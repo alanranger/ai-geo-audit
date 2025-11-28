@@ -1183,6 +1183,7 @@
                 <th style="padding: 0.75rem; text-align: center; border-bottom: 2px solid #ddd; font-weight: 600;">Score</th>
                 <th style="padding: 0.75rem; text-align: center; border-bottom: 2px solid #ddd; font-weight: 600;">Status</th>
                 <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600;">Description</th>
+                <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600;">Improvement Suggestions</th>
               </tr>
             </thead>
             <tbody>
@@ -1195,6 +1196,53 @@
                   visibility: 'Frequency and prominence in organic search, local pack, snippets and AI Overviews.',
                   contentSchema: 'Quality and completeness of structured data markup across your domain.'
                 };
+                
+                // Generate suggestions based on pillar and score
+                const getSuggestions = (pillarKey, pillarScore) => {
+                  const suggestions = {
+                    localEntity: {
+                      high: ['Maintain consistent NAP (Name, Address, Phone) across all platforms', 'Continue building personal brand mentions and citations', 'Monitor entity recognition in knowledge panels'],
+                      medium: ['Add LocalBusiness schema markup to all location pages', 'Ensure consistent business name and person name across website', 'Build more local citations and directory listings', 'Create an About page with clear entity information', 'Add author markup to content'],
+                      low: ['Implement LocalBusiness schema markup immediately', 'Create consistent NAP (Name, Address, Phone) across all platforms', 'Build local citations in relevant directories', 'Add clear About page with entity information', 'Ensure consistent branding across all touchpoints']
+                    },
+                    serviceArea: {
+                      high: ['Continue maintaining clear service area information', 'Update location pages as service areas expand'],
+                      medium: ['Add ServiceArea schema markup to location pages', 'Create dedicated pages for each service area/region', 'Include clear geographic information in content', 'Add location-specific keywords naturally', 'Update Google Business Profile with service areas'],
+                      low: ['Implement ServiceArea schema markup immediately', 'Create location-specific landing pages', 'Add clear geographic service information to homepage', 'Update all location pages with service area details', 'Include city/region names in page titles and content']
+                    },
+                    authority: {
+                      high: ['Continue producing in-depth, expert content', 'Maintain citation and backlink building efforts', 'Seek opportunities for expert quotes and mentions'],
+                      medium: ['Create more comprehensive, long-form content (2000+ words)', 'Build backlinks from authoritative photography/education sites', 'Seek guest posting opportunities on relevant blogs', 'Collect and display customer reviews/testimonials', 'Create case studies and detailed tutorials', 'Get cited in industry publications'],
+                      low: ['Produce comprehensive, expert-level content immediately', 'Build backlinks from authoritative sources', 'Create detailed case studies and tutorials', 'Seek media mentions and expert quotes', 'Display customer reviews prominently', 'Build relationships with industry publications']
+                    },
+                    visibility: {
+                      high: ['Continue optimizing for featured snippets', 'Maintain strong ranking positions', 'Monitor SERP feature opportunities'],
+                      medium: ['Optimize content for featured snippets (answer boxes)', 'Target long-tail keywords with lower competition', 'Improve page load speed and Core Web Vitals', 'Create FAQ schema for common questions', 'Optimize for "People Also Ask" sections', 'Build internal linking structure'],
+                      low: ['Optimize for featured snippets immediately', 'Target low-competition long-tail keywords', 'Improve page speed and mobile experience', 'Add FAQ schema markup', 'Create content targeting "People Also Ask" queries', 'Build strong internal linking structure']
+                    },
+                    contentSchema: {
+                      high: ['Continue maintaining schema markup', 'Expand schema types as new content is added', 'Monitor for schema errors'],
+                      medium: ['Add missing schema types (Article, Course, Event, FAQ)', 'Validate all schema markup using Google Rich Results Test', 'Ensure schema is on all relevant pages', 'Add breadcrumb schema to all pages', 'Implement Organization and Person schema', 'Add Review schema where applicable'],
+                      low: ['Implement comprehensive schema markup immediately', 'Add Organization, Person, and LocalBusiness schema', 'Validate all schema using Google Rich Results Test', 'Add Article schema to all blog posts', 'Implement breadcrumb schema site-wide', 'Add FAQ and HowTo schema where relevant']
+                    }
+                  };
+                  
+                  const pillarSuggestions = suggestions[pillarKey];
+                  if (!pillarSuggestions) return 'No suggestions available';
+                  
+                  let selectedSuggestions = [];
+                  if (pillarScore >= 70) {
+                    selectedSuggestions = pillarSuggestions.high || [];
+                  } else if (pillarScore >= 40) {
+                    selectedSuggestions = pillarSuggestions.medium || [];
+                  } else {
+                    selectedSuggestions = pillarSuggestions.low || [];
+                  }
+                  
+                  // Return top 3-4 suggestions as bullet points
+                  return selectedSuggestions.slice(0, 4).map(s => `• ${s}`).join('<br>') || 'No suggestions available';
+                };
+                
                 return `
                   <tr style="border-bottom: 1px solid #eee;">
                     <td style="padding: 0.75rem; font-weight: 500;">${pillarNames[key]}</td>
@@ -1207,6 +1255,7 @@
                       </span>
                     </td>
                     <td style="padding: 0.75rem; color: #666; font-size: 0.85rem;">${descriptions[key] || ''}</td>
+                    <td style="padding: 0.75rem; color: #555; font-size: 0.85rem; line-height: 1.6;">${getSuggestions(key, score)}</td>
                   </tr>
                 `;
               }).join('')}
