@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI GEO Audit Dashboard - Automated SEO Analysis</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --brand-orange: #E57200;
+      --brand-dark: #222222;
+      --brand-grey: #555555;
+      --bg-page: #f2f2f2;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg-page);
+      color: var(--brand-dark);
+      line-height: 1.5;
+    }
+    .header {
+      background: linear-gradient(135deg, var(--brand-orange) 0%, #ff8c42 100%);
+      color: white;
+      padding: 2rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .header h1 {
+      margin: 0 0 0.5rem 0;
+      font-size: 2rem;
+    }
+    .header p {
+      margin: 0;
+      opacity: 0.9;
+    }
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+    .config-panel {
+      background: white;
+      padding: 1.5rem;
+      border-radius: 8px;
+      margin-bottom: 2rem;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .config-panel h2 {
+      margin: 0 0 1rem 0;
+      color: var(--brand-dark);
+      font-size: 1.25rem;
+    }
+    .form-group {
+      margin-bottom: 1rem;
+    }
+    .form-group label {
+      display: block;
+      margin-bottom: 0.5rem;
+      font-weight: 600;
+      color: var(--brand-grey);
+    }
+    .form-group input {
+      width: 100%;
+      padding: 0.75rem;
+      border: 2px solid #e2e8f0;
+      border-radius: 6px;
+      font-size: 1rem;
+    }
+    .form-group input:focus {
+      outline: none;
+      border-color: var(--brand-orange);
+    }
+    .btn {
+      background: var(--brand-orange);
+      color: white;
+      border: none;
+      padding: 0.75rem 1.5rem;
+      border-radius: 6px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    .btn:hover {
+      background: #d46200;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+    }
+    .btn:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .btn-secondary {
+      background: var(--brand-grey);
+    }
+    .btn-secondary:hover {
+      background: #444;
+    }
+    .status {
+      padding: 1rem;
+      border-radius: 6px;
+      margin-bottom: 1rem;
+      display: none;
+    }
+    .status.success {
+      background: #d1fae5;
+      color: #065f46;
+      border-left: 4px solid var(--success);
+    }
+    .status.error {
+      background: #fee2e2;
+      color: #991b1b;
+      border-left: 4px solid var(--danger);
+    }
+    .status.info {
+      background: #dbeafe;
+      color: #1e40af;
+      border-left: 4px solid #3b82f6;
+    }
+    .status.show {
+      display: block;
+    }
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+    }
+    .pillar-card {
+      background: white;
+      padding: 1.5rem;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      position: relative;
+    }
+    .pillar-card h3 {
+      margin: 0 0 0.5rem 0;
+      color: var(--brand-dark);
+      font-size: 1.1rem;
+    }
+    .pillar-score {
+      font-size: 3rem;
+      font-weight: 700;
+      margin: 0.5rem 0;
+    }
+    .pillar-score.rag-red {
+      color: var(--danger);
+    }
+    .pillar-score.rag-amber {
+      color: var(--warning);
+    }
+    .pillar-score.rag-green {
+      color: var(--success);
+    }
+    .rag-badge {
+      display: inline-block;
+      padding: 0.25rem 0.75rem;
+      border-radius: 4px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      margin-top: 0.5rem;
+    }
+    .rag-badge.red {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+    .rag-badge.amber {
+      background: #fef3c7;
+      color: #92400e;
+    }
+    .rag-badge.green {
+      background: #d1fae5;
+      color: #065f46;
+    }
+    .chart-container {
+      background: white;
+      padding: 1.5rem;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      margin-bottom: 2rem;
+      height: 400px;
+    }
+    .chart-container h3 {
+      margin: 0 0 1rem 0;
+      color: var(--brand-dark);
+    }
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+    .metric-card {
+      background: white;
+      padding: 1rem;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      text-align: center;
+    }
+    .metric-card .value {
+      font-size: 2rem;
+      font-weight: 700;
+      color: var(--brand-orange);
+      margin: 0.5rem 0;
+    }
+    .metric-card .label {
+      color: var(--brand-grey);
+      font-size: 0.875rem;
+    }
+    .loading {
+      display: none;
+      text-align: center;
+      padding: 2rem;
+    }
+    .loading.show {
+      display: block;
+    }
+    .spinner {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid var(--brand-orange);
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 1rem;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .help-text {
+      font-size: 0.875rem;
+      color: var(--brand-grey);
+      margin-top: 0.25rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>AI GEO Audit Dashboard</h1>
+    <p>Automated SEO Analysis & Pillar Score Tracking</p>
+  </div>
+
+  <div class="container">
+    <div class="config-panel">
+      <h2>Configuration</h2>
+      <div class="form-group">
+        <label for="apiKey">Google Search Console API Key</label>
+        <input type="password" id="apiKey" placeholder="Enter your API key">
+        <div class="help-text">Get your API key from Google Cloud Console</div>
+      </div>
+      <div class="form-group">
+        <label for="propertyUrl">Property URL</label>
+        <input type="text" id="propertyUrl" placeholder="https://yourwebsite.com" value="https://alanranger.com">
+      </div>
+      <div class="form-group">
+        <label for="dateRange">Date Range (days)</label>
+        <input type="number" id="dateRange" value="30" min="1" max="90">
+      </div>
+      <button class="btn" onclick="runAudit()">Run Audit Scan</button>
+      <button class="btn btn-secondary" onclick="saveConfig()" style="margin-left: 0.5rem;">Save Configuration</button>
+    </div>
+
+    <div class="status" id="status"></div>
+
+    <div class="loading" id="loading">
+      <div class="spinner"></div>
+      <p>Running audit scan...</p>
+    </div>
+
+    <div id="dashboard" style="display: none;">
+      <div class="dashboard-grid" id="pillarCards"></div>
+      
+      <div class="chart-container">
+        <h3>Pillar Scores Overview</h3>
+        <canvas id="radarChart"></canvas>
+      </div>
+
+      <div class="chart-container">
+        <h3>Score Trends (Last 30 Days)</h3>
+        <canvas id="trendChart"></canvas>
+      </div>
+
+      <div class="metrics-grid" id="metricsGrid"></div>
+    </div>
+  </div>
+
+  <script>
+    // Load saved configuration
+    function loadConfig() {
+      const apiKey = localStorage.getItem('gsc_api_key');
+      const propertyUrl = localStorage.getItem('gsc_property_url');
+      const dateRange = localStorage.getItem('gsc_date_range');
+      
+      if (apiKey) document.getElementById('apiKey').value = apiKey;
+      if (propertyUrl) document.getElementById('propertyUrl').value = propertyUrl;
+      if (dateRange) document.getElementById('dateRange').value = dateRange;
+    }
+
+    // Save configuration
+    function saveConfig() {
+      localStorage.setItem('gsc_api_key', document.getElementById('apiKey').value);
+      localStorage.setItem('gsc_property_url', document.getElementById('propertyUrl').value);
+      localStorage.setItem('gsc_date_range', document.getElementById('dateRange').value);
+      showStatus('Configuration saved!', 'success');
+    }
+
+    // Show status message
+    function showStatus(message, type) {
+      const status = document.getElementById('status');
+      status.textContent = message;
+      status.className = `status ${type} show`;
+      setTimeout(() => {
+        status.classList.remove('show');
+      }, 5000);
+    }
+
+    // Calculate RAG status from score
+    function getRAGStatus(score) {
+      if (score >= 70) return { status: 'green', label: 'Green' };
+      if (score >= 40) return { status: 'amber', label: 'Amber' };
+      return { status: 'red', label: 'Red' };
+    }
+
+    // Calculate pillar scores (basic version - will be enhanced with real API data)
+    function calculatePillarScores(data) {
+      // These are placeholder calculations - will be replaced with real API data
+      const scores = {
+        localEntity: Math.min(100, Math.max(0, 65 + Math.random() * 10 - 5)),
+        serviceArea: Math.min(100, Math.max(0, 55 + Math.random() * 10 - 5)),
+        authority: Math.min(100, Math.max(0, 70 + Math.random() * 10 - 5)),
+        visibility: Math.min(100, Math.max(0, 60 + Math.random() * 10 - 5)),
+        contentSchema: Math.min(100, Math.max(0, 75 + Math.random() * 10 - 5))
+      };
+      return scores;
+    }
+
+    // Fetch data from Google Search Console (mock for now)
+    async function fetchSearchConsoleData(apiKey, propertyUrl, days) {
+      // TODO: Replace with real API call
+      // For now, return mock data to validate the dashboard
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          resolve({
+            totalClicks: 1234,
+            totalImpressions: 45678,
+            averagePosition: 12.5,
+            topQueries: [
+              { query: 'photography classes', clicks: 234, position: 8.2 },
+              { query: 'photography lessons', clicks: 189, position: 9.1 },
+              { query: 'camera settings course', clicks: 156, position: 11.5 }
+            ]
+          });
+        }, 2000);
+      });
+    }
+
+    // Run the audit
+    async function runAudit() {
+      const apiKey = document.getElementById('apiKey').value;
+      const propertyUrl = document.getElementById('propertyUrl').value;
+      const dateRange = parseInt(document.getElementById('dateRange').value);
+
+      if (!apiKey) {
+        showStatus('Please enter your Google Search Console API key', 'error');
+        return;
+      }
+
+      if (!propertyUrl) {
+        showStatus('Please enter your property URL', 'error');
+        return;
+      }
+
+      document.getElementById('loading').classList.add('show');
+      document.getElementById('dashboard').style.display = 'none';
+
+      try {
+        // Fetch data
+        const searchData = await fetchSearchConsoleData(apiKey, propertyUrl, dateRange);
+        
+        // Calculate scores
+        const scores = calculatePillarScores(searchData);
+
+        // Display results
+        displayDashboard(scores, searchData);
+        
+        showStatus('Audit completed successfully!', 'success');
+      } catch (error) {
+        showStatus('Error running audit: ' + error.message, 'error');
+        console.error(error);
+      } finally {
+        document.getElementById('loading').classList.remove('show');
+      }
+    }
+
+    // Display dashboard
+    function displayDashboard(scores, data) {
+      const pillarNames = {
+        localEntity: 'Local Entity',
+        serviceArea: 'Service Area',
+        authority: 'Authority',
+        visibility: 'Visibility',
+        contentSchema: 'Content / Schema'
+      };
+
+      // Create pillar cards
+      const pillarCards = document.getElementById('pillarCards');
+      pillarCards.innerHTML = '';
+
+      Object.entries(scores).forEach(([key, score]) => {
+        const rag = getRAGStatus(score);
+        const card = document.createElement('div');
+        card.className = 'pillar-card';
+        card.innerHTML = `
+          <h3>${pillarNames[key]}</h3>
+          <div class="pillar-score rag-${rag.status}">${Math.round(score)}</div>
+          <div class="rag-badge ${rag.status}">${rag.label}</div>
+        `;
+        pillarCards.appendChild(card);
+      });
+
+      // Create radar chart
+      const radarCtx = document.getElementById('radarChart').getContext('2d');
+      if (window.radarChart) window.radarChart.destroy();
+      window.radarChart = new Chart(radarCtx, {
+        type: 'radar',
+        data: {
+          labels: Object.values(pillarNames),
+          datasets: [{
+            label: 'Current Scores',
+            data: Object.values(scores),
+            backgroundColor: 'rgba(229, 114, 0, 0.2)',
+            borderColor: 'rgba(229, 114, 0, 1)',
+            pointBackgroundColor: 'rgba(229, 114, 0, 1)',
+            pointBorderColor: '#fff',
+            pointHoverBackgroundColor: '#fff',
+            pointHoverBorderColor: 'rgba(229, 114, 0, 1)'
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            r: {
+              beginAtZero: true,
+              max: 100,
+              ticks: {
+                stepSize: 20
+              }
+            }
+          }
+        }
+      });
+
+      // Create trend chart (mock data for now)
+      const trendCtx = document.getElementById('trendChart').getContext('2d');
+      if (window.trendChart) window.trendChart.destroy();
+      const dates = Array.from({ length: 30 }, (_, i) => {
+        const d = new Date();
+        d.setDate(d.getDate() - (29 - i));
+        return d.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' });
+      });
+      window.trendChart = new Chart(trendCtx, {
+        type: 'line',
+        data: {
+          labels: dates,
+          datasets: [
+            {
+              label: 'Local Entity',
+              data: Array.from({ length: 30 }, () => scores.localEntity + (Math.random() * 10 - 5)),
+              borderColor: 'rgba(239, 68, 68, 1)',
+              tension: 0.4
+            },
+            {
+              label: 'Visibility',
+              data: Array.from({ length: 30 }, () => scores.visibility + (Math.random() * 10 - 5)),
+              borderColor: 'rgba(229, 114, 0, 1)',
+              tension: 0.4
+            },
+            {
+              label: 'Authority',
+              data: Array.from({ length: 30 }, () => scores.authority + (Math.random() * 10 - 5)),
+              borderColor: 'rgba(16, 185, 129, 1)',
+              tension: 0.4
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: {
+              beginAtZero: true,
+              max: 100
+            }
+          }
+        }
+      });
+
+      // Display metrics
+      const metricsGrid = document.getElementById('metricsGrid');
+      metricsGrid.innerHTML = `
+        <div class="metric-card">
+          <div class="value">${data.totalClicks.toLocaleString()}</div>
+          <div class="label">Total Clicks</div>
+        </div>
+        <div class="metric-card">
+          <div class="value">${data.totalImpressions.toLocaleString()}</div>
+          <div class="label">Total Impressions</div>
+        </div>
+        <div class="metric-card">
+          <div class="value">${data.averagePosition.toFixed(1)}</div>
+          <div class="label">Avg Position</div>
+        </div>
+        <div class="metric-card">
+          <div class="value">${((data.totalClicks / data.totalImpressions) * 100).toFixed(2)}%</div>
+          <div class="label">CTR</div>
+        </div>
+      `;
+
+      document.getElementById('dashboard').style.display = 'block';
+    }
+
+    // Initialize on load
+    window.addEventListener('DOMContentLoaded', () => {
+      loadConfig();
+    });
+  </script>
+</body>
+</html>
