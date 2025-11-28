@@ -253,31 +253,38 @@
       margin-top: 0.25rem;
     }
 
-    .debug-panel {
-      margin-top: 1rem;
+    .debug-panel-bottom {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
       background: #1a1a1a;
-      border: 3px solid #E57200;
-      border-radius: 8px;
-      padding: 1rem;
+      border-top: 3px solid #E57200;
       font-family: 'Courier New', monospace;
       font-size: 0.85rem;
-      max-height: 400px;
-      overflow-y: auto;
-      display: block !important;
-      visibility: visible !important;
-      opacity: 1 !important;
-      position: relative;
       z-index: 1000;
-      box-shadow: 0 0 20px rgba(229, 114, 0, 0.5);
+      box-shadow: 0 -2px 20px rgba(0, 0, 0, 0.5);
+      max-height: 50vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .debug-panel-bottom.collapsed {
+      max-height: 50px;
+    }
+
+    .debug-panel-bottom.collapsed .debug-content {
+      display: none !important;
     }
 
     .debug-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 0.75rem;
-      padding-bottom: 0.5rem;
+      padding: 0.75rem 1rem;
       border-bottom: 1px solid #333;
+      background: #252525;
+      user-select: none;
     }
 
     .debug-header h3 {
@@ -306,6 +313,10 @@
     .debug-content {
       color: #fff;
       line-height: 1.6;
+      padding: 1rem;
+      overflow-y: auto;
+      flex: 1;
+      max-height: calc(50vh - 60px);
     }
 
     .debug-log-entry {
@@ -354,18 +365,21 @@
   <div class="container">
     <div class="config-panel">
       <h2>Configuration</h2>
-      <div class="form-group">
-        <label for="apiKey">Google Search Console API Key</label>
-        <input type="password" id="apiKey" placeholder="Enter your API key">
-        <div class="help-text">Get your API key from Google Cloud Console</div>
+      <div class="info-box" style="background: #e8f4f8; border-left: 4px solid #2196F3; padding: 1rem; margin-bottom: 1rem; border-radius: 4px;">
+        <p style="margin: 0; font-size: 0.9rem; color: #1565C0;"><strong>Entity-Level Audit:</strong> This dashboard analyzes <strong>www.alanranger.com</strong> as a global entity, tracking AI-powered search visibility, entity recognition, and SERP behavior across the entire domain.</p>
       </div>
       <div class="form-group">
         <label for="propertyUrl">Property URL</label>
-        <input type="text" id="propertyUrl" placeholder="https://yourwebsite.com" value="https://alanranger.com">
+        <input type="text" id="propertyUrl" placeholder="https://yourwebsite.com" value="https://www.alanranger.com">
+        <div class="help-text">The domain being audited (entity-level analysis)</div>
       </div>
       <div class="form-group">
         <label for="dateRange">Date Range (days)</label>
         <input type="number" id="dateRange" value="30" min="1" max="90">
+        <div class="help-text">Analysis period for historical data</div>
+      </div>
+      <div style="background: #f0f0f0; padding: 0.75rem; border-radius: 4px; margin-bottom: 1rem; font-size: 0.85rem; color: #555;">
+        <strong>API Key:</strong> Loaded automatically from Vercel environment variables. No manual entry required.
       </div>
       <button class="btn" onclick="runAudit()">Run Audit Scan</button>
       <button class="btn btn-secondary" onclick="saveConfig()" style="margin-left: 0.5rem;">Save Configuration</button>
@@ -378,36 +392,46 @@
       <p>Running audit scan...</p>
     </div>
 
-    <div class="debug-panel" id="debugPanel" style="display: block !important; visibility: visible !important; opacity: 1 !important;">
-      <div class="debug-header">
-        <h3>🔍 Debug Log (v80c0dd8)</h3>
-        <div class="debug-actions">
-          <button class="btn btn-small" onclick="clearDebugLog()">Clear</button>
-          <button class="btn btn-small" onclick="copyDebugLog()">Copy Log</button>
-          <button class="btn btn-small" onclick="toggleDebugPanel()">Hide</button>
-        </div>
-      </div>
-      <div class="debug-content" id="debugLog">
-        <div class="debug-log-entry info">
-          <span class="debug-timestamp">[Initializing...]</span>Debug panel loaded. Waiting for page initialization...
-        </div>
-      </div>
-    </div>
-
     <div id="dashboard" style="display: none;">
+      <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; margin-bottom: 2rem; border-left: 4px solid var(--brand-orange);">
+        <h3 style="margin-top: 0; color: var(--brand-orange);">Five-Pillar Framework</h3>
+        <p style="color: #555; line-height: 1.6; margin-bottom: 0;">
+          This audit analyzes <strong>www.alanranger.com</strong> as a global entity using a five-pillar framework to assess AI-powered search visibility, entity recognition, and SERP behavior. Each pillar is scored 0-100 and assigned a RAG (Red/Amber/Green) status based on performance thresholds.
+        </p>
+      </div>
+
       <div class="dashboard-grid" id="pillarCards"></div>
-      
+
       <div class="chart-container">
         <h3>Pillar Scores Overview</h3>
+        <p style="font-size: 0.9rem; color: #666; margin-bottom: 1rem;">Radar chart showing current performance across all five pillars. The larger the area, the stronger your overall entity recognition.</p>
         <canvas id="radarChart"></canvas>
       </div>
 
       <div class="chart-container">
         <h3>Score Trends (Last 30 Days)</h3>
+        <p style="font-size: 0.9rem; color: #666; margin-bottom: 1rem;">Historical performance tracking for Local Entity, Visibility, and Authority pillars over the selected date range.</p>
         <canvas id="trendChart"></canvas>
       </div>
 
       <div class="metrics-grid" id="metricsGrid"></div>
+    </div>
+
+    <!-- Debug Panel - Fixed at bottom, collapsible -->
+    <div class="debug-panel-bottom" id="debugPanel">
+      <div class="debug-header" onclick="toggleDebugPanel()" style="cursor: pointer;">
+        <h3>🔍 Debug Log (v80c0dd8)</h3>
+        <div class="debug-actions">
+          <button class="btn btn-small" onclick="event.stopPropagation(); clearDebugLog();">Clear</button>
+          <button class="btn btn-small" onclick="event.stopPropagation(); copyDebugLog();">Copy Log</button>
+          <span id="debugToggleIcon" style="color: #fff; font-size: 1.2rem;">▼</span>
+        </div>
+      </div>
+      <div class="debug-content" id="debugLog" style="display: block;">
+        <div class="debug-log-entry info">
+          <span class="debug-timestamp">[Initializing...]</span>Debug panel loaded. Waiting for page initialization...
+        </div>
+      </div>
     </div>
   </div>
 
@@ -469,38 +493,23 @@
 
     function toggleDebugPanel() {
       const panel = document.getElementById('debugPanel');
-      const content = panel.querySelector('.debug-content');
-      const button = panel.querySelector('.debug-actions button:last-child');
-      if (content.style.display === 'none') {
-        content.style.display = 'block';
-        button.textContent = 'Hide';
+      const icon = document.getElementById('debugToggleIcon');
+      if (panel.classList.contains('collapsed')) {
+        panel.classList.remove('collapsed');
+        if (icon) icon.textContent = '▼';
       } else {
-        content.style.display = 'none';
-        button.textContent = 'Show';
+        panel.classList.add('collapsed');
+        if (icon) icon.textContent = '▲';
       }
     }
 
-    // Force debug panel to be visible on load
-    (function() {
-      console.log('Checking for debug panel...');
-      const debugPanel = document.getElementById('debugPanel');
-      if (debugPanel) {
-        console.log('Debug panel found, making visible');
-        debugPanel.style.display = 'block';
-        debugPanel.style.visibility = 'visible';
-        debugPanel.style.opacity = '1';
-      } else {
-        console.error('DEBUG PANEL NOT FOUND!');
-      }
-    })();
-    
+    // Debug panel is always visible at bottom, just ensure it's not collapsed on load
     window.addEventListener('DOMContentLoaded', () => {
       const debugPanel = document.getElementById('debugPanel');
       if (debugPanel) {
-        debugPanel.style.display = 'block';
-        debugPanel.style.visibility = 'visible';
-        debugPanel.style.opacity = '1';
-        console.log('Debug panel forced visible on DOMContentLoaded');
+        debugPanel.style.display = 'flex';
+        // Start expanded by default
+        debugPanel.classList.remove('collapsed');
       }
     });
 
@@ -638,11 +647,10 @@
     async function runAudit() {
       debugLog('=== AUDIT START: Beginning audit scan ===', 'info');
       
-      // Get API key from input field, or fall back to Vercel env var, config.js, or localStorage
-      let apiKey = document.getElementById('apiKey').value;
-      debugLog(`API key from input field: ${apiKey ? 'present (' + apiKey.substring(0, 10) + '...)' : 'empty'}`, 'info');
+      // Get API key - prioritize Vercel env var, then loaded key, then localStorage
+      let apiKey = window._loadedApiKey;
       
-      // Try Vercel environment variable if input is empty
+      // Try Vercel environment variable first
       if (!apiKey) {
         try {
           debugLog('Fetching API key from Vercel environment variable...', 'info');
@@ -652,8 +660,7 @@
             if (data.apiKey) {
               apiKey = data.apiKey;
               debugLog('✓ Using API key from Vercel environment variable', 'success');
-              // Auto-fill the input field
-              document.getElementById('apiKey').value = apiKey;
+              window._loadedApiKey = apiKey;
             }
           }
         } catch (e) {
@@ -665,6 +672,7 @@
       if (!apiKey && window.API_CONFIG && window.API_CONFIG.googleSearchConsoleApiKey) {
         apiKey = window.API_CONFIG.googleSearchConsoleApiKey;
         debugLog('✓ Using API key from config.js', 'success');
+        window._loadedApiKey = apiKey;
       }
       
       // Fall back to localStorage
@@ -672,6 +680,7 @@
         apiKey = localStorage.getItem('gsc_api_key');
         if (apiKey) {
           debugLog('✓ Using API key from localStorage', 'success');
+          window._loadedApiKey = apiKey;
         }
       }
       
@@ -758,13 +767,78 @@
         const rag = getRAGStatus(score);
         const card = document.createElement('div');
         card.className = 'pillar-card';
+        
+        // Get pillar description
+        const descriptions = {
+          localEntity: 'How clearly your business and you as a person are recognised as entities by AI search systems.',
+          serviceArea: 'How well AI understands where you operate and which regions you serve.',
+          authority: 'Perceived expertise and trust in the topic space (content depth, reviews, citations).',
+          visibility: 'How prominently your content appears in AI-powered search results and featured snippets.',
+          contentSchema: 'Quality and completeness of structured data markup across your domain.'
+        };
+        
         card.innerHTML = `
           <h3>${pillarNames[key]}</h3>
           <div class="pillar-score rag-${rag.status}">${Math.round(score)}</div>
           <div class="rag-badge ${rag.status}">${rag.label}</div>
+          <p style="font-size: 0.85rem; color: #666; margin-top: 0.75rem; line-height: 1.4;">${descriptions[key] || ''}</p>
         `;
         pillarCards.appendChild(card);
       });
+      
+      // Add pillar scorecard table
+      const scorecardTable = document.createElement('div');
+      scorecardTable.className = 'scorecard-section';
+      scorecardTable.innerHTML = `
+        <h3 style="margin-top: 2rem; margin-bottom: 1rem; color: var(--brand-orange);">Pillar Scorecard</h3>
+        <div style="background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); overflow-x: auto;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+            <thead>
+              <tr style="background: #f5f5f5;">
+                <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600;">Pillar</th>
+                <th style="padding: 0.75rem; text-align: center; border-bottom: 2px solid #ddd; font-weight: 600;">Score</th>
+                <th style="padding: 0.75rem; text-align: center; border-bottom: 2px solid #ddd; font-weight: 600;">Status</th>
+                <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600;">Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${Object.entries(scores).map(([key, score]) => {
+                const rag = getRAGStatus(score);
+                const descriptions = {
+                  localEntity: 'Entity recognition and business identity clarity',
+                  serviceArea: 'Geographic service area understanding',
+                  authority: 'Topic expertise and trust signals',
+                  visibility: 'AI search result prominence',
+                  contentSchema: 'Structured data quality and coverage'
+                };
+                return `
+                  <tr style="border-bottom: 1px solid #eee;">
+                    <td style="padding: 0.75rem; font-weight: 500;">${pillarNames[key]}</td>
+                    <td style="padding: 0.75rem; text-align: center; font-size: 1.1rem; font-weight: 600; color: ${rag.status === 'green' ? '#10b981' : rag.status === 'amber' ? '#f59e0b' : '#ef4444'};">
+                      ${Math.round(score)}
+                    </td>
+                    <td style="padding: 0.75rem; text-align: center;">
+                      <span class="rag-badge ${rag.status}" style="display: inline-block; padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.8rem;">
+                        ${rag.label}
+                      </span>
+                    </td>
+                    <td style="padding: 0.75rem; color: #666; font-size: 0.85rem;">${descriptions[key] || ''}</td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+        <div style="background: #f8f9fa; padding: 1rem; border-radius: 8px; margin-top: 1rem; border-left: 4px solid var(--brand-orange);">
+          <p style="margin: 0; font-size: 0.9rem; color: #555;">
+            <strong>RAG Status Guide:</strong> 
+            <span style="color: #10b981; font-weight: 600;">Green (70-100)</span> = Strong performance, 
+            <span style="color: #f59e0b; font-weight: 600;">Amber (40-69)</span> = Needs improvement, 
+            <span style="color: #ef4444; font-weight: 600;">Red (0-39)</span> = Critical issues
+          </p>
+        </div>
+      `;
+      pillarCards.parentNode.insertBefore(scorecardTable, pillarCards.nextSibling);
 
       // Display metrics
       const metricsGrid = document.getElementById('metricsGrid');
@@ -983,3 +1057,4 @@
   </script>
 </body>
 </html>
+
