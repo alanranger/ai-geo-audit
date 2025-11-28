@@ -939,18 +939,35 @@
     // Fetch data from Google Search Console (mock for now)
     async function fetchSearchConsoleData(apiKey, propertyUrl, days) {
       // TODO: Replace with real API call
-      // For now, return mock data to validate the dashboard
+      // For now, return mock data that varies based on date range to validate the dashboard
       return new Promise((resolve) => {
         setTimeout(() => {
+          // Scale metrics based on date range (longer periods = more data)
+          const daysMultiplier = days / 30; // Normalize to 30-day baseline
+          
+          // Base metrics (for 30 days)
+          const baseClicks = 1234;
+          const baseImpressions = 45678;
+          const baseAvgPosition = 12.5;
+          
+          // Scale clicks and impressions proportionally to date range
+          // (but not linearly - longer periods may have slightly lower daily averages)
+          const clicksMultiplier = daysMultiplier * (1 - (days - 30) * 0.001); // Slight decay for longer periods
+          const impressionsMultiplier = daysMultiplier * (1 - (days - 30) * 0.0005);
+          
+          // Average position might improve slightly over longer periods (better historical data)
+          const positionAdjustment = Math.max(0, (days - 30) * 0.01);
+          
           resolve({
-            totalClicks: 1234,
-            totalImpressions: 45678,
-            averagePosition: 12.5,
+            totalClicks: Math.round(baseClicks * clicksMultiplier),
+            totalImpressions: Math.round(baseImpressions * impressionsMultiplier),
+            averagePosition: Math.max(1, baseAvgPosition - positionAdjustment),
             topQueries: [
-              { query: 'photography classes', clicks: 234, position: 8.2 },
-              { query: 'photography lessons', clicks: 189, position: 9.1 },
-              { query: 'camera settings course', clicks: 156, position: 11.5 }
-            ]
+              { query: 'photography classes', clicks: Math.round(234 * clicksMultiplier), position: 8.2 - positionAdjustment * 0.5 },
+              { query: 'photography lessons', clicks: Math.round(189 * clicksMultiplier), position: 9.1 - positionAdjustment * 0.5 },
+              { query: 'camera settings course', clicks: Math.round(156 * clicksMultiplier), position: 11.5 - positionAdjustment * 0.5 }
+            ],
+            dateRange: days // Include date range in response for debugging
           });
         }, 2000);
       });
@@ -1406,6 +1423,7 @@
         
         const trendCtx = trendCanvas.getContext('2d');
         const dateRange = parseInt(document.getElementById('dateRange').value) || 30;
+        debugLog(`Using date range: ${dateRange} days`, 'info');
         const numDataPoints = Math.min(dateRange, 90); // Limit to 90 points for performance
         const dates = Array.from({ length: numDataPoints }, (_, i) => {
           const d = new Date();
