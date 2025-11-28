@@ -418,6 +418,10 @@
     function displayDashboard(scores, data) {
       // Show dashboard first (canvas elements need to be visible for Chart.js)
       const dashboardDiv = document.getElementById('dashboard');
+      if (!dashboardDiv) {
+        console.error('Dashboard div not found');
+        return;
+      }
       dashboardDiv.style.display = 'block';
       
       const pillarNames = {
@@ -467,16 +471,34 @@
 
       // Wait a moment for DOM to update, then create charts (charts need visible canvas)
       setTimeout(() => {
+        // Check if Chart.js is loaded
+        if (typeof Chart === 'undefined') {
+          console.error('Chart.js library not loaded');
+          showStatus('Chart.js library failed to load. Please refresh the page.', 'error');
+          return;
+        }
+
         // Create radar chart
         const radarCanvas = document.getElementById('radarChart');
         if (!radarCanvas) {
           console.error('Radar chart canvas not found');
           return;
         }
-        const radarCtx = radarCanvas.getContext('2d');
-        if (window.radarChart && typeof window.radarChart.destroy === 'function') {
-          window.radarChart.destroy();
+        
+        // Safely destroy existing chart if it exists
+        try {
+          if (window.radarChart) {
+            if (typeof window.radarChart.destroy === 'function') {
+              window.radarChart.destroy();
+            }
+            window.radarChart = null;
+          }
+        } catch (e) {
+          console.warn('Error destroying existing radar chart:', e);
+          window.radarChart = null;
         }
+        
+        const radarCtx = radarCanvas.getContext('2d');
         window.radarChart = new Chart(radarCtx, {
           type: 'radar',
           data: {
@@ -513,10 +535,21 @@
           console.error('Trend chart canvas not found');
           return;
         }
-        const trendCtx = trendCanvas.getContext('2d');
-        if (window.trendChart && typeof window.trendChart.destroy === 'function') {
-          window.trendChart.destroy();
+        
+        // Safely destroy existing chart if it exists
+        try {
+          if (window.trendChart) {
+            if (typeof window.trendChart.destroy === 'function') {
+              window.trendChart.destroy();
+            }
+            window.trendChart = null;
+          }
+        } catch (e) {
+          console.warn('Error destroying existing trend chart:', e);
+          window.trendChart = null;
         }
+        
+        const trendCtx = trendCanvas.getContext('2d');
         const dates = Array.from({ length: 30 }, (_, i) => {
           const d = new Date();
           d.setDate(d.getDate() - (29 - i));
