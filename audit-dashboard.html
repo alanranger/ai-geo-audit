@@ -249,6 +249,87 @@
       color: var(--brand-grey);
       margin-top: 0.25rem;
     }
+
+    .debug-panel {
+      margin-top: 1rem;
+      background: #1a1a1a;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 1rem;
+      font-family: 'Courier New', monospace;
+      font-size: 0.85rem;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+
+    .debug-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.75rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid #333;
+    }
+
+    .debug-header h3 {
+      margin: 0;
+      color: #fff;
+      font-size: 1rem;
+    }
+
+    .debug-actions {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .btn-small {
+      padding: 0.25rem 0.75rem;
+      font-size: 0.75rem;
+      background: #333;
+      color: #fff;
+      border: 1px solid #555;
+    }
+
+    .btn-small:hover {
+      background: #444;
+    }
+
+    .debug-content {
+      color: #0f0;
+      line-height: 1.6;
+    }
+
+    .debug-log-entry {
+      margin-bottom: 0.25rem;
+      padding: 0.25rem 0;
+      border-left: 2px solid transparent;
+      padding-left: 0.5rem;
+    }
+
+    .debug-log-entry.error {
+      color: #f44;
+      border-left-color: #f44;
+    }
+
+    .debug-log-entry.warn {
+      color: #fa4;
+      border-left-color: #fa4;
+    }
+
+    .debug-log-entry.info {
+      color: #4af;
+      border-left-color: #4af;
+    }
+
+    .debug-log-entry.success {
+      color: #4f4;
+      border-left-color: #4f4;
+    }
+
+    .debug-timestamp {
+      color: #888;
+      margin-right: 0.5rem;
+    }
   </style>
 </head>
 <body>
@@ -284,6 +365,18 @@
       <p>Running audit scan...</p>
     </div>
 
+    <div class="debug-panel" id="debugPanel">
+      <div class="debug-header">
+        <h3>Debug Log</h3>
+        <div class="debug-actions">
+          <button class="btn btn-small" onclick="clearDebugLog()">Clear</button>
+          <button class="btn btn-small" onclick="copyDebugLog()">Copy Log</button>
+          <button class="btn btn-small" onclick="toggleDebugPanel()">Hide</button>
+        </div>
+      </div>
+      <div class="debug-content" id="debugLog"></div>
+    </div>
+
     <div id="dashboard" style="display: none;">
       <div class="dashboard-grid" id="pillarCards"></div>
       
@@ -302,24 +395,122 @@
   </div>
 
   <script>
+    // Debug logging system
+    const debugLog = [];
+    
+    function debugLog(message, type = 'info') {
+      const timestamp = new Date().toISOString();
+      const entry = {
+        timestamp,
+        message,
+        type
+      };
+      debugLog.push(entry);
+      
+      const logElement = document.getElementById('debugLog');
+      if (logElement) {
+        const entryDiv = document.createElement('div');
+        entryDiv.className = `debug-log-entry ${type}`;
+        entryDiv.innerHTML = `<span class="debug-timestamp">[${new Date(timestamp).toLocaleTimeString()}]</span>${message}`;
+        logElement.appendChild(entryDiv);
+        logElement.scrollTop = logElement.scrollHeight;
+      }
+      
+      // Also log to console
+      const consoleMethod = type === 'error' ? 'error' : type === 'warn' ? 'warn' : 'log';
+      console[consoleMethod](`[DEBUG ${type.toUpperCase()}]`, message);
+    }
+
+    function clearDebugLog() {
+      debugLog.length = 0;
+      const logElement = document.getElementById('debugLog');
+      if (logElement) {
+        logElement.innerHTML = '';
+      }
+      debugLog('Debug log cleared', 'info');
+    }
+
+    function copyDebugLog() {
+      const logText = debugLog.map(entry => 
+        `[${entry.timestamp}] [${entry.type.toUpperCase()}] ${entry.message}`
+      ).join('\n');
+      
+      navigator.clipboard.writeText(logText).then(() => {
+        debugLog('Debug log copied to clipboard', 'success');
+        showStatus('Debug log copied to clipboard!', 'success');
+      }).catch(err => {
+        debugLog('Failed to copy log: ' + err.message, 'error');
+        showStatus('Failed to copy log', 'error');
+      });
+    }
+
+    function toggleDebugPanel() {
+      const panel = document.getElementById('debugPanel');
+      const content = panel.querySelector('.debug-content');
+      const button = panel.querySelector('.debug-actions button:last-child');
+      if (content.style.display === 'none') {
+        content.style.display = 'block';
+        button.textContent = 'Hide';
+      } else {
+        content.style.display = 'none';
+        button.textContent = 'Show';
+      }
+    }
+
     // Load saved configuration
     function loadConfig() {
-      // Check config.js first, then localStorage
+      debugLog('=== PAGE LOAD: Starting configuration load ===', 'info');
+      
+      // Check if Chart.js is loaded
+      debugLog('Checking Chart.js library...', 'info');
+      if (typeof Chart !== 'undefined') {
+        debugLog('✓ Chart.js library loaded successfully', 'success');
+      } else {
+        debugLog('✗ Chart.js library NOT loaded', 'error');
+      }
+      
+      // Check config.js
+      debugLog('Checking for config.js...', 'info');
+      if (window.API_CONFIG && window.API_CONFIG.googleSearchConsoleApiKey) {
+        debugLog('✓ config.js found with API key', 'success');
+      } else {
+        debugLog('✗ config.js not found or no API key', 'warn');
+      }
+      
+      // Check localStorage
+      debugLog('Checking localStorage...', 'info');
       const configApiKey = window.API_CONFIG && window.API_CONFIG.googleSearchConsoleApiKey;
       const apiKey = configApiKey || localStorage.getItem('gsc_api_key');
       const propertyUrl = localStorage.getItem('gsc_property_url');
       const dateRange = localStorage.getItem('gsc_date_range');
       
+      debugLog(`API Key source: ${configApiKey ? 'config.js' : localStorage.getItem('gsc_api_key') ? 'localStorage' : 'none'}`, 'info');
+      debugLog(`Property URL: ${propertyUrl || 'not set'}`, 'info');
+      debugLog(`Date Range: ${dateRange || 'not set'}`, 'info');
+      
       if (apiKey) {
         document.getElementById('apiKey').value = apiKey;
+        debugLog('✓ API key loaded into input field', 'success');
         // If from config.js, disable the field and show a note
         if (configApiKey) {
           document.getElementById('apiKey').disabled = true;
           document.getElementById('apiKey').placeholder = 'API key loaded from config.js';
+          debugLog('API key field disabled (loaded from config.js)', 'info');
         }
+      } else {
+        debugLog('✗ No API key found', 'warn');
       }
-      if (propertyUrl) document.getElementById('propertyUrl').value = propertyUrl;
-      if (dateRange) document.getElementById('dateRange').value = dateRange;
+      
+      if (propertyUrl) {
+        document.getElementById('propertyUrl').value = propertyUrl;
+        debugLog('✓ Property URL loaded', 'success');
+      }
+      if (dateRange) {
+        document.getElementById('dateRange').value = dateRange;
+        debugLog('✓ Date range loaded', 'success');
+      }
+      
+      debugLog('=== Configuration load complete ===', 'info');
     }
 
     // Save configuration
@@ -382,56 +573,83 @@
 
     // Run the audit
     async function runAudit() {
+      debugLog('=== AUDIT START: Beginning audit scan ===', 'info');
+      
       // Get API key from input field, or fall back to config.js
       let apiKey = document.getElementById('apiKey').value;
+      debugLog(`API key from input field: ${apiKey ? 'present (' + apiKey.substring(0, 10) + '...)' : 'empty'}`, 'info');
+      
       if (!apiKey && window.API_CONFIG && window.API_CONFIG.googleSearchConsoleApiKey) {
         apiKey = window.API_CONFIG.googleSearchConsoleApiKey;
+        debugLog('✓ Using API key from config.js', 'success');
       }
       
       const propertyUrl = document.getElementById('propertyUrl').value;
       const dateRange = parseInt(document.getElementById('dateRange').value);
+      
+      debugLog(`Property URL: ${propertyUrl}`, 'info');
+      debugLog(`Date Range: ${dateRange} days`, 'info');
 
       if (!apiKey) {
+        debugLog('✗ No API key available', 'error');
         showStatus('Please enter your Google Search Console API key or add it to config.js', 'error');
         return;
       }
-
+      
       if (!propertyUrl) {
+        debugLog('✗ No property URL provided', 'error');
         showStatus('Please enter your property URL', 'error');
         return;
       }
 
+      debugLog('Showing loading indicator...', 'info');
       document.getElementById('loading').classList.add('show');
       document.getElementById('dashboard').style.display = 'none';
 
       try {
+        debugLog('Fetching Search Console data...', 'info');
         // Fetch data
         const searchData = await fetchSearchConsoleData(apiKey, propertyUrl, dateRange);
+        debugLog('✓ Search Console data fetched successfully', 'success');
+        debugLog(`Data: ${JSON.stringify(searchData).substring(0, 200)}...`, 'info');
         
+        debugLog('Calculating pillar scores...', 'info');
         // Calculate scores
         const scores = calculatePillarScores(searchData);
+        debugLog('✓ Pillar scores calculated', 'success');
+        debugLog(`Scores: ${JSON.stringify(scores)}`, 'info');
 
+        debugLog('Displaying dashboard...', 'info');
         // Display results
         displayDashboard(scores, searchData);
         
+        debugLog('=== AUDIT COMPLETE: Success ===', 'success');
         showStatus('Audit completed successfully!', 'success');
       } catch (error) {
+        debugLog(`✗ AUDIT ERROR: ${error.message}`, 'error');
+        debugLog(`Stack trace: ${error.stack}`, 'error');
         showStatus('Error running audit: ' + error.message, 'error');
         console.error(error);
       } finally {
+        debugLog('Hiding loading indicator...', 'info');
         document.getElementById('loading').classList.remove('show');
       }
     }
 
     // Display dashboard
     function displayDashboard(scores, data) {
+      debugLog('=== DISPLAY DASHBOARD: Starting ===', 'info');
+      
       // Show dashboard first (canvas elements need to be visible for Chart.js)
       const dashboardDiv = document.getElementById('dashboard');
       if (!dashboardDiv) {
+        debugLog('✗ Dashboard div not found', 'error');
         console.error('Dashboard div not found');
         return;
       }
+      debugLog('✓ Dashboard div found', 'success');
       dashboardDiv.style.display = 'block';
+      debugLog('Dashboard div displayed', 'info');
       
       const pillarNames = {
         localEntity: 'Local Entity',
@@ -480,36 +698,60 @@
 
       // Wait a moment for DOM to update, then create charts (charts need visible canvas)
       setTimeout(() => {
+        debugLog('Starting chart creation (setTimeout callback)...', 'info');
+        
         // Check if Chart.js is loaded
+        debugLog('Checking Chart.js availability...', 'info');
         if (typeof Chart === 'undefined') {
+          debugLog('✗ Chart.js library not loaded', 'error');
           console.error('Chart.js library not loaded');
           showStatus('Chart.js library failed to load. Please refresh the page.', 'error');
           return;
         }
+        debugLog('✓ Chart.js library available', 'success');
+        debugLog(`Chart constructor: ${typeof Chart}`, 'info');
 
         // Create radar chart
+        debugLog('Creating radar chart...', 'info');
         const radarCanvas = document.getElementById('radarChart');
         if (!radarCanvas) {
+          debugLog('✗ Radar chart canvas not found', 'error');
           console.error('Radar chart canvas not found');
           return;
         }
+        debugLog('✓ Radar chart canvas found', 'success');
         
         // Safely destroy existing chart if it exists
+        debugLog(`Checking for existing radarChart: ${window.radarChart ? 'exists' : 'null'}`, 'info');
         try {
           if (window.radarChart) {
+            debugLog(`radarChart type: ${typeof window.radarChart}`, 'info');
+            debugLog(`radarChart instanceof Chart: ${window.radarChart instanceof Chart}`, 'info');
+            debugLog(`radarChart.destroy type: ${typeof window.radarChart.destroy}`, 'info');
+            
             // Check if it's actually a Chart instance
             if (window.radarChart instanceof Chart && typeof window.radarChart.destroy === 'function') {
+              debugLog('Destroying existing radar chart...', 'info');
               window.radarChart.destroy();
+              debugLog('✓ Existing radar chart destroyed', 'success');
+            } else {
+              debugLog('⚠ Existing radarChart is not a valid Chart instance, clearing...', 'warn');
             }
             window.radarChart = null;
+          } else {
+            debugLog('No existing radar chart to destroy', 'info');
           }
         } catch (e) {
+          debugLog(`✗ Error destroying existing radar chart: ${e.message}`, 'error');
+          debugLog(`Stack: ${e.stack}`, 'error');
           console.warn('Error destroying existing radar chart:', e);
           window.radarChart = null;
         }
         
         const radarCtx = radarCanvas.getContext('2d');
-        window.radarChart = new Chart(radarCtx, {
+        debugLog('Creating new Chart instance for radar chart...', 'info');
+        try {
+          window.radarChart = new Chart(radarCtx, {
           type: 'radar',
           data: {
             labels: Object.values(pillarNames),
@@ -547,15 +789,22 @@
         }
         
         // Safely destroy existing chart if it exists
+        debugLog(`Checking for existing trendChart: ${window.trendChart ? 'exists' : 'null'}`, 'info');
         try {
           if (window.trendChart) {
+            debugLog(`trendChart instanceof Chart: ${window.trendChart instanceof Chart}`, 'info');
             // Check if it's actually a Chart instance
             if (window.trendChart instanceof Chart && typeof window.trendChart.destroy === 'function') {
+              debugLog('Destroying existing trend chart...', 'info');
               window.trendChart.destroy();
+              debugLog('✓ Existing trend chart destroyed', 'success');
+            } else {
+              debugLog('⚠ Existing trendChart is not a valid Chart instance, clearing...', 'warn');
             }
             window.trendChart = null;
           }
         } catch (e) {
+          debugLog(`✗ Error destroying existing trend chart: ${e.message}`, 'error');
           console.warn('Error destroying existing trend chart:', e);
           window.trendChart = null;
         }
@@ -566,7 +815,9 @@
           d.setDate(d.getDate() - (29 - i));
           return d.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' });
         });
-        window.trendChart = new Chart(trendCtx, {
+        debugLog('Creating new Chart instance for trend chart...', 'info');
+        try {
+          window.trendChart = new Chart(trendCtx, {
           type: 'line',
           data: {
             labels: dates,
@@ -607,7 +858,11 @@
 
     // Initialize on load
     window.addEventListener('DOMContentLoaded', () => {
+      debugLog('=== PAGE LOAD: DOMContentLoaded event fired ===', 'info');
+      debugLog(`Window location: ${window.location.href}`, 'info');
+      debugLog(`User agent: ${navigator.userAgent}`, 'info');
       loadConfig();
+      debugLog('=== PAGE LOAD: Initialization complete ===', 'success');
     });
   </script>
 </body>
