@@ -936,41 +936,71 @@
       return Math.round(Math.min(100, Math.max(0, readiness)));
     }
 
-    // Fetch data from Google Search Console (mock for now)
+    // Fetch real data from Google Search Console API
     async function fetchSearchConsoleData(apiKey, propertyUrl, days) {
-      // TODO: Replace with real API call
-      // For now, return mock data that varies based on date range to validate the dashboard
-      return new Promise((resolve) => {
-        setTimeout(() => {
-          // Scale metrics based on date range (longer periods = more data)
-          const daysMultiplier = days / 30; // Normalize to 30-day baseline
+      debugLog(`Fetching real GSC data for ${days} days...`, 'info');
+      
+      // Calculate date range
+      const endDate = new Date();
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - days);
+      
+      // Format dates as YYYY-MM-DD
+      const formatDate = (date) => {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      };
+      
+      const startDateStr = formatDate(startDate);
+      const endDateStr = formatDate(endDate);
+      
+      debugLog(`Date range: ${startDateStr} to ${endDateStr}`, 'info');
+      
+      try {
+        // Call serverless function to fetch real GSC data
+        const response = await fetch('/api/fetch-search-console', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            propertyUrl: propertyUrl,
+            startDate: startDateStr,
+            endDate: endDateStr
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          debugLog(`✗ GSC API error: ${errorData.error}`, 'error');
+          if (errorData.details) {
+            debugLog(`Details: ${errorData.details}`, 'error');
+          }
           
-          // Base metrics (for 30 days)
-          const baseClicks = 1234;
-          const baseImpressions = 45678;
-          const baseAvgPosition = 12.5;
+          // If OAuth not configured, show helpful message
+          if (errorData.error && errorData.error.includes('OAuth2 credentials not configured')) {
+            throw new Error('Google Search Console OAuth2 credentials not configured. Please set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN in Vercel environment variables.');
+          }
           
-          // Scale clicks and impressions proportionally to date range
-          // (but not linearly - longer periods may have slightly lower daily averages)
-          const clicksMultiplier = daysMultiplier * (1 - (days - 30) * 0.001); // Slight decay for longer periods
-          const impressionsMultiplier = daysMultiplier * (1 - (days - 30) * 0.0005);
-          
-          // Average position might improve slightly over longer periods (better historical data)
-          const positionAdjustment = Math.max(0, (days - 30) * 0.01);
-          
-          resolve({
-            totalClicks: Math.round(baseClicks * clicksMultiplier),
-            totalImpressions: Math.round(baseImpressions * impressionsMultiplier),
-            averagePosition: Math.max(1, baseAvgPosition - positionAdjustment),
-            topQueries: [
-              { query: 'photography classes', clicks: Math.round(234 * clicksMultiplier), position: 8.2 - positionAdjustment * 0.5 },
-              { query: 'photography lessons', clicks: Math.round(189 * clicksMultiplier), position: 9.1 - positionAdjustment * 0.5 },
-              { query: 'camera settings course', clicks: Math.round(156 * clicksMultiplier), position: 11.5 - positionAdjustment * 0.5 }
-            ],
-            dateRange: days // Include date range in response for debugging
-          });
-        }, 2000);
-      });
+          throw new Error(errorData.error || 'Failed to fetch Search Console data');
+        }
+
+        const data = await response.json();
+        debugLog(`✓ Real GSC data fetched: ${data.totalClicks} clicks, ${data.totalImpressions} impressions`, 'success');
+        
+        return {
+          totalClicks: data.totalClicks || 0,
+          totalImpressions: data.totalImpressions || 0,
+          averagePosition: data.averagePosition || 0,
+          topQueries: data.topQueries || [],
+          dateRange: days
+        };
+      } catch (error) {
+        debugLog(`✗ Error fetching GSC data: ${error.message}`, 'error');
+        throw error;
+      }
     }
 
     // Run the audit
