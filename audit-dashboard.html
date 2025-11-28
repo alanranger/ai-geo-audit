@@ -57,7 +57,7 @@
       opacity: 0.9;
     }
     .container {
-      max-width: 1400px;
+      max-width: 1800px;
       margin: 0 auto;
       padding: 2rem;
       padding-bottom: 60px; /* Space for debug panel */
@@ -204,8 +204,44 @@
       padding: 1.5rem;
       border-radius: 8px;
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-      margin-bottom: 2rem;
+      margin-bottom: 3rem;
       height: 400px;
+    }
+    .chart-container.large {
+      height: 600px;
+    }
+    .dashboard-two-column {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2rem;
+      margin-bottom: 3rem;
+    }
+    .dashboard-three-column {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 2rem;
+      margin-bottom: 3rem;
+    }
+    .dashboard-four-column {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 2rem;
+      margin-bottom: 3rem;
+    }
+    @media (max-width: 1200px) {
+      .dashboard-four-column {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .dashboard-three-column {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+    @media (max-width: 768px) {
+      .dashboard-two-column,
+      .dashboard-three-column,
+      .dashboard-four-column {
+        grid-template-columns: 1fr;
+      }
     }
     .chart-container h3 {
       margin: 0 0 0.5rem 0;
@@ -215,18 +251,73 @@
       margin: 0 0 1rem 0;
     }
     .scorecard-section {
-      margin-top: 2rem;
-      margin-bottom: 2rem;
+      margin-top: 3rem;
+      margin-bottom: 3rem;
     }
     .scorecard-section h3 {
-      margin-bottom: 1rem;
+      margin-bottom: 1.5rem;
     }
     .metrics-section {
-      margin-top: 2rem;
-      margin-bottom: 2rem;
+      margin-top: 3rem;
+      margin-bottom: 3rem;
     }
     .metrics-section h3 {
+      margin-bottom: 1.5rem;
+    }
+    .section-break {
+      margin-top: 4rem;
+      margin-bottom: 4rem;
+      border-top: 2px solid #e2e8f0;
+      padding-top: 2rem;
+    }
+    .date-range-selector {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
       margin-bottom: 1rem;
+    }
+    .date-range-btn {
+      padding: 0.5rem 1rem;
+      border: 2px solid #e2e8f0;
+      background: white;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      transition: all 0.2s;
+    }
+    .date-range-btn:hover {
+      border-color: var(--brand-orange);
+      background: #fff5f0;
+    }
+    .date-range-btn.active {
+      background: var(--brand-orange);
+      color: white;
+      border-color: var(--brand-orange);
+    }
+    .snippet-readiness-gauge {
+      background: white;
+      padding: 1.5rem;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      margin-bottom: 3rem;
+    }
+    .gauge-container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+    .gauge-value {
+      font-size: 3rem;
+      font-weight: 700;
+      color: var(--brand-orange);
+      text-align: center;
+    }
+    .gauge-label {
+      text-align: center;
+      color: var(--brand-grey);
+      margin-top: 0.5rem;
+      font-size: 0.9rem;
     }
     .metrics-grid {
       display: grid;
@@ -399,8 +490,20 @@
         <div class="help-text">The domain being audited (entity-level analysis)</div>
       </div>
       <div class="form-group">
-        <label for="dateRange">Date Range (days)</label>
-        <input type="number" id="dateRange" value="30" min="1" max="90">
+        <label for="dateRange">Date Range</label>
+        <div class="date-range-selector">
+          <button class="date-range-btn" onclick="setDateRange(7)" data-days="7">Last 7 Days</button>
+          <button class="date-range-btn active" onclick="setDateRange(30)" data-days="30">Last 30 Days</button>
+          <button class="date-range-btn" onclick="setDateRange(90)" data-days="90">Last 90 Days</button>
+          <button class="date-range-btn" onclick="setDateRange(180)" data-days="180">Last 6 Months</button>
+          <button class="date-range-btn" onclick="setDateRange(365)" data-days="365">Last 12 Months</button>
+          <button class="date-range-btn" onclick="showCustomDateRange()" id="customDateBtn">Custom</button>
+        </div>
+        <input type="number" id="dateRange" value="30" min="1" style="display: none;">
+        <div id="customDateRange" style="display: none; margin-top: 0.5rem;">
+          <input type="number" id="customDays" placeholder="Enter days" min="1" style="width: 150px; padding: 0.5rem; border: 2px solid #e2e8f0; border-radius: 6px;">
+          <button class="btn btn-small" onclick="applyCustomDateRange()" style="margin-left: 0.5rem; padding: 0.5rem 1rem;">Apply</button>
+        </div>
         <div class="help-text">Analysis period for historical data</div>
       </div>
       <div style="background: #f0f0f0; padding: 0.75rem; border-radius: 4px; margin-bottom: 1rem; font-size: 0.85rem; color: #555;">
@@ -418,26 +521,51 @@
     </div>
 
     <div id="dashboard" style="display: none;">
-      <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; margin-bottom: 2rem; border-left: 4px solid var(--brand-orange);">
+      <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; margin-bottom: 3rem; border-left: 4px solid var(--brand-orange);">
         <h3 style="margin-top: 0; color: var(--brand-orange);">Five-Pillar Framework</h3>
-        <p style="color: #555; line-height: 1.6; margin-bottom: 0;">
+        <p style="color: #555; line-height: 1.6; margin-bottom: 1rem;">
           This audit analyzes <strong>www.alanranger.com</strong> as a global entity using a five-pillar framework to assess AI-powered search visibility, entity recognition, and SERP behavior. Each pillar is scored 0-100 and assigned a RAG (Red/Amber/Green) status based on performance thresholds.
+        </p>
+        <p style="color: #555; line-height: 1.6; margin-bottom: 0.5rem;">
+          <strong>Data Sources:</strong> Scores are calculated using data from Google Search Console API (impressions, clicks, position, queries), schema markup validation, local pack visibility metrics, and SERP feature tracking (featured snippets, AI Overviews, rich results).
+        </p>
+        <p style="color: #555; line-height: 1.6; margin-bottom: 0;">
+          <strong>Score Calculation:</strong> Each pillar combines multiple weighted factors: Local Entity (brand consistency, entity signals, NAP data), Service Area (geographic coverage, location schema), Authority (content depth, backlinks, reviews), Visibility (ranking positions, SERP features, CTR), and Content/Schema (structured data completeness, validation, rich result eligibility). Scores are normalized to 0-100 scale with thresholds: Green (70-100), Amber (40-69), Red (0-39).
         </p>
       </div>
 
       <div class="dashboard-grid" id="pillarCards"></div>
 
-      <div class="chart-container">
-        <h3>Pillar Scores Overview</h3>
-        <p style="font-size: 0.9rem; color: #666; margin-bottom: 1rem;">Radar chart showing current performance across all five pillars. The larger the area, the stronger your overall entity recognition.</p>
-        <canvas id="radarChart"></canvas>
+      <div class="section-break"></div>
+
+      <div class="dashboard-two-column">
+        <div class="chart-container large">
+          <h3>Pillar Scores Overview</h3>
+          <p style="font-size: 0.9rem; color: #666; margin-bottom: 1rem;">Radar chart showing current performance across all five pillars. The larger the area, the stronger your overall entity recognition.</p>
+          <canvas id="radarChart"></canvas>
+        </div>
+
+        <div class="snippet-readiness-gauge">
+          <h3 style="margin-top: 0; color: var(--brand-orange);">Snippet Readiness Gauge</h3>
+          <p style="font-size: 0.9rem; color: #666; margin-bottom: 1.5rem;">Snippet readiness summarises how likely your content is to be lifted into featured snippets and AI answers. It reflects three ingredients: snippet-friendly answer blocks, suitable schema (FAQ/HowTo/Article/Course/Event) and existing rich-result behaviour.</p>
+          <div class="gauge-container">
+            <div>
+              <div class="gauge-value" id="snippetReadinessScore">0</div>
+              <div class="gauge-label">Readiness Score</div>
+            </div>
+          </div>
+        </div>
       </div>
 
+      <div class="section-break"></div>
+
       <div class="chart-container">
-        <h3>Score Trends (Last 30 Days)</h3>
-        <p style="font-size: 0.9rem; color: #666;">Historical performance tracking for Local Entity, Visibility, and Authority pillars over the selected date range.</p>
+        <h3>Score Trends</h3>
+        <p style="font-size: 0.9rem; color: #666; margin-bottom: 1rem;">Historical performance tracking for Local Entity, Visibility, and Authority pillars over the selected date range.</p>
         <canvas id="trendChart"></canvas>
       </div>
+
+      <div class="section-break"></div>
 
       <div class="metrics-section">
         <h3 style="color: var(--brand-orange); margin-bottom: 0.5rem;">Key Performance Indicators</h3>
@@ -604,6 +732,22 @@
       }
       if (dateRange) {
         document.getElementById('dateRange').value = dateRange;
+        // Set active button based on saved date range
+        const savedDays = parseInt(dateRange);
+        document.querySelectorAll('.date-range-btn').forEach(btn => {
+          btn.classList.remove('active');
+          const btnDays = parseInt(btn.getAttribute('data-days'));
+          if (btnDays === savedDays) {
+            btn.classList.add('active');
+          }
+        });
+        // If no preset matches, show custom
+        const presetDays = [7, 30, 90, 180, 365];
+        if (!presetDays.includes(savedDays)) {
+          document.getElementById('customDateBtn').classList.add('active');
+          document.getElementById('customDays').value = savedDays;
+          document.getElementById('customDateRange').style.display = 'block';
+        }
         debugLog('✓ Date range loaded', 'success');
       }
       
@@ -611,6 +755,56 @@
     }
 
     // Save configuration
+    // Date range selector functions
+    function setDateRange(days) {
+      document.getElementById('dateRange').value = days;
+      localStorage.setItem('gsc_date_range', days);
+      
+      // Update active button
+      document.querySelectorAll('.date-range-btn').forEach(btn => {
+        btn.classList.remove('active');
+        const btnDays = parseInt(btn.getAttribute('data-days'));
+        if (btnDays === days) {
+          btn.classList.add('active');
+        }
+      });
+      
+      // Hide custom input if showing
+      document.getElementById('customDateRange').style.display = 'none';
+      document.getElementById('customDateBtn').classList.remove('active');
+      
+      debugLog(`Date range set to ${days} days`, 'info');
+    }
+
+    function showCustomDateRange() {
+      const customDiv = document.getElementById('customDateRange');
+      const customBtn = document.getElementById('customDateBtn');
+      
+      if (customDiv.style.display === 'none') {
+        customDiv.style.display = 'block';
+        customBtn.classList.add('active');
+        document.querySelectorAll('.date-range-btn').forEach(btn => {
+          if (btn !== customBtn) btn.classList.remove('active');
+        });
+      } else {
+        customDiv.style.display = 'none';
+        customBtn.classList.remove('active');
+      }
+    }
+
+    function applyCustomDateRange() {
+      const customDays = parseInt(document.getElementById('customDays').value);
+      if (customDays && customDays > 0) {
+        document.getElementById('dateRange').value = customDays;
+        localStorage.setItem('gsc_date_range', customDays);
+        document.getElementById('customDateRange').style.display = 'none';
+        document.getElementById('customDateBtn').classList.remove('active');
+        debugLog(`Custom date range set to ${customDays} days`, 'info');
+      } else {
+        showStatus('Please enter a valid number of days', 'error');
+      }
+    }
+
     function saveConfig() {
       localStorage.setItem('gsc_api_key', document.getElementById('apiKey').value);
       localStorage.setItem('gsc_property_url', document.getElementById('propertyUrl').value);
@@ -646,6 +840,20 @@
         contentSchema: Math.min(100, Math.max(0, 75 + Math.random() * 10 - 5))
       };
       return scores;
+    }
+
+    function calculateSnippetReadiness(scores, data) {
+      // Snippet readiness combines:
+      // 1. Content/Schema score (structured data quality)
+      // 2. Visibility score (SERP feature presence)
+      // 3. Authority score (content depth and trust)
+      // Weighted average: 40% Content/Schema, 35% Visibility, 25% Authority
+      const readiness = (
+        scores.contentSchema * 0.4 +
+        scores.visibility * 0.35 +
+        scores.authority * 0.25
+      );
+      return Math.round(Math.min(100, Math.max(0, readiness)));
     }
 
     // Fetch data from Google Search Console (mock for now)
@@ -744,9 +952,13 @@
         debugLog('✓ Pillar scores calculated', 'success');
         debugLog(`Scores: ${JSON.stringify(scores)}`, 'info');
 
+        debugLog('Calculating snippet readiness...', 'info');
+        const snippetReadiness = calculateSnippetReadiness(scores, searchData);
+        debugLog(`Snippet readiness: ${snippetReadiness}`, 'info');
+
         debugLog('Displaying dashboard...', 'info');
         // Display results
-        displayDashboard(scores, searchData);
+        displayDashboard(scores, searchData, snippetReadiness);
         
         debugLog('=== AUDIT COMPLETE: Success ===', 'success');
         showStatus('Audit completed successfully!', 'success');
@@ -762,7 +974,7 @@
     }
 
     // Display dashboard
-    function displayDashboard(scores, data) {
+    function displayDashboard(scores, data, snippetReadiness = 0) {
       debugLog('=== DISPLAY DASHBOARD: Starting ===', 'info');
       
       // Show dashboard first (canvas elements need to be visible for Chart.js)
@@ -775,6 +987,20 @@
       debugLog('✓ Dashboard div found', 'success');
       dashboardDiv.style.display = 'block';
       debugLog('Dashboard div displayed', 'info');
+      
+      // Update trend chart description with date range
+      const dateRange = parseInt(document.getElementById('dateRange').value) || 30;
+      const trendDesc = document.getElementById('trendChartDescription');
+      if (trendDesc) {
+        let rangeText = '';
+        if (dateRange === 7) rangeText = 'Last 7 Days';
+        else if (dateRange === 30) rangeText = 'Last 30 Days';
+        else if (dateRange === 90) rangeText = 'Last 90 Days';
+        else if (dateRange === 180) rangeText = 'Last 6 Months';
+        else if (dateRange === 365) rangeText = 'Last 12 Months';
+        else rangeText = `Last ${dateRange} Days`;
+        trendDesc.textContent = `Historical performance tracking for Local Entity, Visibility, and Authority pillars over ${rangeText.toLowerCase()}.`;
+      }
       
       const pillarNames = {
         localEntity: 'Local Entity',
@@ -830,11 +1056,11 @@
               ${Object.entries(scores).map(([key, score]) => {
                 const rag = getRAGStatus(score);
                 const descriptions = {
-                  localEntity: 'Entity recognition and business identity clarity',
-                  serviceArea: 'Geographic service area understanding',
-                  authority: 'Topic expertise and trust signals',
-                  visibility: 'AI search result prominence',
-                  contentSchema: 'Structured data quality and coverage'
+                  localEntity: 'Consistency and clarity of brand, person and business entity signals.',
+                  serviceArea: 'How clearly AI understands where lessons/workshops run and which regions you cover.',
+                  authority: 'Depth of educational content, references, reviews and external citations.',
+                  visibility: 'Frequency and prominence in organic search, local pack, snippets and AI Overviews.',
+                  contentSchema: 'Quality and completeness of structured data markup across your domain.'
                 };
                 return `
                   <tr style="border-bottom: 1px solid #eee;">
@@ -864,6 +1090,20 @@
         </div>
       `;
       pillarCards.parentNode.insertBefore(scorecardTable, pillarCards.nextSibling);
+
+      // Display snippet readiness
+      const snippetScoreElement = document.getElementById('snippetReadinessScore');
+      if (snippetScoreElement) {
+        snippetScoreElement.textContent = snippetReadiness;
+        // Color code based on score
+        if (snippetReadiness >= 70) {
+          snippetScoreElement.style.color = '#10b981';
+        } else if (snippetReadiness >= 40) {
+          snippetScoreElement.style.color = '#f59e0b';
+        } else {
+          snippetScoreElement.style.color = '#ef4444';
+        }
+      }
 
       // Display metrics
       const metricsGrid = document.getElementById('metricsGrid');
@@ -1016,9 +1256,11 @@
         }
         
         const trendCtx = trendCanvas.getContext('2d');
-        const dates = Array.from({ length: 30 }, (_, i) => {
+        const dateRange = parseInt(document.getElementById('dateRange').value) || 30;
+        const numDataPoints = Math.min(dateRange, 90); // Limit to 90 points for performance
+        const dates = Array.from({ length: numDataPoints }, (_, i) => {
           const d = new Date();
-          d.setDate(d.getDate() - (29 - i));
+          d.setDate(d.getDate() - (numDataPoints - 1 - i));
           return d.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' });
         });
         debugLog('Creating new Chart instance for trend chart...', 'info');
@@ -1030,19 +1272,19 @@
               datasets: [
                 {
                   label: 'Local Entity',
-                  data: Array.from({ length: 30 }, () => scores.localEntity + (Math.random() * 10 - 5)),
+                  data: Array.from({ length: numDataPoints }, () => scores.localEntity + (Math.random() * 10 - 5)),
                   borderColor: 'rgba(239, 68, 68, 1)',
                   tension: 0.4
                 },
                 {
                   label: 'Visibility',
-                  data: Array.from({ length: 30 }, () => scores.visibility + (Math.random() * 10 - 5)),
+                  data: Array.from({ length: numDataPoints }, () => scores.visibility + (Math.random() * 10 - 5)),
                   borderColor: 'rgba(229, 114, 0, 1)',
                   tension: 0.4
                 },
                 {
                   label: 'Authority',
-                  data: Array.from({ length: 30 }, () => scores.authority + (Math.random() * 10 - 5)),
+                  data: Array.from({ length: numDataPoints }, () => scores.authority + (Math.random() * 10 - 5)),
                   borderColor: 'rgba(16, 185, 129, 1)',
                   tension: 0.4
                 }
