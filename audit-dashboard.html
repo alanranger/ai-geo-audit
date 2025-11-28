@@ -505,7 +505,7 @@
     });
 
     // Load saved configuration
-    function loadConfig() {
+    async function loadConfig() {
       debugLog('=== PAGE LOAD: Starting configuration load ===', 'info');
       
       // Check if Chart.js is loaded
@@ -514,6 +514,22 @@
         debugLog('✓ Chart.js library loaded successfully', 'success');
       } else {
         debugLog('✗ Chart.js library NOT loaded', 'error');
+      }
+      
+      // Try to fetch API key from Vercel environment variable (via API endpoint)
+      let vercelApiKey = null;
+      try {
+        debugLog('Checking Vercel environment variable...', 'info');
+        const response = await fetch('/api/get-api-key');
+        if (response.ok) {
+          const data = await response.json();
+          if (data.apiKey) {
+            vercelApiKey = data.apiKey;
+            debugLog('✓ API key loaded from Vercel environment variable', 'success');
+          }
+        }
+      } catch (e) {
+        debugLog('Vercel env var endpoint not available (expected for static site)', 'info');
       }
       
       // Check config.js
@@ -527,7 +543,7 @@
       // Check localStorage
       debugLog('Checking localStorage...', 'info');
       const configApiKey = window.API_CONFIG && window.API_CONFIG.googleSearchConsoleApiKey;
-      const apiKey = configApiKey || localStorage.getItem('gsc_api_key');
+      const apiKey = vercelApiKey || configApiKey || localStorage.getItem('gsc_api_key');
       const propertyUrl = localStorage.getItem('gsc_property_url');
       const dateRange = localStorage.getItem('gsc_date_range');
       
@@ -799,34 +815,42 @@
         debugLog('Creating new Chart instance for radar chart...', 'info');
         try {
           window.radarChart = new Chart(radarCtx, {
-          type: 'radar',
-          data: {
-            labels: Object.values(pillarNames),
-            datasets: [{
-              label: 'Current Scores',
-              data: Object.values(scores),
-              backgroundColor: 'rgba(229, 114, 0, 0.2)',
-              borderColor: 'rgba(229, 114, 0, 1)',
-              pointBackgroundColor: 'rgba(229, 114, 0, 1)',
-              pointBorderColor: '#fff',
-              pointHoverBackgroundColor: '#fff',
-              pointHoverBorderColor: 'rgba(229, 114, 0, 1)'
-            }]
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-              r: {
-                beginAtZero: true,
-                max: 100,
-                ticks: {
-                  stepSize: 20
+            type: 'radar',
+            data: {
+              labels: Object.values(pillarNames),
+              datasets: [{
+                label: 'Current Scores',
+                data: Object.values(scores),
+                backgroundColor: 'rgba(229, 114, 0, 0.2)',
+                borderColor: 'rgba(229, 114, 0, 1)',
+                pointBackgroundColor: 'rgba(229, 114, 0, 1)',
+                pointBorderColor: '#fff',
+                pointHoverBackgroundColor: '#fff',
+                pointHoverBorderColor: 'rgba(229, 114, 0, 1)'
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              scales: {
+                r: {
+                  beginAtZero: true,
+                  max: 100,
+                  ticks: {
+                    stepSize: 20
+                  }
                 }
               }
             }
-          }
-        });
+          });
+          debugLog('✓ Radar chart created successfully', 'success');
+          debugLog(`radarChart type after creation: ${typeof window.radarChart}`, 'info');
+          debugLog(`radarChart instanceof Chart: ${window.radarChart instanceof Chart}`, 'info');
+        } catch (e) {
+          debugLog(`✗ Error creating radar chart: ${e.message}`, 'error');
+          debugLog(`Stack: ${e.stack}`, 'error');
+          console.error('Error creating radar chart:', e);
+        }
 
         // Create trend chart (mock data for now)
         debugLog('Creating trend chart...', 'info');
