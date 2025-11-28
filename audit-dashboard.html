@@ -1181,6 +1181,7 @@
               <tr style="background: #f5f5f5;">
                 <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600;">Pillar</th>
                 <th style="padding: 0.75rem; text-align: center; border-bottom: 2px solid #ddd; font-weight: 600;">Score</th>
+                <th style="padding: 0.75rem; text-align: center; border-bottom: 2px solid #ddd; font-weight: 600;">Weight</th>
                 <th style="padding: 0.75rem; text-align: center; border-bottom: 2px solid #ddd; font-weight: 600;">Status</th>
                 <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600;">Description</th>
                 <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600;">Improvement Suggestions</th>
@@ -1189,12 +1190,21 @@
             <tbody>
               ${Object.entries(scores).map(([key, score]) => {
                 const rag = getRAGStatus(score);
+                // Define pillar weightings (importance for AI search)
+                const pillarWeights = {
+                  localEntity: 0.15,      // 15% - Entity recognition important but not critical
+                  serviceArea: 0.10,      // 10% - Less critical for AI search
+                  authority: 0.30,        // 30% - E-A-T is crucial for AI trust
+                  visibility: 0.20,       // 20% - How AI surfaces your content
+                  contentSchema: 0.25      // 25% - Structured data is key for AI understanding
+                };
+                
                 const descriptions = {
-                  localEntity: 'Consistency and clarity of brand, person and business entity signals.',
-                  serviceArea: 'How clearly AI understands where lessons/workshops run and which regions you cover.',
-                  authority: 'E-A-T (Experience, Expertise, Authoritativeness, Trustworthiness): Depth of educational content, references, reviews, external citations, and demonstrated expertise.',
-                  visibility: 'Frequency and prominence in organic search, local pack, snippets and AI Overviews.',
-                  contentSchema: 'Quality and completeness of structured data markup across your domain.'
+                  localEntity: 'Consistency and clarity of brand, person and business entity signals. <strong>AI Importance:</strong> AI systems rely on clear entity signals to understand who you are and connect your brand across platforms. Strong entity recognition helps AI include you in knowledge panels and entity-based results.',
+                  serviceArea: 'How clearly AI understands where lessons/workshops run and which regions you cover. <strong>AI Importance:</strong> AI uses geographic signals to match queries with local intent. Clear service area data helps AI surface your content for location-specific searches and local AI Overviews.',
+                  authority: 'E-A-T (Experience, Expertise, Authoritativeness, Trustworthiness): Depth of educational content, references, reviews, external citations, and demonstrated expertise. <strong>AI Importance:</strong> E-A-T is critical for AI systems - they prioritize authoritative, trustworthy sources. Strong E-A-T signals help AI confidently feature your content in AI Overviews and answer boxes.',
+                  visibility: 'Frequency and prominence in organic search, local pack, snippets and AI Overviews. <strong>AI Importance:</strong> AI systems learn from existing search performance. Higher visibility signals quality and relevance, making AI more likely to surface your content in AI-powered results and featured snippets.',
+                  contentSchema: 'Quality and completeness of structured data markup across your domain. <strong>AI Importance:</strong> Structured data is the primary way AI understands your content. Schema markup directly feeds AI systems, enabling them to extract facts, relationships, and context for use in AI Overviews and answer generation.'
                 };
                 
                 // Generate suggestions based on pillar and score
@@ -1243,18 +1253,24 @@
                   return selectedSuggestions.slice(0, 4).map(s => `• ${s}`).join('<br>') || 'No suggestions available';
                 };
                 
+                const weight = pillarWeights[key] || 0;
+                const weightedScore = score * weight;
+                
                 return `
                   <tr style="border-bottom: 1px solid #eee;">
                     <td style="padding: 0.75rem; font-weight: 500;">${pillarNames[key]}</td>
                     <td style="padding: 0.75rem; text-align: center; font-size: 1.1rem; font-weight: 600; color: ${rag.status === 'green' ? '#10b981' : rag.status === 'amber' ? '#f59e0b' : '#ef4444'};">
                       ${Math.round(score)}
                     </td>
+                    <td style="padding: 0.75rem; text-align: center; font-size: 0.9rem; font-weight: 600; color: #666;">
+                      ${(weight * 100).toFixed(0)}%
+                    </td>
                     <td style="padding: 0.75rem; text-align: center;">
                       <span class="rag-badge ${rag.status}" style="display: inline-block; padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.8rem;">
                         ${rag.label}
                       </span>
                     </td>
-                    <td style="padding: 0.75rem; color: #666; font-size: 0.85rem;">${descriptions[key] || ''}</td>
+                    <td style="padding: 0.75rem; color: #666; font-size: 0.85rem; line-height: 1.6;">${descriptions[key] || ''}</td>
                     <td style="padding: 0.75rem; color: #555; font-size: 0.85rem; line-height: 1.6;">${getSuggestions(key, score)}</td>
                   </tr>
                 `;
@@ -1263,11 +1279,14 @@
           </table>
         </div>
         <div style="background: #f8f9fa; padding: 1rem; border-radius: 8px; margin-top: 1rem; border-left: 4px solid var(--brand-orange);">
-          <p style="margin: 0; font-size: 0.9rem; color: #555; line-height: 1.6;">
+          <p style="margin: 0; font-size: 0.9rem; color: #555; line-height: 1.6; margin-bottom: 0.5rem;">
             <strong>RAG Status Guide:</strong> 
             <span style="color: #10b981; font-weight: 600;">Green (70-100)</span> = Strong performance, 
             <span style="color: #f59e0b; font-weight: 600;">Amber (40-69)</span> = Needs improvement, 
             <span style="color: #ef4444; font-weight: 600;">Red (0-39)</span> = Critical issues
+          </p>
+          <p style="margin: 0; font-size: 0.9rem; color: #555; line-height: 1.6;">
+            <strong>Weighting:</strong> Pillars are weighted by their importance for AI search systems. Authority (30%) and Content/Schema (25%) are most critical, as AI relies heavily on E-A-T signals and structured data. Visibility (20%) reflects how AI learns from existing performance, while Local Entity (15%) and Service Area (10%) are less critical for AI-powered results.
           </p>
         </div>
       `;
