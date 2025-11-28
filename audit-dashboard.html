@@ -401,6 +401,10 @@
 
     // Display dashboard
     function displayDashboard(scores, data) {
+      // Show dashboard first (canvas elements need to be visible for Chart.js)
+      const dashboardDiv = document.getElementById('dashboard');
+      dashboardDiv.style.display = 'block';
+      
       const pillarNames = {
         localEntity: 'Local Entity',
         serviceArea: 'Service Area',
@@ -425,88 +429,6 @@
         pillarCards.appendChild(card);
       });
 
-      // Create radar chart
-      const radarCtx = document.getElementById('radarChart').getContext('2d');
-      if (window.radarChart && typeof window.radarChart.destroy === 'function') {
-        window.radarChart.destroy();
-      }
-      window.radarChart = new Chart(radarCtx, {
-        type: 'radar',
-        data: {
-          labels: Object.values(pillarNames),
-          datasets: [{
-            label: 'Current Scores',
-            data: Object.values(scores),
-            backgroundColor: 'rgba(229, 114, 0, 0.2)',
-            borderColor: 'rgba(229, 114, 0, 1)',
-            pointBackgroundColor: 'rgba(229, 114, 0, 1)',
-            pointBorderColor: '#fff',
-            pointHoverBackgroundColor: '#fff',
-            pointHoverBorderColor: 'rgba(229, 114, 0, 1)'
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          scales: {
-            r: {
-              beginAtZero: true,
-              max: 100,
-              ticks: {
-                stepSize: 20
-              }
-            }
-          }
-        }
-      });
-
-      // Create trend chart (mock data for now)
-      const trendCtx = document.getElementById('trendChart').getContext('2d');
-      if (window.trendChart && typeof window.trendChart.destroy === 'function') {
-        window.trendChart.destroy();
-      }
-      const dates = Array.from({ length: 30 }, (_, i) => {
-        const d = new Date();
-        d.setDate(d.getDate() - (29 - i));
-        return d.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' });
-      });
-      window.trendChart = new Chart(trendCtx, {
-        type: 'line',
-        data: {
-          labels: dates,
-          datasets: [
-            {
-              label: 'Local Entity',
-              data: Array.from({ length: 30 }, () => scores.localEntity + (Math.random() * 10 - 5)),
-              borderColor: 'rgba(239, 68, 68, 1)',
-              tension: 0.4
-            },
-            {
-              label: 'Visibility',
-              data: Array.from({ length: 30 }, () => scores.visibility + (Math.random() * 10 - 5)),
-              borderColor: 'rgba(229, 114, 0, 1)',
-              tension: 0.4
-            },
-            {
-              label: 'Authority',
-              data: Array.from({ length: 30 }, () => scores.authority + (Math.random() * 10 - 5)),
-              borderColor: 'rgba(16, 185, 129, 1)',
-              tension: 0.4
-            }
-          ]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          scales: {
-            y: {
-              beginAtZero: true,
-              max: 100
-            }
-          }
-        }
-      });
-
       // Display metrics
       const metricsGrid = document.getElementById('metricsGrid');
       metricsGrid.innerHTML = `
@@ -528,7 +450,100 @@
         </div>
       `;
 
-      document.getElementById('dashboard').style.display = 'block';
+      // Wait a moment for DOM to update, then create charts (charts need visible canvas)
+      setTimeout(() => {
+        // Create radar chart
+        const radarCanvas = document.getElementById('radarChart');
+        if (!radarCanvas) {
+          console.error('Radar chart canvas not found');
+          return;
+        }
+        const radarCtx = radarCanvas.getContext('2d');
+        if (window.radarChart && typeof window.radarChart.destroy === 'function') {
+          window.radarChart.destroy();
+        }
+        window.radarChart = new Chart(radarCtx, {
+          type: 'radar',
+          data: {
+            labels: Object.values(pillarNames),
+            datasets: [{
+              label: 'Current Scores',
+              data: Object.values(scores),
+              backgroundColor: 'rgba(229, 114, 0, 0.2)',
+              borderColor: 'rgba(229, 114, 0, 1)',
+              pointBackgroundColor: 'rgba(229, 114, 0, 1)',
+              pointBorderColor: '#fff',
+              pointHoverBackgroundColor: '#fff',
+              pointHoverBorderColor: 'rgba(229, 114, 0, 1)'
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              r: {
+                beginAtZero: true,
+                max: 100,
+                ticks: {
+                  stepSize: 20
+                }
+              }
+            }
+          }
+        });
+
+        // Create trend chart (mock data for now)
+        const trendCanvas = document.getElementById('trendChart');
+        if (!trendCanvas) {
+          console.error('Trend chart canvas not found');
+          return;
+        }
+        const trendCtx = trendCanvas.getContext('2d');
+        if (window.trendChart && typeof window.trendChart.destroy === 'function') {
+          window.trendChart.destroy();
+        }
+        const dates = Array.from({ length: 30 }, (_, i) => {
+          const d = new Date();
+          d.setDate(d.getDate() - (29 - i));
+          return d.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' });
+        });
+        window.trendChart = new Chart(trendCtx, {
+          type: 'line',
+          data: {
+            labels: dates,
+            datasets: [
+              {
+                label: 'Local Entity',
+                data: Array.from({ length: 30 }, () => scores.localEntity + (Math.random() * 10 - 5)),
+                borderColor: 'rgba(239, 68, 68, 1)',
+                tension: 0.4
+              },
+              {
+                label: 'Visibility',
+                data: Array.from({ length: 30 }, () => scores.visibility + (Math.random() * 10 - 5)),
+                borderColor: 'rgba(229, 114, 0, 1)',
+                tension: 0.4
+              },
+              {
+                label: 'Authority',
+                data: Array.from({ length: 30 }, () => scores.authority + (Math.random() * 10 - 5)),
+                borderColor: 'rgba(16, 185, 129, 1)',
+                tension: 0.4
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              y: {
+                beginAtZero: true,
+                max: 100
+              }
+            }
+          }
+        });
+      }, 100);
     }
 
     // Initialize on load
