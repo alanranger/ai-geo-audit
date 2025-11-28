@@ -60,8 +60,17 @@ export default async function handler(req, res) {
     const tokenData = await tokenResponse.json();
     const accessToken = tokenData.access_token;
 
-    // Extract site URL (remove https:// and trailing slash)
-    const siteUrl = propertyUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+    // Extract site URL - Search Console API requires exact format as registered
+    // Try different formats: with https://, with http://, or domain only
+    let siteUrl = propertyUrl.trim();
+    
+    // Remove trailing slash
+    siteUrl = siteUrl.replace(/\/$/, '');
+    
+    // If no protocol specified, try https:// first (most common)
+    if (!siteUrl.match(/^https?:\/\//)) {
+      siteUrl = `https://${siteUrl}`;
+    }
     
     // Fetch Search Console performance data
     const searchConsoleUrl = `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`;
@@ -82,10 +91,28 @@ export default async function handler(req, res) {
 
     if (!gscResponse.ok) {
       const errorText = await gscResponse.text();
+      let errorData;
+      try {
+        errorData = JSON.parse(errorText);
+      } catch (e) {
+        errorData = { error: { message: errorText } };
+      }
+      
+      // If permission error, provide helpful message
+      if (gscResponse.status === 403) {
+        return res.status(403).json({ 
+          error: 'Permission denied',
+          message: errorData.error?.message || 'User does not have access to this Search Console property',
+          suggestion: 'Make sure: 1) The property URL matches exactly how it appears in Search Console (check if it uses https:// or http://), 2) The Google account used for the refresh token has access to this property, 3) The property is verified in Search Console',
+          attemptedUrl: siteUrl
+        });
+      }
+      
       return res.status(gscResponse.status).json({ 
         error: 'Failed to fetch Search Console data',
-        details: errorText,
-        status: gscResponse.status
+        details: errorData,
+        status: gscResponse.status,
+        attemptedUrl: siteUrl
       });
     }
 
