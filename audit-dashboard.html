@@ -200,15 +200,17 @@
       color: #065f46;
     }
     .chart-container {
-      background: white;
+      background: linear-gradient(135deg, #fef3e7 0%, #fff8f0 100%);
       padding: 1.5rem;
       border-radius: 8px;
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
       margin-bottom: 3rem;
       height: 400px;
+      border: 1px solid rgba(229, 114, 0, 0.1);
     }
     .chart-container.large {
-      height: 600px;
+      height: 700px;
+      min-height: 700px;
     }
     .dashboard-two-column {
       display: grid;
@@ -249,6 +251,13 @@
     }
     .chart-container p {
       margin: 0 0 1rem 0;
+    }
+    .metrics-section {
+      background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+      padding: 2rem;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      border: 1px solid rgba(59, 130, 246, 0.1);
     }
     .scorecard-section {
       margin-top: 3rem;
@@ -295,29 +304,86 @@
       border-color: var(--brand-orange);
     }
     .snippet-readiness-gauge {
-      background: white;
+      background: linear-gradient(135deg, #e8f5e9 0%, #f1f8e9 100%);
       padding: 1.5rem;
       border-radius: 8px;
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
       margin-bottom: 3rem;
+      border: 1px solid rgba(16, 185, 129, 0.1);
+      height: 700px;
+      min-height: 700px;
+      display: flex;
+      flex-direction: column;
     }
     .gauge-container {
       display: flex;
       align-items: center;
       justify-content: center;
       padding: 2rem;
+      flex: 1;
+      position: relative;
+    }
+    .gauge-wrapper {
+      position: relative;
+      width: 300px;
+      height: 300px;
+    }
+    .gauge-svg {
+      transform: rotate(-90deg);
+      width: 100%;
+      height: 100%;
+    }
+    .gauge-background {
+      fill: none;
+      stroke: #e2e8f0;
+      stroke-width: 20;
+    }
+    .gauge-fill {
+      fill: none;
+      stroke-width: 20;
+      stroke-linecap: round;
+      transition: stroke-dashoffset 1s ease-in-out;
+    }
+    .gauge-fill.green {
+      stroke: #10b981;
+    }
+    .gauge-fill.amber {
+      stroke: #f59e0b;
+    }
+    .gauge-fill.red {
+      stroke: #ef4444;
     }
     .gauge-value {
-      font-size: 3rem;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 4rem;
       font-weight: 700;
-      color: var(--brand-orange);
       text-align: center;
+      z-index: 10;
+    }
+    .gauge-value.green {
+      color: #10b981;
+    }
+    .gauge-value.amber {
+      color: #f59e0b;
+    }
+    .gauge-value.red {
+      color: #ef4444;
     }
     .gauge-label {
       text-align: center;
       color: var(--brand-grey);
+      margin-top: 1rem;
+      font-size: 1rem;
+      font-weight: 600;
+    }
+    .gauge-status {
+      text-align: center;
       margin-top: 0.5rem;
       font-size: 0.9rem;
+      font-weight: 500;
     }
     .metrics-grid {
       display: grid;
@@ -549,9 +615,18 @@
           <h3 style="margin-top: 0; color: var(--brand-orange);">Snippet Readiness Gauge</h3>
           <p style="font-size: 0.9rem; color: #666; margin-bottom: 1.5rem;">Snippet readiness summarises how likely your content is to be lifted into featured snippets and AI answers. It reflects three ingredients: snippet-friendly answer blocks, suitable schema (FAQ/HowTo/Article/Course/Event) and existing rich-result behaviour.</p>
           <div class="gauge-container">
-            <div>
+            <div class="gauge-wrapper">
+              <svg class="gauge-svg" viewBox="0 0 200 200">
+                <circle class="gauge-background" cx="100" cy="100" r="80"></circle>
+                <circle class="gauge-fill" id="gaugeFill" cx="100" cy="100" r="80" 
+                        stroke-dasharray="502.65" 
+                        stroke-dashoffset="502.65"></circle>
+              </svg>
               <div class="gauge-value" id="snippetReadinessScore">0</div>
+            </div>
+            <div style="text-align: center; margin-top: 1rem;">
               <div class="gauge-label">Readiness Score</div>
+              <div class="gauge-status" id="gaugeStatus">Calculating...</div>
             </div>
           </div>
         </div>
@@ -1091,17 +1166,42 @@
       `;
       pillarCards.parentNode.insertBefore(scorecardTable, pillarCards.nextSibling);
 
-      // Display snippet readiness
+      // Display snippet readiness with gauge visualization
       const snippetScoreElement = document.getElementById('snippetReadinessScore');
-      if (snippetScoreElement) {
+      const gaugeFill = document.getElementById('gaugeFill');
+      const gaugeStatus = document.getElementById('gaugeStatus');
+      
+      if (snippetScoreElement && gaugeFill) {
         snippetScoreElement.textContent = snippetReadiness;
+        
+        // Calculate gauge fill (circumference = 2 * π * r = 2 * π * 80 ≈ 502.65)
+        const circumference = 2 * Math.PI * 80;
+        const offset = circumference - (snippetReadiness / 100) * circumference;
+        
         // Color code based on score
+        let colorClass = 'red';
+        let statusText = 'Critical';
         if (snippetReadiness >= 70) {
-          snippetScoreElement.style.color = '#10b981';
+          colorClass = 'green';
+          statusText = 'Strong';
         } else if (snippetReadiness >= 40) {
-          snippetScoreElement.style.color = '#f59e0b';
-        } else {
-          snippetScoreElement.style.color = '#ef4444';
+          colorClass = 'amber';
+          statusText = 'Needs Improvement';
+        }
+        
+        // Update gauge fill
+        gaugeFill.classList.remove('green', 'amber', 'red');
+        gaugeFill.classList.add(colorClass);
+        gaugeFill.style.strokeDashoffset = offset;
+        
+        // Update score color
+        snippetScoreElement.classList.remove('green', 'amber', 'red');
+        snippetScoreElement.classList.add(colorClass);
+        
+        // Update status text
+        if (gaugeStatus) {
+          gaugeStatus.textContent = statusText;
+          gaugeStatus.style.color = snippetScoreElement.style.color;
         }
       }
 
