@@ -1423,12 +1423,51 @@
         
         const trendCtx = trendCanvas.getContext('2d');
         const dateRange = parseInt(document.getElementById('dateRange').value) || 30;
-        debugLog(`Using date range: ${dateRange} days`, 'info');
-        const numDataPoints = Math.min(dateRange, 90); // Limit to 90 points for performance
-        const dates = Array.from({ length: numDataPoints }, (_, i) => {
+        debugLog(`Creating trend chart for date range: ${dateRange} days`, 'info');
+        
+        // Determine number of data points and label frequency based on date range
+        let numDataPoints, labelStep, dateFormat;
+        if (dateRange <= 30) {
+          // For 30 days or less: show daily data, all labels
+          numDataPoints = dateRange;
+          labelStep = 1;
+          dateFormat = { month: 'short', day: 'numeric' };
+        } else if (dateRange <= 90) {
+          // For 90 days: show daily data, label every 3-5 days
+          numDataPoints = dateRange;
+          labelStep = Math.ceil(dateRange / 20); // ~20 labels max
+          dateFormat = { month: 'short', day: 'numeric' };
+        } else if (dateRange <= 180) {
+          // For 6 months: show weekly data, label every week
+          numDataPoints = Math.ceil(dateRange / 7);
+          labelStep = 1;
+          dateFormat = { month: 'short', day: 'numeric' };
+        } else {
+          // For 12 months: show weekly data, label every 2-4 weeks
+          numDataPoints = Math.ceil(dateRange / 7);
+          labelStep = Math.ceil(numDataPoints / 15); // ~15 labels max
+          dateFormat = { month: 'short', day: 'numeric' };
+        }
+        
+        // Generate date labels
+        const allDates = Array.from({ length: numDataPoints }, (_, i) => {
           const d = new Date();
-          d.setDate(d.getDate() - (numDataPoints - 1 - i));
-          return d.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' });
+          if (dateRange <= 90) {
+            // Daily data
+            d.setDate(d.getDate() - (numDataPoints - 1 - i));
+          } else {
+            // Weekly data
+            d.setDate(d.getDate() - ((numDataPoints - 1 - i) * 7));
+          }
+          return d;
+        });
+        
+        // Create labels array with appropriate spacing
+        const dates = allDates.map((d, i) => {
+          if (i % labelStep === 0 || i === allDates.length - 1) {
+            return d.toLocaleDateString('en-GB', dateFormat);
+          }
+          return ''; // Empty string for labels we don't want to show
         });
         debugLog('Creating new Chart instance for trend chart...', 'info');
         try {
@@ -1439,21 +1478,42 @@
               datasets: [
                 {
                   label: 'Local Entity',
-                  data: Array.from({ length: numDataPoints }, () => scores.localEntity + (Math.random() * 10 - 5)),
+                  data: Array.from({ length: numDataPoints }, () => {
+                    const base = scores.localEntity;
+                    const variation = (Math.random() * 10 - 5);
+                    return Math.max(0, Math.min(100, base + variation));
+                  }),
                   borderColor: 'rgba(239, 68, 68, 1)',
-                  tension: 0.4
+                  backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                  tension: 0.4,
+                  pointRadius: dateRange <= 90 ? 3 : 2,
+                  pointHoverRadius: 5
                 },
                 {
                   label: 'Visibility',
-                  data: Array.from({ length: numDataPoints }, () => scores.visibility + (Math.random() * 10 - 5)),
+                  data: Array.from({ length: numDataPoints }, () => {
+                    const base = scores.visibility;
+                    const variation = (Math.random() * 10 - 5);
+                    return Math.max(0, Math.min(100, base + variation));
+                  }),
                   borderColor: 'rgba(229, 114, 0, 1)',
-                  tension: 0.4
+                  backgroundColor: 'rgba(229, 114, 0, 0.1)',
+                  tension: 0.4,
+                  pointRadius: dateRange <= 90 ? 3 : 2,
+                  pointHoverRadius: 5
                 },
                 {
                   label: 'Authority',
-                  data: Array.from({ length: numDataPoints }, () => scores.authority + (Math.random() * 10 - 5)),
+                  data: Array.from({ length: numDataPoints }, () => {
+                    const base = scores.authority;
+                    const variation = (Math.random() * 10 - 5);
+                    return Math.max(0, Math.min(100, base + variation));
+                  }),
                   borderColor: 'rgba(16, 185, 129, 1)',
-                  tension: 0.4
+                  backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                  tension: 0.4,
+                  pointRadius: dateRange <= 90 ? 3 : 2,
+                  pointHoverRadius: 5
                 }
               ]
             },
@@ -1461,9 +1521,56 @@
               responsive: true,
               maintainAspectRatio: false,
               scales: {
+                x: {
+                  ticks: {
+                    maxRotation: 45,
+                    minRotation: 45,
+                    font: {
+                      size: 11,
+                      weight: 'bold'
+                    },
+                    callback: function(value, index) {
+                      // Only show non-empty labels
+                      const label = this.getLabelForValue(value);
+                      return label || '';
+                    }
+                  },
+                  grid: {
+                    display: true,
+                    color: 'rgba(0, 0, 0, 0.05)'
+                  }
+                },
                 y: {
                   beginAtZero: true,
-                  max: 100
+                  max: 100,
+                  ticks: {
+                    stepSize: 10,
+                    font: {
+                      size: 12,
+                      weight: 'bold'
+                    }
+                  },
+                  grid: {
+                    color: 'rgba(0, 0, 0, 0.1)'
+                  }
+                }
+              },
+              plugins: {
+                legend: {
+                  display: true,
+                  position: 'top',
+                  labels: {
+                    font: {
+                      size: 13,
+                      weight: 'bold'
+                    },
+                    padding: 15,
+                    usePointStyle: true
+                  }
+                },
+                tooltip: {
+                  mode: 'index',
+                  intersect: false
                 }
               }
             }
