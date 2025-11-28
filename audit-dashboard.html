@@ -1136,12 +1136,28 @@
         visibility: 'Visibility',
         contentSchema: 'Content / Schema'
       };
+      
+      // Define pillar weightings and order by weight (highest to lowest)
+      const pillarWeights = {
+        authority: 0.30,        // 30% - E-A-T is crucial for AI trust
+        contentSchema: 0.25,     // 25% - Structured data is key for AI understanding
+        visibility: 0.20,        // 20% - How AI surfaces your content
+        localEntity: 0.15,       // 15% - Entity recognition important but not critical
+        serviceArea: 0.10         // 10% - Less critical for AI search
+      };
+      
+      // Sort pillars by weight (highest to lowest) for consistent ordering
+      const getOrderedPillars = (scoresObj) => {
+        return Object.entries(scoresObj).sort((a, b) => {
+          return (pillarWeights[b[0]] || 0) - (pillarWeights[a[0]] || 0);
+        });
+      };
 
-      // Create pillar cards
+      // Create pillar cards (ordered by weight)
       const pillarCards = document.getElementById('pillarCards');
       pillarCards.innerHTML = '';
 
-      Object.entries(scores).forEach(([key, score]) => {
+      getOrderedPillars(scores).forEach(([key, score]) => {
         const rag = getRAGStatus(score);
         const card = document.createElement('div');
         card.className = 'pillar-card';
@@ -1183,28 +1199,20 @@
                 <th style="padding: 0.75rem; text-align: center; border-bottom: 2px solid #ddd; font-weight: 600;">Score</th>
                 <th style="padding: 0.75rem; text-align: center; border-bottom: 2px solid #ddd; font-weight: 600;">Weight</th>
                 <th style="padding: 0.75rem; text-align: center; border-bottom: 2px solid #ddd; font-weight: 600;">Status</th>
-                <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600;">Description</th>
+                <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600; width: 25%;">Description</th>
                 <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600;">Improvement Suggestions</th>
               </tr>
             </thead>
             <tbody>
-              ${Object.entries(scores).map(([key, score]) => {
+              ${getOrderedPillars(scores).map(([key, score], index) => {
                 const rag = getRAGStatus(score);
-                // Define pillar weightings (importance for AI search)
-                const pillarWeights = {
-                  localEntity: 0.15,      // 15% - Entity recognition important but not critical
-                  serviceArea: 0.10,      // 10% - Less critical for AI search
-                  authority: 0.30,        // 30% - E-A-T is crucial for AI trust
-                  visibility: 0.20,       // 20% - How AI surfaces your content
-                  contentSchema: 0.25      // 25% - Structured data is key for AI understanding
-                };
                 
                 const descriptions = {
-                  localEntity: 'Consistency and clarity of brand, person and business entity signals. <strong>AI Importance:</strong> AI systems rely on clear entity signals to understand who you are and connect your brand across platforms. Strong entity recognition helps AI include you in knowledge panels and entity-based results.',
-                  serviceArea: 'How clearly AI understands where lessons/workshops run and which regions you cover. <strong>AI Importance:</strong> AI uses geographic signals to match queries with local intent. Clear service area data helps AI surface your content for location-specific searches and local AI Overviews.',
-                  authority: 'E-A-T (Experience, Expertise, Authoritativeness, Trustworthiness): Depth of educational content, references, reviews, external citations, and demonstrated expertise. <strong>AI Importance:</strong> E-A-T is critical for AI systems - they prioritize authoritative, trustworthy sources. Strong E-A-T signals help AI confidently feature your content in AI Overviews and answer boxes.',
-                  visibility: 'Frequency and prominence in organic search, local pack, snippets and AI Overviews. <strong>AI Importance:</strong> AI systems learn from existing search performance. Higher visibility signals quality and relevance, making AI more likely to surface your content in AI-powered results and featured snippets.',
-                  contentSchema: 'Quality and completeness of structured data markup across your domain. <strong>AI Importance:</strong> Structured data is the primary way AI understands your content. Schema markup directly feeds AI systems, enabling them to extract facts, relationships, and context for use in AI Overviews and answer generation.'
+                  localEntity: 'Consistency and clarity of brand, person and business entity signals. <strong>AI Importance:</strong> AI systems rely on clear entity signals to understand who you are and connect your brand across platforms. Strong entity recognition helps AI include you in knowledge panels and entity-based results. <strong>Data Checked:</strong> LocalBusiness schema presence, NAP consistency across site, entity mentions in content, knowledge panel presence, author markup, Organization schema.',
+                  serviceArea: 'How clearly AI understands where lessons/workshops run and which regions you cover. <strong>AI Importance:</strong> AI uses geographic signals to match queries with local intent. Clear service area data helps AI surface your content for location-specific searches and local AI Overviews. <strong>Data Checked:</strong> ServiceArea schema markup, geographic keywords in content, location pages, Google Business Profile service areas, address/location schema.',
+                  authority: 'E-A-T (Experience, Expertise, Authoritativeness, Trustworthiness): Depth of educational content, references, reviews, external citations, and demonstrated expertise. <strong>AI Importance:</strong> E-A-T is critical for AI systems - they prioritize authoritative, trustworthy sources. Strong E-A-T signals help AI confidently feature your content in AI Overviews and answer boxes. <strong>Data Checked:</strong> Content depth (word count, comprehensiveness), backlink quality/quantity, review counts/ratings, author credentials, citations in content, external mentions, case studies, certifications displayed.',
+                  visibility: 'Frequency and prominence in organic search, local pack, snippets and AI Overviews. <strong>AI Importance:</strong> AI systems learn from existing search performance. Higher visibility signals quality and relevance, making AI more likely to surface your content in AI-powered results and featured snippets. <strong>Data Checked:</strong> Search Console impressions/clicks, average position, CTR, featured snippet appearances, local pack visibility, SERP feature presence, ranking distribution.',
+                  contentSchema: 'Quality and completeness of structured data markup across your domain. <strong>AI Importance:</strong> Structured data is the primary way AI understands your content. Schema markup directly feeds AI systems, enabling them to extract facts, relationships, and context for use in AI Overviews and answer generation. <strong>Data Checked:</strong> Schema types present (Organization, Person, LocalBusiness, Article, Course, Event, FAQ, HowTo), schema validation errors, coverage percentage, breadcrumb schema, review schema, rich result eligibility.'
                 };
                 
                 // Generate suggestions based on pillar and score
@@ -1254,10 +1262,10 @@
                 };
                 
                 const weight = pillarWeights[key] || 0;
-                const weightedScore = score * weight;
+                const isEven = index % 2 === 0;
                 
                 return `
-                  <tr style="border-bottom: 1px solid #eee;">
+                  <tr style="border-bottom: 1px solid #eee; background: ${isEven ? '#ffffff' : '#fafafa'};">
                     <td style="padding: 0.75rem; font-weight: 500;">${pillarNames[key]}</td>
                     <td style="padding: 0.75rem; text-align: center; font-size: 1.1rem; font-weight: 600; color: ${rag.status === 'green' ? '#10b981' : rag.status === 'amber' ? '#f59e0b' : '#ef4444'};">
                       ${Math.round(score)}
@@ -1270,7 +1278,7 @@
                         ${rag.label}
                       </span>
                     </td>
-                    <td style="padding: 0.75rem; color: #666; font-size: 0.85rem; line-height: 1.6;">${descriptions[key] || ''}</td>
+                    <td style="padding: 0.75rem; color: #666; font-size: 0.85rem; line-height: 1.6; width: 25%;">${descriptions[key] || ''}</td>
                     <td style="padding: 0.75rem; color: #555; font-size: 0.85rem; line-height: 1.6;">${getSuggestions(key, score)}</td>
                   </tr>
                 `;
@@ -1417,13 +1425,18 @@
         const radarCtx = radarCanvas.getContext('2d');
         debugLog('Creating new Chart instance for radar chart...', 'info');
         try {
+          // Use ordered pillars for consistent ordering
+          const orderedPillars = getOrderedPillars(scores);
+          const orderedLabels = orderedPillars.map(([key]) => pillarNames[key]);
+          const orderedData = orderedPillars.map(([, score]) => score);
+          
           window.radarChart = new Chart(radarCtx, {
             type: 'radar',
             data: {
-              labels: Object.values(pillarNames),
+              labels: orderedLabels,
               datasets: [{
                 label: 'Current Scores',
-                data: Object.values(scores),
+                data: orderedData,
                 backgroundColor: 'rgba(229, 114, 0, 0.2)',
                 borderColor: 'rgba(229, 114, 0, 1)',
                 pointBackgroundColor: 'rgba(229, 114, 0, 1)',
