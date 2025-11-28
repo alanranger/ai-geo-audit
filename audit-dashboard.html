@@ -638,13 +638,41 @@
     async function runAudit() {
       debugLog('=== AUDIT START: Beginning audit scan ===', 'info');
       
-      // Get API key from input field, or fall back to config.js
+      // Get API key from input field, or fall back to Vercel env var, config.js, or localStorage
       let apiKey = document.getElementById('apiKey').value;
       debugLog(`API key from input field: ${apiKey ? 'present (' + apiKey.substring(0, 10) + '...)' : 'empty'}`, 'info');
       
+      // Try Vercel environment variable if input is empty
+      if (!apiKey) {
+        try {
+          debugLog('Fetching API key from Vercel environment variable...', 'info');
+          const response = await fetch('/api/get-api-key');
+          if (response.ok) {
+            const data = await response.json();
+            if (data.apiKey) {
+              apiKey = data.apiKey;
+              debugLog('✓ Using API key from Vercel environment variable', 'success');
+              // Auto-fill the input field
+              document.getElementById('apiKey').value = apiKey;
+            }
+          }
+        } catch (e) {
+          debugLog('Vercel env var endpoint not available', 'info');
+        }
+      }
+      
+      // Fall back to config.js
       if (!apiKey && window.API_CONFIG && window.API_CONFIG.googleSearchConsoleApiKey) {
         apiKey = window.API_CONFIG.googleSearchConsoleApiKey;
         debugLog('✓ Using API key from config.js', 'success');
+      }
+      
+      // Fall back to localStorage
+      if (!apiKey) {
+        apiKey = localStorage.getItem('gsc_api_key');
+        if (apiKey) {
+          debugLog('✓ Using API key from localStorage', 'success');
+        }
       }
       
       const propertyUrl = document.getElementById('propertyUrl').value;
