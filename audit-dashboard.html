@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AI GEO Audit Dashboard - Automated SEO Analysis</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="config.js"></script>
   <style>
     :root {
       --brand-orange: #E57200;
@@ -294,11 +295,20 @@
   <script>
     // Load saved configuration
     function loadConfig() {
-      const apiKey = localStorage.getItem('gsc_api_key');
+      // Check config.js first, then localStorage
+      const configApiKey = window.API_CONFIG && window.API_CONFIG.googleSearchConsoleApiKey;
+      const apiKey = configApiKey || localStorage.getItem('gsc_api_key');
       const propertyUrl = localStorage.getItem('gsc_property_url');
       const dateRange = localStorage.getItem('gsc_date_range');
       
-      if (apiKey) document.getElementById('apiKey').value = apiKey;
+      if (apiKey) {
+        document.getElementById('apiKey').value = apiKey;
+        // If from config.js, disable the field and show a note
+        if (configApiKey) {
+          document.getElementById('apiKey').disabled = true;
+          document.getElementById('apiKey').placeholder = 'API key loaded from config.js';
+        }
+      }
       if (propertyUrl) document.getElementById('propertyUrl').value = propertyUrl;
       if (dateRange) document.getElementById('dateRange').value = dateRange;
     }
@@ -363,12 +373,17 @@
 
     // Run the audit
     async function runAudit() {
-      const apiKey = document.getElementById('apiKey').value;
+      // Get API key from input field, or fall back to config.js
+      let apiKey = document.getElementById('apiKey').value;
+      if (!apiKey && window.API_CONFIG && window.API_CONFIG.googleSearchConsoleApiKey) {
+        apiKey = window.API_CONFIG.googleSearchConsoleApiKey;
+      }
+      
       const propertyUrl = document.getElementById('propertyUrl').value;
       const dateRange = parseInt(document.getElementById('dateRange').value);
 
       if (!apiKey) {
-        showStatus('Please enter your Google Search Console API key', 'error');
+        showStatus('Please enter your Google Search Console API key or add it to config.js', 'error');
         return;
       }
 
