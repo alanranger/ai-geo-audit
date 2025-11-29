@@ -698,6 +698,19 @@
       <div style="background: #f0f0f0; padding: 0.75rem; border-radius: 4px; margin-bottom: 1rem; font-size: 0.85rem; color: #555;">
         <strong>API Key:</strong> Loaded automatically from Vercel environment variables. No manual entry required.
       </div>
+      <div class="form-group">
+        <label for="manualUrlList">Manual URL List (Optional)</label>
+        <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+          <input type="file" id="urlListFile" accept=".csv" style="flex: 1; padding: 0.5rem; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 0.9rem;">
+          <button class="btn btn-small" onclick="loadUrlListFromFile()" style="padding: 0.5rem 1rem;">Load CSV</button>
+          <button class="btn btn-small" onclick="clearManualUrlList()" style="padding: 0.5rem 1rem; background: #ef4444; color: white; border-color: #ef4444;">Clear</button>
+        </div>
+        <textarea id="manualUrlList" placeholder="Or paste CSV content here (must include 'url' column in header row)..." style="width: 100%; min-height: 100px; padding: 0.75rem; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 0.9rem; font-family: monospace; resize: vertical;"></textarea>
+        <div class="help-text">
+          <strong>Required column:</strong> <code>url</code> (case-insensitive). CSV must have a header row. URLs will be extracted from the 'url' column.
+        </div>
+        <div id="urlListStatus" style="margin-top: 0.5rem; font-size: 0.85rem;"></div>
+      </div>
       <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
         <button class="btn" onclick="runAudit()">Run Audit Scan</button>
         <button class="btn btn-secondary" onclick="saveConfig()">Save Configuration</button>
@@ -1067,6 +1080,21 @@
         debugLog('✓ Date range loaded', 'success');
       }
       
+      // Load manual URL list if saved
+      const savedUrlList = localStorage.getItem('manual_url_list');
+      if (savedUrlList) {
+        try {
+          const urls = JSON.parse(savedUrlList);
+          const statusDiv = document.getElementById('urlListStatus');
+          if (statusDiv) {
+            statusDiv.innerHTML = `<span style="color: #10b981;">✓ ${urls.length} URLs loaded from saved list</span>`;
+          }
+          debugLog(`✓ Manual URL list loaded: ${urls.length} URLs`, 'success');
+        } catch (e) {
+          debugLog('⚠ Failed to load saved URL list', 'warn');
+        }
+      }
+      
       debugLog('=== Configuration load complete ===', 'info');
     }
 
@@ -1126,6 +1154,133 @@
       localStorage.setItem('gsc_property_url', document.getElementById('propertyUrl').value);
       localStorage.setItem('gsc_date_range', document.getElementById('dateRange').value);
       showStatus('Configuration saved!', 'success');
+    }
+
+    // Parse CSV and validate column names
+    function parseUrlListCsv(csvText) {
+      const lines = csvText.split('\n').filter(line => line.trim());
+      if (lines.length === 0) {
+        throw new Error('CSV is empty');
+      }
+      
+      // Parse header row
+      const headerLine = lines[0].trim();
+      const headers = headerLine.split(',').map(h => h.trim().replace(/^"|"$/g, '').toLowerCase());
+      
+      // Check for required 'url' column
+      const urlColumnIndex = headers.findIndex(h => h === 'url');
+      if (urlColumnIndex === -1) {
+        throw new Error(`Required column 'url' not found. Found columns: ${headers.join(', ')}`);
+      }
+      
+      // Extract URLs from the 'url' column
+      const urls = [];
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+        
+        // Parse CSV line (handle quoted values)
+        const columns = [];
+        let current = '';
+        let inQuotes = false;
+        
+        for (let j = 0; j < line.length; j++) {
+          const char = line[j];
+          if (char === '"') {
+            inQuotes = !inQuotes;
+          } else if (char === ',' && !inQuotes) {
+            columns.push(current.trim());
+            current = '';
+          } else {
+            current += char;
+          }
+        }
+        columns.push(current.trim()); // Add last column
+        
+        // Extract URL from the url column
+        if (columns[urlColumnIndex]) {
+          const url = columns[urlColumnIndex].replace(/^"|"$/g, '').trim();
+          if (url && url.startsWith('http')) {
+            urls.push(url);
+          }
+        }
+      }
+      
+      return {
+        headers,
+        urls,
+        totalRows: lines.length - 1,
+        validUrls: urls.length
+      };
+    }
+
+    // Load URL list from file input
+    async function loadUrlListFromFile() {
+      const fileInput = document.getElementById('urlListFile');
+      const statusDiv = document.getElementById('urlListStatus');
+      const textarea = document.getElementById('manualUrlList');
+      
+      if (!fileInput.files || fileInput.files.length === 0) {
+        // If no file, try to parse from textarea
+        const csvText = textarea.value.trim();
+        if (!csvText) {
+          statusDiv.innerHTML = '<span style="color: #ef4444;">⚠ Please select a CSV file or paste CSV content</span>';
+          return;
+        }
+        
+        try {
+          const result = parseUrlListCsv(csvText);
+          localStorage.setItem('manual_url_list', JSON.stringify(result.urls));
+          statusDiv.innerHTML = `<span style="color: #10b981;">✓ Loaded ${result.validUrls} URLs from ${result.totalRows} rows</span>`;
+          debugLog(`✓ Manual URL list loaded: ${result.validUrls} URLs from CSV`, 'success');
+          showStatus(`URL list loaded! Found ${result.validUrls} URLs.`, 'success');
+        } catch (error) {
+          statusDiv.innerHTML = `<span style="color: #ef4444;">✗ ${error.message}</span>`;
+          debugLog(`✗ URL list parse error: ${error.message}`, 'error');
+          showStatus(`URL list error: ${error.message}`, 'error');
+        }
+        return;
+      }
+      
+      const file = fileInput.files[0];
+      debugLog(`Loading URL list from file: ${file.name} (${file.size} bytes)`, 'info');
+      
+      try {
+        const fileText = await file.text();
+        const result = parseUrlListCsv(fileText);
+        
+        // Store URLs in localStorage
+        localStorage.setItem('manual_url_list', JSON.stringify(result.urls));
+        
+        // Also populate textarea with the CSV content
+        textarea.value = fileText;
+        
+        statusDiv.innerHTML = `<span style="color: #10b981;">✓ Loaded ${result.validUrls} URLs from ${result.totalRows} rows. Columns: ${result.headers.join(', ')}</span>`;
+        debugLog(`✓ URL list loaded from file: ${result.validUrls} URLs`, 'success');
+        debugLog(`  File: ${file.name}, Columns: ${result.headers.join(', ')}`, 'info');
+        showStatus(`URL list loaded! Found ${result.validUrls} URLs from ${file.name}.`, 'success');
+        
+        // Clear file input
+        fileInput.value = '';
+      } catch (error) {
+        statusDiv.innerHTML = `<span style="color: #ef4444;">✗ ${error.message}</span>`;
+        debugLog(`✗ URL list file error: ${error.message}`, 'error');
+        showStatus(`URL list error: ${error.message}`, 'error');
+      }
+    }
+
+    // Clear manual URL list
+    function clearManualUrlList() {
+      const textarea = document.getElementById('manualUrlList');
+      const fileInput = document.getElementById('urlListFile');
+      const statusDiv = document.getElementById('urlListStatus');
+      
+      textarea.value = '';
+      fileInput.value = '';
+      localStorage.removeItem('manual_url_list');
+      statusDiv.innerHTML = '<span style="color: #666;">Manual URL list cleared</span>';
+      debugLog('Manual URL list cleared', 'info');
+      showStatus('Manual URL list cleared', 'success');
     }
 
     // Sync CSV from alan-shared-resources
@@ -1443,12 +1598,41 @@
         // Fetch schema audit data
         let schemaAudit = null;
         try {
-          const schemaResponse = await fetch('/api/schema-audit');
+          // Check if manual URL list is available
+          const manualUrlList = localStorage.getItem('manual_url_list');
+          let schemaRequest;
+          
+          if (manualUrlList) {
+            try {
+              const urls = JSON.parse(manualUrlList);
+              debugLog(`Using manual URL list: ${urls.length} URLs`, 'info');
+              schemaRequest = fetch('/api/schema-audit', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ urls })
+              });
+            } catch (e) {
+              debugLog('⚠ Failed to parse manual URL list, using default CSV', 'warn');
+              schemaRequest = fetch('/api/schema-audit');
+            }
+          } else {
+            debugLog('No manual URL list, using default CSV source', 'info');
+            schemaRequest = fetch('/api/schema-audit');
+          }
+          
+          const schemaResponse = await schemaRequest;
           if (schemaResponse.ok) {
             schemaAudit = await schemaResponse.json();
             if (schemaAudit.status === 'ok') {
               debugLog('✓ Schema audit data fetched successfully', 'success');
               debugLog(`Schema coverage: ${schemaAudit.data.coverage}%`, 'info');
+              if (manualUrlList) {
+                debugLog('  Source: Manual URL list', 'info');
+              } else {
+                debugLog('  Source: CSV (GitHub/hosted)', 'info');
+              }
             } else {
               debugLog('⚠ Schema audit returned error, using fallback', 'warn');
             }

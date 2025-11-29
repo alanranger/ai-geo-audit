@@ -228,7 +228,7 @@ class Semaphore {
 export default async function handler(req, res) {
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   
   // Handle preflight
@@ -236,19 +236,50 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
   
-  // Only allow GET requests
-  if (req.method !== 'GET') {
+  // Allow GET and POST requests
+  if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({
       status: 'error',
       source: 'schema-audit',
-      message: 'Method not allowed. Use GET.',
+      message: 'Method not allowed. Use GET or POST.',
       meta: { generatedAt: new Date().toISOString() }
     });
   }
 
   try {
-    // Parse CSV and get URLs
-    const urls = await parseCsvUrls();
+    // Check if manual URL list is provided in request body
+    let urls = [];
+    let urlSource = 'github';
+    
+    if (req.method === 'POST') {
+      // Parse request body
+      let body = {};
+      try {
+        if (typeof req.body === 'string') {
+          body = JSON.parse(req.body);
+        } else {
+          body = req.body || {};
+        }
+      } catch (e) {
+        // Body might already be parsed
+        body = req.body || {};
+      }
+      
+      if (body.urls && Array.isArray(body.urls)) {
+        // Use manual URL list from request
+        urls = body.urls.filter(url => url && typeof url === 'string' && url.startsWith('http'));
+        urlSource = 'manual';
+        console.log(`📄 Using manual URL list: ${urls.length} URLs provided`);
+      } else {
+        // POST but no URLs provided, fall back to CSV
+        urls = await parseCsvUrls();
+        urlSource = 'csv';
+      }
+    } else {
+      // GET request - parse CSV and get URLs from GitHub/hosted CSV
+      urls = await parseCsvUrls();
+      urlSource = 'csv';
+    }
     
     if (urls.length === 0) {
       return res.status(400).json({
