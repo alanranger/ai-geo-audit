@@ -27,8 +27,12 @@ export default async function handler(req, res) {
 
   try {
     // Fetch CSV directly from GitHub
+    // Try different possible branch names (main, master, or default branch)
     const GITHUB_CSV_URL = process.env.GITHUB_CSV_URL || 
       "https://raw.githubusercontent.com/alanranger/alan-shared-resources/main/csv/06-site-urls.csv";
+    
+    // Alternative URLs to try if main fails
+    const GITHUB_CSV_URL_MASTER = "https://raw.githubusercontent.com/alanranger/alan-shared-resources/master/csv/06-site-urls.csv";
     
     // Fallback to hosted CSV if GitHub fetch fails
     const FALLBACK_CSV_URL = process.env.CSV_URL || 
@@ -40,38 +44,63 @@ export default async function handler(req, res) {
     let csvUrl = GITHUB_CSV_URL;
     let source = 'github';
     
-    // Try GitHub first (source of truth)
-    try {
-      console.log(`Attempting to fetch from: ${GITHUB_CSV_URL}`);
-      const response = await fetch(GITHUB_CSV_URL, {
-        headers: {
-          'Accept': 'text/csv',
-          'User-Agent': 'AI-GEO-Audit/1.0',
-          'Cache-Control': 'no-cache'
-        }
-      });
-      
-      console.log(`GitHub response status: ${response.status} ${response.statusText}`);
-      
-      if (response.ok) {
-        csvText = await response.text();
-        const lineCount = csvText.split('\n').filter(l => l.trim()).length;
-        console.log(`✓ CSV fetched from GitHub successfully (${csvText.length} bytes, ${lineCount} lines)`);
+    // Try GitHub first (source of truth) - try main branch, then master
+    let githubFetchError = null;
+    const githubUrls = [GITHUB_CSV_URL, GITHUB_CSV_URL_MASTER];
+    
+    for (const githubUrl of githubUrls) {
+      try {
+        console.log(`Attempting to fetch from: ${githubUrl}`);
+        const response = await fetch(githubUrl, {
+          headers: {
+            'Accept': 'text/csv',
+            'User-Agent': 'AI-GEO-Audit/1.0',
+            'Cache-Control': 'no-cache'
+          }
+        });
         
-        // Verify it's the right file - should have ~434 lines
-        if (lineCount < 100) {
-          console.warn(`⚠ Warning: GitHub CSV has only ${lineCount} lines, expected ~434. File may be incorrect.`);
+        console.log(`GitHub response status: ${response.status} ${response.statusText}`);
+        
+        if (response.ok) {
+          csvText = await response.text();
+          const lineCount = csvText.split('\n').filter(l => l.trim()).length;
+          console.log(`✓ CSV fetched from GitHub successfully (${csvText.length} bytes, ${lineCount} lines)`);
+          
+          // Verify it's the right file - should have ~434 lines
+          if (lineCount < 100) {
+            console.warn(`⚠ Warning: GitHub CSV has only ${lineCount} lines, expected ~434. File may be incorrect.`);
+          } else if (lineCount > 500) {
+            console.warn(`⚠ Warning: GitHub CSV has ${lineCount} lines, expected ~434. File may be incorrect.`);
+          }
+          
+          // Success - break out of loop
+          break;
+        } else {
+          const errorText = await response.text().catch(() => '');
+          console.warn(`GitHub fetch failed for ${githubUrl}: HTTP ${response.status}`);
+          if (errorText) {
+            console.warn(`Response: ${errorText.substring(0, 200)}`);
+          }
+          githubFetchError = new Error(`GitHub fetch failed: HTTP ${response.status} - ${errorText.substring(0, 100)}`);
+          // Continue to next URL
+          continue;
         }
-      } else {
-        const errorText = await response.text().catch(() => '');
-        console.error(`GitHub fetch failed: HTTP ${response.status}`);
-        console.error(`Response: ${errorText.substring(0, 200)}`);
-        throw new Error(`GitHub fetch failed: HTTP ${response.status} - ${errorText.substring(0, 100)}`);
+      } catch (error) {
+        console.warn(`GitHub fetch error for ${githubUrl}:`, error.message);
+        githubFetchError = error;
+        // Continue to next URL
+        continue;
       }
-    } catch (githubError) {
-      console.error("❌ GitHub fetch failed:", githubError.message);
-      console.error("❌ Error details:", githubError.stack);
-      console.warn("⚠ Trying fallback hosted CSV (may be outdated/corrupted):", githubError.message);
+    }
+    
+    // If all GitHub URLs failed, try fallback
+    if (!csvText) {
+      console.error("❌ All GitHub fetch attempts failed");
+      if (githubFetchError) {
+        console.error("❌ Last error:", githubFetchError.message);
+        console.error("❌ Error details:", githubFetchError.stack);
+      }
+      console.warn("⚠ Trying fallback hosted CSV (may be outdated/corrupted)");
       
       // Fallback to hosted CSV
       try {
