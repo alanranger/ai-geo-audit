@@ -202,11 +202,13 @@
     .chart-container {
       background: linear-gradient(135deg, #f0f4f8 0%, #e2e8f0 100%);
       padding: 1.5rem;
+      padding-bottom: 3rem; /* Extra padding at bottom for rotated axis labels */
       border-radius: 8px;
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
       margin-bottom: 6rem; /* extra breathing room below charts */
       height: 400px;
       border: 1px solid rgba(100, 116, 139, 0.2);
+      overflow: visible; /* Allow axis labels to extend beyond container */
     }
     .chart-container.large {
       height: 700px;
@@ -675,7 +677,7 @@
 
       <div class="chart-container">
         <h3>Score Trends</h3>
-        <p style="font-size: 0.9rem; color: #666; margin-bottom: 1rem;">Historical performance tracking for Local Entity, Visibility, and Authority pillars over the selected date range.</p>
+        <p style="font-size: 0.9rem; color: #666; margin-bottom: 1rem;">Historical performance tracking for all five pillars (Local Entity, Service Area, Authority, Visibility, Content/Schema) over the selected date range.</p>
         <div id="trendSummaryRow" class="trend-summary-row"></div>
         <canvas id="trendChart"></canvas>
       </div>
@@ -1693,11 +1695,13 @@
           };
 
           const localEntityData = makeSeries(scores.localEntity, 0.5);
-          const visibilityData = makeSeries(scores.visibility, 1.1);
+          const serviceAreaData = makeSeries(scores.serviceArea, 0.8);
           const authorityData = makeSeries(scores.authority, 1.9);
+          const visibilityData = makeSeries(scores.visibility, 1.1);
+          const contentSchemaData = makeSeries(scores.contentSchema, 1.4);
           
           // Calculate min and max across all datasets
-          const allData = [...localEntityData, ...visibilityData, ...authorityData];
+          const allData = [...localEntityData, ...serviceAreaData, ...authorityData, ...visibilityData, ...contentSchemaData];
           const dataMin = Math.min(...allData);
           const dataMax = Math.max(...allData);
           const dataRange = dataMax - dataMin;
@@ -1739,8 +1743,10 @@
           };
           
           const localEntityTrend = calculateTrend(localEntityData);
-          const visibilityTrend = calculateTrend(visibilityData);
+          const serviceAreaTrend = calculateTrend(serviceAreaData);
           const authorityTrend = calculateTrend(authorityData);
+          const visibilityTrend = calculateTrend(visibilityData);
+          const contentSchemaTrend = calculateTrend(contentSchemaData);
 
           // Update HTML trend summary row
           const trendSummaryRow = document.getElementById('trendSummaryRow');
@@ -1758,8 +1764,10 @@
             };
             trendSummaryRow.innerHTML = [
               buildPill('Local Entity', localEntityTrend),
+              buildPill('Service Area', serviceAreaTrend),
+              buildPill('Authority', authorityTrend),
               buildPill('Visibility', visibilityTrend),
-              buildPill('Authority', authorityTrend)
+              buildPill('Content/Schema', contentSchemaTrend)
             ].join('');
           }
           
@@ -1805,9 +1813,29 @@
                 {
                   label: 'Local Entity',
                   data: localEntityData,
-                  borderColor: 'rgba(239, 68, 68, 1)', // Red
-                  backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                  borderColor: 'rgba(147, 51, 234, 1)', // Purple
+                  backgroundColor: 'rgba(147, 51, 234, 0.1)',
                   borderWidth: 3,
+                  tension: 0.4,
+                  pointRadius: 0,
+                  pointHoverRadius: 5
+                },
+                {
+                  label: 'Service Area',
+                  data: serviceAreaData,
+                  borderColor: 'rgba(20, 184, 166, 1)', // Teal
+                  backgroundColor: 'rgba(20, 184, 166, 0.1)',
+                  borderWidth: 2.5,
+                  tension: 0.4,
+                  pointRadius: 0,
+                  pointHoverRadius: 5
+                },
+                {
+                  label: 'Authority',
+                  data: authorityData,
+                  borderColor: 'rgba(234, 179, 8, 1)', // Yellow
+                  backgroundColor: 'rgba(234, 179, 8, 0.1)',
+                  borderWidth: 4,
                   tension: 0.4,
                   pointRadius: 0,
                   pointHoverRadius: 5
@@ -1823,11 +1851,11 @@
                   pointHoverRadius: 5
                 },
                 {
-                  label: 'Authority',
-                  data: authorityData,
-                  borderColor: 'rgba(16, 185, 129, 1)', // Green
-                  backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                  borderWidth: 4,
+                  label: 'Content / Schema',
+                  data: contentSchemaData,
+                  borderColor: 'rgba(99, 102, 241, 1)', // Indigo
+                  backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                  borderWidth: 2.5,
                   tension: 0.4,
                   pointRadius: 0,
                   pointHoverRadius: 5
@@ -1839,6 +1867,14 @@
               responsive: true,
               maintainAspectRatio: false,
               animation: false, // Disable animation for better performance when changing periods
+              layout: {
+                padding: {
+                  bottom: 40, // Extra padding for rotated X-axis labels
+                  left: 10,
+                  right: 10,
+                  top: 10
+                }
+              },
               scales: {
                 x: {
                   ticks: {
