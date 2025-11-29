@@ -792,17 +792,19 @@
           <h5>5. Content/Schema</h5>
           <p><strong>Measurement:</strong></p>
           <ul>
-            <li>Anchored around 70, with a boost from visibility</li>
-            <li>Formula: <code>contentSchema = 70 + 0.2 * (visibility - 60)</code></li>
+            <li>Anchored around 70, with boost from visibility and real schema coverage</li>
+            <li>Formula: <code>contentSchema = 70 + 0.2 * (visibility - 60) + 0.1 * (coverageScore - 70)</code></li>
+            <li>Uses real schema coverage from CSV-based audit (when available)</li>
             <li>Score range: 0-100</li>
           </ul>
           <p><strong>Data Sources:</strong></p>
           <ul>
             <li>Google Search Console API (via visibility calculation)</li>
-            <li>Schema markup validation (planned)</li>
-            <li>Rich result eligibility checks (planned)</li>
+            <li>Schema Audit API: CSV-based domain crawl of all site URLs</li>
+            <li>Schema markup detection and type counting</li>
+            <li>Rich result eligibility detection</li>
           </ul>
-          <p><strong>Data Checked:</strong> Schema types present (Organization, Person, LocalBusiness, Article, Course, Event, FAQ, HowTo), schema validation errors, coverage percentage, breadcrumb schema, review schema, rich result eligibility.</p>
+          <p><strong>Data Checked:</strong> Total pages scanned, pages with schema, schema coverage percentage, schema types present (Organization, Person, LocalBusiness, Article, Course, Event, FAQ, HowTo, etc.), missing schema types, rich result eligibility (Article, Event, FAQ, Product, LocalBusiness, Course, Review, HowTo).</p>
 
           <div class="note">
             <strong>Current Implementation Status:</strong><br>
@@ -1143,8 +1145,8 @@
       return Math.max(0, Math.min(100, Math.round(value)));
     }
 
-    // Calculate pillar scores (deterministic, based on GSC data)
-    function calculatePillarScores(data) {
+    // Calculate pillar scores (deterministic, based on GSC data and schema audit)
+    function calculatePillarScores(data, schemaAudit = null) {
       // Use new API response format - get values from GSC overview
       const position = data.averagePosition || 40; // 1 (best) - 100 (worst)
       const ctr = data.ctr || 0; // 0-100 percentage from API (e.g., 10 = 10%)
@@ -1171,9 +1173,16 @@
       // Service Area: currently derived from Local Entity but slightly lower
       const serviceArea = clampScore(localEntity - 5);
 
-      // Content/Schema: until we wire real schema checks, anchor around 70,
-      // with a small boost from visibility (well-performing sites usually have better schema)
-      const contentSchema = clampScore(70 + 0.2 * (visibility - 60));
+      // Content/Schema: use real schema coverage if available
+      let contentSchema;
+      if (schemaAudit && schemaAudit.status === 'ok' && schemaAudit.data) {
+        const coverageScore = schemaAudit.data.coverage || 0;
+        // Formula: 70 + 0.2 * (visibility - 60) + 0.1 * (coverageScore - 70)
+        contentSchema = clampScore(70 + 0.2 * (visibility - 60) + 0.1 * (coverageScore - 70));
+      } else {
+        // Fallback: anchor around 70 with visibility boost
+        contentSchema = clampScore(70 + 0.2 * (visibility - 60));
+      }
 
       const scores = {
         localEntity,
@@ -1334,9 +1343,29 @@
         debugLog('✓ Search Console data fetched successfully', 'success');
         debugLog(`Data: ${JSON.stringify(searchData).substring(0, 200)}...`, 'info');
         
+        debugLog('Fetching schema audit data...', 'info');
+        // Fetch schema audit data
+        let schemaAudit = null;
+        try {
+          const schemaResponse = await fetch('/api/schema-audit');
+          if (schemaResponse.ok) {
+            schemaAudit = await schemaResponse.json();
+            if (schemaAudit.status === 'ok') {
+              debugLog('✓ Schema audit data fetched successfully', 'success');
+              debugLog(`Schema coverage: ${schemaAudit.data.coverage}%`, 'info');
+            } else {
+              debugLog('⚠ Schema audit returned error, using fallback', 'warn');
+            }
+          } else {
+            debugLog('⚠ Schema audit endpoint not available, using fallback', 'warn');
+          }
+        } catch (schemaError) {
+          debugLog(`⚠ Schema audit error: ${schemaError.message}, using fallback`, 'warn');
+        }
+        
         debugLog('Calculating pillar scores...', 'info');
-        // Calculate scores
-        const scores = calculatePillarScores(searchData);
+        // Calculate scores (pass schema audit data)
+        const scores = calculatePillarScores(searchData, schemaAudit);
         debugLog('✓ Pillar scores calculated', 'success');
         debugLog(`Scores: ${JSON.stringify(scores)}`, 'info');
 
@@ -1345,8 +1374,8 @@
         debugLog(`Snippet readiness: ${snippetReadiness}`, 'info');
 
         debugLog('Displaying dashboard...', 'info');
-        // Display results
-        displayDashboard(scores, searchData, snippetReadiness);
+        // Display results (pass schema audit data)
+        displayDashboard(scores, searchData, snippetReadiness, schemaAudit);
         
         debugLog('=== AUDIT COMPLETE: Success ===', 'success');
         showStatus('Audit completed successfully!', 'success');
@@ -1362,7 +1391,7 @@
     }
 
     // Display dashboard
-    function displayDashboard(scores, data, snippetReadiness = 0) {
+    function displayDashboard(scores, data, snippetReadiness = 0, schemaAudit = null) {
       debugLog('=== DISPLAY DASHBOARD: Starting ===', 'info');
       
       // Show dashboard first (canvas elements need to be visible for Chart.js)
@@ -1468,12 +1497,38 @@
               ${getOrderedPillars(scores).map(([key, score], index) => {
                 const rag = getRAGStatus(score);
                 
+                // Build Content/Schema description with schema audit data
+                let contentSchemaDesc = 'Quality and completeness of structured data markup across your domain. <strong>AI Importance:</strong> Structured data is the primary way AI understands your content. Schema markup directly feeds AI systems, enabling them to extract facts, relationships, and context for use in AI Overviews and answer generation.';
+                
+                if (schemaAudit && schemaAudit.status === 'ok' && schemaAudit.data) {
+                  const schemaData = schemaAudit.data;
+                  contentSchemaDesc += ` <strong>Data Checked:</strong> Total pages scanned: ${schemaData.totalPages}, Pages with schema: ${schemaData.pagesWithSchema}, Schema coverage: ${schemaData.coverage}%. `;
+                  
+                  if (schemaData.schemaTypes && schemaData.schemaTypes.length > 0) {
+                    const topTypes = schemaData.schemaTypes.slice(0, 5).map(t => `${t.type} (${t.count})`).join(', ');
+                    contentSchemaDesc += `Schema types found: ${topTypes}${schemaData.schemaTypes.length > 5 ? '...' : ''}. `;
+                  }
+                  
+                  if (schemaData.missingTypes && schemaData.missingTypes.length > 0) {
+                    contentSchemaDesc += `Missing types: ${schemaData.missingTypes.join(', ')}. `;
+                  }
+                  
+                  const richTypes = Object.entries(schemaData.richEligible || {})
+                    .filter(([type, eligible]) => eligible)
+                    .map(([type]) => type);
+                  if (richTypes.length > 0) {
+                    contentSchemaDesc += `Rich result eligible: ${richTypes.join(', ')}.`;
+                  }
+                } else {
+                  contentSchemaDesc += ' <strong>Data Checked:</strong> Schema types present (Organization, Person, LocalBusiness, Article, Course, Event, FAQ, HowTo), schema validation errors, coverage percentage, breadcrumb schema, review schema, rich result eligibility.';
+                }
+                
                 const descriptions = {
                   localEntity: 'Consistency and clarity of brand, person and business entity signals. <strong>AI Importance:</strong> AI systems rely on clear entity signals to understand who you are and connect your brand across platforms. Strong entity recognition helps AI include you in knowledge panels and entity-based results. <strong>Data Checked:</strong> LocalBusiness schema presence, NAP consistency across site, entity mentions in content, knowledge panel presence, author markup, Organization schema.',
                   serviceArea: 'How clearly AI understands where lessons/workshops run and which regions you cover. <strong>AI Importance:</strong> AI uses geographic signals to match queries with local intent. Clear service area data helps AI surface your content for location-specific searches and local AI Overviews. <strong>Data Checked:</strong> ServiceArea schema markup, geographic keywords in content, location pages, Google Business Profile service areas, address/location schema.',
                   authority: 'E-A-T (Experience, Expertise, Authoritativeness, Trustworthiness): Depth of educational content, references, reviews, external citations, and demonstrated expertise. <strong>AI Importance:</strong> E-A-T is critical for AI systems - they prioritize authoritative, trustworthy sources. Strong E-A-T signals help AI confidently feature your content in AI Overviews and answer boxes. <strong>Data Checked:</strong> Content depth (word count, comprehensiveness), backlink quality/quantity, review counts/ratings, author credentials, citations in content, external mentions, case studies, certifications displayed.',
                   visibility: 'Frequency and prominence in organic search, local pack, snippets and AI Overviews. <strong>AI Importance:</strong> AI systems learn from existing search performance. Higher visibility signals quality and relevance, making AI more likely to surface your content in AI-powered results and featured snippets. <strong>Data Checked:</strong> Search Console impressions/clicks, average position, CTR, featured snippet appearances, local pack visibility, SERP feature presence, ranking distribution.',
-                  contentSchema: 'Quality and completeness of structured data markup across your domain. <strong>AI Importance:</strong> Structured data is the primary way AI understands your content. Schema markup directly feeds AI systems, enabling them to extract facts, relationships, and context for use in AI Overviews and answer generation. <strong>Data Checked:</strong> Schema types present (Organization, Person, LocalBusiness, Article, Course, Event, FAQ, HowTo), schema validation errors, coverage percentage, breadcrumb schema, review schema, rich result eligibility.'
+                  contentSchema: contentSchemaDesc
                 };
                 
                 // Generate suggestions based on pillar and score
