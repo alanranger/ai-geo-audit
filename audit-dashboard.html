@@ -698,8 +698,13 @@
       <div style="background: #f0f0f0; padding: 0.75rem; border-radius: 4px; margin-bottom: 1rem; font-size: 0.85rem; color: #555;">
         <strong>API Key:</strong> Loaded automatically from Vercel environment variables. No manual entry required.
       </div>
-      <button class="btn" onclick="runAudit()">Run Audit Scan</button>
-      <button class="btn btn-secondary" onclick="saveConfig()" style="margin-left: 0.5rem;">Save Configuration</button>
+      <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
+        <button class="btn" onclick="runAudit()">Run Audit Scan</button>
+        <button class="btn btn-secondary" onclick="saveConfig()">Save Configuration</button>
+        <button class="btn btn-secondary" onclick="syncCSV()" id="syncCsvBtn" style="background: #10b981; color: white; border-color: #10b981;">
+          <span id="syncCsvBtnText">🔄 Sync CSV</span>
+        </button>
+      </div>
     </div>
 
     <div class="status" id="status"></div>
@@ -1121,6 +1126,67 @@
       localStorage.setItem('gsc_property_url', document.getElementById('propertyUrl').value);
       localStorage.setItem('gsc_date_range', document.getElementById('dateRange').value);
       showStatus('Configuration saved!', 'success');
+    }
+
+    // Sync CSV from alan-shared-resources
+    async function syncCSV() {
+      const btn = document.getElementById('syncCsvBtn');
+      const btnText = document.getElementById('syncCsvBtnText');
+      const originalText = btnText.textContent;
+      
+      // Disable button and show loading state
+      btn.disabled = true;
+      btnText.textContent = '⏳ Syncing...';
+      btn.style.opacity = '0.6';
+      btn.style.cursor = 'not-allowed';
+      
+      debugLog('=== CSV SYNC: Starting CSV sync verification ===', 'info');
+      
+      try {
+        const response = await fetch('/api/sync-csv', {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok && data.status === 'ok') {
+          debugLog(`✓ CSV sync verified: ${data.data.totalUrls} URLs found`, 'success');
+          showStatus(`CSV sync verified! Found ${data.data.totalUrls} URLs in CSV.`, 'success');
+          btnText.textContent = '✅ CSV Synced';
+          
+          // Reset button after 3 seconds
+          setTimeout(() => {
+            btnText.textContent = originalText;
+            btn.style.opacity = '1';
+          }, 3000);
+        } else {
+          debugLog(`✗ CSV sync failed: ${data.message}`, 'error');
+          showStatus(`CSV sync failed: ${data.message}. ${data.suggestion || ''}`, 'error');
+          btnText.textContent = '❌ Sync Failed';
+          
+          // Reset button after 5 seconds
+          setTimeout(() => {
+            btnText.textContent = originalText;
+            btn.style.opacity = '1';
+          }, 5000);
+        }
+      } catch (error) {
+        debugLog(`✗ CSV sync error: ${error.message}`, 'error');
+        showStatus(`CSV sync error: ${error.message}. Please run "npm run sync:csv" locally.`, 'error');
+        btnText.textContent = '❌ Error';
+        
+        // Reset button after 5 seconds
+        setTimeout(() => {
+          btnText.textContent = originalText;
+          btn.style.opacity = '1';
+        }, 5000);
+      } finally {
+        btn.disabled = false;
+        btn.style.cursor = 'pointer';
+      }
     }
 
     // Show status message
