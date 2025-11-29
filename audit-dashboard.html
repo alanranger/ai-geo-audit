@@ -253,6 +253,36 @@
     .chart-container p {
       margin: 0 0 1rem 0;
     }
+    .trend-summary-row {
+      display: flex;
+      gap: 1.5rem;
+      font-size: 0.9rem;
+      margin-bottom: 0.75rem;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .trend-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.25rem 0.75rem;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.7);
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+      border: 1px solid rgba(148, 163, 184, 0.3);
+    }
+    .trend-pill span.label {
+      font-weight: 600;
+      color: #374151;
+    }
+    .trend-pill span.value.up {
+      font-weight: 700;
+      color: #10b981; /* green */
+    }
+    .trend-pill span.value.down {
+      font-weight: 700;
+      color: #ef4444; /* red */
+    }
     .metrics-section {
       background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
       padding: 2rem;
@@ -646,6 +676,7 @@
       <div class="chart-container">
         <h3>Score Trends</h3>
         <p style="font-size: 0.9rem; color: #666; margin-bottom: 1rem;">Historical performance tracking for Local Entity, Visibility, and Authority pillars over the selected date range.</p>
+        <div id="trendSummaryRow" class="trend-summary-row"></div>
         <canvas id="trendChart"></canvas>
       </div>
 
@@ -1665,6 +1696,27 @@
           const localEntityTrend = calculateTrend(localEntityData);
           const visibilityTrend = calculateTrend(visibilityData);
           const authorityTrend = calculateTrend(authorityData);
+
+          // Update HTML trend summary row
+          const trendSummaryRow = document.getElementById('trendSummaryRow');
+          if (trendSummaryRow) {
+            const buildPill = (label, trend) => {
+              const arrow = trend.isUp ? '↑' : '↓';
+              const sign = trend.isUp ? '+' : '';
+              const cls = trend.isUp ? 'up' : 'down';
+              return `
+                <div class="trend-pill">
+                  <span class="label">${label}</span>
+                  <span class="value ${cls}">${arrow} ${sign}${trend.percent.toFixed(1)}%</span>
+                </div>
+              `;
+            };
+            trendSummaryRow.innerHTML = [
+              buildPill('Local Entity', localEntityTrend),
+              buildPill('Visibility', visibilityTrend),
+              buildPill('Authority', authorityTrend)
+            ].join('');
+          }
           
           // Plugin to add RAG background bands (kept simple)
           const ragBackgroundPlugin = {
