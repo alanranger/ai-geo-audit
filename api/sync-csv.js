@@ -78,6 +78,37 @@ export default async function handler(req, res) {
       }
     }
     
+    // Helper function to parse CSV line with proper quote handling
+    function parseCsvLine(line) {
+      const columns = [];
+      let current = '';
+      let inQuotes = false;
+      
+      for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        const nextChar = line[i + 1];
+        
+        if (char === '"') {
+          if (inQuotes && nextChar === '"') {
+            // Escaped quote
+            current += '"';
+            i++; // Skip next quote
+          } else {
+            // Toggle quote state
+            inQuotes = !inQuotes;
+          }
+        } else if (char === ',' && !inQuotes) {
+          // End of column
+          columns.push(current);
+          current = '';
+        } else {
+          current += char;
+        }
+      }
+      columns.push(current); // Add last column
+      return columns;
+    }
+    
     // Parse CSV and count URLs
     const lines = csvText.split('\n').filter(line => line.trim());
     
@@ -111,37 +142,6 @@ export default async function handler(req, res) {
         // Skip malformed lines
         continue;
       }
-    }
-    
-    // Helper function to parse CSV line with proper quote handling
-    function parseCsvLine(line) {
-      const columns = [];
-      let current = '';
-      let inQuotes = false;
-      
-      for (let i = 0; i < line.length; i++) {
-        const char = line[i];
-        const nextChar = line[i + 1];
-        
-        if (char === '"') {
-          if (inQuotes && nextChar === '"') {
-            // Escaped quote
-            current += '"';
-            i++; // Skip next quote
-          } else {
-            // Toggle quote state
-            inQuotes = !inQuotes;
-          }
-        } else if (char === ',' && !inQuotes) {
-          // End of column
-          columns.push(current);
-          current = '';
-        } else {
-          current += char;
-        }
-      }
-      columns.push(current); // Add last column
-      return columns;
     }
     
     console.log(`✓ CSV parsed: ${urlCount} URLs found from ${source}`);
