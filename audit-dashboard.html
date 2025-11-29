@@ -1653,85 +1653,42 @@
           
           debugLog(`Y-axis range: ${yAxisMin} to ${yAxisMax} (range: ${actualRange}, step: ${stepSize})`, 'info');
           
-          // Helper function to get RAG color
-          const getRAGColor = (score) => {
-            if (score >= 70) return 'rgba(16, 185, 129, 1)'; // Green
-            if (score >= 40) return 'rgba(245, 158, 11, 1)'; // Amber
-            return 'rgba(239, 68, 68, 1)'; // Red
-          };
-          
-          // Plugin to color line segments based on RAG status and customize legend
-          const ragSegmentPlugin = {
-            id: 'ragSegment',
+          // Plugin to add RAG background bands and improve line visibility
+          const ragBackgroundPlugin = {
+            id: 'ragBackground',
             beforeDraw: (chart) => {
               const ctx = chart.ctx;
-              chart.data.datasets.forEach((dataset, datasetIndex) => {
-                const meta = chart.getDatasetMeta(datasetIndex);
-                if (meta.type !== 'line') return;
-                
-                const points = meta.data;
-                if (points.length < 2) return;
-                
-                ctx.save();
-                
-                // Set different line thicknesses for better distinction
-                let lineWidth = 2;
-                if (dataset.label === 'Authority') {
-                  lineWidth = 4; // Thickest for most important
-                } else if (dataset.label === 'Local Entity') {
-                  lineWidth = 3; // Medium
-                } else {
-                  lineWidth = 2.5; // Visibility - slightly thicker than default
-                }
-                
-                // Set line style based on dataset
-                if (dataset.borderDash) {
-                  ctx.setLineDash(dataset.borderDash);
-                } else {
-                  ctx.setLineDash([]);
-                }
-                
-                // Draw segments with RAG colors, with white outline for visibility when overlapping
-                for (let i = 0; i < points.length - 1; i++) {
-                  const point1 = points[i];
-                  const point2 = points[i + 1];
-                  const value1 = dataset.data[i];
-                  const value2 = dataset.data[i + 1];
-                  const avgScore = (value1 + value2) / 2;
-                  
-                  // Draw white outline first (slightly thicker) for visibility when lines overlap
-                  ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-                  ctx.lineWidth = lineWidth + 2;
-                  ctx.beginPath();
-                  ctx.moveTo(point1.x, point1.y);
-                  ctx.lineTo(point2.x, point2.y);
-                  ctx.stroke();
-                  
-                  // Draw colored line on top
-                  ctx.strokeStyle = getRAGColor(avgScore);
-                  ctx.lineWidth = lineWidth;
-                  ctx.beginPath();
-                  ctx.moveTo(point1.x, point1.y);
-                  ctx.lineTo(point2.x, point2.y);
-                  ctx.stroke();
-                }
-                
-                ctx.restore();
-                
-                // Draw points with RAG colors
-                const pointRadius = dateRange <= 90 ? 3 : 2;
-                points.forEach((point, index) => {
-                  const value = dataset.data[index];
-                  ctx.fillStyle = getRAGColor(value);
-                  ctx.beginPath();
-                  ctx.arc(point.x, point.y, pointRadius, 0, Math.PI * 2);
-                  ctx.fill();
-                  // Add white border for better visibility
-                  ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-                  ctx.lineWidth = 1;
-                  ctx.stroke();
-                });
-              });
+              const chartArea = chart.chartArea;
+              const yScale = chart.scales.y;
+              
+              // Draw RAG background bands
+              const redTop = yScale.getPixelForValue(39);
+              const amberTop = yScale.getPixelForValue(69);
+              const greenTop = yScale.getPixelForValue(100);
+              const chartBottom = chartArea.bottom;
+              
+              // Red zone (0-39)
+              if (yAxisMin <= 39) {
+                ctx.fillStyle = 'rgba(239, 68, 68, 0.1)';
+                ctx.fillRect(chartArea.left, Math.max(chartArea.top, yScale.getPixelForValue(Math.max(0, yAxisMin))), 
+                            chartArea.right - chartArea.left, Math.min(redTop, chartArea.bottom) - Math.max(chartArea.top, yScale.getPixelForValue(Math.max(0, yAxisMin))));
+              }
+              
+              // Amber zone (40-69)
+              if (yAxisMin <= 69 && yAxisMax >= 40) {
+                const amberStart = Math.max(chartArea.top, yScale.getPixelForValue(Math.max(40, yAxisMin)));
+                const amberEnd = Math.min(chartArea.bottom, yScale.getPixelForValue(Math.min(69, yAxisMax)));
+                ctx.fillStyle = 'rgba(245, 158, 11, 0.1)';
+                ctx.fillRect(chartArea.left, amberStart, chartArea.right - chartArea.left, amberEnd - amberStart);
+              }
+              
+              // Green zone (70-100)
+              if (yAxisMax >= 70) {
+                const greenStart = Math.max(chartArea.top, yScale.getPixelForValue(Math.max(70, yAxisMin)));
+                ctx.fillStyle = 'rgba(16, 185, 129, 0.1)';
+                ctx.fillRect(chartArea.left, greenStart, chartArea.right - chartArea.left, 
+                            Math.min(chartArea.bottom, yScale.getPixelForValue(Math.min(100, yAxisMax))) - greenStart);
+              }
             }
           };
           
@@ -1743,36 +1700,45 @@
                 {
                   label: 'Local Entity',
                   data: localEntityData,
-                  borderColor: 'transparent', // Will be drawn by plugin
+                  borderColor: 'rgba(239, 68, 68, 1)', // Red
                   backgroundColor: 'rgba(239, 68, 68, 0.1)',
                   borderDash: [10, 5], // Dashed line
+                  borderWidth: 3,
                   tension: 0.4,
-                  pointRadius: dateRange <= 90 ? 3 : 2, // Points drawn by plugin but need radius for hover
-                  pointHoverRadius: 5
+                  pointRadius: dateRange <= 90 ? 3 : 2,
+                  pointHoverRadius: 5,
+                  pointBackgroundColor: 'rgba(239, 68, 68, 1)',
+                  pointBorderColor: '#fff'
                 },
                 {
                   label: 'Visibility',
                   data: visibilityData,
-                  borderColor: 'transparent', // Will be drawn by plugin
+                  borderColor: 'rgba(229, 114, 0, 1)', // Orange
                   backgroundColor: 'rgba(229, 114, 0, 0.1)',
                   borderDash: [2, 2], // Dotted line
+                  borderWidth: 2.5,
                   tension: 0.4,
-                  pointRadius: dateRange <= 90 ? 3 : 2, // Points drawn by plugin but need radius for hover
-                  pointHoverRadius: 5
+                  pointRadius: dateRange <= 90 ? 3 : 2,
+                  pointHoverRadius: 5,
+                  pointBackgroundColor: 'rgba(229, 114, 0, 1)',
+                  pointBorderColor: '#fff'
                 },
                 {
                   label: 'Authority',
                   data: authorityData,
-                  borderColor: 'transparent', // Will be drawn by plugin
+                  borderColor: 'rgba(16, 185, 129, 1)', // Green
                   backgroundColor: 'rgba(16, 185, 129, 0.1)',
                   // Solid line (no borderDash)
+                  borderWidth: 4,
                   tension: 0.4,
-                  pointRadius: dateRange <= 90 ? 3 : 2, // Points drawn by plugin but need radius for hover
-                  pointHoverRadius: 5
+                  pointRadius: dateRange <= 90 ? 3 : 2,
+                  pointHoverRadius: 5,
+                  pointBackgroundColor: 'rgba(16, 185, 129, 1)',
+                  pointBorderColor: '#fff'
                 }
               ]
             },
-            plugins: [ragSegmentPlugin],
+            plugins: [ragBackgroundPlugin],
             options: {
               responsive: true,
               maintainAspectRatio: false,
@@ -1836,13 +1802,13 @@
                   position: 'top',
                   labels: {
                     font: {
-                      size: 13,
+                      size: 16,
                       weight: 'bold'
                     },
-                    padding: 15,
+                    padding: 25,
                     usePointStyle: false,
-                    boxWidth: 50,
-                    boxHeight: 3
+                    boxWidth: 60,
+                    boxHeight: 4
                   }
                 },
                 tooltip: {
