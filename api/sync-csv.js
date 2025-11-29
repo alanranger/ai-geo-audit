@@ -42,23 +42,36 @@ export default async function handler(req, res) {
     
     // Try GitHub first (source of truth)
     try {
+      console.log(`Attempting to fetch from: ${GITHUB_CSV_URL}`);
       const response = await fetch(GITHUB_CSV_URL, {
         headers: {
           'Accept': 'text/csv',
+          'User-Agent': 'AI-GEO-Audit/1.0',
           'Cache-Control': 'no-cache'
         }
       });
       
+      console.log(`GitHub response status: ${response.status} ${response.statusText}`);
+      
       if (response.ok) {
         csvText = await response.text();
-        console.log(`✓ CSV fetched from GitHub successfully (${csvText.length} bytes, ${csvText.split('\n').length} lines)`);
+        const lineCount = csvText.split('\n').filter(l => l.trim()).length;
+        console.log(`✓ CSV fetched from GitHub successfully (${csvText.length} bytes, ${lineCount} lines)`);
+        
+        // Verify it's the right file - should have ~434 lines
+        if (lineCount < 100) {
+          console.warn(`⚠ Warning: GitHub CSV has only ${lineCount} lines, expected ~434. File may be incorrect.`);
+        }
       } else {
         const errorText = await response.text().catch(() => '');
+        console.error(`GitHub fetch failed: HTTP ${response.status}`);
+        console.error(`Response: ${errorText.substring(0, 200)}`);
         throw new Error(`GitHub fetch failed: HTTP ${response.status} - ${errorText.substring(0, 100)}`);
       }
     } catch (githubError) {
       console.error("❌ GitHub fetch failed:", githubError.message);
-      console.warn("⚠ Trying fallback hosted CSV (may be outdated):", githubError.message);
+      console.error("❌ Error details:", githubError.stack);
+      console.warn("⚠ Trying fallback hosted CSV (may be outdated/corrupted):", githubError.message);
       
       // Fallback to hosted CSV
       try {
