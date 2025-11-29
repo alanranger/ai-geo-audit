@@ -126,25 +126,67 @@ async function parseCsvUrls() {
   console.log(`✓ CSV loaded from ${source}, size: ${csvText.length} bytes`);
   const csvContent = csvText;
   
-  // Parse CSV - extract URLs from first column (skip header)
+  // Parse CSV - extract URLs from url column (skip header)
   const lines = csvContent.split('\n').filter(line => line.trim());
   const urls = [];
+  
+  // Parse header row to find URL column index
+  let urlColumnIndex = 0; // Default to first column
+  if (lines.length > 0) {
+    const headerLine = lines[0].trim();
+    const headers = parseCsvLine(headerLine);
+    const urlHeaderIndex = headers.findIndex(h => h.toLowerCase() === 'url');
+    if (urlHeaderIndex !== -1) {
+      urlColumnIndex = urlHeaderIndex;
+    }
+  }
+  
+  // Helper function to parse CSV line with proper quote handling
+  function parseCsvLine(line) {
+    const columns = [];
+    let current = '';
+    let inQuotes = false;
+    
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      const nextChar = line[i + 1];
+      
+      if (char === '"') {
+        if (inQuotes && nextChar === '"') {
+          // Escaped quote
+          current += '"';
+          i++; // Skip next quote
+        } else {
+          // Toggle quote state
+          inQuotes = !inQuotes;
+        }
+      } else if (char === ',' && !inQuotes) {
+        // End of column
+        columns.push(current);
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    columns.push(current); // Add last column
+    return columns;
+  }
   
   for (let i = 1; i < lines.length; i++) { // Skip header row
     const line = lines[i].trim();
     if (!line) continue; // Skip empty rows
     
-    // Parse CSV line (handle quoted values)
-    const match = line.match(/^"?(https?:\/\/[^,"]+)"?/);
-    if (match) {
-      urls.push(match[1].replace(/^"|"$/g, ''));
-    } else {
-      // Fallback: split by comma and take first column
-      const columns = line.split(',');
-      const url = columns[0]?.trim().replace(/^"|"$/g, '');
-      if (url && url.startsWith('http')) {
-        urls.push(url);
+    try {
+      const columns = parseCsvLine(line);
+      if (columns[urlColumnIndex]) {
+        const url = columns[urlColumnIndex].trim().replace(/^"|"$/g, '');
+        if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+          urls.push(url);
+        }
       }
+    } catch (e) {
+      // Skip malformed lines
+      continue;
     }
   }
   
