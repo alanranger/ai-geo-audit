@@ -1653,6 +1653,19 @@
           
           debugLog(`Y-axis range: ${yAxisMin} to ${yAxisMax} (range: ${actualRange}, step: ${stepSize})`, 'info');
           
+          // Calculate trend percentages for each dataset
+          const calculateTrend = (data) => {
+            if (data.length < 2) return { percent: 0, isUp: false };
+            const first = data[0];
+            const last = data[data.length - 1];
+            const percent = ((last - first) / first) * 100;
+            return { percent: Math.abs(percent), isUp: percent > 0 };
+          };
+          
+          const localEntityTrend = calculateTrend(localEntityData);
+          const visibilityTrend = calculateTrend(visibilityData);
+          const authorityTrend = calculateTrend(authorityData);
+          
           // Plugin to add RAG background bands and improve line visibility
           const ragBackgroundPlugin = {
             id: 'ragBackground',
@@ -1799,7 +1812,39 @@
                     padding: 25,
                     usePointStyle: false,
                     boxWidth: 60,
-                    boxHeight: 4
+                    boxHeight: 4,
+                    generateLabels: function(chart) {
+                      const original = Chart.defaults.plugins.legend.labels.generateLabels;
+                      const labels = original.call(this, chart);
+                      
+                      // Add trend indicators to labels
+                      labels.forEach((label, index) => {
+                        let trend;
+                        if (label.text === 'Local Entity') {
+                          trend = localEntityTrend;
+                        } else if (label.text === 'Visibility') {
+                          trend = visibilityTrend;
+                        } else if (label.text === 'Authority') {
+                          trend = authorityTrend;
+                        }
+                        
+                        if (trend) {
+                          const arrow = trend.isUp ? '↑' : '↓';
+                          const color = trend.isUp ? '#10b981' : '#ef4444'; // Green for up, red for down
+                          const sign = trend.isUp ? '+' : '';
+                          label.text = `${label.text} ${arrow} ${sign}${trend.percent.toFixed(1)}%`;
+                          // Store color for custom rendering if needed
+                          label.trendColor = color;
+                        }
+                      });
+                      
+                      return labels;
+                    },
+                    // Custom label rendering to color the trend indicator
+                    color: function(context) {
+                      // Return default color for the main label
+                      return Chart.defaults.color;
+                    }
                   }
                 },
                 tooltip: {
