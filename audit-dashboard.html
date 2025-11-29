@@ -1660,7 +1660,7 @@
             return 'rgba(239, 68, 68, 1)'; // Red
           };
           
-          // Plugin to color line segments based on RAG status
+          // Plugin to color line segments based on RAG status and customize legend
           const ragSegmentPlugin = {
             id: 'ragSegment',
             beforeDraw: (chart) => {
@@ -1820,8 +1820,27 @@
                       size: 13,
                       weight: 'bold'
                     },
-                    padding: 15,
-                    usePointStyle: true
+                    padding: 20,
+                    usePointStyle: false,
+                    generateLabels: function(chart) {
+                      const original = Chart.defaults.plugins.legend.labels.generateLabels;
+                      const labels = original.call(this, chart);
+                      
+                      // Customize labels to show line styles
+                      labels.forEach((label, index) => {
+                        const dataset = chart.data.datasets[index];
+                        // Store line style info for custom rendering
+                        label.lineStyle = dataset.borderDash || [];
+                        label.lineWidth = 3;
+                        // Use a representative color (average of RAG colors or dataset color)
+                        label.strokeStyle = dataset.borderColor || 'rgba(100, 100, 100, 1)';
+                      });
+                      
+                      return labels;
+                    },
+                    // Custom legend item rendering
+                    boxWidth: 40,
+                    boxHeight: 2
                   }
                 },
                 tooltip: {
