@@ -1145,12 +1145,9 @@
 
     // Calculate pillar scores (deterministic, based on GSC data)
     function calculatePillarScores(data) {
-      const clicks = data.totalClicks || 0;
-      const impressions = data.totalImpressions || 0;
+      // Use new API response format
       const avgPosition = data.averagePosition || 40; // 1 (best) - 100 (worst)
-
-      // Derived metrics
-      const ctr = impressions > 0 ? (clicks / impressions) : 0; // 0-1
+      const ctr = data.ctr || 0; // Already 0-100 from new API
 
       // Map average position (1-40) -> 100-10 (better position => higher score)
       const posScore = (() => {
@@ -1159,8 +1156,8 @@
         return 100 - scale * 90; // 100 to 10
       })();
 
-      // Map CTR (0-10%) -> 0-100 (typical organic CTR range)
-      const ctrScore = Math.min(100, ctr * 1000); // 0.10 (10%) => 100
+      // CTR is already 0-100 from API, use directly
+      const ctrScore = ctr;
 
       // Visibility is primarily driven by position
       const visibility = clampScore(posScore);
@@ -1204,7 +1201,8 @@
       return Math.round(Math.min(100, Math.max(0, readiness)));
     }
 
-    // Fetch real data from Google Search Console API
+    // Fetch real data from Google Search Console API using unified endpoint
+    // Note: apiKey parameter kept for compatibility but not used (endpoint uses OAuth2)
     async function fetchSearchConsoleData(apiKey, propertyUrl, days) {
       debugLog(`Fetching real GSC data for ${days} days...`, 'info');
       
@@ -1227,43 +1225,43 @@
       debugLog(`Date range: ${startDateStr} to ${endDateStr}`, 'info');
       
       try {
-        // Call serverless function to fetch real GSC data
-        const response = await fetch('/api/fetch-search-console', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            propertyUrl: propertyUrl,
-            startDate: startDateStr,
-            endDate: endDateStr
-          }),
-        });
+        // Call unified GSC entity metrics endpoint
+        const response = await fetch(`/api/aigeo/gsc-entity-metrics?property=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDateStr}`);
 
         if (!response.ok) {
           const errorData = await response.json();
-          debugLog(`✗ GSC API error: ${errorData.error}`, 'error');
+          debugLog(`✗ GSC API error: ${errorData.message || errorData.error}`, 'error');
           if (errorData.details) {
             debugLog(`Details: ${errorData.details}`, 'error');
           }
           
           // If OAuth not configured, show helpful message
-          if (errorData.error && errorData.error.includes('OAuth2 credentials not configured')) {
+          if (errorData.message && errorData.message.includes('OAuth2 credentials not configured')) {
             throw new Error('Google Search Console OAuth2 credentials not configured. Please set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN in Vercel environment variables.');
           }
           
-          throw new Error(errorData.error || 'Failed to fetch Search Console data');
+          throw new Error(errorData.message || errorData.error || 'Failed to fetch Search Console data');
         }
 
-        const data = await response.json();
-        debugLog(`✓ Real GSC data fetched: ${data.totalClicks} clicks, ${data.totalImpressions} impressions`, 'success');
+        const gsc = await response.json();
         
+        if (gsc.status !== 'ok') {
+          throw new Error(gsc.message || 'Failed to fetch Search Console data');
+        }
+        
+        debugLog(`✓ Real GSC data fetched: ${gsc.data.overview.totalClicks} clicks, ${gsc.data.overview.totalImpressions} impressions`, 'success');
+        
+        // Return data in format expected by existing code
         return {
-          totalClicks: data.totalClicks || 0,
-          totalImpressions: data.totalImpressions || 0,
-          averagePosition: data.averagePosition || 0,
-          topQueries: data.topQueries || [],
-          dateRange: days
+          totalClicks: gsc.data.overview.totalClicks || 0,
+          totalImpressions: gsc.data.overview.totalImpressions || 0,
+          averagePosition: gsc.data.overview.avgPosition || 0,
+          ctr: gsc.data.overview.ctr || 0, // Already 0-100 from API
+          topQueries: gsc.data.topQueries || [],
+          timeseries: gsc.data.timeseries || [], // For trend chart
+          dateRange: days,
+          // Store full GSC response for trend chart access
+          _gscResponse: gsc
         };
       } catch (error) {
         debugLog(`✗ Error fetching GSC data: ${error.message}`, 'error');
@@ -1318,12 +1316,7 @@
       debugLog(`Property URL: ${propertyUrl}`, 'info');
       debugLog(`Date Range: ${dateRange} days`, 'info');
 
-      if (!apiKey) {
-        debugLog('✗ No API key available', 'error');
-        showStatus('Please enter your Google Search Console API key or add it to config.js', 'error');
-        return;
-      }
-      
+      // Note: API key no longer required - new endpoint uses OAuth2 from env vars
       if (!propertyUrl) {
         debugLog('✗ No property URL provided', 'error');
         showStatus('Please enter your property URL', 'error');
@@ -1648,7 +1641,7 @@
           <div class="label">Avg Position</div>
         </div>
         <div class="metric-card">
-          <div class="value">${((data.totalClicks / data.totalImpressions) * 100).toFixed(2)}%</div>
+          <div class="value">${(data.ctr || 0).toFixed(2)}%</div>
           <div class="label">CTR</div>
         </div>
       `;
@@ -1875,25 +1868,84 @@
         });
         debugLog('Creating new Chart instance for trend chart...', 'info');
         try {
-          // Generate data arrays first
-          // Deterministic "wiggle" generator so trends are stable across refreshes
-          const makeSeries = (baseScore, seed) => {
-            const arr = [];
-            for (let i = 0; i < numDataPoints; i++) {
-              const angle = (i / numDataPoints) * Math.PI * 4; // ~2 full oscillations
-              const wave = Math.sin(angle + seed) * 3;        // ±3 variation
-              const trendTilt = (i - numDataPoints / 2) * 0.02; // slight gradual drift
-              const value = baseScore + wave + trendTilt;
-              arr.push(Math.max(0, Math.min(100, value)));
-            }
-            return arr;
-          };
-
-          const localEntityData = makeSeries(scores.localEntity, 0.5);
-          const serviceAreaData = makeSeries(scores.serviceArea, 0.8);
-          const authorityData = makeSeries(scores.authority, 1.9);
-          const visibilityData = makeSeries(scores.visibility, 1.1);
-          const contentSchemaData = makeSeries(scores.contentSchema, 1.4);
+          // Use real timeseries data from GSC API
+          const timeseries = data.timeseries || [];
+          debugLog(`Using ${timeseries.length} timeseries data points from GSC API`, 'info');
+          
+          // If we have timeseries data, use it; otherwise fall back to mock data
+          let localEntityData, serviceAreaData, authorityData, visibilityData, contentSchemaData;
+          let chartDates = dates;
+          
+          if (timeseries.length > 0) {
+            // Calculate pillar scores for each timeseries point
+            const calculatePillarFromMetrics = (position, ctr) => {
+              // Position score (same formula as main calculation)
+              const clampedPos = Math.max(1, Math.min(40, position));
+              const scale = (clampedPos - 1) / 39;
+              const posScore = 100 - scale * 90;
+              
+              // CTR is already 0-100 from API
+              const ctrScore = ctr;
+              
+              // Calculate each pillar (same formulas as main calculation)
+              const visibility = clampScore(posScore);
+              const authority = clampScore(0.6 * ctrScore + 0.4 * posScore);
+              const localEntity = clampScore(60 + 0.3 * (posScore - 50) + 0.2 * (ctrScore - 50));
+              const serviceArea = clampScore(localEntity - 5);
+              const contentSchema = clampScore(70 + 0.2 * (visibility - 60));
+              
+              return { visibility, authority, localEntity, serviceArea, contentSchema };
+            };
+            
+            // Extract data arrays from timeseries
+            localEntityData = [];
+            serviceAreaData = [];
+            authorityData = [];
+            visibilityData = [];
+            contentSchemaData = [];
+            const allDates = [];
+            
+            timeseries.forEach(point => {
+              const pillarScores = calculatePillarFromMetrics(point.position, point.ctr);
+              localEntityData.push(pillarScores.localEntity);
+              serviceAreaData.push(pillarScores.serviceArea);
+              authorityData.push(pillarScores.authority);
+              visibilityData.push(pillarScores.visibility);
+              contentSchemaData.push(pillarScores.contentSchema);
+              
+              // Format date for chart (timeseries dates are YYYY-MM-DD)
+              const dateObj = new Date(point.date);
+              allDates.push(dateObj.toLocaleDateString('en-GB', dateFormat));
+            });
+            
+            // Apply label spacing to dates (show every labelStep-th label)
+            chartDates = allDates.map((d, i) => {
+              if (i % labelStep === 0 || i === allDates.length - 1) {
+                return d;
+              }
+              return ''; // Empty string for labels we don't want to show
+            });
+          } else {
+            // Fallback to mock data if no timeseries available
+            debugLog('No timeseries data available, using mock data', 'warn');
+            const makeSeries = (baseScore, seed) => {
+              const arr = [];
+              for (let i = 0; i < numDataPoints; i++) {
+                const angle = (i / numDataPoints) * Math.PI * 4;
+                const wave = Math.sin(angle + seed) * 3;
+                const trendTilt = (i - numDataPoints / 2) * 0.02;
+                const value = baseScore + wave + trendTilt;
+                arr.push(Math.max(0, Math.min(100, value)));
+              }
+              return arr;
+            };
+            
+            localEntityData = makeSeries(scores.localEntity, 0.5);
+            serviceAreaData = makeSeries(scores.serviceArea, 0.8);
+            authorityData = makeSeries(scores.authority, 1.9);
+            visibilityData = makeSeries(scores.visibility, 1.1);
+            contentSchemaData = makeSeries(scores.contentSchema, 1.4);
+          }
           
           // Calculate min and max across all datasets
           const allData = [...localEntityData, ...serviceAreaData, ...authorityData, ...visibilityData, ...contentSchemaData];
@@ -2003,7 +2055,7 @@
           window.trendChart = new Chart(trendCtx, {
             type: 'line',
             data: {
-              labels: dates,
+              labels: chartDates,
               datasets: [
                 {
                   label: 'Local Entity',
