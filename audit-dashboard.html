@@ -1673,7 +1673,16 @@
                 if (points.length < 2) return;
                 
                 ctx.save();
-                ctx.lineWidth = 2;
+                
+                // Set different line thicknesses for better distinction
+                let lineWidth = 2;
+                if (dataset.label === 'Authority') {
+                  lineWidth = 4; // Thickest for most important
+                } else if (dataset.label === 'Local Entity') {
+                  lineWidth = 3; // Medium
+                } else {
+                  lineWidth = 2.5; // Visibility - slightly thicker than default
+                }
                 
                 // Set line style based on dataset
                 if (dataset.borderDash) {
@@ -1682,7 +1691,7 @@
                   ctx.setLineDash([]);
                 }
                 
-                // Draw segments with RAG colors
+                // Draw segments with RAG colors, with white outline for visibility when overlapping
                 for (let i = 0; i < points.length - 1; i++) {
                   const point1 = points[i];
                   const point2 = points[i + 1];
@@ -1690,7 +1699,17 @@
                   const value2 = dataset.data[i + 1];
                   const avgScore = (value1 + value2) / 2;
                   
+                  // Draw white outline first (slightly thicker) for visibility when lines overlap
+                  ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+                  ctx.lineWidth = lineWidth + 2;
+                  ctx.beginPath();
+                  ctx.moveTo(point1.x, point1.y);
+                  ctx.lineTo(point2.x, point2.y);
+                  ctx.stroke();
+                  
+                  // Draw colored line on top
                   ctx.strokeStyle = getRAGColor(avgScore);
+                  ctx.lineWidth = lineWidth;
                   ctx.beginPath();
                   ctx.moveTo(point1.x, point1.y);
                   ctx.lineTo(point2.x, point2.y);
@@ -1861,42 +1880,10 @@
                       size: 13,
                       weight: 'bold'
                     },
-                    padding: 20,
+                    padding: 15,
                     usePointStyle: false,
-                    generateLabels: function(chart) {
-                      const original = Chart.defaults.plugins.legend.labels.generateLabels;
-                      const labels = original.call(this, chart);
-                      
-                      // Customize labels to include line style descriptions
-                      const styleDescriptions = {
-                        0: ' (Solid)',      // Authority - no borderDash
-                        1: ' (Dashed)',    // Local Entity - [10, 5]
-                        2: ' (Dotted)'     // Visibility - [2, 2]
-                      };
-                      
-                      labels.forEach((label, index) => {
-                        const dataset = chart.data.datasets[index];
-                        // Add line style description to label text
-                        if (dataset.borderDash && dataset.borderDash.length > 0) {
-                          if (dataset.borderDash[0] === 10) {
-                            label.text = label.text + ' (Dashed)';
-                          } else {
-                            label.text = label.text + ' (Dotted)';
-                          }
-                        } else {
-                          label.text = label.text + ' (Solid)';
-                        }
-                        // Store line style info for custom rendering
-                        label.lineStyle = dataset.borderDash || [];
-                        label.lineWidth = 3;
-                        label.strokeStyle = '#666'; // Neutral color for legend
-                      });
-                      
-                      return labels;
-                    },
-                    // Custom legend item rendering
-                    boxWidth: 40,
-                    boxHeight: 2
+                    boxWidth: 50,
+                    boxHeight: 3
                   }
                 },
                 tooltip: {
