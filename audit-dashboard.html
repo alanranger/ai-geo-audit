@@ -1145,24 +1145,24 @@
 
     // Calculate pillar scores (deterministic, based on GSC data)
     function calculatePillarScores(data) {
-      // Use new API response format
-      const avgPosition = data.averagePosition || 40; // 1 (best) - 100 (worst)
-      const ctr = data.ctr || 0; // Already 0-100 from new API
+      // Use new API response format - get values from GSC overview
+      const position = data.averagePosition || 40; // 1 (best) - 100 (worst)
+      const ctr = data.ctr || 0; // 0-100 percentage from API (e.g., 10 = 10%)
 
       // Map average position (1-40) -> 100-10 (better position => higher score)
       const posScore = (() => {
-        const clampedPos = Math.max(1, Math.min(40, avgPosition));
+        const clampedPos = Math.max(1, Math.min(40, position));
         const scale = (clampedPos - 1) / 39; // 0 to 1
         return 100 - scale * 90; // 100 to 10
       })();
 
-      // CTR is already 0-100 from API, use directly
-      const ctrScore = ctr;
-
       // Visibility is primarily driven by position
       const visibility = clampScore(posScore);
 
-      // Authority: blend of CTR and position (trust & engagement)
+      // Authority: use exact formula with GSC values
+      // Convert ctr from percentage (0-100) to decimal (0-1), then apply formula
+      const ctrDecimal = ctr / 100; // Convert percentage to decimal (e.g., 10% -> 0.10)
+      const ctrScore = Math.min((ctrDecimal / 0.10) * 100, 100);
       const authority = clampScore(0.6 * ctrScore + 0.4 * posScore);
 
       // Local Entity: slightly smoother blend, anchored around 60
@@ -1884,8 +1884,10 @@
               const scale = (clampedPos - 1) / 39;
               const posScore = 100 - scale * 90;
               
-              // CTR is already 0-100 from API
-              const ctrScore = ctr;
+              // Authority: use exact formula with GSC values (same as main calculation)
+              // Convert ctr from percentage (0-100) to decimal (0-1), then apply formula
+              const ctrDecimal = ctr / 100; // Convert percentage to decimal (e.g., 10% -> 0.10)
+              const ctrScore = Math.min((ctrDecimal / 0.10) * 100, 100);
               
               // Calculate each pillar (same formulas as main calculation)
               const visibility = clampScore(posScore);
