@@ -1867,14 +1867,29 @@
                       const original = Chart.defaults.plugins.legend.labels.generateLabels;
                       const labels = original.call(this, chart);
                       
-                      // Customize labels to show line styles
+                      // Customize labels to include line style descriptions
+                      const styleDescriptions = {
+                        0: ' (Solid)',      // Authority - no borderDash
+                        1: ' (Dashed)',    // Local Entity - [10, 5]
+                        2: ' (Dotted)'     // Visibility - [2, 2]
+                      };
+                      
                       labels.forEach((label, index) => {
                         const dataset = chart.data.datasets[index];
+                        // Add line style description to label text
+                        if (dataset.borderDash && dataset.borderDash.length > 0) {
+                          if (dataset.borderDash[0] === 10) {
+                            label.text = label.text + ' (Dashed)';
+                          } else {
+                            label.text = label.text + ' (Dotted)';
+                          }
+                        } else {
+                          label.text = label.text + ' (Solid)';
+                        }
                         // Store line style info for custom rendering
                         label.lineStyle = dataset.borderDash || [];
                         label.lineWidth = 3;
-                        // Use a representative color (average of RAG colors or dataset color)
-                        label.strokeStyle = dataset.borderColor || 'rgba(100, 100, 100, 1)';
+                        label.strokeStyle = '#666'; // Neutral color for legend
                       });
                       
                       return labels;
