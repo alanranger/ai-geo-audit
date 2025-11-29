@@ -81,51 +81,29 @@ function detectRichResultEligibility(typesArray) {
  * Parse CSV and extract URLs from column A (skip header)
  */
 async function parseCsvUrls() {
-  let csvContent;
-  
-  // Try multiple approaches to load CSV
-  // 1. Try environment variable URL first (for Vercel)
-  if (process.env.CSV_URL) {
-    try {
-      const response = await fetch(process.env.CSV_URL);
-      if (response.ok) {
-        csvContent = await response.text();
-      }
-    } catch (e) {
-      console.warn('Failed to fetch CSV from CSV_URL:', e.message);
+  // Always use the hosted CSV from alanranger-schema
+  const CSV_URL =
+    process.env.CSV_URL ||
+    "https://schema-tools-six.vercel.app/06-site-urls.csv";
+
+  console.log("📄 Using CSV source:", CSV_URL);
+
+  let csvText = "";
+
+  try {
+    const res = await fetch(CSV_URL);
+
+    if (!res.ok) {
+      throw new Error("Failed to fetch hosted CSV");
     }
+
+    csvText = await res.text();
+  } catch (err) {
+    console.error("❌ CSV fetch error:", err);
+    throw new Error("Unable to load site URLs CSV");
   }
   
-  // 2. Try relative path from project root (for local dev)
-  if (!csvContent) {
-    try {
-      const fs = await import('fs');
-      const path = await import('path');
-      // Try multiple possible paths
-      const possiblePaths = [
-        path.resolve(process.cwd(), '../../alan-shared-resources/csv/06-site-urls.csv'),
-        path.resolve(process.cwd(), '../alan-shared-resources/csv/06-site-urls.csv'),
-        path.resolve(process.cwd(), 'csv/06-site-urls.csv'),
-        path.resolve(process.cwd(), '06-site-urls.csv')
-      ];
-      
-      for (const csvPath of possiblePaths) {
-        try {
-          csvContent = fs.readFileSync(csvPath, 'utf-8');
-          break; // Success, exit loop
-        } catch (e) {
-          // Try next path
-        }
-      }
-    } catch (e) {
-      // File system not available (e.g., in Vercel)
-    }
-  }
-  
-  // 3. If still no CSV, throw error with helpful message
-  if (!csvContent) {
-    throw new Error('Could not load CSV file. Please set CSV_URL environment variable pointing to the 06-site-urls.csv file, or ensure the CSV is accessible in the project directory.');
-  }
+  const csvContent = csvText;
   
   // Parse CSV - extract URLs from first column (skip header)
   const lines = csvContent.split('\n').filter(line => line.trim());
