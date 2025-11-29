@@ -1653,6 +1653,69 @@
           
           debugLog(`Y-axis range: ${yAxisMin} to ${yAxisMax} (range: ${actualRange}, step: ${stepSize})`, 'info');
           
+          // Helper function to get RAG color
+          const getRAGColor = (score) => {
+            if (score >= 70) return 'rgba(16, 185, 129, 1)'; // Green
+            if (score >= 40) return 'rgba(245, 158, 11, 1)'; // Amber
+            return 'rgba(239, 68, 68, 1)'; // Red
+          };
+          
+          // Plugin to color line segments based on RAG status
+          const ragSegmentPlugin = {
+            id: 'ragSegment',
+            beforeDraw: (chart) => {
+              const ctx = chart.ctx;
+              chart.data.datasets.forEach((dataset, datasetIndex) => {
+                const meta = chart.getDatasetMeta(datasetIndex);
+                if (meta.type !== 'line') return;
+                
+                const points = meta.data;
+                if (points.length < 2) return;
+                
+                ctx.save();
+                ctx.lineWidth = 2;
+                
+                // Set line style based on dataset
+                if (dataset.borderDash) {
+                  ctx.setLineDash(dataset.borderDash);
+                } else {
+                  ctx.setLineDash([]);
+                }
+                
+                // Draw segments with RAG colors
+                for (let i = 0; i < points.length - 1; i++) {
+                  const point1 = points[i];
+                  const point2 = points[i + 1];
+                  const value1 = dataset.data[i];
+                  const value2 = dataset.data[i + 1];
+                  const avgScore = (value1 + value2) / 2;
+                  
+                  ctx.strokeStyle = getRAGColor(avgScore);
+                  ctx.beginPath();
+                  ctx.moveTo(point1.x, point1.y);
+                  ctx.lineTo(point2.x, point2.y);
+                  ctx.stroke();
+                }
+                
+                ctx.restore();
+                
+                // Draw points with RAG colors
+                const pointRadius = dateRange <= 90 ? 3 : 2;
+                points.forEach((point, index) => {
+                  const value = dataset.data[index];
+                  ctx.fillStyle = getRAGColor(value);
+                  ctx.beginPath();
+                  ctx.arc(point.x, point.y, pointRadius, 0, Math.PI * 2);
+                  ctx.fill();
+                  // Add white border for better visibility
+                  ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+                  ctx.lineWidth = 1;
+                  ctx.stroke();
+                });
+              });
+            }
+          };
+          
           window.trendChart = new Chart(trendCtx, {
             type: 'line',
             data: {
@@ -1661,35 +1724,40 @@
                 {
                   label: 'Local Entity',
                   data: localEntityData,
-                  borderColor: 'rgba(239, 68, 68, 1)',
+                  borderColor: 'transparent', // Will be drawn by plugin
                   backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                  borderDash: [10, 5], // Dashed line
                   tension: 0.4,
-                  pointRadius: dateRange <= 90 ? 3 : 2,
+                  pointRadius: dateRange <= 90 ? 3 : 2, // Points drawn by plugin but need radius for hover
                   pointHoverRadius: 5
                 },
                 {
                   label: 'Visibility',
                   data: visibilityData,
-                  borderColor: 'rgba(229, 114, 0, 1)',
+                  borderColor: 'transparent', // Will be drawn by plugin
                   backgroundColor: 'rgba(229, 114, 0, 0.1)',
+                  borderDash: [2, 2], // Dotted line
                   tension: 0.4,
-                  pointRadius: dateRange <= 90 ? 3 : 2,
+                  pointRadius: dateRange <= 90 ? 3 : 2, // Points drawn by plugin but need radius for hover
                   pointHoverRadius: 5
                 },
                 {
                   label: 'Authority',
                   data: authorityData,
-                  borderColor: 'rgba(16, 185, 129, 1)',
+                  borderColor: 'transparent', // Will be drawn by plugin
                   backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                  // Solid line (no borderDash)
                   tension: 0.4,
-                  pointRadius: dateRange <= 90 ? 3 : 2,
+                  pointRadius: dateRange <= 90 ? 3 : 2, // Points drawn by plugin but need radius for hover
                   pointHoverRadius: 5
                 }
               ]
             },
+            plugins: [ragSegmentPlugin],
             options: {
               responsive: true,
               maintainAspectRatio: false,
+              animation: false, // Disable animation for better performance when changing periods
               scales: {
                 x: {
                   ticks: {
