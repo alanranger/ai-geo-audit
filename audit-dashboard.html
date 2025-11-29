@@ -312,6 +312,92 @@
       border-top: 2px solid #e2e8f0;
       padding-top: 2rem;
     }
+    .calculation-explanation {
+      background: #f8f9fa;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      margin-bottom: 2rem;
+      overflow: hidden;
+    }
+    .calculation-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 1.5rem;
+      background: linear-gradient(135deg, #fff5f0 0%, #ffe8d6 100%);
+      border-bottom: 2px solid var(--brand-orange);
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.2s;
+    }
+    .calculation-header:hover {
+      background: linear-gradient(135deg, #ffe8d6 0%, #ffd9b3 100%);
+    }
+    .calculation-header h4 {
+      margin: 0;
+      color: var(--brand-orange);
+      font-size: 1.1rem;
+      font-weight: 600;
+    }
+    .calculation-toggle {
+      font-size: 1.2rem;
+      color: var(--brand-orange);
+      font-weight: bold;
+      transition: transform 0.3s;
+    }
+    .calculation-explanation.collapsed .calculation-toggle {
+      transform: rotate(-90deg);
+    }
+    .calculation-content {
+      padding: 1.5rem;
+      color: #555;
+      line-height: 1.8;
+    }
+    .calculation-content.collapsed {
+      display: none;
+    }
+    .calculation-content h5 {
+      color: var(--brand-dark);
+      margin-top: 1.5rem;
+      margin-bottom: 0.75rem;
+      font-size: 1rem;
+      font-weight: 600;
+      border-bottom: 2px solid var(--brand-orange);
+      padding-bottom: 0.5rem;
+    }
+    .calculation-content h5:first-child {
+      margin-top: 0;
+    }
+    .calculation-content ul {
+      margin: 0.5rem 0;
+      padding-left: 1.5rem;
+    }
+    .calculation-content li {
+      margin: 0.5rem 0;
+    }
+    .calculation-content code {
+      background: #e2e8f0;
+      padding: 0.2rem 0.4rem;
+      border-radius: 3px;
+      font-family: 'Courier New', monospace;
+      font-size: 0.9em;
+      color: #c53030;
+    }
+    .calculation-content .formula {
+      background: #f0f4f8;
+      padding: 0.75rem;
+      border-left: 3px solid var(--brand-orange);
+      margin: 0.75rem 0;
+      font-family: 'Courier New', monospace;
+      font-size: 0.9rem;
+    }
+    .calculation-content .note {
+      background: #fff3cd;
+      border-left: 3px solid #f59e0b;
+      padding: 0.75rem;
+      margin: 1rem 0;
+      font-size: 0.9rem;
+    }
     .date-range-selector {
       display: flex;
       flex-wrap: wrap;
@@ -633,6 +719,96 @@
         </p>
       </div>
 
+      <div class="calculation-explanation collapsed" id="calculationExplanation">
+        <div class="calculation-header" onclick="toggleCalculationExplanation()">
+          <h4>📊 Detailed Calculation Explanation</h4>
+          <span class="calculation-toggle" id="calculationToggle">▶</span>
+        </div>
+        <div class="calculation-content collapsed" id="calculationContent">
+          <h5>1. Visibility</h5>
+          <p><strong>Measurement:</strong></p>
+          <ul>
+            <li>Primary: Average position from Google Search Console (1-40 mapped to 100-10)</li>
+            <li>Formula: <code>posScore = 100 - ((clampedPosition - 1) / 39) * 90</code></li>
+            <li>Score range: 0-100</li>
+          </ul>
+          <p><strong>Data Sources:</strong></p>
+          <ul>
+            <li>Google Search Console API: impressions, clicks, average position, CTR</li>
+            <li>SERP feature tracking: featured snippets, AI Overviews, rich results</li>
+          </ul>
+          <p><strong>Data Checked:</strong> Search Console impressions/clicks, average position, CTR, featured snippet appearances, local pack visibility, SERP feature presence, ranking distribution.</p>
+
+          <h5>2. Authority (E-A-T)</h5>
+          <p><strong>Measurement:</strong></p>
+          <ul>
+            <li>Blend of CTR (60%) and position score (40%)</li>
+            <li>Formula: <code>authority = 0.6 * ctrScore + 0.4 * posScore</code></li>
+            <li>CTR mapped: 0-10% → 0-100 (0.10 = 100)</li>
+            <li>Score range: 0-100</li>
+          </ul>
+          <p><strong>Data Sources:</strong></p>
+          <ul>
+            <li>Google Search Console API: CTR, position</li>
+            <li>Backlink analysis (planned)</li>
+            <li>Review data (planned)</li>
+          </ul>
+          <p><strong>Data Checked:</strong> Content depth (word count, comprehensiveness), backlink quality/quantity, review counts/ratings, author credentials, citations in content, external mentions, case studies, certifications displayed.</p>
+
+          <h5>3. Local Entity</h5>
+          <p><strong>Measurement:</strong></p>
+          <ul>
+            <li>Anchored around 60, adjusted by position and CTR</li>
+            <li>Formula: <code>localEntity = 60 + 0.3 * (posScore - 50) + 0.2 * (ctrScore - 50)</code></li>
+            <li>Score range: 0-100</li>
+          </ul>
+          <p><strong>Data Sources:</strong></p>
+          <ul>
+            <li>Google Search Console API: position, CTR</li>
+            <li>Schema markup validation (planned)</li>
+            <li>Knowledge panel tracking (planned)</li>
+          </ul>
+          <p><strong>Data Checked:</strong> LocalBusiness schema presence, NAP consistency across site, entity mentions in content, knowledge panel presence, author markup, Organization schema.</p>
+
+          <h5>4. Service Area</h5>
+          <p><strong>Measurement:</strong></p>
+          <ul>
+            <li>Derived from Local Entity, slightly lower</li>
+            <li>Formula: <code>serviceArea = localEntity - 5</code></li>
+            <li>Score range: 0-100</li>
+          </ul>
+          <p><strong>Data Sources:</strong></p>
+          <ul>
+            <li>Google Search Console API (via Local Entity calculation)</li>
+            <li>Schema markup validation (planned)</li>
+            <li>Google Business Profile data (planned)</li>
+          </ul>
+          <p><strong>Data Checked:</strong> ServiceArea schema markup, geographic keywords in content, location pages, Google Business Profile service areas, address/location schema.</p>
+
+          <h5>5. Content/Schema</h5>
+          <p><strong>Measurement:</strong></p>
+          <ul>
+            <li>Anchored around 70, with a boost from visibility</li>
+            <li>Formula: <code>contentSchema = 70 + 0.2 * (visibility - 60)</code></li>
+            <li>Score range: 0-100</li>
+          </ul>
+          <p><strong>Data Sources:</strong></p>
+          <ul>
+            <li>Google Search Console API (via visibility calculation)</li>
+            <li>Schema markup validation (planned)</li>
+            <li>Rich result eligibility checks (planned)</li>
+          </ul>
+          <p><strong>Data Checked:</strong> Schema types present (Organization, Person, LocalBusiness, Article, Course, Event, FAQ, HowTo), schema validation errors, coverage percentage, breadcrumb schema, review schema, rich result eligibility.</p>
+
+          <div class="note">
+            <strong>Current Implementation Status:</strong><br>
+            <strong>Currently Active:</strong> Google Search Console API integration (real-time data) - Total clicks, Total impressions, Average position, CTR calculation, Top queries.<br><br>
+            <strong>Planned/Future Enhancements:</strong> Schema markup validation and analysis, Backlink quality/quantity analysis, Review aggregation, Knowledge panel tracking, Local pack visibility metrics, SERP feature detection, Rich result eligibility checks.<br><br>
+            <strong>Note:</strong> Currently, most pillars are calculated from GSC metrics (position, CTR, impressions, clicks). The formulas are deterministic and stable, but full implementation will require additional data sources for complete accuracy.
+          </div>
+        </div>
+      </div>
+
       <div class="dashboard-grid" id="pillarCards"></div>
 
       <div class="section-break"></div>
@@ -767,6 +943,21 @@
       } else {
         panel.classList.add('collapsed');
         if (icon) icon.textContent = '▲';
+      }
+    }
+
+    function toggleCalculationExplanation() {
+      const explanation = document.getElementById('calculationExplanation');
+      const content = document.getElementById('calculationContent');
+      const toggle = document.getElementById('calculationToggle');
+      if (explanation.classList.contains('collapsed')) {
+        explanation.classList.remove('collapsed');
+        content.classList.remove('collapsed');
+        if (toggle) toggle.textContent = '▼';
+      } else {
+        explanation.classList.add('collapsed');
+        content.classList.add('collapsed');
+        if (toggle) toggle.textContent = '▶';
       }
     }
 
