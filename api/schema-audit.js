@@ -81,28 +81,49 @@ function detectRichResultEligibility(typesArray) {
  * Parse CSV and extract URLs from column A (skip header)
  */
 async function parseCsvUrls() {
-  // Always use the hosted CSV from alanranger-schema
-  const CSV_URL =
-    process.env.CSV_URL ||
+  // Fetch CSV directly from GitHub (primary source)
+  const GITHUB_CSV_URL = process.env.GITHUB_CSV_URL || 
+    "https://raw.githubusercontent.com/alanranger/alan-shared-resources/main/csv/06-site-urls.csv";
+  
+  // Fallback to hosted CSV if GitHub fails
+  const FALLBACK_CSV_URL = process.env.CSV_URL || 
     "https://schema-tools-six.vercel.app/06-site-urls.csv";
 
-  console.log("📄 Using CSV source:", CSV_URL);
+  console.log("📄 Fetching CSV from GitHub:", GITHUB_CSV_URL);
 
   let csvText = "";
+  let source = 'github';
 
   try {
-    const res = await fetch(CSV_URL);
+    // Try GitHub first
+    const res = await fetch(GITHUB_CSV_URL);
 
-    if (!res.ok) {
-      throw new Error("Failed to fetch hosted CSV");
+    if (res.ok) {
+      csvText = await res.text();
+      console.log("✓ CSV fetched from GitHub successfully");
+    } else {
+      throw new Error(`GitHub fetch failed: HTTP ${res.status}`);
     }
-
-    csvText = await res.text();
-  } catch (err) {
-    console.error("❌ CSV fetch error:", err);
-    throw new Error("Unable to load site URLs CSV");
+  } catch (githubErr) {
+    console.warn("⚠ GitHub fetch failed, trying fallback:", githubErr.message);
+    
+    // Fallback to hosted CSV
+    try {
+      const fallbackRes = await fetch(FALLBACK_CSV_URL);
+      if (fallbackRes.ok) {
+        csvText = await fallbackRes.text();
+        source = 'hosted';
+        console.log("✓ CSV fetched from fallback location");
+      } else {
+        throw new Error(`Fallback fetch failed: HTTP ${fallbackRes.status}`);
+      }
+    } catch (fallbackErr) {
+      console.error("❌ CSV fetch error from both sources:", fallbackErr);
+      throw new Error(`Unable to load site URLs CSV from GitHub or fallback. GitHub: ${githubErr.message}, Fallback: ${fallbackErr.message}`);
+    }
   }
   
+  console.log(`✓ CSV loaded from ${source}, size: ${csvText.length} bytes`);
   const csvContent = csvText;
   
   // Parse CSV - extract URLs from first column (skip header)
