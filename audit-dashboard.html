@@ -1608,6 +1608,51 @@
         });
         debugLog('Creating new Chart instance for trend chart...', 'info');
         try {
+          // Generate data arrays first
+          const localEntityData = Array.from({ length: numDataPoints }, () => {
+            const base = scores.localEntity;
+            const variation = (Math.random() * 10 - 5);
+            return Math.max(0, Math.min(100, base + variation));
+          });
+          const visibilityData = Array.from({ length: numDataPoints }, () => {
+            const base = scores.visibility;
+            const variation = (Math.random() * 10 - 5);
+            return Math.max(0, Math.min(100, base + variation));
+          });
+          const authorityData = Array.from({ length: numDataPoints }, () => {
+            const base = scores.authority;
+            const variation = (Math.random() * 10 - 5);
+            return Math.max(0, Math.min(100, base + variation));
+          });
+          
+          // Calculate min and max across all datasets
+          const allData = [...localEntityData, ...visibilityData, ...authorityData];
+          const dataMin = Math.min(...allData);
+          const dataMax = Math.max(...allData);
+          const dataRange = dataMax - dataMin;
+          
+          // Calculate dynamic Y-axis range
+          // Minimum range of 30, or actual range + padding if larger
+          const minRange = 30;
+          const padding = 5; // Add 5 points padding above and below
+          const actualRange = Math.max(minRange, dataRange + (padding * 2));
+          
+          // Calculate Y-axis min and max
+          const yAxisMin = Math.max(0, Math.floor(dataMin - padding));
+          const yAxisMax = Math.min(100, Math.ceil(yAxisMin + actualRange));
+          
+          // Adjust step size based on range (smaller steps for smaller ranges)
+          let stepSize = 10;
+          if (actualRange <= 40) {
+            stepSize = 5;
+          } else if (actualRange <= 60) {
+            stepSize = 10;
+          } else {
+            stepSize = 20;
+          }
+          
+          debugLog(`Y-axis range: ${yAxisMin} to ${yAxisMax} (range: ${actualRange}, step: ${stepSize})`, 'info');
+          
           window.trendChart = new Chart(trendCtx, {
             type: 'line',
             data: {
@@ -1615,11 +1660,7 @@
               datasets: [
                 {
                   label: 'Local Entity',
-                  data: Array.from({ length: numDataPoints }, () => {
-                    const base = scores.localEntity;
-                    const variation = (Math.random() * 10 - 5);
-                    return Math.max(0, Math.min(100, base + variation));
-                  }),
+                  data: localEntityData,
                   borderColor: 'rgba(239, 68, 68, 1)',
                   backgroundColor: 'rgba(239, 68, 68, 0.1)',
                   tension: 0.4,
@@ -1628,11 +1669,7 @@
                 },
                 {
                   label: 'Visibility',
-                  data: Array.from({ length: numDataPoints }, () => {
-                    const base = scores.visibility;
-                    const variation = (Math.random() * 10 - 5);
-                    return Math.max(0, Math.min(100, base + variation));
-                  }),
+                  data: visibilityData,
                   borderColor: 'rgba(229, 114, 0, 1)',
                   backgroundColor: 'rgba(229, 114, 0, 0.1)',
                   tension: 0.4,
@@ -1641,11 +1678,7 @@
                 },
                 {
                   label: 'Authority',
-                  data: Array.from({ length: numDataPoints }, () => {
-                    const base = scores.authority;
-                    const variation = (Math.random() * 10 - 5);
-                    return Math.max(0, Math.min(100, base + variation));
-                  }),
+                  data: authorityData,
                   borderColor: 'rgba(16, 185, 129, 1)',
                   backgroundColor: 'rgba(16, 185, 129, 0.1)',
                   tension: 0.4,
@@ -1678,10 +1711,10 @@
                   }
                 },
                 y: {
-                  beginAtZero: true,
-                  max: 100,
+                  min: yAxisMin,
+                  max: yAxisMax,
                   ticks: {
-                    stepSize: 10,
+                    stepSize: stepSize,
                     font: {
                       size: 12,
                       weight: 'bold'
