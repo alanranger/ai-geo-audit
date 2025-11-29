@@ -1,8 +1,8 @@
 /**
  * CSV Sync API Endpoint
  * 
- * Triggers CSV sync from alan-shared-resources to verify CSV is accessible.
- * In a serverless environment, this verifies the CSV can be fetched from the source.
+ * Fetches CSV directly from GitHub (alan-shared-resources repository).
+ * This provides the latest CSV without requiring local sync steps.
  */
 
 export default async function handler(req, res) {
@@ -26,45 +26,103 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Verify the hosted CSV is accessible
-    const CSV_URL = process.env.CSV_URL || "https://schema-tools-six.vercel.app/06-site-urls.csv";
+    // Fetch CSV directly from GitHub
+    const GITHUB_CSV_URL = process.env.GITHUB_CSV_URL || 
+      "https://raw.githubusercontent.com/alanranger/alan-shared-resources/main/csv/06-site-urls.csv";
     
-    console.log("🔄 Verifying CSV sync - checking hosted CSV:", CSV_URL);
+    // Fallback to hosted CSV if GitHub fetch fails
+    const FALLBACK_CSV_URL = process.env.CSV_URL || 
+      "https://schema-tools-six.vercel.app/06-site-urls.csv";
     
-    const response = await fetch(CSV_URL);
+    console.log("🔄 Fetching CSV from GitHub:", GITHUB_CSV_URL);
     
-    if (!response.ok) {
-      return res.status(500).json({
-        status: 'error',
-        message: `Hosted CSV not accessible: HTTP ${response.status}`,
-        csvUrl: CSV_URL,
-        suggestion: 'Please ensure the CSV has been synced to the hosted location.',
-        meta: { generatedAt: new Date().toISOString() }
-      });
+    let csvText = '';
+    let csvUrl = GITHUB_CSV_URL;
+    let source = 'github';
+    
+    // Try GitHub first
+    try {
+      const response = await fetch(GITHUB_CSV_URL);
+      
+      if (response.ok) {
+        csvText = await response.text();
+        console.log("✓ CSV fetched from GitHub successfully");
+      } else {
+        throw new Error(`GitHub fetch failed: HTTP ${response.status}`);
+      }
+    } catch (githubError) {
+      console.warn("⚠ GitHub fetch failed, trying fallback:", githubError.message);
+      
+      // Fallback to hosted CSV
+      try {
+        const fallbackResponse = await fetch(FALLBACK_CSV_URL);
+        if (fallbackResponse.ok) {
+          csvText = await fallbackResponse.text();
+          csvUrl = FALLBACK_CSV_URL;
+          source = 'hosted';
+          console.log("✓ CSV fetched from fallback location");
+        } else {
+          throw new Error(`Fallback fetch failed: HTTP ${fallbackResponse.status}`);
+        }
+      } catch (fallbackError) {
+        return res.status(500).json({
+          status: 'error',
+          message: 'Failed to fetch CSV from both GitHub and fallback location',
+          details: {
+            githubError: githubError.message,
+            fallbackError: fallbackError.message
+          },
+          suggestion: 'Please ensure the CSV exists in the GitHub repository or the hosted location is accessible.',
+          meta: { generatedAt: new Date().toISOString() }
+        });
+      }
     }
     
-    const csvText = await response.text();
+    // Parse CSV and count URLs
     const lines = csvText.split('\n').filter(line => line.trim());
-    const urlCount = Math.max(0, lines.length - 1); // Subtract header row
+    let urlCount = 0;
+    
+    // Count URLs (skip header row, count lines with valid URLs)
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      
+      // Check if line contains a URL
+      const match = line.match(/^"?(https?:\/\/[^,"]+)"?/);
+      if (match) {
+        urlCount++;
+      } else {
+        // Fallback: check first column for URL
+        const columns = line.split(',');
+        const url = columns[0]?.trim().replace(/^"|"$/g, '');
+        if (url && url.startsWith('http')) {
+          urlCount++;
+        }
+      }
+    }
+    
+    console.log(`✓ CSV parsed: ${urlCount} URLs found from ${source}`);
     
     return res.status(200).json({
       status: 'ok',
-      message: 'CSV sync verified successfully',
-      csvUrl: CSV_URL,
+      message: `CSV fetched successfully from ${source}`,
+      csvUrl,
+      source,
       data: {
         totalUrls: urlCount,
         csvSize: csvText.length,
-        lastVerified: new Date().toISOString()
+        linesProcessed: lines.length - 1, // Exclude header
+        fetchedAt: new Date().toISOString()
       },
       meta: { generatedAt: new Date().toISOString() }
     });
     
   } catch (error) {
-    console.error('Error verifying CSV sync:', error);
+    console.error('Error fetching CSV:', error);
     return res.status(500).json({
       status: 'error',
-      message: error.message || 'Failed to verify CSV sync',
-      suggestion: 'Please run "npm run sync:csv" locally to sync the CSV, or ensure CSV_URL environment variable is set correctly.',
+      message: error.message || 'Failed to fetch CSV',
+      suggestion: 'Please check that the CSV exists in the GitHub repository.',
       meta: { generatedAt: new Date().toISOString() }
     });
   }

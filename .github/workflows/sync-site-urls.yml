@@ -1,0 +1,37 @@
+name: Sync 06-site-urls.csv from shared resources
+
+on:
+  schedule:
+    - cron: "0 * * * *" # every hour
+  workflow_dispatch: {}
+  repository_dispatch:
+    types: [sync_site_urls]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout target repo (alanranger-schema)
+        uses: actions/checkout@v4
+        with:
+          path: target
+
+      - name: Checkout source repo (alan-shared-resources)
+        uses: actions/checkout@v4
+        with:
+          repository: alanranger/alan-shared-resources
+          path: source
+
+      - name: Copy CSV file
+        run: |
+          cp source/csv/06-site-urls.csv target/public/06-site-urls.csv
+
+      - name: Commit & Push if changed
+        run: |
+          cd target
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add public/06-site-urls.csv
+          git diff --quiet --cached || git commit -m "Auto-sync 06-site-urls.csv"
+          git push
+
