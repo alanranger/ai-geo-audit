@@ -141,6 +141,7 @@ export default async function handler(req, res) {
     let urlCount = 0;
     let sampleUrls = [];
     let skippedCount = 0;
+    let errorCount = 0;
     
     // Count URLs (skip header row)
     for (let i = 1; i < lines.length; i++) {
@@ -149,32 +150,44 @@ export default async function handler(req, res) {
       
       try {
         const columns = parseCsvLine(line);
-        if (columns[urlColumnIndex]) {
+        
+        // Debug first few lines
+        if (i <= 3) {
+          console.log(`Line ${i}: ${columns.length} columns, column[${urlColumnIndex}]: "${columns[urlColumnIndex]?.substring(0, 60)}"`);
+        }
+        
+        if (columns[urlColumnIndex] !== undefined && columns[urlColumnIndex] !== null) {
           const url = columns[urlColumnIndex].trim().replace(/^"|"$/g, '');
           if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
             urlCount++;
             if (sampleUrls.length < 3) {
               sampleUrls.push(url);
             }
-          } else if (url) {
+          } else if (url && url.length > 0) {
             // Log first few non-URL values to debug
-            if (skippedCount < 3) {
-              console.log(`⚠ Skipped non-URL value in column ${urlColumnIndex}: "${url.substring(0, 50)}"`);
+            if (skippedCount < 5) {
+              console.log(`⚠ Line ${i}: Skipped non-URL value in column ${urlColumnIndex}: "${url.substring(0, 80)}"`);
               skippedCount++;
             }
+          }
+        } else {
+          // Column doesn't exist or is empty
+          if (errorCount < 3) {
+            console.log(`⚠ Line ${i}: Column ${urlColumnIndex} is missing or empty. Total columns: ${columns.length}`);
+            errorCount++;
           }
         }
       } catch (e) {
         // Skip malformed lines
-        if (skippedCount < 3) {
+        if (errorCount < 3) {
           console.log(`⚠ Error parsing line ${i}: ${e.message}`);
-          skippedCount++;
+          errorCount++;
         }
         continue;
       }
     }
     
-    console.log(`✓ Found ${urlCount} URLs`);
+    console.log(`✓ Found ${urlCount} URLs out of ${lines.length - 1} data lines`);
     if (sampleUrls.length > 0) {
       console.log(`  Sample URLs: ${sampleUrls.join(', ')}`);
     }
