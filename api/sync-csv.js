@@ -75,6 +75,17 @@ export default async function handler(req, res) {
           
           // Success - break out of loop
           break;
+        } else if (response.status === 404) {
+          // 404 could mean: file doesn't exist, wrong branch, or repository is private
+          const errorText = await response.text().catch(() => '');
+          console.warn(`GitHub fetch 404 for ${githubUrl} - file not found or repository may be private`);
+          if (errorText.includes('Not Found') || errorText.includes('404')) {
+            githubFetchError = new Error(`GitHub repository may be private or file path incorrect. HTTP 404 - Cannot access raw.githubusercontent.com for private repositories.`);
+          } else {
+            githubFetchError = new Error(`GitHub fetch failed: HTTP 404 - ${errorText.substring(0, 100)}`);
+          }
+          // Continue to next URL
+          continue;
         } else {
           const errorText = await response.text().catch(() => '');
           console.warn(`GitHub fetch failed for ${githubUrl}: HTTP ${response.status}`);
