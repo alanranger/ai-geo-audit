@@ -204,7 +204,7 @@
       padding: 1.5rem;
       border-radius: 8px;
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-      margin-bottom: 4.5rem; /* extra breathing room below charts */
+      margin-bottom: 6rem; /* extra breathing room below charts */
       height: 400px;
       border: 1px solid rgba(100, 116, 139, 0.2);
     }
@@ -291,7 +291,7 @@
       border: 1px solid rgba(59, 130, 246, 0.1);
     }
     .scorecard-section {
-      margin-top: 3rem;
+      margin-top: 4rem;  /* push scorecard further below charts */
       margin-bottom: 3rem;
     }
     .scorecard-section h3 {
@@ -941,16 +941,55 @@
       return { status: 'red', label: 'Red' };
     }
 
-    // Calculate pillar scores (basic version - will be enhanced with real API data)
+    // Helper: clamp score to 0-100 and round
+    function clampScore(value) {
+      return Math.max(0, Math.min(100, Math.round(value)));
+    }
+
+    // Calculate pillar scores (deterministic, based on GSC data)
     function calculatePillarScores(data) {
-      // These are placeholder calculations - will be replaced with real API data
+      const clicks = data.totalClicks || 0;
+      const impressions = data.totalImpressions || 0;
+      const avgPosition = data.averagePosition || 40; // 1 (best) - 100 (worst)
+
+      // Derived metrics
+      const ctr = impressions > 0 ? (clicks / impressions) : 0; // 0-1
+
+      // Map average position (1-40) -> 100-10 (better position => higher score)
+      const posScore = (() => {
+        const clampedPos = Math.max(1, Math.min(40, avgPosition));
+        const scale = (clampedPos - 1) / 39; // 0 to 1
+        return 100 - scale * 90; // 100 to 10
+      })();
+
+      // Map CTR (0-10%) -> 0-100 (typical organic CTR range)
+      const ctrScore = Math.min(100, ctr * 1000); // 0.10 (10%) => 100
+
+      // Visibility is primarily driven by position
+      const visibility = clampScore(posScore);
+
+      // Authority: blend of CTR and position (trust & engagement)
+      const authority = clampScore(0.6 * ctrScore + 0.4 * posScore);
+
+      // Local Entity: slightly smoother blend, anchored around 60
+      const localEntity = clampScore(60 + 0.3 * (posScore - 50) + 0.2 * (ctrScore - 50));
+
+      // Service Area: currently derived from Local Entity but slightly lower
+      const serviceArea = clampScore(localEntity - 5);
+
+      // Content/Schema: until we wire real schema checks, anchor around 70,
+      // with a small boost from visibility (well-performing sites usually have better schema)
+      const contentSchema = clampScore(70 + 0.2 * (visibility - 60));
+
       const scores = {
-        localEntity: Math.min(100, Math.max(0, 65 + Math.random() * 10 - 5)),
-        serviceArea: Math.min(100, Math.max(0, 55 + Math.random() * 10 - 5)),
-        authority: Math.min(100, Math.max(0, 70 + Math.random() * 10 - 5)),
-        visibility: Math.min(100, Math.max(0, 60 + Math.random() * 10 - 5)),
-        contentSchema: Math.min(100, Math.max(0, 75 + Math.random() * 10 - 5))
+        localEntity,
+        serviceArea,
+        authority,
+        visibility,
+        contentSchema
       };
+
+      debugLog(`Deterministic pillar scores: ${JSON.stringify(scores)}`, 'info');
       return scores;
     }
 
@@ -1640,21 +1679,22 @@
         debugLog('Creating new Chart instance for trend chart...', 'info');
         try {
           // Generate data arrays first
-          const localEntityData = Array.from({ length: numDataPoints }, () => {
-            const base = scores.localEntity;
-            const variation = (Math.random() * 10 - 5);
-            return Math.max(0, Math.min(100, base + variation));
-          });
-          const visibilityData = Array.from({ length: numDataPoints }, () => {
-            const base = scores.visibility;
-            const variation = (Math.random() * 10 - 5);
-            return Math.max(0, Math.min(100, base + variation));
-          });
-          const authorityData = Array.from({ length: numDataPoints }, () => {
-            const base = scores.authority;
-            const variation = (Math.random() * 10 - 5);
-            return Math.max(0, Math.min(100, base + variation));
-          });
+          // Deterministic "wiggle" generator so trends are stable across refreshes
+          const makeSeries = (baseScore, seed) => {
+            const arr = [];
+            for (let i = 0; i < numDataPoints; i++) {
+              const angle = (i / numDataPoints) * Math.PI * 4; // ~2 full oscillations
+              const wave = Math.sin(angle + seed) * 3;        // ±3 variation
+              const trendTilt = (i - numDataPoints / 2) * 0.02; // slight gradual drift
+              const value = baseScore + wave + trendTilt;
+              arr.push(Math.max(0, Math.min(100, value)));
+            }
+            return arr;
+          };
+
+          const localEntityData = makeSeries(scores.localEntity, 0.5);
+          const visibilityData = makeSeries(scores.visibility, 1.1);
+          const authorityData = makeSeries(scores.authority, 1.9);
           
           // Calculate min and max across all datasets
           const allData = [...localEntityData, ...visibilityData, ...authorityData];
