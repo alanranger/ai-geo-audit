@@ -1666,7 +1666,7 @@
           const visibilityTrend = calculateTrend(visibilityData);
           const authorityTrend = calculateTrend(authorityData);
           
-          // Plugin to add RAG background bands and improve line visibility
+          // Plugin to add RAG background bands (kept simple)
           const ragBackgroundPlugin = {
             id: 'ragBackground',
             beforeDraw: (chart) => {
@@ -1674,33 +1674,28 @@
               const chartArea = chart.chartArea;
               const yScale = chart.scales.y;
               
-              // Draw RAG background bands
-              const redTop = yScale.getPixelForValue(39);
-              const amberTop = yScale.getPixelForValue(69);
-              const greenTop = yScale.getPixelForValue(100);
-              const chartBottom = chartArea.bottom;
-              
               // Red zone (0-39)
               if (yAxisMin <= 39) {
-                ctx.fillStyle = 'rgba(239, 68, 68, 0.1)';
-                ctx.fillRect(chartArea.left, Math.max(chartArea.top, yScale.getPixelForValue(Math.max(0, yAxisMin))), 
-                            chartArea.right - chartArea.left, Math.min(redTop, chartArea.bottom) - Math.max(chartArea.top, yScale.getPixelForValue(Math.max(0, yAxisMin))));
+                const start = Math.max(chartArea.top, yScale.getPixelForValue(Math.max(0, yAxisMin)));
+                const end = Math.min(chartArea.bottom, yScale.getPixelForValue(Math.min(39, yAxisMax)));
+                ctx.fillStyle = 'rgba(239, 68, 68, 0.08)';
+                ctx.fillRect(chartArea.left, start, chartArea.right - chartArea.left, end - start);
               }
               
               // Amber zone (40-69)
               if (yAxisMin <= 69 && yAxisMax >= 40) {
-                const amberStart = Math.max(chartArea.top, yScale.getPixelForValue(Math.max(40, yAxisMin)));
-                const amberEnd = Math.min(chartArea.bottom, yScale.getPixelForValue(Math.min(69, yAxisMax)));
-                ctx.fillStyle = 'rgba(245, 158, 11, 0.1)';
-                ctx.fillRect(chartArea.left, amberStart, chartArea.right - chartArea.left, amberEnd - amberStart);
+                const start = Math.max(chartArea.top, yScale.getPixelForValue(Math.max(40, yAxisMin)));
+                const end = Math.min(chartArea.bottom, yScale.getPixelForValue(Math.min(69, yAxisMax)));
+                ctx.fillStyle = 'rgba(245, 158, 11, 0.08)';
+                ctx.fillRect(chartArea.left, start, chartArea.right - chartArea.left, end - start);
               }
               
               // Green zone (70-100)
               if (yAxisMax >= 70) {
-                const greenStart = Math.max(chartArea.top, yScale.getPixelForValue(Math.max(70, yAxisMin)));
-                ctx.fillStyle = 'rgba(16, 185, 129, 0.1)';
-                ctx.fillRect(chartArea.left, greenStart, chartArea.right - chartArea.left, 
-                            Math.min(chartArea.bottom, yScale.getPixelForValue(Math.min(100, yAxisMax))) - greenStart);
+                const start = Math.max(chartArea.top, yScale.getPixelForValue(Math.max(70, yAxisMin)));
+                const end = Math.min(chartArea.bottom, yScale.getPixelForValue(Math.min(100, yAxisMax)));
+                ctx.fillStyle = 'rgba(16, 185, 129, 0.08)';
+                ctx.fillRect(chartArea.left, start, chartArea.right - chartArea.left, end - start);
               }
             }
           };
@@ -1742,51 +1737,7 @@
                 }
               ]
             },
-            plugins: [
-              ragBackgroundPlugin,
-              {
-                id: 'trendLegend',
-                afterDraw: (chart) => {
-                  // Custom rendering to color trend indicators in legend
-                  const legend = chart.legend;
-                  if (!legend || !legend.legendItems) return;
-                  
-                  const ctx = chart.ctx;
-                  const labels = legend.legendItems;
-                  
-                  ctx.save();
-                  
-                  labels.forEach((item) => {
-                    if (item.trendColor && item.text) {
-                      // Parse the text to separate main label from trend
-                      const trendMatch = item.text.match(/(↑|↓) ([+-]?\d+\.\d+%)/);
-                      if (trendMatch) {
-                        const trendText = trendMatch[0];
-                        const mainText = item.text.replace(trendText, '').trim();
-                        
-                        // Get font properties
-                        const fontSize = item.fontSize || 16;
-                        const fontFamily = item.fontFamily || 'Arial';
-                        const fontWeight = item.fontStyle || 'bold';
-                        
-                        // Draw main text in default color
-                        ctx.fillStyle = Chart.defaults.color || '#666';
-                        ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
-                        ctx.textBaseline = 'middle';
-                        ctx.fillText(mainText, item.textX, item.y);
-                        
-                        // Draw trend indicator in color
-                        ctx.fillStyle = item.trendColor;
-                        const mainTextWidth = ctx.measureText(mainText).width;
-                        ctx.fillText(trendText, item.textX + mainTextWidth + 5, item.y);
-                      }
-                    }
-                  });
-                  
-                  ctx.restore();
-                }
-              }
-            ],
+            plugins: [ragBackgroundPlugin],
             options: {
               responsive: true,
               maintainAspectRatio: false,
@@ -1884,10 +1835,16 @@
                       
                       return labels;
                     },
-                    // Custom label rendering to color the trend indicator
+                    // Color legend labels based on trend direction (entire label)
                     color: function(context) {
-                      // Return default color for the main label
-                      return Chart.defaults.color;
+                      const text = context.text || '';
+                      if (text.includes('↑')) {
+                        return '#10b981'; // Green for positive trend
+                      }
+                      if (text.includes('↓')) {
+                        return '#ef4444'; // Red for negative trend
+                      }
+                      return Chart.defaults.color || '#4b5563';
                     }
                   }
                 },
