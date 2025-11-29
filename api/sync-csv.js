@@ -40,18 +40,25 @@ export default async function handler(req, res) {
     let csvUrl = GITHUB_CSV_URL;
     let source = 'github';
     
-    // Try GitHub first
+    // Try GitHub first (source of truth)
     try {
-      const response = await fetch(GITHUB_CSV_URL);
+      const response = await fetch(GITHUB_CSV_URL, {
+        headers: {
+          'Accept': 'text/csv',
+          'Cache-Control': 'no-cache'
+        }
+      });
       
       if (response.ok) {
         csvText = await response.text();
-        console.log("✓ CSV fetched from GitHub successfully");
+        console.log(`✓ CSV fetched from GitHub successfully (${csvText.length} bytes, ${csvText.split('\n').length} lines)`);
       } else {
-        throw new Error(`GitHub fetch failed: HTTP ${response.status}`);
+        const errorText = await response.text().catch(() => '');
+        throw new Error(`GitHub fetch failed: HTTP ${response.status} - ${errorText.substring(0, 100)}`);
       }
     } catch (githubError) {
-      console.warn("⚠ GitHub fetch failed, trying fallback:", githubError.message);
+      console.error("❌ GitHub fetch failed:", githubError.message);
+      console.warn("⚠ Trying fallback hosted CSV (may be outdated):", githubError.message);
       
       // Fallback to hosted CSV
       try {
