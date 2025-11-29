@@ -1134,15 +1134,18 @@
       const btnText = document.getElementById('syncCsvBtnText');
       const originalText = btnText.textContent;
       
+      debugLog('=== CSV SYNC: Starting CSV sync verification ===', 'info');
+      debugLog('Button clicked - initiating CSV sync check...', 'info');
+      
       // Disable button and show loading state
       btn.disabled = true;
       btnText.textContent = '⏳ Syncing...';
       btn.style.opacity = '0.6';
       btn.style.cursor = 'not-allowed';
-      
-      debugLog('=== CSV SYNC: Starting CSV sync verification ===', 'info');
+      debugLog('Button state: disabled, showing loading indicator', 'info');
       
       try {
+        debugLog('Fetching /api/sync-csv endpoint...', 'info');
         const response = await fetch('/api/sync-csv', {
           method: 'GET',
           headers: {
@@ -1150,10 +1153,17 @@
           },
         });
         
+        debugLog(`API response status: ${response.status} ${response.statusText}`, response.ok ? 'success' : 'error');
+        
         const data = await response.json();
+        debugLog(`API response data: ${JSON.stringify(data).substring(0, 200)}...`, 'info');
         
         if (response.ok && data.status === 'ok') {
-          debugLog(`✓ CSV sync verified: ${data.data.totalUrls} URLs found`, 'success');
+          debugLog(`✓ CSV sync verified successfully`, 'success');
+          debugLog(`  CSV URL: ${data.csvUrl || 'not provided'}`, 'info');
+          debugLog(`  Total URLs found: ${data.data.totalUrls}`, 'success');
+          debugLog(`  CSV size: ${data.data.csvSize} bytes`, 'info');
+          debugLog(`  Last verified: ${data.data.lastVerified}`, 'info');
           showStatus(`CSV sync verified! Found ${data.data.totalUrls} URLs in CSV.`, 'success');
           btnText.textContent = '✅ CSV Synced';
           
@@ -1161,9 +1171,15 @@
           setTimeout(() => {
             btnText.textContent = originalText;
             btn.style.opacity = '1';
+            debugLog('Button reset to original state', 'info');
           }, 3000);
         } else {
-          debugLog(`✗ CSV sync failed: ${data.message}`, 'error');
+          debugLog(`✗ CSV sync failed`, 'error');
+          debugLog(`  Error message: ${data.message || 'Unknown error'}`, 'error');
+          debugLog(`  CSV URL attempted: ${data.csvUrl || 'not provided'}`, 'error');
+          if (data.suggestion) {
+            debugLog(`  Suggestion: ${data.suggestion}`, 'warn');
+          }
           showStatus(`CSV sync failed: ${data.message}. ${data.suggestion || ''}`, 'error');
           btnText.textContent = '❌ Sync Failed';
           
@@ -1171,10 +1187,16 @@
           setTimeout(() => {
             btnText.textContent = originalText;
             btn.style.opacity = '1';
+            debugLog('Button reset to original state after error', 'info');
           }, 5000);
         }
       } catch (error) {
-        debugLog(`✗ CSV sync error: ${error.message}`, 'error');
+        debugLog(`✗ CSV sync error occurred`, 'error');
+        debugLog(`  Error type: ${error.name || 'Unknown'}`, 'error');
+        debugLog(`  Error message: ${error.message}`, 'error');
+        if (error.stack) {
+          debugLog(`  Stack trace: ${error.stack.substring(0, 300)}...`, 'error');
+        }
         showStatus(`CSV sync error: ${error.message}. Please run "npm run sync:csv" locally.`, 'error');
         btnText.textContent = '❌ Error';
         
@@ -1182,10 +1204,12 @@
         setTimeout(() => {
           btnText.textContent = originalText;
           btn.style.opacity = '1';
+          debugLog('Button reset to original state after exception', 'info');
         }, 5000);
       } finally {
         btn.disabled = false;
         btn.style.cursor = 'pointer';
+        debugLog('=== CSV SYNC: Complete ===', 'info');
       }
     }
 
