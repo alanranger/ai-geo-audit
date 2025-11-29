@@ -111,19 +111,36 @@ export default async function handler(req, res) {
     
     // Parse CSV and count URLs
     const lines = csvText.split('\n').filter(line => line.trim());
+    console.log(`📊 CSV has ${lines.length} total lines`);
     
     // Parse header row to find URL column index
     let urlColumnIndex = 0; // Default to first column
+    let headers = [];
     if (lines.length > 0) {
       const headerLine = lines[0].trim();
-      const headers = parseCsvLine(headerLine);
+      headers = parseCsvLine(headerLine);
+      console.log(`📋 CSV headers: ${headers.join(', ')}`);
       const urlHeaderIndex = headers.findIndex(h => h.toLowerCase() === 'url');
       if (urlHeaderIndex !== -1) {
         urlColumnIndex = urlHeaderIndex;
+        console.log(`✓ Found 'url' column at index ${urlColumnIndex}`);
+      } else {
+        console.log(`⚠ 'url' column not found in headers, using first column (index 0)`);
+        // Try to find any column that might contain URLs
+        for (let i = 0; i < headers.length; i++) {
+          const header = headers[i].toLowerCase();
+          if (header.includes('url') || header.includes('link') || header.includes('href')) {
+            urlColumnIndex = i;
+            console.log(`✓ Using column '${headers[i]}' at index ${i} as URL column`);
+            break;
+          }
+        }
       }
     }
     
     let urlCount = 0;
+    let sampleUrls = [];
+    let skippedCount = 0;
     
     // Count URLs (skip header row)
     for (let i = 1; i < lines.length; i++) {
@@ -136,12 +153,30 @@ export default async function handler(req, res) {
           const url = columns[urlColumnIndex].trim().replace(/^"|"$/g, '');
           if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
             urlCount++;
+            if (sampleUrls.length < 3) {
+              sampleUrls.push(url);
+            }
+          } else if (url) {
+            // Log first few non-URL values to debug
+            if (skippedCount < 3) {
+              console.log(`⚠ Skipped non-URL value in column ${urlColumnIndex}: "${url.substring(0, 50)}"`);
+              skippedCount++;
+            }
           }
         }
       } catch (e) {
         // Skip malformed lines
+        if (skippedCount < 3) {
+          console.log(`⚠ Error parsing line ${i}: ${e.message}`);
+          skippedCount++;
+        }
         continue;
       }
+    }
+    
+    console.log(`✓ Found ${urlCount} URLs`);
+    if (sampleUrls.length > 0) {
+      console.log(`  Sample URLs: ${sampleUrls.join(', ')}`);
     }
     
     console.log(`✓ CSV parsed: ${urlCount} URLs found from ${source}`);
