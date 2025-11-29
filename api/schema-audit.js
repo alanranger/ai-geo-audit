@@ -78,6 +78,108 @@ function detectRichResultEligibility(typesArray) {
 }
 
 /**
+ * Get parent collection page URL for a given URL
+ * Returns null if no parent collection page exists
+ */
+function getParentCollectionPageUrl(url) {
+  try {
+    const urlObj = new URL(url);
+    const pathname = urlObj.pathname;
+    
+    // Blog posts -> blog index
+    if (pathname.startsWith('/blog-on-photography/') && pathname !== '/blog-on-photography') {
+      return `${urlObj.origin}/blog-on-photography`;
+    }
+    
+    // Workshops -> workshops listing
+    if (pathname.startsWith('/photographic-workshops-near-me/') && pathname !== '/photographic-workshops-near-me') {
+      return `${urlObj.origin}/photographic-workshops-near-me`;
+    }
+    
+    // Lessons -> lessons listing
+    if (pathname.startsWith('/beginners-photography-lessons/') && pathname !== '/beginners-photography-lessons') {
+      return `${urlObj.origin}/beginners-photography-lessons`;
+    }
+    
+    // Events -> events listing (if different from workshops)
+    if (pathname.startsWith('/photography-services-near-me/') && pathname !== '/photography-services-near-me') {
+      // Check if it's an event/product page
+      return `${urlObj.origin}/photography-services-near-me`;
+    }
+    
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Check if a URL is listed in a parent collection page's ItemList schema
+ */
+async function checkInheritedSchema(url, parentCollectionUrl) {
+  try {
+    const response = await fetch(parentCollectionUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; AI-GEO-Audit/1.0; +https://ai-geo-audit.vercel.app)'
+      },
+      signal: AbortSignal.timeout(10000)
+    });
+    
+    if (!response.ok) {
+      return false;
+    }
+    
+    const html = await response.text();
+    const schemas = extractJsonLd(html);
+    
+    // Normalize the URL for comparison (remove trailing slashes, etc.)
+    const normalizedUrl = url.replace(/\/$/, '');
+    
+    // Look for ItemList schema that contains this URL
+    for (const schema of schemas) {
+      const types = normalizeSchemaTypes(schema);
+      
+      // Check if this is an ItemList or CollectionPage
+      if (types.includes('ItemList') || types.includes('CollectionPage')) {
+        // Check itemListElement array
+        const itemList = schema.itemListElement || schema['@graph']?.find(item => 
+          normalizeSchemaTypes(item).includes('ItemList')
+        )?.itemListElement;
+        
+        if (Array.isArray(itemList)) {
+          for (const item of itemList) {
+            // Check if item has a URL that matches
+            const itemUrl = item.url || item['@id'] || item.item?.url || item.item?.['@id'];
+            if (itemUrl) {
+              const normalizedItemUrl = itemUrl.replace(/\/$/, '');
+              if (normalizedItemUrl === normalizedUrl || normalizedItemUrl.includes(normalizedUrl) || normalizedUrl.includes(normalizedItemUrl)) {
+                return true;
+              }
+            }
+            
+            // Also check nested items
+            if (item.item) {
+              const nestedUrl = item.item.url || item.item['@id'];
+              if (nestedUrl) {
+                const normalizedNestedUrl = nestedUrl.replace(/\/$/, '');
+                if (normalizedNestedUrl === normalizedUrl || normalizedNestedUrl.includes(normalizedUrl) || normalizedUrl.includes(normalizedNestedUrl)) {
+                  return true;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    return false;
+  } catch (error) {
+    // Silently fail - don't break the audit if parent page check fails
+    return false;
+  }
+}
+
+/**
  * Parse CSV and extract URLs from column A (skip header)
  */
 async function parseCsvUrls() {
@@ -337,19 +439,22 @@ export default async function handler(req, res) {
     const crawlPromises = urls.map(url => crawlUrl(url, semaphore));
     const results = await Promise.all(crawlPromises);
     
-    // Aggregate results
+    // Aggregate results - first pass: check inline schema
     const totalPages = results.length;
     let pagesWithSchema = 0;
+    let pagesWithInheritedSchema = 0;
     const schemaTypes = {};
     const allTypes = new Set();
     const errors = [];
     const richEligible = {};
+    const pagesNeedingInheritanceCheck = []; // URLs without inline schema
     
     // Initialize rich eligible map
     RICH_RESULT_TYPES.forEach(type => {
       richEligible[type] = false;
     });
     
+    // First pass: check for inline schema
     results.forEach(result => {
       if (!result.success) {
         errors.push({
@@ -359,34 +464,71 @@ export default async function handler(req, res) {
         return;
       }
       
-      if (result.schemas.length === 0) {
-        return; // No schema on this page
-      }
+      const hasInlineSchema = result.schemas.length > 0;
       
-      pagesWithSchema++;
-      
-      // Collect all types from this page
-      const pageTypes = new Set();
-      result.schemas.forEach(schema => {
-        const types = normalizeSchemaTypes(schema);
-        types.forEach(type => {
-          pageTypes.add(type);
-          allTypes.add(type);
-          schemaTypes[type] = (schemaTypes[type] || 0) + 1;
+      if (hasInlineSchema) {
+        pagesWithSchema++;
+        
+        // Collect all types from this page
+        const pageTypes = new Set();
+        result.schemas.forEach(schema => {
+          const types = normalizeSchemaTypes(schema);
+          types.forEach(type => {
+            pageTypes.add(type);
+            allTypes.add(type);
+            schemaTypes[type] = (schemaTypes[type] || 0) + 1;
+          });
         });
-      });
-      
-      // Check rich result eligibility
-      const pageTypesArray = Array.from(pageTypes);
-      const pageEligible = detectRichResultEligibility(pageTypesArray);
-      RICH_RESULT_TYPES.forEach(type => {
-        if (pageEligible[type]) {
-          richEligible[type] = true;
+        
+        // Check rich result eligibility
+        const pageTypesArray = Array.from(pageTypes);
+        const pageEligible = detectRichResultEligibility(pageTypesArray);
+        RICH_RESULT_TYPES.forEach(type => {
+          if (pageEligible[type]) {
+            richEligible[type] = true;
+          }
+        });
+      } else {
+        // No inline schema - check if we should look for inherited schema
+        const parentUrl = getParentCollectionPageUrl(result.url);
+        if (parentUrl) {
+          pagesNeedingInheritanceCheck.push({
+            url: result.url,
+            parentUrl: parentUrl
+          });
         }
-      });
+      }
     });
     
-    // Calculate coverage
+    // Second pass: check for inherited schema (only for pages without inline schema)
+    if (pagesNeedingInheritanceCheck.length > 0) {
+      console.log(`Checking ${pagesNeedingInheritanceCheck.length} pages for inherited schema from parent collection pages...`);
+      const inheritanceCheckSemaphore = new Semaphore(2); // Lower concurrency for parent page checks
+      const inheritanceChecks = pagesNeedingInheritanceCheck.map(async ({ url, parentUrl }) => {
+        await inheritanceCheckSemaphore.acquire();
+        try {
+          const hasInherited = await checkInheritedSchema(url, parentUrl);
+          return { url, hasInherited };
+        } finally {
+          inheritanceCheckSemaphore.release();
+        }
+      });
+      
+      const inheritanceResults = await Promise.all(inheritanceChecks);
+      
+      // Process inheritance results
+      inheritanceResults.forEach(({ url, hasInherited }) => {
+        if (hasInherited) {
+          pagesWithInheritedSchema++;
+          // Note: inherited schema doesn't contribute to schemaTypes count
+          // as it's from the parent page, not this page
+        }
+      });
+      
+      console.log(`Found ${pagesWithInheritedSchema} pages with inherited schema`);
+    }
+    
+    // Calculate coverage (pages with inline schema only - inherited doesn't count for coverage)
     const coverage = totalPages > 0 ? (pagesWithSchema / totalPages) * 100 : 0;
     
     // Determine missing types (common types that should be present)
@@ -403,8 +545,9 @@ export default async function handler(req, res) {
       source: 'schema-audit',
       data: {
         totalPages,
-        pagesWithSchema,
-        coverage: Math.round(coverage * 100) / 100,
+        pagesWithSchema, // Pages with inline schema
+        pagesWithInheritedSchema, // Pages with inherited schema only
+        coverage: Math.round(coverage * 100) / 100, // Coverage based on inline schema only
         schemaTypes: schemaTypesArray,
         missingTypes: missingTypes.length > 0 ? missingTypes : undefined,
         richEligible,
@@ -413,7 +556,8 @@ export default async function handler(req, res) {
       meta: {
         generatedAt: new Date().toISOString(),
         urlsScanned: totalPages,
-        urlsWithSchema: pagesWithSchema
+        urlsWithSchema: pagesWithSchema,
+        urlsWithInheritedSchema: pagesWithInheritedSchema
       }
     });
     
