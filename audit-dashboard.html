@@ -1713,6 +1713,47 @@
                   ctx.stroke();
                 });
               });
+            },
+            afterDraw: (chart) => {
+              // Custom legend rendering to show line styles
+              const legend = chart.legend;
+              if (!legend || !legend.legendItems) return;
+              
+              const ctx = chart.ctx;
+              const legendOpts = chart.options.plugins.legend;
+              const labels = legend.legendItems;
+              
+              if (!labels || labels.length === 0) return;
+              
+              ctx.save();
+              
+              labels.forEach((item, i) => {
+                const dataset = chart.data.datasets[i];
+                if (!dataset) return;
+                
+                // Get legend item position
+                const boxWidth = legendOpts.labels.boxWidth || 40;
+                const x = item.fillStyle ? (item.textX - boxWidth - 5) : item.x;
+                const y = item.y;
+                
+                // Draw line segment with appropriate style
+                ctx.strokeStyle = '#666'; // Use neutral color for legend
+                ctx.lineWidth = 3;
+                
+                if (dataset.borderDash && dataset.borderDash.length > 0) {
+                  ctx.setLineDash(dataset.borderDash);
+                } else {
+                  ctx.setLineDash([]); // Solid line
+                }
+                
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+                ctx.lineTo(x + boxWidth, y);
+                ctx.stroke();
+                ctx.setLineDash([]); // Reset
+              });
+              
+              ctx.restore();
             }
           };
           
