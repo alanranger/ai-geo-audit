@@ -2198,10 +2198,21 @@
           return d;
         });
         
-        // Create labels array with appropriate spacing
+        // Create labels array with appropriate spacing and year detection
+        let lastVisibleYear = null;
         const dates = allDates.map((d, i) => {
           if (i % labelStep === 0 || i === allDates.length - 1) {
-            return d.toLocaleDateString('en-GB', dateFormat);
+            const currentYear = d.getFullYear();
+            const formattedDate = d.toLocaleDateString('en-GB', dateFormat);
+            
+            // Add year if it changed from the last visible label
+            if (lastVisibleYear !== null && currentYear !== lastVisibleYear) {
+              lastVisibleYear = currentYear;
+              return `${formattedDate} ${currentYear}`;
+            }
+            
+            lastVisibleYear = currentYear;
+            return formattedDate;
           }
           return ''; // Empty string for labels we don't want to show
         });
@@ -2244,6 +2255,7 @@
             authorityData = [];
             visibilityData = [];
             contentSchemaData = [];
+            const allDateObjects = []; // Store Date objects for year detection
             const allDates = [];
             
             timeseries.forEach(point => {
@@ -2256,12 +2268,23 @@
               
               // Format date for chart (timeseries dates are YYYY-MM-DD)
               const dateObj = new Date(point.date);
+              allDateObjects.push(dateObj);
               allDates.push(dateObj.toLocaleDateString('en-GB', dateFormat));
             });
             
-            // Apply label spacing to dates (show every labelStep-th label)
+            // Apply label spacing to dates with year detection (show every labelStep-th label)
+            let lastVisibleYear = null;
             chartDates = allDates.map((d, i) => {
               if (i % labelStep === 0 || i === allDates.length - 1) {
+                const currentYear = allDateObjects[i].getFullYear();
+                
+                // Add year if it changed from the last visible label
+                if (lastVisibleYear !== null && currentYear !== lastVisibleYear) {
+                  lastVisibleYear = currentYear;
+                  return `${d} ${currentYear}`;
+                }
+                
+                lastVisibleYear = currentYear;
                 return d;
               }
               return ''; // Empty string for labels we don't want to show
