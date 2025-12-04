@@ -2382,6 +2382,60 @@
             ].join('');
           }
           
+          // Plugin to make year transition labels bold
+          const yearLabelBoldPlugin = {
+            id: 'yearLabelBold',
+            afterDraw: (chart) => {
+              const xScale = chart.scales.x;
+              const ctx = chart.ctx;
+              const rotation = -45 * (Math.PI / 180); // -45 degrees in radians
+              
+              // Get the chart dates array from the chart's data labels
+              const chartDates = chart.data.labels || [];
+              
+              // Iterate through all visible ticks
+              xScale.ticks.forEach((tick, index) => {
+                const label = chartDates[index] || '';
+                // Check if label contains a year (4-digit number at the end)
+                if (label && /\d{4}$/.test(label)) {
+                  const tickPosition = xScale.getPixelForTick(index);
+                  const yPosition = chart.chartArea.bottom + 20;
+                  
+                  // Save context
+                  ctx.save();
+                  
+                  // Translate to tick position and rotate
+                  ctx.translate(tickPosition, yPosition);
+                  ctx.rotate(rotation);
+                  
+                  // Set bold font with larger size
+                  ctx.font = 'bold 13px Arial';
+                  ctx.fillStyle = '#000';
+                  ctx.textAlign = 'center';
+                  ctx.textBaseline = 'middle';
+                  
+                  // Measure text to clear area properly
+                  const metrics = ctx.measureText(label);
+                  const textWidth = metrics.width;
+                  const textHeight = 16;
+                  
+                  // Clear a larger area to remove the original label
+                  ctx.globalCompositeOperation = 'destination-out';
+                  ctx.fillRect(-textWidth/2 - 5, -textHeight/2 - 2, textWidth + 10, textHeight + 4);
+                  
+                  // Switch back to normal drawing
+                  ctx.globalCompositeOperation = 'source-over';
+                  
+                  // Draw bold label
+                  ctx.fillText(label, 0, 0);
+                  
+                  // Restore context
+                  ctx.restore();
+                }
+              });
+            }
+          };
+          
           // Plugin to add RAG background bands (kept simple)
           const ragBackgroundPlugin = {
             id: 'ragBackground',
@@ -2473,7 +2527,7 @@
                 }
               ]
             },
-            plugins: [ragBackgroundPlugin],
+            plugins: [ragBackgroundPlugin, yearLabelBoldPlugin],
             options: {
               responsive: true,
               maintainAspectRatio: false,
@@ -2491,16 +2545,9 @@
                   ticks: {
                     maxRotation: 45,
                     minRotation: 45,
-                    font: function(context) {
-                      // Get the label from the chartDates array using the tick index
-                      const tickIndex = context.index;
-                      const label = chartDates[tickIndex] || '';
-                      // Check if label contains a year (4-digit number at the end)
-                      const hasYear = label && /\d{4}$/.test(label);
-                      return {
-                        size: 11,
-                        weight: hasYear ? 'bold' : 'normal'
-                      };
+                    font: {
+                      size: 11,
+                      weight: 'normal'
                     },
                     callback: function(value, index) {
                       // Only show non-empty labels
