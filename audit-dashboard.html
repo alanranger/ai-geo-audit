@@ -2438,7 +2438,7 @@
             }
           };
           
-          // Plugin to add RAG background bands (kept simple)
+          // Plugin to add RAG background bands with stronger contrast
           const ragBackgroundPlugin = {
             id: 'ragBackground',
             beforeDraw: (chart) => {
@@ -2446,29 +2446,78 @@
               const chartArea = chart.chartArea;
               const yScale = chart.scales.y;
               
-              // Red zone (0-39)
+              // Red zone (0-39) - increased opacity and saturation
               if (yAxisMin <= 39) {
                 const start = Math.max(chartArea.top, yScale.getPixelForValue(Math.max(0, yAxisMin)));
                 const end = Math.min(chartArea.bottom, yScale.getPixelForValue(Math.min(39, yAxisMax)));
-                ctx.fillStyle = 'rgba(239, 68, 68, 0.08)';
+                ctx.fillStyle = 'rgba(220, 38, 38, 0.18)'; // More saturated red, higher opacity
                 ctx.fillRect(chartArea.left, start, chartArea.right - chartArea.left, end - start);
               }
               
-              // Amber zone (40-69)
+              // Amber zone (40-69) - increased opacity and saturation
               if (yAxisMin <= 69 && yAxisMax >= 40) {
                 const start = Math.max(chartArea.top, yScale.getPixelForValue(Math.max(40, yAxisMin)));
                 const end = Math.min(chartArea.bottom, yScale.getPixelForValue(Math.min(69, yAxisMax)));
-                ctx.fillStyle = 'rgba(245, 158, 11, 0.08)';
+                ctx.fillStyle = 'rgba(234, 179, 8, 0.18)'; // More saturated amber/yellow, higher opacity
                 ctx.fillRect(chartArea.left, start, chartArea.right - chartArea.left, end - start);
               }
               
-              // Green zone (70-100)
+              // Green zone (70-100) - increased opacity and saturation
               if (yAxisMax >= 70) {
                 const start = Math.max(chartArea.top, yScale.getPixelForValue(Math.max(70, yAxisMin)));
                 const end = Math.min(chartArea.bottom, yScale.getPixelForValue(Math.min(100, yAxisMax)));
-                ctx.fillStyle = 'rgba(16, 185, 129, 0.08)';
+                ctx.fillStyle = 'rgba(22, 163, 74, 0.18)'; // More saturated green, higher opacity
                 ctx.fillRect(chartArea.left, start, chartArea.right - chartArea.left, end - start);
               }
+            }
+          };
+          
+          // Plugin to draw vertical dividing lines at year transitions
+          const yearDividingLinePlugin = {
+            id: 'yearDividingLine',
+            afterDraw: (chart) => {
+              const xScale = chart.scales.x;
+              const ctx = chart.ctx;
+              const chartArea = chart.chartArea;
+              const chartDates = chart.data.labels || [];
+              
+              // Store year transitions we've found
+              const yearTransitions = [];
+              let lastYear = null;
+              
+              // First pass: identify year transitions from labels
+              chartDates.forEach((label, index) => {
+                if (label && /\d{4}$/.test(label)) {
+                  // Extract year from label (4 digits at the end)
+                  const yearMatch = label.match(/(\d{4})$/);
+                  if (yearMatch) {
+                    const currentYear = parseInt(yearMatch[1]);
+                    if (lastYear !== null && currentYear !== lastYear) {
+                      yearTransitions.push(index);
+                    }
+                    lastYear = currentYear;
+                  }
+                }
+              });
+              
+              // Draw vertical lines at year transitions
+              yearTransitions.forEach((dataIndex) => {
+                // Get pixel position for this data point
+                const tickPosition = xScale.getPixelForValue(dataIndex);
+                
+                // Only draw if within chart area
+                if (tickPosition >= chartArea.left && tickPosition <= chartArea.right) {
+                  ctx.save();
+                  ctx.strokeStyle = 'rgba(120, 120, 120, 0.6)'; // Medium grey, more visible
+                  ctx.lineWidth = 2.5;
+                  ctx.setLineDash([8, 4]); // Dashed line pattern
+                  ctx.beginPath();
+                  ctx.moveTo(tickPosition, chartArea.top);
+                  ctx.lineTo(tickPosition, chartArea.bottom);
+                  ctx.stroke();
+                  ctx.restore();
+                }
+              });
             }
           };
           
@@ -2529,7 +2578,7 @@
                 }
               ]
             },
-            plugins: [ragBackgroundPlugin, yearLabelBoldPlugin],
+            plugins: [ragBackgroundPlugin, yearLabelBoldPlugin, yearDividingLinePlugin],
             options: {
               responsive: true,
               maintainAspectRatio: false,
