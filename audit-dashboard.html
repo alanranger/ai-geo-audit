@@ -2390,14 +2390,16 @@
               const ctx = chart.ctx;
               const rotation = -45 * (Math.PI / 180); // -45 degrees in radians
               
-              // Get the chart dates array from the chart's data labels
+              // Get the chart dates array from the chart's data labels (original labels before callback)
               const chartDates = chart.data.labels || [];
               
               // Iterate through all visible ticks
               xScale.ticks.forEach((tick, index) => {
-                const label = chartDates[index] || '';
-                // Check if label contains a year (4-digit number at the end)
-                if (label && /\d{4}$/.test(label)) {
+                // Get original label from chartDates (before callback processing)
+                const originalLabel = chartDates[index] || '';
+                // Check if original label contains a year (4-digit number at the end)
+                if (originalLabel && /\d{4}$/.test(originalLabel)) {
+                  const label = originalLabel;
                   const tickPosition = xScale.getPixelForTick(index);
                   const yPosition = chart.chartArea.bottom + 20;
                   
@@ -2552,6 +2554,10 @@
                     callback: function(value, index) {
                       // Only show non-empty labels
                       const label = this.getLabelForValue(value);
+                      // Hide year labels (they'll be drawn by plugin in bold)
+                      if (label && /\d{4}$/.test(label)) {
+                        return ''; // Return empty to hide, plugin will draw it
+                      }
                       return label || '';
                     }
                   },
