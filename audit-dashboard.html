@@ -211,8 +211,8 @@
       overflow: visible; /* Allow axis labels to extend beyond container */
     }
     .chart-container.large {
-      height: 700px;
-      min-height: 700px;
+      height: 900px;
+      min-height: 900px;
       padding: 2rem;
     }
     .dashboard-two-column {
@@ -2403,15 +2403,14 @@
               // Get the chart dates array from the chart's data labels (original labels before callback)
               const chartDates = chart.data.labels || [];
               
-              // Iterate through all visible ticks
-              xScale.ticks.forEach((tick, index) => {
-                // Get original label from chartDates (before callback processing)
-                const originalLabel = chartDates[index] || '';
+              // Iterate through all data points to find year labels
+              chartDates.forEach((originalLabel, dataIndex) => {
                 // Check if original label contains a year (4-digit number at the end)
                 if (originalLabel && /\d{4}$/.test(originalLabel)) {
                   const label = originalLabel;
-                  const tickPosition = xScale.getPixelForTick(index);
-                  const yPosition = chart.chartArea.bottom + 20;
+                  // Get pixel position for this data point
+                  const tickPosition = xScale.getPixelForValue(dataIndex);
+                  const yPosition = chart.chartArea.bottom + 25;
                   
                   // Save context
                   ctx.save();
@@ -2421,7 +2420,7 @@
                   ctx.rotate(rotation);
                   
                   // Set bold font with larger size
-                  ctx.font = 'bold 13px Arial';
+                  ctx.font = 'bold 14px Arial';
                   ctx.fillStyle = '#000';
                   ctx.textAlign = 'center';
                   ctx.textBaseline = 'middle';
@@ -2429,11 +2428,11 @@
                   // Measure text to clear area properly
                   const metrics = ctx.measureText(label);
                   const textWidth = metrics.width;
-                  const textHeight = 16;
+                  const textHeight = 18;
                   
                   // Clear a larger area to remove the original label
                   ctx.globalCompositeOperation = 'destination-out';
-                  ctx.fillRect(-textWidth/2 - 5, -textHeight/2 - 2, textWidth + 10, textHeight + 4);
+                  ctx.fillRect(-textWidth/2 - 6, -textHeight/2 - 3, textWidth + 12, textHeight + 6);
                   
                   // Switch back to normal drawing
                   ctx.globalCompositeOperation = 'source-over';
@@ -2518,15 +2517,18 @@
                 // Get pixel position for this data point
                 const tickPosition = xScale.getPixelForValue(dataIndex);
                 
-                // Only draw if within chart area
+                // Only draw if within chart area horizontally
                 if (tickPosition >= chartArea.left && tickPosition <= chartArea.right) {
                   ctx.save();
-                  ctx.strokeStyle = 'rgba(150, 150, 150, 0.5)'; // Light grey
-                  ctx.lineWidth = 1.5;
-                  ctx.setLineDash([2, 3]); // Dotted line pattern (small dots)
+                  ctx.strokeStyle = 'rgba(120, 120, 120, 0.7)'; // Medium grey, more visible
+                  ctx.lineWidth = 3; // Thicker lines
+                  ctx.setLineDash([3, 4]); // Dotted line pattern
                   ctx.beginPath();
-                  ctx.moveTo(tickPosition, chartArea.top);
-                  ctx.lineTo(tickPosition, chartArea.bottom);
+                  // Extend line beyond chart area to reach axis labels
+                  const lineTop = chartArea.top - 10; // Extend above chart
+                  const lineBottom = chartArea.bottom + 50; // Extend below chart to reach axis labels
+                  ctx.moveTo(tickPosition, lineTop);
+                  ctx.lineTo(tickPosition, lineBottom);
                   ctx.stroke();
                   ctx.restore();
                 }
@@ -2598,7 +2600,7 @@
               animation: false, // Disable animation for better performance when changing periods
               layout: {
                 padding: {
-                  bottom: 40, // Extra padding for rotated X-axis labels
+                  bottom: 60, // Extra padding for rotated X-axis labels and extended lines
                   left: 10,
                   right: 10,
                   top: 10
