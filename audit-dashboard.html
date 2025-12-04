@@ -2185,7 +2185,7 @@
           dateFormat = { month: 'short', day: 'numeric' };
         }
         
-        // Generate date labels
+        // Generate date labels and store Date objects
         const allDates = Array.from({ length: numDataPoints }, (_, i) => {
           const d = new Date();
           if (dateRange <= 90) {
@@ -2197,6 +2197,9 @@
           }
           return d;
         });
+        
+        // Store Date objects for period detection (for mock data)
+        const mockDateObjects = allDates.slice();
         
         // Create labels array with appropriate spacing and year detection
         let lastVisibleYear = null;
@@ -2216,6 +2219,9 @@
           }
           return ''; // Empty string for labels we don't want to show
         });
+        
+        // Store date objects for mock data (will be updated if timeseries data exists)
+        chartDateObjects = mockDateObjects;
         debugLog('Creating new Chart instance for trend chart...', 'info');
         try {
           // Use real timeseries data from GSC API
@@ -2225,6 +2231,7 @@
           // If we have timeseries data, use it; otherwise fall back to mock data
           let localEntityData, serviceAreaData, authorityData, visibilityData, contentSchemaData;
           let chartDates = dates;
+          let chartDateObjects = []; // Store Date objects for period detection
           
           if (timeseries.length > 0) {
             // Calculate pillar scores for each timeseries point
@@ -2289,6 +2296,9 @@
               }
               return ''; // Empty string for labels we don't want to show
             });
+            
+            // Store date objects for timeseries data
+            chartDateObjects = allDateObjects;
           } else {
             // Fallback to mock data if no timeseries available
             debugLog('No timeseries data available, using mock data', 'warn');
@@ -2472,45 +2482,48 @@
             }
           };
           
-          // Plugin to draw vertical dividing lines at year transitions
-          const yearDividingLinePlugin = {
-            id: 'yearDividingLine',
+          // Plugin to draw vertical dividing lines at period transitions (months and years)
+          const periodDividingLinePlugin = {
+            id: 'periodDividingLine',
             afterDraw: (chart) => {
               const xScale = chart.scales.x;
               const ctx = chart.ctx;
               const chartArea = chart.chartArea;
-              const chartDates = chart.data.labels || [];
               
-              // Store year transitions we've found
-              const yearTransitions = [];
+              // Detect period transitions (month and year changes)
+              const periodTransitions = [];
+              let lastMonth = null;
               let lastYear = null;
               
-              // First pass: identify year transitions from labels
-              chartDates.forEach((label, index) => {
-                if (label && /\d{4}$/.test(label)) {
-                  // Extract year from label (4 digits at the end)
-                  const yearMatch = label.match(/(\d{4})$/);
-                  if (yearMatch) {
-                    const currentYear = parseInt(yearMatch[1]);
-                    if (lastYear !== null && currentYear !== lastYear) {
-                      yearTransitions.push(index);
+              // Use stored date objects to detect month/year changes
+              chartDateObjects.forEach((dateObj, index) => {
+                if (dateObj instanceof Date) {
+                  const currentMonth = dateObj.getMonth(); // 0-11
+                  const currentYear = dateObj.getFullYear();
+                  
+                  // Check for month or year transition
+                  if (lastMonth !== null && lastYear !== null) {
+                    if (currentYear !== lastYear || currentMonth !== lastMonth) {
+                      periodTransitions.push(index);
                     }
-                    lastYear = currentYear;
                   }
+                  
+                  lastMonth = currentMonth;
+                  lastYear = currentYear;
                 }
               });
               
-              // Draw vertical lines at year transitions
-              yearTransitions.forEach((dataIndex) => {
+              // Draw vertical dotted lines at period transitions
+              periodTransitions.forEach((dataIndex) => {
                 // Get pixel position for this data point
                 const tickPosition = xScale.getPixelForValue(dataIndex);
                 
                 // Only draw if within chart area
                 if (tickPosition >= chartArea.left && tickPosition <= chartArea.right) {
                   ctx.save();
-                  ctx.strokeStyle = 'rgba(120, 120, 120, 0.6)'; // Medium grey, more visible
-                  ctx.lineWidth = 2.5;
-                  ctx.setLineDash([8, 4]); // Dashed line pattern
+                  ctx.strokeStyle = 'rgba(150, 150, 150, 0.5)'; // Light grey
+                  ctx.lineWidth = 1.5;
+                  ctx.setLineDash([2, 3]); // Dotted line pattern (small dots)
                   ctx.beginPath();
                   ctx.moveTo(tickPosition, chartArea.top);
                   ctx.lineTo(tickPosition, chartArea.bottom);
@@ -2578,7 +2591,7 @@
                 }
               ]
             },
-            plugins: [ragBackgroundPlugin, yearLabelBoldPlugin, yearDividingLinePlugin],
+            plugins: [ragBackgroundPlugin, yearLabelBoldPlugin, periodDividingLinePlugin],
             options: {
               responsive: true,
               maintainAspectRatio: false,
