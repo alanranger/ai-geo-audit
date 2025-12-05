@@ -1545,6 +1545,9 @@
         html += `</div>`;
         
         if (failedPages > 0) {
+          // Get failed URLs from missingSchemaPages that have errors
+          const failedUrls = (data.missingSchemaPages || []).filter(p => p.error).map(p => p.url);
+          
           html += `<div style="background: #fef2f2; border-left: 4px solid #ef4444; padding: 1rem; border-radius: 4px; margin-bottom: 1rem;">`;
           html += `<div style="font-size: 0.85rem; color: #666; margin-bottom: 0.25rem;">Failed Crawls</div>`;
           html += `<div style="font-size: 1.5rem; font-weight: 600; color: #ef4444;">${failedPages}</div>`;
@@ -1557,6 +1560,17 @@
             });
             html += `</div>`;
           }
+          
+          // Add retry button if there are failed URLs
+          if (failedUrls.length > 0) {
+            html += `<div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #fee2e2;">`;
+            html += `<button id="retryFailedUrls" class="btn" style="background: #10b981; color: white; border-color: #10b981; width: 100%;" title="Retry crawling the ${failedUrls.length} failed URLs. This will rescan only the URLs that failed during the initial audit.">`;
+            html += `🔄 Retry Failed URLs (${failedUrls.length})`;
+            html += `</button>`;
+            html += `<div style="font-size: 0.8rem; color: #666; margin-top: 0.5rem; text-align: center;">Click to rescan only the failed URLs</div>`;
+            html += `</div>`;
+          }
+          
           html += `</div>`;
         }
         
@@ -1575,6 +1589,93 @@
       modal.style.display = 'block';
       debugLog('Modal display set to block', 'info');
       debugLog(`Modal is now visible: ${modal.style.display}`, 'info');
+      
+      // Attach retry button handler if it exists
+      const retryButton = document.getElementById('retryFailedUrls');
+      if (retryButton) {
+        retryButton.onclick = function() {
+          retryFailedUrls(schemaAudit);
+        };
+      }
+    }
+    
+    // Retry failed URLs from schema audit
+    async function retryFailedUrls(schemaAudit) {
+      if (!schemaAudit || !schemaAudit.data || !schemaAudit.data.missingSchemaPages) {
+        debugLog('✗ No failed URLs to retry', 'error');
+        showStatus('No failed URLs found to retry', 'error');
+        return;
+      }
+      
+      // Extract failed URLs (those with errors)
+      const failedUrls = schemaAudit.data.missingSchemaPages
+        .filter(p => p.error)
+        .map(p => p.url);
+      
+      if (failedUrls.length === 0) {
+        debugLog('✗ No failed URLs to retry', 'error');
+        showStatus('No failed URLs found to retry', 'error');
+        return;
+      }
+      
+      debugLog(`🔄 Retrying ${failedUrls.length} failed URLs...`, 'info');
+      showStatus(`Retrying ${failedUrls.length} failed URLs...`, 'info');
+      
+      // Close the modal
+      closeCompletionModal();
+      
+      // Show loading indicator
+      document.getElementById('loading').classList.add('show');
+      document.getElementById('dashboard').style.display = 'none';
+      updateProgress(0, `Retrying ${failedUrls.length} failed URLs...`);
+      
+      try {
+        updateProgress(20, 'Scanning failed URLs for schema markup...');
+        debugLog(`Sending retry request for ${failedUrls.length} URLs`, 'info');
+        
+        // Call schema-audit API with only the failed URLs
+        const schemaResponse = await fetch('/api/schema-audit', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ urls: failedUrls })
+        });
+        
+        if (!schemaResponse.ok) {
+          throw new Error(`Schema audit API returned error: ${schemaResponse.status}`);
+        }
+        
+        const retrySchemaAudit = await schemaResponse.json();
+        
+        if (retrySchemaAudit.status !== 'ok') {
+          throw new Error(retrySchemaAudit.message || 'Schema audit failed');
+        }
+        
+        const retryData = retrySchemaAudit.data;
+        const retrySuccessful = retryData.pagesWithSchema || 0;
+        const retryStillFailed = (retryData.missingSchemaCount || 0);
+        
+        debugLog(`✓ Retry completed: ${retrySuccessful} pages now have schema, ${retryStillFailed} still failed`, 'success');
+        updateProgress(80, 'Retry completed!');
+        
+        // Show completion modal with retry results
+        showCompletionModal(retrySchemaAudit);
+        
+        updateProgress(100, 'Retry completed!');
+        showStatus(`Retry completed: ${retrySuccessful} URLs now have schema, ${retryStillFailed} still failed`, 'success');
+        
+        debugLog('⚠ Note: Retry results shown separately. Run full audit to see merged results in main dashboard.', 'warn');
+        
+      } catch (error) {
+        debugLog(`✗ Retry error: ${error.message}`, 'error');
+        showStatus(`Error retrying failed URLs: ${error.message}`, 'error');
+      } finally {
+        document.getElementById('loading').classList.remove('show');
+        setTimeout(() => {
+          updateProgress(0, 'Initializing audit scan...');
+        }, 500);
+      }
     }
 
     // Close completion modal

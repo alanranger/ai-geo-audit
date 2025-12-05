@@ -554,8 +554,9 @@ Applied to all 5 pillar scores and snippet readiness.
 - [ ] Store historical audit results
 - [ ] Track score trends over time
 - [ ] Build comparison views (this week vs last week)
+- [ ] **Historical Schema Coverage Tracking**: Implement Supabase database with cron job to track schema coverage changes over time. This will enable real Content/Schema trend lines showing actual historical schema changes (currently shows flat line because schema audit is only run once per audit, not historically).
 
-**Current State**: No data persistence (each audit is independent)
+**Current State**: No data persistence (each audit is independent). Content/Schema trend shows current score for all historical points (schema is static snapshot).
 
 ---
 
