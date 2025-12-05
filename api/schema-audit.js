@@ -359,10 +359,30 @@ async function crawlUrl(url, semaphore) {
       schemas
     };
   } catch (error) {
+    // Categorize error types for better diagnostics
+    let errorType = 'Unknown';
+    let errorMessage = error.message || 'Unknown error';
+    
+    if (error.name === 'AbortError' || error.message.includes('timeout')) {
+      errorType = 'Timeout';
+      errorMessage = 'Request timed out after 10 seconds';
+    } else if (error.message.includes('fetch failed') || error.message.includes('ECONNREFUSED')) {
+      errorType = 'Connection Error';
+    } else if (error.message.includes('ENOTFOUND') || error.message.includes('DNS')) {
+      errorType = 'DNS Error';
+    } else if (error.message.includes('certificate') || error.message.includes('SSL')) {
+      errorType = 'SSL/Certificate Error';
+    } else if (error.message.includes('HTTP')) {
+      errorType = 'HTTP Error';
+    } else if (error.message.includes('network')) {
+      errorType = 'Network Error';
+    }
+    
     return {
       url,
       success: false,
-      error: error.message || 'Unknown error',
+      error: errorMessage,
+      errorType: errorType,
       schemas: []
     };
   } finally {
@@ -481,10 +501,37 @@ export default async function handler(req, res) {
     const richEligible = {};
     const pagesNeedingInheritanceCheck = []; // URLs without inline schema
     
+    // Track error types for diagnostics
+    const errorTypes = {};
+    const errorExamples = {}; // Store one example URL per error type
+    
     console.log(`📊 Starting schema audit aggregation:`);
     console.log(`  Total pages crawled: ${totalPages}`);
     console.log(`  Successful crawls: ${results.filter(r => r.success).length}`);
-    console.log(`  Failed crawls: ${results.filter(r => !r.success).length}`);
+    const failedResults = results.filter(r => !r.success);
+    console.log(`  Failed crawls: ${failedResults.length}`);
+    
+    // Analyze error types
+    failedResults.forEach(result => {
+      const errorType = result.errorType || 'Unknown';
+      errorTypes[errorType] = (errorTypes[errorType] || 0) + 1;
+      if (!errorExamples[errorType]) {
+        errorExamples[errorType] = {
+          url: result.url,
+          error: result.error
+        };
+      }
+    });
+    
+    if (Object.keys(errorTypes).length > 0) {
+      console.log(`📊 Error breakdown:`);
+      Object.entries(errorTypes).forEach(([type, count]) => {
+        console.log(`  • ${type}: ${count} pages`);
+        if (errorExamples[type]) {
+          console.log(`    Example: ${errorExamples[type].url} - ${errorExamples[type].error}`);
+        }
+      });
+    }
     
     // Initialize rich eligible map
     RICH_RESULT_TYPES.forEach(type => {
@@ -681,6 +728,8 @@ export default async function handler(req, res) {
       urlsWithoutSchemas: pagesWithoutSchemasArray.length > 0 && pagesWithoutSchemasArray.length <= 20 
         ? pagesWithoutSchemasArray 
         : (pagesWithoutSchemasArray.length > 20 ? pagesWithoutSchemasArray.slice(0, 20) : []),
+      errorTypes: Object.keys(errorTypes).length > 0 ? errorTypes : undefined,
+      errorExamples: Object.keys(errorExamples).length > 0 ? errorExamples : undefined,
       note: 'Failed crawls are counted as pages without schema since schema cannot be verified'
     };
     
