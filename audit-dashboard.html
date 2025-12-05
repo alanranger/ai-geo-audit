@@ -823,7 +823,7 @@
           <strong>Data Sources:</strong> Scores are calculated using data from Google Search Console API (impressions, clicks, position, queries), schema markup validation, local pack visibility metrics, and SERP feature tracking (featured snippets, AI Overviews, rich results).
         </p>
         <p style="color: #555; line-height: 1.6; margin-bottom: 0;">
-          <strong>Score Calculation:</strong> Each pillar combines multiple weighted factors: Local Entity (brand consistency, entity signals, NAP data), Service Area (geographic coverage, location schema), Authority (E-A-T: Experience, Expertise, Authoritativeness, Trustworthiness - content depth, backlinks, reviews, credentials, citations), Visibility (ranking positions, SERP features, CTR), and Content/Schema (structured data completeness, validation, rich result eligibility). Scores are normalized to 0-100 scale with thresholds: Green (70-100), Amber (40-69), Red (0-39).
+          <strong>Score Calculation:</strong> Each pillar combines multiple weighted factors: Local Entity (brand consistency, entity signals, NAP data), Service Area (geographic coverage, location schema), Authority (E-A-T: Experience, Expertise, Authoritativeness, Trustworthiness - content depth, backlinks, reviews, credentials, citations), Visibility (ranking positions, SERP features, CTR), and Content/Schema (Foundation schemas 30% + Rich Results 35% + Coverage 20% + Diversity 15%). Scores are normalized to 0-100 scale with thresholds: Green (70-100), Amber (40-69), Red (0-39).
         </p>
       </div>
 
@@ -896,17 +896,22 @@
           <h5>5. Content/Schema</h5>
           <p><strong>Measurement:</strong></p>
           <ul>
-            <li>Anchored around 70, with boost from visibility and real schema coverage</li>
-            <li>Formula: <code>contentSchema = 70 + 0.2 * (visibility - 60) + 0.1 * (coverageScore - 70)</code></li>
+            <li>Weighted calculation based on four components: Foundation schemas, Rich Results, Coverage, and Diversity</li>
+            <li>Formula: <code>contentSchema = (Foundation × 30%) + (Rich Results × 35%) + (Coverage × 20%) + (Diversity × 15%)</code></li>
+            <li><strong>Foundation Schemas (30%):</strong> Organization, Person, WebSite, BreadcrumbList presence. Score = (types present / 4) × 100</li>
+            <li><strong>Rich Results (35%):</strong> Article, Event, Course, FAQ, HowTo, VideoObject, Recipe, Product, LocalBusiness, Review eligibility. Score = (eligible types / 10) × 100</li>
+            <li><strong>Coverage (20%):</strong> Pages with schema / total pages. Score = coverage percentage</li>
+            <li><strong>Diversity (15%):</strong> Number of unique schema types across site. Score = min((unique types / 15) × 100, 100)</li>
+            <li><strong>Data Source:</strong> Schema audit API (crawls actual pages for JSON-LD markup)</li>
             <li>Uses real schema coverage from CSV-based audit (when available)</li>
             <li>Score range: 0-100</li>
           </ul>
           <p><strong>Data Sources:</strong></p>
           <ul>
-            <li>Google Search Console API (via visibility calculation)</li>
             <li>Schema Audit API: CSV-based domain crawl of all site URLs</li>
             <li>Schema markup detection and type counting</li>
-            <li>Rich result eligibility detection</li>
+            <li>Foundation schema presence detection (Organization, Person, WebSite, BreadcrumbList)</li>
+            <li>Rich result eligibility detection (Article, Event, Course, FAQ, HowTo, VideoObject, Recipe, Product, LocalBusiness, Review)</li>
           </ul>
           <p><strong>Data Checked:</strong> Total pages scanned, pages with schema, schema coverage percentage, schema types present (Organization, Person, LocalBusiness, Article, Course, Event, FAQ, HowTo, etc.), missing schema types, rich result eligibility (Article, Event, FAQ, Product, LocalBusiness, Course, Review, HowTo).</p>
 
@@ -1627,15 +1632,49 @@
       // Service Area: currently derived from Local Entity but slightly lower
       const serviceArea = clampScore(localEntity - 5);
 
-      // Content/Schema: use real schema coverage if available
+      // Content/Schema: weighted calculation based on foundation schemas, rich results, coverage, and diversity
       let contentSchema;
       if (schemaAudit && schemaAudit.status === 'ok' && schemaAudit.data) {
-        const coverageScore = schemaAudit.data.coverage || 0;
-        // Formula: 70 + 0.2 * (visibility - 60) + 0.1 * (coverageScore - 70)
-        contentSchema = clampScore(70 + 0.2 * (visibility - 60) + 0.1 * (coverageScore - 70));
+        const schemaData = schemaAudit.data;
+        const allTypes = new Set();
+        
+        // Collect all schema types from schemaTypes array
+        if (schemaData.schemaTypes && Array.isArray(schemaData.schemaTypes)) {
+          schemaData.schemaTypes.forEach(item => {
+            if (item.type) allTypes.add(item.type);
+          });
+        }
+        
+        // 1. Foundation Schemas Score (30% weight): Organization, Person, WebSite, BreadcrumbList
+        const foundationTypes = ['Organization', 'Person', 'WebSite', 'BreadcrumbList'];
+        const foundationPresent = foundationTypes.filter(type => allTypes.has(type)).length;
+        const foundationScore = (foundationPresent / foundationTypes.length) * 100;
+        
+        // 2. Rich Result Eligibility Score (35% weight): Count eligible rich result types
+        const richResultTypes = ['Article', 'Event', 'FAQPage', 'Product', 'LocalBusiness', 'Course', 'Review', 'HowTo', 'VideoObject', 'Recipe'];
+        const richEligibleCount = Object.values(schemaData.richEligible || {}).filter(eligible => eligible === true).length;
+        const richResultScore = (richEligibleCount / richResultTypes.length) * 100;
+        
+        // 3. Coverage Score (20% weight): Pages with schema / total pages
+        const coverageScore = schemaData.coverage || 0;
+        
+        // 4. Type Diversity Score (15% weight): Number of unique schema types (normalized to 15 types)
+        const uniqueTypesCount = allTypes.size;
+        const diversityScore = Math.min((uniqueTypesCount / 15) * 100, 100);
+        
+        // Weighted calculation: 30% foundation + 35% rich results + 20% coverage + 15% diversity
+        contentSchema = clampScore(
+          foundationScore * 0.30 +
+          richResultScore * 0.35 +
+          coverageScore * 0.20 +
+          diversityScore * 0.15
+        );
+        
+        debugLog(`Content/Schema calculation: Foundation=${foundationScore.toFixed(1)}% (${foundationPresent}/4), Rich Results=${richResultScore.toFixed(1)}% (${richEligibleCount}/10), Coverage=${coverageScore.toFixed(1)}%, Diversity=${diversityScore.toFixed(1)}% (${uniqueTypesCount} types)`, 'info');
       } else {
-        // Fallback: anchor around 70 with visibility boost
-        contentSchema = clampScore(70 + 0.2 * (visibility - 60));
+        // Fallback: if no schema audit data, return 0 (can't calculate without data)
+        contentSchema = 0;
+        debugLog('⚠ No schema audit data available, Content/Schema score set to 0', 'warn');
       }
 
       const scores = {
@@ -2036,13 +2075,13 @@
         const card = document.createElement('div');
         card.className = 'pillar-card';
         
-        // Get pillar description
+        // Get pillar description with data source info
         const descriptions = {
-          localEntity: 'How clearly your business and you as a person are recognised as entities by AI search systems.',
-          serviceArea: 'How well AI understands where you operate and which regions you serve.',
-          authority: 'E-A-T (Experience, Expertise, Authoritativeness, Trustworthiness): Perceived expertise and trust in the topic space (content depth, reviews, citations, credentials, demonstrated experience).',
-          visibility: 'How prominently your content appears in AI-powered search results and featured snippets.',
-          contentSchema: 'Quality and completeness of structured data markup across your domain.'
+          localEntity: 'How clearly your business and you as a person are recognised as entities by AI search systems. <strong>Data Source:</strong> ⚠️ Currently derived from search performance (GSC position/CTR). Real local signals API integration pending.',
+          serviceArea: 'How well AI understands where you operate and which regions you serve. <strong>Data Source:</strong> ⚠️ Currently derived from Local Entity score. Real service area data from Google Business Profile pending.',
+          authority: 'E-A-T (Experience, Expertise, Authoritativeness, Trustworthiness): Perceived expertise and trust in the topic space. <strong>Data Source:</strong> ✅ Live data from Google Search Console (CTR + position). Backlink metrics pending.',
+          visibility: 'How prominently your content appears in AI-powered search results and featured snippets. <strong>Data Source:</strong> ✅ Live data from Google Search Console (impressions, clicks, position, SERP features).',
+          contentSchema: 'Quality and completeness of structured data markup across your domain. <strong>Data Source:</strong> ✅ Live data from schema audit. <strong>Calculation:</strong> Foundation schemas (30%) + Rich Results (35%) + Coverage (20%) + Diversity (15%).'
         };
         
         card.innerHTML = `
@@ -2082,13 +2121,27 @@
                 const rag = getRAGStatus(score);
                 
                 // Build Content/Schema description with schema audit data
-                let contentSchemaDesc = 'Quality and completeness of structured data markup across your domain. <strong>AI Importance:</strong> Structured data is the primary way AI understands your content. Schema markup directly feeds AI systems, enabling them to extract facts, relationships, and context for use in AI Overviews and answer generation.';
+                let contentSchemaDesc = 'Quality and completeness of structured data markup across your domain. <strong>AI Importance:</strong> Structured data is the primary way AI understands your content. Schema markup directly feeds AI systems, enabling them to extract facts, relationships, and context for use in AI Overviews and answer generation. <strong>Data Source:</strong> ✅ <span style="color: #10b981;">Live data</span> from schema audit (crawls actual website pages for JSON-LD markup). <strong>Calculation:</strong> Weighted score based on Foundation schemas (30%), Rich Result eligibility (35%), Coverage (20%), and Type Diversity (15%).';
                 
                 if (schemaAudit && schemaAudit.status === 'ok' && schemaAudit.data) {
                   const schemaData = schemaAudit.data;
                   const { coverage, totalPages, pagesWithSchema, missingSchemaCount, missingSchemaPages, schemaTypes } = schemaData;
                   
-                  contentSchemaDesc += ` <strong>Data Checked:</strong> Total pages scanned: ${totalPages}, Pages with schema: ${pagesWithSchema}/${totalPages}. Pages without schema: ${missingSchemaCount || 0}. Schema coverage: ${coverage}%. `;
+                  // Calculate foundation schemas
+                  const allTypes = new Set();
+                  if (schemaTypes && Array.isArray(schemaTypes)) {
+                    schemaTypes.forEach(item => {
+                      if (item.type) allTypes.add(item.type);
+                    });
+                  }
+                  const foundationTypes = ['Organization', 'Person', 'WebSite', 'BreadcrumbList'];
+                  const foundationPresent = foundationTypes.filter(type => allTypes.has(type)).length;
+                  
+                  // Count rich result types
+                  const richEligibleCount = Object.values(schemaData.richEligible || {}).filter(eligible => eligible === true).length;
+                  const uniqueTypesCount = allTypes.size;
+                  
+                  contentSchemaDesc += ` <strong>Data Checked:</strong> Foundation schemas: ${foundationPresent}/4 (${foundationTypes.filter(t => allTypes.has(t)).join(', ') || 'none'}), Rich result types: ${richEligibleCount}/10 eligible, Coverage: ${coverage}% (${pagesWithSchema}/${totalPages} pages), Type diversity: ${uniqueTypesCount} unique types. `;
                   
                   if (schemaTypes && schemaTypes.length > 0) {
                     const topTypes = schemaTypes.slice(0, 10).map(t => `${t.type} (${t.count})`).join(', ');
@@ -2096,7 +2149,7 @@
                   }
                   
                   if (schemaData.missingTypes && schemaData.missingTypes.length > 0) {
-                    contentSchemaDesc += `Missing types: ${schemaData.missingTypes.join(', ')}. `;
+                    contentSchemaDesc += `Missing foundation types: ${schemaData.missingTypes.join(', ')}. `;
                   }
                   
                   const richTypes = Object.entries(schemaData.richEligible || {})
@@ -2106,18 +2159,153 @@
                     contentSchemaDesc += `Rich result eligible: ${richTypes.join(', ')}.`;
                   }
                 } else {
-                  contentSchemaDesc += ' <strong>Data Checked:</strong> Schema types present (Organization, Person, LocalBusiness, Article, Course, Event, FAQ, HowTo), schema validation errors, coverage percentage, breadcrumb schema, review schema, rich result eligibility.';
+                  contentSchemaDesc += ' <strong>Data Checked:</strong> Foundation schemas (Organization, Person, WebSite, BreadcrumbList), Rich result eligibility (Article, Event, Course, FAQ, HowTo, VideoObject, Recipe, Product, LocalBusiness, Review), schema coverage percentage, schema type diversity.';
                 }
                 
                 const descriptions = {
-                  localEntity: 'Consistency and clarity of brand, person and business entity signals. <strong>AI Importance:</strong> AI systems rely on clear entity signals to understand who you are and connect your brand across platforms. Strong entity recognition helps AI include you in knowledge panels and entity-based results. <strong>Data Checked:</strong> LocalBusiness schema presence, NAP consistency across site, entity mentions in content, knowledge panel presence, author markup, Organization schema.',
-                  serviceArea: 'How clearly AI understands where lessons/workshops run and which regions you cover. <strong>AI Importance:</strong> AI uses geographic signals to match queries with local intent. Clear service area data helps AI surface your content for location-specific searches and local AI Overviews. <strong>Data Checked:</strong> ServiceArea schema markup, geographic keywords in content, location pages, Google Business Profile service areas, address/location schema.',
-                  authority: 'E-A-T (Experience, Expertise, Authoritativeness, Trustworthiness): Depth of educational content, references, reviews, external citations, and demonstrated expertise. <strong>AI Importance:</strong> E-A-T is critical for AI systems - they prioritize authoritative, trustworthy sources. Strong E-A-T signals help AI confidently feature your content in AI Overviews and answer boxes. <strong>Data Checked:</strong> Content depth (word count, comprehensiveness), backlink quality/quantity, review counts/ratings, author credentials, citations in content, external mentions, case studies, certifications displayed.',
-                  visibility: 'Frequency and prominence in organic search, local pack, snippets and AI Overviews. <strong>AI Importance:</strong> AI systems learn from existing search performance. Higher visibility signals quality and relevance, making AI more likely to surface your content in AI-powered results and featured snippets. <strong>Data Checked:</strong> Search Console impressions/clicks, average position, CTR, featured snippet appearances, local pack visibility, SERP feature presence, ranking distribution.',
+                  localEntity: 'Consistency and clarity of brand, person and business entity signals. <strong>AI Importance:</strong> AI systems rely on clear entity signals to understand who you are and connect your brand across platforms. Strong entity recognition helps AI include you in knowledge panels and entity-based results. <strong>Data Source:</strong> ⚠️ <span style="color: #f59e0b;">Derived calculation</span> from GSC position/CTR (not using real local signals yet). <strong>Data Checked:</strong> Currently calculated from search performance metrics. Real data pending: LocalBusiness schema presence, NAP consistency, Google Business Profile data, knowledge panel detection.',
+                  serviceArea: 'How clearly AI understands where lessons/workshops run and which regions you cover. <strong>AI Importance:</strong> AI uses geographic signals to match queries with local intent. Clear service area data helps AI surface your content for location-specific searches and local AI Overviews. <strong>Data Source:</strong> ⚠️ <span style="color: #f59e0b;">Derived calculation</span> from Local Entity score (not using real service area data yet). <strong>Data Checked:</strong> Currently calculated from Local Entity. Real data pending: ServiceArea schema markup, Google Business Profile service areas, geographic keywords, location pages.',
+                  authority: 'E-A-T (Experience, Expertise, Authoritativeness, Trustworthiness): Depth of educational content, references, reviews, external citations, and demonstrated expertise. <strong>AI Importance:</strong> E-A-T is critical for AI systems - they prioritize authoritative, trustworthy sources. Strong E-A-T signals help AI confidently feature your content in AI Overviews and answer boxes. <strong>Data Source:</strong> ✅ <span style="color: #10b981;">Live data</span> from Google Search Console API. <strong>Data Checked:</strong> CTR (${data.ctr ? data.ctr.toFixed(2) : 0}%), average position (${data.averagePosition ? data.averagePosition.toFixed(1) : 0}), clicks (${data.totalClicks || 0}), impressions (${data.totalImpressions || 0}). Backlink metrics pending integration.',
+                  visibility: 'Frequency and prominence in organic search, local pack, snippets and AI Overviews. <strong>AI Importance:</strong> AI systems learn from existing search performance. Higher visibility signals quality and relevance, making AI more likely to surface your content in AI-powered results and featured snippets. <strong>Data Source:</strong> ✅ <span style="color: #10b981;">Live data</span> from Google Search Console API. <strong>Data Checked:</strong> Average position (${data.averagePosition ? data.averagePosition.toFixed(1) : 0}), CTR (${data.ctr ? data.ctr.toFixed(2) : 0}%), total clicks (${data.totalClicks || 0}), total impressions (${data.totalImpressions || 0}), SERP feature appearances.',
                   contentSchema: contentSchemaDesc
                 };
                 
-                // Generate suggestions based on pillar and score
+                // Generate dynamic next steps based on actual data and scores
+                const getNextSteps = (pillarKey, pillarScore, gscData, schemaData) => {
+                  const steps = [];
+                  
+                  switch(pillarKey) {
+                    case 'contentSchema':
+                      if (schemaData && schemaData.status === 'ok' && schemaData.data) {
+                        const schemaAuditData = schemaData.data;
+                        const { coverage, missingSchemaCount, totalPages, pagesWithSchema, schemaTypes, richEligible, missingTypes } = schemaAuditData;
+                        
+                        // Collect all types for analysis
+                        const allTypes = new Set();
+                        if (schemaTypes && Array.isArray(schemaTypes)) {
+                          schemaTypes.forEach(item => {
+                            if (item.type) allTypes.add(item.type);
+                          });
+                        }
+                        
+                        // 1. Foundation Schemas (30% weight)
+                        const foundationTypes = ['Organization', 'Person', 'WebSite', 'BreadcrumbList'];
+                        const foundationPresent = foundationTypes.filter(type => allTypes.has(type)).length;
+                        const foundationMissing = foundationTypes.filter(type => !allTypes.has(type));
+                        
+                        if (foundationPresent < 4) {
+                          steps.push(`<strong>Foundation schemas (30%):</strong> ${foundationPresent}/4 present. Add: ${foundationMissing.join(', ')}`);
+                        } else {
+                          steps.push(`<strong>Foundation schemas (30%):</strong> ✅ All 4 present (Organization, Person, WebSite, BreadcrumbList)`);
+                        }
+                        
+                        // 2. Rich Result Eligibility (35% weight)
+                        const richResultTypes = ['Article', 'Event', 'FAQPage', 'Product', 'LocalBusiness', 'Course', 'Review', 'HowTo', 'VideoObject', 'Recipe'];
+                        const richEligibleCount = Object.values(richEligible || {}).filter(eligible => eligible === true).length;
+                        const richMissing = richResultTypes.filter(type => !richEligible[type]);
+                        
+                        if (richEligibleCount < 10) {
+                          steps.push(`<strong>Rich results (35%):</strong> ${richEligibleCount}/10 eligible. Add: ${richMissing.slice(0, 3).join(', ')}${richMissing.length > 3 ? '...' : ''}`);
+                        } else {
+                          steps.push(`<strong>Rich results (35%):</strong> ✅ All 10 types eligible`);
+                        }
+                        
+                        // 3. Coverage (20% weight)
+                        if (coverage < 100) {
+                          steps.push(`<strong>Coverage (20%):</strong> ${coverage}% - Add schema to ${missingSchemaCount || 0} pages without markup`);
+                        } else {
+                          steps.push(`<strong>Coverage (20%):</strong> ✅ 100% - All pages have schema`);
+                        }
+                        
+                        // 4. Type Diversity (15% weight)
+                        const uniqueTypesCount = allTypes.size;
+                        if (uniqueTypesCount < 15) {
+                          steps.push(`<strong>Diversity (15%):</strong> ${uniqueTypesCount} unique types. Add more schema types to reach 15+ for maximum score`);
+                        } else {
+                          steps.push(`<strong>Diversity (15%):</strong> ✅ ${uniqueTypesCount} unique types (excellent diversity)`);
+                        }
+                      } else {
+                        steps.push(`<strong>Status:</strong> Schema audit data not available - run audit to see detailed metrics`);
+                      }
+                      break;
+                      
+                    case 'visibility':
+                      if (gscData) {
+                        const position = gscData.averagePosition || 0;
+                        const ctr = gscData.ctr || 0;
+                        
+                        if (position > 10) {
+                          steps.push(`<strong>Average position: ${position.toFixed(1)}</strong> - Target top 10 positions (currently ranking ${position > 20 ? 'below' : 'in'} page ${Math.ceil(position / 10)})`);
+                        } else {
+                          steps.push(`<strong>Average position: ${position.toFixed(1)}</strong> - Excellent! Maintain top 10 rankings`);
+                        }
+                        
+                        if (ctr < 2.0) {
+                          steps.push(`<strong>CTR: ${ctr.toFixed(2)}%</strong> - Improve click-through rate (target: 2%+) with better titles/meta descriptions`);
+                        } else {
+                          steps.push(`<strong>CTR: ${ctr.toFixed(2)}%</strong> - Good CTR! Continue optimizing for featured snippets`);
+                        }
+                        
+                        if (gscData.totalImpressions < 1000) {
+                          steps.push(`<strong>Impressions: ${gscData.totalImpressions}</strong> - Increase visibility by targeting more keywords`);
+                        }
+                      }
+                      break;
+                      
+                    case 'authority':
+                      if (gscData) {
+                        const ctr = gscData.ctr || 0;
+                        const position = gscData.averagePosition || 0;
+                        
+                        if (ctr < 1.5) {
+                          steps.push(`<strong>CTR: ${ctr.toFixed(2)}%</strong> - Low click-through indicates trust issues. Improve E-A-T signals`);
+                        } else {
+                          steps.push(`<strong>CTR: ${ctr.toFixed(2)}%</strong> - Good engagement. Build more backlinks to strengthen authority`);
+                        }
+                        
+                        if (position > 15) {
+                          steps.push(`<strong>Position: ${position.toFixed(1)}</strong> - Improve rankings through comprehensive, expert content`);
+                        }
+                        
+                        steps.push(`<strong>Next:</strong> Integrate backlink metrics API to measure domain authority`);
+                      }
+                      break;
+                      
+                    case 'localEntity':
+                      steps.push(`<strong>Current score: ${Math.round(pillarScore)}</strong> - Using derived calculation from search performance`);
+                      steps.push(`<strong>Priority:</strong> Integrate Google Business Profile API to use real local signals data`);
+                      if (pillarScore < 70) {
+                        steps.push(`<strong>Action:</strong> Add LocalBusiness schema markup and ensure NAP consistency`);
+                      }
+                      break;
+                      
+                    case 'serviceArea':
+                      steps.push(`<strong>Current score: ${Math.round(pillarScore)}</strong> - Using derived calculation from Local Entity`);
+                      steps.push(`<strong>Priority:</strong> Integrate Google Business Profile API to get real service area data`);
+                      if (pillarScore < 70) {
+                        steps.push(`<strong>Action:</strong> Add ServiceArea schema and create location-specific pages`);
+                      }
+                      break;
+                  }
+                  
+                  // If no specific steps generated, add generic ones
+                  if (steps.length === 0) {
+                    if (pillarScore >= 70) {
+                      steps.push('Maintain current performance');
+                      steps.push('Monitor for any score drops');
+                    } else if (pillarScore >= 40) {
+                      steps.push('Focus on improving this pillar');
+                      steps.push('Review specific metrics above');
+                    } else {
+                      steps.push('Critical: Immediate action required');
+                      steps.push('Review all data sources and implement fixes');
+                    }
+                  }
+                  
+                  return steps.slice(0, 3).map(s => `• ${s}`).join('<br>') || 'No next steps available';
+                };
+                
+                // Generate suggestions based on pillar and score (fallback)
                 const getSuggestions = (pillarKey, pillarScore) => {
                   const suggestions = {
                     localEntity: {
@@ -2141,9 +2329,9 @@
                       low: ['Optimize for featured snippets immediately', 'Target low-competition long-tail keywords', 'Improve page speed and mobile experience', 'Add FAQ schema markup', 'Create content targeting "People Also Ask" queries', 'Build strong internal linking structure']
                     },
                     contentSchema: {
-                      high: ['Continue maintaining schema markup', 'Expand schema types as new content is added', 'Monitor for schema errors'],
-                      medium: ['Add missing schema types (Article, Course, Event, FAQ)', 'Validate all schema markup using Google Rich Results Test', 'Ensure schema is on all relevant pages', 'Add breadcrumb schema to all pages', 'Implement Organization and Person schema', 'Add Review schema where applicable'],
-                      low: ['Implement comprehensive schema markup immediately', 'Add Organization, Person, and LocalBusiness schema', 'Validate all schema using Google Rich Results Test', 'Add Article schema to all blog posts', 'Implement breadcrumb schema site-wide', 'Add FAQ and HowTo schema where relevant']
+                      high: ['Continue maintaining all foundation schemas (Organization, Person, WebSite, BreadcrumbList)', 'Expand rich result eligible types (Article, Event, Course, FAQ, HowTo)', 'Monitor schema validation errors', 'Add more schema type diversity'],
+                      medium: ['Add missing foundation schemas (Organization, Person, WebSite, BreadcrumbList)', 'Add rich result eligible types (Article, Event, Course, FAQ, HowTo, VideoObject, Recipe)', 'Ensure 100% schema coverage across all pages', 'Increase schema type diversity (target 15+ unique types)', 'Validate all schema using Google Rich Results Test'],
+                      low: ['Implement foundation schemas immediately (Organization, Person, WebSite, BreadcrumbList)', 'Add rich result eligible schemas (Article, Event, Course, FAQ, HowTo)', 'Ensure schema coverage reaches 100%', 'Add schema type diversity (target 15+ unique types)', 'Validate all schema using Google Rich Results Test']
                     }
                   };
                   
@@ -2200,7 +2388,7 @@
                       </span>
                     </td>
                     <td style="padding: 0.75rem; color: #666; font-size: 0.85rem; line-height: 1.6; width: 45%;">${descriptionCell}</td>
-                    <td style="padding: 0.75rem; color: #555; font-size: 0.85rem; line-height: 1.6; width: 20%;">${getSuggestions(key, score)}</td>
+                    <td style="padding: 0.75rem; color: #555; font-size: 0.85rem; line-height: 1.6; width: 20%;">${getNextSteps(key, score, data, schemaAudit)}</td>
                   </tr>
                 `;
               }).join('')}
@@ -2619,7 +2807,8 @@
               const authority = clampScore(0.6 * ctrScore + 0.4 * posScore);
               const localEntity = clampScore(60 + 0.3 * (posScore - 50) + 0.2 * (ctrScore - 50));
               const serviceArea = clampScore(localEntity - 5);
-              const contentSchema = clampScore(70 + 0.2 * (visibility - 60));
+              // Fallback: if no schema audit data, can't calculate Content/Schema score
+              const contentSchema = 0;
               
               return { visibility, authority, localEntity, serviceArea, contentSchema };
             };
