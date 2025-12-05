@@ -1730,6 +1730,57 @@
       }
     }
 
+    // Save audit results to localStorage
+    function saveAuditResults(scores, searchData, snippetReadiness, schemaAudit) {
+      try {
+        const auditData = {
+          scores,
+          searchData,
+          snippetReadiness,
+          schemaAudit,
+          timestamp: new Date().toISOString()
+        };
+        localStorage.setItem('last_audit_results', JSON.stringify(auditData));
+        debugLog('✓ Audit results saved to localStorage', 'success');
+        
+        // Update timestamp display
+        updateAuditTimestamp(auditData.timestamp);
+      } catch (error) {
+        debugLog(`✗ Error saving audit results: ${error.message}`, 'error');
+      }
+    }
+    
+    // Load audit results from localStorage
+    function loadAuditResults() {
+      try {
+        const saved = localStorage.getItem('last_audit_results');
+        if (saved) {
+          const auditData = JSON.parse(saved);
+          debugLog('✓ Audit results loaded from localStorage', 'success');
+          return auditData;
+        }
+      } catch (error) {
+        debugLog(`✗ Error loading audit results: ${error.message}`, 'error');
+      }
+      return null;
+    }
+    
+    // Update audit timestamp display
+    function updateAuditTimestamp(timestamp) {
+      const timestampElement = document.getElementById('lastAuditTime');
+      if (timestampElement && timestamp) {
+        const date = new Date(timestamp);
+        const formatted = date.toLocaleString('en-GB', {
+          day: '2-digit',
+          month: 'short',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+        timestampElement.textContent = formatted;
+      }
+    }
+
     // Close completion modal
     function closeCompletionModal() {
       const modal = document.getElementById('completionModal');
