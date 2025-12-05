@@ -585,6 +585,35 @@
       margin-top: 0.5rem;
       font-weight: 500;
     }
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 1000;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.5);
+      overflow: auto;
+    }
+    .modal-content {
+      background-color: white;
+      margin: 5% auto;
+      padding: 2rem;
+      border-radius: 8px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      animation: modalSlideIn 0.3s ease;
+    }
+    @keyframes modalSlideIn {
+      from {
+        transform: translateY(-50px);
+        opacity: 0;
+      }
+      to {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
     .help-text {
       font-size: 0.875rem;
       color: var(--brand-grey);
@@ -767,6 +796,20 @@
           <div class="progress-bar" id="progressBar" style="width: 0%;">0%</div>
         </div>
         <div class="progress-status" id="progressStatus">Initializing audit scan...</div>
+      </div>
+    </div>
+
+    <!-- Completion Summary Modal -->
+    <div id="completionModal" class="modal" style="display: none;">
+      <div class="modal-content" style="max-width: 600px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+          <h2 style="margin: 0; color: var(--brand-orange);">Audit Complete</h2>
+          <button onclick="closeCompletionModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #666;">&times;</button>
+        </div>
+        <div id="completionSummaryContent"></div>
+        <div style="margin-top: 1.5rem; text-align: right;">
+          <button class="btn" onclick="closeCompletionModal()" style="background: var(--brand-orange); color: white; border-color: var(--brand-orange);">Close</button>
+        </div>
       </div>
     </div>
 
@@ -1440,6 +1483,101 @@
       }, 5000);
     }
 
+    // Show completion summary modal
+    function showCompletionModal(schemaAudit) {
+      const modal = document.getElementById('completionModal');
+      const content = document.getElementById('completionSummaryContent');
+      
+      if (!modal || !content) return;
+      
+      let html = '';
+      
+      if (schemaAudit && schemaAudit.status === 'ok' && schemaAudit.data && schemaAudit.meta) {
+        const data = schemaAudit.data;
+        const meta = schemaAudit.meta;
+        const diag = meta.diagnostic || {};
+        
+        const totalPages = data.totalPages || diag.totalPages || 0;
+        const successfulPages = diag.successfulPages || totalPages;
+        const failedPages = diag.failedPages || data.missingSchemaCount || 0;
+        const isComplete = failedPages === 0;
+        
+        html += `<div style="margin-bottom: 1.5rem;">`;
+        html += `<div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;">`;
+        html += `<span style="font-size: 2rem;">${isComplete ? '✅' : '⚠️'}</span>`;
+        html += `<h3 style="margin: 0; color: ${isComplete ? '#10b981' : '#f59e0b'};">
+          ${isComplete ? 'Complete' : 'Incomplete'} Data
+        </h3>`;
+        html += `</div>`;
+        
+        html += `<div style="background: ${isComplete ? '#f0fdf4' : '#fffbeb'}; border-left: 4px solid ${isComplete ? '#10b981' : '#f59e0b'}; padding: 1rem; border-radius: 4px; margin-bottom: 1rem;">`;
+        html += `<p style="margin: 0; color: #555; line-height: 1.6;">`;
+        if (isComplete) {
+          html += `All pages were successfully crawled. Dashboard data is complete and accurate.`;
+        } else {
+          html += `<strong>Warning:</strong> ${failedPages} page${failedPages !== 1 ? 's' : ''} failed to crawl. Dashboard data may be incomplete. Failed pages are counted as missing schema.`;
+        }
+        html += `</p>`;
+        html += `</div>`;
+        
+        html += `<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">`;
+        html += `<div style="background: #f8f9fa; padding: 1rem; border-radius: 6px;">`;
+        html += `<div style="font-size: 0.85rem; color: #666; margin-bottom: 0.25rem;">Total URLs Scanned</div>`;
+        html += `<div style="font-size: 1.5rem; font-weight: 600; color: #333;">${totalPages}</div>`;
+        html += `</div>`;
+        html += `<div style="background: #f8f9fa; padding: 1rem; border-radius: 6px;">`;
+        html += `<div style="font-size: 0.85rem; color: #666; margin-bottom: 0.25rem;">Successful Crawls</div>`;
+        html += `<div style="font-size: 1.5rem; font-weight: 600; color: #10b981;">${successfulPages}</div>`;
+        html += `</div>`;
+        html += `</div>`;
+        
+        if (failedPages > 0) {
+          html += `<div style="background: #fef2f2; border-left: 4px solid #ef4444; padding: 1rem; border-radius: 4px; margin-bottom: 1rem;">`;
+          html += `<div style="font-size: 0.85rem; color: #666; margin-bottom: 0.25rem;">Failed Crawls</div>`;
+          html += `<div style="font-size: 1.5rem; font-weight: 600; color: #ef4444;">${failedPages}</div>`;
+          
+          if (diag.errorTypes && Object.keys(diag.errorTypes).length > 0) {
+            html += `<div style="margin-top: 0.75rem; font-size: 0.85rem; color: #666;">`;
+            html += `<strong>Error Breakdown:</strong><br>`;
+            Object.entries(diag.errorTypes).forEach(([type, count]) => {
+              html += `${type}: ${count}<br>`;
+            });
+            html += `</div>`;
+          }
+          html += `</div>`;
+        }
+        
+        html += `<div style="background: #f8f9fa; padding: 1rem; border-radius: 6px; margin-top: 1rem;">`;
+        html += `<div style="font-size: 0.85rem; color: #666; margin-bottom: 0.5rem;"><strong>Schema Coverage</strong></div>`;
+        html += `<div style="font-size: 1.25rem; font-weight: 600; color: #333;">${data.coverage || 0}%</div>`;
+        html += `<div style="font-size: 0.85rem; color: #666; margin-top: 0.25rem;">${data.pagesWithSchema || 0} pages with inline schema</div>`;
+        html += `</div>`;
+        
+        html += `</div>`;
+      } else {
+        html += `<p>Unable to load audit summary data.</p>`;
+      }
+      
+      content.innerHTML = html;
+      modal.style.display = 'block';
+    }
+
+    // Close completion modal
+    function closeCompletionModal() {
+      const modal = document.getElementById('completionModal');
+      if (modal) {
+        modal.style.display = 'none';
+      }
+    }
+
+    // Close modal when clicking outside
+    window.onclick = function(event) {
+      const modal = document.getElementById('completionModal');
+      if (event.target === modal) {
+        closeCompletionModal();
+      }
+    }
+
     // Calculate RAG status from score
     function getRAGStatus(score) {
       if (score >= 70) return { status: 'green', label: 'Green' };
@@ -1804,6 +1942,14 @@
       } finally {
         debugLog('Hiding loading indicator...', 'info');
         document.getElementById('loading').classList.remove('show');
+        
+        // Show completion summary modal
+        if (schemaAudit) {
+          setTimeout(() => {
+            showCompletionModal(schemaAudit);
+          }, 500);
+        }
+        
         // Reset progress bar for next run
         setTimeout(() => {
           updateProgress(0, 'Initializing audit scan...');
