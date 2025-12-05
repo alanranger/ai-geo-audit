@@ -1485,10 +1485,17 @@
 
     // Show completion summary modal
     function showCompletionModal(schemaAudit) {
+      debugLog('showCompletionModal called', 'info');
       const modal = document.getElementById('completionModal');
       const content = document.getElementById('completionSummaryContent');
       
-      if (!modal || !content) return;
+      debugLog(`Modal element found: ${modal ? 'yes' : 'no'}`, 'info');
+      debugLog(`Content element found: ${content ? 'yes' : 'no'}`, 'info');
+      
+      if (!modal || !content) {
+        debugLog('⚠ Modal or content element not found, cannot show modal', 'error');
+        return;
+      }
       
       let html = '';
       
@@ -1560,6 +1567,8 @@
       
       content.innerHTML = html;
       modal.style.display = 'block';
+      debugLog('Modal display set to block', 'info');
+      debugLog(`Modal is now visible: ${modal.style.display}`, 'info');
     }
 
     // Close completion modal
@@ -1782,6 +1791,9 @@
       document.getElementById('dashboard').style.display = 'none';
       updateProgress(0, 'Initializing audit scan...');
 
+      // Declare schemaAudit outside try block so it's accessible in finally
+      let schemaAudit = null;
+
       try {
         updateProgress(10, 'Fetching Search Console data...');
         debugLog('Fetching Search Console data...', 'info');
@@ -1793,7 +1805,6 @@
         updateProgress(40, 'Fetching schema audit data...');
         debugLog('Fetching schema audit data...', 'info');
         // Fetch schema audit data
-        let schemaAudit = null;
         try {
           // Check if manual URL list is available
           const manualUrlList = localStorage.getItem('manual_url_list');
@@ -1944,10 +1955,14 @@
         document.getElementById('loading').classList.remove('show');
         
         // Show completion summary modal
+        debugLog(`Schema audit available for modal: ${schemaAudit ? 'yes' : 'no'}`, 'info');
         if (schemaAudit) {
+          debugLog('Showing completion modal...', 'info');
           setTimeout(() => {
             showCompletionModal(schemaAudit);
           }, 500);
+        } else {
+          debugLog('⚠ No schema audit data available for modal', 'warn');
         }
         
         // Reset progress bar for next run

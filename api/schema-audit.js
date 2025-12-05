@@ -342,10 +342,23 @@ async function crawlUrl(url, semaphore) {
     });
     
     if (!response.ok) {
+      // Categorize HTTP errors
+      let errorType = 'HTTP Error';
+      if (response.status === 429) {
+        errorType = 'Rate Limited';
+      } else if (response.status >= 500) {
+        errorType = 'Server Error';
+      } else if (response.status === 404) {
+        errorType = 'Not Found';
+      } else if (response.status === 403) {
+        errorType = 'Forbidden';
+      }
+      
       return {
         url,
         success: false,
         error: `HTTP ${response.status}: ${response.statusText}`,
+        errorType: errorType,
         schemas: []
       };
     }
