@@ -1854,11 +1854,13 @@
                 
                 if (schemaAudit && schemaAudit.status === 'ok' && schemaAudit.data) {
                   const schemaData = schemaAudit.data;
-                  contentSchemaDesc += ` <strong>Data Checked:</strong> Total pages scanned: ${schemaData.totalPages}, Pages with schema: ${schemaData.pagesWithSchema}, Schema coverage: ${schemaData.coverage}%. `;
+                  const { coverage, totalPages, pagesWithSchema, missingSchemaCount, missingSchemaPages, schemaTypes } = schemaData;
                   
-                  if (schemaData.schemaTypes && schemaData.schemaTypes.length > 0) {
-                    const topTypes = schemaData.schemaTypes.slice(0, 5).map(t => `${t.type} (${t.count})`).join(', ');
-                    contentSchemaDesc += `Schema types found: ${topTypes}${schemaData.schemaTypes.length > 5 ? '...' : ''}. `;
+                  contentSchemaDesc += ` <strong>Data Checked:</strong> Total pages scanned: ${totalPages}, Pages with schema: ${pagesWithSchema}/${totalPages}. Pages without schema: ${missingSchemaCount || 0}. Schema coverage: ${coverage}%. `;
+                  
+                  if (schemaTypes && schemaTypes.length > 0) {
+                    const topTypes = schemaTypes.slice(0, 10).map(t => `${t.type} (${t.count})`).join(', ');
+                    contentSchemaDesc += `Schema types found: ${topTypes}. `;
                   }
                   
                   if (schemaData.missingTypes && schemaData.missingTypes.length > 0) {
@@ -1932,6 +1934,18 @@
                 const weight = pillarWeights[key] || 0;
                 const isEven = index % 2 === 0;
                 
+                // Add CSV download button for Content/Schema if there are missing pages
+                let descriptionCell = descriptions[key] || '';
+                if (key === 'contentSchema' && schemaAudit && schemaAudit.status === 'ok' && schemaAudit.data) {
+                  const schemaData = schemaAudit.data;
+                  const missingSchemaCount = schemaData.missingSchemaCount || 0;
+                  const missingSchemaPages = schemaData.missingSchemaPages || [];
+                  
+                  if (missingSchemaCount > 0) {
+                    descriptionCell += `<div style="margin-top: 0.75rem;"><button id="download-missing-schema" class="btn-small" style="padding: 0.4rem 0.8rem; font-size: 0.8rem; background: #10b981; color: white; border: none; border-radius: 4px; cursor: pointer;">Download pages without schema (CSV)</button></div>`;
+                  }
+                }
+                
                 return `
                   <tr style="border-bottom: 1px solid #eee; background: ${isEven ? '#ffffff' : '#fafafa'};">
                     <td style="padding: 0.75rem; font-weight: 500;">${pillarNames[key]}</td>
@@ -1946,7 +1960,7 @@
                         ${rag.label}
                       </span>
                     </td>
-                    <td style="padding: 0.75rem; color: #666; font-size: 0.85rem; line-height: 1.6; width: 45%;">${descriptions[key] || ''}</td>
+                    <td style="padding: 0.75rem; color: #666; font-size: 0.85rem; line-height: 1.6; width: 45%;">${descriptionCell}</td>
                     <td style="padding: 0.75rem; color: #555; font-size: 0.85rem; line-height: 1.6; width: 20%;">${getSuggestions(key, score)}</td>
                   </tr>
                 `;
@@ -1980,6 +1994,39 @@
         } else {
           // Last resort: insert after pillar cards
           pillarCards.parentNode.insertBefore(scorecardTable, pillarCards.nextSibling);
+        }
+      }
+
+      // Add CSV download handler for missing schema pages
+      const downloadBtn = document.getElementById('download-missing-schema');
+      if (downloadBtn && schemaAudit && schemaAudit.status === 'ok' && schemaAudit.data) {
+        const schemaData = schemaAudit.data;
+        const missingSchemaCount = schemaData.missingSchemaCount || 0;
+        const missingSchemaPages = schemaData.missingSchemaPages || [];
+        
+        if (missingSchemaCount > 0 && missingSchemaPages.length > 0) {
+          downloadBtn.addEventListener('click', () => {
+            const rows = [
+              ['url', 'parentUrl'],
+              ...missingSchemaPages.map(p => [p.url, p.parentUrl || '']),
+            ];
+            
+            const csv = rows
+              .map(r => r.map(v => `"${(v || '').replace(/"/g, '""')}"`).join(','))
+              .join('\n');
+            
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'ai-geo-missing-schema-pages.csv';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          });
+        } else {
+          downloadBtn.style.display = 'none';
         }
       }
 

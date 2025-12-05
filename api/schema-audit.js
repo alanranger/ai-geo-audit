@@ -533,6 +533,7 @@ export default async function handler(req, res) {
     });
     
     // Second pass: check for inherited schema (only for pages without inline schema)
+    let inheritanceResults = [];
     if (pagesNeedingInheritanceCheck.length > 0) {
       console.log(`Checking ${pagesNeedingInheritanceCheck.length} pages for inherited schema from parent collection pages...`);
       const inheritanceCheckSemaphore = new Semaphore(2); // Lower concurrency for parent page checks
@@ -546,7 +547,7 @@ export default async function handler(req, res) {
         }
       });
       
-      const inheritanceResults = await Promise.all(inheritanceChecks);
+      inheritanceResults = await Promise.all(inheritanceChecks);
       
       // Process inheritance results
       inheritanceResults.forEach(({ url, hasInherited }) => {
@@ -560,6 +561,30 @@ export default async function handler(req, res) {
       console.log(`Found ${pagesWithInheritedSchema} pages with inherited schema`);
     }
     
+    // Build lookup for inheritance results
+    const inheritanceMap = new Map();
+    inheritanceResults.forEach(({ url, hasInherited }) => {
+      inheritanceMap.set(url, hasInherited);
+    });
+    
+    // URLs that had no inline schema AND no inherited schema
+    const missingSchemaPages = pagesNeedingInheritanceCheck
+      .filter(({ url }) => !inheritanceMap.get(url))
+      .map(({ url, parentUrl }) => ({ url, parentUrl }));
+    
+    // Also include pages that had no inline schema and no parent collection page to check
+    results.forEach(result => {
+      if (!result.success) return;
+      const hasInlineSchema = result.schemas.length > 0;
+      if (!hasInlineSchema) {
+        const parentUrl = getParentCollectionPageUrl(result.url);
+        if (!parentUrl) {
+          // No inline schema and no parent page to check - definitely missing
+          missingSchemaPages.push({ url: result.url, parentUrl: null });
+        }
+      }
+    });
+    
     // Calculate coverage (pages with inline schema only - inherited doesn't count for coverage)
     const coverage = totalPages > 0 ? (pagesWithSchema / totalPages) * 100 : 0;
     
@@ -567,10 +592,11 @@ export default async function handler(req, res) {
     const commonTypes = ['Organization', 'Person', 'LocalBusiness', 'WebSite', 'BreadcrumbList'];
     const missingTypes = commonTypes.filter(type => !allTypes.has(type));
     
-    // Convert schemaTypes to array format
+    // Convert schemaTypes to array format, limit to top 10
     const schemaTypesArray = Object.entries(schemaTypes)
       .map(([type, count]) => ({ type, count }))
-      .sort((a, b) => b.count - a.count);
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
     
     return res.status(200).json({
       status: 'ok',
@@ -582,6 +608,8 @@ export default async function handler(req, res) {
         coverage: Math.round(coverage * 100) / 100, // Coverage based on inline schema only
         schemaTypes: schemaTypesArray,
         missingTypes: missingTypes.length > 0 ? missingTypes : undefined,
+        missingSchemaCount: missingSchemaPages.length,
+        missingSchemaPages: missingSchemaPages.length > 0 ? missingSchemaPages : undefined,
         richEligible,
         errors: errors.length > 0 ? errors : undefined
       },
