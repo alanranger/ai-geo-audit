@@ -433,10 +433,6 @@
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
       margin-bottom: 3rem;
       border: 1px solid rgba(16, 185, 129, 0.1);
-      height: 700px;
-      min-height: 700px;
-      display: flex;
-      flex-direction: column;
     }
     .gauge-container {
       display: flex;
@@ -946,19 +942,24 @@
         <div class="snippet-readiness-gauge">
           <h3 style="margin-top: 0; color: var(--brand-orange);">Snippet Readiness Gauge</h3>
           <p style="font-size: 0.9rem; color: #666; margin-bottom: 1.5rem;">Snippet readiness summarises how likely your content is to be lifted into featured snippets and AI answers. It reflects three ingredients: snippet-friendly answer blocks, suitable schema (FAQ/HowTo/Article/Course/Event) and existing rich-result behaviour.</p>
-          <div class="gauge-container">
-            <div class="gauge-wrapper">
-              <svg class="gauge-svg" viewBox="0 0 200 200">
-                <circle class="gauge-background" cx="100" cy="100" r="80"></circle>
-                <circle class="gauge-fill" id="gaugeFill" cx="100" cy="100" r="80" 
-                        stroke-dasharray="502.65" 
-                        stroke-dashoffset="502.65"></circle>
-              </svg>
-              <div class="gauge-value" id="snippetReadinessScore">0</div>
+          
+          <!-- Overall Combined Score -->
+          <div style="text-align: center; margin-bottom: 1.5rem;">
+            <div style="font-size: 0.85rem; color: #666; margin-bottom: 0.5rem;">Overall Snippet Readiness</div>
+            <div id="snippetReadinessScore" style="font-size: 3rem; font-weight: 700; color: var(--brand-orange); line-height: 1;">0</div>
+            <div id="gaugeStatus" style="font-size: 0.9rem; color: #666; margin-top: 0.25rem;">Calculating...</div>
+          </div>
+          
+          <!-- Pie Chart Container -->
+          <div style="display: flex; align-items: center; justify-content: center; gap: 2rem; flex-wrap: wrap;">
+            <div style="flex: 0 0 300px; max-width: 300px;">
+              <canvas id="snippetReadinessPieChart"></canvas>
             </div>
-            <div style="text-align: center; margin-top: 1rem;">
-              <div class="gauge-label">Readiness Score</div>
-              <div class="gauge-status" id="gaugeStatus">Calculating...</div>
+            <div style="flex: 1; min-width: 200px;">
+              <div style="font-size: 0.9rem; font-weight: 600; margin-bottom: 0.75rem; color: var(--brand-dark);">Component Breakdown:</div>
+              <div id="snippetReadinessLegend" style="display: flex; flex-direction: column; gap: 0.75rem;">
+                <!-- Legend will be populated by JavaScript -->
+              </div>
             </div>
           </div>
         </div>
@@ -2474,42 +2475,147 @@
         debugLog('Download button not found in DOM', 'warn');
       }
 
-      // Display snippet readiness with gauge visualization
+      // Display snippet readiness with pie chart visualization
       const snippetScoreElement = document.getElementById('snippetReadinessScore');
-      const gaugeFill = document.getElementById('gaugeFill');
       const gaugeStatus = document.getElementById('gaugeStatus');
+      const legendElement = document.getElementById('snippetReadinessLegend');
       
-      if (snippetScoreElement && gaugeFill) {
+      if (snippetScoreElement) {
         snippetScoreElement.textContent = snippetReadiness;
         
-        // Calculate gauge fill (circumference = 2 * π * r = 2 * π * 80 ≈ 502.65)
-        const circumference = 2 * Math.PI * 80;
-        const offset = circumference - (snippetReadiness / 100) * circumference;
-        
-        // Color code based on score
-        let colorClass = 'red';
+        // Color code overall score based on value
+        let colorClass = '#ef4444'; // red
         let statusText = 'Critical';
         if (snippetReadiness >= 70) {
-          colorClass = 'green';
+          colorClass = '#10b981'; // green
           statusText = 'Strong';
         } else if (snippetReadiness >= 40) {
-          colorClass = 'amber';
+          colorClass = '#f59e0b'; // amber
           statusText = 'Needs Improvement';
         }
         
-        // Update gauge fill
-        gaugeFill.classList.remove('green', 'amber', 'red');
-        gaugeFill.classList.add(colorClass);
-        gaugeFill.style.strokeDashoffset = offset;
-        
-        // Update score color
-        snippetScoreElement.classList.remove('green', 'amber', 'red');
-        snippetScoreElement.classList.add(colorClass);
+        snippetScoreElement.style.color = colorClass;
         
         // Update status text
         if (gaugeStatus) {
           gaugeStatus.textContent = statusText;
-          gaugeStatus.style.color = snippetScoreElement.style.color;
+          gaugeStatus.style.color = colorClass;
+        }
+      }
+      
+      // Create pie chart showing weighted components
+      const pieChartCanvas = document.getElementById('snippetReadinessPieChart');
+      if (pieChartCanvas && scores) {
+        // Destroy existing chart if it exists
+        if (window.snippetReadinessChart) {
+          window.snippetReadinessChart.destroy();
+        }
+        
+        const contentSchemaScore = Math.round(scores.contentSchema || 0);
+        const visibilityScore = Math.round(scores.visibility || 0);
+        const authorityScore = Math.round(scores.authority || 0);
+        
+        // Calculate weighted contribution of each component
+        const contentSchemaContribution = (contentSchemaScore * 0.4).toFixed(1);
+        const visibilityContribution = (visibilityScore * 0.35).toFixed(1);
+        const authorityContribution = (authorityScore * 0.25).toFixed(1);
+        
+        window.snippetReadinessChart = new Chart(pieChartCanvas, {
+          type: 'doughnut',
+          data: {
+            labels: [
+              `Content/Schema (${contentSchemaScore})`,
+              `Visibility (${visibilityScore})`,
+              `Authority (${authorityScore})`
+            ],
+            datasets: [{
+              data: [40, 35, 25], // Weighting percentages
+              backgroundColor: [
+                '#E57200', // Orange for Content/Schema
+                '#3b82f6', // Blue for Visibility
+                '#8b5cf6'  // Purple for Authority
+              ],
+              borderWidth: 2,
+              borderColor: '#ffffff'
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            plugins: {
+              legend: {
+                display: false // We'll use custom legend
+              },
+              tooltip: {
+                callbacks: {
+                  label: function(context) {
+                    const label = context.label || '';
+                    const value = context.parsed || 0;
+                    const index = context.dataIndex;
+                    let score = 0;
+                    let contribution = 0;
+                    
+                    if (index === 0) {
+                      score = contentSchemaScore;
+                      contribution = contentSchemaContribution;
+                    } else if (index === 1) {
+                      score = visibilityScore;
+                      contribution = visibilityContribution;
+                    } else if (index === 2) {
+                      score = authorityScore;
+                      contribution = authorityContribution;
+                    }
+                    
+                    return [
+                      label,
+                      `Weight: ${value}%`,
+                      `Your Score: ${score}`,
+                      `Contribution: ${contribution} points`
+                    ];
+                  }
+                }
+              }
+            }
+          }
+        });
+        
+        // Create custom legend with scores
+        if (legendElement) {
+          const getRAGColor = (score) => {
+            if (score >= 70) return '#10b981';
+            if (score >= 40) return '#f59e0b';
+            return '#ef4444';
+          };
+          
+          const getRAGLabel = (score) => {
+            if (score >= 70) return 'Green';
+            if (score >= 40) return 'Amber';
+            return 'Red';
+          };
+          
+          legendElement.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: #f8f9fa; border-radius: 6px; border-left: 4px solid #E57200;">
+              <div style="width: 16px; height: 16px; background: #E57200; border-radius: 3px; flex-shrink: 0;"></div>
+              <div style="flex: 1;">
+                <div style="font-weight: 600; color: var(--brand-dark);">Content/Schema</div>
+                <div style="font-size: 0.85rem; color: #666;">Weight: 40% | Score: <strong style="color: ${getRAGColor(contentSchemaScore)};">${contentSchemaScore}</strong> (${getRAGLabel(contentSchemaScore)}) | Contribution: ${contentSchemaContribution} pts</div>
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: #f8f9fa; border-radius: 6px; border-left: 4px solid #3b82f6;">
+              <div style="width: 16px; height: 16px; background: #3b82f6; border-radius: 3px; flex-shrink: 0;"></div>
+              <div style="flex: 1;">
+                <div style="font-weight: 600; color: var(--brand-dark);">Visibility</div>
+                <div style="font-size: 0.85rem; color: #666;">Weight: 35% | Score: <strong style="color: ${getRAGColor(visibilityScore)};">${visibilityScore}</strong> (${getRAGLabel(visibilityScore)}) | Contribution: ${visibilityContribution} pts</div>
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: #f8f9fa; border-radius: 6px; border-left: 4px solid #8b5cf6;">
+              <div style="width: 16px; height: 16px; background: #8b5cf6; border-radius: 3px; flex-shrink: 0;"></div>
+              <div style="flex: 1;">
+                <div style="font-weight: 600; color: var(--brand-dark);">Authority</div>
+                <div style="font-size: 0.85rem; color: #666;">Weight: 25% | Score: <strong style="color: ${getRAGColor(authorityScore)};">${authorityScore}</strong> (${getRAGLabel(authorityScore)}) | Contribution: ${authorityContribution} pts</div>
+              </div>
+            </div>
+          `;
         }
       }
 
