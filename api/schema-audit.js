@@ -481,6 +481,11 @@ export default async function handler(req, res) {
     const richEligible = {};
     const pagesNeedingInheritanceCheck = []; // URLs without inline schema
     
+    console.log(`📊 Starting schema audit aggregation:`);
+    console.log(`  Total pages crawled: ${totalPages}`);
+    console.log(`  Successful crawls: ${results.filter(r => r.success).length}`);
+    console.log(`  Failed crawls: ${results.filter(r => !r.success).length}`);
+    
     // Initialize rich eligible map
     RICH_RESULT_TYPES.forEach(type => {
       richEligible[type] = false;
@@ -532,6 +537,11 @@ export default async function handler(req, res) {
       }
     });
     
+    console.log(`📊 After first pass (inline schema check):`);
+    console.log(`  Pages with inline schema: ${pagesWithSchema}`);
+    console.log(`  Pages needing inheritance check: ${pagesNeedingInheritanceCheck.length}`);
+    console.log(`  Pages without inline and without parent: ${totalPages - pagesWithSchema - pagesNeedingInheritanceCheck - errors.length}`);
+    
     // Second pass: check for inherited schema (only for pages without inline schema)
     let inheritanceResults = [];
     if (pagesNeedingInheritanceCheck.length > 0) {
@@ -570,24 +580,52 @@ export default async function handler(req, res) {
     // Build complete list of pages without schema
     // A page is missing schema if: no inline schema AND (no parent page OR parent page check returned false)
     const missingSchemaPages = [];
+    let pagesWithoutInline = 0;
+    let pagesWithParentButNoInherited = 0;
+    let pagesWithoutParent = 0;
+    
     results.forEach(result => {
       if (!result.success) return;
       const hasInlineSchema = result.schemas.length > 0;
       if (!hasInlineSchema) {
+        pagesWithoutInline++;
         const parentUrl = getParentCollectionPageUrl(result.url);
         if (parentUrl) {
           // Has parent page - check if it got inherited schema
           const hasInherited = inheritanceMap.get(result.url);
-          if (!hasInherited) {
+          if (hasInherited === undefined) {
+            // Page was in pagesNeedingInheritanceCheck but result not in map - this is an error
+            console.warn(`⚠ Page ${result.url} was checked for inheritance but result not in map`);
+            missingSchemaPages.push({ url: result.url, parentUrl: parentUrl });
+          } else if (!hasInherited) {
             // No inline schema and no inherited schema - missing
+            pagesWithParentButNoInherited++;
             missingSchemaPages.push({ url: result.url, parentUrl: parentUrl });
           }
         } else {
           // No inline schema and no parent page to check - definitely missing
+          pagesWithoutParent++;
           missingSchemaPages.push({ url: result.url, parentUrl: null });
         }
       }
     });
+    
+    console.log(`📊 Missing schema analysis:`);
+    console.log(`  Total pages: ${totalPages}`);
+    console.log(`  Pages with inline schema: ${pagesWithSchema}`);
+    console.log(`  Pages without inline schema: ${pagesWithoutInline}`);
+    console.log(`  Pages with inherited schema: ${pagesWithInheritedSchema}`);
+    console.log(`  Pages with parent but no inherited: ${pagesWithParentButNoInherited}`);
+    console.log(`  Pages without parent page: ${pagesWithoutParent}`);
+    console.log(`  Total missing schema pages: ${missingSchemaPages.length}`);
+    console.log(`  Expected missing: ${totalPages - pagesWithSchema - pagesWithInheritedSchema}`);
+    
+    // Sanity check: missing pages should equal total - inline - inherited
+    const expectedMissing = totalPages - pagesWithSchema - pagesWithInheritedSchema;
+    if (missingSchemaPages.length !== expectedMissing) {
+      console.error(`❌ MISMATCH: missingSchemaPages.length (${missingSchemaPages.length}) != expected (${expectedMissing})`);
+      console.error(`  This suggests some pages are being double-counted or missed`);
+    }
     
     // Calculate coverage (pages with inline schema only - inherited doesn't count for coverage)
     const coverage = totalPages > 0 ? (pagesWithSchema / totalPages) * 100 : 0;
