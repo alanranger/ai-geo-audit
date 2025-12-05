@@ -3221,7 +3221,7 @@
           let chartDateObjects = []; // Store Date objects for period detection
           
           if (timeseries.length > 0) {
-            // Fetch historical Content/Schema data from Supabase
+            // Fetch historical Content/Schema data from Supabase (async operation)
             const propertyUrl = document.getElementById('propertyUrl')?.value || '';
             const endDate = new Date().toISOString().split('T')[0];
             const startDateObj = new Date();
@@ -3229,21 +3229,28 @@
             const startDate = startDateObj.toISOString().split('T')[0];
             
             let contentSchemaHistory = [];
-            if (propertyUrl) {
-              contentSchemaHistory = await fetchContentSchemaHistory(propertyUrl, startDate, endDate);
-            }
-            
-            // Create a map of dates to Content/Schema scores from Supabase
-            const contentSchemaMap = new Map();
-            contentSchemaHistory.forEach(record => {
-              contentSchemaMap.set(record.date, record.contentSchemaScore);
-            });
-            
+            let contentSchemaMap = new Map();
             const currentContentSchema = scores.contentSchema || 0;
-            const hasHistoricalData = contentSchemaHistory.length > 0;
             
-            if (hasHistoricalData) {
-              debugLog(`Using ${contentSchemaHistory.length} historical Content/Schema records from Supabase`, 'info');
+            // Fetch historical data asynchronously
+            if (propertyUrl) {
+              try {
+                contentSchemaHistory = await fetchContentSchemaHistory(propertyUrl, startDate, endDate);
+                // Create a map of dates to Content/Schema scores from Supabase
+                contentSchemaHistory.forEach(record => {
+                  contentSchemaMap.set(record.date, record.contentSchemaScore);
+                });
+                
+                const hasHistoricalData = contentSchemaHistory.length > 0;
+                if (hasHistoricalData) {
+                  debugLog(`Using ${contentSchemaHistory.length} historical Content/Schema records from Supabase`, 'info');
+                } else {
+                  debugLog(`No historical Content/Schema data found. Using current score (${currentContentSchema}) for all points. Dashed line will indicate estimated data.`, 'info');
+                }
+              } catch (error) {
+                debugLog(`⚠ Error fetching historical data: ${error.message}`, 'warn');
+                contentSchemaHistory = [];
+              }
             } else {
               debugLog(`No historical Content/Schema data found. Using current score (${currentContentSchema}) for all points. Dashed line will indicate estimated data.`, 'info');
             }
