@@ -1,65 +1,86 @@
 # Deployment Instructions
 
-## GitHub Pages Deployment
+## Vercel Deployment
 
-### Step 1: Initialize Git (if not already done)
+This project is configured for deployment on **Vercel** using serverless functions for API endpoints.
 
-```bash
-cd "G:\Dropbox\alan ranger photography\Website Code\AI GEO Audit"
-git init
-```
+### Prerequisites
 
-### Step 2: Add and Commit Files
+1. A GitHub account
+2. A Vercel account (sign up at https://vercel.com)
+3. Google Cloud Console access (for OAuth2 credentials)
 
-```bash
-git add .
-git commit -m "Initial commit: AI GEO Audit Dashboard"
-```
+### Step 1: Push to GitHub
 
-### Step 3: Create GitHub Repository
+1. **Initialize Git** (if not already done):
+   ```bash
+   cd "G:\Dropbox\alan ranger photography\Website Code\AI GEO Audit"
+   git init
+   ```
 
-1. Go to https://github.com/new
-2. Repository name: `ai-geo-audit` (or your preferred name)
-3. Description: "AI GEO Audit Dashboard - Automated SEO Analysis"
-4. Choose Public or Private
-5. **Do NOT** check "Initialize with README"
-6. Click "Create repository"
+2. **Add and Commit Files**:
+   ```bash
+   git add .
+   git commit -m "Initial commit: AI GEO Audit Dashboard"
+   ```
 
-### Step 4: Connect and Push
+3. **Create GitHub Repository**:
+   - Go to https://github.com/new
+   - Repository name: `ai-geo-audit` (or your preferred name)
+   - Description: "AI GEO Audit Dashboard - Automated SEO Analysis"
+   - Choose Public or Private
+   - **Do NOT** check "Initialize with README"
+   - Click "Create repository"
 
-```bash
-git remote add origin https://github.com/YOUR_USERNAME/ai-geo-audit.git
-git branch -M main
-git push -u origin main
-```
+4. **Connect and Push**:
+   ```bash
+   git remote add origin https://github.com/YOUR_USERNAME/ai-geo-audit.git
+   git branch -M main
+   git push -u origin main
+   ```
 
-Replace `YOUR_USERNAME` with your GitHub username.
+### Step 2: Deploy to Vercel
 
-### Step 5: Enable GitHub Pages
+1. Go to [Vercel Dashboard](https://vercel.com/dashboard)
+2. Click **Add New Project**
+3. Import your GitHub repository (`ai-geo-audit`)
+4. Vercel will auto-detect settings:
+   - Framework Preset: Other
+   - Root Directory: `./`
+   - Build Command: (leave empty)
+   - Output Directory: `./`
+5. Click **Deploy**
 
-1. Go to your repository on GitHub
-2. Click **Settings** (top menu)
-3. Click **Pages** (left sidebar)
-4. Under **Source**:
-   - Select **Deploy from a branch**
-   - Branch: **main**
-   - Folder: **/ (root)**
+### Step 3: Configure Environment Variables
+
+After deployment, configure OAuth2 credentials:
+
+1. Go to your project in Vercel Dashboard
+2. Navigate to **Settings** → **Environment Variables**
+3. Add these three variables (see `GSC_API_SETUP.md` for details):
+   - `GOOGLE_CLIENT_ID` - Your OAuth2 Client ID
+   - `GOOGLE_CLIENT_SECRET` - Your OAuth2 Client Secret
+   - `GOOGLE_REFRESH_TOKEN` - Your OAuth2 Refresh Token
+4. Select **Production**, **Preview**, and **Development** environments
 5. Click **Save**
 
-### Step 6: Access Your Dashboard
+### Step 4: Redeploy
+
+After adding environment variables, trigger a new deployment:
+- Go to **Deployments** tab
+- Click the **⋯** menu on the latest deployment
+- Click **Redeploy**
+
+### Step 5: Access Your Dashboard
 
 Your dashboard will be live at:
-- `https://YOUR_USERNAME.github.io/ai-geo-audit/`
-
-GitHub Pages usually takes 1-2 minutes to build and deploy.
+- `https://ai-geo-audit.vercel.app/` (or your custom domain)
 
 ### Custom Domain (Optional)
 
-If you want to use a custom domain (e.g., `audit.alanranger.com`):
-
-1. In GitHub Pages settings, enter your custom domain
-2. Add a `CNAME` file in the repository root with your domain
-3. Configure DNS records as GitHub instructs
+1. Go to **Settings** → **Domains** in Vercel
+2. Add your custom domain (e.g., `audit.alanranger.com`)
+3. Configure DNS records as Vercel instructs
 
 ### Updating
 
@@ -71,11 +92,12 @@ git commit -m "Update: [describe your changes]"
 git push
 ```
 
-GitHub Pages will automatically rebuild.
+Vercel will automatically rebuild and deploy (usually takes 1-2 minutes).
 
 ## Troubleshooting
 
-- **404 Error**: Wait 2-3 minutes after enabling Pages, or check that `index.html` exists
-- **Not Updating**: Clear browser cache or wait a few minutes for GitHub to rebuild
-- **API Keys**: Remember API keys are stored in browser localStorage, not in the code
+- **404 Error**: Check that `vercel.json` exists and routes are configured correctly
+- **Not Updating**: Clear browser cache or wait a few minutes for Vercel to rebuild
+- **OAuth2 Errors**: Verify all three environment variables are set in Vercel
+- **API Errors**: Check Vercel function logs in the dashboard under **Functions** tab
 

@@ -49,7 +49,13 @@ You need to generate a refresh token that the serverless function can use:
 
 You can also use a Node.js script to generate the refresh token. Let me know if you need this approach.
 
-## Step 4: Add Environment Variables to Vercel
+## Step 4: Deploy to Vercel (if not already done)
+
+If you haven't deployed to Vercel yet, see `DEPLOY.md` for full deployment instructions.
+
+The project must be deployed to Vercel before you can add environment variables.
+
+## Step 5: Add Environment Variables to Vercel
 
 1. Go to your Vercel project dashboard
 2. Navigate to **Settings** → **Environment Variables**
@@ -63,16 +69,27 @@ You can also use a Node.js script to generate the refresh token. Let me know if 
 
 4. Make sure to select **Production**, **Preview**, and **Development** environments
 5. Click **Save**
+6. **Important**: After adding environment variables, you must redeploy for them to take effect
 
-## Step 5: Verify Search Console Access
+## Step 6: Redeploy After Adding Environment Variables
+
+After adding the environment variables, you must trigger a new deployment:
+
+1. Go to your Vercel project dashboard
+2. Navigate to **Deployments** tab
+3. Click the **⋯** menu on the latest deployment
+4. Click **Redeploy**
+5. Wait for deployment to complete (usually 1-2 minutes)
+
+## Step 7: Verify Search Console Access
 
 Make sure the Google account you used to generate the refresh token has access to the Search Console property you want to query (e.g., `alanranger.com`).
 
-## Step 6: Test the Integration
+## Step 8: Test the Integration
 
-1. Deploy the updated code to Vercel (it should auto-deploy from GitHub)
-2. Open your dashboard
-3. Run an audit scan
+1. Open your dashboard at `https://ai-geo-audit.vercel.app/` (or your custom domain)
+2. Enter your property URL (e.g., `https://alanranger.com`)
+3. Click "Run Audit Scan"
 4. Check the debug log for any authentication errors
 
 ## Troubleshooting
@@ -96,4 +113,5 @@ Make sure the Google account you used to generate the refresh token has access t
 - The serverless function handles authentication server-side
 - Client-side code never sees your credentials
 - Refresh tokens can be revoked in Google Cloud Console if compromised
+
 

@@ -7,40 +7,12 @@ Automated SEO analysis tool for tracking AI-powered search visibility, entity re
 ### Local Testing
 Simply open `audit-dashboard.html` in your browser - no server needed!
 
-## Deploy to GitHub Pages
+## Deployment
 
-### Initial Setup
+This project is deployed on **Vercel**. See `DEPLOY.md` for detailed deployment instructions.
 
-1. **Initialize Git repository** (if not already done):
-   ```bash
-   cd "G:\Dropbox\alan ranger photography\Website Code\AI GEO Audit"
-   git init
-   git add .
-   git commit -m "Initial commit: AI GEO Audit Dashboard"
-   ```
-
-2. **Create GitHub Repository**:
-   - Go to [GitHub](https://github.com/new)
-   - Create a new repository (e.g., `ai-geo-audit`)
-   - **Do NOT** initialize with README, .gitignore, or license
-
-3. **Push to GitHub**:
-   ```bash
-   git remote add origin https://github.com/YOUR_USERNAME/ai-geo-audit.git
-   git branch -M main
-   git push -u origin main
-   ```
-
-4. **Enable GitHub Pages**:
-   - Go to your repository on GitHub
-   - Click **Settings** → **Pages**
-   - Under **Source**, select **Deploy from a branch**
-   - Select **main** branch and **/ (root)** folder
-   - Click **Save**
-
-5. **Access your dashboard**:
-   - Your dashboard will be live at: `https://YOUR_USERNAME.github.io/ai-geo-audit/`
-   - Or with custom domain if configured
+### Live Dashboard
+The dashboard is available at: `https://ai-geo-audit.vercel.app/`
 
 ### Updating the Dashboard
 
@@ -51,7 +23,7 @@ git commit -m "Update dashboard"
 git push
 ```
 
-GitHub Pages will automatically rebuild (usually takes 1-2 minutes).
+Vercel will automatically rebuild and deploy (usually takes 1-2 minutes).
 
 ## Features
 
@@ -63,30 +35,51 @@ GitHub Pages will automatically rebuild (usually takes 1-2 minutes).
 
 ## Setup
 
-1. Get your Google Search Console API key from [Google Cloud Console](https://console.cloud.google.com/)
-2. Enable the Search Console API
-3. Enter your API key in the dashboard configuration panel
-4. Enter your property URL (e.g., `https://alanranger.com`)
-5. Click "Run Audit Scan"
+1. **Configure OAuth2 Credentials** (see `GSC_API_SETUP.md` for detailed instructions):
+   - Enable Google Search Console API in Google Cloud Console
+   - Create OAuth2 credentials (Client ID and Client Secret)
+   - Generate a refresh token
+   - Add credentials to Vercel environment variables
+
+2. **Access the Dashboard**:
+   - Open the live dashboard at `https://ai-geo-audit.vercel.app/`
+   - Enter your property URL (e.g., `https://alanranger.com`)
+   - Click "Run Audit Scan"
 
 ## Current Status
 
 - ✅ Dashboard UI complete
 - ✅ Visual charts and graphs
+- ✅ Google Search Console API integration (OAuth2)
+- ✅ Schema audit and coverage scanning
+- ✅ Entity metrics and SERP features tracking
+- ✅ Real-time data from GSC API
 - ✅ Configuration management
-- ⚠️ Using mock data (API integration in progress)
+
+## API Endpoints
+
+The following serverless functions are available:
+
+- `/api/fetch-search-console` - Fetch GSC performance data
+- `/api/schema-audit` - Scan URLs for JSON-LD schema coverage
+- `/api/aigeo/gsc-entity-metrics` - Comprehensive GSC entity metrics
+- `/api/aigeo/schema-coverage` - Schema coverage analysis
+- `/api/aigeo/serp-features` - SERP feature detection
+- `/api/aigeo/local-signals` - Local SEO signals
+- `/api/aigeo/backlink-metrics` - Backlink analysis
+- `/api/aigeo/entity-extract` - Entity extraction (placeholder)
 
 ## Next Steps
 
-- [ ] Connect real Google Search Console API
 - [ ] Add Google Analytics integration
-- [ ] Add schema validation API
-- [ ] Add SERP tracking
-- [ ] Add automated scheduling
+- [ ] Implement automated scheduling
+- [ ] Add email notifications
+- [ ] Expand entity extraction capabilities
 
 ## Notes
 
-- API keys are stored in browser localStorage (not sent to any server)
-- All processing is client-side for privacy
+- OAuth2 credentials are stored securely in Vercel environment variables
+- All API calls are handled server-side via Vercel serverless functions
 - Charts use Chart.js (loaded via CDN)
+- Schema audit reads URLs from GitHub-hosted CSV file
 

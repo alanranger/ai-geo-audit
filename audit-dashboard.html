@@ -1780,6 +1780,61 @@
         timestampElement.textContent = formatted;
       }
     }
+    
+    // Save audit results to Supabase for historical tracking
+    async function saveAuditToSupabase(propertyUrl, scores, searchData, snippetReadiness, schemaAudit) {
+      try {
+        const auditDate = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+        
+        const response = await fetch('/api/supabase/save-audit', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            propertyUrl,
+            auditDate,
+            schemaAudit,
+            scores,
+            searchData,
+            snippetReadiness
+          })
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          debugLog('✓ Audit results saved to Supabase', 'success');
+        } else {
+          const error = await response.json();
+          // Don't show error to user - Supabase is optional for now
+          debugLog(`⚠ Could not save to Supabase: ${error.message || 'Unknown error'}`, 'warn');
+        }
+      } catch (error) {
+        // Don't show error to user - Supabase is optional for now
+        debugLog(`⚠ Supabase save error: ${error.message}`, 'warn');
+      }
+    }
+    
+    // Fetch historical Content/Schema data from Supabase
+    async function fetchContentSchemaHistory(propertyUrl, startDate, endDate) {
+      try {
+        const response = await fetch(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}&startDate=${startDate}&endDate=${endDate}`);
+        
+        if (response.ok) {
+          const result = await response.json();
+          if (result.status === 'ok' && result.data) {
+            debugLog(`✓ Fetched ${result.count} historical Content/Schema records from Supabase`, 'success');
+            return result.data;
+          }
+        } else {
+          const error = await response.json();
+          debugLog(`⚠ Could not fetch from Supabase: ${error.message || 'Unknown error'}`, 'warn');
+        }
+      } catch (error) {
+        debugLog(`⚠ Supabase fetch error: ${error.message}`, 'warn');
+      }
+      return [];
+    }
 
     // Close completion modal
     function closeCompletionModal() {
@@ -2191,6 +2246,9 @@
         
         // Save audit results to localStorage
         saveAuditResults(scores, searchData, snippetReadiness, schemaAudit);
+        
+        // Save audit results to Supabase for historical tracking
+        saveAuditToSupabase(propertyUrl, scores, searchData, snippetReadiness, schemaAudit);
         
         showStatus('Audit completed successfully!', 'success');
       } catch (error) {
@@ -3112,9 +3170,32 @@
           let chartDateObjects = []; // Store Date objects for period detection
           
           if (timeseries.length > 0) {
-            // Get current Content/Schema score (schema doesn't change daily, so use current score for all points)
+            // Fetch historical Content/Schema data from Supabase
+            const propertyUrl = document.getElementById('propertyUrl')?.value || '';
+            const endDate = new Date().toISOString().split('T')[0];
+            const startDateObj = new Date();
+            startDateObj.setDate(startDateObj.getDate() - dateRange);
+            const startDate = startDateObj.toISOString().split('T')[0];
+            
+            let contentSchemaHistory = [];
+            if (propertyUrl) {
+              contentSchemaHistory = await fetchContentSchemaHistory(propertyUrl, startDate, endDate);
+            }
+            
+            // Create a map of dates to Content/Schema scores from Supabase
+            const contentSchemaMap = new Map();
+            contentSchemaHistory.forEach(record => {
+              contentSchemaMap.set(record.date, record.contentSchemaScore);
+            });
+            
             const currentContentSchema = scores.contentSchema || 0;
-            debugLog(`Using current Content/Schema score (${currentContentSchema}) for all trend points (schema is static, not time-based)`, 'info');
+            const hasHistoricalData = contentSchemaHistory.length > 0;
+            
+            if (hasHistoricalData) {
+              debugLog(`Using ${contentSchemaHistory.length} historical Content/Schema records from Supabase`, 'info');
+            } else {
+              debugLog(`No historical Content/Schema data found. Using current score (${currentContentSchema}) for all points. Dashed line will indicate estimated data.`, 'info');
+            }
             
             // Calculate pillar scores for each timeseries point
             const calculatePillarFromMetrics = (position, ctr) => {
@@ -3133,10 +3214,8 @@
               const authority = clampScore(0.6 * ctrScore + 0.4 * posScore);
               const localEntity = clampScore(60 + 0.3 * (posScore - 50) + 0.2 * (ctrScore - 50));
               const serviceArea = clampScore(localEntity - 5);
-              // Use current Content/Schema score for all historical points (schema is static, not time-based)
-              const contentSchema = currentContentSchema;
               
-              return { visibility, authority, localEntity, serviceArea, contentSchema };
+              return { visibility, authority, localEntity, serviceArea };
             };
             
             // Extract data arrays from timeseries
@@ -3145,6 +3224,7 @@
             authorityData = [];
             visibilityData = [];
             contentSchemaData = [];
+            const contentSchemaDataEstimated = []; // For dashed line (dates without real data)
             const allDateObjects = []; // Store Date objects for year detection
             const allDates = [];
             
@@ -3154,7 +3234,20 @@
               serviceAreaData.push(pillarScores.serviceArea);
               authorityData.push(pillarScores.authority);
               visibilityData.push(pillarScores.visibility);
-              contentSchemaData.push(pillarScores.contentSchema);
+              
+              // Check if we have real historical data for this date
+              const pointDate = point.date; // YYYY-MM-DD format
+              const realScore = contentSchemaMap.get(pointDate);
+              
+              if (realScore !== undefined) {
+                // We have real data for this date
+                contentSchemaData.push(realScore);
+                contentSchemaDataEstimated.push(null); // No estimated value
+              } else {
+                // No real data - use current score as estimate
+                contentSchemaData.push(null); // No real value
+                contentSchemaDataEstimated.push(currentContentSchema); // Estimated value
+              }
               
               // Format date for chart (timeseries dates are YYYY-MM-DD)
               const dateObj = new Date(point.date);
@@ -3485,8 +3578,22 @@
                   borderWidth: 2.5,
                   tension: 0.4,
                   pointRadius: 0,
-                  pointHoverRadius: 5
-                }
+                  pointHoverRadius: 5,
+                  spanGaps: true // Connect across null values
+                },
+                // Estimated Content/Schema data (dashed line for dates without real data)
+                ...(contentSchemaDataEstimated && contentSchemaDataEstimated.some(v => v !== null) ? [{
+                  label: 'Content / Schema (Estimated)',
+                  data: contentSchemaDataEstimated,
+                  borderColor: 'rgba(107, 114, 128, 0.5)', // Lighter grey
+                  backgroundColor: 'rgba(107, 114, 128, 0.05)',
+                  borderWidth: 2,
+                  borderDash: [5, 5], // Dashed line
+                  tension: 0.4,
+                  pointRadius: 0,
+                  pointHoverRadius: 5,
+                  spanGaps: true
+                }] : [])
               ]
             },
             plugins: [ragBackgroundPlugin, yearLabelBoldPlugin, periodDividingLinePlugin],
