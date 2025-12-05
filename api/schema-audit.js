@@ -588,11 +588,25 @@ export default async function handler(req, res) {
     // Build a set of all URLs that were checked for inheritance
     const checkedUrls = new Set(inheritanceResults.map(r => r.url));
     
+    // Track all pages for diagnostic purposes
+    let successfulPages = 0;
+    let failedPages = 0;
+    let pagesWithSchemasArray = [];
+    let pagesWithoutSchemasArray = [];
+    
     results.forEach(result => {
-      if (!result.success) return;
-      const hasInlineSchema = result.schemas.length > 0;
-      if (!hasInlineSchema) {
+      if (!result.success) {
+        failedPages++;
+        return;
+      }
+      successfulPages++;
+      const hasInlineSchema = result.schemas && result.schemas.length > 0;
+      
+      if (hasInlineSchema) {
+        pagesWithSchemasArray.push(result.url);
+      } else {
         pagesWithoutInline++;
+        pagesWithoutSchemasArray.push(result.url);
         const parentUrl = getParentCollectionPageUrl(result.url);
         if (parentUrl) {
           // Has parent page - check if it got inherited schema
@@ -621,6 +635,16 @@ export default async function handler(req, res) {
       }
     });
     
+    // Additional diagnostic logging
+    console.log(`📊 Detailed page analysis:`);
+    console.log(`  Successful pages: ${successfulPages}`);
+    console.log(`  Failed pages: ${failedPages}`);
+    console.log(`  Pages with schemas: ${pagesWithSchemasArray.length}`);
+    console.log(`  Pages without schemas: ${pagesWithoutSchemasArray.length}`);
+    if (pagesWithoutSchemasArray.length > 0 && pagesWithoutSchemasArray.length <= 10) {
+      console.log(`  URLs without schemas: ${pagesWithoutSchemasArray.join(', ')}`);
+    }
+    
     console.log(`📊 Missing schema analysis:`);
     console.log(`  Total pages: ${totalPages}`);
     console.log(`  Pages with inline schema: ${pagesWithSchema}`);
@@ -636,6 +660,8 @@ export default async function handler(req, res) {
     const expectedMissing = totalPages - pagesWithSchema - pagesWithInheritedSchema;
     const diagnosticInfo = {
       totalPages,
+      successfulPages,
+      failedPages,
       pagesWithInlineSchema: pagesWithSchema,
       pagesWithoutInlineSchema: pagesWithoutInline,
       pagesWithInheritedSchema,
@@ -643,7 +669,10 @@ export default async function handler(req, res) {
       pagesWithParentButNotChecked,
       pagesWithoutParent,
       totalMissing: missingSchemaPages.length,
-      expectedMissing
+      expectedMissing,
+      urlsWithoutSchemas: pagesWithoutSchemasArray.length > 0 && pagesWithoutSchemasArray.length <= 20 
+        ? pagesWithoutSchemasArray 
+        : (pagesWithoutSchemasArray.length > 20 ? pagesWithoutSchemasArray.slice(0, 20) : [])
     };
     
     if (missingSchemaPages.length !== expectedMissing) {
