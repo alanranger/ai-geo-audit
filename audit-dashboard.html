@@ -810,6 +810,9 @@
     </div>
 
     <div id="dashboard" style="display: none;">
+      <div id="auditTimestamp" style="background: #e8f5e9; padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 1rem; border-left: 4px solid #10b981; font-size: 0.9rem; color: #555;">
+        <strong>Last Audit:</strong> <span id="lastAuditTime">Not yet run</span>
+      </div>
       <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; margin-bottom: 3rem; border-left: 4px solid var(--brand-orange);">
         <h3 style="margin-top: 0; color: var(--brand-orange);">Five-Pillar Framework</h3>
         <p style="color: #555; line-height: 1.6; margin-bottom: 1rem;">
@@ -1657,15 +1660,64 @@
         const retryStillFailed = (retryData.missingSchemaCount || 0);
         
         debugLog(`✓ Retry completed: ${retrySuccessful} pages now have schema, ${retryStillFailed} still failed`, 'success');
-        updateProgress(80, 'Retry completed!');
+        updateProgress(60, 'Merging retry results with original audit...');
         
-        // Show completion modal with retry results
-        showCompletionModal(retrySchemaAudit);
-        
-        updateProgress(100, 'Retry completed!');
-        showStatus(`Retry completed: ${retrySuccessful} URLs now have schema, ${retryStillFailed} still failed`, 'success');
-        
-        debugLog('⚠ Note: Retry results shown separately. Run full audit to see merged results in main dashboard.', 'warn');
+        // Load original audit results from localStorage
+        const savedAudit = loadAuditResults();
+        if (savedAudit && savedAudit.schemaAudit && savedAudit.schemaAudit.data) {
+          // Merge retry results with original schema audit
+          const originalData = savedAudit.schemaAudit.data;
+          const originalPages = originalData.pagesWithSchema || 0;
+          const originalFailed = originalData.missingSchemaCount || 0;
+          
+          // Create merged schema audit data
+          const mergedSchemaAudit = {
+            ...savedAudit.schemaAudit,
+            data: {
+              ...originalData,
+              // Update counts: add retry successful pages, remove retry successful from failed
+              pagesWithSchema: originalPages + retrySuccessful,
+              missingSchemaCount: Math.max(0, originalFailed - retrySuccessful),
+              // Update missingSchemaPages: remove successfully retried URLs
+              missingSchemaPages: (originalData.missingSchemaPages || []).filter(p => {
+                // Keep only pages that weren't in the retry list or still failed
+                return !failedUrls.includes(p.url) || (retryData.missingSchemaPages || []).some(rp => rp.url === p.url);
+              }),
+              // Update coverage
+              coverage: ((originalPages + retrySuccessful) / originalData.totalPages) * 100
+            }
+          };
+          
+          // Update saved audit with merged results
+          const mergedAudit = {
+            ...savedAudit,
+            schemaAudit: mergedSchemaAudit
+          };
+          
+          // Recalculate scores with merged data
+          const mergedScores = calculatePillarScores(savedAudit.searchData, mergedSchemaAudit);
+          const mergedSnippetReadiness = calculateSnippetReadiness(mergedScores, savedAudit.searchData);
+          
+          // Save merged results
+          saveAuditResults(mergedScores, savedAudit.searchData, mergedSnippetReadiness, mergedSchemaAudit);
+          
+          // Refresh dashboard with merged results
+          updateProgress(80, 'Refreshing dashboard with merged results...');
+          displayDashboard(mergedScores, savedAudit.searchData, mergedSnippetReadiness, mergedSchemaAudit);
+          
+          updateProgress(100, 'Retry completed and dashboard updated!');
+          showStatus(`Retry completed: ${retrySuccessful} URLs now have schema. Dashboard updated with merged results.`, 'success');
+          
+          // Show completion modal with merged results
+          showCompletionModal(mergedSchemaAudit);
+        } else {
+          // No saved audit found, just show retry results
+          updateProgress(80, 'Retry completed!');
+          showCompletionModal(retrySchemaAudit);
+          updateProgress(100, 'Retry completed!');
+          showStatus(`Retry completed: ${retrySuccessful} URLs now have schema, ${retryStillFailed} still failed`, 'success');
+          debugLog('⚠ No saved audit found to merge with. Run full audit to see complete results.', 'warn');
+        }
         
       } catch (error) {
         debugLog(`✗ Retry error: ${error.message}`, 'error');
@@ -2085,6 +2137,10 @@
         
         updateProgress(100, 'Audit completed successfully!');
         debugLog('=== AUDIT COMPLETE: Success ===', 'success');
+        
+        // Save audit results to localStorage
+        saveAuditResults(scores, searchData, snippetReadiness, schemaAudit);
+        
         showStatus('Audit completed successfully!', 'success');
       } catch (error) {
         debugLog(`✗ AUDIT ERROR: ${error.message}`, 'error');
@@ -2115,6 +2171,16 @@
 
     // Display dashboard
     function displayDashboard(scores, data, snippetReadiness = 0, schemaAudit = null) {
+      // Update timestamp if this is a fresh display
+      const saved = loadAuditResults();
+      if (saved && saved.timestamp) {
+        updateAuditTimestamp(saved.timestamp);
+      }
+      // Update timestamp if this is a fresh display
+      const saved = loadAuditResults();
+      if (saved && saved.timestamp) {
+        updateAuditTimestamp(saved.timestamp);
+      }
       debugLog('=== DISPLAY DASHBOARD: Starting ===', 'info');
       
       // Show dashboard first (canvas elements need to be visible for Chart.js)
@@ -3492,6 +3558,23 @@
       debugLog(`Window location: ${window.location.href}`, 'info');
       debugLog(`User agent: ${navigator.userAgent}`, 'info');
       loadConfig();
+      
+      // Load and display last audit results if available
+      const savedAudit = loadAuditResults();
+      if (savedAudit && savedAudit.scores && savedAudit.searchData) {
+        debugLog('Loading last audit results from localStorage...', 'info');
+        // Show dashboard immediately with saved results
+        document.getElementById('dashboard').style.display = 'block';
+        document.getElementById('loading').classList.remove('show');
+        displayDashboard(
+          savedAudit.scores,
+          savedAudit.searchData,
+          savedAudit.snippetReadiness || 0,
+          savedAudit.schemaAudit || null
+        );
+        debugLog('✓ Last audit results displayed', 'success');
+      }
+      
       debugLog('=== PAGE LOAD: Initialization complete ===', 'success');
     });
   </script>
