@@ -552,6 +552,39 @@
       0% { transform: rotate(0deg); }
       100% { transform: rotate(360deg); }
     }
+    .progress-container {
+      background: #f8f9fa;
+      border-radius: 8px;
+      padding: 1.5rem;
+      margin: 1rem 0;
+    }
+    .progress-bar-wrapper {
+      width: 100%;
+      background: #e2e8f0;
+      border-radius: 10px;
+      height: 24px;
+      overflow: hidden;
+      margin: 1rem 0;
+    }
+    .progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, var(--brand-orange), #ff8c42);
+      border-radius: 10px;
+      transition: width 0.3s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: 600;
+      font-size: 0.85rem;
+      min-width: 0;
+    }
+    .progress-status {
+      font-size: 0.95rem;
+      color: #555;
+      margin-top: 0.5rem;
+      font-weight: 500;
+    }
     .help-text {
       font-size: 0.875rem;
       color: var(--brand-grey);
@@ -702,6 +735,9 @@
       </div>
       <div class="form-group">
         <label for="manualUrlList">Manual URL List (Optional)</label>
+        <div style="font-size: 0.85rem; color: #666; margin-bottom: 0.5rem;">
+          Load list of site URLs from a CSV file
+        </div>
         <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
           <input type="file" id="urlListFile" accept=".csv" style="flex: 1; padding: 0.5rem; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 0.9rem;">
           <button class="btn btn-small" onclick="loadUrlListFromFile()" style="padding: 0.5rem 1rem;">Load CSV</button>
@@ -725,8 +761,13 @@
     <div class="status" id="status"></div>
 
     <div class="loading" id="loading">
-      <div class="spinner"></div>
-      <p>Running audit scan...</p>
+      <div class="progress-container">
+        <div class="spinner"></div>
+        <div class="progress-bar-wrapper">
+          <div class="progress-bar" id="progressBar" style="width: 0%;">0%</div>
+        </div>
+        <div class="progress-status" id="progressStatus">Initializing audit scan...</div>
+      </div>
     </div>
 
     <div id="dashboard" style="display: none;">
@@ -1376,6 +1417,19 @@
       }
     }
 
+    // Update progress bar
+    function updateProgress(percent, statusText) {
+      const progressBar = document.getElementById('progressBar');
+      const progressStatus = document.getElementById('progressStatus');
+      if (progressBar) {
+        progressBar.style.width = Math.min(100, Math.max(0, percent)) + '%';
+        progressBar.textContent = Math.round(percent) + '%';
+      }
+      if (progressStatus) {
+        progressStatus.textContent = statusText || 'Processing...';
+      }
+    }
+
     // Show status message
     function showStatus(message, type) {
       const status = document.getElementById('status');
@@ -1588,14 +1642,17 @@
       debugLog('Showing loading indicator...', 'info');
       document.getElementById('loading').classList.add('show');
       document.getElementById('dashboard').style.display = 'none';
+      updateProgress(0, 'Initializing audit scan...');
 
       try {
+        updateProgress(10, 'Fetching Search Console data...');
         debugLog('Fetching Search Console data...', 'info');
         // Fetch data
         const searchData = await fetchSearchConsoleData(apiKey, propertyUrl, dateRange);
         debugLog('✓ Search Console data fetched successfully', 'success');
         debugLog(`Data: ${JSON.stringify(searchData).substring(0, 200)}...`, 'info');
         
+        updateProgress(40, 'Fetching schema audit data...');
         debugLog('Fetching schema audit data...', 'info');
         // Fetch schema audit data
         let schemaAudit = null;
@@ -1608,6 +1665,7 @@
             try {
               const urls = JSON.parse(manualUrlList);
               debugLog(`Using manual URL list: ${urls.length} URLs`, 'info');
+              updateProgress(45, `Crawling ${urls.length} URLs for schema markup...`);
               schemaRequest = fetch('/api/schema-audit', {
                 method: 'POST',
                 headers: {
@@ -1617,10 +1675,12 @@
               });
             } catch (e) {
               debugLog('⚠ Failed to parse manual URL list, using default CSV', 'warn');
+              updateProgress(45, 'Loading URLs from CSV and crawling for schema markup...');
               schemaRequest = fetch('/api/schema-audit');
             }
           } else {
             debugLog('No manual URL list, using default CSV source', 'info');
+            updateProgress(45, 'Loading URLs from CSV and crawling for schema markup...');
             schemaRequest = fetch('/api/schema-audit');
           }
           
@@ -1645,20 +1705,24 @@
           debugLog(`⚠ Schema audit error: ${schemaError.message}, using fallback`, 'warn');
         }
         
+        updateProgress(70, 'Calculating pillar scores...');
         debugLog('Calculating pillar scores...', 'info');
         // Calculate scores (pass schema audit data)
         const scores = calculatePillarScores(searchData, schemaAudit);
         debugLog('✓ Pillar scores calculated', 'success');
         debugLog(`Scores: ${JSON.stringify(scores)}`, 'info');
 
+        updateProgress(85, 'Calculating snippet readiness...');
         debugLog('Calculating snippet readiness...', 'info');
         const snippetReadiness = calculateSnippetReadiness(scores, searchData);
         debugLog(`Snippet readiness: ${snippetReadiness}`, 'info');
 
+        updateProgress(95, 'Generating dashboard...');
         debugLog('Displaying dashboard...', 'info');
         // Display results (pass schema audit data)
         displayDashboard(scores, searchData, snippetReadiness, schemaAudit);
         
+        updateProgress(100, 'Audit completed successfully!');
         debugLog('=== AUDIT COMPLETE: Success ===', 'success');
         showStatus('Audit completed successfully!', 'success');
       } catch (error) {
@@ -1669,6 +1733,10 @@
       } finally {
         debugLog('Hiding loading indicator...', 'info');
         document.getElementById('loading').classList.remove('show');
+        // Reset progress bar for next run
+        setTimeout(() => {
+          updateProgress(0, 'Initializing audit scan...');
+        }, 500);
       }
     }
 
