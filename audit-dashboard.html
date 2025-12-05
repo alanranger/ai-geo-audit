@@ -1696,22 +1696,42 @@
                 debugLog('  Source: CSV (GitHub/hosted)', 'info');
               }
               
-              // Log diagnostic info if available
+              // Log comprehensive diagnostic info if available
               if (schemaAudit.meta && schemaAudit.meta.diagnostic) {
                 const diag = schemaAudit.meta.diagnostic;
-                debugLog('📊 Schema Audit Diagnostics:', 'info');
-                debugLog(`  Total pages: ${diag.totalPages}`, 'info');
-                debugLog(`  Pages with inline schema: ${diag.pagesWithInlineSchema}`, 'info');
-                debugLog(`  Pages without inline schema: ${diag.pagesWithoutInlineSchema}`, 'info');
-                debugLog(`  Pages with inherited schema: ${diag.pagesWithInheritedSchema}`, 'info');
-                debugLog(`  Pages with parent but no inherited: ${diag.pagesWithParentButNoInherited}`, 'info');
-                debugLog(`  Pages with parent but not checked: ${diag.pagesWithParentButNotChecked}`, 'info');
-                debugLog(`  Pages without parent: ${diag.pagesWithoutParent}`, 'info');
-                debugLog(`  Total missing: ${diag.totalMissing}`, 'info');
-                debugLog(`  Expected missing: ${diag.expectedMissing}`, 'info');
+                debugLog('═══════════════════════════════════════════════════════', 'info');
+                debugLog('📊 SCHEMA AUDIT DIAGNOSTICS', 'info');
+                debugLog('═══════════════════════════════════════════════════════', 'info');
+                debugLog('', 'info'); // Empty line for spacing
+                
+                debugLog('📈 PAGE COUNTS:', 'info');
+                debugLog(`  • Total pages scanned: ${diag.totalPages}`, 'info');
+                debugLog(`  • Pages with inline schema: ${diag.pagesWithInlineSchema}`, 'info');
+                debugLog(`  • Pages without inline schema: ${diag.pagesWithoutInlineSchema}`, 'info');
+                debugLog(`  • Pages with inherited schema: ${diag.pagesWithInheritedSchema}`, 'info');
+                debugLog('', 'info'); // Empty line for spacing
+                
+                debugLog('🔍 MISSING SCHEMA BREAKDOWN:', 'info');
+                debugLog(`  • Pages with parent but no inherited: ${diag.pagesWithParentButNoInherited}`, 'info');
+                debugLog(`  • Pages with parent but not checked: ${diag.pagesWithParentButNotChecked}`, diag.pagesWithParentButNotChecked > 0 ? 'warn' : 'info');
+                debugLog(`  • Pages without parent page: ${diag.pagesWithoutParent}`, 'info');
+                debugLog('', 'info'); // Empty line for spacing
+                
+                debugLog('✅ VALIDATION:', 'info');
+                debugLog(`  • Total missing pages (calculated): ${diag.totalMissing}`, 'info');
+                debugLog(`  • Expected missing (total - inline - inherited): ${diag.expectedMissing}`, 'info');
+                
                 if (diag.mismatch) {
-                  debugLog(`  ❌ MISMATCH: ${diag.mismatchDetails}`, 'error');
+                  debugLog('', 'info'); // Empty line for spacing
+                  debugLog(`  ❌ MISMATCH DETECTED!`, 'error');
+                  debugLog(`  ${diag.mismatchDetails}`, 'error');
+                  debugLog(`  This indicates pages are being double-counted or missed in the calculation.`, 'error');
+                } else {
+                  debugLog(`  ✓ Counts match correctly`, 'success');
                 }
+                
+                debugLog('', 'info'); // Empty line for spacing
+                debugLog('═══════════════════════════════════════════════════════', 'info');
               }
             } else {
               debugLog('⚠ Schema audit returned error, using fallback', 'warn');
