@@ -776,6 +776,9 @@
       </div>
       <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
         <button class="btn" onclick="runAudit()" title="Start a comprehensive audit scan. Fetches Google Search Console data and performs schema audit on all site URLs. Results will appear in the dashboard below.">Run Audit Scan</button>
+        <button class="btn btn-secondary" id="retryFailedUrlsBtn" onclick="retryFailedUrlsFromLastAudit()" style="background: #f59e0b; color: white; border-color: #f59e0b; display: none;" title="Retry scanning the failed URLs from the last audit. This will rescan only the URLs that failed during the previous audit scan.">
+          🔄 Retry Failed URLs
+        </button>
         <button class="btn btn-secondary" onclick="saveConfig()" title="Save your current configuration (property URL and date range) to browser localStorage. Settings will be restored when you reload the page.">Save Configuration</button>
         <button class="btn btn-secondary" onclick="syncCSV()" id="syncCsvBtn" style="background: #10b981; color: white; border-color: #10b981;" title="Sync the site URLs CSV file from GitHub. This updates the list of URLs that will be scanned during schema audit.">
           <span id="syncCsvBtnText">🔄 Sync CSV</span>
@@ -1701,6 +1704,9 @@
           // Save merged results
           saveAuditResults(mergedScores, savedAudit.searchData, mergedSnippetReadiness, mergedSchemaAudit);
           
+          // Update retry button visibility
+          updateRetryButtonVisibility(mergedSchemaAudit);
+          
           // Refresh dashboard with merged results
           updateProgress(80, 'Refreshing dashboard with merged results...');
           displayDashboard(mergedScores, savedAudit.searchData, mergedSnippetReadiness, mergedSchemaAudit);
@@ -1834,6 +1840,24 @@
         debugLog(`⚠ Supabase fetch error: ${error.message}`, 'warn');
       }
       return [];
+    }
+    
+    // Update retry button visibility based on failed URLs
+    function updateRetryButtonVisibility(schemaAudit) {
+      const retryBtn = document.getElementById('retryFailedUrlsBtn');
+      if (!retryBtn) return;
+      
+      if (schemaAudit && schemaAudit.data && schemaAudit.data.missingSchemaPages) {
+        const failedUrls = schemaAudit.data.missingSchemaPages.filter(p => p.error);
+        if (failedUrls.length > 0) {
+          retryBtn.style.display = 'inline-block';
+          retryBtn.textContent = `🔄 Retry Failed URLs (${failedUrls.length})`;
+        } else {
+          retryBtn.style.display = 'none';
+        }
+      } else {
+        retryBtn.style.display = 'none';
+      }
     }
 
     // Close completion modal
@@ -2285,6 +2309,10 @@
       if (saved && saved.timestamp) {
         updateAuditTimestamp(saved.timestamp);
       }
+      
+      // Update retry button visibility
+      updateRetryButtonVisibility(schemaAudit);
+      
       debugLog('=== DISPLAY DASHBOARD: Starting ===', 'info');
       
       // Show dashboard first (canvas elements need to be visible for Chart.js)
@@ -2791,24 +2819,57 @@
         const visibilityContribution = (visibilityScore * 0.35).toFixed(1);
         const authorityContribution = (authorityScore * 0.25).toFixed(1);
         
+        // Create nested pie chart with fill percentages
+        // Outer ring: Weighting (40%, 35%, 25%)
+        // Inner fill: Score percentage within each segment (like fuel gauge)
+        
+        const weights = [40, 35, 25];
+        const scoresArray = [contentSchemaScore, visibilityScore, authorityScore];
+        const colors = ['#E57200', '#3b82f6', '#8b5cf6'];
+        
+        // Calculate outer ring data (weighting percentages)
+        const outerData = weights;
+        
+        // Calculate inner fill data (score as percentage of each segment)
+        // For each segment, show how much of it is "filled" based on score
+        const innerData = weights.map((weight, i) => {
+          const scorePercent = scoresArray[i] / 100; // Convert score to 0-1
+          return weight * scorePercent; // Fill this percentage of the segment
+        });
+        
         window.snippetReadinessChart = new Chart(pieChartCanvas, {
           type: 'doughnut',
           data: {
             labels: [
-              `Content/Schema (${contentSchemaScore})`,
-              `Visibility (${visibilityScore})`,
-              `Authority (${authorityScore})`
+              `Content/Schema (${contentSchemaScore}%)`,
+              `Visibility (${visibilityScore}%)`,
+              `Authority (${authorityScore}%)`
             ],
-            datasets: [{
-              data: [40, 35, 25], // Weighting percentages
-              backgroundColor: [
-                '#E57200', // Orange for Content/Schema
-                '#3b82f6', // Blue for Visibility
-                '#8b5cf6'  // Purple for Authority
-              ],
-              borderWidth: 2,
-              borderColor: '#ffffff'
-            }]
+            datasets: [
+              {
+                // Outer ring: Weighting percentages (40%, 35%, 25%)
+                label: 'Weight',
+                data: outerData,
+                backgroundColor: colors,
+                borderWidth: 3,
+                borderColor: '#ffffff',
+                cutout: '60%' // Leave room for inner fill
+              },
+              {
+                // Inner fill: Score percentage within each segment (fuel gauge effect)
+                label: 'Score Fill',
+                data: innerData,
+                backgroundColor: scoresArray.map(score => {
+                  // Use RAG color based on score
+                  if (score >= 70) return '#10b981'; // Green
+                  if (score >= 40) return '#f59e0b'; // Amber
+                  return '#ef4444'; // Red
+                }),
+                borderWidth: 2,
+                borderColor: '#ffffff',
+                cutout: '75%' // Inner ring showing fill
+              }
+            ]
           },
           options: {
             responsive: true,
@@ -2820,29 +2881,19 @@
               tooltip: {
                 callbacks: {
                   label: function(context) {
-                    const label = context.label || '';
-                    const value = context.parsed || 0;
+                    const datasetIndex = context.datasetIndex;
                     const index = context.dataIndex;
-                    let score = 0;
-                    let contribution = 0;
+                    const label = context.label || '';
                     
-                    if (index === 0) {
-                      score = contentSchemaScore;
-                      contribution = contentSchemaContribution;
-                    } else if (index === 1) {
-                      score = visibilityScore;
-                      contribution = visibilityContribution;
-                    } else if (index === 2) {
-                      score = authorityScore;
-                      contribution = authorityContribution;
+                    if (datasetIndex === 0) {
+                      // Outer ring: Show weighting
+                      return `Weight: ${weights[index]}%`;
+                    } else {
+                      // Inner fill: Show score and fill percentage
+                      const score = scoresArray[index];
+                      const fillPercent = (score / 100) * 100;
+                      return `Score: ${score}% (${fillPercent.toFixed(0)}% of segment filled)`;
                     }
-                    
-                    return [
-                      label,
-                      `Weight: ${value}%`,
-                      `Your Score: ${score}`,
-                      `Contribution: ${contribution} points`
-                    ];
                   }
                 }
               }
