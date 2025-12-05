@@ -1708,8 +1708,14 @@
                 debugLog(`  • Total pages scanned: ${diag.totalPages}`, 'info');
                 debugLog(`  • Successful crawls: ${diag.successfulPages || diag.totalPages}`, 'info');
                 debugLog(`  • Failed crawls: ${diag.failedPages || 0}`, diag.failedPages > 0 ? 'warn' : 'info');
+                if (diag.failedPages > 0) {
+                  debugLog(`    ⚠ Failed crawls are counted as pages without schema`, 'warn');
+                }
                 debugLog(`  • Pages with inline schema: ${diag.pagesWithInlineSchema}`, 'info');
                 debugLog(`  • Pages without inline schema: ${diag.pagesWithoutInlineSchema}`, 'info');
+                if (diag.failedPages > 0) {
+                  debugLog(`    (includes ${diag.failedPages} failed crawls)`, 'info');
+                }
                 debugLog(`  • Pages with inherited schema: ${diag.pagesWithInheritedSchema}`, 'info');
                 debugLog('', 'info'); // Empty line for spacing
                 
@@ -2067,9 +2073,17 @@
         
         if (missingSchemaCount > 0 && missingSchemaPages.length > 0) {
           downloadBtn.addEventListener('click', () => {
+            // Check if any pages have error field to determine CSV columns
+            const hasErrors = missingSchemaPages.some(p => p.error);
+            const headers = hasErrors ? ['url', 'parentUrl', 'error'] : ['url', 'parentUrl'];
+            
             const rows = [
-              ['url', 'parentUrl'],
-              ...missingSchemaPages.map(p => [p.url, p.parentUrl || '']),
+              headers,
+              ...missingSchemaPages.map(p => [
+                p.url, 
+                p.parentUrl || '', 
+                ...(hasErrors ? [p.error || ''] : [])
+              ]),
             ];
             
             const csv = rows

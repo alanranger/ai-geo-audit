@@ -596,7 +596,15 @@ export default async function handler(req, res) {
     
     results.forEach(result => {
       if (!result.success) {
+        // Failed crawls = pages without schema (can't verify if they have schema)
         failedPages++;
+        pagesWithoutInline++; // Count failed as without inline schema
+        pagesWithoutSchemasArray.push(result.url);
+        missingSchemaPages.push({ 
+          url: result.url, 
+          parentUrl: null,
+          error: result.error || 'Crawl failed'
+        });
         return;
       }
       successfulPages++;
@@ -648,12 +656,12 @@ export default async function handler(req, res) {
     console.log(`📊 Missing schema analysis:`);
     console.log(`  Total pages: ${totalPages}`);
     console.log(`  Pages with inline schema: ${pagesWithSchema}`);
-    console.log(`  Pages without inline schema: ${pagesWithoutInline}`);
+    console.log(`  Pages without inline schema: ${pagesWithoutInline} (includes ${failedPages} failed crawls)`);
     console.log(`  Pages with inherited schema: ${pagesWithInheritedSchema}`);
     console.log(`  Pages with parent but no inherited: ${pagesWithParentButNoInherited}`);
     console.log(`  Pages with parent but not checked: ${pagesWithParentButNotChecked}`);
-    console.log(`  Pages without parent page: ${pagesWithoutParent}`);
-    console.log(`  Total missing schema pages: ${missingSchemaPages.length}`);
+    console.log(`  Pages without parent page: ${pagesWithoutParent} (includes ${failedPages} failed crawls)`);
+    console.log(`  Total missing schema pages: ${missingSchemaPages.length} (includes ${failedPages} failed crawls)`);
     console.log(`  Expected missing: ${totalPages - pagesWithSchema - pagesWithInheritedSchema}`);
     
     // Sanity check: missing pages should equal total - inline - inherited
@@ -663,16 +671,17 @@ export default async function handler(req, res) {
       successfulPages,
       failedPages,
       pagesWithInlineSchema: pagesWithSchema,
-      pagesWithoutInlineSchema: pagesWithoutInline,
+      pagesWithoutInlineSchema: pagesWithoutInline, // Includes failed crawls
       pagesWithInheritedSchema,
       pagesWithParentButNoInherited,
       pagesWithParentButNotChecked,
-      pagesWithoutParent,
-      totalMissing: missingSchemaPages.length,
+      pagesWithoutParent, // Includes failed crawls
+      totalMissing: missingSchemaPages.length, // Includes failed crawls
       expectedMissing,
       urlsWithoutSchemas: pagesWithoutSchemasArray.length > 0 && pagesWithoutSchemasArray.length <= 20 
         ? pagesWithoutSchemasArray 
-        : (pagesWithoutSchemasArray.length > 20 ? pagesWithoutSchemasArray.slice(0, 20) : [])
+        : (pagesWithoutSchemasArray.length > 20 ? pagesWithoutSchemasArray.slice(0, 20) : []),
+      note: 'Failed crawls are counted as pages without schema since schema cannot be verified'
     };
     
     if (missingSchemaPages.length !== expectedMissing) {
