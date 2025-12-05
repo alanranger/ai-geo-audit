@@ -521,43 +521,58 @@ export default async function handler(req, res) {
       });
     }
     
-    // Crawl URLs with concurrency limit of 4 and delay between requests
+    // Crawl URLs with concurrency limit and delay between requests
+    // Reduced delay to avoid Vercel timeout limits
     const semaphore = new Semaphore(4);
-    const delayBetweenRequests = 300; // 300ms delay after each request to avoid rate limiting
+    const delayBetweenRequests = 150; // 150ms delay after each request (reduced from 300ms)
     
-    // Initial crawl with delays
-    console.log(`🕷️ Starting initial crawl of ${urls.length} URLs with ${delayBetweenRequests}ms delay between requests...`);
-    const crawlPromises = urls.map(url => crawlUrl(url, semaphore, delayBetweenRequests));
-    let results = await Promise.all(crawlPromises);
-    
-    // Identify failed crawls for retry
-    const failedResults = results.filter(r => !r.success);
-    const retryCount = failedResults.length;
-    
-    if (retryCount > 0) {
-      console.log(`🔄 Retrying ${retryCount} failed crawls with longer delays (2 seconds)...`);
-      const retrySemaphore = new Semaphore(2); // Lower concurrency for retries
-      const retryDelay = 2000; // 2 second delay for retries
+    let results = [];
+    try {
+      // Initial crawl with delays
+      console.log(`🕷️ Starting initial crawl of ${urls.length} URLs with ${delayBetweenRequests}ms delay between requests...`);
+      const startTime = Date.now();
+      const crawlPromises = urls.map(url => crawlUrl(url, semaphore, delayBetweenRequests));
+      results = await Promise.all(crawlPromises);
+      const crawlTime = ((Date.now() - startTime) / 1000).toFixed(1);
+      console.log(`✓ Initial crawl completed in ${crawlTime} seconds`);
       
-      // Add a longer initial delay before starting retries
-      await delay(3000);
+      // Identify failed crawls for retry
+      const failedResults = results.filter(r => !r.success);
+      const retryCount = failedResults.length;
       
-      const retryPromises = failedResults.map(result => {
-        return crawlUrl(result.url, retrySemaphore, retryDelay);
-      });
-      
-      const retryResults = await Promise.all(retryPromises);
-      
-      // Update results with retry attempts (replace failed with retry results)
-      const resultsMap = new Map(results.map(r => [r.url, r]));
-      retryResults.forEach(retryResult => {
-        resultsMap.set(retryResult.url, retryResult);
-      });
-      results = Array.from(resultsMap.values());
-      
-      const retrySuccessCount = retryResults.filter(r => r.success).length;
-      const retryFailedCount = retryCount - retrySuccessCount;
-      console.log(`✓ Retry complete: ${retrySuccessCount}/${retryCount} succeeded, ${retryFailedCount} still failed`);
+      if (retryCount > 0) {
+        console.log(`🔄 Retrying ${retryCount} failed crawls with longer delays (1.5 seconds)...`);
+        const retrySemaphore = new Semaphore(2); // Lower concurrency for retries
+        const retryDelay = 1500; // 1.5 second delay for retries (reduced from 2s)
+        
+        // Add a shorter initial delay before starting retries
+        await delay(2000); // Reduced from 3s
+        
+        const retryStartTime = Date.now();
+        const retryPromises = failedResults.map(result => {
+          return crawlUrl(result.url, retrySemaphore, retryDelay);
+        });
+        
+        const retryResults = await Promise.all(retryPromises);
+        const retryTime = ((Date.now() - retryStartTime) / 1000).toFixed(1);
+        console.log(`✓ Retry completed in ${retryTime} seconds`);
+        
+        // Update results with retry attempts (replace failed with retry results)
+        const resultsMap = new Map(results.map(r => [r.url, r]));
+        retryResults.forEach(retryResult => {
+          resultsMap.set(retryResult.url, retryResult);
+        });
+        results = Array.from(resultsMap.values());
+        
+        const retrySuccessCount = retryResults.filter(r => r.success).length;
+        const retryFailedCount = retryCount - retrySuccessCount;
+        console.log(`✓ Retry results: ${retrySuccessCount}/${retryCount} succeeded, ${retryFailedCount} still failed`);
+      }
+    } catch (crawlError) {
+      console.error('❌ Error during crawl process:', crawlError);
+      console.error('Stack:', crawlError.stack);
+      // If crawl fails entirely, return empty results with error
+      throw new Error(`Crawl process failed: ${crawlError.message}`);
     }
     
     // Aggregate results - first pass: check inline schema
