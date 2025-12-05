@@ -328,9 +328,16 @@ async function parseCsvUrls() {
 }
 
 /**
+ * Delay helper function
+ */
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
  * Crawl a single URL with concurrency control
  */
-async function crawlUrl(url, semaphore) {
+async function crawlUrl(url, semaphore, delayAfterMs = 0) {
   await semaphore.acquire();
   
   try {
@@ -354,6 +361,11 @@ async function crawlUrl(url, semaphore) {
         errorType = 'Forbidden';
       }
       
+      // Add delay after failed request
+      if (delayAfterMs > 0) {
+        await delay(delayAfterMs);
+      }
+      
       return {
         url,
         success: false,
@@ -365,6 +377,11 @@ async function crawlUrl(url, semaphore) {
     
     const html = await response.text();
     const schemas = extractJsonLd(html);
+    
+    // Add delay after successful request to avoid rate limiting
+    if (delayAfterMs > 0) {
+      await delay(delayAfterMs);
+    }
     
     return {
       url,
@@ -389,6 +406,11 @@ async function crawlUrl(url, semaphore) {
       errorType = 'HTTP Error';
     } else if (error.message.includes('network')) {
       errorType = 'Network Error';
+    }
+    
+    // Add delay after error to avoid rate limiting
+    if (delayAfterMs > 0) {
+      await delay(delayAfterMs);
     }
     
     return {
@@ -499,10 +521,44 @@ export default async function handler(req, res) {
       });
     }
     
-    // Crawl URLs with concurrency limit of 4
+    // Crawl URLs with concurrency limit of 4 and delay between requests
     const semaphore = new Semaphore(4);
-    const crawlPromises = urls.map(url => crawlUrl(url, semaphore));
-    const results = await Promise.all(crawlPromises);
+    const delayBetweenRequests = 300; // 300ms delay after each request to avoid rate limiting
+    
+    // Initial crawl with delays
+    console.log(`🕷️ Starting initial crawl of ${urls.length} URLs with ${delayBetweenRequests}ms delay between requests...`);
+    const crawlPromises = urls.map(url => crawlUrl(url, semaphore, delayBetweenRequests));
+    let results = await Promise.all(crawlPromises);
+    
+    // Identify failed crawls for retry
+    const failedResults = results.filter(r => !r.success);
+    const retryCount = failedResults.length;
+    
+    if (retryCount > 0) {
+      console.log(`🔄 Retrying ${retryCount} failed crawls with longer delays (2 seconds)...`);
+      const retrySemaphore = new Semaphore(2); // Lower concurrency for retries
+      const retryDelay = 2000; // 2 second delay for retries
+      
+      // Add a longer initial delay before starting retries
+      await delay(3000);
+      
+      const retryPromises = failedResults.map(result => {
+        return crawlUrl(result.url, retrySemaphore, retryDelay);
+      });
+      
+      const retryResults = await Promise.all(retryPromises);
+      
+      // Update results with retry attempts (replace failed with retry results)
+      const resultsMap = new Map(results.map(r => [r.url, r]));
+      retryResults.forEach(retryResult => {
+        resultsMap.set(retryResult.url, retryResult);
+      });
+      results = Array.from(resultsMap.values());
+      
+      const retrySuccessCount = retryResults.filter(r => r.success).length;
+      const retryFailedCount = retryCount - retrySuccessCount;
+      console.log(`✓ Retry complete: ${retrySuccessCount}/${retryCount} succeeded, ${retryFailedCount} still failed`);
+    }
     
     // Aggregate results - first pass: check inline schema
     const totalPages = results.length;
