@@ -583,6 +583,10 @@ export default async function handler(req, res) {
     let pagesWithoutInline = 0;
     let pagesWithParentButNoInherited = 0;
     let pagesWithoutParent = 0;
+    let pagesWithParentButNotChecked = 0;
+    
+    // Build a set of all URLs that were checked for inheritance
+    const checkedUrls = new Set(inheritanceResults.map(r => r.url));
     
     results.forEach(result => {
       if (!result.success) return;
@@ -592,15 +596,22 @@ export default async function handler(req, res) {
         const parentUrl = getParentCollectionPageUrl(result.url);
         if (parentUrl) {
           // Has parent page - check if it got inherited schema
-          const hasInherited = inheritanceMap.get(result.url);
-          if (hasInherited === undefined) {
-            // Page was in pagesNeedingInheritanceCheck but result not in map - this is an error
-            console.warn(`⚠ Page ${result.url} was checked for inheritance but result not in map`);
+          if (!checkedUrls.has(result.url)) {
+            // This page has a parent but wasn't checked - this shouldn't happen
+            console.warn(`⚠ Page ${result.url} has parent ${parentUrl} but was not checked for inheritance`);
+            pagesWithParentButNotChecked++;
             missingSchemaPages.push({ url: result.url, parentUrl: parentUrl });
-          } else if (!hasInherited) {
-            // No inline schema and no inherited schema - missing
-            pagesWithParentButNoInherited++;
-            missingSchemaPages.push({ url: result.url, parentUrl: parentUrl });
+          } else {
+            const hasInherited = inheritanceMap.get(result.url);
+            if (hasInherited === undefined) {
+              // Page was checked but result not in map - this is an error
+              console.warn(`⚠ Page ${result.url} was checked for inheritance but result not in map`);
+              missingSchemaPages.push({ url: result.url, parentUrl: parentUrl });
+            } else if (!hasInherited) {
+              // No inline schema and no inherited schema - missing
+              pagesWithParentButNoInherited++;
+              missingSchemaPages.push({ url: result.url, parentUrl: parentUrl });
+            }
           }
         } else {
           // No inline schema and no parent page to check - definitely missing
@@ -616,15 +627,30 @@ export default async function handler(req, res) {
     console.log(`  Pages without inline schema: ${pagesWithoutInline}`);
     console.log(`  Pages with inherited schema: ${pagesWithInheritedSchema}`);
     console.log(`  Pages with parent but no inherited: ${pagesWithParentButNoInherited}`);
+    console.log(`  Pages with parent but not checked: ${pagesWithParentButNotChecked}`);
     console.log(`  Pages without parent page: ${pagesWithoutParent}`);
     console.log(`  Total missing schema pages: ${missingSchemaPages.length}`);
     console.log(`  Expected missing: ${totalPages - pagesWithSchema - pagesWithInheritedSchema}`);
     
     // Sanity check: missing pages should equal total - inline - inherited
     const expectedMissing = totalPages - pagesWithSchema - pagesWithInheritedSchema;
+    const diagnosticInfo = {
+      totalPages,
+      pagesWithInlineSchema: pagesWithSchema,
+      pagesWithoutInlineSchema: pagesWithoutInline,
+      pagesWithInheritedSchema,
+      pagesWithParentButNoInherited,
+      pagesWithParentButNotChecked,
+      pagesWithoutParent,
+      totalMissing: missingSchemaPages.length,
+      expectedMissing
+    };
+    
     if (missingSchemaPages.length !== expectedMissing) {
       console.error(`❌ MISMATCH: missingSchemaPages.length (${missingSchemaPages.length}) != expected (${expectedMissing})`);
       console.error(`  This suggests some pages are being double-counted or missed`);
+      diagnosticInfo.mismatch = true;
+      diagnosticInfo.mismatchDetails = `missingSchemaPages.length (${missingSchemaPages.length}) != expected (${expectedMissing})`;
     }
     
     // Calculate coverage (pages with inline schema only - inherited doesn't count for coverage)
@@ -659,7 +685,8 @@ export default async function handler(req, res) {
         generatedAt: new Date().toISOString(),
         urlsScanned: totalPages,
         urlsWithSchema: pagesWithSchema,
-        urlsWithInheritedSchema: pagesWithInheritedSchema
+        urlsWithInheritedSchema: pagesWithInheritedSchema,
+        diagnostic: diagnosticInfo
       }
     });
     
