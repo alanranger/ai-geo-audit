@@ -50,20 +50,52 @@ function extractJsonLd(htmlString) {
 /**
  * Normalize schema types from a schema object
  * Returns array of @type values
+ * Walks @graph and common nested properties to detect all types
  */
 function normalizeSchemaTypes(schemaObject) {
-  const types = [];
-  const typeValue = schemaObject['@type'];
-  
-  if (typeValue) {
-    if (Array.isArray(typeValue)) {
-      types.push(...typeValue.filter(t => t && typeof t === 'string'));
-    } else if (typeof typeValue === 'string') {
-      types.push(typeValue);
+  const collected = new Set();
+
+  function addType(value) {
+    if (!value) return;
+
+    if (Array.isArray(value)) {
+      value.forEach(v => {
+        if (typeof v === 'string' && v.trim()) {
+          collected.add(v.trim());
+        }
+      });
+    } else if (typeof value === 'string' && value.trim()) {
+      collected.add(value.trim());
     }
   }
-  
-  return types;
+
+  function walk(node) {
+    if (!node || typeof node !== 'object') return;
+
+    // 1) Top-level @type for this node
+    addType(node['@type']);
+
+    // 2) Any items in @graph
+    if (Array.isArray(node['@graph'])) {
+      node['@graph'].forEach(child => walk(child));
+    }
+
+    // 3) Common nested properties that often contain Person/Organization
+    const nestedKeys = ['author', 'creator', 'publisher', 'provider', 'performer', 'brand'];
+
+    nestedKeys.forEach(key => {
+      const value = node[key];
+
+      if (!value) return;
+
+      if (Array.isArray(value)) value.forEach(v => walk(v));
+      else walk(value);
+    });
+  }
+
+  walk(schemaObject);
+
+  return Array.from(collected);
 }
 
 /**
