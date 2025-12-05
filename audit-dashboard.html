@@ -2899,6 +2899,10 @@
           let chartDateObjects = []; // Store Date objects for period detection
           
           if (timeseries.length > 0) {
+            // Get current Content/Schema score (schema doesn't change daily, so use current score for all points)
+            const currentContentSchema = scores.contentSchema || 0;
+            debugLog(`Using current Content/Schema score (${currentContentSchema}) for all trend points (schema is static, not time-based)`, 'info');
+            
             // Calculate pillar scores for each timeseries point
             const calculatePillarFromMetrics = (position, ctr) => {
               // Position score (same formula as main calculation)
@@ -2916,8 +2920,8 @@
               const authority = clampScore(0.6 * ctrScore + 0.4 * posScore);
               const localEntity = clampScore(60 + 0.3 * (posScore - 50) + 0.2 * (ctrScore - 50));
               const serviceArea = clampScore(localEntity - 5);
-              // Fallback: if no schema audit data, can't calculate Content/Schema score
-              const contentSchema = 0;
+              // Use current Content/Schema score for all historical points (schema is static, not time-based)
+              const contentSchema = currentContentSchema;
               
               return { visibility, authority, localEntity, serviceArea, contentSchema };
             };
@@ -3025,7 +3029,20 @@
             if (data.length < 2) return { percent: 0, isUp: false };
             const first = data[0];
             const last = data[data.length - 1];
+            // Handle division by zero (when first value is 0) or NaN
+            if (first === 0 || isNaN(first) || isNaN(last)) {
+              // If first is 0 and last is also 0, no change
+              if (last === 0 || isNaN(last)) {
+                return { percent: 0, isUp: false };
+              }
+              // If first is 0 but last has value, show as 100% increase
+              return { percent: 100, isUp: true };
+            }
             const percent = ((last - first) / first) * 100;
+            // Handle NaN result
+            if (isNaN(percent) || !isFinite(percent)) {
+              return { percent: 0, isUp: false };
+            }
             return { percent: Math.abs(percent), isUp: percent > 0 };
           };
           
