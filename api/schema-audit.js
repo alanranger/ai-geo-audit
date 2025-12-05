@@ -567,18 +567,22 @@ export default async function handler(req, res) {
       inheritanceMap.set(url, hasInherited);
     });
     
-    // URLs that had no inline schema AND no inherited schema
-    const missingSchemaPages = pagesNeedingInheritanceCheck
-      .filter(({ url }) => !inheritanceMap.get(url))
-      .map(({ url, parentUrl }) => ({ url, parentUrl }));
-    
-    // Also include pages that had no inline schema and no parent collection page to check
+    // Build complete list of pages without schema
+    // A page is missing schema if: no inline schema AND (no parent page OR parent page check returned false)
+    const missingSchemaPages = [];
     results.forEach(result => {
       if (!result.success) return;
       const hasInlineSchema = result.schemas.length > 0;
       if (!hasInlineSchema) {
         const parentUrl = getParentCollectionPageUrl(result.url);
-        if (!parentUrl) {
+        if (parentUrl) {
+          // Has parent page - check if it got inherited schema
+          const hasInherited = inheritanceMap.get(result.url);
+          if (!hasInherited) {
+            // No inline schema and no inherited schema - missing
+            missingSchemaPages.push({ url: result.url, parentUrl: parentUrl });
+          }
+        } else {
           // No inline schema and no parent page to check - definitely missing
           missingSchemaPages.push({ url: result.url, parentUrl: null });
         }
