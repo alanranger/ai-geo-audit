@@ -120,11 +120,9 @@
 
     <div id="step3" class="step" style="display: none;">
       <div class="step-number">Step 3:</div>
-      <p>After you click "Authorize", Google will show you an authorization code on the page (instead of redirecting). Copy that code and paste it here:</p>
-      <input type="text" id="authCode" placeholder="4/0ATX87IMzHV9HhSkvPTNc7IN9SlduxyqgJl_fMq7WmLDd3OX_JEV_g6pc9sTaaeWhXWohKg">
-      <button onclick="exchangeCode()">Exchange Code for Refresh Token</button>
+      <p>After you click "Authorize", Google will redirect you back to this site. The callback handler will automatically exchange the code for a refresh token and display it on the page.</p>
       <p style="margin-top: 10px; font-size: 14px; color: #666;">
-        <strong>Note:</strong> The code will look like: <code>4/0ATX87IMzHV9HhSkvPTNc7IN9SlduxyqgJl_fMq7WmLDd3OX_JEV_g6pc9sTaaeWhXWohKg</code>
+        <strong>Note:</strong> Make sure you've added <code id="callbackUrl"></code> to your OAuth client's "Authorized redirect URIs" in Google Cloud Console.
       </p>
     </div>
 
@@ -147,8 +145,8 @@
       sessionStorage.setItem('clientSecret', clientSecret);
 
       // Generate authorization URL
-      // Use 'urn:ietf:wg:oauth:2.0:oob' which shows the code on the page instead of redirecting
-      const redirectUri = 'urn:ietf:wg:oauth:2.0:oob';
+      // Use the Vercel callback endpoint
+      const redirectUri = window.location.origin + '/api/oauth/callback';
       const scopes = [
         'https://www.googleapis.com/auth/webmasters', // GSC (existing)
         'https://www.googleapis.com/auth/business.manage' // Business Profile (new)
@@ -163,7 +161,9 @@
         `prompt=consent`;
 
       document.getElementById('authUrl').textContent = authUrl;
+      document.getElementById('callbackUrl').textContent = redirectUri;
       document.getElementById('step2').style.display = 'block';
+      document.getElementById('step3').style.display = 'block';
     }
 
     function authorize() {
@@ -175,20 +175,7 @@
       document.getElementById('step3').style.display = 'block';
     }
 
-    async function exchangeCode() {
-      const authCode = document.getElementById('authCode').value.trim();
-      const clientSecret = sessionStorage.getItem('clientSecret');
-
-      if (!authCode) {
-        alert('Please paste the authorization code');
-        return;
-      }
-
-      // Code is already extracted (user pastes it directly)
-      const code = authCode;
-
-      const clientId = document.getElementById('clientId').value.trim();
-      const redirectUri = 'urn:ietf:wg:oauth:2.0:oob';
+    // Removed exchangeCode function - the callback endpoint handles it automatically
 
       // Show loading
       const resultDiv = document.getElementById('result');
