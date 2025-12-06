@@ -284,6 +284,7 @@ export default async function handler(req, res) {
       // Save new timeseries data to Supabase directly (don't wait, but log errors)
       if (newTimeseries.length > 0 && supabaseUrl && supabaseKey) {
         // Save directly to Supabase REST API (more reliable than calling another serverless function)
+        // Use PATCH for upsert to avoid 409 conflicts
         const records = newTimeseries.map(point => ({
           property_url: siteUrl,
           date: point.date,
@@ -294,6 +295,7 @@ export default async function handler(req, res) {
           updated_at: new Date().toISOString()
         }));
         
+        // Try POST first, if 409 then use PATCH for each record
         fetch(`${supabaseUrl}/rest/v1/gsc_timeseries`, {
           method: 'POST',
           headers: {
@@ -305,29 +307,50 @@ export default async function handler(req, res) {
           body: JSON.stringify(records)
         })
         .then(async (response) => {
-          if (response.ok) {
-            try {
-              const contentType = response.headers.get('content-type');
-              if (contentType && contentType.includes('application/json')) {
-                const result = await response.json();
-                const savedCount = Array.isArray(result) ? result.length : records.length;
-                console.log(`[GSC Cache] ✓ Saved ${savedCount} timeseries records to Supabase`);
-              } else {
-                // Empty response is OK for upserts
-                console.log(`[GSC Cache] ✓ Saved ${records.length} timeseries records to Supabase (upsert, no response body)`);
-              }
-            } catch (jsonError) {
-              // Empty response is OK for upserts
-              console.log(`[GSC Cache] ✓ Saved ${records.length} timeseries records to Supabase (upsert, empty response)`);
-            }
+          if (response.status === 409) {
+            // Conflict - use PATCH to update existing records
+            console.log(`[GSC Cache] POST returned 409, using PATCH for ${records.length} records`);
+            // PATCH each record individually (Supabase doesn't support bulk PATCH with unique constraints easily)
+            const patchPromises = records.map(record => 
+              fetch(`${supabaseUrl}/rest/v1/gsc_timeseries?property_url=eq.${encodeURIComponent(record.property_url)}&date=eq.${record.date}`, {
+                method: 'PATCH',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'apikey': supabaseKey,
+                  'Authorization': `Bearer ${supabaseKey}`,
+                  'Prefer': 'return=minimal'
+                },
+                body: JSON.stringify(record)
+              })
+            );
+            
+            const patchResults = await Promise.allSettled(patchPromises);
+            const successCount = patchResults.filter(r => r.status === 'fulfilled' && r.value.ok).length;
+            console.log(`[GSC Cache] ✓ Updated ${successCount}/${records.length} timeseries records via PATCH`);
           } else {
-            let errorText = '';
-            try {
-              errorText = await response.text();
-            } catch (e) {
-              errorText = `Status ${response.status} - Could not read error message`;
+            // Original POST logic for success case
+            if (response.ok) {
+              try {
+                const contentType = response.headers.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
+                  const result = await response.json();
+                  const savedCount = Array.isArray(result) ? result.length : records.length;
+                  console.log(`[GSC Cache] ✓ Saved ${savedCount} timeseries records to Supabase`);
+                } else {
+                  console.log(`[GSC Cache] ✓ Saved ${records.length} timeseries records to Supabase (upsert, no response body)`);
+                }
+              } catch (jsonError) {
+                console.log(`[GSC Cache] ✓ Saved ${records.length} timeseries records to Supabase (upsert, empty response)`);
+              }
+            } else {
+              let errorText = '';
+              try {
+                errorText = await response.text();
+              } catch (e) {
+                errorText = `Status ${response.status} - Could not read error message`;
+              }
+              console.error(`[GSC Cache] ✗ Failed to save: ${response.status} - ${errorText.substring(0, 200)}`);
             }
-            console.error(`[GSC Cache] ✗ Failed to save: ${response.status} - ${errorText.substring(0, 200)}`);
           }
         })
         .catch(err => {
