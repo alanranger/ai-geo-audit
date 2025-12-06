@@ -130,6 +130,17 @@ export async function getGSCAccessToken() {
 }
 
 /**
+ * Get OAuth2 access token for Business Profile API
+ * Uses the same credentials as GSC (refresh token includes both scopes)
+ * @returns {Promise<string>} Access token
+ */
+export async function getBusinessProfileAccessToken() {
+  // Business Profile API uses the same OAuth credentials as GSC
+  // The refresh token we got includes both webmasters and business.manage scopes
+  return getGSCAccessToken();
+}
+
+/**
  * Normalize property URL for GSC API
  * @param {string} propertyUrl - Raw property URL
  * @returns {string} Normalized URL
