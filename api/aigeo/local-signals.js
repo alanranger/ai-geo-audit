@@ -88,7 +88,9 @@ export default async function handler(req, res) {
     
     console.log('[Local Signals] Fetching locations for account:', accountName);
     
-    const locationsUrl = `https://mybusinessbusinessinformation.googleapis.com/v1/${accountName}/locations?readMask=name,title,storefrontAddress,websiteUri,phoneNumbers,primaryPhone,serviceArea`;
+    // Business Profile API readMask - use valid field names
+    // Note: primaryPhone might not be a valid field, and phoneNumbers might need to be requested differently
+    const locationsUrl = `https://mybusinessbusinessinformation.googleapis.com/v1/${accountName}/locations?readMask=name,title,storefrontAddress,websiteUri,phoneNumbers,serviceArea`;
     console.log('[Local Signals] Locations URL:', locationsUrl);
     
     const locationsResponse = await fetch(locationsUrl, {
