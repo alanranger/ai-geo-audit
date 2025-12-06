@@ -254,13 +254,41 @@ export default async function handler(req, res) {
         napConsistencyScore,
         knowledgePanelDetected: locations.length > 0, // If we have locations, likely has knowledge panel
         serviceAreas,
-        locations: locations.map(loc => ({
-          name: loc.title || loc.name,
-          address: loc.storefrontAddress,
-          phone: loc.phoneNumbers?.[0]?.phoneNumber,
-          website: loc.websiteUri,
-          serviceArea: loc.serviceArea
-        })),
+        locations: locationsToProcess.map(loc => {
+          // Extract phone number with all possible formats
+          let phone = null;
+          if (loc.phoneNumbers) {
+            if (Array.isArray(loc.phoneNumbers) && loc.phoneNumbers.length > 0) {
+              phone = loc.phoneNumbers[0].phoneNumber || loc.phoneNumbers[0];
+            } else if (typeof loc.phoneNumbers === 'string') {
+              phone = loc.phoneNumbers;
+            } else if (loc.phoneNumbers.phoneNumber) {
+              phone = loc.phoneNumbers.phoneNumber;
+            }
+          }
+          if (!phone && loc.primaryPhone) {
+            phone = typeof loc.primaryPhone === 'string' 
+              ? loc.primaryPhone 
+              : loc.primaryPhone.phoneNumber;
+          }
+          
+          return {
+            name: loc.title || loc.name,
+            address: loc.storefrontAddress,
+            phone: phone,
+            phoneNumbersRaw: loc.phoneNumbers, // Include raw data for debugging
+            primaryPhoneRaw: loc.primaryPhone, // Include raw data for debugging
+            website: loc.websiteUri,
+            serviceArea: loc.serviceArea,
+            // Include all fields for debugging
+            _debug: {
+              hasPhoneNumbers: !!loc.phoneNumbers,
+              hasPrimaryPhone: !!loc.primaryPhone,
+              phoneNumbersType: typeof loc.phoneNumbers,
+              allKeys: Object.keys(loc).filter(k => k.toLowerCase().includes('phone'))
+            }
+          };
+        }),
         accountName: account.accountName,
         accountType: account.type,
         notes: `Fetched ${locations.length} location(s) from Google Business Profile. Service areas: ${serviceAreas.length}.`
