@@ -4178,12 +4178,25 @@
                 authorityData.push(null);
                 visibilityData.push(null);
                 
-                // For Local Entity and Service Area, use calculated GSC data for missing dates
-                // (calculatePillarFromMetrics will use historical Business Profile data if available,
-                // otherwise calculated GSC data)
-                // For missing recent dates, we don't have GSC data yet, so use null
-                localEntityData.push(null);
-                serviceAreaData.push(null);
+                // For Local Entity and Service Area, check if we have historical data from Supabase
+                const historicalLocalEntity = localEntityMap.get(dateStr);
+                const historicalServiceArea = serviceAreaMap.get(dateStr);
+                
+                if (historicalLocalEntity !== undefined && historicalLocalEntity !== null) {
+                  localEntityData.push(historicalLocalEntity);
+                  debugLog(`✓ Added Local Entity score (${historicalLocalEntity}) for ${dateStr} from Supabase`, 'info');
+                } else {
+                  localEntityData.push(null);
+                  debugLog(`No Local Entity data for ${dateStr}`, 'info');
+                }
+                
+                if (historicalServiceArea !== undefined && historicalServiceArea !== null) {
+                  serviceAreaData.push(historicalServiceArea);
+                  debugLog(`✓ Added Service Area score (${historicalServiceArea}) for ${dateStr} from Supabase`, 'info');
+                } else {
+                  serviceAreaData.push(null);
+                  debugLog(`No Service Area data for ${dateStr}`, 'info');
+                }
                 
                 // For Content/Schema, check if we have real data for this date
                 const realScore = contentSchemaMap.get(dateStr);
