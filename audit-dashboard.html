@@ -3341,7 +3341,58 @@
                   }
                 }
               }
-            }
+            },
+            plugins: [{
+              id: 'radarScoreLabels',
+              afterDraw: (chart) => {
+                const ctx = chart.ctx;
+                const meta = chart.getDatasetMeta(0);
+                const centerX = chart.chartArea.left + (chart.chartArea.right - chart.chartArea.left) / 2;
+                const centerY = chart.chartArea.top + (chart.chartArea.bottom - chart.chartArea.top) / 2;
+                
+                // Get RAG color based on score
+                const getRAGColor = (score) => {
+                  if (score >= 70) return '#10b981'; // Green
+                  if (score >= 40) return '#f59e0b'; // Amber
+                  return '#ef4444'; // Red
+                };
+                
+                // Draw score labels at each data point
+                meta.data.forEach((point, index) => {
+                  const score = orderedData[index];
+                  const x = point.x;
+                  const y = point.y;
+                  
+                  // Calculate angle from center to point for label positioning
+                  const angle = Math.atan2(y - centerY, x - centerX);
+                  const labelOffset = 25; // Distance from point to label
+                  const labelX = x + Math.cos(angle) * labelOffset;
+                  const labelY = y + Math.sin(angle) * labelOffset;
+                  
+                  // Get RAG color
+                  const ragColor = getRAGColor(score);
+                  
+                  // Draw label background for readability
+                  ctx.save();
+                  ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+                  ctx.beginPath();
+                  ctx.arc(labelX, labelY, 18, 0, Math.PI * 2);
+                  ctx.fill();
+                  ctx.strokeStyle = ragColor;
+                  ctx.lineWidth = 2;
+                  ctx.stroke();
+                  
+                  // Draw score text in RAG color
+                  ctx.fillStyle = ragColor;
+                  ctx.font = 'bold 14px system-ui';
+                  ctx.textAlign = 'center';
+                  ctx.textBaseline = 'middle';
+                  ctx.fillText(`${Math.round(score)}%`, labelX, labelY);
+                  
+                  ctx.restore();
+                });
+              }
+            }]
           });
           debugLog('✓ Radar chart created successfully', 'success');
           debugLog(`radarChart type after creation: ${typeof window.radarChart}`, 'info');
