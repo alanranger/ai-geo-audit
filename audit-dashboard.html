@@ -3805,6 +3805,7 @@
                 // We have real data for this date
                 contentSchemaData.push(realScore);
                 contentSchemaDataEstimated.push(null); // No estimated value
+                debugLog(`Content/Schema: Added ${realScore} for ${pointDate}`, 'info');
               } else {
                 // No real data for this date - use null (don't show estimated line)
                 contentSchemaData.push(null);
@@ -3976,25 +3977,35 @@
           debugLog(`Y-axis range: ${yAxisMin} to ${yAxisMax} (range: ${actualRange}, step: ${stepSize})`, 'info');
           
           // Calculate trend percentages for each dataset
+          // Filter out null values to get actual first and last data points
           const calculateTrend = (data) => {
-            if (data.length < 2) return { percent: 0, isUp: false };
-            const first = data[0];
-            const last = data[data.length - 1];
-            // Handle division by zero (when first value is 0) or NaN
-            if (first === 0 || isNaN(first) || isNaN(last)) {
+            // Filter out null/undefined values
+            const validData = data.filter(v => v !== null && v !== undefined && !isNaN(v));
+            if (validData.length < 2) return { percent: 0, isUp: false };
+            
+            const first = validData[0];
+            const last = validData[validData.length - 1];
+            
+            // Handle division by zero (when first value is 0)
+            if (first === 0) {
               // If first is 0 and last is also 0, no change
-              if (last === 0 || isNaN(last)) {
+              if (last === 0) {
                 return { percent: 0, isUp: false };
               }
               // If first is 0 but last has value, show as 100% increase
               return { percent: 100, isUp: true };
             }
+            
             const percent = ((last - first) / first) * 100;
-            // Handle NaN result
+            
+            // Handle NaN or infinite result
             if (isNaN(percent) || !isFinite(percent)) {
               return { percent: 0, isUp: false };
             }
-            return { percent: Math.abs(percent), isUp: percent > 0 };
+            
+            // Cap at 100% to avoid showing unrealistic percentages
+            const cappedPercent = Math.min(Math.abs(percent), 100);
+            return { percent: cappedPercent, isUp: percent > 0 };
           };
           
           const localEntityTrend = calculateTrend(localEntityData);
@@ -4419,9 +4430,10 @@
         const reportContainer = document.createElement('div');
         reportContainer.id = 'pdfReportContainer';
         // Position visible but off-screen for html2pdf to capture
-        reportContainer.style.position = 'fixed';
-        reportContainer.style.top = '-9999px';
-        reportContainer.style.left = '0';
+        // Use a position that's still in the viewport but not visible
+        reportContainer.style.position = 'absolute';
+        reportContainer.style.top = '0';
+        reportContainer.style.left = '-9999px';
         reportContainer.style.width = '210mm'; // A4 width
         reportContainer.style.minHeight = '297mm'; // A4 height
         reportContainer.style.padding = '20mm';
@@ -4429,6 +4441,14 @@
         reportContainer.style.zIndex = '9999';
         reportContainer.style.visibility = 'visible';
         reportContainer.style.opacity = '1';
+        reportContainer.style.display = 'block';
+        
+        // Verify reportHTML has content
+        if (!reportHTML || reportHTML.length < 100) {
+          throw new Error('Report HTML is empty or too short. Cannot generate PDF.');
+        }
+        
+        console.log('Report HTML length:', reportHTML.length);
         reportContainer.innerHTML = reportHTML;
         document.body.appendChild(reportContainer);
 
