@@ -4542,55 +4542,74 @@
         printWindow.document.write('</head>\n');
         printWindow.document.write('<body>\n');
         
-        // Write the report HTML directly, but escape </script> tags to prevent breaking the JavaScript we'll write next
-        const safeReportHTML = reportHTML.replace(/<\/script>/gi, '<\\/script>');
-        printWindow.document.write(safeReportHTML);
+        // Write the report HTML directly
+        printWindow.document.write(reportHTML);
         printWindow.document.write('\n');
         
-        // Build the script content as a single string to avoid syntax issues
-        const scriptContent = '  window.onload = function() {\n' +
-          '    setTimeout(function() {\n' +
-          '      if (window.html2pdf) {\n' +
-          '        const opt = {\n' +
-          '          margin: [10, 10, 10, 10],\n' +
-          '          filename: ' + JSON.stringify(pdfFilename) + ',\n' +
-          '          image: { type: "jpeg", quality: 0.98 },\n' +
-          '          html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff", allowTaint: true },\n' +
-          '          jsPDF: { unit: "mm", format: "a4", orientation: "portrait" }\n' +
-          '        };\n' +
-          '        window.html2pdf().set(opt).from(document.body).save().then(function() {\n' +
-          '          console.log("PDF generated successfully");\n' +
-          '          setTimeout(function() { window.close(); }, 1000);\n' +
-          '        }).catch(function(error) {\n' +
-          '          console.error("PDF generation error:", error);\n' +
-          '          alert("PDF generation failed: " + error.message);\n' +
-          '        });\n' +
-          '      } else {\n' +
-          '        console.error("html2pdf not loaded");\n' +
-          '        alert("PDF library not loaded. Please try again.");\n' +
-          '      }\n' +
-          '    }, 1000);\n' +
-          '  };';
+        // Close the document and wait for it to load, then trigger print (simpler approach like tide-sun correlator)
+        printWindow.document.close();
         
-        // Write the script tags
-        printWindow.document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"><\/script>\n');
-        printWindow.document.write('<script>\n');
-        printWindow.document.write(scriptContent);
-        printWindow.document.write('\n<\/script>\n');
+        // Wait for content to load, then print
+        printWindow.onload = function() {
+          setTimeout(function() {
+            try {
+              printWindow.print();
+              // Don't close immediately - let user save the PDF first
+              setTimeout(function() {
+                printWindow.close();
+              }, 1000);
+            } catch (printError) {
+              console.error('Print error:', printError);
+              printWindow.close();
+            }
+          }, 500);
+        };
         printWindow.document.write('</body>\n');
         printWindow.document.write('</html>\n');
         printWindow.document.close();
         
         console.log('[PDF] New window opened with report content');
         
-        if (statusDiv) {
-          statusDiv.textContent = '✅ PDF window opened. The PDF will be generated automatically.';
-          statusDiv.style.color = '#10b981';
-          
-          setTimeout(() => {
-            statusDiv.textContent = '';
-          }, 5000);
-        }
+        // Wait for content to load, then trigger print dialog (simpler approach)
+        printWindow.onload = function() {
+          setTimeout(function() {
+            try {
+              printWindow.print();
+              // Close after a delay to let user save
+              setTimeout(function() {
+                printWindow.close();
+              }, 1000);
+              
+              if (statusDiv) {
+                statusDiv.textContent = '✅ Print dialog opened. Save as PDF from the print dialog.';
+                statusDiv.style.color = '#10b981';
+                setTimeout(() => {
+                  statusDiv.textContent = '';
+                }, 5000);
+              }
+            } catch (printError) {
+              console.error('[PDF] Print error:', printError);
+              printWindow.close();
+              throw new Error('Failed to open print dialog: ' + printError.message);
+            }
+          }, 500);
+        };
+        
+        // Fallback in case onload doesn't fire
+        setTimeout(function() {
+          if (printWindow && !printWindow.closed) {
+            try {
+              printWindow.print();
+              setTimeout(function() {
+                if (printWindow && !printWindow.closed) {
+                  printWindow.close();
+                }
+              }, 1000);
+            } catch (e) {
+              console.warn('[PDF] Fallback print failed:', e);
+            }
+          }
+        }, 2000);
 
       } catch (error) {
         console.error('[PDF] ===== PDF GENERATION ERROR =====');
