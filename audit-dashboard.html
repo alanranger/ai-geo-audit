@@ -3872,7 +3872,8 @@
                 allDateObjects.push(dateObj);
                 allDates.push(dateObj.toLocaleDateString('en-GB', dateFormat));
                 
-                // Add null values for GSC-based pillars (no data for these dates yet)
+                // Add null values for GSC-based pillars (no data for these dates yet due to GSC delay)
+                // These are NOT mock/estimated values - they are null because GSC hasn't updated yet
                 localEntityData.push(null);
                 serviceAreaData.push(null);
                 authorityData.push(null);
@@ -3941,33 +3942,29 @@
             // Store date objects for timeseries data
             chartDateObjects = allDateObjects;
           } else {
-            // Fallback to mock data if no timeseries available
-            debugLog('No timeseries data available, using mock data', 'warn');
-            const makeSeries = (baseScore, seed) => {
-              const arr = [];
-              for (let i = 0; i < numDataPoints; i++) {
-                const angle = (i / numDataPoints) * Math.PI * 4;
-                const wave = Math.sin(angle + seed) * 3;
-                const trendTilt = (i - numDataPoints / 2) * 0.02;
-                const value = baseScore + wave + trendTilt;
-                arr.push(Math.max(0, Math.min(100, value)));
-              }
-              return arr;
-            };
+            // No timeseries data available - use all nulls (no mock data)
+            debugLog('No timeseries data available - chart will show empty with null values', 'warn');
             
-            localEntityData = makeSeries(scores.localEntity, 0.5);
-            serviceAreaData = makeSeries(scores.serviceArea, 0.8);
-            authorityData = makeSeries(scores.authority, 1.9);
-            visibilityData = makeSeries(scores.visibility, 1.1);
-            contentSchemaData = makeSeries(scores.contentSchema, 1.4);
-            contentSchemaDataEstimated = new Array(numDataPoints).fill(null); // Initialize with nulls for fallback case
+            // Use all null values - no mock/estimated data
+            localEntityData = new Array(numDataPoints).fill(null);
+            serviceAreaData = new Array(numDataPoints).fill(null);
+            authorityData = new Array(numDataPoints).fill(null);
+            visibilityData = new Array(numDataPoints).fill(null);
+            contentSchemaData = new Array(numDataPoints).fill(null);
+            contentSchemaDataEstimated = new Array(numDataPoints).fill(null);
             
-            // Generate dates for fallback case
+            // Generate dates for the date range
             const fallbackDates = [];
             const fallbackDateObjects = [];
             for (let i = 0; i < numDataPoints; i++) {
               const dateObj = new Date();
-              dateObj.setDate(dateObj.getDate() - (numDataPoints - 1 - i));
+              if (dateRange <= 90) {
+                // Daily data
+                dateObj.setDate(dateObj.getDate() - (numDataPoints - 1 - i));
+              } else {
+                // Weekly data
+                dateObj.setDate(dateObj.getDate() - ((numDataPoints - 1 - i) * 7));
+              }
               fallbackDateObjects.push(dateObj);
               fallbackDates.push(dateObj.toLocaleDateString('en-GB', dateFormat));
             }
