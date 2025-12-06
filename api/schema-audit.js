@@ -22,6 +22,7 @@ const RICH_RESULT_TYPES = [
   'HowTo',
   'VideoObject',
   'ImageObject', // For image search rich results
+  'ItemList', // Creates Carousel rich results in Google Search Console
   'Recipe' // May not be applicable for all business types
 ];
 
