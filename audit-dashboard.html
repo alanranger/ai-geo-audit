@@ -4469,8 +4469,39 @@
         const dateRange = document.getElementById('dateRange')?.value || 30;
         const auditDate = savedAudit.auditDate || new Date().toISOString().split('T')[0];
 
-        // Create report HTML
-        const reportHTML = createReportHTML(savedAudit, propertyUrl, dateRange, auditDate);
+        // Convert charts to images first (before creating HTML)
+        console.log('[PDF] Converting charts to images...');
+        
+        // Create temporary canvas elements to capture charts
+        const radarCanvas = document.getElementById('radarChart');
+        const trendCanvas = document.getElementById('trendChart');
+        const snippetCanvas = document.getElementById('snippetReadinessPieChart');
+        
+        let radarImgData = '';
+        let trendImgData = '';
+        let snippetImgData = '';
+        
+        if (radarCanvas && window.radarChart) {
+          radarImgData = radarCanvas.toDataURL('image/png');
+          console.log('[PDF] Radar chart converted to image');
+        }
+        
+        if (trendCanvas && window.trendChart) {
+          trendImgData = trendCanvas.toDataURL('image/png');
+          console.log('[PDF] Trend chart converted to image');
+        }
+        
+        if (snippetCanvas && window.snippetReadinessChart) {
+          snippetImgData = snippetCanvas.toDataURL('image/png');
+          console.log('[PDF] Snippet readiness chart converted to image');
+        }
+
+        // Create report HTML with embedded chart images
+        const reportHTML = createReportHTML(savedAudit, propertyUrl, dateRange, auditDate, {
+          radarChart: radarImgData,
+          trendChart: trendImgData,
+          snippetReadinessChart: snippetImgData
+        });
 
         // Verify reportHTML has content
         if (!reportHTML || reportHTML.length < 100) {
@@ -4478,119 +4509,49 @@
         }
         
         console.log('[PDF] Report HTML length:', reportHTML.length);
-        console.log('[PDF] Report HTML preview (first 500 chars):', reportHTML.substring(0, 500));
         
-        // Remove any existing PDF container
-        const existingContainer = document.getElementById('pdfReportContainer');
-        if (existingContainer) {
-          existingContainer.remove();
-          console.log('[PDF] Removed existing PDF container');
+        // Use Workshop Planner approach: open new window and generate PDF there
+        const printWindow = window.open('', '_blank', 'width=900,height=1200');
+        if (!printWindow) {
+          throw new Error('Could not open print window. Please allow popups for this site.');
         }
         
-        // Create a temporary container for the report
-        // Position it off-screen but keep it VISIBLE so html2canvas can capture it
-        const reportContainer = document.createElement('div');
-        reportContainer.id = 'pdfReportContainer';
-        reportContainer.style.position = 'absolute';
-        reportContainer.style.left = '-10000px'; // Off-screen but still in DOM
-        reportContainer.style.top = '0';
-        reportContainer.style.width = '210mm';
-        reportContainer.style.minHeight = '297mm';
-        reportContainer.style.padding = '20mm';
-        reportContainer.style.backgroundColor = '#ffffff';
-        reportContainer.style.zIndex = '999999';
-        reportContainer.style.visibility = 'visible'; // MUST be visible for html2canvas
-        reportContainer.style.opacity = '1'; // MUST be opaque for html2canvas
-        reportContainer.style.pointerEvents = 'none';
-        reportContainer.style.overflow = 'visible';
-        
-        reportContainer.innerHTML = reportHTML;
-        document.body.appendChild(reportContainer);
-        
-        console.log('[PDF] Container created and added to DOM');
-        console.log('[PDF] Container dimensions:', reportContainer.offsetWidth, 'x', reportContainer.offsetHeight);
-        console.log('[PDF] Container innerHTML length:', reportContainer.innerHTML.length);
-
-        // Wait for DOM to update
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        console.log('[PDF] Converting charts to images...');
-        
-        // Convert charts to images
-        await convertChartsToImages(reportContainer);
-        
-        console.log('[PDF] Charts converted, waiting for images to load...');
-        
-        // Wait for images to load in the container
-        await new Promise(resolve => {
-          const images = reportContainer.querySelectorAll('img');
-          console.log('[PDF] Found', images.length, 'images in container');
-          let loaded = 0;
-          if (images.length === 0) {
-            console.log('[PDF] No images to load');
-            resolve();
-            return;
-          }
-          images.forEach((img, idx) => {
-            if (img.complete && img.naturalWidth > 0) {
-              console.log(`[PDF] Image ${idx + 1} already loaded:`, img.naturalWidth, 'x', img.naturalHeight);
-              loaded++;
-              if (loaded === images.length) resolve();
-            } else {
-              img.onload = () => {
-                if (img.naturalWidth > 0) {
-                  console.log(`[PDF] Image ${idx + 1} loaded:`, img.naturalWidth, 'x', img.naturalHeight);
-                  loaded++;
-                  if (loaded === images.length) resolve();
-                }
-              };
-              img.onerror = () => {
-                console.warn(`[PDF] Image ${idx + 1} failed to load`);
-                loaded++;
-                if (loaded === images.length) resolve();
-              };
-            }
-          });
-          // Timeout after 10 seconds
-          setTimeout(() => {
-            console.log('[PDF] Image load timeout reached, loaded:', loaded, 'of', images.length);
-            resolve();
-          }, 10000);
-        });
-
-        // Additional wait to ensure everything is rendered
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        // Verify container has content
-        console.log('[PDF] Final container check:');
-        console.log('[PDF] - scrollHeight:', reportContainer.scrollHeight);
-        console.log('[PDF] - offsetHeight:', reportContainer.offsetHeight);
-        console.log('[PDF] - scrollWidth:', reportContainer.scrollWidth);
-        console.log('[PDF] - offsetWidth:', reportContainer.offsetWidth);
-        console.log('[PDF] - children count:', reportContainer.children.length);
-        console.log('[PDF] - has text content:', reportContainer.textContent.length > 0);
-        console.log('[PDF] - text content length:', reportContainer.textContent.length);
-        console.log('[PDF] - innerHTML length:', reportContainer.innerHTML.length);
-
-        // Generate PDF - container is already visible and off-screen
+        // Write HTML content to new window with html2pdf script
+        const fullHTML = `<!DOCTYPE html>
+<html>
+<head>
+  <title>AI GEO Audit Report</title>
+  <style>
+    body { 
+      font-family: system-ui, -apple-system, sans-serif; 
+      padding: 20mm; 
+      background: #ffffff;
+      color: #222222;
+    }
+    img { max-width: 100%; height: auto; display: block; margin: 10px auto; }
+    h1, h2, h3 { color: #E57200; }
+    table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+    th, td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
+    th { background-color: #f2f2f2; }
+  </style>
+</head>
+<body>
+${reportHTML}
+<script src='https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js'></script>
+<script>
+  // Wait for content to load, then generate PDF
+  window.onload = function() {
+    setTimeout(function() {
+      if (window.html2pdf) {
         const opt = {
           margin: [10, 10, 10, 10],
-          filename: `AI-GEO-Audit-Report-${propertyUrl.replace(/https?:\/\//, '').replace(/\//g, '-')}-${auditDate}.pdf`,
+          filename: 'AI-GEO-Audit-Report-${propertyUrl.replace(/https?:\/\//, '').replace(/\//g, '-')}-${auditDate}.pdf',
           image: { type: 'jpeg', quality: 0.98 },
           html2canvas: { 
             scale: 2,
             useCORS: true,
-            logging: true,
             backgroundColor: '#ffffff',
-            allowTaint: true,
-            width: reportContainer.scrollWidth || 794, // A4 width in pixels at 96 DPI
-            height: reportContainer.scrollHeight || 1123, // A4 height in pixels at 96 DPI
-            x: 0,
-            y: 0,
-            scrollX: 0,
-            scrollY: 0,
-            windowWidth: reportContainer.scrollWidth || 794,
-            windowHeight: reportContainer.scrollHeight || 1123
+            allowTaint: true
           },
           jsPDF: { 
             unit: 'mm', 
@@ -4598,40 +4559,39 @@
             orientation: 'portrait' 
           }
         };
-
-        console.log('[PDF] Starting html2pdf generation');
-        console.log('[PDF] Container scrollWidth:', reportContainer.scrollWidth);
-        console.log('[PDF] Container scrollHeight:', reportContainer.scrollHeight);
-        console.log('[PDF] html2canvas options:', JSON.stringify(opt.html2canvas, null, 2));
         
-        try {
-          console.log('[PDF] Calling html2pdf().set().from().save()...');
-          const pdfPromise = html2pdf().set(opt).from(reportContainer).save();
-          console.log('[PDF] html2pdf promise created, awaiting...');
-          await pdfPromise;
-          console.log('[PDF] html2pdf() completed successfully');
-        } catch (pdfError) {
-          console.error('[PDF] html2pdf error:', pdfError);
-          console.error('[PDF] Error stack:', pdfError.stack);
-          throw new Error(`PDF generation failed: ${pdfError.message}`);
-        }
-
-        // Wait a bit before cleanup to ensure PDF is saved
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        // Clean up - just remove the container
-        if (document.body.contains(reportContainer)) {
-          document.body.removeChild(reportContainer);
-          console.log('[PDF] Container removed from DOM');
-        }
+        window.html2pdf().set(opt).from(document.body).save().then(function() {
+          console.log('PDF generated successfully');
+          // Close window after a short delay
+          setTimeout(function() {
+            window.close();
+          }, 1000);
+        }).catch(function(error) {
+          console.error('PDF generation error:', error);
+          alert('PDF generation failed: ' + error.message);
+        });
+      } else {
+        console.error('html2pdf not loaded');
+        alert('PDF library not loaded. Please try again.');
+      }
+    }, 1000); // Wait 1 second for images to load
+  };
+</script>
+</body>
+</html>`;
+        
+        printWindow.document.write(fullHTML);
+        printWindow.document.close();
+        
+        console.log('[PDF] New window opened with report content');
         
         if (statusDiv) {
-          statusDiv.textContent = '✅ PDF report generated successfully!';
+          statusDiv.textContent = '✅ PDF window opened. The PDF will be generated automatically.';
           statusDiv.style.color = '#10b981';
           
           setTimeout(() => {
             statusDiv.textContent = '';
-          }, 3000);
+          }, 5000);
         }
 
       } catch (error) {
@@ -4714,7 +4674,7 @@
     }
 
     // Create report HTML content
-    function createReportHTML(auditData, propertyUrl, dateRange, auditDate) {
+    function createReportHTML(auditData, propertyUrl, dateRange, auditDate, chartImages = {}) {
       const scores = auditData.scores || {};
       const searchData = auditData.searchData || {};
       const schemaAudit = auditData.schemaAudit || {};
@@ -5071,19 +5031,19 @@
             
             <div class="chart-container">
               <div class="chart-title">Pillar Scores Radar Chart</div>
-              <img id="radarChartImg" src="" alt="Radar Chart" style="display: none; max-width: 600px; margin: 0 auto;">
+              ${chartImages.radarChart ? `<img src="${chartImages.radarChart}" alt="Radar Chart" style="max-width: 600px; margin: 0 auto; display: block;">` : '<p style="color: #999;">Chart not available</p>'}
               <p style="color: #666; font-size: 14px; margin-top: 10px;">Radar chart showing current performance across all five pillars. The larger the area, the stronger your overall entity recognition.</p>
             </div>
-
+            
             <div class="chart-container">
               <div class="chart-title">Performance Trends</div>
-              <img id="trendChartImg" src="" alt="Trend Chart" style="display: none; max-width: 100%; margin: 0 auto;">
+              ${chartImages.trendChart ? `<img src="${chartImages.trendChart}" alt="Trend Chart" style="max-width: 100%; margin: 0 auto; display: block;">` : '<p style="color: #999;">Chart not available</p>'}
               <p style="color: #666; font-size: 14px; margin-top: 10px;">Historical performance trends showing clicks, impressions, CTR, position, and Content/Schema scores over the selected date range.</p>
             </div>
-
+            
             <div class="chart-container">
               <div class="chart-title">Snippet Readiness Gauge</div>
-              <img id="snippetReadinessChartImg" src="" alt="Snippet Readiness Chart" style="display: none; max-width: 500px; margin: 0 auto;">
+              ${chartImages.snippetReadinessChart ? `<img src="${chartImages.snippetReadinessChart}" alt="Snippet Readiness Chart" style="max-width: 500px; margin: 0 auto; display: block;">` : '<p style="color: #999;">Chart not available</p>'}
               <p style="color: #666; font-size: 14px; margin-top: 10px;">Nested doughnut chart showing weighted breakdown of snippet readiness components with actual performance scores.</p>
             </div>
           </div>
