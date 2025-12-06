@@ -3417,6 +3417,19 @@
           const timeseries = data.timeseries || [];
           debugLog(`Using ${timeseries.length} timeseries data points from GSC API`, 'info');
           
+          // Check if we have data
+          if (!data || !data.timeseries || data.timeseries.length === 0) {
+            debugLog('⚠ No timeseries data available. Chart will show mock data. Run a new audit to get real GSC historical data.', 'warn');
+            // Show message to user
+            const trendCanvas = document.getElementById('trendChart');
+            if (trendCanvas && trendCanvas.parentElement) {
+              const messageDiv = document.createElement('div');
+              messageDiv.style.cssText = 'background: #fff3cd; padding: 1rem; border-radius: 4px; border-left: 3px solid #f59e0b; margin-bottom: 1rem; font-size: 0.9rem; color: #856404;';
+              messageDiv.innerHTML = '<strong>No historical data available.</strong> The trend chart requires timeseries data from Google Search Console. Please run a new audit to populate the chart with real historical data.';
+              trendCanvas.parentElement.insertBefore(messageDiv, trendCanvas);
+            }
+          }
+          
           // If we have timeseries data, use it; otherwise fall back to mock data
           let localEntityData, serviceAreaData, authorityData, visibilityData, contentSchemaData;
           let chartDates = dates;
