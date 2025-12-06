@@ -102,6 +102,11 @@ export default async function handler(req, res) {
       const locationsData = await locationsResponse.json();
       locations = locationsData.locations || [];
       
+      // Debug: Log location data to see what we're getting
+      if (locations.length > 0) {
+        console.log('[Local Signals] First location data:', JSON.stringify(locations[0], null, 2));
+      }
+      
       // Extract service areas and NAP data
       locations.forEach(location => {
         // Service areas - check both SERVICE_AREA_BUSINESS and places data
@@ -127,6 +132,28 @@ export default async function handler(req, res) {
         
         // NAP data (Name, Address, Phone)
         if (location.title || location.storefrontAddress || location.phoneNumbers || location.websiteUri) {
+          // Try different phone number formats
+          let phone = null;
+          if (location.phoneNumbers) {
+            if (Array.isArray(location.phoneNumbers) && location.phoneNumbers.length > 0) {
+              // Format: [{ phoneNumber: "...", ... }]
+              phone = location.phoneNumbers[0].phoneNumber || location.phoneNumbers[0];
+            } else if (typeof location.phoneNumbers === 'string') {
+              // Format: direct string
+              phone = location.phoneNumbers;
+            } else if (location.phoneNumbers.phoneNumber) {
+              // Format: { phoneNumber: "..." }
+              phone = location.phoneNumbers.phoneNumber;
+            }
+          }
+          
+          // Also check primaryPhone field
+          if (!phone && location.primaryPhone) {
+            phone = typeof location.primaryPhone === 'string' 
+              ? location.primaryPhone 
+              : location.primaryPhone.phoneNumber;
+          }
+          
           napData.push({
             name: location.title || null,
             address: location.storefrontAddress ? {
@@ -136,9 +163,7 @@ export default async function handler(req, res) {
               postalCode: location.storefrontAddress.postalCode || null,
               regionCode: location.storefrontAddress.regionCode || null
             } : null,
-            phone: location.phoneNumbers && location.phoneNumbers.length > 0 
-              ? location.phoneNumbers[0].phoneNumber 
-              : null,
+            phone: phone,
             website: location.websiteUri || null
           });
         }
