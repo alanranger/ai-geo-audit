@@ -4138,6 +4138,7 @@
           let contentSchemaMap = new Map();
           let localEntityMap = new Map();
           let serviceAreaMap = new Map();
+          let authorityMap = new Map(); // Store historical Authority scores from Supabase
           const currentContentSchema = scores.contentSchema || 0;
           
           if (timeseries.length > 0) {
@@ -4268,6 +4269,11 @@
               const scale = (clampedPos - 1) / 39;
               const posScore = 100 - scale * 90;
               
+              // CTR score (needed for Local Entity calculation and Authority fallback)
+              // Convert ctr from percentage (0-100) to decimal (0-1), then apply formula
+              const ctrDecimal = ctr / 100; // Convert percentage to decimal (e.g., 10% -> 0.10)
+              const ctrScore = Math.min((ctrDecimal / 0.10) * 100, 100);
+              
               // Calculate each pillar (same formulas as main calculation)
               const visibility = clampScore(posScore);
               
@@ -4301,10 +4307,6 @@
                 debugLog(`Authority: Calculated from topQueries for ${dateStr || 'current'}: Behaviour=${behaviourScore.toFixed(1)}, Ranking=${rankingScore.toFixed(1)}, Final=${authority}`, 'info');
               } else {
                 // Fallback: Simplified Authority calculation from aggregate metrics
-                // Convert ctr from percentage (0-100) to decimal (0-1)
-                const ctrDecimal = ctr / 100;
-                const ctrScore = Math.min((ctrDecimal / 0.10) * 100, 100);
-                
                 // Estimate Behaviour and Ranking scores from aggregate metrics
                 // Behaviour: Use aggregate CTR as proxy (simplified)
                 const estimatedBehaviourScore = Math.min(ctrScore * 0.7, 70); // Max 70 points
@@ -4382,29 +4384,38 @@
             timeseries.forEach(point => {
               const pointDate = point.date; // YYYY-MM-DD format
               
-              // Check if we have historical data from Supabase for Local Entity and Service Area
+              // Check if we have historical data from Supabase for Local Entity, Service Area, and Authority
               const historicalLocalEntity = localEntityMap.get(pointDate);
               const historicalServiceArea = serviceAreaMap.get(pointDate);
+              const historicalAuthority = authorityMap.get(pointDate);
               
               // Pass date to calculatePillarFromMetrics so it can check for historical data
-              const pillarScores = calculatePillarFromMetrics(point.position, point.ctr, pointDate);
+              // Note: topQueries is not available per-date, so we pass null
+              const pillarScores = calculatePillarFromMetrics(point.position, point.ctr, pointDate, null);
               
               // Use historical data from Supabase if available, otherwise use calculated scores
               if (historicalLocalEntity !== undefined && historicalLocalEntity !== null) {
                 localEntityData.push(historicalLocalEntity);
-                debugLog(`Content/Schema: Using historical Local Entity (${historicalLocalEntity}) for ${pointDate}`, 'info');
+                debugLog(`Using historical Local Entity (${historicalLocalEntity}) for ${pointDate}`, 'info');
               } else {
                 localEntityData.push(pillarScores.localEntity);
               }
               
               if (historicalServiceArea !== undefined && historicalServiceArea !== null) {
                 serviceAreaData.push(historicalServiceArea);
-                debugLog(`Content/Schema: Using historical Service Area (${historicalServiceArea}) for ${pointDate}`, 'info');
+                debugLog(`Using historical Service Area (${historicalServiceArea}) for ${pointDate}`, 'info');
               } else {
                 serviceAreaData.push(pillarScores.serviceArea);
               }
               
-              authorityData.push(pillarScores.authority);
+              // Use historical Authority score if available, otherwise use calculated
+              if (historicalAuthority !== undefined && historicalAuthority !== null) {
+                authorityData.push(historicalAuthority);
+                debugLog(`Using historical Authority (${historicalAuthority}) for ${pointDate}`, 'info');
+              } else {
+                authorityData.push(pillarScores.authority);
+              }
+              
               visibilityData.push(pillarScores.visibility);
               
               // Check if we have real historical data for this date
