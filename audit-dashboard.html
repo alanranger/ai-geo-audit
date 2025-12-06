@@ -2134,11 +2134,14 @@
       const top10Impr = top10.reduce((s, q) => s + q.impressions, 0);
       const ctrTop10 = top10Impr > 0 ? top10Clicks / top10Impr : ctrAll;
 
-      // Normalize CTR scores per design: 10% CTR = 100 for all ranking, 20% CTR = 100 for top-10
-      const ctrScoreAll = normalisePct(ctrAll, 0.10) * 0.7; // Max 70 points
-      const ctrScoreTop10 = normalisePct(ctrTop10, 0.20) * 0.3; // Max 30 points
+      // Normalize CTR scores: 10% CTR = 100 for all ranking, 20% CTR = 100 for top-10
+      // ctrAll 0-10% → 0-100 (values >10% capped at 100)
+      // ctrTop10 0-20% → 0-100 (values >20% capped at 100)
+      const ctrScoreAll = normalisePct(ctrAll, 0.10); // 0-100
+      const ctrScoreTop10 = normalisePct(ctrTop10, 0.20); // 0-100
 
-      return ctrScoreAll + ctrScoreTop10; // 0-100
+      // Combine: 50% ctrAll + 50% ctrTop10
+      return 0.5 * ctrScoreAll + 0.5 * ctrScoreTop10; // 0-100
     }
 
     function computeRankingScore(queries) {
@@ -2146,34 +2149,32 @@
         return 50; // neutral fallback
       }
 
-      // Filter to ranking queries (position > 0, <= 30, with impressions) per design
-      const ranking = queries.filter(q => q.position > 0 && q.position <= 30 && q.impressions > 0);
+      // Filter to ranking queries (position > 0, <= 20, with impressions)
+      const ranking = queries.filter(q => q.position > 0 && q.position <= 20 && q.impressions > 0);
 
       if (ranking.length === 0) {
         return 50; // neutral fallback
       }
 
-      // Calculate weighted average position
+      // Calculate impression-weighted average position
       const totalImpr = ranking.reduce((s, q) => s + q.impressions, 0);
-      const weightedPos = totalImpr > 0
+      const avgPos = totalImpr > 0
         ? ranking.reduce((s, q) => s + q.position * q.impressions, 0) / totalImpr
         : 0;
 
-      // Normalize position score per design: rank_pos = clamp((30 - avgPosition_ranked) / 29, 0, 1) * 60
-      // Map position 1-30 -> 100-0, then scale to max 60 points
-      const clampedPos = Math.max(1, Math.min(30, weightedPos));
-      const t = (30 - clampedPos) / 29; // 0..1 (1 at position 1, 0 at position 30)
-      const posScore = Math.max(0, Math.min(1, t)) * 60; // Max 60 points
+      // Map position: 1 → 100, 20 → 0 (clamped)
+      const clampedPos = Math.max(1, Math.min(20, avgPos));
+      const posScore = normalisePosition(clampedPos, 1, 20); // 0-100
 
-      // Calculate top-10 impression share
-      // Design: rank_share = clamp(share_top10, 0, 1) * 40
+      // Calculate top-10 impression share (% of impressions where position ≤ 10)
       const top10Impr = ranking
         .filter(q => q.position <= 10)
         .reduce((s, q) => s + q.impressions, 0);
-      const shareTop10 = totalImpr > 0 ? top10Impr / totalImpr : 0; // 0-1
-      const shareScore = Math.max(0, Math.min(1, shareTop10)) * 40; // Max 40 points
+      const top10Share = totalImpr > 0 ? top10Impr / totalImpr : 0; // 0-1
+      const top10Score = top10Share * 100; // 0-100 (as a percentage)
 
-      return posScore + shareScore; // 0-100
+      // Combine: 50% posScore + 50% top10Score
+      return 0.5 * posScore + 0.5 * top10Score; // 0-100
     }
 
     function computeReviewScore(opts) {
