@@ -265,11 +265,20 @@ export default async function handler(req, res) {
           // Extract phone number with all possible formats
           let phone = null;
           if (loc.phoneNumbers) {
-            if (Array.isArray(loc.phoneNumbers) && loc.phoneNumbers.length > 0) {
+            // Check for primaryPhone nested inside phoneNumbers object (THIS IS THE FORMAT!)
+            if (loc.phoneNumbers.primaryPhone) {
+              phone = loc.phoneNumbers.primaryPhone;
+            }
+            // Check for array format: [{ phoneNumber: "...", ... }]
+            else if (Array.isArray(loc.phoneNumbers) && loc.phoneNumbers.length > 0) {
               phone = loc.phoneNumbers[0].phoneNumber || loc.phoneNumbers[0];
-            } else if (typeof loc.phoneNumbers === 'string') {
+            }
+            // Check for direct string
+            else if (typeof loc.phoneNumbers === 'string') {
               phone = loc.phoneNumbers;
-            } else if (loc.phoneNumbers.phoneNumber) {
+            }
+            // Check for { phoneNumber: "..." } format
+            else if (loc.phoneNumbers.phoneNumber) {
               phone = loc.phoneNumbers.phoneNumber;
             }
           }
