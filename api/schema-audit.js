@@ -10,6 +10,7 @@
 import { safeJsonParse } from './aigeo/utils.js';
 
 // Rich result eligible schema types
+// Note: Recipe is included but may not be applicable for all businesses (e.g., photography)
 const RICH_RESULT_TYPES = [
   'Article',
   'Event',
@@ -20,7 +21,8 @@ const RICH_RESULT_TYPES = [
   'Review',
   'HowTo',
   'VideoObject',
-  'Recipe'
+  'ImageObject', // For image search rich results
+  'Recipe' // May not be applicable for all business types
 ];
 
 /**
@@ -862,11 +864,19 @@ export default async function handler(req, res) {
     console.log(`  All types: ${Array.from(allTypes).sort().join(', ')}`);
     console.log(`  BreadcrumbList detected: ${allTypes.has('BreadcrumbList') ? 'YES' : 'NO'}`);
     console.log(`  Review detected: ${allTypes.has('Review') ? 'YES' : 'NO'}`);
+    console.log(`  Product detected: ${allTypes.has('Product') ? 'YES' : 'NO'}`);
+    console.log(`  ImageObject detected: ${allTypes.has('ImageObject') ? 'YES' : 'NO'}`);
+    console.log(`  Organization detected: ${allTypes.has('Organization') ? 'YES' : 'NO'}`);
     console.log(`  Schema types counts:`, Object.entries(schemaTypes)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 15)
       .map(([type, count]) => `${type}: ${count}`)
       .join(', '));
+    console.log(`  Rich result eligibility:`, Object.entries(richEligible)
+      .filter(([type, eligible]) => eligible)
+      .map(([type]) => type)
+      .join(', '));
+    console.log(`  Missing rich result types:`, RICH_RESULT_TYPES.filter(type => !richEligible[type]).join(', '));
     
     // Convert schemaTypes to array format, limit to top 10 for display
     const schemaTypesArray = Object.entries(schemaTypes)
