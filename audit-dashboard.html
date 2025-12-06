@@ -2774,9 +2774,15 @@
                   const schemaData = schemaAudit.data;
                   const { coverage, totalPages, pagesWithSchema, missingSchemaCount, missingSchemaPages, schemaTypes } = schemaData;
                   
-                  // Calculate foundation schemas
+                  // Calculate foundation schemas - use allDetectedTypes if available (all types), otherwise fall back to schemaTypes (top 10)
                   const allTypes = new Set();
-                  if (schemaTypes && Array.isArray(schemaTypes)) {
+                  if (schemaData.allDetectedTypes && Array.isArray(schemaData.allDetectedTypes)) {
+                    // Use all detected types for accurate calculation
+                    schemaData.allDetectedTypes.forEach(type => {
+                      if (type) allTypes.add(type);
+                    });
+                  } else if (schemaTypes && Array.isArray(schemaTypes)) {
+                    // Fallback: collect from top 10 schemaTypes array (may miss some types)
                     schemaTypes.forEach(item => {
                       if (item.type) allTypes.add(item.type);
                     });
