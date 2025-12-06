@@ -163,24 +163,70 @@ export default async function handler(req, res) {
       }
       
       // Extract rating and review count from location details
-      // These fields might be in the location detail response
+      // Note: The Business Information API may not include rating/review count in location details
+      // We need to check the actual response structure or use a different endpoint
       let gbpRating = null;
       let gbpReviewCount = null;
       
       if (locationsToProcess.length > 0) {
         const firstLocation = locationsToProcess[0];
-        // Check various possible field names for rating and review count
-        gbpRating = firstLocation.rating || firstLocation.averageRating || firstLocation.primaryRating || null;
-        gbpReviewCount = firstLocation.totalReviewCount || firstLocation.reviewCount || firstLocation.numberOfReviews || null;
         
-        // If not found in detail, try fetching from reviews endpoint
-        if (gbpRating === null || gbpReviewCount === null) {
+        // Check various possible field names for rating and review count in the location detail
+        // The Business Information API might have these fields nested or named differently
+        gbpRating = firstLocation.rating 
+          || firstLocation.averageRating 
+          || firstLocation.primaryRating 
+          || (firstLocation.primaryCategory && firstLocation.primaryCategory.rating)
+          || (firstLocation.moreHours && firstLocation.moreHours.rating)
+          || null;
+          
+        gbpReviewCount = firstLocation.totalReviewCount 
+          || firstLocation.reviewCount 
+          || firstLocation.numberOfReviews
+          || (firstLocation.primaryCategory && firstLocation.primaryCategory.totalReviewCount)
+          || null;
+        
+        // If not found in detail, try fetching from the Reviews API endpoint
+        if ((gbpRating === null || gbpReviewCount === null) && firstLocation.name) {
           try {
-            // Try to get rating from location metadata or reviews endpoint
-            // Note: This might require additional API calls or permissions
-            console.log('[Local Signals] Rating/review count not in location detail, checking alternative sources...');
+            // Try the Reviews API endpoint: accounts/{account}/locations/{location}/reviews
+            // This endpoint requires different permissions and may return review data
+            const reviewsUrl = `https://mybusiness.googleapis.com/v4/${firstLocation.name}/reviews`;
+            console.log('[Local Signals] Attempting to fetch reviews from:', reviewsUrl);
+            
+            const reviewsResponse = await fetch(reviewsUrl, {
+              method: 'GET',
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+              },
+            });
+            
+            if (reviewsResponse.ok) {
+              const reviewsData = await reviewsResponse.json();
+              console.log('[Local Signals] Reviews API response:', JSON.stringify(reviewsData, null, 2));
+              
+              // Extract rating and review count from reviews response
+              // The structure might be: { reviews: [...], averageRating: X, totalReviewCount: Y }
+              if (reviewsData.averageRating !== undefined) {
+                gbpRating = reviewsData.averageRating;
+              }
+              if (reviewsData.totalReviewCount !== undefined) {
+                gbpReviewCount = reviewsData.totalReviewCount;
+              } else if (reviewsData.reviews && Array.isArray(reviewsData.reviews)) {
+                // If we have the reviews array, calculate from it
+                gbpReviewCount = reviewsData.reviews.length;
+                if (reviewsData.reviews.length > 0) {
+                  const sumRating = reviewsData.reviews.reduce((sum, review) => sum + (review.starRating || 0), 0);
+                  gbpRating = sumRating / reviewsData.reviews.length;
+                }
+              }
+            } else {
+              const errorText = await reviewsResponse.text();
+              console.log('[Local Signals] Reviews API not available or requires different permissions:', reviewsResponse.status, errorText);
+            }
           } catch (error) {
-            console.warn('[Local Signals] Could not fetch rating/review count:', error);
+            console.warn('[Local Signals] Could not fetch rating/review count from Reviews API:', error.message);
           }
         }
         
