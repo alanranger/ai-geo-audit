@@ -3908,7 +3908,18 @@
                 // Normalize dates to YYYY-MM-DD format (Supabase might return with timezone)
                 contentSchemaHistory.forEach(record => {
                   // Ensure date is in YYYY-MM-DD format (strip time if present)
-                  const normalizedDate = record.date ? record.date.split('T')[0] : null;
+                  // Handle both date strings and Date objects
+                  let normalizedDate = null;
+                  if (record.date) {
+                    if (typeof record.date === 'string') {
+                      normalizedDate = record.date.split('T')[0];
+                    } else if (record.date instanceof Date) {
+                      normalizedDate = record.date.toISOString().split('T')[0];
+                    } else {
+                      normalizedDate = String(record.date).split('T')[0];
+                    }
+                  }
+                  
                   if (normalizedDate) {
                     // Content/Schema data
                     if (record.contentSchemaScore !== null && record.contentSchemaScore !== undefined) {
