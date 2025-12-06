@@ -4690,29 +4690,35 @@
       loadConfig();
       
       // Load and display last audit results if available
-      const savedAudit = loadAuditResults();
-      if (savedAudit && savedAudit.scores && savedAudit.searchData) {
-        // Check if saved audit's date range matches current date range
-        const currentDateRange = parseInt(document.getElementById('dateRange')?.value) || 30;
-        const savedDateRange = savedAudit.dateRange || currentDateRange;
-        
-        if (savedDateRange === currentDateRange) {
-          debugLog('Loading last audit results from localStorage...', 'info');
-          // Show dashboard immediately with saved results
-          document.getElementById('dashboard').style.display = 'block';
-          document.getElementById('loading').classList.remove('show');
-          displayDashboard(
-            savedAudit.scores,
-            savedAudit.searchData,
-            savedAudit.snippetReadiness || 0,
-            savedAudit.schemaAudit || null
-          );
-          debugLog('✓ Last audit results displayed', 'success');
-        } else {
-          debugLog(`Saved audit date range (${savedDateRange}) doesn't match current (${currentDateRange}). Dashboard not displayed.`, 'warn');
-          // Don't show dashboard - user needs to run new audit
+      // Wait a tick to ensure loadConfig() has finished updating the date range input
+      setTimeout(() => {
+        const savedAudit = loadAuditResults();
+        if (savedAudit && savedAudit.scores && savedAudit.searchData) {
+          // Check if saved audit's date range matches current date range
+          // Get the actual current value from the input field (which should be set by loadConfig)
+          const currentDateRange = parseInt(document.getElementById('dateRange')?.value) || 30;
+          const savedDateRange = savedAudit.dateRange || currentDateRange;
+          
+          debugLog(`Checking date range match: saved=${savedDateRange}, current=${currentDateRange}`, 'info');
+          
+          if (savedDateRange === currentDateRange) {
+            debugLog('Loading last audit results from localStorage...', 'info');
+            // Show dashboard immediately with saved results
+            document.getElementById('dashboard').style.display = 'block';
+            document.getElementById('loading').classList.remove('show');
+            displayDashboard(
+              savedAudit.scores,
+              savedAudit.searchData,
+              savedAudit.snippetReadiness || 0,
+              savedAudit.schemaAudit || null
+            );
+            debugLog('✓ Last audit results displayed', 'success');
+          } else {
+            debugLog(`Saved audit date range (${savedDateRange}) doesn't match current (${currentDateRange}). Dashboard not displayed.`, 'warn');
+            // Don't show dashboard - user needs to run new audit
+          }
         }
-      }
+      }, 0);
       
       debugLog('=== PAGE LOAD: Initialization complete ===', 'success');
     });
