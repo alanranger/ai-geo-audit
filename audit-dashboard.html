@@ -2748,7 +2748,14 @@
                     .filter(([type, eligible]) => eligible)
                     .map(([type]) => type);
                   if (richTypes.length > 0) {
-                    contentSchemaDesc += `Rich result eligible: ${richTypes.join(', ')}.`;
+                    contentSchemaDesc += `Rich result eligible: ${richTypes.join(', ')}. `;
+                  }
+                  
+                  // Check if Review schema is detected (even if not in top 10 types)
+                  const hasReviewSchema = allTypes.has('Review') || schemaTypes?.some(t => t.type === 'Review');
+                  if (hasReviewSchema) {
+                    const reviewCount = schemaTypes?.find(t => t.type === 'Review')?.count || 0;
+                    contentSchemaDesc += `Review schema detected (${reviewCount} instances) - matches GSC review snippets data.`;
                   }
                 } else {
                   contentSchemaDesc += ' <strong>Data Checked:</strong> Foundation schemas (Organization, Person, WebSite, BreadcrumbList), Rich result eligibility (Article, Event, Course, FAQ, HowTo, VideoObject, Recipe, Product, LocalBusiness, Review), schema coverage percentage, schema type diversity.';
@@ -2768,11 +2775,17 @@
                   serviceAreaDesc = 'How clearly AI understands where lessons/workshops run and which regions you cover. <strong>AI Importance:</strong> AI uses geographic signals to match queries with local intent. Clear service area data helps AI surface your content for location-specific searches and local AI Overviews. <strong>Data Source:</strong> ⚠️ <span style="color: #f59e0b;">Derived calculation</span> from Local Entity score (not using real service area data yet). <strong>Data Checked:</strong> Currently calculated from Local Entity. Real data pending: ServiceArea schema markup, Google Business Profile service areas, geographic keywords, location pages.';
                 }
                 
+                // Format GSC data for display
+                const ctr = data?.ctr || 0;
+                const avgPosition = data?.averagePosition || 0;
+                const totalClicks = data?.totalClicks || 0;
+                const totalImpressions = data?.totalImpressions || 0;
+                
                 const descriptions = {
                   localEntity: localEntityDesc,
                   serviceArea: serviceAreaDesc,
-                  authority: 'E-A-T (Experience, Expertise, Authoritativeness, Trustworthiness): Depth of educational content, references, reviews, external citations, and demonstrated expertise. <strong>AI Importance:</strong> E-A-T is critical for AI systems - they prioritize authoritative, trustworthy sources. Strong E-A-T signals help AI confidently feature your content in AI Overviews and answer boxes. <strong>Data Source:</strong> ✅ <span style="color: #10b981;">Live data</span> from Google Search Console API. <strong>Data Checked:</strong> CTR (${data.ctr ? data.ctr.toFixed(2) : 0}%), average position (${data.averagePosition ? data.averagePosition.toFixed(1) : 0}), clicks (${data.totalClicks || 0}), impressions (${data.totalImpressions || 0}). Backlink metrics pending integration.',
-                  visibility: 'Frequency and prominence in organic search, local pack, snippets and AI Overviews. <strong>AI Importance:</strong> AI systems learn from existing search performance. Higher visibility signals quality and relevance, making AI more likely to surface your content in AI-powered results and featured snippets. <strong>Data Source:</strong> ✅ <span style="color: #10b981;">Live data</span> from Google Search Console API. <strong>Data Checked:</strong> Average position (${data.averagePosition ? data.averagePosition.toFixed(1) : 0}), CTR (${data.ctr ? data.ctr.toFixed(2) : 0}%), total clicks (${data.totalClicks || 0}), total impressions (${data.totalImpressions || 0}), SERP feature appearances.',
+                  authority: `E-A-T (Experience, Expertise, Authoritativeness, Trustworthiness): Depth of educational content, references, reviews, external citations, and demonstrated expertise. <strong>AI Importance:</strong> E-A-T is critical for AI systems - they prioritize authoritative, trustworthy sources. Strong E-A-T signals help AI confidently feature your content in AI Overviews and answer boxes. <strong>Data Source:</strong> ✅ <span style="color: #10b981;">Live data</span> from Google Search Console API. <strong>Data Checked:</strong> CTR ${ctr.toFixed(2)}%, average position ${avgPosition.toFixed(1)}, clicks ${totalClicks.toLocaleString()}, impressions ${totalImpressions.toLocaleString()}. Backlink metrics pending integration.`,
+                  visibility: `Frequency and prominence in organic search, local pack, snippets and AI Overviews. <strong>AI Importance:</strong> AI systems learn from existing search performance. Higher visibility signals quality and relevance, making AI more likely to surface your content in AI-powered results and featured snippets. <strong>Data Source:</strong> ✅ <span style="color: #10b981;">Live data</span> from Google Search Console API. <strong>Data Checked:</strong> Average position ${avgPosition.toFixed(1)}, CTR ${ctr.toFixed(2)}%, total clicks ${totalClicks.toLocaleString()}, total impressions ${totalImpressions.toLocaleString()}, SERP feature appearances.`,
                   contentSchema: contentSchemaDesc
                 };
                 
