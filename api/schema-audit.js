@@ -69,15 +69,18 @@ function normalizeSchemaTypes(schemaObject) {
     }
   }
 
-  function walk(node) {
+  function walk(node, depth = 0) {
     if (!node || typeof node !== 'object') return;
+    
+    // Prevent infinite recursion (max depth 10)
+    if (depth > 10) return;
 
     // 1) Top-level @type for this node
     addType(node['@type']);
 
     // 2) Any items in @graph
     if (Array.isArray(node['@graph'])) {
-      node['@graph'].forEach(child => walk(child));
+      node['@graph'].forEach(child => walk(child, depth + 1));
     }
 
     // 3) Common nested properties that often contain Person/Organization
@@ -88,9 +91,31 @@ function normalizeSchemaTypes(schemaObject) {
 
       if (!value) return;
 
-      if (Array.isArray(value)) value.forEach(v => walk(v));
-      else walk(value);
+      if (Array.isArray(value)) value.forEach(v => walk(v, depth + 1));
+      else walk(value, depth + 1);
     });
+    
+    // 4) Walk all object properties recursively to catch any nested schema types
+    // This ensures we catch BreadcrumbList, ItemList, and other types that might be nested
+    for (const key in node) {
+      if (key === '@type' || key === '@graph' || nestedKeys.includes(key)) {
+        continue; // Already handled above
+      }
+      
+      const value = node[key];
+      if (value && typeof value === 'object') {
+        if (Array.isArray(value)) {
+          value.forEach(item => {
+            if (item && typeof item === 'object' && item['@type']) {
+              walk(item, depth + 1);
+            }
+          });
+        } else if (value['@type']) {
+          // If it has a @type, it's likely a schema object - walk it
+          walk(value, depth + 1);
+        }
+      }
+    }
   }
 
   walk(schemaObject);
