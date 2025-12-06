@@ -3466,27 +3466,35 @@
                   return '#ef4444'; // Red
                 };
                 
-                // Calculate angle for each point (radar charts have evenly spaced points)
-                const numPoints = orderedLabels.length;
-                const angleStep = (2 * Math.PI) / numPoints;
-                const startAngle = -Math.PI / 2; // Start at top (12 o'clock)
+                // Get the actual point label positions from Chart.js
+                // Chart.js stores these in _pointLabelItems after the chart is drawn
+                const pointLabelItems = scale._pointLabelItems || [];
                 
-                // Draw score labels outside the chart, underneath each pillar label
+                // Draw score labels outside the chart, directly underneath each pillar label
                 meta.data.forEach((point, index) => {
                   const score = orderedData[index];
                   
-                  // Calculate angle for this point
-                  const angle = startAngle + (index * angleStep);
+                  let labelX, labelY;
                   
-                  // Calculate position of pillar label (at max radius + padding)
-                  const labelRadius = maxRadius + scale.options.pointLabels.padding;
-                  const labelX = centerX + Math.cos(angle) * labelRadius;
-                  const labelY = centerY + Math.sin(angle) * labelRadius;
+                  // Use actual point label positions if available (Chart.js v4)
+                  if (pointLabelItems[index]) {
+                    labelX = pointLabelItems[index].x;
+                    labelY = pointLabelItems[index].y;
+                  } else {
+                    // Fallback: calculate position from angle
+                    const numPoints = orderedLabels.length;
+                    const angleStep = (2 * Math.PI) / numPoints;
+                    const startAngle = -Math.PI / 2; // Start at top (12 o'clock)
+                    const angle = startAngle + (index * angleStep);
+                    const labelRadius = maxRadius + scale.options.pointLabels.padding;
+                    labelX = centerX + Math.cos(angle) * labelRadius;
+                    labelY = centerY + Math.sin(angle) * labelRadius;
+                  }
                   
                   // Position score label directly underneath the pillar label
-                  // Offset along the radial direction (same angle, further out)
-                  const scoreLabelOffset = 30; // Distance below the pillar label
-                  const scoreLabelX = labelX; // Same X position (aligned)
+                  // Always offset vertically downward (regardless of angle)
+                  const scoreLabelOffset = 28; // Distance below the pillar label
+                  const scoreLabelX = labelX; // Same X position (centered under label)
                   const scoreLabelY = labelY + scoreLabelOffset; // Directly below
                   
                   // Get RAG color
@@ -3500,8 +3508,8 @@
                   ctx.textBaseline = 'top';
                   
                   // Add white shadow for readability
-                  ctx.shadowColor = 'rgba(255, 255, 255, 0.8)';
-                  ctx.shadowBlur = 4;
+                  ctx.shadowColor = 'rgba(255, 255, 255, 0.9)';
+                  ctx.shadowBlur = 5;
                   ctx.shadowOffsetX = 0;
                   ctx.shadowOffsetY = 0;
                   
