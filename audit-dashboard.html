@@ -4138,11 +4138,18 @@
               const lastDate = new Date(lastTimeseriesDate);
               lastDate.setHours(0, 0, 0, 0);
               
+              debugLog(`Last GSC date: ${lastTimeseriesDate}, Today: ${todayStr}`, 'info');
+              debugLog(`Content/Schema map has ${contentSchemaMap.size} entries before filling missing dates`, 'info');
+              debugLog(`Content/Schema map entries: ${Array.from(contentSchemaMap.entries()).map(([d, s]) => `${d}=${s}`).join(', ')}`, 'info');
+              
               // Add all missing dates from day after last GSC date to today
               const currentDate = new Date(lastDate);
               currentDate.setDate(currentDate.getDate() + 1); // Start from day after last GSC date
               
-              while (currentDate <= today) {
+              // Compare dates as strings to avoid timezone issues
+              const todayDateStr = today.toISOString().split('T')[0];
+              
+              while (currentDate.toISOString().split('T')[0] <= todayDateStr) {
                 const dateStr = currentDate.toISOString().split('T')[0];
                 const dateObj = new Date(dateStr);
                 
@@ -4160,23 +4167,25 @@
                 localEntityData.push(null);
                 serviceAreaData.push(null);
                 
-              // For Content/Schema, check if we have real data for this date
-              const realScore = contentSchemaMap.get(dateStr);
-              if (realScore !== undefined && realScore !== null) {
-                // We have real data for this date
-                contentSchemaData.push(realScore);
-                contentSchemaDataEstimated.push(null);
-                debugLog(`✓ Added Content/Schema score (${realScore}) for ${dateStr} from Supabase`, 'info');
-              } else {
-                // No real data - use null (don't show estimated)
-                contentSchemaData.push(null);
-                contentSchemaDataEstimated.push(null);
-                debugLog(`No Content/Schema data for ${dateStr}`, 'info');
-              }
+                // For Content/Schema, check if we have real data for this date
+                const realScore = contentSchemaMap.get(dateStr);
+                if (realScore !== undefined && realScore !== null) {
+                  // We have real data for this date
+                  contentSchemaData.push(realScore);
+                  contentSchemaDataEstimated.push(null);
+                  debugLog(`✓ Added Content/Schema score (${realScore}) for ${dateStr} from Supabase`, 'info');
+                } else {
+                  // No real data - use null (don't show estimated)
+                  contentSchemaData.push(null);
+                  contentSchemaDataEstimated.push(null);
+                  debugLog(`No Content/Schema data for ${dateStr} (checked map, not found)`, 'info');
+                }
                 
                 // Move to next day
                 currentDate.setDate(currentDate.getDate() + 1);
               }
+              
+              debugLog(`Filled missing dates: added ${allDateObjects.length - timeseries.length} additional dates`, 'info');
             } else if (timeseries.length === 0) {
               // No timeseries data at all - just add today
               const todayDateObj = new Date(todayStr);
@@ -4263,11 +4272,17 @@
             chartDateObjects = fallbackDateObjects;
           }
           
-          // Calculate min and max across all datasets
-          const allData = [...localEntityData, ...serviceAreaData, ...authorityData, ...visibilityData, ...contentSchemaData];
-          const dataMin = Math.min(...allData);
-          const dataMax = Math.max(...allData);
+          // Calculate min and max across all datasets (filter out null values)
+          const allData = [...localEntityData, ...serviceAreaData, ...authorityData, ...visibilityData, ...contentSchemaData].filter(v => v !== null && v !== undefined && !isNaN(v));
+          const dataMin = allData.length > 0 ? Math.min(...allData) : 0;
+          const dataMax = allData.length > 0 ? Math.max(...allData) : 100;
           const dataRange = dataMax - dataMin;
+          
+          // Debug: Log Content/Schema data to see what we have
+          const contentSchemaValid = contentSchemaData.filter(v => v !== null && v !== undefined && !isNaN(v));
+          debugLog(`Content/Schema dataset: ${contentSchemaValid.length} valid values out of ${contentSchemaData.length} total. Values: ${contentSchemaValid.join(', ')}`, 'info');
+          debugLog(`Content/Schema data array length: ${contentSchemaData.length}, chart dates length: ${chartDates.length}`, 'info');
+          debugLog(`Last few Content/Schema values: ${contentSchemaData.slice(-5).join(', ')}`, 'info');
           
           // Calculate dynamic Y-axis range
           // Minimum range of 30, or actual range + padding if larger
