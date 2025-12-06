@@ -2824,6 +2824,39 @@
         const visibilityScore = Math.round(scores.visibility || 0);
         const authorityScore = Math.round(scores.authority || 0);
         
+        // Show Content/Schema explanation if schema audit data is available
+        const explanationDiv = document.getElementById('contentSchemaExplanation');
+        if (explanationDiv && schemaAudit && schemaAudit.status === 'ok' && schemaAudit.data) {
+          const schemaData = schemaAudit.data;
+          const allTypes = new Set();
+          if (schemaData.schemaTypes && Array.isArray(schemaData.schemaTypes)) {
+            schemaData.schemaTypes.forEach(item => {
+              if (item.type) allTypes.add(item.type);
+            });
+          }
+          
+          const foundationTypes = ['Organization', 'Person', 'WebSite', 'BreadcrumbList'];
+          const foundationPresent = foundationTypes.filter(type => allTypes.has(type)).length;
+          const foundationScore = (foundationPresent / foundationTypes.length) * 100;
+          
+          const richResultTypes = ['Article', 'Event', 'FAQPage', 'Product', 'LocalBusiness', 'Course', 'Review', 'HowTo', 'VideoObject', 'Recipe'];
+          const richEligibleCount = Object.values(schemaData.richEligible || {}).filter(eligible => eligible === true).length;
+          const richResultScore = (richEligibleCount / richResultTypes.length) * 100;
+          
+          const coverageScore = schemaData.coverage || 0;
+          const uniqueTypesCount = allTypes.size;
+          const diversityScore = Math.min((uniqueTypesCount / 15) * 100, 100);
+          
+          document.getElementById('explainFoundation').textContent = `${foundationScore.toFixed(0)}% (${foundationPresent}/4 types present)`;
+          document.getElementById('explainRich').textContent = `${richResultScore.toFixed(0)}% (${richEligibleCount}/10 types eligible)`;
+          document.getElementById('explainCoverage').textContent = `${coverageScore.toFixed(1)}% (${schemaData.pagesWithSchema || 0}/${schemaData.totalPages || 0} pages)`;
+          document.getElementById('explainDiversity').textContent = `${diversityScore.toFixed(0)}% (${uniqueTypesCount} unique types, target: 15+)`;
+          
+          explanationDiv.style.display = 'block';
+        } else if (explanationDiv) {
+          explanationDiv.style.display = 'none';
+        }
+        
         // Calculate weighted contribution of each component
         const contentSchemaContribution = (contentSchemaScore * 0.4).toFixed(1);
         const visibilityContribution = (visibilityScore * 0.35).toFixed(1);
