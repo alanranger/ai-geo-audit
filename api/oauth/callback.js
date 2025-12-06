@@ -77,7 +77,15 @@ export default async function handler(req, res) {
     // Get OAuth credentials from environment
     const clientId = process.env.GOOGLE_CLIENT_ID;
     const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-    const redirectUri = `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}/api/oauth/callback`;
+    
+    // Construct redirect URI - must match EXACTLY what was used in authorization request
+    // Use the request URL to ensure exact match
+    const protocol = req.headers['x-forwarded-proto'] || 'https';
+    const host = req.headers.host || req.headers['x-forwarded-host'];
+    const redirectUri = `${protocol}://${host}/api/oauth/callback`;
+    
+    console.log('[OAuth Callback] Redirect URI:', redirectUri);
+    console.log('[OAuth Callback] Client ID:', clientId ? `${clientId.substring(0, 20)}...` : 'NOT SET');
     
     if (!clientId || !clientSecret) {
       return res.status(500).send(`
@@ -118,7 +126,13 @@ export default async function handler(req, res) {
     
     const tokenData = await tokenResponse.json();
     
+    console.log('[OAuth Callback] Token exchange response status:', tokenResponse.status);
+    console.log('[OAuth Callback] Token exchange error:', tokenData.error || 'none');
+    
     if (!tokenResponse.ok || !tokenData.refresh_token) {
+      const errorDetails = tokenData.error_description || tokenData.error || 'Unknown error';
+      console.error('[OAuth Callback] Token exchange failed:', errorDetails);
+      
       return res.status(400).send(`
         <!DOCTYPE html>
         <html>
