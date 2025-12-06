@@ -29,8 +29,15 @@ Vercel will automatically rebuild and deploy (usually takes 1-2 minutes).
 
 - **5 Pillar Score Tracking**: Local Entity, Service Area, Authority, Visibility, Content/Schema
 - **Real-time Data**: Google Search Console API integration
-- **Visual Dashboards**: Radar charts, trend graphs, metrics cards
-- **RAG Status**: Color-coded Red/Amber/Green indicators
+- **Visual Dashboards**: 
+  - Radar chart with RAG color-coded score labels at each data point
+  - Trend graphs showing historical performance
+  - Snippet Readiness nested doughnut chart with weighted segments and score indicators
+  - Metrics cards with real-time data
+- **RAG Status**: Color-coded Red/Amber/Green indicators on all scores
+- **Historical Data**: Supabase integration for Content/Schema trend tracking
+- **Dashboard Persistence**: Automatically loads last audit results on page reload
+- **Retry Failed URLs**: Rescan failed/missing URLs without running full audit
 - **Configuration**: Save API keys and settings locally
 
 ## Setup
@@ -48,13 +55,17 @@ Vercel will automatically rebuild and deploy (usually takes 1-2 minutes).
 
 ## Current Status
 
-- ✅ Dashboard UI complete
-- ✅ Visual charts and graphs
+- ✅ Dashboard UI complete with enhanced visualizations
+- ✅ Visual charts and graphs (radar, trend, snippet readiness)
 - ✅ Google Search Console API integration (OAuth2)
-- ✅ Schema audit and coverage scanning
+- ✅ Schema audit and coverage scanning with retry mechanism
 - ✅ Entity metrics and SERP features tracking
 - ✅ Real-time data from GSC API
+- ✅ Supabase integration for historical Content/Schema tracking
+- ✅ Dashboard persistence (localStorage)
+- ✅ Retry failed URLs functionality
 - ✅ Configuration management
+- ✅ Tooltips on all interactive buttons
 
 ## API Endpoints
 
@@ -65,9 +76,11 @@ The following serverless functions are available:
 - `/api/aigeo/gsc-entity-metrics` - Comprehensive GSC entity metrics
 - `/api/aigeo/schema-coverage` - Schema coverage analysis
 - `/api/aigeo/serp-features` - SERP feature detection
-- `/api/aigeo/local-signals` - Local SEO signals
-- `/api/aigeo/backlink-metrics` - Backlink analysis
-- `/api/aigeo/entity-extract` - Entity extraction (placeholder)
+- `/api/aigeo/local-signals` - Local SEO signals (stub)
+- `/api/aigeo/backlink-metrics` - Backlink analysis (stub)
+- `/api/aigeo/entity-extract` - Entity extraction (stub)
+- `/api/supabase/save-audit` - Save audit results to Supabase
+- `/api/supabase/get-audit-history` - Fetch historical Content/Schema data
 
 ## Next Steps
 
@@ -80,6 +93,10 @@ The following serverless functions are available:
 
 - OAuth2 credentials are stored securely in Vercel environment variables
 - All API calls are handled server-side via Vercel serverless functions
-- Charts use Chart.js (loaded via CDN)
-- Schema audit reads URLs from GitHub-hosted CSV file
+- Charts use Chart.js (loaded via CDN) with custom plugins for enhanced visualizations
+- Schema audit reads URLs from GitHub-hosted CSV file or accepts manual URL lists
+- Historical Content/Schema data is stored in Supabase (requires `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` environment variables)
+- Dashboard state persists in browser localStorage between sessions
+- Snippet Readiness score is calculated as weighted average: Content/Schema (40%), Visibility (35%), Authority (25%)
+- Content/Schema pillar uses weighted formula: Foundation (30%), Rich Results (35%), Coverage (20%), Diversity (15%)
 

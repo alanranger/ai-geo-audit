@@ -57,12 +57,16 @@ After deployment, configure OAuth2 credentials:
 
 1. Go to your project in Vercel Dashboard
 2. Navigate to **Settings** → **Environment Variables**
-3. Add these three variables (see `GSC_API_SETUP.md` for details):
+3. Add these environment variables (see `GSC_API_SETUP.md` for OAuth2 details):
    - `GOOGLE_CLIENT_ID` - Your OAuth2 Client ID
    - `GOOGLE_CLIENT_SECRET` - Your OAuth2 Client Secret
    - `GOOGLE_REFRESH_TOKEN` - Your OAuth2 Refresh Token
+   - `SUPABASE_URL` (optional) - Your Supabase project URL (for historical Content/Schema tracking)
+   - `SUPABASE_SERVICE_ROLE_KEY` (optional) - Your Supabase service role key (for historical Content/Schema tracking)
 4. Select **Production**, **Preview**, and **Development** environments
 5. Click **Save**
+
+**Note**: Supabase variables are optional. If not configured, the dashboard will still work but Content/Schema historical trends will show a dashed line using the current score.
 
 ### Step 4: Redeploy
 

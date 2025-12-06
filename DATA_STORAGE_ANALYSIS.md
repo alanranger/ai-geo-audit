@@ -31,9 +31,11 @@
 ### 1. **Content/Schema Pillar** (Currently 100% needs storage)
 
 **Current State:**
-- Shows flat line on trend chart (uses current score for all historical points)
-- Schema audit is run once per audit (not daily)
-- No historical tracking of schema changes
+- ✅ Supabase integration implemented for historical tracking
+- ✅ Audit results saved to Supabase after each scan
+- ✅ Historical Content/Schema data fetched from Supabase for trend chart
+- ⚠️ If Supabase not configured, shows dashed line using current score for all historical points
+- ⚠️ Schema audit is run once per audit (not daily) - historical data accumulates over time
 
 **What Needs Storage:**
 ```javascript
@@ -209,27 +211,35 @@ CREATE INDEX idx_audit_results_property_date ON audit_results(property_url, audi
 
 ---
 
-## Current Workaround
+## Current Implementation
 
 **What works now:**
-- Visibility & Authority trends (from GSC timeseries)
-- Current Content/Schema score (from schema audit)
-- Dashboard persistence (localStorage - single snapshot)
+- ✅ Visibility & Authority trends (from GSC timeseries)
+- ✅ Current Content/Schema score (from schema audit)
+- ✅ Dashboard persistence (localStorage - last audit snapshot)
+- ✅ Historical Content/Schema tracking (Supabase - if configured)
+- ✅ Trend chart shows real historical Content/Schema data when available
+- ⚠️ If Supabase not configured, trend chart shows dashed line using current score
 
-**What doesn't work:**
-- Content/Schema historical trends (shows flat line)
-- Schema coverage changes over time
-- Multi-day comparison of schema improvements
+**What's improved:**
+- ✅ Content/Schema historical trends (real data from Supabase)
+- ✅ Schema coverage changes over time (tracked in Supabase)
+- ✅ Multi-day comparison of schema improvements (via Supabase queries)
 
 ---
 
-## Recommendation
+## Implementation Status
 
-**Start with Supabase for Content/Schema tracking:**
-1. After each schema audit, save results to Supabase
-2. On dashboard load, fetch last 30/60/90 days of schema data
-3. Show real Content/Schema trend line (not flat)
-4. Enable "Schema Coverage Over Time" visualization
+**✅ Supabase for Content/Schema tracking is implemented:**
+1. ✅ After each schema audit, results are saved to Supabase (via `/api/supabase/save-audit`)
+2. ✅ On dashboard load, historical Content/Schema data is fetched from Supabase (via `/api/supabase/get-audit-history`)
+3. ✅ Trend chart shows real Content/Schema trend line (solid line for dates with data, dashed line for dates without)
+4. ✅ Historical schema coverage changes are tracked in Supabase
 
-**This addresses the biggest gap** - Content/Schema pillar showing real historical trends instead of a flat line.
+**Configuration Required:**
+- Set `SUPABASE_URL` environment variable in Vercel
+- Set `SUPABASE_SERVICE_ROLE_KEY` environment variable in Vercel
+- If not configured, the system gracefully falls back to showing current score for all historical points (dashed line)
+
+**This addresses the biggest gap** - Content/Schema pillar now shows real historical trends when Supabase is configured.
 

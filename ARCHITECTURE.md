@@ -231,9 +231,64 @@
 
 ---
 
+#### 6. `/api/supabase/save-audit` (POST)
+**Purpose**: Save audit results to Supabase for historical tracking
+
+**Body**:
+```json
+{
+  "propertyUrl": "https://alanranger.com",
+  "auditDate": "2025-12-05",
+  "scores": { "visibility": 80, "authority": 35, ... },
+  "schemaAudit": { "data": { ... } },
+  "gscData": { "totalClicks": 6897, ... }
+}
+```
+
+**Returns**:
+```json
+{
+  "status": "ok",
+  "message": "Audit results saved to Supabase",
+  "data": [...]
+}
+```
+
+**Data Source**: ✅ **REAL** - Stores actual audit results in Supabase database
+
+**Note**: Requires `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` environment variables. If not configured, returns `status: "skipped"`.
+
+---
+
+#### 7. `/api/supabase/get-audit-history` (GET)
+**Purpose**: Fetch historical Content/Schema scores from Supabase
+
+**Parameters**:
+- `propertyUrl` (required)
+- `startDate` (required): YYYY-MM-DD
+- `endDate` (required): YYYY-MM-DD
+
+**Returns**:
+```json
+{
+  "status": "ok",
+  "data": [
+    { "date": "2025-12-01", "contentSchemaScore": 75 },
+    { "date": "2025-12-02", "contentSchemaScore": 76 },
+    ...
+  ]
+}
+```
+
+**Data Source**: ✅ **REAL** - Retrieves historical data from Supabase database
+
+**Note**: If Supabase is not configured, returns `status: "skipped"`. Trend chart will use current score for all historical points (dashed line).
+
+---
+
 ### ⚠️ Stubs (Placeholder Data)
 
-#### 6. `/api/aigeo/local-signals` (GET)
+#### 8. `/api/aigeo/local-signals` (GET)
 **Status**: ⚠️ **STUB** - Returns placeholder data
 
 **Returns**:
@@ -257,7 +312,7 @@
 
 ---
 
-#### 7. `/api/aigeo/backlink-metrics` (GET)
+#### 9. `/api/aigeo/backlink-metrics` (GET)
 **Status**: ⚠️ **STUB** - Returns placeholder data
 
 **Returns**:
@@ -280,7 +335,7 @@
 
 ---
 
-#### 8. `/api/aigeo/entity-extract` (POST)
+#### 10. `/api/aigeo/entity-extract` (POST)
 **Status**: ⚠️ **STUB** - Returns static sample data
 
 **Returns**:
@@ -422,12 +477,15 @@ Applied to all 5 pillar scores and snippet readiness.
 
 #### 3. **Radar Chart** (Chart.js)
 - Visual representation of 5 pillar scores
-- Color-coded by RAG status
+- RAG color-coded score labels displayed at each data point (red/amber/green)
+- Timestamp showing current data date and time (not historical)
+- Custom Chart.js plugin for score label rendering
 
 #### 4. **Trend Chart** (Chart.js)
 - Timeseries line chart
 - Shows clicks, impressions, CTR, position over time
-- **Data Source**: ✅ **REAL** - GSC timeseries data
+- Content/Schema score shown as dashed line (uses current score for historical points until Supabase data is available)
+- **Data Source**: ✅ **REAL** - GSC timeseries data for Visibility/Authority; Supabase for Content/Schema historical data
 
 #### 5. **Metrics Cards**
 - Total Clicks
@@ -440,13 +498,31 @@ Applied to all 5 pillar scores and snippet readiness.
 - Top 10 queries with clicks, impressions, CTR, position
 - **Data Source**: ✅ **REAL** - GSC topQueries data
 
-#### 7. **Completion Modal**
+#### 7. **Snippet Readiness Gauge** (Chart.js Doughnut)
+- Nested doughnut chart showing weighted breakdown of snippet readiness
+- Outer ring displays three segments with weight percentages (Content/Schema 40%, Visibility 35%, Authority 25%)
+- Inner ring shows actual pillar scores as "fuel gauge" fills within each segment
+- Color-coded by RAG status (green/amber/red) for each score
+- Overall snippet readiness score and status displayed prominently
+- Detailed legend showing weight, score, RAG status, and contribution points for each component
+- Explanation box for Content/Schema score breakdown (Foundation, Rich Results, Coverage, Diversity)
+- Timestamp showing current data date and time (not historical)
+- Custom Chart.js plugin for segment labels, arrows, and score indicators
+
+#### 8. **Completion Modal**
 - Shows schema audit summary
 - Displays crawl success/failure counts
 - Lists pages without schema
 - Error breakdown by type
+- "Retry Failed URLs" button to rescan only failed URLs
 
-#### 8. **Debug Log Panel** (Collapsible)
+#### 9. **Retry Failed URLs Button**
+- Appears in URL load section (outside modal) when failed URLs exist
+- Allows rescanning only failed/missing URLs without running full audit
+- Merges new results with existing audit data
+- Updates dashboard and saves to localStorage
+
+#### 10. **Debug Log Panel** (Collapsible)
 - Real-time logging of audit process
 - Color-coded messages (info/success/warning/error)
 - Scrollable log history
@@ -545,7 +621,10 @@ Applied to all 5 pillar scores and snippet readiness.
 - [ ] Store historical data (database or file storage)
 - [ ] Send email notifications on score changes
 
-**Current State**: Manual trigger only (user clicks "Run Audit Scan")
+**Current State**: 
+- Manual trigger only (user clicks "Run Audit Scan")
+- ✅ Dashboard persistence via localStorage (last audit results load automatically)
+- ✅ Retry failed URLs functionality (rescan only failed URLs without full audit)
 
 ---
 
@@ -556,7 +635,12 @@ Applied to all 5 pillar scores and snippet readiness.
 - [ ] Build comparison views (this week vs last week)
 - [ ] **Historical Schema Coverage Tracking**: Implement Supabase database with cron job to track schema coverage changes over time. This will enable real Content/Schema trend lines showing actual historical schema changes (currently shows flat line because schema audit is only run once per audit, not historically).
 
-**Current State**: No data persistence (each audit is independent). Content/Schema trend shows current score for all historical points (schema is static snapshot).
+**Current State**: 
+- ✅ Supabase integration implemented for Content/Schema historical tracking
+- ✅ Audit results saved to Supabase after each scan
+- ✅ Historical Content/Schema data fetched from Supabase for trend chart
+- ⚠️ If Supabase not configured, trend chart shows dashed line using current score for all historical points
+- ⚠️ Other pillars (Visibility, Authority) use GSC timeseries data (no storage needed)
 
 ---
 
@@ -616,13 +700,13 @@ Applied to all 5 pillar scores and snippet readiness.
 
 ## Current Limitations
 
-1. **No Data Persistence**: Each audit is independent, no historical tracking
+1. **Partial Data Persistence**: Content/Schema historical tracking via Supabase (optional), other pillars use GSC timeseries
 2. **Manual Trigger Only**: No automated scheduling
 3. **Single Property**: One property per audit session
-4. **Limited Local Signals**: Local Entity/Service Area use derived calculations
+4. **Limited Local Signals**: Local Entity/Service Area use derived calculations (GBP API not integrated)
 5. **No Backlink Data**: Authority score doesn't include backlink metrics
 6. **No Entity Extraction**: Content analysis is limited to schema markup
-7. **No Error Recovery**: Failed API calls require manual retry
+7. **Error Recovery**: ✅ Retry failed URLs functionality implemented
 8. **No Multi-User Support**: No authentication or user management
 
 ---
@@ -653,6 +737,7 @@ Applied to all 5 pillar scores and snippet readiness.
 - Google Search Console API (OAuth2)
 - GitHub (for CSV hosting)
 - Target websites (for schema crawling)
+- Supabase (optional - for historical Content/Schema data storage)
 
 ### Libraries
 - Chart.js (via CDN) - Chart rendering
@@ -660,7 +745,8 @@ Applied to all 5 pillar scores and snippet readiness.
 
 ### Infrastructure
 - Vercel - Hosting and serverless functions
-- Browser localStorage - UI preferences
+- Browser localStorage - UI preferences and last audit results persistence
+- Supabase (optional) - Historical Content/Schema data storage
 
 ---
 
@@ -686,6 +772,9 @@ AI GEO Audit/
 │       ├── backlink-metrics.js     # STUB: Backlinks
 │       ├── entity-extract.js       # STUB: Entity extraction
 │       └── utils.js                # Shared utilities
+│   └── supabase/
+│       ├── save-audit.js           # Save audit results to Supabase
+│       └── get-audit-history.js    # Fetch historical Content/Schema data
 └── scripts/
     └── sync-site-urls.js          # CSV sync script
 ```
@@ -699,10 +788,13 @@ AI GEO Audit/
 - ✅ 3 of 5 pillars use real data (Visibility, Authority, Content/Schema - with weighted foundation/rich results/coverage/diversity calculation)
 - ⚠️ 2 pillars use derived calculations (Local Entity, Service Area)
 - ⚠️ 3 API endpoints are stubs (local-signals, backlink-metrics, entity-extract)
+- ✅ Supabase integration for Content/Schema historical tracking
+- ✅ Enhanced visualizations (radar chart with score labels, snippet readiness nested doughnut chart)
+- ✅ Dashboard persistence and retry failed URLs functionality
 
 **Next Priority**: 
 1. Implement Local Signals API (Google Business Profile)
 2. Implement Backlink Metrics API
-3. Add automated scheduling
-4. Add data persistence for historical tracking
+3. Add automated scheduling (cron jobs)
+4. Expand historical tracking to other pillars if needed
 

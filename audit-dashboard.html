@@ -8,6 +8,7 @@
   <meta http-equiv="Expires" content="0">
   <title>AI GEO Audit Dashboard - Automated SEO Analysis (v 80c0dd8)</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
   <script>
     // Try to load config.js if it exists (for local development)
     // Note: config.js is gitignored and won't be deployed to Vercel
@@ -786,6 +787,20 @@
       </div>
     </div>
 
+    <!-- Reporting Section -->
+    <div class="config-panel" style="margin-top: 2rem;">
+      <h2>Reporting</h2>
+      <div class="info-box" style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 1rem; margin-bottom: 1rem; border-radius: 4px;">
+        <p style="margin: 0; font-size: 0.9rem; color: #856404;"><strong>Generate Reports:</strong> Create comprehensive PDF reports containing all audit data, charts, and pillar score definitions.</p>
+      </div>
+      <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
+        <button class="btn" onclick="generatePDFReport()" id="generatePdfBtn" style="background: #dc2626; color: white; border-color: #dc2626;" title="Generate a comprehensive PDF report containing all audit data, charts, pillar scores, definitions, and metrics. The report will include all sections from the dashboard.">
+          📄 Generate PDF Report
+        </button>
+        <div id="pdfStatus" style="font-size: 0.85rem; color: #666; margin-left: 0.5rem;"></div>
+      </div>
+    </div>
+
     <div class="status" id="status"></div>
 
     <div class="loading" id="loading">
@@ -960,15 +975,14 @@
             <strong>Current data as of:</strong> <span id="snippetReadinessAuditTime">-</span> <span style="color: #666; font-size: 0.75rem;">(Not historical - reflects last audit scan)</span>
           </div>
           
-          <div id="contentSchemaExplanation" style="display: none; background: #f0f9ff; border-left: 4px solid #3b82f6; padding: 1rem; margin-bottom: 1rem; border-radius: 4px; font-size: 0.85rem; color: #1e40af;">
-            <strong>Why is Content/Schema 77%?</strong> The score is calculated from four weighted components:
+          <div id="snippetReadinessExplanation" style="display: none; background: #f0f9ff; border-left: 4px solid #3b82f6; padding: 1rem; margin-bottom: 1rem; border-radius: 4px; font-size: 0.85rem; color: #1e40af;">
+            <strong id="explanationTitle">Why is Snippet Readiness 0%?</strong> The score is calculated from three weighted components:
             <ul style="margin: 0.5rem 0 0 1.5rem; padding: 0;">
-              <li><strong>Foundation (30%):</strong> <span id="explainFoundation">-</span> - Missing foundation schemas reduce this component</li>
-              <li><strong>Rich Results (35%):</strong> <span id="explainRich">-</span> - Not all rich result types are eligible yet</li>
-              <li><strong>Coverage (20%):</strong> <span id="explainCoverage">-</span> - Some pages still lack schema markup</li>
-              <li><strong>Diversity (15%):</strong> <span id="explainDiversity">-</span> - Limited schema type variety across the site</li>
+              <li><strong>Content/Schema (40% weight):</strong> <span id="explainContentSchema">-</span> - <span id="explainContentSchemaDetail">-</span></li>
+              <li><strong>Visibility (35% weight):</strong> <span id="explainVisibility">-</span> - <span id="explainVisibilityDetail">-</span></li>
+              <li><strong>Authority (25% weight):</strong> <span id="explainAuthority">-</span> - <span id="explainAuthorityDetail">-</span></li>
             </ul>
-            <div style="margin-top: 0.5rem; font-weight: 600;">Formula: (Foundation × 30%) + (Rich Results × 35%) + (Coverage × 20%) + (Diversity × 15%) = 77%</div>
+            <div style="margin-top: 0.5rem; font-weight: 600;" id="explanationFormula">Formula: (Content/Schema × 40%) + (Visibility × 35%) + (Authority × 25%) = 0%</div>
           </div>
           
           <!-- Overall Combined Score -->
@@ -2870,33 +2884,67 @@
         const visibilityScore = Math.round(scores.visibility || 0);
         const authorityScore = Math.round(scores.authority || 0);
         
-        // Show Content/Schema explanation if schema audit data is available
-        const explanationDiv = document.getElementById('contentSchemaExplanation');
-        if (explanationDiv && schemaAudit && schemaAudit.status === 'ok' && schemaAudit.data) {
-          const schemaData = schemaAudit.data;
-          const allTypes = new Set();
-          if (schemaData.schemaTypes && Array.isArray(schemaData.schemaTypes)) {
-            schemaData.schemaTypes.forEach(item => {
-              if (item.type) allTypes.add(item.type);
-            });
+        // Show Snippet Readiness explanation with all three components
+        const explanationDiv = document.getElementById('snippetReadinessExplanation');
+        if (explanationDiv && scores) {
+          const contentSchemaScore = Math.round(scores.contentSchema || 0);
+          const visibilityScore = Math.round(scores.visibility || 0);
+          const authorityScore = Math.round(scores.authority || 0);
+          
+          // Calculate contributions
+          const contentSchemaContribution = (contentSchemaScore * 0.4).toFixed(1);
+          const visibilityContribution = (visibilityScore * 0.35).toFixed(1);
+          const authorityContribution = (authorityScore * 0.25).toFixed(1);
+          
+          // Update title with actual score
+          document.getElementById('explanationTitle').textContent = `Why is Snippet Readiness ${snippetReadiness}%?`;
+          
+          // Content/Schema details
+          let contentSchemaDetail = '';
+          if (schemaAudit && schemaAudit.status === 'ok' && schemaAudit.data) {
+            const schemaData = schemaAudit.data;
+            const allTypes = new Set();
+            if (schemaData.schemaTypes && Array.isArray(schemaData.schemaTypes)) {
+              schemaData.schemaTypes.forEach(item => {
+                if (item.type) allTypes.add(item.type);
+              });
+            }
+            const foundationTypes = ['Organization', 'Person', 'WebSite', 'BreadcrumbList'];
+            const foundationPresent = foundationTypes.filter(type => allTypes.has(type)).length;
+            const richEligibleCount = Object.values(schemaData.richEligible || {}).filter(eligible => eligible === true).length;
+            const uniqueTypesCount = allTypes.size;
+            contentSchemaDetail = `Foundation: ${foundationPresent}/4, Rich Results: ${richEligibleCount}/10, Coverage: ${(schemaData.coverage || 0).toFixed(1)}%, Diversity: ${uniqueTypesCount} types`;
+          } else {
+            contentSchemaDetail = 'Schema audit data not available';
           }
           
-          const foundationTypes = ['Organization', 'Person', 'WebSite', 'BreadcrumbList'];
-          const foundationPresent = foundationTypes.filter(type => allTypes.has(type)).length;
-          const foundationScore = (foundationPresent / foundationTypes.length) * 100;
+          // Visibility details
+          let visibilityDetail = '';
+          if (data && data.averagePosition !== undefined) {
+            visibilityDetail = `Position: ${data.averagePosition.toFixed(1)}, CTR: ${(data.ctr || 0).toFixed(2)}%, Clicks: ${(data.totalClicks || 0).toLocaleString()}`;
+          } else {
+            visibilityDetail = 'GSC data not available';
+          }
           
-          const richResultTypes = ['Article', 'Event', 'FAQPage', 'Product', 'LocalBusiness', 'Course', 'Review', 'HowTo', 'VideoObject', 'Recipe'];
-          const richEligibleCount = Object.values(schemaData.richEligible || {}).filter(eligible => eligible === true).length;
-          const richResultScore = (richEligibleCount / richResultTypes.length) * 100;
+          // Authority details
+          let authorityDetail = '';
+          if (data && data.ctr !== undefined) {
+            authorityDetail = `CTR: ${(data.ctr || 0).toFixed(2)}%, Position: ${(data.averagePosition || 0).toFixed(1)}`;
+          } else {
+            authorityDetail = 'GSC data not available';
+          }
           
-          const coverageScore = schemaData.coverage || 0;
-          const uniqueTypesCount = allTypes.size;
-          const diversityScore = Math.min((uniqueTypesCount / 15) * 100, 100);
+          // Update explanation text
+          document.getElementById('explainContentSchema').textContent = `${contentSchemaScore}% (contributes ${contentSchemaContribution} pts)`;
+          document.getElementById('explainContentSchemaDetail').textContent = contentSchemaDetail;
+          document.getElementById('explainVisibility').textContent = `${visibilityScore}% (contributes ${visibilityContribution} pts)`;
+          document.getElementById('explainVisibilityDetail').textContent = visibilityDetail;
+          document.getElementById('explainAuthority').textContent = `${authorityScore}% (contributes ${authorityContribution} pts)`;
+          document.getElementById('explainAuthorityDetail').textContent = authorityDetail;
           
-          document.getElementById('explainFoundation').textContent = `${foundationScore.toFixed(0)}% (${foundationPresent}/4 types present)`;
-          document.getElementById('explainRich').textContent = `${richResultScore.toFixed(0)}% (${richEligibleCount}/10 types eligible)`;
-          document.getElementById('explainCoverage').textContent = `${coverageScore.toFixed(1)}% (${schemaData.pagesWithSchema || 0}/${schemaData.totalPages || 0} pages)`;
-          document.getElementById('explainDiversity').textContent = `${diversityScore.toFixed(0)}% (${uniqueTypesCount} unique types, target: 15+)`;
+          // Update formula
+          document.getElementById('explanationFormula').textContent = 
+            `Formula: (Content/Schema ${contentSchemaScore}% × 40%) + (Visibility ${visibilityScore}% × 35%) + (Authority ${authorityScore}% × 25%) = ${snippetReadiness}%`;
           
           explanationDiv.style.display = 'block';
         } else if (explanationDiv) {
@@ -3304,7 +3352,8 @@
               },
               scales: {
                 r: {
-                  beginAtZero: true,
+                  beginAtZero: false,
+                  min: 20,
                   max: 100,
                   ticks: {
                     stepSize: 20,
@@ -3347,8 +3396,10 @@
               afterDraw: (chart) => {
                 const ctx = chart.ctx;
                 const meta = chart.getDatasetMeta(0);
-                const centerX = chart.chartArea.left + (chart.chartArea.right - chart.chartArea.left) / 2;
-                const centerY = chart.chartArea.top + (chart.chartArea.bottom - chart.chartArea.top) / 2;
+                const scale = chart.scales.r;
+                const centerX = scale.xCenter;
+                const centerY = scale.yCenter;
+                const maxRadius = scale.drawingArea();
                 
                 // Get RAG color based on score
                 const getRAGColor = (score) => {
@@ -3357,38 +3408,47 @@
                   return '#ef4444'; // Red
                 };
                 
-                // Draw score labels at each data point
+                // Calculate angle for each point (radar charts have evenly spaced points)
+                const numPoints = orderedLabels.length;
+                const angleStep = (2 * Math.PI) / numPoints;
+                const startAngle = -Math.PI / 2; // Start at top (12 o'clock)
+                
+                // Draw score labels outside the chart, underneath each pillar label
                 meta.data.forEach((point, index) => {
                   const score = orderedData[index];
-                  const x = point.x;
-                  const y = point.y;
                   
-                  // Calculate angle from center to point for label positioning
-                  const angle = Math.atan2(y - centerY, x - centerX);
-                  const labelOffset = 25; // Distance from point to label
-                  const labelX = x + Math.cos(angle) * labelOffset;
-                  const labelY = y + Math.sin(angle) * labelOffset;
+                  // Calculate angle for this point
+                  const angle = startAngle + (index * angleStep);
+                  
+                  // Calculate position of pillar label (at max radius + padding)
+                  const labelRadius = maxRadius + scale.options.pointLabels.padding;
+                  const labelX = centerX + Math.cos(angle) * labelRadius;
+                  const labelY = centerY + Math.sin(angle) * labelRadius;
+                  
+                  // Position score label underneath the pillar label
+                  // For labels at top/bottom, offset vertically
+                  // For labels at sides, offset vertically (always down from label)
+                  const verticalOffset = 25; // Distance below the pillar label
+                  const scoreLabelX = labelX;
+                  const scoreLabelY = labelY + verticalOffset;
                   
                   // Get RAG color
                   const ragColor = getRAGColor(score);
                   
-                  // Draw label background for readability
-                  ctx.save();
-                  ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
-                  ctx.beginPath();
-                  ctx.arc(labelX, labelY, 18, 0, Math.PI * 2);
-                  ctx.fill();
-                  ctx.strokeStyle = ragColor;
-                  ctx.lineWidth = 2;
-                  ctx.stroke();
-                  
                   // Draw score text in RAG color
+                  ctx.save();
                   ctx.fillStyle = ragColor;
                   ctx.font = 'bold 14px system-ui';
                   ctx.textAlign = 'center';
-                  ctx.textBaseline = 'middle';
-                  ctx.fillText(`${Math.round(score)}%`, labelX, labelY);
+                  ctx.textBaseline = 'top';
                   
+                  // Add white shadow for readability
+                  ctx.shadowColor = 'rgba(255, 255, 255, 0.8)';
+                  ctx.shadowBlur = 4;
+                  ctx.shadowOffsetX = 0;
+                  ctx.shadowOffsetY = 0;
+                  
+                  ctx.fillText(`${Math.round(score)}%`, scoreLabelX, scoreLabelY);
                   ctx.restore();
                 });
               }
@@ -4096,6 +4156,653 @@
       
       debugLog('=== PAGE LOAD: Initialization complete ===', 'success');
     });
+
+    // PDF Report Generation
+    async function generatePDFReport() {
+      const btn = document.getElementById('generatePdfBtn');
+      const statusDiv = document.getElementById('pdfStatus');
+      
+      // Check if dashboard has data
+      const dashboard = document.getElementById('dashboard');
+      if (!dashboard || dashboard.style.display === 'none') {
+        statusDiv.textContent = '⚠️ Please run an audit first to generate a report.';
+        statusDiv.style.color = '#dc2626';
+        return;
+      }
+
+      // Disable button and show status
+      btn.disabled = true;
+      btn.style.opacity = '0.6';
+      statusDiv.textContent = '⏳ Generating PDF report...';
+      statusDiv.style.color = '#2563eb';
+
+      try {
+        // Load saved audit data
+        const savedAudit = loadAuditResults();
+        if (!savedAudit || !savedAudit.scores) {
+          throw new Error('No audit data available. Please run an audit first.');
+        }
+
+        // Get property URL and date range
+        const propertyUrl = document.getElementById('propertyUrl')?.value || 'N/A';
+        const dateRange = document.getElementById('dateRange')?.value || 30;
+        const auditDate = savedAudit.auditDate || new Date().toISOString().split('T')[0];
+
+        // Create report HTML
+        const reportHTML = createReportHTML(savedAudit, propertyUrl, dateRange, auditDate);
+
+        // Create a temporary container for the report
+        const reportContainer = document.createElement('div');
+        reportContainer.id = 'pdfReportContainer';
+        reportContainer.style.position = 'absolute';
+        reportContainer.style.left = '-9999px';
+        reportContainer.style.width = '210mm'; // A4 width
+        reportContainer.style.padding = '20mm';
+        reportContainer.style.backgroundColor = '#ffffff';
+        reportContainer.innerHTML = reportHTML;
+        document.body.appendChild(reportContainer);
+
+        // Convert charts to images
+        await convertChartsToImages(reportContainer);
+
+        // Generate PDF
+        const opt = {
+          margin: [10, 10, 10, 10],
+          filename: `AI-GEO-Audit-Report-${propertyUrl.replace(/https?:\/\//, '').replace(/\//g, '-')}-${auditDate}.pdf`,
+          image: { type: 'jpeg', quality: 0.98 },
+          html2canvas: { 
+            scale: 2,
+            useCORS: true,
+            logging: false,
+            backgroundColor: '#ffffff'
+          },
+          jsPDF: { 
+            unit: 'mm', 
+            format: 'a4', 
+            orientation: 'portrait' 
+          }
+        };
+
+        await html2pdf().set(opt).from(reportContainer).save();
+
+        // Clean up
+        document.body.removeChild(reportContainer);
+        
+        statusDiv.textContent = '✅ PDF report generated successfully!';
+        statusDiv.style.color = '#10b981';
+        
+        setTimeout(() => {
+          statusDiv.textContent = '';
+        }, 3000);
+
+      } catch (error) {
+        console.error('PDF generation error:', error);
+        statusDiv.textContent = `❌ Error: ${error.message}`;
+        statusDiv.style.color = '#dc2626';
+      } finally {
+        btn.disabled = false;
+        btn.style.opacity = '1';
+      }
+    }
+
+    // Convert Chart.js charts to images
+    async function convertChartsToImages(container) {
+      // Convert radar chart
+      const radarCanvas = document.getElementById('radarChart');
+      if (radarCanvas && window.radarChart) {
+        const radarImg = radarCanvas.toDataURL('image/png');
+        const radarImgElement = container.querySelector('#radarChartImg');
+        if (radarImgElement) {
+          radarImgElement.src = radarImg;
+          radarImgElement.style.display = 'block';
+        }
+      }
+
+      // Convert trend chart
+      const trendCanvas = document.getElementById('trendChart');
+      if (trendCanvas && window.trendChart) {
+        const trendImg = trendCanvas.toDataURL('image/png');
+        const trendImgElement = container.querySelector('#trendChartImg');
+        if (trendImgElement) {
+          trendImgElement.src = trendImg;
+          trendImgElement.style.display = 'block';
+        }
+      }
+
+      // Convert snippet readiness chart
+      const snippetCanvas = document.getElementById('snippetReadinessChart');
+      if (snippetCanvas && window.snippetReadinessChart) {
+        const snippetImg = snippetCanvas.toDataURL('image/png');
+        const snippetImgElement = container.querySelector('#snippetReadinessChartImg');
+        if (snippetImgElement) {
+          snippetImgElement.src = snippetImg;
+          snippetImgElement.style.display = 'block';
+        }
+      }
+    }
+
+    // Create report HTML content
+    function createReportHTML(auditData, propertyUrl, dateRange, auditDate) {
+      const scores = auditData.scores || {};
+      const searchData = auditData.searchData || {};
+      const schemaAudit = auditData.schemaAudit || {};
+      const snippetReadiness = auditData.snippetReadiness || 0;
+
+      // Helper function for RAG status
+      const getRAGStatus = (score) => {
+        if (score >= 70) return { color: '#10b981', label: 'Green', text: 'Good' };
+        if (score >= 40) return { color: '#f59e0b', label: 'Amber', text: 'Needs Improvement' };
+        return { color: '#ef4444', label: 'Red', text: 'Poor' };
+      };
+
+      // Get next steps (create a helper function similar to the one in displayDashboard)
+      const getNextStepsForPDF = (scores, searchData, schemaAudit) => {
+        const nextSteps = {};
+        
+        Object.entries(scores).forEach(([key, score]) => {
+          const steps = [];
+          
+          switch(key) {
+            case 'contentSchema':
+              if (schemaAudit && schemaAudit.data) {
+                const schemaData = schemaAudit.data;
+                const { coverage, schemaTypes, richEligible } = schemaData;
+                
+                const allTypes = new Set();
+                if (schemaTypes && Array.isArray(schemaTypes)) {
+                  schemaTypes.forEach(item => {
+                    if (item.type) allTypes.add(item.type);
+                  });
+                }
+                
+                const foundationTypes = ['Organization', 'Person', 'WebSite', 'BreadcrumbList'];
+                const foundationPresent = foundationTypes.filter(type => allTypes.has(type)).length;
+                const foundationMissing = foundationTypes.filter(type => !allTypes.has(type));
+                
+                if (foundationPresent < 4) {
+                  steps.push(`Foundation schemas (30%): ${foundationPresent}/4 present. Add: ${foundationMissing.join(', ')}`);
+                } else {
+                  steps.push(`Foundation schemas (30%): All 4 present`);
+                }
+                
+                const richEligibleCount = Object.values(richEligible || {}).filter(eligible => eligible === true).length;
+                if (richEligibleCount < 10) {
+                  steps.push(`Rich results (35%): ${richEligibleCount}/10 eligible. Add more rich result types`);
+                } else {
+                  steps.push(`Rich results (35%): All 10 types eligible`);
+                }
+                
+                if (coverage < 100) {
+                  steps.push(`Coverage (20%): ${coverage.toFixed(1)}% - Add schema to pages without markup`);
+                } else {
+                  steps.push(`Coverage (20%): 100% - All pages have schema`);
+                }
+                
+                const uniqueTypesCount = allTypes.size;
+                if (uniqueTypesCount < 15) {
+                  steps.push(`Diversity (15%): ${uniqueTypesCount} unique types. Add more schema types to reach 15+`);
+                } else {
+                  steps.push(`Diversity (15%): ${uniqueTypesCount} unique types (excellent)`);
+                }
+              } else {
+                steps.push('Schema audit data not available - run audit to see detailed metrics');
+              }
+              break;
+              
+            case 'visibility':
+              if (searchData) {
+                const position = searchData.averagePosition || 0;
+                const ctr = searchData.ctr || 0;
+                
+                if (position > 10) {
+                  steps.push(`Average position: ${position.toFixed(1)} - Target top 10 positions`);
+                } else {
+                  steps.push(`Average position: ${position.toFixed(1)} - Excellent! Maintain top 10 rankings`);
+                }
+                
+                if (ctr < 2.0) {
+                  steps.push(`CTR: ${ctr.toFixed(2)}% - Improve click-through rate (target: 2%+)`);
+                } else {
+                  steps.push(`CTR: ${ctr.toFixed(2)}% - Good CTR! Continue optimizing`);
+                }
+              }
+              break;
+              
+            case 'authority':
+              if (searchData) {
+                const ctr = searchData.ctr || 0;
+                const position = searchData.averagePosition || 0;
+                
+                if (ctr < 1.5) {
+                  steps.push(`CTR: ${ctr.toFixed(2)}% - Low click-through indicates trust issues. Improve E-A-T signals`);
+                } else {
+                  steps.push(`CTR: ${ctr.toFixed(2)}% - Good engagement. Build more backlinks to strengthen authority`);
+                }
+                
+                if (position > 15) {
+                  steps.push(`Position: ${position.toFixed(1)} - Improve rankings through comprehensive, expert content`);
+                }
+              }
+              break;
+              
+            case 'localEntity':
+              steps.push(`Current score: ${Math.round(score)} - Using derived calculation from search performance`);
+              steps.push(`Priority: Integrate Google Business Profile API to use real local signals data`);
+              if (score < 70) {
+                steps.push(`Action: Add LocalBusiness schema markup and ensure NAP consistency`);
+              }
+              break;
+              
+            case 'serviceArea':
+              steps.push(`Current score: ${Math.round(score)} - Using derived calculation from Local Entity`);
+              steps.push(`Priority: Integrate Google Business Profile API to get real service area data`);
+              if (score < 70) {
+                steps.push(`Action: Add ServiceArea schema and create location-specific pages`);
+              }
+              break;
+          }
+          
+          if (steps.length === 0) {
+            if (score >= 70) {
+              steps.push('Maintain current performance');
+              steps.push('Monitor for any score drops');
+            } else if (score >= 40) {
+              steps.push('Focus on improving this pillar');
+              steps.push('Review specific metrics above');
+            } else {
+              steps.push('Critical: Immediate action required');
+              steps.push('Review all data sources and implement fixes');
+            }
+          }
+          
+          nextSteps[key] = steps;
+        });
+        
+        return nextSteps;
+      };
+      
+      const nextSteps = getNextStepsForPDF(scores, searchData, schemaAudit);
+
+      return `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <style>
+            body {
+              font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+              color: #333;
+              line-height: 1.6;
+              margin: 0;
+              padding: 0;
+            }
+            .report-header {
+              text-align: center;
+              border-bottom: 3px solid #f97316;
+              padding-bottom: 20px;
+              margin-bottom: 30px;
+            }
+            .report-header h1 {
+              color: #f97316;
+              margin: 0 0 10px 0;
+              font-size: 28px;
+            }
+            .report-header .meta {
+              color: #666;
+              font-size: 14px;
+            }
+            .section {
+              margin-bottom: 40px;
+              page-break-inside: avoid;
+            }
+            .section-title {
+              background: #f97316;
+              color: white;
+              padding: 12px 20px;
+              margin: 0 0 20px 0;
+              font-size: 20px;
+              font-weight: bold;
+              border-radius: 4px;
+            }
+            .pillar-grid {
+              display: grid;
+              grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+              gap: 15px;
+              margin-bottom: 30px;
+            }
+            .pillar-card {
+              border: 2px solid #e2e8f0;
+              border-radius: 8px;
+              padding: 15px;
+              background: #f8f9fa;
+            }
+            .pillar-card h3 {
+              margin: 0 0 10px 0;
+              font-size: 16px;
+              color: #333;
+            }
+            .pillar-score {
+              font-size: 36px;
+              font-weight: bold;
+              margin: 10px 0;
+            }
+            .rag-indicator {
+              display: inline-block;
+              width: 12px;
+              height: 12px;
+              border-radius: 50%;
+              margin-right: 5px;
+            }
+            .metrics-grid {
+              display: grid;
+              grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+              gap: 15px;
+              margin-bottom: 30px;
+            }
+            .metric-card {
+              border: 1px solid #e2e8f0;
+              border-radius: 6px;
+              padding: 15px;
+              text-align: center;
+              background: #ffffff;
+            }
+            .metric-value {
+              font-size: 28px;
+              font-weight: bold;
+              color: #2563eb;
+              margin: 10px 0;
+            }
+            .metric-label {
+              color: #666;
+              font-size: 14px;
+            }
+            .chart-container {
+              text-align: center;
+              margin: 30px 0;
+              page-break-inside: avoid;
+            }
+            .chart-container img {
+              max-width: 100%;
+              height: auto;
+              border: 1px solid #e2e8f0;
+              border-radius: 4px;
+            }
+            .chart-title {
+              font-size: 18px;
+              font-weight: bold;
+              margin-bottom: 15px;
+              color: #333;
+            }
+            .definition-box {
+              background: #f0f9ff;
+              border-left: 4px solid #2563eb;
+              padding: 15px;
+              margin: 20px 0;
+              border-radius: 4px;
+            }
+            .definition-box h4 {
+              margin: 0 0 10px 0;
+              color: #2563eb;
+            }
+            .next-steps {
+              background: #fff7ed;
+              border-left: 4px solid #f59e0b;
+              padding: 15px;
+              margin: 20px 0;
+              border-radius: 4px;
+            }
+            .next-steps h4 {
+              margin: 0 0 10px 0;
+              color: #f59e0b;
+            }
+            .next-steps ul {
+              margin: 10px 0;
+              padding-left: 20px;
+            }
+            .next-steps li {
+              margin: 8px 0;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin: 20px 0;
+            }
+            table th, table td {
+              border: 1px solid #e2e8f0;
+              padding: 10px;
+              text-align: left;
+            }
+            table th {
+              background: #f8f9fa;
+              font-weight: bold;
+            }
+            .footer {
+              margin-top: 50px;
+              padding-top: 20px;
+              border-top: 1px solid #e2e8f0;
+              text-align: center;
+              color: #666;
+              font-size: 12px;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="report-header">
+            <h1>AI GEO Audit Report</h1>
+            <div class="meta">
+              <strong>Property:</strong> ${propertyUrl}<br>
+              <strong>Date Range:</strong> Last ${dateRange} days<br>
+              <strong>Audit Date:</strong> ${new Date(auditDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+            </div>
+          </div>
+
+          <!-- Executive Summary -->
+          <div class="section">
+            <div class="section-title">Executive Summary</div>
+            <div style="margin-bottom: 20px;">
+              <p><strong>Overall Snippet Readiness:</strong> <span style="font-size: 24px; font-weight: bold; color: ${getRAGStatus(snippetReadiness).color};">${snippetReadiness}%</span> 
+              <span class="rag-indicator" style="background-color: ${getRAGStatus(snippetReadiness).color};"></span>${getRAGStatus(snippetReadiness).text}</p>
+              <p>The Snippet Readiness score indicates how likely your content is to appear in featured snippets and AI answers. It combines Content/Schema (40%), Visibility (35%), and Authority (25%).</p>
+            </div>
+          </div>
+
+          <!-- Pillar Scores -->
+          <div class="section">
+            <div class="section-title">Pillar Scores Overview</div>
+            <div class="pillar-grid">
+              ${Object.entries(scores).map(([key, score]) => {
+                const rag = getRAGStatus(score);
+                const pillarNames = {
+                  localEntity: 'Local Entity',
+                  serviceArea: 'Service Area',
+                  authority: 'Authority',
+                  visibility: 'Visibility',
+                  contentSchema: 'Content/Schema'
+                };
+                return `
+                  <div class="pillar-card">
+                    <h3>${pillarNames[key] || key}</h3>
+                    <div class="pillar-score" style="color: ${rag.color};">${score}%</div>
+                    <div>
+                      <span class="rag-indicator" style="background-color: ${rag.color};"></span>
+                      <strong>${rag.label}</strong> - ${rag.text}
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          </div>
+
+          <!-- Charts -->
+          <div class="section">
+            <div class="section-title">Visual Analytics</div>
+            
+            <div class="chart-container">
+              <div class="chart-title">Pillar Scores Radar Chart</div>
+              <img id="radarChartImg" src="" alt="Radar Chart" style="display: none; max-width: 600px; margin: 0 auto;">
+              <p style="color: #666; font-size: 14px; margin-top: 10px;">Radar chart showing current performance across all five pillars. The larger the area, the stronger your overall entity recognition.</p>
+            </div>
+
+            <div class="chart-container">
+              <div class="chart-title">Performance Trends</div>
+              <img id="trendChartImg" src="" alt="Trend Chart" style="display: none; max-width: 100%; margin: 0 auto;">
+              <p style="color: #666; font-size: 14px; margin-top: 10px;">Historical performance trends showing clicks, impressions, CTR, position, and Content/Schema scores over the selected date range.</p>
+            </div>
+
+            <div class="chart-container">
+              <div class="chart-title">Snippet Readiness Gauge</div>
+              <img id="snippetReadinessChartImg" src="" alt="Snippet Readiness Chart" style="display: none; max-width: 500px; margin: 0 auto;">
+              <p style="color: #666; font-size: 14px; margin-top: 10px;">Nested doughnut chart showing weighted breakdown of snippet readiness components with actual performance scores.</p>
+            </div>
+          </div>
+
+          <!-- Metrics -->
+          <div class="section">
+            <div class="section-title">Key Metrics</div>
+            <div class="metrics-grid">
+              <div class="metric-card">
+                <div class="metric-value">${(searchData.totalClicks || 0).toLocaleString()}</div>
+                <div class="metric-label">Total Clicks</div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-value">${(searchData.totalImpressions || 0).toLocaleString()}</div>
+                <div class="metric-label">Total Impressions</div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-value">${(searchData.ctr || 0).toFixed(2)}%</div>
+                <div class="metric-label">Average CTR</div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-value">${(searchData.averagePosition || 0).toFixed(1)}</div>
+                <div class="metric-label">Average Position</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Pillar Definitions -->
+          <div class="section">
+            <div class="section-title">Pillar Definitions & Current Status</div>
+            ${Object.entries(scores).map(([key, score]) => {
+              const rag = getRAGStatus(score);
+              const pillarNames = {
+                localEntity: 'Local Entity',
+                serviceArea: 'Service Area',
+                authority: 'Authority',
+                visibility: 'Visibility',
+                contentSchema: 'Content/Schema'
+              };
+              const definitions = {
+                localEntity: 'Measures how well your business is recognized as a local entity. Based on LocalBusiness schema presence, NAP consistency, and knowledge panel detection. Currently uses derived calculations from GSC data.',
+                serviceArea: 'Assesses your service area coverage and geographic relevance. Derived from Local Entity score. Will use real service area data when Google Business Profile API is integrated.',
+                authority: 'Evaluates your domain authority and trust signals. Calculated from CTR (60%) and average position (40%). Will include backlink metrics when backlink API is integrated.',
+                visibility: 'Tracks your search visibility and ranking performance. Based on average position from Google Search Console (1 = best, 40 = worst). Score ranges from 10 to 100.',
+                contentSchema: 'Measures schema markup quality and completeness. Weighted calculation: Foundation Schemas (30%), Rich Results (35%), Coverage (20%), Diversity (15%).'
+              };
+              return `
+                <div class="definition-box">
+                  <h4>${pillarNames[key] || key} - ${score}% 
+                    <span class="rag-indicator" style="background-color: ${rag.color};"></span>${rag.label}
+                  </h4>
+                  <p>${definitions[key] || 'No definition available.'}</p>
+                </div>
+              `;
+            }).join('')}
+          </div>
+
+          <!-- Next Steps -->
+          <div class="section">
+            <div class="section-title">Recommended Next Steps</div>
+            ${Object.entries(nextSteps).map(([pillar, steps]) => {
+              if (!steps || steps.length === 0) return '';
+              const pillarNames = {
+                localEntity: 'Local Entity',
+                serviceArea: 'Service Area',
+                authority: 'Authority',
+                visibility: 'Visibility',
+                contentSchema: 'Content/Schema'
+              };
+              return `
+                <div class="next-steps">
+                  <h4>${pillarNames[pillar] || pillar}</h4>
+                  <ul>
+                    ${steps.map(step => `<li>${step}</li>`).join('')}
+                  </ul>
+                </div>
+              `;
+            }).join('')}
+          </div>
+
+          <!-- Schema Audit Summary -->
+          ${schemaAudit.data ? `
+          <div class="section">
+            <div class="section-title">Schema Audit Summary</div>
+            <div class="metrics-grid">
+              <div class="metric-card">
+                <div class="metric-value">${schemaAudit.data.totalPages || 0}</div>
+                <div class="metric-label">Total Pages Scanned</div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-value">${schemaAudit.data.pagesWithSchema || 0}</div>
+                <div class="metric-label">Pages With Schema</div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-value">${(schemaAudit.data.coverage || 0).toFixed(1)}%</div>
+                <div class="metric-label">Schema Coverage</div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-value">${(schemaAudit.data.schemaTypes || []).length}</div>
+                <div class="metric-label">Schema Types Found</div>
+              </div>
+            </div>
+            ${schemaAudit.data.missingSchemaPages && schemaAudit.data.missingSchemaPages.length > 0 ? `
+              <div style="margin-top: 20px;">
+                <h4>Pages Missing Schema (${schemaAudit.data.missingSchemaPages.length}):</h4>
+                <ul style="font-size: 12px; max-height: 200px; overflow-y: auto;">
+                  ${schemaAudit.data.missingSchemaPages.slice(0, 20).map(url => `<li>${url}</li>`).join('')}
+                  ${schemaAudit.data.missingSchemaPages.length > 20 ? `<li><em>... and ${schemaAudit.data.missingSchemaPages.length - 20} more</em></li>` : ''}
+                </ul>
+              </div>
+            ` : ''}
+          </div>
+          ` : ''}
+
+          <!-- Top Queries -->
+          ${searchData.topQueries && searchData.topQueries.length > 0 ? `
+          <div class="section">
+            <div class="section-title">Top Queries</div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Query</th>
+                  <th>Clicks</th>
+                  <th>Impressions</th>
+                  <th>CTR</th>
+                  <th>Position</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${searchData.topQueries.slice(0, 20).map(query => `
+                  <tr>
+                    <td>${query.query || 'N/A'}</td>
+                    <td>${(query.clicks || 0).toLocaleString()}</td>
+                    <td>${(query.impressions || 0).toLocaleString()}</td>
+                    <td>${(query.ctr || 0).toFixed(2)}%</td>
+                    <td>${(query.position || 0).toFixed(1)}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+          ` : ''}
+
+          <div class="footer">
+            <p>Generated by AI GEO Audit Dashboard on ${new Date().toLocaleString('en-GB')}</p>
+            <p>This report contains data from Google Search Console API and schema audit results.</p>
+          </div>
+        </body>
+        </html>
+      `;
+    }
   </script>
 </body>
 </html>
