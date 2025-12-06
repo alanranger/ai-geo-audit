@@ -86,7 +86,7 @@ export default async function handler(req, res) {
     const account = accounts[0];
     const accountName = account.name; // e.g., "accounts/109345350307918860454"
     
-    const locationsResponse = await fetch(`https://mybusinessbusinessinformation.googleapis.com/v1/${accountName}/locations?readMask=name,title,storefrontAddress,websiteUri,phoneNumbers,serviceArea`, {
+    const locationsResponse = await fetch(`https://mybusinessbusinessinformation.googleapis.com/v1/${accountName}/locations?readMask=name,title,storefrontAddress,websiteUri,phoneNumbers,primaryPhone,serviceArea`, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
