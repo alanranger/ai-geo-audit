@@ -189,19 +189,42 @@ export default async function handler(req, res) {
         }
       }
       
-      // Save new timeseries data to Supabase (async, don't wait)
+      // Save new timeseries data to Supabase directly (don't wait, but log errors)
       if (newTimeseries.length > 0 && supabaseUrl && supabaseKey) {
-        const baseUrl = req.headers.host 
-          ? `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}`
-          : 'http://localhost:3000';
-        fetch(`${baseUrl}/api/supabase/save-gsc-timeseries`, {
+        // Save directly to Supabase REST API (more reliable than calling another serverless function)
+        const records = newTimeseries.map(point => ({
+          property_url: siteUrl,
+          date: point.date,
+          clicks: point.clicks || 0,
+          impressions: point.impressions || 0,
+          ctr: parseFloat(point.ctr) || 0,
+          position: parseFloat(point.position) || 0,
+          updated_at: new Date().toISOString()
+        }));
+        
+        fetch(`${supabaseUrl}/rest/v1/gsc_timeseries`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            propertyUrl: siteUrl,
-            timeseries: newTimeseries
-          })
-        }).catch(err => console.warn('[GSC Cache] Failed to save to cache:', err.message));
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': supabaseKey,
+            'Authorization': `Bearer ${supabaseKey}`,
+            'Prefer': 'resolution=merge-duplicates'
+          },
+          body: JSON.stringify(records)
+        })
+        .then(async (response) => {
+          if (response.ok) {
+            const result = await response.json();
+            const savedCount = Array.isArray(result) ? result.length : records.length;
+            console.log(`[GSC Cache] ✓ Saved ${savedCount} timeseries records to Supabase`);
+          } else {
+            const errorText = await response.text();
+            console.error(`[GSC Cache] ✗ Failed to save: ${response.status} - ${errorText}`);
+          }
+        })
+        .catch(err => {
+          console.error('[GSC Cache] ✗ Save error:', err.message);
+        });
       }
       
       // Merge stored + new data
