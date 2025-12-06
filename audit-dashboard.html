@@ -3421,7 +3421,7 @@
                       weight: 'bold'
                     },
                     color: '#1e293b',
-                    padding: 15
+                    padding: 20
                   },
                   grid: {
                     color: 'rgba(100, 116, 139, 0.2)'
@@ -3447,74 +3447,32 @@
               id: 'radarScoreLabels',
               afterDraw: (chart) => {
                 const ctx = chart.ctx;
-                const meta = chart.getDatasetMeta(0);
                 const scale = chart.scales.r;
-                const centerX = scale.xCenter;
-                const centerY = scale.yCenter;
-                // Calculate max radius (drawing area) - Chart.js v4 doesn't have drawingArea() method
-                // Use getDistanceFromCenterForValue with max value, or calculate from chart area
-                const maxRadius = scale.getDistanceFromCenterForValue(scale.max) || 
-                  Math.min(
-                    (chart.chartArea.right - chart.chartArea.left) / 2,
-                    (chart.chartArea.bottom - chart.chartArea.top) / 2
-                  ) - scale.options.pointLabels.padding;
-                
-                // Get RAG color based on score
-                const getRAGColor = (score) => {
-                  if (score >= 70) return '#10b981'; // Green
-                  if (score >= 40) return '#f59e0b'; // Amber
-                  return '#ef4444'; // Red
-                };
-                
-                // Get the actual point label positions from Chart.js
-                // Chart.js stores these in _pointLabelItems after the chart is drawn
                 const pointLabelItems = scale._pointLabelItems || [];
                 
-                // Draw score labels outside the chart, directly underneath each pillar label
-                meta.data.forEach((point, index) => {
-                  const score = orderedData[index];
-                  
-                  let labelX, labelY;
-                  
-                  // Use actual point label positions if available (Chart.js v4)
-                  if (pointLabelItems[index]) {
-                    labelX = pointLabelItems[index].x;
-                    labelY = pointLabelItems[index].y;
-                  } else {
-                    // Fallback: calculate position from angle
-                    const numPoints = orderedLabels.length;
-                    const angleStep = (2 * Math.PI) / numPoints;
-                    const startAngle = -Math.PI / 2; // Start at top (12 o'clock)
-                    const angle = startAngle + (index * angleStep);
-                    const labelRadius = maxRadius + scale.options.pointLabels.padding;
-                    labelX = centerX + Math.cos(angle) * labelRadius;
-                    labelY = centerY + Math.sin(angle) * labelRadius;
+                // Draw score percentages directly under each label
+                pointLabelItems.forEach((item, index) => {
+                  if (item && orderedData[index] !== undefined) {
+                    const score = orderedData[index];
+                    // Get RAG color based on score
+                    let ragColor = '#1e293b'; // Default dark
+                    if (score >= 70) ragColor = '#10b981'; // Green
+                    else if (score >= 40) ragColor = '#f59e0b'; // Amber
+                    else ragColor = '#ef4444'; // Red
+                    
+                    // Draw the score percentage directly below the label
+                    ctx.save();
+                    ctx.fillStyle = ragColor;
+                    ctx.font = 'bold 14px system-ui';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'top';
+                    ctx.shadowColor = 'rgba(255, 255, 255, 0.9)';
+                    ctx.shadowBlur = 4;
+                    // Position it 20px below the label
+                    const scoreY = item.y + 20;
+                    ctx.fillText(`${Math.round(score)}%`, item.x, scoreY);
+                    ctx.restore();
                   }
-                  
-                  // Position score label directly underneath the pillar label
-                  // Always offset vertically downward (regardless of angle)
-                  const scoreLabelOffset = 28; // Distance below the pillar label
-                  const scoreLabelX = labelX; // Same X position (centered under label)
-                  const scoreLabelY = labelY + scoreLabelOffset; // Directly below
-                  
-                  // Get RAG color
-                  const ragColor = getRAGColor(score);
-                  
-                  // Draw score text in RAG color
-                  ctx.save();
-                  ctx.fillStyle = ragColor;
-                  ctx.font = 'bold 14px system-ui';
-                  ctx.textAlign = 'center';
-                  ctx.textBaseline = 'top';
-                  
-                  // Add white shadow for readability
-                  ctx.shadowColor = 'rgba(255, 255, 255, 0.9)';
-                  ctx.shadowBlur = 5;
-                  ctx.shadowOffsetX = 0;
-                  ctx.shadowOffsetY = 0;
-                  
-                  ctx.fillText(`${Math.round(score)}%`, scoreLabelX, scoreLabelY);
-                  ctx.restore();
                 });
               }
             }]
