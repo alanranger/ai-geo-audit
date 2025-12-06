@@ -4085,13 +4085,29 @@
             
             timeseries.forEach(point => {
               const pointDate = point.date; // YYYY-MM-DD format
+              
+              // Check if we have historical data from Supabase for Local Entity and Service Area
+              const historicalLocalEntity = localEntityMap.get(pointDate);
+              const historicalServiceArea = serviceAreaMap.get(pointDate);
+              
               // Pass date to calculatePillarFromMetrics so it can check for historical data
               const pillarScores = calculatePillarFromMetrics(point.position, point.ctr, pointDate);
               
-              // Use calculated scores (which will use historical Business Profile data if available,
-              // otherwise calculated GSC data for that date)
-              localEntityData.push(pillarScores.localEntity);
-              serviceAreaData.push(pillarScores.serviceArea);
+              // Use historical data from Supabase if available, otherwise use calculated scores
+              if (historicalLocalEntity !== undefined && historicalLocalEntity !== null) {
+                localEntityData.push(historicalLocalEntity);
+                debugLog(`Content/Schema: Using historical Local Entity (${historicalLocalEntity}) for ${pointDate}`, 'info');
+              } else {
+                localEntityData.push(pillarScores.localEntity);
+              }
+              
+              if (historicalServiceArea !== undefined && historicalServiceArea !== null) {
+                serviceAreaData.push(historicalServiceArea);
+                debugLog(`Content/Schema: Using historical Service Area (${historicalServiceArea}) for ${pointDate}`, 'info');
+              } else {
+                serviceAreaData.push(pillarScores.serviceArea);
+              }
+              
               authorityData.push(pillarScores.authority);
               visibilityData.push(pillarScores.visibility);
               
