@@ -1233,6 +1233,7 @@
     // Save configuration
     // Date range selector functions
     function setDateRange(days) {
+      const oldDateRange = parseInt(document.getElementById('dateRange').value) || 30;
       document.getElementById('dateRange').value = days;
       localStorage.setItem('gsc_date_range', days);
       
@@ -1250,6 +1251,18 @@
       document.getElementById('customDateBtn').classList.remove('active');
       
       debugLog(`Date range set to ${days} days`, 'info');
+      
+      // Check if saved audit exists and if its date range matches
+      const savedAudit = loadAuditResults();
+      if (savedAudit && savedAudit.scores) {
+        const savedDateRange = savedAudit.dateRange || oldDateRange;
+        if (savedDateRange !== days) {
+          // Date range changed - clear dashboard and show message
+          debugLog(`Date range changed from ${savedDateRange} to ${days} days. Dashboard needs refresh.`, 'warn');
+          clearDashboard();
+          showStatus(`Date range changed to ${days} days. Please run a new audit to see updated metrics.`, 'info');
+        }
+      }
     }
 
     function showCustomDateRange() {
@@ -1271,11 +1284,24 @@
     function applyCustomDateRange() {
       const customDays = parseInt(document.getElementById('customDays').value);
       if (customDays && customDays > 0) {
+        const oldDateRange = parseInt(document.getElementById('dateRange').value) || 30;
         document.getElementById('dateRange').value = customDays;
         localStorage.setItem('gsc_date_range', customDays);
         document.getElementById('customDateRange').style.display = 'none';
         document.getElementById('customDateBtn').classList.remove('active');
         debugLog(`Custom date range set to ${customDays} days`, 'info');
+        
+        // Check if saved audit exists and if its date range matches
+        const savedAudit = loadAuditResults();
+        if (savedAudit && savedAudit.scores) {
+          const savedDateRange = savedAudit.dateRange || oldDateRange;
+          if (savedDateRange !== customDays) {
+            // Date range changed - clear dashboard and show message
+            debugLog(`Date range changed from ${savedDateRange} to ${customDays} days. Dashboard needs refresh.`, 'warn');
+            clearDashboard();
+            showStatus(`Date range changed to ${customDays} days. Please run a new audit to see updated metrics.`, 'info');
+          }
+        }
       } else {
         showStatus('Please enter a valid number of days', 'error');
       }
@@ -1773,11 +1799,13 @@
     // Save audit results to localStorage
     function saveAuditResults(scores, searchData, snippetReadiness, schemaAudit) {
       try {
+        const dateRange = parseInt(document.getElementById('dateRange')?.value) || 30;
         const auditData = {
           scores,
           searchData,
           snippetReadiness,
           schemaAudit,
+          dateRange, // Store the date range used for this audit
           timestamp: new Date().toISOString()
         };
         localStorage.setItem('last_audit_results', JSON.stringify(auditData));
@@ -1787,6 +1815,27 @@
         updateAuditTimestamp(auditData.timestamp);
       } catch (error) {
         debugLog(`✗ Error saving audit results: ${error.message}`, 'error');
+      }
+    }
+    
+    // Clear dashboard and show message that new audit is needed
+    function clearDashboard() {
+      const dashboard = document.getElementById('dashboard');
+      if (dashboard) {
+        dashboard.style.display = 'none';
+      }
+      // Clear any charts
+      if (window.radarChart) {
+        window.radarChart.destroy();
+        window.radarChart = null;
+      }
+      if (window.trendChart) {
+        window.trendChart.destroy();
+        window.trendChart = null;
+      }
+      if (window.snippetReadinessChart) {
+        window.snippetReadinessChart.destroy();
+        window.snippetReadinessChart = null;
       }
     }
     
@@ -4225,17 +4274,26 @@
       // Load and display last audit results if available
       const savedAudit = loadAuditResults();
       if (savedAudit && savedAudit.scores && savedAudit.searchData) {
-        debugLog('Loading last audit results from localStorage...', 'info');
-        // Show dashboard immediately with saved results
-        document.getElementById('dashboard').style.display = 'block';
-        document.getElementById('loading').classList.remove('show');
-        displayDashboard(
-          savedAudit.scores,
-          savedAudit.searchData,
-          savedAudit.snippetReadiness || 0,
-          savedAudit.schemaAudit || null
-        );
-        debugLog('✓ Last audit results displayed', 'success');
+        // Check if saved audit's date range matches current date range
+        const currentDateRange = parseInt(document.getElementById('dateRange')?.value) || 30;
+        const savedDateRange = savedAudit.dateRange || currentDateRange;
+        
+        if (savedDateRange === currentDateRange) {
+          debugLog('Loading last audit results from localStorage...', 'info');
+          // Show dashboard immediately with saved results
+          document.getElementById('dashboard').style.display = 'block';
+          document.getElementById('loading').classList.remove('show');
+          displayDashboard(
+            savedAudit.scores,
+            savedAudit.searchData,
+            savedAudit.snippetReadiness || 0,
+            savedAudit.schemaAudit || null
+          );
+          debugLog('✓ Last audit results displayed', 'success');
+        } else {
+          debugLog(`Saved audit date range (${savedDateRange}) doesn't match current (${currentDateRange}). Dashboard not displayed.`, 'warn');
+          // Don't show dashboard - user needs to run new audit
+        }
       }
       
       debugLog('=== PAGE LOAD: Initialization complete ===', 'success');
