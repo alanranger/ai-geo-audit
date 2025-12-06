@@ -1773,7 +1773,7 @@
           };
           
           // Recalculate scores with merged data (use saved localSignals if available)
-          const mergedScores = calculatePillarScores(savedAudit.searchData, mergedSchemaAudit, savedAudit.localSignals || null);
+          const mergedScores = calculatePillarScores(savedAudit.searchData, mergedSchemaAudit, savedAudit.localSignals || null, savedAudit.siteReviews || null);
           const mergedSnippetReadiness = calculateSnippetReadiness(mergedScores, savedAudit.searchData);
           
           // Save merged results (preserve localSignals)
@@ -1869,7 +1869,7 @@
         
         // Recalculate pillar scores based on new GSC data
         // Keep existing schema audit data (doesn't change with date range)
-        const scores = calculatePillarScores(searchData, savedAudit.schemaAudit, localSignals);
+        const scores = calculatePillarScores(searchData, savedAudit.schemaAudit, localSignals, savedAudit.siteReviews || null);
         const snippetReadiness = calculateSnippetReadiness(scores, searchData);
         
         debugLog(`Recalculated scores for ${newDateRange} days: ${JSON.stringify(scores)}`, 'info');
@@ -2176,7 +2176,33 @@
       return posScore + shareScore; // 0-100
     }
 
-    function calculatePillarScores(data, schemaAudit = null, localSignals = null) {
+    function computeReviewScore(opts) {
+      const {
+        gbpRating = 0,
+        gbpCount = 0,
+        siteRating = 0,
+        siteCount = 0
+      } = opts || {};
+
+      const maxCount = 500; // cap so a few extra reviews don't blow up score
+
+      // GBP scores
+      const gbpRatingScore = (gbpRating / 5) * 100;
+      const gbpCountScore = Math.min(gbpCount / maxCount, 1) * 100;
+      const gbpScore = 0.6 * gbpRatingScore + 0.4 * gbpCountScore;
+
+      // Site scores
+      const siteRatingScore = (siteRating / 5) * 100;
+      const siteCountScore = Math.min(siteCount / maxCount, 1) * 100;
+      const siteScore = 0.6 * siteRatingScore + 0.4 * siteCountScore;
+
+      // Slightly favour GBP as a stronger trust signal
+      const reviewScore = 0.6 * gbpScore + 0.4 * siteScore;
+
+      return clampScore(reviewScore);
+    }
+
+    function calculatePillarScores(data, schemaAudit = null, localSignals = null, siteReviews = null) {
       // Use new API response format - get values from GSC overview
       const position = data.averagePosition || 40; // 1 (best) - 100 (worst)
       const ctr = data.ctr || 0; // 0-100 percentage from API (e.g., 10 = 10%)
@@ -2204,9 +2230,28 @@
       const behaviourScore = computeBehaviourScore(queriesForCalculation);
       const rankingScore = computeRankingScore(queriesForCalculation);
 
-      // Temporary neutral placeholders until Phases 2 & 3 are wired
+      // Review Score: Phase 2 - Use real review data if available
+      let reviewScore = 50; // Default placeholder
+      if (localSignals && localSignals.status === 'ok' && localSignals.data) {
+        const gbpRating = localSignals.data.gbpRating || 0;
+        const gbpCount = localSignals.data.gbpReviewCount || 0;
+        const siteRating = siteReviews?.siteRating || 0;
+        const siteCount = siteReviews?.siteReviewCount || 0;
+        
+        reviewScore = computeReviewScore({
+          gbpRating,
+          gbpCount,
+          siteRating,
+          siteCount
+        });
+        
+        debugLog(`Review Score: GBP (rating=${gbpRating}, count=${gbpCount}), Site (rating=${siteRating}, count=${siteCount}), Final=${reviewScore.toFixed(1)}`, 'info');
+      } else {
+        debugLog('Review Score: Using placeholder (50) - no review data available', 'warn');
+      }
+
+      // Temporary placeholder until Phase 3
       const backlinkScore = 50;
-      const reviewScore = 50;
 
       const authority = clampScore(
         0.4 * behaviourScore +
@@ -2521,6 +2566,28 @@
           debugLog(`⚠ Local signals error: ${localSignalsError.message}, using fallback`, 'warn');
         }
         
+        updateProgress(37, 'Fetching site reviews data...');
+        debugLog('Fetching site reviews data...', 'info');
+        // Fetch site reviews (on-site/Trustpilot) data
+        let siteReviews = null;
+        try {
+          const siteReviewsResponse = await fetch('/api/reviews/site-reviews');
+          if (siteReviewsResponse.ok) {
+            const siteReviewsData = await siteReviewsResponse.json();
+            if (siteReviewsData.status === 'ok') {
+              siteReviews = siteReviewsData.data;
+              debugLog('✓ Site reviews data fetched successfully', 'success');
+              debugLog(`Site reviews: rating=${siteReviews.siteRating}, count=${siteReviews.siteReviewCount}`, 'info');
+            } else {
+              debugLog('⚠ Site reviews returned error, using fallback', 'warn');
+            }
+          } else {
+            debugLog('⚠ Site reviews endpoint not available, using fallback', 'warn');
+          }
+        } catch (siteReviewsError) {
+          debugLog(`⚠ Site reviews error: ${siteReviewsError.message}, using fallback`, 'warn');
+        }
+        
         updateProgress(40, 'Fetching schema audit data...');
         debugLog('Fetching schema audit data...', 'info');
         // Fetch schema audit data
@@ -2646,8 +2713,8 @@
         
         updateProgress(70, 'Calculating pillar scores...');
         debugLog('Calculating pillar scores...', 'info');
-        // Calculate scores (pass schema audit data and local signals)
-        const scores = calculatePillarScores(searchData, schemaAudit, localSignals);
+        // Calculate scores (pass schema audit data, local signals, and site reviews)
+        const scores = calculatePillarScores(searchData, schemaAudit, localSignals, siteReviews);
         debugLog('✓ Pillar scores calculated', 'success');
         debugLog(`Scores: ${JSON.stringify(scores)}`, 'info');
 
@@ -2665,7 +2732,7 @@
         debugLog('=== AUDIT COMPLETE: Success ===', 'success');
         
         // Save audit results to localStorage
-        saveAuditResults(scores, searchData, snippetReadiness, schemaAudit, localSignals);
+        saveAuditResults(scores, searchData, snippetReadiness, schemaAudit, localSignals, siteReviews);
         
         // Save audit results to Supabase for historical tracking
         saveAuditToSupabase(propertyUrl, scores, searchData, snippetReadiness, schemaAudit, localSignals);

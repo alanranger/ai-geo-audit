@@ -138,6 +138,16 @@ export default async function handler(req, res) {
             console.warn('[Local Signals] Failed to get location details:', await detailResponse.text());
             locationDetails.push(location); // Fall back to basic location data
           }
+          
+          // Fetch rating and review count for this location
+          // Note: This might require a different endpoint or be included in the detail response
+          try {
+            const reviewsUrl = `https://mybusinessbusinessinformation.googleapis.com/v1/${location.name}`;
+            // Rating and review count might be in the location detail, or we might need a reviews endpoint
+            // For now, check if it's in the detailData we already fetched
+          } catch (error) {
+            console.warn('[Local Signals] Could not fetch reviews:', error);
+          }
         } catch (error) {
           console.error('[Local Signals] Error fetching location details:', error);
           locationDetails.push(location); // Fall back to basic location data
@@ -150,6 +160,31 @@ export default async function handler(req, res) {
       // Debug: Log location data to see what we're getting
       if (locationsToProcess.length > 0) {
         console.log('[Local Signals] First location data (full):', JSON.stringify(locationsToProcess[0], null, 2));
+      }
+      
+      // Extract rating and review count from location details
+      // These fields might be in the location detail response
+      let gbpRating = null;
+      let gbpReviewCount = null;
+      
+      if (locationsToProcess.length > 0) {
+        const firstLocation = locationsToProcess[0];
+        // Check various possible field names for rating and review count
+        gbpRating = firstLocation.rating || firstLocation.averageRating || firstLocation.primaryRating || null;
+        gbpReviewCount = firstLocation.totalReviewCount || firstLocation.reviewCount || firstLocation.numberOfReviews || null;
+        
+        // If not found in detail, try fetching from reviews endpoint
+        if (gbpRating === null || gbpReviewCount === null) {
+          try {
+            // Try to get rating from location metadata or reviews endpoint
+            // Note: This might require additional API calls or permissions
+            console.log('[Local Signals] Rating/review count not in location detail, checking alternative sources...');
+          } catch (error) {
+            console.warn('[Local Signals] Could not fetch rating/review count:', error);
+          }
+        }
+        
+        console.log('[Local Signals] GBP Rating:', gbpRating, 'Review Count:', gbpReviewCount);
       }
       
       // Extract service areas and NAP data
@@ -261,6 +296,9 @@ export default async function handler(req, res) {
         napConsistencyScore,
         knowledgePanelDetected: locations.length > 0, // If we have locations, likely has knowledge panel
         serviceAreas,
+        // GBP Rating and Review Count (for Review Score calculation)
+        gbpRating: gbpRating !== null ? parseFloat(gbpRating) : null,
+        gbpReviewCount: gbpReviewCount !== null ? parseInt(gbpReviewCount) : null,
         locations: locationsToProcess.map(loc => {
           // Extract phone number with all possible formats
           let phone = null;
