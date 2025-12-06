@@ -1973,7 +1973,7 @@
     }
     
     // Save audit results to Supabase for historical tracking
-    async function saveAuditToSupabase(propertyUrl, scores, searchData, snippetReadiness, schemaAudit) {
+    async function saveAuditToSupabase(propertyUrl, scores, searchData, snippetReadiness, schemaAudit, localSignals = null) {
       try {
         const auditDate = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
         
@@ -1988,7 +1988,8 @@
             schemaAudit,
             scores,
             searchData,
-            snippetReadiness
+            snippetReadiness,
+            localSignals // Pass Business Profile data for storage
           })
         });
         
@@ -2529,7 +2530,7 @@
         saveAuditResults(scores, searchData, snippetReadiness, schemaAudit, localSignals);
         
         // Save audit results to Supabase for historical tracking
-        saveAuditToSupabase(propertyUrl, scores, searchData, snippetReadiness, schemaAudit);
+        saveAuditToSupabase(propertyUrl, scores, searchData, snippetReadiness, schemaAudit, localSignals);
         
         showStatus('Audit completed successfully!', 'success');
       } catch (error) {
@@ -3884,43 +3885,57 @@
             
             let contentSchemaHistory = [];
             let contentSchemaMap = new Map();
+            let localEntityMap = new Map();
+            let serviceAreaMap = new Map();
             const currentContentSchema = scores.contentSchema || 0;
             
-            // Fetch historical data asynchronously
+            // Fetch historical data asynchronously (includes Content/Schema AND Business Profile data)
             if (propertyUrl) {
               try {
                 contentSchemaHistory = await fetchContentSchemaHistory(propertyUrl, startDate, endDate);
-                // Create a map of dates to Content/Schema scores from Supabase
+                // Create maps of dates to scores from Supabase
                 // Normalize dates to YYYY-MM-DD format (Supabase might return with timezone)
                 contentSchemaHistory.forEach(record => {
                   // Ensure date is in YYYY-MM-DD format (strip time if present)
                   const normalizedDate = record.date ? record.date.split('T')[0] : null;
                   if (normalizedDate) {
-                    contentSchemaMap.set(normalizedDate, record.contentSchemaScore);
-                    debugLog(`Mapped Content/Schema: ${normalizedDate} = ${record.contentSchemaScore}`, 'info');
+                    // Content/Schema data
+                    if (record.contentSchemaScore !== null && record.contentSchemaScore !== undefined) {
+                      contentSchemaMap.set(normalizedDate, record.contentSchemaScore);
+                      debugLog(`Mapped Content/Schema: ${normalizedDate} = ${record.contentSchemaScore}`, 'info');
+                    }
+                    // Business Profile data (Local Entity and Service Area)
+                    if (record.localEntityScore !== null && record.localEntityScore !== undefined) {
+                      localEntityMap.set(normalizedDate, record.localEntityScore);
+                      debugLog(`Mapped Local Entity: ${normalizedDate} = ${record.localEntityScore}`, 'info');
+                    }
+                    if (record.serviceAreaScore !== null && record.serviceAreaScore !== undefined) {
+                      serviceAreaMap.set(normalizedDate, record.serviceAreaScore);
+                      debugLog(`Mapped Service Area: ${normalizedDate} = ${record.serviceAreaScore}`, 'info');
+                    }
                   }
                 });
                 
                 const hasHistoricalData = contentSchemaHistory.length > 0;
                 if (hasHistoricalData) {
-                  debugLog(`Using ${contentSchemaHistory.length} historical Content/Schema records from Supabase`, 'info');
+                  debugLog(`Using ${contentSchemaHistory.length} historical audit records from Supabase`, 'info');
                 } else {
-                  debugLog(`No historical Content/Schema data found. Using current score (${currentContentSchema}) for all points. Dashed line will indicate estimated data.`, 'info');
+                  debugLog(`No historical data found. Will use current scores for all points.`, 'info');
                 }
               } catch (error) {
                 debugLog(`⚠ Error fetching historical data: ${error.message}`, 'warn');
                 contentSchemaHistory = [];
               }
             } else {
-              debugLog(`No historical Content/Schema data found. Using current score (${currentContentSchema}) for all points. Dashed line will indicate estimated data.`, 'info');
+              debugLog(`No property URL found. Cannot fetch historical data.`, 'info');
             }
             
-            // Get current Business Profile data for Local Entity and Service Area (used for all historical dates)
-            // Note: Business Profile data is current, not historical, so we use the same values for all dates
+            // Get current Business Profile data for Local Entity and Service Area (fallback if no historical data)
             const hasLocalSignals = saved && saved.localSignals && saved.localSignals.status === 'ok' && saved.localSignals.data;
             const localSignalsData = hasLocalSignals ? saved.localSignals.data : null;
             
             // Calculate current Local Entity and Service Area scores from Business Profile data (if available)
+            // These will be used as fallback when historical data is not available for a specific date
             let currentLocalEntity, currentServiceArea;
             if (hasLocalSignals && localSignalsData) {
               // Local Entity: NAP consistency + bonuses
@@ -3952,12 +3967,12 @@
               }
               currentServiceArea = clampScore(currentServiceArea);
               
-              debugLog(`Trend chart: Using current Business Profile data - Local Entity=${currentLocalEntity}, Service Area=${currentServiceArea} (for all historical dates)`, 'info');
+              debugLog(`Trend chart: Current Business Profile data - Local Entity=${currentLocalEntity}, Service Area=${currentServiceArea} (used as fallback)`, 'info');
             } else {
               // Fallback: use derived calculation
               currentLocalEntity = null;
               currentServiceArea = null;
-              debugLog('Trend chart: No Business Profile data available, using derived calculation for historical dates', 'warn');
+              debugLog('Trend chart: No Business Profile data available, will use derived calculation for dates without historical data', 'warn');
             }
             
             // Calculate pillar scores for each timeseries point
@@ -4003,8 +4018,29 @@
             
             timeseries.forEach(point => {
               const pillarScores = calculatePillarFromMetrics(point.position, point.ctr);
-              localEntityData.push(pillarScores.localEntity);
-              serviceAreaData.push(pillarScores.serviceArea);
+              
+              // Check if we have historical Business Profile data for this date
+              const pointDate = point.date; // YYYY-MM-DD format
+              const historicalLocalEntity = localEntityMap.get(pointDate);
+              const historicalServiceArea = serviceAreaMap.get(pointDate);
+              
+              // Use historical data if available, otherwise use calculated scores (which may use current Business Profile data)
+              if (historicalLocalEntity !== null && historicalLocalEntity !== undefined) {
+                localEntityData.push(historicalLocalEntity);
+                debugLog(`Local Entity: Using historical data ${historicalLocalEntity} for ${pointDate}`, 'info');
+              } else {
+                // Use calculated score (which uses current Business Profile data if available, otherwise derived)
+                localEntityData.push(pillarScores.localEntity);
+              }
+              
+              if (historicalServiceArea !== null && historicalServiceArea !== undefined) {
+                serviceAreaData.push(historicalServiceArea);
+                debugLog(`Service Area: Using historical data ${historicalServiceArea} for ${pointDate}`, 'info');
+              } else {
+                // Use calculated score (which uses current Business Profile data if available, otherwise derived)
+                serviceAreaData.push(pillarScores.serviceArea);
+              }
+              
               authorityData.push(pillarScores.authority);
               visibilityData.push(pillarScores.visibility);
               
@@ -4084,15 +4120,26 @@
                 authorityData.push(null);
                 visibilityData.push(null);
                 
-                // For Local Entity and Service Area, use current Business Profile data (if available)
-                // Business Profile data is current, not historical, so we use the same values for all dates
-                if (currentLocalEntity !== null) {
+                // For Local Entity and Service Area, check for historical data first, then use current as fallback
+                const historicalLocalEntity = localEntityMap.get(dateStr);
+                const historicalServiceArea = serviceAreaMap.get(dateStr);
+                
+                if (historicalLocalEntity !== null && historicalLocalEntity !== undefined) {
+                  localEntityData.push(historicalLocalEntity);
+                  debugLog(`Local Entity: Using historical data ${historicalLocalEntity} for ${dateStr}`, 'info');
+                } else if (currentLocalEntity !== null) {
                   localEntityData.push(currentLocalEntity);
+                  debugLog(`Local Entity: Using current data ${currentLocalEntity} for ${dateStr} (no historical data)`, 'info');
                 } else {
                   localEntityData.push(null);
                 }
-                if (currentServiceArea !== null) {
+                
+                if (historicalServiceArea !== null && historicalServiceArea !== undefined) {
+                  serviceAreaData.push(historicalServiceArea);
+                  debugLog(`Service Area: Using historical data ${historicalServiceArea} for ${dateStr}`, 'info');
+                } else if (currentServiceArea !== null) {
                   serviceAreaData.push(currentServiceArea);
+                  debugLog(`Service Area: Using current data ${currentServiceArea} for ${dateStr} (no historical data)`, 'info');
                 } else {
                   serviceAreaData.push(null);
                 }
@@ -4124,13 +4171,21 @@
               authorityData.push(null);
               visibilityData.push(null);
               
-              // For Local Entity and Service Area, use current Business Profile data (if available)
-              if (currentLocalEntity !== null) {
+              // For Local Entity and Service Area, check for historical data first, then use current as fallback
+              const historicalLocalEntity = localEntityMap.get(todayStr);
+              const historicalServiceArea = serviceAreaMap.get(todayStr);
+              
+              if (historicalLocalEntity !== null && historicalLocalEntity !== undefined) {
+                localEntityData.push(historicalLocalEntity);
+              } else if (currentLocalEntity !== null) {
                 localEntityData.push(currentLocalEntity);
               } else {
                 localEntityData.push(null);
               }
-              if (currentServiceArea !== null) {
+              
+              if (historicalServiceArea !== null && historicalServiceArea !== undefined) {
+                serviceAreaData.push(historicalServiceArea);
+              } else if (currentServiceArea !== null) {
                 serviceAreaData.push(currentServiceArea);
               } else {
                 serviceAreaData.push(null);

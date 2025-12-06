@@ -32,7 +32,8 @@ export default async function handler(req, res) {
       schemaAudit,
       scores,
       searchData,
-      snippetReadiness
+      snippetReadiness,
+      localSignals
     } = req.body;
 
     if (!propertyUrl || !auditDate) {
@@ -93,6 +94,12 @@ export default async function handler(req, res) {
       gsc_impressions: searchData?.totalImpressions || null,
       gsc_avg_position: searchData?.averagePosition || null,
       gsc_ctr: searchData?.ctr || null,
+      
+      // Business Profile Data (for historical tracking)
+      local_business_schema_pages: localSignals?.data?.localBusinessSchemaPages || null,
+      nap_consistency_score: localSignals?.data?.napConsistencyScore || null,
+      knowledge_panel_detected: localSignals?.data?.knowledgePanelDetected || null,
+      service_areas: localSignals?.data?.serviceAreas || null, // Array of service area objects
       
       updated_at: new Date().toISOString()
     };

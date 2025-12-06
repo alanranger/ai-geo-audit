@@ -84,13 +84,21 @@ export default async function handler(req, res) {
     // Transform results to match expected format
     const history = results.map(record => ({
       date: record.audit_date,
+      // Content/Schema data
       contentSchemaScore: record.content_schema_score,
       schemaCoverage: record.schema_coverage,
       schemaTotalPages: record.schema_total_pages,
       schemaPagesWithSchema: record.schema_pages_with_schema,
       schemaTypes: record.schema_types || [],
       foundationSchemas: record.schema_foundation || {},
-      richEligible: record.schema_rich_eligible || {}
+      richEligible: record.schema_rich_eligible || {},
+      // Business Profile data (for Local Entity and Service Area historical tracking)
+      localEntityScore: record.local_entity_score,
+      serviceAreaScore: record.service_area_score,
+      napConsistencyScore: record.nap_consistency_score,
+      knowledgePanelDetected: record.knowledge_panel_detected,
+      serviceAreas: record.service_areas || [],
+      locationsCount: record.service_areas ? (record.service_areas.length > 0 ? 1 : 0) : null // Infer from service_areas data
     }));
 
     return res.status(200).json({
