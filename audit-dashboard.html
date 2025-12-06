@@ -3893,19 +3893,24 @@
           let chartDates = dates;
           let chartDateObjects = []; // Store Date objects for period detection
           
+          // Declare maps in outer scope so they're accessible everywhere
+          let contentSchemaHistory = [];
+          let contentSchemaMap = new Map();
+          let localEntityMap = new Map();
+          let serviceAreaMap = new Map();
+          const currentContentSchema = scores.contentSchema || 0;
+          
           if (timeseries.length > 0) {
             // Fetch historical Content/Schema data from Supabase (async operation)
             const propertyUrl = document.getElementById('propertyUrl')?.value || '';
-            const endDate = new Date().toISOString().split('T')[0];
-            const startDateObj = new Date();
+            // Use today's date (should be 2024, not 2025)
+            const today = new Date();
+            const endDate = today.toISOString().split('T')[0];
+            const startDateObj = new Date(today);
             startDateObj.setDate(startDateObj.getDate() - dateRange);
             const startDate = startDateObj.toISOString().split('T')[0];
             
-            let contentSchemaHistory = [];
-            let contentSchemaMap = new Map();
-            let localEntityMap = new Map();
-            let serviceAreaMap = new Map();
-            const currentContentSchema = scores.contentSchema || 0;
+            debugLog(`Fetching Content/Schema history from Supabase: ${startDate} to ${endDate}`, 'info');
             
             // Fetch historical data asynchronously (includes Content/Schema AND Business Profile data)
             if (propertyUrl) {
