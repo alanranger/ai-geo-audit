@@ -105,11 +105,14 @@ export default async function handler(req, res) {
     // 2. Get timeseries data (by date) - WITH CACHING
     let timeseries = [];
     let storedTimeseries = [];
-    let missingDates = [];
+    let missingDates = null; // null means fetch all dates
     
     // Check Supabase for cached timeseries data
     const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    
+    console.log(`[GSC Cache] Checking cache for property: ${siteUrl}, date range: ${startDate} to ${endDate}`);
+    console.log(`[GSC Cache] Supabase configured: ${!!supabaseUrl && !!supabaseKey}`);
     
     if (supabaseUrl && supabaseKey) {
       try {
@@ -117,9 +120,16 @@ export default async function handler(req, res) {
         const baseUrl = req.headers.host 
           ? `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}`
           : 'http://localhost:3000';
-        const cacheResponse = await fetch(`${baseUrl}/api/supabase/get-gsc-timeseries?propertyUrl=${encodeURIComponent(siteUrl)}&startDate=${startDate}&endDate=${endDate}`);
+        const cacheUrl = `${baseUrl}/api/supabase/get-gsc-timeseries?propertyUrl=${encodeURIComponent(siteUrl)}&startDate=${startDate}&endDate=${endDate}`;
+        console.log(`[GSC Cache] Fetching from cache: ${cacheUrl}`);
+        
+        const cacheResponse = await fetch(cacheUrl);
+        console.log(`[GSC Cache] Cache response status: ${cacheResponse.status}`);
+        
         if (cacheResponse.ok) {
           const cacheData = await cacheResponse.json();
+          console.log(`[GSC Cache] Cache response data status: ${cacheData.status}, data length: ${cacheData.data?.length || 0}`);
+          
           if (cacheData.status === 'ok' && cacheData.data && cacheData.data.length > 0) {
             storedTimeseries = cacheData.data;
             console.log(`[GSC Cache] Found ${storedTimeseries.length} cached timeseries records`);
@@ -128,6 +138,7 @@ export default async function handler(req, res) {
             const cachedDates = new Set(storedTimeseries.map(r => r.date));
             
             // Generate all dates in range and find missing ones
+            missingDates = [];
             const start = new Date(startDate);
             const end = new Date(endDate);
             for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
@@ -137,16 +148,25 @@ export default async function handler(req, res) {
               }
             }
             
-            console.log(`[GSC Cache] Missing ${missingDates.length} dates, will fetch from GSC API`);
+            console.log(`[GSC Cache] Missing ${missingDates.length} dates out of ${Math.ceil((end - start) / (1000 * 60 * 60 * 24))} total dates, will fetch from GSC API`);
+          } else {
+            console.log(`[GSC Cache] No cached data found, will fetch all dates from GSC API`);
+            missingDates = null; // Fetch all dates
           }
+        } else {
+          const errorText = await cacheResponse.text();
+          console.warn(`[GSC Cache] Cache fetch failed (${cacheResponse.status}): ${errorText.substring(0, 200)}`);
+          missingDates = null; // Fetch all dates if cache check fails
         }
       } catch (cacheError) {
         console.warn('[GSC Cache] Error checking cache, will fetch all from GSC API:', cacheError.message);
+        console.warn('[GSC Cache] Cache error stack:', cacheError.stack);
         // If cache check fails, fetch all dates
         missingDates = null; // null means fetch all
       }
     } else {
       // Supabase not configured, fetch all dates
+      console.log(`[GSC Cache] Supabase not configured, will fetch all dates from GSC API`);
       missingDates = null;
     }
     
@@ -351,6 +371,10 @@ export default async function handler(req, res) {
       }
     }
     
+    // Final logging before response
+    console.log(`[GSC Cache] Final timeseries count: ${timeseries.length}`);
+    console.log(`[GSC Cache] Timeseries sample (first 3):`, timeseries.slice(0, 3).map(t => ({ date: t.date, clicks: t.clicks })));
+    
     return res.status(200).json({
       status: 'ok',
       source: 'gsc-entity-metrics',
@@ -362,7 +386,7 @@ export default async function handler(req, res) {
           avgPosition,
           ctr
         },
-        timeseries,
+        timeseries: timeseries || [], // Ensure it's always an array
         topQueries,
         topPages,
         searchAppearance

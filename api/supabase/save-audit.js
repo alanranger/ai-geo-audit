@@ -111,7 +111,8 @@ export default async function handler(req, res) {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Supabase error:', errorText);
+      console.error('[Supabase Save] Error response:', response.status, errorText);
+      console.error('[Supabase Save] Request data:', JSON.stringify(auditRecord, null, 2).substring(0, 500));
       return res.status(response.status).json({
         status: 'error',
         message: 'Failed to save audit results to Supabase',
@@ -121,6 +122,7 @@ export default async function handler(req, res) {
     }
 
     const result = await response.json();
+    console.log('[Supabase Save] ✓ Successfully saved audit results');
 
     return res.status(200).json({
       status: 'ok',
@@ -130,7 +132,8 @@ export default async function handler(req, res) {
     });
 
   } catch (error) {
-    console.error('Error saving audit results:', error);
+    console.error('[Supabase Save] Exception:', error.message);
+    console.error('[Supabase Save] Stack:', error.stack);
     return res.status(500).json({
       status: 'error',
       message: 'Internal server error',

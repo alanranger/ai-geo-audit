@@ -94,3 +94,4 @@ CREATE INDEX IF NOT EXISTS idx_gsc_timeseries_property
 -- 4. After creating tables, ensure RLS (Row Level Security) policies are set
 --    if you want to restrict access (optional for service role key usage)
 
+
