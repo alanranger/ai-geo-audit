@@ -3399,7 +3399,13 @@
                 const scale = chart.scales.r;
                 const centerX = scale.xCenter;
                 const centerY = scale.yCenter;
-                const maxRadius = scale.drawingArea();
+                // Calculate max radius (drawing area) - Chart.js v4 doesn't have drawingArea() method
+                // Use getDistanceFromCenterForValue with max value, or calculate from chart area
+                const maxRadius = scale.getDistanceFromCenterForValue(scale.max) || 
+                  Math.min(
+                    (chart.chartArea.right - chart.chartArea.left) / 2,
+                    (chart.chartArea.bottom - chart.chartArea.top) / 2
+                  ) - scale.options.pointLabels.padding;
                 
                 // Get RAG color based on score
                 const getRAGColor = (score) => {
@@ -3650,7 +3656,7 @@
             authorityData = [];
             visibilityData = [];
             contentSchemaData = [];
-            const contentSchemaDataEstimated = []; // For dashed line (dates without real data)
+            let contentSchemaDataEstimated = []; // For dashed line (dates without real data)
             const allDateObjects = []; // Store Date objects for year detection
             const allDates = [];
             
@@ -3721,6 +3727,7 @@
             authorityData = makeSeries(scores.authority, 1.9);
             visibilityData = makeSeries(scores.visibility, 1.1);
             contentSchemaData = makeSeries(scores.contentSchema, 1.4);
+            contentSchemaDataEstimated = []; // Initialize empty array for fallback case
           }
           
           // Calculate min and max across all datasets
