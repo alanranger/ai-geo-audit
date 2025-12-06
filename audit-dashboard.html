@@ -2873,14 +2873,11 @@
         // Calculate outer ring data (weighting percentages)
         const outerData = weights;
         
-        // Calculate inner fill data (score as percentage of each segment)
-        // For each segment, show how much of it is "filled" based on score
-        const innerData = weights.map((weight, i) => {
-          const scorePercent = scoresArray[i] / 100; // Convert score to 0-1
-          return weight * scorePercent; // Fill this percentage of the segment
-        });
+        // Inner ring: Same segment sizes as outer, but we'll use custom drawing to fill only the score percentage
+        // The inner data must match outer segment sizes so they align
+        const innerData = weights; // Same sizes as outer
         
-        // Create chart with custom label plugin for in-segment labels
+        // Create chart with custom drawing for inner fill segments
         window.snippetReadinessChart = new Chart(pieChartCanvas, {
           type: 'doughnut',
           data: {
@@ -2895,21 +2892,19 @@
                 label: 'Weight',
                 data: outerData,
                 backgroundColor: colors,
-                borderWidth: 3,
+                borderWidth: 4,
                 borderColor: '#ffffff',
                 cutout: '60%' // Leave room for inner fill
               },
               {
-                // Inner fill: Score percentage within each segment (fuel gauge effect)
+                // Inner ring: Same segment sizes, but will be custom-drawn to show score fill
                 label: 'Score Fill',
                 data: innerData,
-                backgroundColor: scoresArray.map(score => {
-                  // Use RAG color based on score
-                  if (score >= 70) return '#10b981'; // Green
-                  if (score >= 40) return '#f59e0b'; // Amber
-                  return '#ef4444'; // Red
+                backgroundColor: colors.map((color, i) => {
+                  // Use darker version of segment color for unfilled portion
+                  return color + '40'; // Add transparency
                 }),
-                borderWidth: 2,
+                borderWidth: 4,
                 borderColor: '#ffffff',
                 cutout: '75%' // Inner ring showing fill
               }
@@ -2943,52 +2938,82 @@
             }
           },
           plugins: [{
-            id: 'segmentLabels',
+            id: 'innerFillAndLabels',
             afterDraw: (chart) => {
               const ctx = chart.ctx;
-              const meta = chart.getDatasetMeta(0); // Use outer ring for positioning
+              const outerMeta = chart.getDatasetMeta(0); // Outer ring
+              const innerMeta = chart.getDatasetMeta(1); // Inner ring
               const centerX = chart.chartArea.left + (chart.chartArea.right - chart.chartArea.left) / 2;
               const centerY = chart.chartArea.top + (chart.chartArea.bottom - chart.chartArea.top) / 2;
-              const radius = (chart.chartArea.right - chart.chartArea.left) / 2;
+              const outerRadius = (chart.chartArea.right - chart.chartArea.left) / 2;
+              const innerRadius = outerRadius * 0.75; // 75% cutout
+              const outerInnerRadius = outerRadius * 0.60; // 60% cutout (where inner ring starts)
               
-              // Calculate mid-radius for label placement (between outer and inner rings)
-              const midRadius = radius * 0.675; // Between 60% and 75% cutout
+              // First, clear the inner ring segments (they're drawn by Chart.js but we'll redraw them)
+              // Then draw custom filled portions based on scores
               
-              meta.data.forEach((segment, index) => {
-                const model = segment;
-                const startAngle = model.startAngle;
-                const endAngle = model.endAngle;
-                const midAngle = (startAngle + endAngle) / 2;
+              outerMeta.data.forEach((outerSegment, index) => {
+                const score = scoresArray[index];
+                const scorePercent = score / 100; // 0 to 1
+                const startAngle = outerSegment.startAngle;
+                const endAngle = outerSegment.endAngle;
+                const segmentAngle = endAngle - startAngle;
+                const filledAngle = segmentAngle * scorePercent;
+                const filledEndAngle = startAngle + filledAngle;
                 
-                // Calculate label position
+                // Get RAG color for fill
+                let fillColor;
+                if (score >= 70) fillColor = '#10b981'; // Green
+                else if (score >= 40) fillColor = '#f59e0b'; // Amber
+                else fillColor = '#ef4444'; // Red
+                
+                // Draw the filled portion of this inner segment (fuel gauge effect)
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, outerInnerRadius, startAngle, filledEndAngle, false);
+                ctx.arc(centerX, centerY, innerRadius, filledEndAngle, startAngle, true);
+                ctx.closePath();
+                ctx.fillStyle = fillColor;
+                ctx.fill();
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 4;
+                ctx.stroke();
+                ctx.restore();
+                
+                // Draw label in the middle of the segment
+                const midAngle = (startAngle + endAngle) / 2;
+                const midRadius = (outerInnerRadius + innerRadius) / 2;
                 const labelX = centerX + Math.cos(midAngle) * midRadius;
                 const labelY = centerY + Math.sin(midAngle) * midRadius;
                 
                 // Get component names
                 const componentNames = ['Content/Schema', 'Visibility', 'Authority'];
                 const weight = weights[index];
-                const score = scoresArray[index];
                 
                 // Draw label background for better readability
                 ctx.save();
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
                 ctx.beginPath();
-                ctx.arc(labelX, labelY, 35, 0, Math.PI * 2);
+                ctx.arc(labelX, labelY, 40, 0, Math.PI * 2);
                 ctx.fill();
+                ctx.strokeStyle = colors[index];
+                ctx.lineWidth = 2;
+                ctx.stroke();
                 
                 // Draw text
                 ctx.fillStyle = colors[index];
-                ctx.font = 'bold 10px system-ui';
+                ctx.font = 'bold 11px system-ui';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 
-                // First line: Component name and weight
-                ctx.fillText(`${componentNames[index]}`, labelX, labelY - 8);
+                // First line: Component name
+                ctx.fillText(`${componentNames[index]}`, labelX, labelY - 10);
+                // Second line: Weight
+                ctx.font = '10px system-ui';
                 ctx.fillText(`Weight: ${weight}%`, labelX, labelY + 2);
-                
-                // Second line: Score percentage
-                ctx.fillStyle = scoresArray[index] >= 70 ? '#10b981' : scoresArray[index] >= 40 ? '#f59e0b' : '#ef4444';
-                ctx.font = 'bold 11px system-ui';
+                // Third line: Score percentage
+                ctx.fillStyle = fillColor;
+                ctx.font = 'bold 12px system-ui';
                 ctx.fillText(`Score: ${score}%`, labelX, labelY + 14);
                 
                 ctx.restore();
