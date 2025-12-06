@@ -104,9 +104,20 @@ export default async function handler(req, res) {
       
       // Extract service areas and NAP data
       locations.forEach(location => {
-        // Service areas
-        if (location.serviceArea && location.serviceArea.businessType === 'SERVICE_AREA_BUSINESS') {
-          if (location.serviceArea.regionCode) {
+        // Service areas - check both SERVICE_AREA_BUSINESS and places data
+        if (location.serviceArea) {
+          // Extract from places if available
+          if (location.serviceArea.places && location.serviceArea.places.placeInfos) {
+            location.serviceArea.places.placeInfos.forEach(place => {
+              serviceAreas.push({
+                placeName: place.placeName || null,
+                placeId: place.placeId || null,
+                locationName: location.title || location.name
+              });
+            });
+          }
+          // Also check for region-based service area
+          else if (location.serviceArea.businessType === 'SERVICE_AREA_BUSINESS' && location.serviceArea.regionCode) {
             serviceAreas.push({
               regionCode: location.serviceArea.regionCode,
               locationName: location.title || location.name
@@ -115,7 +126,7 @@ export default async function handler(req, res) {
         }
         
         // NAP data (Name, Address, Phone)
-        if (location.title || location.storefrontAddress || location.phoneNumbers) {
+        if (location.title || location.storefrontAddress || location.phoneNumbers || location.websiteUri) {
           napData.push({
             name: location.title || null,
             address: location.storefrontAddress ? {
@@ -137,15 +148,18 @@ export default async function handler(req, res) {
     }
     
     // Step 3: Calculate NAP consistency score
-    // For now, if we have at least one location with complete NAP data, score is high
+    // Score based on: Name (30%), Address (40%), Phone (30%)
+    // Website is bonus but not required for NAP
     let napConsistencyScore = null;
     if (napData.length > 0) {
-      const completeNapCount = napData.filter(nap => 
-        nap.name && nap.address && nap.phone
-      ).length;
-      napConsistencyScore = napData.length > 0 
-        ? Math.round((completeNapCount / napData.length) * 100)
-        : 0;
+      const scores = napData.map(nap => {
+        let score = 0;
+        if (nap.name) score += 30;
+        if (nap.address && nap.address.locality) score += 40; // Address with locality is considered complete
+        if (nap.phone) score += 30;
+        return score;
+      });
+      napConsistencyScore = Math.round(scores.reduce((sum, s) => sum + s, 0) / scores.length);
     }
     
     // Step 4: LocalBusiness schema detection would require website scanning
