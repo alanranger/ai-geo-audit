@@ -3280,7 +3280,12 @@
           if (contentSchemaScore < 100 && schemaAudit && schemaAudit.status === 'ok' && schemaAudit.data) {
             const schemaData = schemaAudit.data;
             const allTypes = new Set();
-            if (schemaData.schemaTypes && Array.isArray(schemaData.schemaTypes)) {
+            // Use allDetectedTypes if available (all types), otherwise fall back to schemaTypes (top 10)
+            if (schemaData.allDetectedTypes && Array.isArray(schemaData.allDetectedTypes)) {
+              schemaData.allDetectedTypes.forEach(type => {
+                if (type) allTypes.add(type);
+              });
+            } else if (schemaData.schemaTypes && Array.isArray(schemaData.schemaTypes)) {
               schemaData.schemaTypes.forEach(item => {
                 if (item.type) allTypes.add(item.type);
               });
@@ -3304,10 +3309,28 @@
             
             if (richEligibleCount < 10) {
               const potentialGain = ((10 - richEligibleCount) / 10) * 35 * 0.4; // 35% weight of 40% total
+              
+              // Get list of all rich result types and which ones are missing
+              const richResultTypes = ['Article', 'Event', 'FAQPage', 'Product', 'LocalBusiness', 'Course', 'Review', 'HowTo', 'VideoObject', 'Recipe'];
+              const missingRichTypes = richResultTypes.filter(type => {
+                return !schemaData.richEligible || !schemaData.richEligible[type];
+              });
+              
+              // Filter out Recipe for photography businesses (not applicable)
+              const applicableMissingTypes = missingRichTypes.filter(type => type !== 'Recipe');
+              
+              // Build suggestion text
+              let suggestionText;
+              if (applicableMissingTypes.length > 0) {
+                suggestionText = `Add more rich result types. Currently ${richEligibleCount}/10 eligible. Add: ${applicableMissingTypes.join(', ')} schemas. Potential gain: +${potentialGain.toFixed(1)} points.`;
+              } else {
+                suggestionText = `Add more rich result types. Currently ${richEligibleCount}/10 eligible. Potential gain: +${potentialGain.toFixed(1)} points.`;
+              }
+              
               actions.push({
                 priority: 3,
                 impact: potentialGain,
-                text: `Add more rich result types. Currently ${richEligibleCount}/10 eligible. Add: Review, VideoObject, Recipe, or Course schemas. Potential gain: +${potentialGain.toFixed(1)} points.`
+                text: suggestionText
               });
             }
             
