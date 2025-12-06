@@ -6,9 +6,10 @@
 /**
  * Parse date range from request query with defaults
  * @param {Object} req - Request object
+ * @param {boolean} accountForGSCDelay - If true, subtract 2 days from endDate to account for GSC data delay (default: false)
  * @returns {Object} { startDate, endDate } as ISO strings (YYYY-MM-DD)
  */
-export function parseDateRange(req) {
+export function parseDateRange(req, accountForGSCDelay = false) {
   const { startDate, endDate } = req.query;
   
   // Default to last 30 days if not provided
@@ -17,6 +18,12 @@ export function parseDateRange(req) {
   
   if (!startDate) {
     start.setDate(start.getDate() - 30);
+  }
+  
+  // Google Search Console data is typically delayed by 2-3 days
+  // If accountForGSCDelay is true, subtract 2 days from endDate to avoid requesting data that doesn't exist yet
+  if (accountForGSCDelay && !endDate) {
+    end.setDate(end.getDate() - 2);
   }
   
   // Format as YYYY-MM-DD

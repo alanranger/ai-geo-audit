@@ -44,6 +44,8 @@ export default async function handler(req, res) {
     }
     
     // Parse date range with defaults
+    // Note: GSC data is typically delayed by 2-3 days, but we still request up to today
+    // GSC will return whatever data it has available
     const { startDate, endDate } = parseDateRange(req);
     
     // Normalize property URL

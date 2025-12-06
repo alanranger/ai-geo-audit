@@ -3832,6 +3832,31 @@
             const todayStr = today.toISOString().split('T')[0];
             const lastTimeseriesDate = timeseries.length > 0 ? timeseries[timeseries.length - 1].date : null;
             
+            // Check if we're missing recent dates (likely due to GSC delay)
+            let hasRecentMissingDates = false;
+            if (lastTimeseriesDate) {
+              const lastDate = new Date(lastTimeseriesDate);
+              lastDate.setHours(0, 0, 0, 0);
+              const daysSinceLastData = Math.floor((today - lastDate) / (1000 * 60 * 60 * 24));
+              hasRecentMissingDates = daysSinceLastData > 1; // More than 1 day gap indicates GSC delay
+              
+              // Show a note about GSC delay if we're missing recent dates
+              if (hasRecentMissingDates) {
+                const trendCanvas = document.getElementById('trendChart');
+                if (trendCanvas && trendCanvas.parentElement) {
+                  // Check if note already exists
+                  const existingNote = trendCanvas.parentElement.querySelector('.gsc-delay-note');
+                  if (!existingNote) {
+                    const noteDiv = document.createElement('div');
+                    noteDiv.className = 'gsc-delay-note';
+                    noteDiv.style.cssText = 'background: #e0f2fe; padding: 0.75rem; border-radius: 4px; border-left: 3px solid #0284c7; margin-bottom: 1rem; font-size: 0.85rem; color: #0c4a6e;';
+                    noteDiv.innerHTML = `<strong>Note:</strong> Google Search Console data is typically delayed by 2-3 days. Recent dates (last ${daysSinceLastData} day${daysSinceLastData > 1 ? 's' : ''}) may show no data until GSC updates.`;
+                    trendCanvas.parentElement.insertBefore(noteDiv, trendCanvas);
+                  }
+                }
+              }
+            }
+            
             if (lastTimeseriesDate) {
               const lastDate = new Date(lastTimeseriesDate);
               lastDate.setHours(0, 0, 0, 0);
