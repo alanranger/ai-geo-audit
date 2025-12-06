@@ -180,19 +180,25 @@ export default async function handler(req, res) {
           // Try different phone number formats
           let phone = null;
           if (location.phoneNumbers) {
-            if (Array.isArray(location.phoneNumbers) && location.phoneNumbers.length > 0) {
-              // Format: [{ phoneNumber: "...", ... }]
+            // Check for primaryPhone nested inside phoneNumbers object
+            if (location.phoneNumbers.primaryPhone) {
+              phone = location.phoneNumbers.primaryPhone;
+            }
+            // Check for array format: [{ phoneNumber: "...", ... }]
+            else if (Array.isArray(location.phoneNumbers) && location.phoneNumbers.length > 0) {
               phone = location.phoneNumbers[0].phoneNumber || location.phoneNumbers[0];
-            } else if (typeof location.phoneNumbers === 'string') {
-              // Format: direct string
+            }
+            // Check for direct string
+            else if (typeof location.phoneNumbers === 'string') {
               phone = location.phoneNumbers;
-            } else if (location.phoneNumbers.phoneNumber) {
-              // Format: { phoneNumber: "..." }
+            }
+            // Check for { phoneNumber: "..." } format
+            else if (location.phoneNumbers.phoneNumber) {
               phone = location.phoneNumbers.phoneNumber;
             }
           }
           
-          // Also check primaryPhone field
+          // Also check primaryPhone field at location level
           if (!phone && location.primaryPhone) {
             phone = typeof location.primaryPhone === 'string' 
               ? location.primaryPhone 
