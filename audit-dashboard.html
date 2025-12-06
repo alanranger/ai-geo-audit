@@ -2146,8 +2146,8 @@
         return 50; // neutral fallback
       }
 
-      // Filter to ranking queries (position > 0, <= 20, with impressions)
-      const ranking = queries.filter(q => q.position > 0 && q.position <= 20 && q.impressions > 0);
+      // Filter to ranking queries (position > 0, <= 30, with impressions) per design
+      const ranking = queries.filter(q => q.position > 0 && q.position <= 30 && q.impressions > 0);
 
       if (ranking.length === 0) {
         return 50; // neutral fallback
@@ -2159,9 +2159,11 @@
         ? ranking.reduce((s, q) => s + q.position * q.impressions, 0) / totalImpr
         : 0;
 
-      // Normalize position score (1-30 -> 100-0 per design, but we filter to <=20 so use 1-20)
-      // Design: rank_pos = clamp((30 - avgPosition_ranked) / 29, 0, 1) * 60
-      const posScore = normalisePosition(weightedPos, 1, 20) * 0.6; // Max 60 points
+      // Normalize position score per design: rank_pos = clamp((30 - avgPosition_ranked) / 29, 0, 1) * 60
+      // Map position 1-30 -> 100-0, then scale to max 60 points
+      const clampedPos = Math.max(1, Math.min(30, weightedPos));
+      const t = (30 - clampedPos) / 29; // 0..1 (1 at position 1, 0 at position 30)
+      const posScore = Math.max(0, Math.min(1, t)) * 60; // Max 60 points
 
       // Calculate top-10 impression share
       // Design: rank_share = clamp(share_top10, 0, 1) * 40
@@ -2169,7 +2171,7 @@
         .filter(q => q.position <= 10)
         .reduce((s, q) => s + q.impressions, 0);
       const shareTop10 = totalImpr > 0 ? top10Impr / totalImpr : 0; // 0-1
-      const shareScore = shareTop10 * 40; // Max 40 points
+      const shareScore = Math.max(0, Math.min(1, shareTop10)) * 40; // Max 40 points
 
       return posScore + shareScore; // 0-100
     }
