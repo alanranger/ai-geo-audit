@@ -2177,14 +2177,14 @@
         const schemaData = schemaAudit.data;
         const allTypes = new Set();
         
-        // Use allDetectedTypes if available (all types), otherwise fall back to schemaTypes (top 10)
+        // Use allDetectedTypes if available (all types), otherwise use schemaTypes (all types, sorted by count)
         if (schemaData.allDetectedTypes && Array.isArray(schemaData.allDetectedTypes)) {
           // Use all detected types for accurate calculation
           schemaData.allDetectedTypes.forEach(type => {
             if (type) allTypes.add(type);
           });
         } else if (schemaData.schemaTypes && Array.isArray(schemaData.schemaTypes)) {
-          // Fallback: collect from top 10 schemaTypes array (may miss some types)
+          // Fallback: collect from schemaTypes array (contains all types, sorted by count)
           schemaData.schemaTypes.forEach(item => {
             if (item.type) allTypes.add(item.type);
           });
@@ -2799,8 +2799,9 @@
                   contentSchemaDesc += ` <strong>Data Checked:</strong> Foundation schemas: ${foundationPresent}/4 (${foundationTypes.filter(t => allTypes.has(t)).join(', ') || 'none'}), Rich result types: ${richEligibleCount}/${richResultTypesList.length} eligible, Coverage: ${coverage}% (${pagesWithSchema}/${totalPages} pages), Type diversity: ${uniqueTypesCount} unique types. `;
                   
                   if (schemaTypes && schemaTypes.length > 0) {
-                    const topTypes = schemaTypes.slice(0, 10).map(t => `${t.type} (${t.count})`).join(', ');
-                    contentSchemaDesc += `Schema types found: ${topTypes}. `;
+                    // Show top 15 most common types for readability (still sorted by count)
+                    const topTypes = schemaTypes.slice(0, 15).map(t => `${t.type} (${t.count})`).join(', ');
+                    contentSchemaDesc += `Schema types found: ${topTypes}${schemaTypes.length > 15 ? '...' : ''}. `;
                   }
                   
                   if (schemaData.missingTypes && schemaData.missingTypes.length > 0) {
@@ -2873,9 +2874,15 @@
                         const schemaAuditData = schemaData.data;
                         const { coverage, missingSchemaCount, totalPages, pagesWithSchema, schemaTypes, richEligible, missingTypes } = schemaAuditData;
                         
-                        // Collect all types for analysis
+                        // Collect all types for analysis - use allDetectedTypes if available (all types), otherwise fall back to schemaTypes (top 10)
                         const allTypes = new Set();
-                        if (schemaTypes && Array.isArray(schemaTypes)) {
+                        if (schemaAuditData.allDetectedTypes && Array.isArray(schemaAuditData.allDetectedTypes)) {
+                          // Use all detected types for accurate calculation
+                          schemaAuditData.allDetectedTypes.forEach(type => {
+                            if (type) allTypes.add(type);
+                          });
+                        } else if (schemaTypes && Array.isArray(schemaTypes)) {
+                          // Fallback: collect from top 10 schemaTypes array (may miss some types)
                           schemaTypes.forEach(item => {
                             if (item.type) allTypes.add(item.type);
                           });
@@ -5213,8 +5220,15 @@
                 const schemaData = schemaAudit.data;
                 const { coverage, schemaTypes, richEligible } = schemaData;
                 
+                // Use allDetectedTypes if available (all types), otherwise fall back to schemaTypes (top 10)
                 const allTypes = new Set();
-                if (schemaTypes && Array.isArray(schemaTypes)) {
+                if (schemaData.allDetectedTypes && Array.isArray(schemaData.allDetectedTypes)) {
+                  // Use all detected types for accurate calculation
+                  schemaData.allDetectedTypes.forEach(type => {
+                    if (type) allTypes.add(type);
+                  });
+                } else if (schemaTypes && Array.isArray(schemaTypes)) {
+                  // Fallback: collect from top 10 schemaTypes array (may miss some types)
                   schemaTypes.forEach(item => {
                     if (item.type) allTypes.add(item.type);
                   });
