@@ -4488,19 +4488,19 @@
         }
         
         // Create a temporary container for the report
-        // Use a simpler approach: create it in the viewport but make it invisible
+        // Position it off-screen but keep it VISIBLE so html2canvas can capture it
         const reportContainer = document.createElement('div');
         reportContainer.id = 'pdfReportContainer';
-        reportContainer.style.position = 'fixed';
+        reportContainer.style.position = 'absolute';
+        reportContainer.style.left = '-10000px'; // Off-screen but still in DOM
         reportContainer.style.top = '0';
-        reportContainer.style.left = '0';
         reportContainer.style.width = '210mm';
         reportContainer.style.minHeight = '297mm';
         reportContainer.style.padding = '20mm';
         reportContainer.style.backgroundColor = '#ffffff';
         reportContainer.style.zIndex = '999999';
-        reportContainer.style.visibility = 'hidden'; // Hidden but still in viewport
-        reportContainer.style.opacity = '0';
+        reportContainer.style.visibility = 'visible'; // MUST be visible for html2canvas
+        reportContainer.style.opacity = '1'; // MUST be opaque for html2canvas
         reportContainer.style.pointerEvents = 'none';
         reportContainer.style.overflow = 'visible';
         
@@ -4509,9 +4509,10 @@
         
         console.log('[PDF] Container created and added to DOM');
         console.log('[PDF] Container dimensions:', reportContainer.offsetWidth, 'x', reportContainer.offsetHeight);
+        console.log('[PDF] Container innerHTML length:', reportContainer.innerHTML.length);
 
         // Wait for DOM to update
-        await new Promise(resolve => setTimeout(resolve, 300));
+        await new Promise(resolve => setTimeout(resolve, 500));
         
         console.log('[PDF] Converting charts to images...');
         
@@ -4557,19 +4558,21 @@
           }, 10000);
         });
 
-        // Make container visible to html2canvas (but still off-screen visually)
-        reportContainer.style.visibility = 'visible';
-        reportContainer.style.opacity = '1';
-        
         // Additional wait to ensure everything is rendered
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Verify container has content
+        console.log('[PDF] Final container check:');
+        console.log('[PDF] - scrollHeight:', reportContainer.scrollHeight);
+        console.log('[PDF] - offsetHeight:', reportContainer.offsetHeight);
+        console.log('[PDF] - scrollWidth:', reportContainer.scrollWidth);
+        console.log('[PDF] - offsetWidth:', reportContainer.offsetWidth);
+        console.log('[PDF] - children count:', reportContainer.children.length);
+        console.log('[PDF] - has text content:', reportContainer.textContent.length > 0);
+        console.log('[PDF] - text content length:', reportContainer.textContent.length);
+        console.log('[PDF] - innerHTML length:', reportContainer.innerHTML.length);
 
-        console.log('[PDF] Container ready for PDF generation');
-        console.log('[PDF] Container scrollHeight:', reportContainer.scrollHeight);
-        console.log('[PDF] Container has children:', reportContainer.children.length);
-        console.log('[PDF] Container innerHTML length:', reportContainer.innerHTML.length);
-
-        // Generate PDF with simpler options
+        // Generate PDF - container is already visible and off-screen
         const opt = {
           margin: [10, 10, 10, 10],
           filename: `AI-GEO-Audit-Report-${propertyUrl.replace(/https?:\/\//, '').replace(/\//g, '-')}-${auditDate}.pdf`,
@@ -4580,8 +4583,14 @@
             logging: true,
             backgroundColor: '#ffffff',
             allowTaint: true,
-            width: reportContainer.scrollWidth,
-            height: reportContainer.scrollHeight
+            width: reportContainer.scrollWidth || 794, // A4 width in pixels at 96 DPI
+            height: reportContainer.scrollHeight || 1123, // A4 height in pixels at 96 DPI
+            x: 0,
+            y: 0,
+            scrollX: 0,
+            scrollY: 0,
+            windowWidth: reportContainer.scrollWidth || 794,
+            windowHeight: reportContainer.scrollHeight || 1123
           },
           jsPDF: { 
             unit: 'mm', 
@@ -4590,7 +4599,10 @@
           }
         };
 
-        console.log('[PDF] Starting html2pdf generation with options:', JSON.stringify(opt, null, 2));
+        console.log('[PDF] Starting html2pdf generation');
+        console.log('[PDF] Container scrollWidth:', reportContainer.scrollWidth);
+        console.log('[PDF] Container scrollHeight:', reportContainer.scrollHeight);
+        console.log('[PDF] html2canvas options:', JSON.stringify(opt.html2canvas, null, 2));
         
         try {
           console.log('[PDF] Calling html2pdf().set().from().save()...');
@@ -4605,14 +4617,9 @@
         }
 
         // Wait a bit before cleanup to ensure PDF is saved
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, 2000));
 
-        // Clean up - hide container first, then remove
-        reportContainer.style.visibility = 'hidden';
-        reportContainer.style.opacity = '0';
-        
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
+        // Clean up - just remove the container
         if (document.body.contains(reportContainer)) {
           document.body.removeChild(reportContainer);
           console.log('[PDF] Container removed from DOM');
