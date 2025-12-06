@@ -3613,6 +3613,7 @@
           
           // If we have timeseries data, use it; otherwise fall back to mock data
           let localEntityData, serviceAreaData, authorityData, visibilityData, contentSchemaData;
+          let contentSchemaDataEstimated = []; // Declare in outer scope for use in chart creation
           let chartDates = dates;
           let chartDateObjects = []; // Store Date objects for period detection
           
@@ -3678,7 +3679,7 @@
             authorityData = [];
             visibilityData = [];
             contentSchemaData = [];
-            let contentSchemaDataEstimated = []; // For dashed line (dates without real data)
+            contentSchemaDataEstimated = []; // Reset array for timeseries data
             const allDateObjects = []; // Store Date objects for year detection
             const allDates = [];
             
@@ -4244,16 +4245,49 @@
         // Create a temporary container for the report
         const reportContainer = document.createElement('div');
         reportContainer.id = 'pdfReportContainer';
-        reportContainer.style.position = 'absolute';
-        reportContainer.style.left = '-9999px';
+        // Position off-screen but still in viewport for html2pdf to capture
+        reportContainer.style.position = 'fixed';
+        reportContainer.style.top = '0';
+        reportContainer.style.left = '0';
         reportContainer.style.width = '210mm'; // A4 width
         reportContainer.style.padding = '20mm';
         reportContainer.style.backgroundColor = '#ffffff';
+        reportContainer.style.zIndex = '9999';
         reportContainer.innerHTML = reportHTML;
         document.body.appendChild(reportContainer);
 
+        // Wait for DOM to update
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
         // Convert charts to images
         await convertChartsToImages(reportContainer);
+        
+        // Wait for images to load in the container
+        await new Promise(resolve => {
+          const images = reportContainer.querySelectorAll('img');
+          let loaded = 0;
+          if (images.length === 0) {
+            resolve();
+            return;
+          }
+          images.forEach(img => {
+            if (img.complete) {
+              loaded++;
+              if (loaded === images.length) resolve();
+            } else {
+              img.onload = () => {
+                loaded++;
+                if (loaded === images.length) resolve();
+              };
+              img.onerror = () => {
+                loaded++;
+                if (loaded === images.length) resolve();
+              };
+            }
+          });
+          // Timeout after 2 seconds
+          setTimeout(resolve, 2000);
+        });
 
         // Generate PDF
         const opt = {
@@ -4264,7 +4298,9 @@
             scale: 2,
             useCORS: true,
             logging: false,
-            backgroundColor: '#ffffff'
+            backgroundColor: '#ffffff',
+            allowTaint: true,
+            windowWidth: 1200
           },
           jsPDF: { 
             unit: 'mm', 
@@ -4320,7 +4356,7 @@
       }
 
       // Convert snippet readiness chart
-      const snippetCanvas = document.getElementById('snippetReadinessChart');
+      const snippetCanvas = document.getElementById('snippetReadinessPieChart');
       if (snippetCanvas && window.snippetReadinessChart) {
         const snippetImg = snippetCanvas.toDataURL('image/png');
         const snippetImgElement = container.querySelector('#snippetReadinessChartImg');
