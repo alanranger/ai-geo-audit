@@ -113,13 +113,46 @@ export default async function handler(req, res) {
       locations = locationsData.locations || [];
       console.log('[Local Signals] Found', locations.length, 'locations');
       
+      // Fetch detailed information for each location (phone numbers might be in details)
+      const locationDetails = [];
+      for (const location of locations) {
+        try {
+          // Get full location details with all fields
+          const locationDetailUrl = `https://mybusinessbusinessinformation.googleapis.com/v1/${location.name}?readMask=*`;
+          console.log('[Local Signals] Fetching location details:', locationDetailUrl);
+          
+          const detailResponse = await fetch(locationDetailUrl, {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+            },
+          });
+          
+          if (detailResponse.ok) {
+            const detailData = await detailResponse.json();
+            console.log('[Local Signals] Location detail data:', JSON.stringify(detailData, null, 2));
+            locationDetails.push(detailData);
+          } else {
+            console.warn('[Local Signals] Failed to get location details:', await detailResponse.text());
+            locationDetails.push(location); // Fall back to basic location data
+          }
+        } catch (error) {
+          console.error('[Local Signals] Error fetching location details:', error);
+          locationDetails.push(location); // Fall back to basic location data
+        }
+      }
+      
+      // Use detailed location data if available, otherwise use basic
+      const locationsToProcess = locationDetails.length > 0 ? locationDetails : locations;
+      
       // Debug: Log location data to see what we're getting
-      if (locations.length > 0) {
-        console.log('[Local Signals] First location data:', JSON.stringify(locations[0], null, 2));
+      if (locationsToProcess.length > 0) {
+        console.log('[Local Signals] First location data (full):', JSON.stringify(locationsToProcess[0], null, 2));
       }
       
       // Extract service areas and NAP data
-      locations.forEach(location => {
+      locationsToProcess.forEach(location => {
         // Service areas - check both SERVICE_AREA_BUSINESS and places data
         if (location.serviceArea) {
           // Extract from places if available
