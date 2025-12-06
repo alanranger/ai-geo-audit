@@ -1840,6 +1840,8 @@
         const scores = calculatePillarScores(searchData, savedAudit.schemaAudit);
         const snippetReadiness = calculateSnippetReadiness(scores, searchData);
         
+        debugLog(`Recalculated scores for ${newDateRange} days: ${JSON.stringify(scores)}`, 'info');
+        
         // Update saved audit with new data
         const updatedAudit = {
           ...savedAudit,
@@ -1854,7 +1856,8 @@
         saveAuditResults(scores, searchData, snippetReadiness, savedAudit.schemaAudit);
         localStorage.setItem('last_audit_results', JSON.stringify(updatedAudit));
         
-        // Update dashboard with new data
+        // Update dashboard with new data - ensure scores object has all required properties
+        debugLog(`Updating dashboard with scores: ${JSON.stringify(scores)}`, 'info');
         displayDashboard(scores, searchData, snippetReadiness, savedAudit.schemaAudit);
         
         showStatus(`Metrics updated for ${newDateRange} day period.`, 'success');
@@ -3798,14 +3801,14 @@
               const pointDate = point.date; // YYYY-MM-DD format
               const realScore = contentSchemaMap.get(pointDate);
               
-              if (realScore !== undefined) {
+              if (realScore !== undefined && realScore !== null) {
                 // We have real data for this date
                 contentSchemaData.push(realScore);
                 contentSchemaDataEstimated.push(null); // No estimated value
               } else {
-                // No real data - use current score as estimate
-                contentSchemaData.push(null); // No real value
-                contentSchemaDataEstimated.push(currentContentSchema); // Estimated value
+                // No real data for this date - use null (don't show estimated line)
+                contentSchemaData.push(null);
+                contentSchemaDataEstimated.push(null);
               }
               
               // Format date for chart (timeseries dates are YYYY-MM-DD)
@@ -3842,19 +3845,19 @@
                 authorityData.push(null);
                 visibilityData.push(null);
                 
-                // For Content/Schema, check if we have real data for this date
-                const realScore = contentSchemaMap.get(dateStr);
-                if (realScore !== undefined) {
-                  // We have real data for this date
-                  contentSchemaData.push(realScore);
-                  contentSchemaDataEstimated.push(null);
-                  debugLog(`✓ Added Content/Schema score (${realScore}) for ${dateStr} from Supabase`, 'info');
-                } else {
-                  // No real data - use current score as estimate
-                  contentSchemaData.push(null);
-                  contentSchemaDataEstimated.push(currentContentSchema);
-                  debugLog(`Using current Content/Schema score (${currentContentSchema}) as estimate for ${dateStr}`, 'info');
-                }
+              // For Content/Schema, check if we have real data for this date
+              const realScore = contentSchemaMap.get(dateStr);
+              if (realScore !== undefined && realScore !== null) {
+                // We have real data for this date
+                contentSchemaData.push(realScore);
+                contentSchemaDataEstimated.push(null);
+                debugLog(`✓ Added Content/Schema score (${realScore}) for ${dateStr} from Supabase`, 'info');
+              } else {
+                // No real data - use null (don't show estimated)
+                contentSchemaData.push(null);
+                contentSchemaDataEstimated.push(null);
+                debugLog(`No Content/Schema data for ${dateStr}`, 'info');
+              }
                 
                 // Move to next day
                 currentDate.setDate(currentDate.getDate() + 1);
@@ -4222,20 +4225,7 @@
                   pointRadius: 0,
                   pointHoverRadius: 5,
                   spanGaps: true // Connect across null values
-                },
-                // Estimated Content/Schema data (dashed line for dates without real data)
-                ...(contentSchemaDataEstimated && contentSchemaDataEstimated.some(v => v !== null) ? [{
-                  label: 'Content / Schema (Estimated)',
-                  data: contentSchemaDataEstimated,
-                  borderColor: 'rgba(107, 114, 128, 0.5)', // Lighter grey
-                  backgroundColor: 'rgba(107, 114, 128, 0.05)',
-                  borderWidth: 2,
-                  borderDash: [5, 5], // Dashed line
-                  tension: 0.4,
-                  pointRadius: 0,
-                  pointHoverRadius: 5,
-                  spanGaps: true
-                }] : [])
+                }
               ]
             },
             plugins: [ragBackgroundPlugin, yearLabelBoldPlugin, periodDividingLinePlugin],
