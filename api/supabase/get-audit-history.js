@@ -98,7 +98,13 @@ export default async function handler(req, res) {
       napConsistencyScore: record.nap_consistency_score,
       knowledgePanelDetected: record.knowledge_panel_detected,
       serviceAreas: record.service_areas || [],
-      locationsCount: record.service_areas ? (record.service_areas.length > 0 ? 1 : 0) : null // Infer from service_areas data
+      locationsCount: record.service_areas ? (record.service_areas.length > 0 ? 1 : 0) : null, // Infer from service_areas data
+      // Authority component scores (for historical Authority tracking)
+      authorityScore: record.authority_score,
+      authorityBehaviourScore: record.authority_behaviour_score,
+      authorityRankingScore: record.authority_ranking_score,
+      authorityBacklinkScore: record.authority_backlink_score,
+      authorityReviewScore: record.authority_review_score
     }));
 
     return res.status(200).json({

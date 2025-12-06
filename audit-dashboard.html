@@ -4192,6 +4192,11 @@
                       serviceAreaMap.set(normalizedDate, record.serviceAreaScore);
                       debugLog(`Mapped Service Area: ${normalizedDate} = ${record.serviceAreaScore}`, 'info');
                     }
+                    // Authority data (use stored Authority score if available, calculated with new formula)
+                    if (record.authorityScore !== null && record.authorityScore !== undefined) {
+                      authorityMap.set(normalizedDate, record.authorityScore);
+                      debugLog(`Mapped Authority: ${normalizedDate} = ${record.authorityScore}`, 'info');
+                    }
                   }
                 });
                 
@@ -4257,20 +4262,69 @@
             // Calculate pillar scores for each timeseries point
             // For Local Entity and Service Area: use historical Business Profile data if available,
             // otherwise use calculated data from GSC (derived calculation)
-            const calculatePillarFromMetrics = (position, ctr, dateStr = null) => {
+            const calculatePillarFromMetrics = (position, ctr, dateStr = null, topQueries = null) => {
               // Position score (same formula as main calculation)
               const clampedPos = Math.max(1, Math.min(40, position));
               const scale = (clampedPos - 1) / 39;
               const posScore = 100 - scale * 90;
               
-              // Authority: use exact formula with GSC values (same as main calculation)
-              // Convert ctr from percentage (0-100) to decimal (0-1), then apply formula
-              const ctrDecimal = ctr / 100; // Convert percentage to decimal (e.g., 10% -> 0.10)
-              const ctrScore = Math.min((ctrDecimal / 0.10) * 100, 100);
-              
               // Calculate each pillar (same formulas as main calculation)
               const visibility = clampScore(posScore);
-              const authority = clampScore(0.6 * ctrScore + 0.4 * posScore);
+              
+              // Authority: New 4-component model
+              // Check if we have stored Authority component scores for this date
+              let authority;
+              if (dateStr && authorityMap && authorityMap.has(dateStr)) {
+                // Use stored Authority score from Supabase (calculated with new formula)
+                authority = authorityMap.get(dateStr);
+                debugLog(`Authority: Using stored score (${authority}) for ${dateStr}`, 'info');
+              } else if (topQueries && Array.isArray(topQueries) && topQueries.length > 0) {
+                // We have topQueries data - use full 4-component calculation
+                const queriesForCalculation = topQueries.map(q => ({
+                  clicks: q.clicks || 0,
+                  impressions: q.impressions || 0,
+                  ctr: (q.ctr || 0) / 100, // Convert percentage to decimal
+                  position: q.position || 0
+                }));
+                
+                const behaviourScore = computeBehaviourScore(queriesForCalculation);
+                const rankingScore = computeRankingScore(queriesForCalculation);
+                const backlinkScore = 50; // Placeholder
+                const reviewScore = 50; // Placeholder
+                
+                authority = clampScore(
+                  0.4 * behaviourScore +
+                  0.2 * rankingScore +
+                  0.2 * backlinkScore +
+                  0.2 * reviewScore
+                );
+                debugLog(`Authority: Calculated from topQueries for ${dateStr || 'current'}: Behaviour=${behaviourScore.toFixed(1)}, Ranking=${rankingScore.toFixed(1)}, Final=${authority}`, 'info');
+              } else {
+                // Fallback: Simplified Authority calculation from aggregate metrics
+                // Convert ctr from percentage (0-100) to decimal (0-1)
+                const ctrDecimal = ctr / 100;
+                const ctrScore = Math.min((ctrDecimal / 0.10) * 100, 100);
+                
+                // Estimate Behaviour and Ranking scores from aggregate metrics
+                // Behaviour: Use aggregate CTR as proxy (simplified)
+                const estimatedBehaviourScore = Math.min(ctrScore * 0.7, 70); // Max 70 points
+                
+                // Ranking: Use position score (simplified)
+                const estimatedRankingScore = posScore * 0.6; // Max 60 points (position) + 40 (share estimate)
+                const estimatedShareScore = 20; // Conservative estimate for top-10 share
+                const estimatedRanking = estimatedRankingScore + estimatedShareScore;
+                
+                const backlinkScore = 50; // Placeholder
+                const reviewScore = 50; // Placeholder
+                
+                authority = clampScore(
+                  0.4 * estimatedBehaviourScore +
+                  0.2 * estimatedRanking +
+                  0.2 * backlinkScore +
+                  0.2 * reviewScore
+                );
+                debugLog(`Authority: Using simplified calculation from aggregate metrics for ${dateStr || 'current'}: Estimated Behaviour=${estimatedBehaviourScore.toFixed(1)}, Estimated Ranking=${estimatedRanking.toFixed(1)}, Final=${authority}`, 'info');
+              }
               
               // For Local Entity and Service Area:
               // 1. Check for historical Business Profile data for this specific date
