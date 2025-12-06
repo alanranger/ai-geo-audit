@@ -879,13 +879,12 @@ export default async function handler(req, res) {
       .join(', '));
     console.log(`  Missing rich result types:`, RICH_RESULT_TYPES.filter(type => !richEligible[type]).join(', '));
     
-    // Convert schemaTypes to array format, limit to top 10 for display
+    // Convert schemaTypes to array format, sorted by count (most common first)
     const schemaTypesArray = Object.entries(schemaTypes)
       .map(([type, count]) => ({ type, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 10);
+      .sort((a, b) => b.count - a.count);
     
-    // Return ALL detected types as an array for calculation purposes
+    // Return ALL detected types as an array for accurate calculations
     const allTypesArray = Array.from(allTypes);
     
     return res.status(200).json({
@@ -896,8 +895,8 @@ export default async function handler(req, res) {
         pagesWithSchema, // Pages with inline schema
         pagesWithInheritedSchema, // Pages with inherited schema only
         coverage: Math.round(coverage * 100) / 100, // Coverage based on inline schema only
-        schemaTypes: schemaTypesArray, // Top 10 for display
-        allDetectedTypes: allTypesArray, // ALL detected types for accurate calculation
+        schemaTypes: schemaTypesArray, // All types sorted by count (most common first)
+        allDetectedTypes: allTypesArray, // ALL detected types for accurate calculation (same as schemaTypes but as array of strings)
         missingTypes: missingTypes.length > 0 ? missingTypes : undefined,
         missingSchemaCount: missingSchemaPages.length,
         missingSchemaPages: missingSchemaPages.length > 0 ? missingSchemaPages : undefined,
