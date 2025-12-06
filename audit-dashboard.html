@@ -948,6 +948,16 @@
         <div class="snippet-readiness-gauge">
           <h3 style="margin-top: 0; color: var(--brand-orange);">Snippet Readiness Gauge</h3>
           <p style="font-size: 0.9rem; color: #666; margin-bottom: 1.5rem;">Snippet readiness summarises how likely your content is to be lifted into featured snippets and AI answers. It reflects three ingredients: snippet-friendly answer blocks, suitable schema (FAQ/HowTo/Article/Course/Event) and existing rich-result behaviour.</p>
+          <div id="contentSchemaExplanation" style="display: none; background: #f0f9ff; border-left: 4px solid #3b82f6; padding: 1rem; margin-bottom: 1rem; border-radius: 4px; font-size: 0.85rem; color: #1e40af;">
+            <strong>Why is Content/Schema 77%?</strong> The score is calculated from four weighted components:
+            <ul style="margin: 0.5rem 0 0 1.5rem; padding: 0;">
+              <li><strong>Foundation (30%):</strong> <span id="explainFoundation">-</span> - Missing foundation schemas reduce this component</li>
+              <li><strong>Rich Results (35%):</strong> <span id="explainRich">-</span> - Not all rich result types are eligible yet</li>
+              <li><strong>Coverage (20%):</strong> <span id="explainCoverage">-</span> - Some pages still lack schema markup</li>
+              <li><strong>Diversity (15%):</strong> <span id="explainDiversity">-</span> - Limited schema type variety across the site</li>
+            </ul>
+            <div style="margin-top: 0.5rem; font-weight: 600;">Formula: (Foundation × 30%) + (Rich Results × 35%) + (Coverage × 20%) + (Diversity × 15%) = 77%</div>
+          </div>
           
           <!-- Overall Combined Score -->
           <div style="text-align: center; margin-bottom: 1.5rem;">
@@ -2837,13 +2847,14 @@
           return weight * scorePercent; // Fill this percentage of the segment
         });
         
+        // Create chart with custom label plugin for in-segment labels
         window.snippetReadinessChart = new Chart(pieChartCanvas, {
           type: 'doughnut',
           data: {
             labels: [
-              `Content/Schema (${contentSchemaScore}%)`,
-              `Visibility (${visibilityScore}%)`,
-              `Authority (${authorityScore}%)`
+              `Content/Schema`,
+              `Visibility`,
+              `Authority`
             ],
             datasets: [
               {
@@ -2883,7 +2894,6 @@
                   label: function(context) {
                     const datasetIndex = context.datasetIndex;
                     const index = context.dataIndex;
-                    const label = context.label || '';
                     
                     if (datasetIndex === 0) {
                       // Outer ring: Show weighting
@@ -2898,7 +2908,60 @@
                 }
               }
             }
-          }
+          },
+          plugins: [{
+            id: 'segmentLabels',
+            afterDraw: (chart) => {
+              const ctx = chart.ctx;
+              const meta = chart.getDatasetMeta(0); // Use outer ring for positioning
+              const centerX = chart.chartArea.left + (chart.chartArea.right - chart.chartArea.left) / 2;
+              const centerY = chart.chartArea.top + (chart.chartArea.bottom - chart.chartArea.top) / 2;
+              const radius = (chart.chartArea.right - chart.chartArea.left) / 2;
+              
+              // Calculate mid-radius for label placement (between outer and inner rings)
+              const midRadius = radius * 0.675; // Between 60% and 75% cutout
+              
+              meta.data.forEach((segment, index) => {
+                const model = segment;
+                const startAngle = model.startAngle;
+                const endAngle = model.endAngle;
+                const midAngle = (startAngle + endAngle) / 2;
+                
+                // Calculate label position
+                const labelX = centerX + Math.cos(midAngle) * midRadius;
+                const labelY = centerY + Math.sin(midAngle) * midRadius;
+                
+                // Get component names
+                const componentNames = ['Content/Schema', 'Visibility', 'Authority'];
+                const weight = weights[index];
+                const score = scoresArray[index];
+                
+                // Draw label background for better readability
+                ctx.save();
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+                ctx.beginPath();
+                ctx.arc(labelX, labelY, 35, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Draw text
+                ctx.fillStyle = colors[index];
+                ctx.font = 'bold 10px system-ui';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                
+                // First line: Component name and weight
+                ctx.fillText(`${componentNames[index]}`, labelX, labelY - 8);
+                ctx.fillText(`Weight: ${weight}%`, labelX, labelY + 2);
+                
+                // Second line: Score percentage
+                ctx.fillStyle = scoresArray[index] >= 70 ? '#10b981' : scoresArray[index] >= 40 ? '#f59e0b' : '#ef4444';
+                ctx.font = 'bold 11px system-ui';
+                ctx.fillText(`Score: ${score}%`, labelX, labelY + 14);
+                
+                ctx.restore();
+              });
+            }
+          }]
         });
         
         // Create custom legend with scores
