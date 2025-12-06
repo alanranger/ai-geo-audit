@@ -3027,19 +3027,26 @@
                 ctx.stroke();
                 ctx.restore();
                 
-                // Draw weight percentage in outer segment (bold black text)
+                // Draw weight percentage in outer segment (larger, white for grey segment, black for others)
                 const outerSegmentMidAngle = (startAngle + endAngle) / 2;
-                const outerSegmentMidRadius = (outerRadius + outerInnerRadius) / 2; // Middle of outer ring
-                const weightTextX = centerX + Math.cos(outerSegmentMidAngle) * outerSegmentMidRadius;
-                const weightTextY = centerY + Math.sin(outerSegmentMidAngle) * outerSegmentMidRadius;
+                // Position closer to outer edge but still inside segment (about 75% of outer ring width)
+                const outerSegmentTextRadius = outerRadius - ((outerRadius - outerInnerRadius) * 0.25);
+                const weightTextX = centerX + Math.cos(outerSegmentMidAngle) * outerSegmentTextRadius;
+                const weightTextY = centerY + Math.sin(outerSegmentMidAngle) * outerSegmentTextRadius;
                 
                 ctx.save();
-                ctx.fillStyle = '#000000'; // Black text
-                ctx.font = 'bold 14px system-ui';
+                // Use white text for grey segment (Content/Schema), black for others
+                const textColor = colors[index] === '#6b7280' ? '#ffffff' : '#000000';
+                ctx.fillStyle = textColor;
+                ctx.font = 'bold 18px system-ui'; // Increased from 14px to 18px
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
-                // Add white shadow for readability on colored background
-                ctx.shadowColor = 'rgba(255, 255, 255, 0.9)';
+                // Add shadow for readability (dark shadow for white text, light shadow for black text)
+                if (textColor === '#ffffff') {
+                  ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+                } else {
+                  ctx.shadowColor = 'rgba(255, 255, 255, 0.9)';
+                }
                 ctx.shadowBlur = 4;
                 ctx.shadowOffsetX = 0;
                 ctx.shadowOffsetY = 0;
