@@ -4516,79 +4516,78 @@
           throw new Error('Could not open print window. Please allow popups for this site.');
         }
         
-        // Escape the reportHTML to prevent breaking the JavaScript
-        const escapedReportHTML = reportHTML.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\${/g, '\\${');
-        
         // Create filename safely
         const safePropertyUrl = propertyUrl.replace(/https?:\/\//, '').replace(/\//g, '-');
         const pdfFilename = 'AI-GEO-Audit-Report-' + safePropertyUrl + '-' + auditDate + '.pdf';
         
-        // Write HTML content to new window with html2pdf script
-        // Use string concatenation to avoid template literal issues
-        const fullHTML = '<!DOCTYPE html>\n' +
-'<html>\n' +
-'<head>\n' +
-'  <title>AI GEO Audit Report</title>\n' +
-'  <style>\n' +
-'    body { \n' +
-'      font-family: system-ui, -apple-system, sans-serif; \n' +
-'      padding: 20mm; \n' +
-'      background: #ffffff;\n' +
-'      color: #222222;\n' +
-'    }\n' +
-'    img { max-width: 100%; height: auto; display: block; margin: 10px auto; }\n' +
-'    h1, h2, h3 { color: #E57200; }\n' +
-'    table { width: 100%; border-collapse: collapse; margin: 20px 0; }\n' +
-'    th, td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }\n' +
-'    th { background-color: #f2f2f2; }\n' +
-'  </style>\n' +
-'</head>\n' +
-'<body>\n' +
-escapedReportHTML + '\n' +
-'<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>\n' +
-'<script>\n' +
-'  // Wait for content to load, then generate PDF\n' +
-'  window.onload = function() {\n' +
-'    setTimeout(function() {\n' +
-'      if (window.html2pdf) {\n' +
-'        const opt = {\n' +
-'          margin: [10, 10, 10, 10],\n' +
-'          filename: "' + pdfFilename + '",\n' +
-'          image: { type: "jpeg", quality: 0.98 },\n' +
-'          html2canvas: { \n' +
-'            scale: 2,\n' +
-'            useCORS: true,\n' +
-'            backgroundColor: "#ffffff",\n' +
-'            allowTaint: true\n' +
-'          },\n' +
-'          jsPDF: { \n' +
-'            unit: "mm", \n' +
-'            format: "a4", \n' +
-'            orientation: "portrait" \n' +
-'          }\n' +
-'        };\n' +
-'        \n' +
-'        window.html2pdf().set(opt).from(document.body).save().then(function() {\n' +
-'          console.log("PDF generated successfully");\n' +
-'          // Close window after a short delay\n' +
-'          setTimeout(function() {\n' +
-'            window.close();\n' +
-'          }, 1000);\n' +
-'        }).catch(function(error) {\n' +
-'          console.error("PDF generation error:", error);\n' +
-'          alert("PDF generation failed: " + error.message);\n' +
-'        });\n' +
-'      } else {\n' +
-'        console.error("html2pdf not loaded");\n' +
-'        alert("PDF library not loaded. Please try again.");\n' +
-'      }\n' +
-'    }, 1000); // Wait 1 second for images to load\n' +
-'  };\n' +
-'</script>\n' +
-'</body>\n' +
-'</html>';
+        // Write the document structure first
+        printWindow.document.open();
+        printWindow.document.write('<!DOCTYPE html>\n');
+        printWindow.document.write('<html>\n');
+        printWindow.document.write('<head>\n');
+        printWindow.document.write('  <title>AI GEO Audit Report</title>\n');
+        printWindow.document.write('  <style>\n');
+        printWindow.document.write('    body { \n');
+        printWindow.document.write('      font-family: system-ui, -apple-system, sans-serif; \n');
+        printWindow.document.write('      padding: 20mm; \n');
+        printWindow.document.write('      background: #ffffff;\n');
+        printWindow.document.write('      color: #222222;\n');
+        printWindow.document.write('    }\n');
+        printWindow.document.write('    img { max-width: 100%; height: auto; display: block; margin: 10px auto; }\n');
+        printWindow.document.write('    h1, h2, h3 { color: #E57200; }\n');
+        printWindow.document.write('    table { width: 100%; border-collapse: collapse; margin: 20px 0; }\n');
+        printWindow.document.write('    th, td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }\n');
+        printWindow.document.write('    th { background-color: #f2f2f2; }\n');
+        printWindow.document.write('  </style>\n');
+        printWindow.document.write('</head>\n');
+        printWindow.document.write('<body>\n');
         
-        printWindow.document.write(fullHTML);
+        // Write the report HTML directly (no escaping needed since we're using document.write)
+        printWindow.document.write(reportHTML);
+        printWindow.document.write('\n');
+        
+        // Write the script tag
+        printWindow.document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>\n');
+        printWindow.document.write('<script>\n');
+        printWindow.document.write('  // Wait for content to load, then generate PDF\n');
+        printWindow.document.write('  window.onload = function() {\n');
+        printWindow.document.write('    setTimeout(function() {\n');
+        printWindow.document.write('      if (window.html2pdf) {\n');
+        printWindow.document.write('        const opt = {\n');
+        printWindow.document.write('          margin: [10, 10, 10, 10],\n');
+        printWindow.document.write('          filename: ' + JSON.stringify(pdfFilename) + ',\n');
+        printWindow.document.write('          image: { type: "jpeg", quality: 0.98 },\n');
+        printWindow.document.write('          html2canvas: { \n');
+        printWindow.document.write('            scale: 2,\n');
+        printWindow.document.write('            useCORS: true,\n');
+        printWindow.document.write('            backgroundColor: "#ffffff",\n');
+        printWindow.document.write('            allowTaint: true\n');
+        printWindow.document.write('          },\n');
+        printWindow.document.write('          jsPDF: { \n');
+        printWindow.document.write('            unit: "mm", \n');
+        printWindow.document.write('            format: "a4", \n');
+        printWindow.document.write('            orientation: "portrait" \n');
+        printWindow.document.write('          }\n');
+        printWindow.document.write('        };\n');
+        printWindow.document.write('        \n');
+        printWindow.document.write('        window.html2pdf().set(opt).from(document.body).save().then(function() {\n');
+        printWindow.document.write('          console.log("PDF generated successfully");\n');
+        printWindow.document.write('          setTimeout(function() {\n');
+        printWindow.document.write('            window.close();\n');
+        printWindow.document.write('          }, 1000);\n');
+        printWindow.document.write('        }).catch(function(error) {\n');
+        printWindow.document.write('          console.error("PDF generation error:", error);\n');
+        printWindow.document.write('          alert("PDF generation failed: " + error.message);\n');
+        printWindow.document.write('        });\n');
+        printWindow.document.write('      } else {\n');
+        printWindow.document.write('        console.error("html2pdf not loaded");\n');
+        printWindow.document.write('        alert("PDF library not loaded. Please try again.");\n');
+        printWindow.document.write('      }\n');
+        printWindow.document.write('    }, 1000);\n');
+        printWindow.document.write('  };\n');
+        printWindow.document.write('</script>\n');
+        printWindow.document.write('</body>\n');
+        printWindow.document.write('</html>\n');
         printWindow.document.close();
         
         console.log('[PDF] New window opened with report content');
