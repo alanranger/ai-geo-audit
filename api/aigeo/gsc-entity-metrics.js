@@ -113,7 +113,11 @@ export default async function handler(req, res) {
     
     if (supabaseUrl && supabaseKey) {
       try {
-        const cacheResponse = await fetch(`${process.env.VERCEL_URL || 'http://localhost:3000'}/api/supabase/get-gsc-timeseries?propertyUrl=${encodeURIComponent(siteUrl)}&startDate=${startDate}&endDate=${endDate}`);
+        // Use relative path for internal API calls (works in Vercel)
+        const baseUrl = req.headers.host 
+          ? `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}`
+          : 'http://localhost:3000';
+        const cacheResponse = await fetch(`${baseUrl}/api/supabase/get-gsc-timeseries?propertyUrl=${encodeURIComponent(siteUrl)}&startDate=${startDate}&endDate=${endDate}`);
         if (cacheResponse.ok) {
           const cacheData = await cacheResponse.json();
           if (cacheData.status === 'ok' && cacheData.data && cacheData.data.length > 0) {
@@ -187,7 +191,10 @@ export default async function handler(req, res) {
       
       // Save new timeseries data to Supabase (async, don't wait)
       if (newTimeseries.length > 0 && supabaseUrl && supabaseKey) {
-        fetch(`${process.env.VERCEL_URL || 'http://localhost:3000'}/api/supabase/save-gsc-timeseries`, {
+        const baseUrl = req.headers.host 
+          ? `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}`
+          : 'http://localhost:3000';
+        fetch(`${baseUrl}/api/supabase/save-gsc-timeseries`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
