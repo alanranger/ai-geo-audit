@@ -3710,6 +3710,39 @@
               allDates.push(dateObj.toLocaleDateString('en-GB', dateFormat));
             });
             
+            // Add today's date if it's not already in the timeseries
+            // This ensures we can show today's audit data even if GSC hasn't updated yet
+            const today = new Date();
+            const todayStr = today.toISOString().split('T')[0];
+            const lastTimeseriesDate = timeseries.length > 0 ? timeseries[timeseries.length - 1].date : null;
+            
+            if (lastTimeseriesDate !== todayStr) {
+              // Today is not in the timeseries - add it
+              const todayDateObj = new Date(todayStr);
+              allDateObjects.push(todayDateObj);
+              allDates.push(todayDateObj.toLocaleDateString('en-GB', dateFormat));
+              
+              // Add null values for GSC-based pillars (no data for today yet)
+              localEntityData.push(null);
+              serviceAreaData.push(null);
+              authorityData.push(null);
+              visibilityData.push(null);
+              
+              // For Content/Schema, check if we have real data for today
+              const todayRealScore = contentSchemaMap.get(todayStr);
+              if (todayRealScore !== undefined) {
+                // We have real data for today
+                contentSchemaData.push(todayRealScore);
+                contentSchemaDataEstimated.push(null);
+                debugLog(`✓ Added today's Content/Schema score (${todayRealScore}) from Supabase`, 'info');
+              } else {
+                // Use current score as estimate for today
+                contentSchemaData.push(null);
+                contentSchemaDataEstimated.push(currentContentSchema);
+                debugLog(`Using current Content/Schema score (${currentContentSchema}) as estimate for today`, 'info');
+              }
+            }
+            
             // Apply label spacing to dates with year detection (show every labelStep-th label)
             let lastVisibleYear = null;
             chartDates = allDates.map((d, i) => {
