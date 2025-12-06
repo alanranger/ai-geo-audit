@@ -4516,69 +4516,77 @@
           throw new Error('Could not open print window. Please allow popups for this site.');
         }
         
-        // Write HTML content to new window with html2pdf script
-        const fullHTML = `<!DOCTYPE html>
-<html>
-<head>
-  <title>AI GEO Audit Report</title>
-  <style>
-    body { 
-      font-family: system-ui, -apple-system, sans-serif; 
-      padding: 20mm; 
-      background: #ffffff;
-      color: #222222;
-    }
-    img { max-width: 100%; height: auto; display: block; margin: 10px auto; }
-    h1, h2, h3 { color: #E57200; }
-    table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-    th, td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
-    th { background-color: #f2f2f2; }
-  </style>
-</head>
-<body>
-${reportHTML}
-<script src='https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js'></script>
-<script>
-  // Wait for content to load, then generate PDF
-  window.onload = function() {
-    setTimeout(function() {
-      if (window.html2pdf) {
-        const opt = {
-          margin: [10, 10, 10, 10],
-          filename: 'AI-GEO-Audit-Report-${propertyUrl.replace(/https?:\/\//, '').replace(/\//g, '-')}-${auditDate}.pdf',
-          image: { type: 'jpeg', quality: 0.98 },
-          html2canvas: { 
-            scale: 2,
-            useCORS: true,
-            backgroundColor: '#ffffff',
-            allowTaint: true
-          },
-          jsPDF: { 
-            unit: 'mm', 
-            format: 'a4', 
-            orientation: 'portrait' 
-          }
-        };
+        // Escape the reportHTML to prevent breaking the JavaScript
+        const escapedReportHTML = reportHTML.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\${/g, '\\${');
         
-        window.html2pdf().set(opt).from(document.body).save().then(function() {
-          console.log('PDF generated successfully');
-          // Close window after a short delay
-          setTimeout(function() {
-            window.close();
-          }, 1000);
-        }).catch(function(error) {
-          console.error('PDF generation error:', error);
-          alert('PDF generation failed: ' + error.message);
-        });
-      } else {
-        console.error('html2pdf not loaded');
-        alert('PDF library not loaded. Please try again.');
-      }
-    }, 1000); // Wait 1 second for images to load
-  };
-</script>
-</body>
-</html>`;
+        // Create filename safely
+        const safePropertyUrl = propertyUrl.replace(/https?:\/\//, '').replace(/\//g, '-');
+        const pdfFilename = 'AI-GEO-Audit-Report-' + safePropertyUrl + '-' + auditDate + '.pdf';
+        
+        // Write HTML content to new window with html2pdf script
+        // Use string concatenation to avoid template literal issues
+        const fullHTML = '<!DOCTYPE html>\n' +
+'<html>\n' +
+'<head>\n' +
+'  <title>AI GEO Audit Report</title>\n' +
+'  <style>\n' +
+'    body { \n' +
+'      font-family: system-ui, -apple-system, sans-serif; \n' +
+'      padding: 20mm; \n' +
+'      background: #ffffff;\n' +
+'      color: #222222;\n' +
+'    }\n' +
+'    img { max-width: 100%; height: auto; display: block; margin: 10px auto; }\n' +
+'    h1, h2, h3 { color: #E57200; }\n' +
+'    table { width: 100%; border-collapse: collapse; margin: 20px 0; }\n' +
+'    th, td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }\n' +
+'    th { background-color: #f2f2f2; }\n' +
+'  </style>\n' +
+'</head>\n' +
+'<body>\n' +
+escapedReportHTML + '\n' +
+'<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>\n' +
+'<script>\n' +
+'  // Wait for content to load, then generate PDF\n' +
+'  window.onload = function() {\n' +
+'    setTimeout(function() {\n' +
+'      if (window.html2pdf) {\n' +
+'        const opt = {\n' +
+'          margin: [10, 10, 10, 10],\n' +
+'          filename: "' + pdfFilename + '",\n' +
+'          image: { type: "jpeg", quality: 0.98 },\n' +
+'          html2canvas: { \n' +
+'            scale: 2,\n' +
+'            useCORS: true,\n' +
+'            backgroundColor: "#ffffff",\n' +
+'            allowTaint: true\n' +
+'          },\n' +
+'          jsPDF: { \n' +
+'            unit: "mm", \n' +
+'            format: "a4", \n' +
+'            orientation: "portrait" \n' +
+'          }\n' +
+'        };\n' +
+'        \n' +
+'        window.html2pdf().set(opt).from(document.body).save().then(function() {\n' +
+'          console.log("PDF generated successfully");\n' +
+'          // Close window after a short delay\n' +
+'          setTimeout(function() {\n' +
+'            window.close();\n' +
+'          }, 1000);\n' +
+'        }).catch(function(error) {\n' +
+'          console.error("PDF generation error:", error);\n' +
+'          alert("PDF generation failed: " + error.message);\n' +
+'        });\n' +
+'      } else {\n' +
+'        console.error("html2pdf not loaded");\n' +
+'        alert("PDF library not loaded. Please try again.");\n' +
+'      }\n' +
+'    }, 1000); // Wait 1 second for images to load\n' +
+'  };\n' +
+'</script>\n' +
+'</body>\n' +
+'</html>';
         
         printWindow.document.write(fullHTML);
         printWindow.document.close();
