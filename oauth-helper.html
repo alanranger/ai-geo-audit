@@ -176,68 +176,6 @@
     }
 
     // Removed exchangeCode function - the callback endpoint handles it automatically
-
-      // Show loading
-      const resultDiv = document.getElementById('result');
-      resultDiv.style.display = 'block';
-      resultDiv.className = 'step info';
-      resultDiv.innerHTML = '<div class="step-number">Exchanging code...</div><p>Please wait...</p>';
-
-      try {
-        // Exchange code for tokens
-        const response = await fetch('https://oauth2.googleapis.com/token', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          body: new URLSearchParams({
-            client_id: clientId,
-            client_secret: clientSecret,
-            code: code,
-            grant_type: 'authorization_code',
-            redirect_uri: redirectUri,
-          }),
-        });
-
-        const data = await response.json();
-
-        if (response.ok && data.refresh_token) {
-          resultDiv.className = 'step success';
-          resultDiv.innerHTML = `
-            <div class="step-number">✓ Success!</div>
-            <p><strong>Your new refresh token (with Business Profile scope):</strong></p>
-            <div class="code-block">${data.refresh_token}</div>
-            <p style="margin-top: 15px;"><strong>Next steps:</strong></p>
-            <ol>
-              <li>Copy the refresh token above</li>
-              <li>Go to Vercel → Your Project → Settings → Environment Variables</li>
-              <li>Update the <code>GOOGLE_REFRESH_TOKEN</code> variable with the new token</li>
-              <li>Redeploy your application</li>
-            </ol>
-            <p style="margin-top: 15px; color: #666; font-size: 14px;">
-              <strong>Note:</strong> This token includes both GSC and Business Profile scopes, so it will work for both APIs.
-            </p>
-          `;
-        } else {
-          throw new Error(data.error_description || data.error || 'Failed to exchange code');
-        }
-      } catch (error) {
-        resultDiv.className = 'step error';
-        resultDiv.innerHTML = `
-          <div class="step-number">✗ Error</div>
-          <p><strong>Failed to exchange code:</strong></p>
-          <div class="code-block">${error.message}</div>
-          <p style="margin-top: 10px;">Please check:</p>
-          <ul>
-            <li>The redirect URL is correct</li>
-            <li>The code hasn't expired (codes expire after 10 minutes)</li>
-            <li>Your Client ID and Secret are correct</li>
-          </ul>
-        `;
-      }
-    }
-
-    // No need to check for URL params since we're using 'oob' redirect
   </script>
 </body>
 </html>
