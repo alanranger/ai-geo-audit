@@ -794,7 +794,7 @@
         <p style="margin: 0; font-size: 0.9rem; color: #856404;"><strong>Generate Reports:</strong> Create comprehensive PDF reports containing all audit data, charts, and pillar score definitions.</p>
       </div>
       <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
-        <button class="btn" onclick="generatePDFReport()" id="generatePdfBtn" style="background: #dc2626; color: white; border-color: #dc2626;" title="Generate a comprehensive PDF report containing all audit data, charts, pillar scores, definitions, and metrics. The report will include all sections from the dashboard.">
+        <button class="btn" onclick="try { console.log('[PDF] Button clicked!'); generatePDFReport(); } catch(e) { console.error('[PDF] Error in onclick:', e); alert('Error generating PDF: ' + e.message); }" id="generatePdfBtn" style="background: #dc2626; color: white; border-color: #dc2626;" title="Generate a comprehensive PDF report containing all audit data, charts, pillar scores, definitions, and metrics. The report will include all sections from the dashboard.">
           📄 Generate PDF Report
         </button>
         <div id="pdfStatus" style="font-size: 0.85rem; color: #666; margin-left: 0.5rem;"></div>
@@ -4404,32 +4404,58 @@
 
     // PDF Report Generation
     async function generatePDFReport() {
+      console.log('[PDF] ===== PDF GENERATION STARTED =====');
+      
       const btn = document.getElementById('generatePdfBtn');
       const statusDiv = document.getElementById('pdfStatus');
       
-      // Check if html2pdf is available
-      if (typeof html2pdf === 'undefined') {
-        statusDiv.textContent = '❌ PDF library not loaded. Please refresh the page.';
-        statusDiv.style.color = '#dc2626';
-        console.error('[PDF] html2pdf is not defined');
+      if (!btn) {
+        console.error('[PDF] Generate PDF button not found!');
+        alert('Error: Generate PDF button not found. Please refresh the page.');
         return;
       }
+      
+      if (!statusDiv) {
+        console.error('[PDF] PDF status div not found!');
+      }
+      
+      // Check if html2pdf is available
+      if (typeof html2pdf === 'undefined') {
+        const errorMsg = '❌ PDF library not loaded. Please refresh the page.';
+        if (statusDiv) {
+          statusDiv.textContent = errorMsg;
+          statusDiv.style.color = '#dc2626';
+        }
+        console.error('[PDF] html2pdf is not defined');
+        alert(errorMsg);
+        return;
+      }
+      
+      console.log('[PDF] html2pdf library is available');
       
       // Check if dashboard has data
       const dashboard = document.getElementById('dashboard');
       if (!dashboard || dashboard.style.display === 'none') {
-        statusDiv.textContent = '⚠️ Please run an audit first to generate a report.';
-        statusDiv.style.color = '#dc2626';
+        const errorMsg = '⚠️ Please run an audit first to generate a report.';
+        if (statusDiv) {
+          statusDiv.textContent = errorMsg;
+          statusDiv.style.color = '#dc2626';
+        }
+        console.warn('[PDF] Dashboard not available or hidden');
         return;
       }
+
+      console.log('[PDF] Dashboard is available and visible');
 
       // Disable button and show status
       btn.disabled = true;
       btn.style.opacity = '0.6';
-      statusDiv.textContent = '⏳ Generating PDF report...';
-      statusDiv.style.color = '#2563eb';
+      if (statusDiv) {
+        statusDiv.textContent = '⏳ Generating PDF report...';
+        statusDiv.style.color = '#2563eb';
+      }
       
-      console.log('[PDF] Starting PDF generation...');
+      console.log('[PDF] Starting PDF generation process...');
 
       try {
         // Load saved audit data
@@ -4454,30 +4480,40 @@
         console.log('[PDF] Report HTML length:', reportHTML.length);
         console.log('[PDF] Report HTML preview (first 500 chars):', reportHTML.substring(0, 500));
         
+        // Remove any existing PDF container
+        const existingContainer = document.getElementById('pdfReportContainer');
+        if (existingContainer) {
+          existingContainer.remove();
+          console.log('[PDF] Removed existing PDF container');
+        }
+        
         // Create a temporary container for the report
-        // Position it absolutely off-screen but still in the DOM for html2canvas
+        // Use a simpler approach: create it in the viewport but make it invisible
         const reportContainer = document.createElement('div');
         reportContainer.id = 'pdfReportContainer';
-        reportContainer.style.position = 'absolute';
-        reportContainer.style.left = '-9999px';
+        reportContainer.style.position = 'fixed';
         reportContainer.style.top = '0';
-        reportContainer.style.width = '210mm'; // A4 width
-        reportContainer.style.minHeight = '297mm'; // A4 height
+        reportContainer.style.left = '0';
+        reportContainer.style.width = '210mm';
+        reportContainer.style.minHeight = '297mm';
         reportContainer.style.padding = '20mm';
         reportContainer.style.backgroundColor = '#ffffff';
-        reportContainer.style.zIndex = '99999';
-        reportContainer.style.visibility = 'visible';
-        reportContainer.style.opacity = '1';
-        reportContainer.style.display = 'block';
+        reportContainer.style.zIndex = '999999';
+        reportContainer.style.visibility = 'hidden'; // Hidden but still in viewport
+        reportContainer.style.opacity = '0';
+        reportContainer.style.pointerEvents = 'none';
         reportContainer.style.overflow = 'visible';
         
         reportContainer.innerHTML = reportHTML;
         document.body.appendChild(reportContainer);
+        
+        console.log('[PDF] Container created and added to DOM');
+        console.log('[PDF] Container dimensions:', reportContainer.offsetWidth, 'x', reportContainer.offsetHeight);
 
         // Wait for DOM to update
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise(resolve => setTimeout(resolve, 300));
         
-        console.log('[PDF] Container added to DOM, converting charts...');
+        console.log('[PDF] Converting charts to images...');
         
         // Convert charts to images
         await convertChartsToImages(reportContainer);
@@ -4490,6 +4526,7 @@
           console.log('[PDF] Found', images.length, 'images in container');
           let loaded = 0;
           if (images.length === 0) {
+            console.log('[PDF] No images to load');
             resolve();
             return;
           }
@@ -4515,20 +4552,24 @@
           });
           // Timeout after 10 seconds
           setTimeout(() => {
-            console.log('[PDF] Image load timeout reached');
+            console.log('[PDF] Image load timeout reached, loaded:', loaded, 'of', images.length);
             resolve();
           }, 10000);
         });
 
+        // Make container visible to html2canvas (but still off-screen visually)
+        reportContainer.style.visibility = 'visible';
+        reportContainer.style.opacity = '1';
+        
         // Additional wait to ensure everything is rendered
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, 500));
 
-        console.log('[PDF] Container dimensions:', reportContainer.offsetWidth, 'x', reportContainer.offsetHeight);
+        console.log('[PDF] Container ready for PDF generation');
         console.log('[PDF] Container scrollHeight:', reportContainer.scrollHeight);
         console.log('[PDF] Container has children:', reportContainer.children.length);
         console.log('[PDF] Container innerHTML length:', reportContainer.innerHTML.length);
 
-        // Generate PDF
+        // Generate PDF with simpler options
         const opt = {
           margin: [10, 10, 10, 10],
           filename: `AI-GEO-Audit-Report-${propertyUrl.replace(/https?:\/\//, '').replace(/\//g, '-')}-${auditDate}.pdf`,
@@ -4539,12 +4580,8 @@
             logging: true,
             backgroundColor: '#ffffff',
             allowTaint: true,
-            windowWidth: reportContainer.scrollWidth || 1200,
-            windowHeight: reportContainer.scrollHeight || 1600,
-            x: 0,
-            y: 0,
-            scrollX: 0,
-            scrollY: 0
+            width: reportContainer.scrollWidth,
+            height: reportContainer.scrollHeight
           },
           jsPDF: { 
             unit: 'mm', 
@@ -4553,53 +4590,61 @@
           }
         };
 
-        console.log('[PDF] Starting html2pdf generation...');
-        
-        // Move container into viewport temporarily for html2canvas
-        const originalLeft = reportContainer.style.left;
-        reportContainer.style.left = '0';
-        reportContainer.style.position = 'fixed';
-        
-        // Wait for repositioning
-        await new Promise(resolve => setTimeout(resolve, 500));
+        console.log('[PDF] Starting html2pdf generation with options:', JSON.stringify(opt, null, 2));
         
         try {
           console.log('[PDF] Calling html2pdf().set().from().save()...');
-          await html2pdf().set(opt).from(reportContainer).save();
+          const pdfPromise = html2pdf().set(opt).from(reportContainer).save();
+          console.log('[PDF] html2pdf promise created, awaiting...');
+          await pdfPromise;
           console.log('[PDF] html2pdf() completed successfully');
         } catch (pdfError) {
           console.error('[PDF] html2pdf error:', pdfError);
+          console.error('[PDF] Error stack:', pdfError.stack);
           throw new Error(`PDF generation failed: ${pdfError.message}`);
-        } finally {
-          // Restore original position
-          reportContainer.style.left = originalLeft;
-          reportContainer.style.position = 'absolute';
         }
 
         // Wait a bit before cleanup to ensure PDF is saved
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise(resolve => setTimeout(resolve, 1000));
 
-        // Clean up
+        // Clean up - hide container first, then remove
+        reportContainer.style.visibility = 'hidden';
+        reportContainer.style.opacity = '0';
+        
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
         if (document.body.contains(reportContainer)) {
           document.body.removeChild(reportContainer);
           console.log('[PDF] Container removed from DOM');
         }
         
-        statusDiv.textContent = '✅ PDF report generated successfully!';
-        statusDiv.style.color = '#10b981';
-        
-        setTimeout(() => {
-          statusDiv.textContent = '';
-        }, 3000);
+        if (statusDiv) {
+          statusDiv.textContent = '✅ PDF report generated successfully!';
+          statusDiv.style.color = '#10b981';
+          
+          setTimeout(() => {
+            statusDiv.textContent = '';
+          }, 3000);
+        }
 
       } catch (error) {
-        console.error('[PDF] PDF generation error:', error);
+        console.error('[PDF] ===== PDF GENERATION ERROR =====');
+        console.error('[PDF] Error message:', error.message);
         console.error('[PDF] Error stack:', error.stack);
-        statusDiv.textContent = `❌ Error: ${error.message}`;
-        statusDiv.style.color = '#dc2626';
+        console.error('[PDF] Error object:', error);
+        
+        const errorMsg = `❌ Error: ${error.message}`;
+        if (statusDiv) {
+          statusDiv.textContent = errorMsg;
+          statusDiv.style.color = '#dc2626';
+        }
+        
+        // Also show alert so user definitely sees the error
+        alert(`PDF Generation Failed:\n\n${error.message}\n\nCheck the browser console for more details.`);
       } finally {
         btn.disabled = false;
         btn.style.opacity = '1';
+        console.log('[PDF] ===== PDF GENERATION COMPLETE =====');
       }
     }
 
