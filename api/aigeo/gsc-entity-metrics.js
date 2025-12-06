@@ -186,7 +186,13 @@ export default async function handler(req, res) {
               position: row.position || 0
             });
           });
+          console.log(`[GSC Cache] Fetched ${newTimeseries.length} timeseries records from GSC API for date range ${fetchStartDate} to ${fetchEndDate}`);
+        } else {
+          console.warn(`[GSC Cache] GSC API returned no rows for timeseries. Response:`, JSON.stringify(timeseriesData).substring(0, 200));
         }
+      } else {
+        const errorText = await timeseriesResponse.text();
+        console.error(`[GSC Cache] GSC API timeseries request failed: ${timeseriesResponse.status} - ${errorText}`);
       }
       
       // Save new timeseries data to Supabase directly (don't wait, but log errors)
