@@ -4694,8 +4694,25 @@
       setTimeout(() => {
         const savedAudit = loadAuditResults();
         if (savedAudit && savedAudit.scores && savedAudit.searchData) {
-          // Check if saved audit's date range matches current date range
-          // Get the actual current value from the input field (which should be set by loadConfig)
+          // If saved audit has a date range, use it to set the input field and button
+          // This ensures the UI matches the saved audit's date range
+          if (savedAudit.dateRange) {
+            const savedDateRange = savedAudit.dateRange;
+            document.getElementById('dateRange').value = savedDateRange;
+            // Update active button to match saved date range
+            document.querySelectorAll('.date-range-btn').forEach(btn => {
+              btn.classList.remove('active');
+              const btnDays = parseInt(btn.getAttribute('data-days'));
+              if (btnDays === savedDateRange) {
+                btn.classList.add('active');
+              }
+            });
+            // Update localStorage to match
+            localStorage.setItem('gsc_date_range', savedDateRange);
+            debugLog(`Set date range to ${savedDateRange} to match saved audit`, 'info');
+          }
+          
+          // Now check if they match (they should, since we just set it)
           const currentDateRange = parseInt(document.getElementById('dateRange')?.value) || 30;
           const savedDateRange = savedAudit.dateRange || currentDateRange;
           
@@ -4718,7 +4735,7 @@
             // Don't show dashboard - user needs to run new audit
           }
         }
-      }, 0);
+      }, 100); // Increased delay to ensure loadConfig completes
       
       debugLog('=== PAGE LOAD: Initialization complete ===', 'success');
     });
