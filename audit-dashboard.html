@@ -2815,10 +2815,21 @@
                   }
                   
                   // Check if Review schema is detected (even if not in top 10 types)
-                  const hasReviewSchema = allTypes.has('Review') || schemaTypes?.some(t => t.type === 'Review');
+                  const hasReviewSchema = allTypes.has('Review');
                   if (hasReviewSchema) {
-                    const reviewCount = schemaTypes?.find(t => t.type === 'Review')?.count || 0;
-                    contentSchemaDesc += `Review schema detected (${reviewCount} instances) - matches GSC review snippets data.`;
+                    // Try to get count from schemaTypes array first, otherwise check schemaData for actual count
+                    let reviewCount = schemaTypes?.find(t => t.type === 'Review')?.count || 0;
+                    // If not in top 10, check if we have schemaData with all types info
+                    if (reviewCount === 0 && schemaData.schemaTypes) {
+                      // schemaTypes in response is top 10, but we need to check if Review exists
+                      // Since it's in allTypes, it exists, but we don't have the exact count
+                      // Just indicate it's detected without showing 0
+                      contentSchemaDesc += `Review schema detected - matches GSC review snippets data. `;
+                    } else if (reviewCount > 0) {
+                      contentSchemaDesc += `Review schema detected (${reviewCount} instances) - matches GSC review snippets data. `;
+                    } else {
+                      contentSchemaDesc += `Review schema detected - matches GSC review snippets data. `;
+                    }
                   }
                 } else {
                   contentSchemaDesc += ' <strong>Data Checked:</strong> Foundation schemas (Organization, Person, WebSite, BreadcrumbList), Rich result eligibility (Article, Event, Course, FAQ, HowTo, VideoObject, Recipe, Product, LocalBusiness, Review), schema coverage percentage, schema type diversity.';
