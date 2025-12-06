@@ -3683,8 +3683,14 @@
               try {
                 contentSchemaHistory = await fetchContentSchemaHistory(propertyUrl, startDate, endDate);
                 // Create a map of dates to Content/Schema scores from Supabase
+                // Normalize dates to YYYY-MM-DD format (Supabase might return with timezone)
                 contentSchemaHistory.forEach(record => {
-                  contentSchemaMap.set(record.date, record.contentSchemaScore);
+                  // Ensure date is in YYYY-MM-DD format (strip time if present)
+                  const normalizedDate = record.date ? record.date.split('T')[0] : null;
+                  if (normalizedDate) {
+                    contentSchemaMap.set(normalizedDate, record.contentSchemaScore);
+                    debugLog(`Mapped Content/Schema: ${normalizedDate} = ${record.contentSchemaScore}`, 'info');
+                  }
                 });
                 
                 const hasHistoricalData = contentSchemaHistory.length > 0;
@@ -3759,19 +3765,58 @@
               allDates.push(dateObj.toLocaleDateString('en-GB', dateFormat));
             });
             
-            // Add today's date if it's not already in the timeseries
-            // This ensures we can show today's audit data even if GSC hasn't updated yet
+            // Fill in missing dates between last GSC date and today
+            // GSC data is delayed by 2-3 days, so we need to add missing dates
             const today = new Date();
+            today.setHours(0, 0, 0, 0); // Normalize to start of day
             const todayStr = today.toISOString().split('T')[0];
             const lastTimeseriesDate = timeseries.length > 0 ? timeseries[timeseries.length - 1].date : null;
             
-            if (lastTimeseriesDate !== todayStr) {
-              // Today is not in the timeseries - add it
+            if (lastTimeseriesDate) {
+              const lastDate = new Date(lastTimeseriesDate);
+              lastDate.setHours(0, 0, 0, 0);
+              
+              // Add all missing dates from day after last GSC date to today
+              const currentDate = new Date(lastDate);
+              currentDate.setDate(currentDate.getDate() + 1); // Start from day after last GSC date
+              
+              while (currentDate <= today) {
+                const dateStr = currentDate.toISOString().split('T')[0];
+                const dateObj = new Date(dateStr);
+                
+                allDateObjects.push(dateObj);
+                allDates.push(dateObj.toLocaleDateString('en-GB', dateFormat));
+                
+                // Add null values for GSC-based pillars (no data for these dates yet)
+                localEntityData.push(null);
+                serviceAreaData.push(null);
+                authorityData.push(null);
+                visibilityData.push(null);
+                
+                // For Content/Schema, check if we have real data for this date
+                const realScore = contentSchemaMap.get(dateStr);
+                if (realScore !== undefined) {
+                  // We have real data for this date
+                  contentSchemaData.push(realScore);
+                  contentSchemaDataEstimated.push(null);
+                  debugLog(`✓ Added Content/Schema score (${realScore}) for ${dateStr} from Supabase`, 'info');
+                } else {
+                  // No real data - use current score as estimate
+                  contentSchemaData.push(null);
+                  contentSchemaDataEstimated.push(currentContentSchema);
+                  debugLog(`Using current Content/Schema score (${currentContentSchema}) as estimate for ${dateStr}`, 'info');
+                }
+                
+                // Move to next day
+                currentDate.setDate(currentDate.getDate() + 1);
+              }
+            } else if (timeseries.length === 0) {
+              // No timeseries data at all - just add today
               const todayDateObj = new Date(todayStr);
               allDateObjects.push(todayDateObj);
               allDates.push(todayDateObj.toLocaleDateString('en-GB', dateFormat));
               
-              // Add null values for GSC-based pillars (no data for today yet)
+              // Add null values for GSC-based pillars
               localEntityData.push(null);
               serviceAreaData.push(null);
               authorityData.push(null);
@@ -3780,12 +3825,10 @@
               // For Content/Schema, check if we have real data for today
               const todayRealScore = contentSchemaMap.get(todayStr);
               if (todayRealScore !== undefined) {
-                // We have real data for today
                 contentSchemaData.push(todayRealScore);
                 contentSchemaDataEstimated.push(null);
                 debugLog(`✓ Added today's Content/Schema score (${todayRealScore}) from Supabase`, 'info');
               } else {
-                // Use current score as estimate for today
                 contentSchemaData.push(null);
                 contentSchemaDataEstimated.push(currentContentSchema);
                 debugLog(`Using current Content/Schema score (${currentContentSchema}) as estimate for today`, 'info');
