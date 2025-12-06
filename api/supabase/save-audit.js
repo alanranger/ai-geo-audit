@@ -89,6 +89,12 @@ export default async function handler(req, res) {
       content_schema_score: scores?.contentSchema || null,
       snippet_readiness: snippetReadiness || null,
       
+      // Authority Component Scores (for historical tracking and debugging)
+      authority_behaviour_score: scores?.authorityComponents?.behaviour || null,
+      authority_ranking_score: scores?.authorityComponents?.ranking || null,
+      authority_backlink_score: scores?.authorityComponents?.backlinks || null,
+      authority_review_score: scores?.authorityComponents?.reviews || null,
+      
       // GSC Data (for reference)
       gsc_clicks: searchData?.totalClicks || null,
       gsc_impressions: searchData?.totalImpressions || null,
