@@ -2097,10 +2097,86 @@
     }
 
     // Calculate pillar scores (deterministic, based on GSC data and schema audit)
+    // Helper functions for Authority score calculation
+    function normalisePct(value, max) {
+      // value in 0-1 range; scale to 0-100 and cap
+      const pct = Math.max(0, Math.min(1, value / max));
+      return pct * 100;
+    }
+
+    function normalisePosition(pos, minPos, maxPos) {
+      // map [minPos..maxPos] -> [100..10], clamp outside range
+      const clamped = Math.max(minPos, Math.min(maxPos, pos));
+      const t = (clamped - minPos) / (maxPos - minPos); // 0..1
+      return 100 - t * 90; // 100 at best, 10 at worst
+    }
+
+    function computeBehaviourScore(queries) {
+      if (!queries || !Array.isArray(queries) || queries.length === 0) {
+        return 50; // neutral fallback
+      }
+
+      // Filter to ranking queries (position > 0, <= 20, with impressions)
+      const ranking = queries.filter(q => q.position > 0 && q.position <= 20 && q.impressions > 0);
+
+      if (ranking.length === 0) {
+        return 50; // neutral fallback
+      }
+
+      // Calculate CTR for all ranking queries
+      const totalClicks = ranking.reduce((s, q) => s + q.clicks, 0);
+      const totalImpr = ranking.reduce((s, q) => s + q.impressions, 0);
+      const ctrAll = totalImpr > 0 ? totalClicks / totalImpr : 0; // 0-1
+
+      // Calculate CTR for top-10 queries
+      const top10 = ranking.filter(q => q.position <= 10);
+      const top10Clicks = top10.reduce((s, q) => s + q.clicks, 0);
+      const top10Impr = top10.reduce((s, q) => s + q.impressions, 0);
+      const ctrTop10 = top10Impr > 0 ? top10Clicks / top10Impr : ctrAll;
+
+      // Normalize CTR scores (0-15% avg CTR is "normal", >25% is excellent)
+      const ctrScoreAll = normalisePct(ctrAll, 0.15);
+      const ctrScoreTop10 = normalisePct(ctrTop10, 0.25);
+
+      return 0.7 * ctrScoreAll + 0.3 * ctrScoreTop10;
+    }
+
+    function computeRankingScore(queries) {
+      if (!queries || !Array.isArray(queries) || queries.length === 0) {
+        return 50; // neutral fallback
+      }
+
+      // Filter to ranking queries (position > 0, <= 20, with impressions)
+      const ranking = queries.filter(q => q.position > 0 && q.position <= 20 && q.impressions > 0);
+
+      if (ranking.length === 0) {
+        return 50; // neutral fallback
+      }
+
+      // Calculate weighted average position
+      const totalImpr = ranking.reduce((s, q) => s + q.impressions, 0);
+      const weightedPos = totalImpr > 0
+        ? ranking.reduce((s, q) => s + q.position * q.impressions, 0) / totalImpr
+        : 0;
+
+      // Normalize position score (1-20 -> 100-10)
+      const posScore = normalisePosition(weightedPos, 1, 20);
+
+      // Calculate top-10 impression share
+      const top10Impr = ranking
+        .filter(q => q.position <= 10)
+        .reduce((s, q) => s + q.impressions, 0);
+      const shareTop10 = totalImpr > 0 ? top10Impr / totalImpr : 0; // 0-1
+      const shareScore = shareTop10 * 100; // 0-100
+
+      return 0.6 * posScore + 0.4 * shareScore;
+    }
+
     function calculatePillarScores(data, schemaAudit = null, localSignals = null) {
       // Use new API response format - get values from GSC overview
       const position = data.averagePosition || 40; // 1 (best) - 100 (worst)
       const ctr = data.ctr || 0; // 0-100 percentage from API (e.g., 10 = 10%)
+      const topQueries = data.topQueries || []; // Array of query objects with clicks, impressions, ctr, position
 
       // Map average position (1-40) -> 100-10 (better position => higher score)
       const posScore = (() => {
@@ -2112,11 +2188,30 @@
       // Visibility is primarily driven by position
       const visibility = clampScore(posScore);
 
-      // Authority: use exact formula with GSC values
-      // Convert ctr from percentage (0-100) to decimal (0-1), then apply formula
-      const ctrDecimal = ctr / 100; // Convert percentage to decimal (e.g., 10% -> 0.10)
-      const ctrScore = Math.min((ctrDecimal / 0.10) * 100, 100);
-      const authority = clampScore(0.6 * ctrScore + 0.4 * posScore);
+      // Authority: New 4-component model
+      // Convert topQueries CTR from percentage (0-100) to decimal (0-1) for calculations
+      const queriesForCalculation = topQueries.map(q => ({
+        clicks: q.clicks || 0,
+        impressions: q.impressions || 0,
+        ctr: (q.ctr || 0) / 100, // Convert percentage to decimal
+        position: q.position || 0
+      }));
+
+      const behaviourScore = computeBehaviourScore(queriesForCalculation);
+      const rankingScore = computeRankingScore(queriesForCalculation);
+
+      // Temporary neutral placeholders until Phases 2 & 3 are wired
+      const backlinkScore = 50;
+      const reviewScore = 50;
+
+      const authority = clampScore(
+        0.4 * behaviourScore +
+        0.2 * rankingScore +
+        0.2 * backlinkScore +
+        0.2 * reviewScore
+      );
+
+      debugLog(`Authority calculation: Behaviour=${behaviourScore.toFixed(1)}, Ranking=${rankingScore.toFixed(1)}, Backlinks=${backlinkScore}, Reviews=${reviewScore}, Final=${authority}`, 'info');
 
       // Local Entity: Use real Business Profile data if available, otherwise fallback to derived calculation
       let localEntity;
