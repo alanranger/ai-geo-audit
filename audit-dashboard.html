@@ -3903,14 +3903,19 @@
           if (timeseries.length > 0) {
             // Fetch historical Content/Schema data from Supabase (async operation)
             const propertyUrl = document.getElementById('propertyUrl')?.value || '';
+            // Use the actual date range from timeseries data (not calculated from today)
+            // This ensures we query the correct year (2024 vs 2025)
+            const timeseriesStartDate = timeseries[0].date; // First date in timeseries
+            const timeseriesEndDate = timeseries[timeseries.length - 1].date; // Last date in timeseries
             // Use today's date (declare as 'let' so it can be reused later)
             let today = new Date();
-            const endDate = today.toISOString().split('T')[0];
-            const startDateObj = new Date(today);
-            startDateObj.setDate(startDateObj.getDate() - dateRange);
-            const startDate = startDateObj.toISOString().split('T')[0];
+            const todayStr = today.toISOString().split('T')[0];
+            // Query from timeseries start to today (to catch any data beyond timeseries)
+            const startDate = timeseriesStartDate;
+            const endDate = todayStr; // Use today, not timeseries end date
             
             debugLog(`Fetching Content/Schema history from Supabase: ${startDate} to ${endDate}`, 'info');
+            debugLog(`Timeseries date range: ${timeseriesStartDate} to ${timeseriesEndDate}`, 'info');
             
             // Fetch historical data asynchronously (includes Content/Schema AND Business Profile data)
             if (propertyUrl) {
