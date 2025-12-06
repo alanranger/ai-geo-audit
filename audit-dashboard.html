@@ -2232,12 +2232,13 @@
 
       // Review Score: Phase 2 - Use real review data if available
       let reviewScore = 50; // Default placeholder
-      if (localSignals && localSignals.status === 'ok' && localSignals.data) {
-        const gbpRating = localSignals.data.gbpRating || 0;
-        const gbpCount = localSignals.data.gbpReviewCount || 0;
-        const siteRating = siteReviews?.siteRating || 0;
-        const siteCount = siteReviews?.siteReviewCount || 0;
-        
+      const gbpRating = (localSignals && localSignals.status === 'ok' && localSignals.data) ? (localSignals.data.gbpRating || 0) : 0;
+      const gbpCount = (localSignals && localSignals.status === 'ok' && localSignals.data) ? (localSignals.data.gbpReviewCount || 0) : 0;
+      const siteRating = siteReviews?.siteRating || 0;
+      const siteCount = siteReviews?.siteReviewCount || 0;
+      
+      // Calculate review score if we have any review data (GBP or site)
+      if (gbpRating > 0 || gbpCount > 0 || siteRating > 0 || siteCount > 0) {
         reviewScore = computeReviewScore({
           gbpRating,
           gbpCount,
@@ -2291,6 +2292,9 @@
         debugLog(`Local Entity: NAP=${localData.napConsistencyScore || 0}, Knowledge Panel=${localData.knowledgePanelDetected}, Locations=${localData.locations?.length || 0}, Final=${localEntity}`, 'info');
       } else {
         // Fallback: derived calculation (old method)
+        // Calculate ctrScore from ctr (which is 0-100 percentage)
+        const ctrDecimal = ctr / 100; // Convert percentage to decimal (e.g., 10% -> 0.10)
+        const ctrScore = Math.min((ctrDecimal / 0.10) * 100, 100);
         localEntity = clampScore(60 + 0.3 * (posScore - 50) + 0.2 * (ctrScore - 50));
         debugLog('Local Entity: Using fallback calculation (no Business Profile data)', 'warn');
       }
