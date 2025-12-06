@@ -4547,46 +4547,36 @@
         printWindow.document.write(safeReportHTML);
         printWindow.document.write('\n');
         
-        // Write the script tag
-        printWindow.document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>\n');
+        // Build the script content as a single string to avoid syntax issues
+        const scriptContent = '  window.onload = function() {\n' +
+          '    setTimeout(function() {\n' +
+          '      if (window.html2pdf) {\n' +
+          '        const opt = {\n' +
+          '          margin: [10, 10, 10, 10],\n' +
+          '          filename: ' + JSON.stringify(pdfFilename) + ',\n' +
+          '          image: { type: "jpeg", quality: 0.98 },\n' +
+          '          html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff", allowTaint: true },\n' +
+          '          jsPDF: { unit: "mm", format: "a4", orientation: "portrait" }\n' +
+          '        };\n' +
+          '        window.html2pdf().set(opt).from(document.body).save().then(function() {\n' +
+          '          console.log("PDF generated successfully");\n' +
+          '          setTimeout(function() { window.close(); }, 1000);\n' +
+          '        }).catch(function(error) {\n' +
+          '          console.error("PDF generation error:", error);\n' +
+          '          alert("PDF generation failed: " + error.message);\n' +
+          '        });\n' +
+          '      } else {\n' +
+          '        console.error("html2pdf not loaded");\n' +
+          '        alert("PDF library not loaded. Please try again.");\n' +
+          '      }\n' +
+          '    }, 1000);\n' +
+          '  };';
+        
+        // Write the script tags
+        printWindow.document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"><\/script>\n');
         printWindow.document.write('<script>\n');
-        printWindow.document.write('  // Wait for content to load, then generate PDF\n');
-        printWindow.document.write('  window.onload = function() {\n');
-        printWindow.document.write('    setTimeout(function() {\n');
-        printWindow.document.write('      if (window.html2pdf) {\n');
-        printWindow.document.write('        const opt = {\n');
-        printWindow.document.write('          margin: [10, 10, 10, 10],\n');
-        printWindow.document.write('          filename: ' + JSON.stringify(pdfFilename) + ',\n');
-        printWindow.document.write('          image: { type: "jpeg", quality: 0.98 },\n');
-        printWindow.document.write('          html2canvas: { \n');
-        printWindow.document.write('            scale: 2,\n');
-        printWindow.document.write('            useCORS: true,\n');
-        printWindow.document.write('            backgroundColor: "#ffffff",\n');
-        printWindow.document.write('            allowTaint: true\n');
-        printWindow.document.write('          },\n');
-        printWindow.document.write('          jsPDF: { \n');
-        printWindow.document.write('            unit: "mm", \n');
-        printWindow.document.write('            format: "a4", \n');
-        printWindow.document.write('            orientation: "portrait" \n');
-        printWindow.document.write('          }\n');
-        printWindow.document.write('        };\n');
-        printWindow.document.write('        \n');
-        printWindow.document.write('        window.html2pdf().set(opt).from(document.body).save().then(function() {\n');
-        printWindow.document.write('          console.log("PDF generated successfully");\n');
-        printWindow.document.write('          setTimeout(function() {\n');
-        printWindow.document.write('            window.close();\n');
-        printWindow.document.write('          }, 1000);\n');
-        printWindow.document.write('        }).catch(function(error) {\n');
-        printWindow.document.write('          console.error("PDF generation error:", error);\n');
-        printWindow.document.write('          alert("PDF generation failed: " + error.message);\n');
-        printWindow.document.write('        });\n');
-        printWindow.document.write('      } else {\n');
-        printWindow.document.write('        console.error("html2pdf not loaded");\n');
-        printWindow.document.write('        alert("PDF library not loaded. Please try again.");\n');
-        printWindow.document.write('      }\n');
-        printWindow.document.write('    }, 1000);\n');
-        printWindow.document.write('  };\n');
-        printWindow.document.write('</script>\n');
+        printWindow.document.write(scriptContent);
+        printWindow.document.write('\n<\/script>\n');
         printWindow.document.write('</body>\n');
         printWindow.document.write('</html>\n');
         printWindow.document.close();
