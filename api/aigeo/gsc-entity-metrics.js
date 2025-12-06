@@ -102,35 +102,124 @@ export default async function handler(req, res) {
     const avgPosition = overviewRow.position || 0;
     const ctr = overviewRow.ctr ? overviewRow.ctr * 100 : (totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0);
     
-    // 2. Get timeseries data (by date)
-    const timeseriesResponse = await fetch(searchConsoleUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        startDate,
-        endDate,
-        dimensions: ['date'],
-        rowLimit: 1000,
-      }),
-    });
+    // 2. Get timeseries data (by date) - WITH CACHING
+    let timeseries = [];
+    let storedTimeseries = [];
+    let missingDates = [];
     
-    const timeseries = [];
-    if (timeseriesResponse.ok) {
-      const timeseriesData = await timeseriesResponse.json();
-      if (timeseriesData.rows && Array.isArray(timeseriesData.rows)) {
-        timeseriesData.rows.forEach(row => {
-          timeseries.push({
-            date: row.keys[0],
-            clicks: row.clicks || 0,
-            impressions: row.impressions || 0,
-            ctr: row.ctr ? row.ctr * 100 : 0,
-            position: row.position || 0
-          });
-        });
+    // Check Supabase for cached timeseries data
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    
+    if (supabaseUrl && supabaseKey) {
+      try {
+        const cacheResponse = await fetch(`${process.env.VERCEL_URL || 'http://localhost:3000'}/api/supabase/get-gsc-timeseries?propertyUrl=${encodeURIComponent(siteUrl)}&startDate=${startDate}&endDate=${endDate}`);
+        if (cacheResponse.ok) {
+          const cacheData = await cacheResponse.json();
+          if (cacheData.status === 'ok' && cacheData.data && cacheData.data.length > 0) {
+            storedTimeseries = cacheData.data;
+            console.log(`[GSC Cache] Found ${storedTimeseries.length} cached timeseries records`);
+            
+            // Create a set of dates we have in cache
+            const cachedDates = new Set(storedTimeseries.map(r => r.date));
+            
+            // Generate all dates in range and find missing ones
+            const start = new Date(startDate);
+            const end = new Date(endDate);
+            for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+              const dateStr = d.toISOString().split('T')[0];
+              if (!cachedDates.has(dateStr)) {
+                missingDates.push(dateStr);
+              }
+            }
+            
+            console.log(`[GSC Cache] Missing ${missingDates.length} dates, will fetch from GSC API`);
+          }
+        }
+      } catch (cacheError) {
+        console.warn('[GSC Cache] Error checking cache, will fetch all from GSC API:', cacheError.message);
+        // If cache check fails, fetch all dates
+        missingDates = null; // null means fetch all
       }
+    } else {
+      // Supabase not configured, fetch all dates
+      missingDates = null;
+    }
+    
+    // Fetch missing dates from GSC API (or all dates if cache unavailable)
+    if (missingDates === null || missingDates.length > 0) {
+      const fetchStartDate = missingDates && missingDates.length > 0 
+        ? missingDates[0] // Fetch from first missing date
+        : startDate;
+      const fetchEndDate = missingDates && missingDates.length > 0
+        ? missingDates[missingDates.length - 1] // Fetch to last missing date
+        : endDate;
+      
+      const timeseriesResponse = await fetch(searchConsoleUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          startDate: fetchStartDate,
+          endDate: fetchEndDate,
+          dimensions: ['date'],
+          rowLimit: 1000,
+        }),
+      });
+      
+      let newTimeseries = [];
+      if (timeseriesResponse.ok) {
+        const timeseriesData = await timeseriesResponse.json();
+        if (timeseriesData.rows && Array.isArray(timeseriesData.rows)) {
+          timeseriesData.rows.forEach(row => {
+            newTimeseries.push({
+              date: row.keys[0],
+              clicks: row.clicks || 0,
+              impressions: row.impressions || 0,
+              ctr: row.ctr ? row.ctr * 100 : 0,
+              position: row.position || 0
+            });
+          });
+        }
+      }
+      
+      // Save new timeseries data to Supabase (async, don't wait)
+      if (newTimeseries.length > 0 && supabaseUrl && supabaseKey) {
+        fetch(`${process.env.VERCEL_URL || 'http://localhost:3000'}/api/supabase/save-gsc-timeseries`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            propertyUrl: siteUrl,
+            timeseries: newTimeseries
+          })
+        }).catch(err => console.warn('[GSC Cache] Failed to save to cache:', err.message));
+      }
+      
+      // Merge stored + new data
+      const allDates = new Map();
+      
+      // Add stored data
+      storedTimeseries.forEach(point => {
+        allDates.set(point.date, point);
+      });
+      
+      // Add/overwrite with new data
+      newTimeseries.forEach(point => {
+        allDates.set(point.date, point);
+      });
+      
+      // Convert to sorted array
+      timeseries = Array.from(allDates.values()).sort((a, b) => 
+        new Date(a.date) - new Date(b.date)
+      );
+      
+      console.log(`[GSC Cache] Merged ${storedTimeseries.length} stored + ${newTimeseries.length} new = ${timeseries.length} total records`);
+    } else {
+      // All dates are in cache, use stored data
+      timeseries = storedTimeseries;
+      console.log(`[GSC Cache] Using ${timeseries.length} cached records (no GSC API call needed)`);
     }
     
     // 3. Get top queries
