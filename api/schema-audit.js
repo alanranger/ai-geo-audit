@@ -856,6 +856,18 @@ export default async function handler(req, res) {
     const commonTypes = ['Organization', 'Person', 'LocalBusiness', 'WebSite', 'BreadcrumbList'];
     const missingTypes = commonTypes.filter(type => !allTypes.has(type));
     
+    // Debug: Log all detected types and check for BreadcrumbList and Review
+    console.log('🔍 SCHEMA TYPE DETECTION DEBUG:');
+    console.log(`  Total unique types detected: ${allTypes.size}`);
+    console.log(`  All types: ${Array.from(allTypes).sort().join(', ')}`);
+    console.log(`  BreadcrumbList detected: ${allTypes.has('BreadcrumbList') ? 'YES' : 'NO'}`);
+    console.log(`  Review detected: ${allTypes.has('Review') ? 'YES' : 'NO'}`);
+    console.log(`  Schema types counts:`, Object.entries(schemaTypes)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 15)
+      .map(([type, count]) => `${type}: ${count}`)
+      .join(', '));
+    
     // Convert schemaTypes to array format, limit to top 10
     const schemaTypesArray = Object.entries(schemaTypes)
       .map(([type, count]) => ({ type, count }))
