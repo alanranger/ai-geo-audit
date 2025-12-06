@@ -4407,6 +4407,14 @@
       const btn = document.getElementById('generatePdfBtn');
       const statusDiv = document.getElementById('pdfStatus');
       
+      // Check if html2pdf is available
+      if (typeof html2pdf === 'undefined') {
+        statusDiv.textContent = '❌ PDF library not loaded. Please refresh the page.';
+        statusDiv.style.color = '#dc2626';
+        console.error('[PDF] html2pdf is not defined');
+        return;
+      }
+      
       // Check if dashboard has data
       const dashboard = document.getElementById('dashboard');
       if (!dashboard || dashboard.style.display === 'none') {
@@ -4420,6 +4428,8 @@
       btn.style.opacity = '0.6';
       statusDiv.textContent = '⏳ Generating PDF report...';
       statusDiv.style.color = '#2563eb';
+      
+      console.log('[PDF] Starting PDF generation...');
 
       try {
         // Load saved audit data
@@ -4441,16 +4451,16 @@
           throw new Error('Report HTML is empty or too short. Cannot generate PDF.');
         }
         
-        console.log('Report HTML length:', reportHTML.length);
-        console.log('Report HTML preview (first 500 chars):', reportHTML.substring(0, 500));
+        console.log('[PDF] Report HTML length:', reportHTML.length);
+        console.log('[PDF] Report HTML preview (first 500 chars):', reportHTML.substring(0, 500));
         
         // Create a temporary container for the report
-        // Make it visible but positioned off-screen so html2pdf can capture it
+        // Position it absolutely off-screen but still in the DOM for html2canvas
         const reportContainer = document.createElement('div');
         reportContainer.id = 'pdfReportContainer';
-        reportContainer.style.position = 'fixed';
+        reportContainer.style.position = 'absolute';
+        reportContainer.style.left = '-9999px';
         reportContainer.style.top = '0';
-        reportContainer.style.left = '0';
         reportContainer.style.width = '210mm'; // A4 width
         reportContainer.style.minHeight = '297mm'; // A4 height
         reportContainer.style.padding = '20mm';
@@ -4463,48 +4473,60 @@
         
         reportContainer.innerHTML = reportHTML;
         document.body.appendChild(reportContainer);
-        
-        // Make container visible briefly for html2pdf to capture, then hide it
-        // html2pdf needs the element to be in the DOM and renderable
-        reportContainer.style.transform = 'translateX(-100%)'; // Move off-screen but keep in viewport
 
         // Wait for DOM to update
         await new Promise(resolve => setTimeout(resolve, 500));
         
+        console.log('[PDF] Container added to DOM, converting charts...');
+        
         // Convert charts to images
         await convertChartsToImages(reportContainer);
+        
+        console.log('[PDF] Charts converted, waiting for images to load...');
         
         // Wait for images to load in the container
         await new Promise(resolve => {
           const images = reportContainer.querySelectorAll('img');
+          console.log('[PDF] Found', images.length, 'images in container');
           let loaded = 0;
           if (images.length === 0) {
             resolve();
             return;
           }
-          images.forEach(img => {
+          images.forEach((img, idx) => {
             if (img.complete && img.naturalWidth > 0) {
+              console.log(`[PDF] Image ${idx + 1} already loaded:`, img.naturalWidth, 'x', img.naturalHeight);
               loaded++;
               if (loaded === images.length) resolve();
             } else {
               img.onload = () => {
                 if (img.naturalWidth > 0) {
+                  console.log(`[PDF] Image ${idx + 1} loaded:`, img.naturalWidth, 'x', img.naturalHeight);
                   loaded++;
                   if (loaded === images.length) resolve();
                 }
               };
               img.onerror = () => {
+                console.warn(`[PDF] Image ${idx + 1} failed to load`);
                 loaded++;
                 if (loaded === images.length) resolve();
               };
             }
           });
-          // Timeout after 5 seconds
-          setTimeout(resolve, 5000);
+          // Timeout after 10 seconds
+          setTimeout(() => {
+            console.log('[PDF] Image load timeout reached');
+            resolve();
+          }, 10000);
         });
 
         // Additional wait to ensure everything is rendered
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        console.log('[PDF] Container dimensions:', reportContainer.offsetWidth, 'x', reportContainer.offsetHeight);
+        console.log('[PDF] Container scrollHeight:', reportContainer.scrollHeight);
+        console.log('[PDF] Container has children:', reportContainer.children.length);
+        console.log('[PDF] Container innerHTML length:', reportContainer.innerHTML.length);
 
         // Generate PDF
         const opt = {
@@ -4514,11 +4536,15 @@
           html2canvas: { 
             scale: 2,
             useCORS: true,
-            logging: true, // Enable logging to debug
+            logging: true,
             backgroundColor: '#ffffff',
             allowTaint: true,
-            windowWidth: 1200,
-            windowHeight: reportContainer.scrollHeight || 1600
+            windowWidth: reportContainer.scrollWidth || 1200,
+            windowHeight: reportContainer.scrollHeight || 1600,
+            x: 0,
+            y: 0,
+            scrollX: 0,
+            scrollY: 0
           },
           jsPDF: { 
             unit: 'mm', 
@@ -4527,34 +4553,36 @@
           }
         };
 
-        console.log('Starting PDF generation, container content length:', reportContainer.innerHTML.length);
-        console.log('Container dimensions:', reportContainer.offsetWidth, 'x', reportContainer.offsetHeight);
-        console.log('Container scrollHeight:', reportContainer.scrollHeight);
-        console.log('Container has children:', reportContainer.children.length);
+        console.log('[PDF] Starting html2pdf generation...');
         
-        // Temporarily make container fully visible for html2pdf capture
-        const originalTransform = reportContainer.style.transform;
-        reportContainer.style.transform = 'translateX(0)';
-        reportContainer.style.position = 'fixed';
-        reportContainer.style.top = '0';
+        // Move container into viewport temporarily for html2canvas
+        const originalLeft = reportContainer.style.left;
         reportContainer.style.left = '0';
+        reportContainer.style.position = 'fixed';
         
-        // Wait a moment for rendering
-        await new Promise(resolve => setTimeout(resolve, 300));
+        // Wait for repositioning
+        await new Promise(resolve => setTimeout(resolve, 500));
         
         try {
+          console.log('[PDF] Calling html2pdf().set().from().save()...');
           await html2pdf().set(opt).from(reportContainer).save();
+          console.log('[PDF] html2pdf() completed successfully');
+        } catch (pdfError) {
+          console.error('[PDF] html2pdf error:', pdfError);
+          throw new Error(`PDF generation failed: ${pdfError.message}`);
         } finally {
           // Restore original position
-          reportContainer.style.transform = originalTransform || 'translateX(-100%)';
+          reportContainer.style.left = originalLeft;
+          reportContainer.style.position = 'absolute';
         }
 
         // Wait a bit before cleanup to ensure PDF is saved
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, 2000));
 
         // Clean up
         if (document.body.contains(reportContainer)) {
           document.body.removeChild(reportContainer);
+          console.log('[PDF] Container removed from DOM');
         }
         
         statusDiv.textContent = '✅ PDF report generated successfully!';
@@ -4565,7 +4593,8 @@
         }, 3000);
 
       } catch (error) {
-        console.error('PDF generation error:', error);
+        console.error('[PDF] PDF generation error:', error);
+        console.error('[PDF] Error stack:', error.stack);
         statusDiv.textContent = `❌ Error: ${error.message}`;
         statusDiv.style.color = '#dc2626';
       } finally {
@@ -4576,38 +4605,60 @@
 
     // Convert Chart.js charts to images
     async function convertChartsToImages(container) {
+      console.log('[PDF] Converting charts to images...');
+      
       // Convert radar chart
       const radarCanvas = document.getElementById('radarChart');
       if (radarCanvas && window.radarChart) {
+        console.log('[PDF] Converting radar chart...');
         const radarImg = radarCanvas.toDataURL('image/png');
         const radarImgElement = container.querySelector('#radarChartImg');
         if (radarImgElement) {
           radarImgElement.src = radarImg;
           radarImgElement.style.display = 'block';
+          console.log('[PDF] Radar chart image set, data URL length:', radarImg.length);
+        } else {
+          console.warn('[PDF] Radar chart image element not found in container');
         }
+      } else {
+        console.warn('[PDF] Radar chart canvas or chart instance not found');
       }
 
       // Convert trend chart
       const trendCanvas = document.getElementById('trendChart');
       if (trendCanvas && window.trendChart) {
+        console.log('[PDF] Converting trend chart...');
         const trendImg = trendCanvas.toDataURL('image/png');
         const trendImgElement = container.querySelector('#trendChartImg');
         if (trendImgElement) {
           trendImgElement.src = trendImg;
           trendImgElement.style.display = 'block';
+          console.log('[PDF] Trend chart image set, data URL length:', trendImg.length);
+        } else {
+          console.warn('[PDF] Trend chart image element not found in container');
         }
+      } else {
+        console.warn('[PDF] Trend chart canvas or chart instance not found');
       }
 
       // Convert snippet readiness chart
       const snippetCanvas = document.getElementById('snippetReadinessPieChart');
       if (snippetCanvas && window.snippetReadinessChart) {
+        console.log('[PDF] Converting snippet readiness chart...');
         const snippetImg = snippetCanvas.toDataURL('image/png');
         const snippetImgElement = container.querySelector('#snippetReadinessChartImg');
         if (snippetImgElement) {
           snippetImgElement.src = snippetImg;
           snippetImgElement.style.display = 'block';
+          console.log('[PDF] Snippet readiness chart image set, data URL length:', snippetImg.length);
+        } else {
+          console.warn('[PDF] Snippet readiness chart image element not found in container');
         }
+      } else {
+        console.warn('[PDF] Snippet readiness chart canvas or chart instance not found');
       }
+      
+      console.log('[PDF] Chart conversion complete');
     }
 
     // Create report HTML content
