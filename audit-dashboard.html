@@ -4418,19 +4418,22 @@
         // Create a temporary container for the report
         const reportContainer = document.createElement('div');
         reportContainer.id = 'pdfReportContainer';
-        // Position off-screen but still in viewport for html2pdf to capture
+        // Position visible but off-screen for html2pdf to capture
         reportContainer.style.position = 'fixed';
-        reportContainer.style.top = '0';
+        reportContainer.style.top = '-9999px';
         reportContainer.style.left = '0';
         reportContainer.style.width = '210mm'; // A4 width
+        reportContainer.style.minHeight = '297mm'; // A4 height
         reportContainer.style.padding = '20mm';
         reportContainer.style.backgroundColor = '#ffffff';
         reportContainer.style.zIndex = '9999';
+        reportContainer.style.visibility = 'visible';
+        reportContainer.style.opacity = '1';
         reportContainer.innerHTML = reportHTML;
         document.body.appendChild(reportContainer);
 
         // Wait for DOM to update
-        await new Promise(resolve => setTimeout(resolve, 200));
+        await new Promise(resolve => setTimeout(resolve, 500));
         
         // Convert charts to images
         await convertChartsToImages(reportContainer);
@@ -4444,13 +4447,15 @@
             return;
           }
           images.forEach(img => {
-            if (img.complete) {
+            if (img.complete && img.naturalWidth > 0) {
               loaded++;
               if (loaded === images.length) resolve();
             } else {
               img.onload = () => {
-                loaded++;
-                if (loaded === images.length) resolve();
+                if (img.naturalWidth > 0) {
+                  loaded++;
+                  if (loaded === images.length) resolve();
+                }
               };
               img.onerror = () => {
                 loaded++;
@@ -4458,9 +4463,12 @@
               };
             }
           });
-          // Timeout after 2 seconds
-          setTimeout(resolve, 2000);
+          // Timeout after 5 seconds
+          setTimeout(resolve, 5000);
         });
+
+        // Additional wait to ensure everything is rendered
+        await new Promise(resolve => setTimeout(resolve, 500));
 
         // Generate PDF
         const opt = {
@@ -4470,10 +4478,11 @@
           html2canvas: { 
             scale: 2,
             useCORS: true,
-            logging: false,
+            logging: true, // Enable logging to debug
             backgroundColor: '#ffffff',
             allowTaint: true,
-            windowWidth: 1200
+            windowWidth: 1200,
+            windowHeight: reportContainer.scrollHeight || 1600
           },
           jsPDF: { 
             unit: 'mm', 
@@ -4482,10 +4491,18 @@
           }
         };
 
+        console.log('Starting PDF generation, container content length:', reportContainer.innerHTML.length);
+        console.log('Container dimensions:', reportContainer.offsetWidth, 'x', reportContainer.offsetHeight);
+        
         await html2pdf().set(opt).from(reportContainer).save();
 
+        // Wait a bit before cleanup to ensure PDF is saved
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
         // Clean up
-        document.body.removeChild(reportContainer);
+        if (document.body.contains(reportContainer)) {
+          document.body.removeChild(reportContainer);
+        }
         
         statusDiv.textContent = '✅ PDF report generated successfully!';
         statusDiv.style.color = '#10b981';
