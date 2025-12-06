@@ -2627,15 +2627,31 @@
       const pillarCards = document.getElementById('pillarCards');
       pillarCards.innerHTML = '';
 
+      // Check if we have real Business Profile data
+      const hasLocalSignals = saved && saved.localSignals && saved.localSignals.status === 'ok' && saved.localSignals.data;
+      const localSignalsData = hasLocalSignals ? saved.localSignals.data : null;
+      
       getOrderedPillars(scores).forEach(([key, score]) => {
         const rag = getRAGStatus(score);
         const card = document.createElement('div');
         card.className = 'pillar-card';
         
-        // Get pillar description with data source info
+        // Get pillar description with data source info (dynamic based on whether we have real data)
+        let localEntityDesc, serviceAreaDesc;
+        if (hasLocalSignals && localSignalsData) {
+          const napScore = localSignalsData.napConsistencyScore !== null ? localSignalsData.napConsistencyScore : 'N/A';
+          const serviceAreasCount = localSignalsData.serviceAreas?.length || 0;
+          const locationsCount = localSignalsData.locations?.length || 0;
+          localEntityDesc = `How clearly your business and you as a person are recognised as entities by AI search systems. <strong>Data Source:</strong> ✅ Live data from Google Business Profile API. <strong>Data Checked:</strong> NAP consistency (${napScore}%), knowledge panel (${localSignalsData.knowledgePanelDetected ? 'detected' : 'not detected'}), locations (${locationsCount}).`;
+          serviceAreaDesc = `How well AI understands where you operate and which regions you serve. <strong>Data Source:</strong> ✅ Live data from Google Business Profile API. <strong>Data Checked:</strong> Service areas (${serviceAreasCount}), NAP consistency (${napScore}%).`;
+        } else {
+          localEntityDesc = 'How clearly your business and you as a person are recognised as entities by AI search systems. <strong>Data Source:</strong> ⚠️ Currently derived from search performance (GSC position/CTR). Real local signals API integration pending.';
+          serviceAreaDesc = 'How well AI understands where you operate and which regions you serve. <strong>Data Source:</strong> ⚠️ Currently derived from Local Entity score. Real service area data from Google Business Profile pending.';
+        }
+        
         const descriptions = {
-          localEntity: 'How clearly your business and you as a person are recognised as entities by AI search systems. <strong>Data Source:</strong> ⚠️ Currently derived from search performance (GSC position/CTR). Real local signals API integration pending.',
-          serviceArea: 'How well AI understands where you operate and which regions you serve. <strong>Data Source:</strong> ⚠️ Currently derived from Local Entity score. Real service area data from Google Business Profile pending.',
+          localEntity: localEntityDesc,
+          serviceArea: serviceAreaDesc,
           authority: 'E-A-T (Experience, Expertise, Authoritativeness, Trustworthiness): Perceived expertise and trust in the topic space. <strong>Data Source:</strong> ✅ Live data from Google Search Console (CTR + position). Backlink metrics pending.',
           visibility: 'How prominently your content appears in AI-powered search results and featured snippets. <strong>Data Source:</strong> ✅ Live data from Google Search Console (impressions, clicks, position, SERP features).',
           contentSchema: 'Quality and completeness of structured data markup across your domain. <strong>Data Source:</strong> ✅ Live data from schema audit. <strong>Calculation:</strong> Foundation schemas (30%) + Rich Results (35%) + Coverage (20%) + Diversity (15%).'
@@ -2719,9 +2735,23 @@
                   contentSchemaDesc += ' <strong>Data Checked:</strong> Foundation schemas (Organization, Person, WebSite, BreadcrumbList), Rich result eligibility (Article, Event, Course, FAQ, HowTo, VideoObject, Recipe, Product, LocalBusiness, Review), schema coverage percentage, schema type diversity.';
                 }
                 
+                // Build Local Entity and Service Area descriptions based on whether we have real Business Profile data
+                let localEntityDesc, serviceAreaDesc;
+                if (hasLocalSignals && localSignalsData) {
+                  const napScore = localSignalsData.napConsistencyScore !== null ? localSignalsData.napConsistencyScore : 'N/A';
+                  const serviceAreasCount = localSignalsData.serviceAreas?.length || 0;
+                  const locationsCount = localSignalsData.locations?.length || 0;
+                  const knowledgePanel = localSignalsData.knowledgePanelDetected ? 'detected' : 'not detected';
+                  localEntityDesc = `Consistency and clarity of brand, person and business entity signals. <strong>AI Importance:</strong> AI systems rely on clear entity signals to understand who you are and connect your brand across platforms. Strong entity recognition helps AI include you in knowledge panels and entity-based results. <strong>Data Source:</strong> ✅ <span style="color: #10b981;">Live data</span> from Google Business Profile API. <strong>Data Checked:</strong> NAP consistency (${napScore}%), knowledge panel (${knowledgePanel}), locations (${locationsCount}), LocalBusiness schema presence, Google Business Profile data.`;
+                  serviceAreaDesc = `How clearly AI understands where lessons/workshops run and which regions you cover. <strong>AI Importance:</strong> AI uses geographic signals to match queries with local intent. Clear service area data helps AI surface your content for location-specific searches and local AI Overviews. <strong>Data Source:</strong> ✅ <span style="color: #10b981;">Live data</span> from Google Business Profile API. <strong>Data Checked:</strong> Service areas (${serviceAreasCount}), NAP consistency (${napScore}%), Google Business Profile service areas.`;
+                } else {
+                  localEntityDesc = 'Consistency and clarity of brand, person and business entity signals. <strong>AI Importance:</strong> AI systems rely on clear entity signals to understand who you are and connect your brand across platforms. Strong entity recognition helps AI include you in knowledge panels and entity-based results. <strong>Data Source:</strong> ⚠️ <span style="color: #f59e0b;">Derived calculation</span> from GSC position/CTR (not using real local signals yet). <strong>Data Checked:</strong> Currently calculated from search performance metrics. Real data pending: LocalBusiness schema presence, NAP consistency, Google Business Profile data, knowledge panel detection.';
+                  serviceAreaDesc = 'How clearly AI understands where lessons/workshops run and which regions you cover. <strong>AI Importance:</strong> AI uses geographic signals to match queries with local intent. Clear service area data helps AI surface your content for location-specific searches and local AI Overviews. <strong>Data Source:</strong> ⚠️ <span style="color: #f59e0b;">Derived calculation</span> from Local Entity score (not using real service area data yet). <strong>Data Checked:</strong> Currently calculated from Local Entity. Real data pending: ServiceArea schema markup, Google Business Profile service areas, geographic keywords, location pages.';
+                }
+                
                 const descriptions = {
-                  localEntity: 'Consistency and clarity of brand, person and business entity signals. <strong>AI Importance:</strong> AI systems rely on clear entity signals to understand who you are and connect your brand across platforms. Strong entity recognition helps AI include you in knowledge panels and entity-based results. <strong>Data Source:</strong> ⚠️ <span style="color: #f59e0b;">Derived calculation</span> from GSC position/CTR (not using real local signals yet). <strong>Data Checked:</strong> Currently calculated from search performance metrics. Real data pending: LocalBusiness schema presence, NAP consistency, Google Business Profile data, knowledge panel detection.',
-                  serviceArea: 'How clearly AI understands where lessons/workshops run and which regions you cover. <strong>AI Importance:</strong> AI uses geographic signals to match queries with local intent. Clear service area data helps AI surface your content for location-specific searches and local AI Overviews. <strong>Data Source:</strong> ⚠️ <span style="color: #f59e0b;">Derived calculation</span> from Local Entity score (not using real service area data yet). <strong>Data Checked:</strong> Currently calculated from Local Entity. Real data pending: ServiceArea schema markup, Google Business Profile service areas, geographic keywords, location pages.',
+                  localEntity: localEntityDesc,
+                  serviceArea: serviceAreaDesc,
                   authority: 'E-A-T (Experience, Expertise, Authoritativeness, Trustworthiness): Depth of educational content, references, reviews, external citations, and demonstrated expertise. <strong>AI Importance:</strong> E-A-T is critical for AI systems - they prioritize authoritative, trustworthy sources. Strong E-A-T signals help AI confidently feature your content in AI Overviews and answer boxes. <strong>Data Source:</strong> ✅ <span style="color: #10b981;">Live data</span> from Google Search Console API. <strong>Data Checked:</strong> CTR (${data.ctr ? data.ctr.toFixed(2) : 0}%), average position (${data.averagePosition ? data.averagePosition.toFixed(1) : 0}), clicks (${data.totalClicks || 0}), impressions (${data.totalImpressions || 0}). Backlink metrics pending integration.',
                   visibility: 'Frequency and prominence in organic search, local pack, snippets and AI Overviews. <strong>AI Importance:</strong> AI systems learn from existing search performance. Higher visibility signals quality and relevance, making AI more likely to surface your content in AI-powered results and featured snippets. <strong>Data Source:</strong> ✅ <span style="color: #10b981;">Live data</span> from Google Search Console API. <strong>Data Checked:</strong> Average position (${data.averagePosition ? data.averagePosition.toFixed(1) : 0}), CTR (${data.ctr ? data.ctr.toFixed(2) : 0}%), total clicks (${data.totalClicks || 0}), total impressions (${data.totalImpressions || 0}), SERP feature appearances.',
                   contentSchema: contentSchemaDesc
@@ -2829,18 +2859,56 @@
                       break;
                       
                     case 'localEntity':
-                      steps.push(`<strong>Current score: ${Math.round(pillarScore)}</strong> - Using derived calculation from search performance`);
-                      steps.push(`<strong>Priority:</strong> Integrate Google Business Profile API to use real local signals data`);
-                      if (pillarScore < 70) {
-                        steps.push(`<strong>Action:</strong> Add LocalBusiness schema markup and ensure NAP consistency`);
+                      if (hasLocalSignals && localSignalsData) {
+                        const napScore = localSignalsData.napConsistencyScore !== null ? localSignalsData.napConsistencyScore : 'N/A';
+                        const locationsCount = localSignalsData.locations?.length || 0;
+                        const knowledgePanel = localSignalsData.knowledgePanelDetected ? 'detected' : 'not detected';
+                        steps.push(`<strong>Current score: ${Math.round(pillarScore)}</strong> - Using real Business Profile data`);
+                        steps.push(`<strong>Data:</strong> NAP consistency: ${napScore}%, Knowledge panel: ${knowledgePanel}, Locations: ${locationsCount}`);
+                        if (pillarScore < 70) {
+                          if (napScore < 100) {
+                            steps.push(`<strong>Action:</strong> Improve NAP consistency (currently ${napScore}%) - ensure Name, Address, and Phone are consistent across all platforms`);
+                          }
+                          if (!localSignalsData.knowledgePanelDetected) {
+                            steps.push(`<strong>Action:</strong> Work on knowledge panel detection - improve entity signals and citations`);
+                          }
+                          if (locationsCount === 0) {
+                            steps.push(`<strong>Action:</strong> Add business location to Google Business Profile`);
+                          }
+                        } else {
+                          steps.push(`<strong>Status:</strong> ✅ Strong local entity signals detected`);
+                        }
+                      } else {
+                        steps.push(`<strong>Current score: ${Math.round(pillarScore)}</strong> - Using derived calculation from search performance`);
+                        steps.push(`<strong>Priority:</strong> Integrate Google Business Profile API to use real local signals data`);
+                        if (pillarScore < 70) {
+                          steps.push(`<strong>Action:</strong> Add LocalBusiness schema markup and ensure NAP consistency`);
+                        }
                       }
                       break;
                       
                     case 'serviceArea':
-                      steps.push(`<strong>Current score: ${Math.round(pillarScore)}</strong> - Using derived calculation from Local Entity`);
-                      steps.push(`<strong>Priority:</strong> Integrate Google Business Profile API to get real service area data`);
-                      if (pillarScore < 70) {
-                        steps.push(`<strong>Action:</strong> Add ServiceArea schema and create location-specific pages`);
+                      if (hasLocalSignals && localSignalsData) {
+                        const serviceAreasCount = localSignalsData.serviceAreas?.length || 0;
+                        const napScore = localSignalsData.napConsistencyScore !== null ? localSignalsData.napConsistencyScore : 'N/A';
+                        steps.push(`<strong>Current score: ${Math.round(pillarScore)}</strong> - Using real Business Profile data`);
+                        steps.push(`<strong>Data:</strong> Service areas: ${serviceAreasCount}, NAP consistency: ${napScore}%`);
+                        if (pillarScore < 70) {
+                          if (serviceAreasCount < 5) {
+                            steps.push(`<strong>Action:</strong> Add more service areas to Google Business Profile (currently ${serviceAreasCount}, target: 5+)`);
+                          }
+                          if (napScore < 100) {
+                            steps.push(`<strong>Action:</strong> Improve NAP consistency to boost service area score (currently ${napScore}%)`);
+                          }
+                        } else {
+                          steps.push(`<strong>Status:</strong> ✅ Good service area coverage`);
+                        }
+                      } else {
+                        steps.push(`<strong>Current score: ${Math.round(pillarScore)}</strong> - Using derived calculation from Local Entity`);
+                        steps.push(`<strong>Priority:</strong> Integrate Google Business Profile API to get real service area data`);
+                        if (pillarScore < 70) {
+                          steps.push(`<strong>Action:</strong> Add ServiceArea schema and create location-specific pages`);
+                        }
                       }
                       break;
                   }
@@ -4755,6 +4823,9 @@
       const searchData = auditData.searchData || {};
       const schemaAudit = auditData.schemaAudit || {};
       const snippetReadiness = auditData.snippetReadiness || 0;
+      const localSignals = auditData.localSignals || null;
+      const hasLocalSignals = localSignals && localSignals.status === 'ok' && localSignals.data;
+      const localSignalsData = hasLocalSignals ? localSignals.data : null;
 
       // Helper function for RAG status
       const getRAGStatus = (score) => {
@@ -4854,18 +4925,49 @@
               break;
               
             case 'localEntity':
-              steps.push(`Current score: ${Math.round(score)} - Using derived calculation from search performance`);
-              steps.push(`Priority: Integrate Google Business Profile API to use real local signals data`);
-              if (score < 70) {
-                steps.push(`Action: Add LocalBusiness schema markup and ensure NAP consistency`);
+              if (hasLocalSignals && localSignalsData) {
+                const napScore = localSignalsData.napConsistencyScore !== null ? localSignalsData.napConsistencyScore : 'N/A';
+                const locationsCount = localSignalsData.locations?.length || 0;
+                const knowledgePanel = localSignalsData.knowledgePanelDetected ? 'detected' : 'not detected';
+                steps.push(`Current score: ${Math.round(score)} - Using real Business Profile data`);
+                steps.push(`Data: NAP consistency: ${napScore}%, Knowledge panel: ${knowledgePanel}, Locations: ${locationsCount}`);
+                if (score < 70) {
+                  if (napScore < 100) {
+                    steps.push(`Action: Improve NAP consistency (currently ${napScore}%)`);
+                  }
+                  if (!localSignalsData.knowledgePanelDetected) {
+                    steps.push(`Action: Work on knowledge panel detection`);
+                  }
+                }
+              } else {
+                steps.push(`Current score: ${Math.round(score)} - Using derived calculation from search performance`);
+                steps.push(`Priority: Integrate Google Business Profile API to use real local signals data`);
+                if (score < 70) {
+                  steps.push(`Action: Add LocalBusiness schema markup and ensure NAP consistency`);
+                }
               }
               break;
               
             case 'serviceArea':
-              steps.push(`Current score: ${Math.round(score)} - Using derived calculation from Local Entity`);
-              steps.push(`Priority: Integrate Google Business Profile API to get real service area data`);
-              if (score < 70) {
-                steps.push(`Action: Add ServiceArea schema and create location-specific pages`);
+              if (hasLocalSignals && localSignalsData) {
+                const serviceAreasCount = localSignalsData.serviceAreas?.length || 0;
+                const napScore = localSignalsData.napConsistencyScore !== null ? localSignalsData.napConsistencyScore : 'N/A';
+                steps.push(`Current score: ${Math.round(score)} - Using real Business Profile data`);
+                steps.push(`Data: Service areas: ${serviceAreasCount}, NAP consistency: ${napScore}%`);
+                if (score < 70) {
+                  if (serviceAreasCount < 5) {
+                    steps.push(`Action: Add more service areas (currently ${serviceAreasCount}, target: 5+)`);
+                  }
+                  if (napScore < 100) {
+                    steps.push(`Action: Improve NAP consistency (currently ${napScore}%)`);
+                  }
+                }
+              } else {
+                steps.push(`Current score: ${Math.round(score)} - Using derived calculation from Local Entity`);
+                steps.push(`Priority: Integrate Google Business Profile API to get real service area data`);
+                if (score < 70) {
+                  steps.push(`Action: Add ServiceArea schema and create location-specific pages`);
+                }
               }
               break;
           }
@@ -5159,9 +5261,22 @@
                 visibility: 'Visibility',
                 contentSchema: 'Content/Schema'
               };
+              // Build definitions dynamically based on whether we have real Business Profile data
+              let localEntityDef, serviceAreaDef;
+              if (hasLocalSignals && localSignalsData) {
+                const napScore = localSignalsData.napConsistencyScore !== null ? localSignalsData.napConsistencyScore : 'N/A';
+                const serviceAreasCount = localSignalsData.serviceAreas?.length || 0;
+                const locationsCount = localSignalsData.locations?.length || 0;
+                localEntityDef = `Measures how well your business is recognized as a local entity. Uses real data from Google Business Profile API: NAP consistency (${napScore}%), knowledge panel (${localSignalsData.knowledgePanelDetected ? 'detected' : 'not detected'}), locations (${locationsCount}).`;
+                serviceAreaDef = `Assesses your service area coverage and geographic relevance. Uses real data from Google Business Profile API: ${serviceAreasCount} service areas, NAP consistency (${napScore}%).`;
+              } else {
+                localEntityDef = 'Measures how well your business is recognized as a local entity. Based on LocalBusiness schema presence, NAP consistency, and knowledge panel detection. Currently uses derived calculations from GSC data.';
+                serviceAreaDef = 'Assesses your service area coverage and geographic relevance. Derived from Local Entity score. Will use real service area data when Google Business Profile API is integrated.';
+              }
+              
               const definitions = {
-                localEntity: 'Measures how well your business is recognized as a local entity. Based on LocalBusiness schema presence, NAP consistency, and knowledge panel detection. Currently uses derived calculations from GSC data.',
-                serviceArea: 'Assesses your service area coverage and geographic relevance. Derived from Local Entity score. Will use real service area data when Google Business Profile API is integrated.',
+                localEntity: localEntityDef,
+                serviceArea: serviceAreaDef,
                 authority: 'Evaluates your domain authority and trust signals. Calculated from CTR (60%) and average position (40%). Will include backlink metrics when backlink API is integrated.',
                 visibility: 'Tracks your search visibility and ranking performance. Based on average position from Google Search Console (1 = best, 40 = worst). Score ranges from 10 to 100.',
                 contentSchema: 'Measures schema markup quality and completeness. Weighted calculation: Foundation Schemas (30%), Rich Results (35%), Coverage (20%), Diversity (15%).'
