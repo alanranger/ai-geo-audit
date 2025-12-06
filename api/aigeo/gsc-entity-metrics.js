@@ -49,6 +49,10 @@ export default async function handler(req, res) {
     // Normalize property URL
     const siteUrl = normalizePropertyUrl(property);
     
+    // Get Supabase credentials (needed early for cache checks)
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    
     // Get access token
     const accessToken = await getGSCAccessToken();
     const searchConsoleUrl = `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`;
@@ -172,10 +176,7 @@ export default async function handler(req, res) {
     let storedTimeseries = [];
     let missingDates = null; // null means fetch all dates
     
-    // Check Supabase for cached timeseries data
-    const supabaseUrl = process.env.SUPABASE_URL;
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    
+    // Check Supabase for cached timeseries data (supabaseUrl and supabaseKey already declared above)
     console.log(`[GSC Cache] Checking cache for property: ${siteUrl}, date range: ${startDate} to ${endDate}`);
     console.log(`[GSC Cache] Supabase configured: ${!!supabaseUrl && !!supabaseKey}`);
     
