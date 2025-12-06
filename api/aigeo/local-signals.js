@@ -106,6 +106,7 @@ export default async function handler(req, res) {
     let locations = [];
     let serviceAreas = [];
     let napData = [];
+    let locationsToProcess = []; // Initialize to avoid undefined errors
     
     if (locationsResponse.ok) {
       const locationsData = await locationsResponse.json();
@@ -144,7 +145,7 @@ export default async function handler(req, res) {
       }
       
       // Use detailed location data if available, otherwise use basic
-      const locationsToProcess = locationDetails.length > 0 ? locationDetails : locations;
+      locationsToProcess = locationDetails.length > 0 ? locationDetails : locations;
       
       // Debug: Log location data to see what we're getting
       if (locationsToProcess.length > 0) {
