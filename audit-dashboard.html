@@ -3596,13 +3596,18 @@
           // Check if we have data
           if (!data || !data.timeseries || data.timeseries.length === 0) {
             debugLog('⚠ No timeseries data available. Chart will show mock data. Run a new audit to get real GSC historical data.', 'warn');
-            // Show message to user
+            // Show message to user (only if message doesn't already exist)
             const trendCanvas = document.getElementById('trendChart');
             if (trendCanvas && trendCanvas.parentElement) {
-              const messageDiv = document.createElement('div');
-              messageDiv.style.cssText = 'background: #fff3cd; padding: 1rem; border-radius: 4px; border-left: 3px solid #f59e0b; margin-bottom: 1rem; font-size: 0.9rem; color: #856404;';
-              messageDiv.innerHTML = '<strong>No historical data available.</strong> The trend chart requires timeseries data from Google Search Console. Please run a new audit to populate the chart with real historical data.';
-              trendCanvas.parentElement.insertBefore(messageDiv, trendCanvas);
+              // Check if message already exists
+              const existingMessage = trendCanvas.parentElement.querySelector('.trend-chart-warning');
+              if (!existingMessage) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'trend-chart-warning';
+                messageDiv.style.cssText = 'background: #fff3cd; padding: 1rem; border-radius: 4px; border-left: 3px solid #f59e0b; margin-bottom: 1rem; font-size: 0.9rem; color: #856404;';
+                messageDiv.innerHTML = '<strong>No historical data available.</strong> The trend chart requires timeseries data from Google Search Console. Please run a new audit to populate the chart with real historical data.';
+                trendCanvas.parentElement.insertBefore(messageDiv, trendCanvas);
+              }
             }
           }
           
@@ -4158,11 +4163,20 @@
           debugLog('✓ Trend chart created successfully', 'success');
           debugLog(`trendChart type after creation: ${typeof window.trendChart}`, 'info');
           debugLog(`trendChart instanceof Chart: ${window.trendChart instanceof Chart}`, 'info');
+          debugLog(`Chart data points: Local Entity=${localEntityData.length}, Visibility=${visibilityData.length}, Authority=${authorityData.length}`, 'info');
           debugLog('=== DISPLAY DASHBOARD: Complete ===', 'success');
         } catch (e) {
           debugLog(`✗ Error creating trend chart: ${e.message}`, 'error');
           debugLog(`Stack: ${e.stack}`, 'error');
           console.error('Error creating trend chart:', e);
+          // Show error message to user
+          const trendCanvas = document.getElementById('trendChart');
+          if (trendCanvas && trendCanvas.parentElement) {
+            const errorDiv = document.createElement('div');
+            errorDiv.style.cssText = 'background: #fee2e2; padding: 1rem; border-radius: 4px; border-left: 3px solid #ef4444; margin-bottom: 1rem; font-size: 0.9rem; color: #991b1b;';
+            errorDiv.innerHTML = `<strong>Error loading trend chart:</strong> ${e.message}. Please refresh the page or run a new audit.`;
+            trendCanvas.parentElement.insertBefore(errorDiv, trendCanvas);
+          }
         }
       }, 100);
     }
