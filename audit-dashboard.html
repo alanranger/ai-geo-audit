@@ -1257,10 +1257,9 @@
       if (savedAudit && savedAudit.scores) {
         const savedDateRange = savedAudit.dateRange || oldDateRange;
         if (savedDateRange !== days) {
-          // Date range changed - clear dashboard and show message
-          debugLog(`Date range changed from ${savedDateRange} to ${days} days. Dashboard needs refresh.`, 'warn');
-          clearDashboard();
-          showStatus(`Date range changed to ${days} days. Please run a new audit to see updated metrics.`, 'info');
+          // Date range changed - update GSC data and recalculate scores
+          debugLog(`Date range changed from ${savedDateRange} to ${days} days. Updating metrics...`, 'info');
+          updateAuditForNewDateRange(days, savedAudit);
         }
       }
     }
@@ -1296,10 +1295,9 @@
         if (savedAudit && savedAudit.scores) {
           const savedDateRange = savedAudit.dateRange || oldDateRange;
           if (savedDateRange !== customDays) {
-            // Date range changed - clear dashboard and show message
-            debugLog(`Date range changed from ${savedDateRange} to ${customDays} days. Dashboard needs refresh.`, 'warn');
-            clearDashboard();
-            showStatus(`Date range changed to ${customDays} days. Please run a new audit to see updated metrics.`, 'info');
+            // Date range changed - update GSC data and recalculate scores
+            debugLog(`Date range changed from ${savedDateRange} to ${customDays} days. Updating metrics...`, 'info');
+            updateAuditForNewDateRange(customDays, savedAudit);
           }
         }
       } else {
@@ -1815,6 +1813,57 @@
         updateAuditTimestamp(auditData.timestamp);
       } catch (error) {
         debugLog(`✗ Error saving audit results: ${error.message}`, 'error');
+      }
+    }
+    
+    // Update audit results for new date range without full rescan
+    async function updateAuditForNewDateRange(newDateRange, savedAudit) {
+      try {
+        showStatus(`Updating metrics for ${newDateRange} day period...`, 'info');
+        
+        const propertyUrl = document.getElementById('propertyUrl')?.value || savedAudit.propertyUrl || '';
+        if (!propertyUrl) {
+          clearDashboard();
+          showStatus(`Date range changed to ${newDateRange} days. Please run a new audit to see updated metrics.`, 'info');
+          return;
+        }
+        
+        // Get API key (needed for fetchSearchConsoleData signature, but not actually used)
+        let apiKey = window._loadedApiKey || '';
+        
+        // Fetch new GSC data for the new date range (will use Supabase cache)
+        debugLog(`Fetching GSC data for ${newDateRange} day period...`, 'info');
+        const searchData = await fetchSearchConsoleData(apiKey, propertyUrl, newDateRange);
+        
+        // Recalculate pillar scores based on new GSC data
+        // Keep existing schema audit data (doesn't change with date range)
+        const scores = calculatePillarScores(searchData, savedAudit.schemaAudit);
+        const snippetReadiness = calculateSnippetReadiness(scores, searchData);
+        
+        // Update saved audit with new data
+        const updatedAudit = {
+          ...savedAudit,
+          dateRange: newDateRange,
+          searchData: searchData,
+          scores: scores,
+          snippetReadiness: snippetReadiness,
+          timestamp: new Date().toISOString()
+        };
+        
+        // Save updated audit
+        saveAuditResults(scores, searchData, snippetReadiness, savedAudit.schemaAudit);
+        localStorage.setItem('last_audit_results', JSON.stringify(updatedAudit));
+        
+        // Update dashboard with new data
+        displayDashboard(updatedAudit);
+        
+        showStatus(`Metrics updated for ${newDateRange} day period.`, 'success');
+        debugLog(`✓ Audit updated for ${newDateRange} day period`, 'success');
+        
+      } catch (error) {
+        debugLog(`✗ Error updating audit for new date range: ${error.message}`, 'error');
+        clearDashboard();
+        showStatus(`Date range changed to ${newDateRange} days. Please run a new audit to see updated metrics.`, 'info');
       }
     }
     
