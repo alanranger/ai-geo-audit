@@ -1755,12 +1755,12 @@
             schemaAudit: mergedSchemaAudit
           };
           
-          // Recalculate scores with merged data
-          const mergedScores = calculatePillarScores(savedAudit.searchData, mergedSchemaAudit);
+          // Recalculate scores with merged data (use saved localSignals if available)
+          const mergedScores = calculatePillarScores(savedAudit.searchData, mergedSchemaAudit, savedAudit.localSignals || null);
           const mergedSnippetReadiness = calculateSnippetReadiness(mergedScores, savedAudit.searchData);
           
-          // Save merged results
-          saveAuditResults(mergedScores, savedAudit.searchData, mergedSnippetReadiness, mergedSchemaAudit);
+          // Save merged results (preserve localSignals)
+          saveAuditResults(mergedScores, savedAudit.searchData, mergedSnippetReadiness, mergedSchemaAudit, savedAudit.localSignals || null);
           
           // Update retry button visibility
           updateRetryButtonVisibility(mergedSchemaAudit);
@@ -1795,7 +1795,7 @@
     }
 
     // Save audit results to localStorage
-    function saveAuditResults(scores, searchData, snippetReadiness, schemaAudit) {
+    function saveAuditResults(scores, searchData, snippetReadiness, schemaAudit, localSignals = null) {
       try {
         const dateRange = parseInt(document.getElementById('dateRange')?.value) || 30;
         const auditData = {
@@ -1803,6 +1803,7 @@
           searchData,
           snippetReadiness,
           schemaAudit,
+          localSignals, // Store local signals data for future use
           dateRange, // Store the date range used for this audit
           timestamp: new Date().toISOString()
         };
@@ -1835,9 +1836,23 @@
         debugLog(`Fetching GSC data for ${newDateRange} day period...`, 'info');
         const searchData = await fetchSearchConsoleData(apiKey, propertyUrl, newDateRange);
         
+        // Fetch local signals (Business Profile data doesn't change with date range, but fetch to ensure it's fresh)
+        let localSignals = savedAudit.localSignals || null;
+        try {
+          const localSignalsResponse = await fetch(`/api/aigeo/local-signals?property=${encodeURIComponent(propertyUrl)}`);
+          if (localSignalsResponse.ok) {
+            localSignals = await localSignalsResponse.json();
+            if (localSignals.status === 'ok') {
+              debugLog('✓ Local signals data fetched successfully', 'success');
+            }
+          }
+        } catch (localSignalsError) {
+          debugLog(`⚠ Local signals error: ${localSignalsError.message}, using cached data if available`, 'warn');
+        }
+        
         // Recalculate pillar scores based on new GSC data
         // Keep existing schema audit data (doesn't change with date range)
-        const scores = calculatePillarScores(searchData, savedAudit.schemaAudit);
+        const scores = calculatePillarScores(searchData, savedAudit.schemaAudit, localSignals);
         const snippetReadiness = calculateSnippetReadiness(scores, searchData);
         
         debugLog(`Recalculated scores for ${newDateRange} days: ${JSON.stringify(scores)}`, 'info');
@@ -1849,11 +1864,12 @@
           searchData: searchData,
           scores: scores,
           snippetReadiness: snippetReadiness,
+          localSignals: localSignals, // Store local signals for future use
           timestamp: new Date().toISOString()
         };
         
         // Save updated audit
-        saveAuditResults(scores, searchData, snippetReadiness, savedAudit.schemaAudit);
+        saveAuditResults(scores, searchData, snippetReadiness, savedAudit.schemaAudit, localSignals);
         localStorage.setItem('last_audit_results', JSON.stringify(updatedAudit));
         
         // Update dashboard with new data - ensure scores object has all required properties
@@ -2058,7 +2074,7 @@
     }
 
     // Calculate pillar scores (deterministic, based on GSC data and schema audit)
-    function calculatePillarScores(data, schemaAudit = null) {
+    function calculatePillarScores(data, schemaAudit = null, localSignals = null) {
       // Use new API response format - get values from GSC overview
       const position = data.averagePosition || 40; // 1 (best) - 100 (worst)
       const ctr = data.ctr || 0; // 0-100 percentage from API (e.g., 10 = 10%)
@@ -2079,11 +2095,62 @@
       const ctrScore = Math.min((ctrDecimal / 0.10) * 100, 100);
       const authority = clampScore(0.6 * ctrScore + 0.4 * posScore);
 
-      // Local Entity: slightly smoother blend, anchored around 60
-      const localEntity = clampScore(60 + 0.3 * (posScore - 50) + 0.2 * (ctrScore - 50));
+      // Local Entity: Use real Business Profile data if available, otherwise fallback to derived calculation
+      let localEntity;
+      if (localSignals && localSignals.status === 'ok' && localSignals.data) {
+        const localData = localSignals.data;
+        // Base score from NAP consistency (0-100)
+        let baseScore = localData.napConsistencyScore || 0;
+        
+        // Bonus for knowledge panel detection (+10 points)
+        if (localData.knowledgePanelDetected) {
+          baseScore = Math.min(100, baseScore + 10);
+        }
+        
+        // Bonus for having at least one location (+5 points)
+        if (localData.locations && localData.locations.length > 0) {
+          baseScore = Math.min(100, baseScore + 5);
+        }
+        
+        localEntity = clampScore(baseScore);
+        debugLog(`Local Entity: NAP=${localData.napConsistencyScore || 0}, Knowledge Panel=${localData.knowledgePanelDetected}, Locations=${localData.locations?.length || 0}, Final=${localEntity}`, 'info');
+      } else {
+        // Fallback: derived calculation (old method)
+        localEntity = clampScore(60 + 0.3 * (posScore - 50) + 0.2 * (ctrScore - 50));
+        debugLog('Local Entity: Using fallback calculation (no Business Profile data)', 'warn');
+      }
 
-      // Service Area: currently derived from Local Entity but slightly lower
-      const serviceArea = clampScore(localEntity - 5);
+      // Service Area: Use real Business Profile service areas count if available, otherwise fallback
+      let serviceArea;
+      if (localSignals && localSignals.status === 'ok' && localSignals.data) {
+        const localData = localSignals.data;
+        const serviceAreasCount = localData.serviceAreas?.length || 0;
+        
+        // Normalize service areas count to 0-100 score
+        // 0 areas = 0, 5 areas = 50, 10+ areas = 100
+        // Using a logarithmic scale for better distribution
+        if (serviceAreasCount === 0) {
+          serviceArea = 0;
+        } else if (serviceAreasCount >= 10) {
+          serviceArea = 100;
+        } else {
+          // Linear scale: 1 area = 10 points, 2 = 20, ..., 5 = 50, 6 = 60, ..., 9 = 90
+          serviceArea = Math.min(100, serviceAreasCount * 10);
+        }
+        
+        // Apply NAP consistency as a multiplier (if NAP is low, reduce service area score)
+        if (localData.napConsistencyScore !== null && localData.napConsistencyScore < 100) {
+          const napMultiplier = localData.napConsistencyScore / 100;
+          serviceArea = Math.round(serviceArea * napMultiplier);
+        }
+        
+        serviceArea = clampScore(serviceArea);
+        debugLog(`Service Area: Count=${serviceAreasCount}, NAP Multiplier=${localData.napConsistencyScore !== null ? (localData.napConsistencyScore / 100).toFixed(2) : 'N/A'}, Final=${serviceArea}`, 'info');
+      } else {
+        // Fallback: derived from Local Entity (old method)
+        serviceArea = clampScore(localEntity - 5);
+        debugLog('Service Area: Using fallback calculation (no Business Profile data)', 'warn');
+      }
 
       // Content/Schema: weighted calculation based on foundation schemas, rich results, coverage, and diversity
       let contentSchema;
@@ -2294,6 +2361,27 @@
         debugLog('✓ Search Console data fetched successfully', 'success');
         debugLog(`Data: ${JSON.stringify(searchData).substring(0, 200)}...`, 'info');
         
+        updateProgress(35, 'Fetching local signals data...');
+        debugLog('Fetching local signals data...', 'info');
+        // Fetch local signals (Business Profile) data
+        let localSignals = null;
+        try {
+          const localSignalsResponse = await fetch(`/api/aigeo/local-signals?property=${encodeURIComponent(propertyUrl)}`);
+          if (localSignalsResponse.ok) {
+            localSignals = await localSignalsResponse.json();
+            if (localSignals.status === 'ok') {
+              debugLog('✓ Local signals data fetched successfully', 'success');
+              debugLog(`Service areas: ${localSignals.data.serviceAreas?.length || 0}, NAP score: ${localSignals.data.napConsistencyScore || 'N/A'}`, 'info');
+            } else {
+              debugLog('⚠ Local signals returned error, using fallback', 'warn');
+            }
+          } else {
+            debugLog('⚠ Local signals endpoint not available, using fallback', 'warn');
+          }
+        } catch (localSignalsError) {
+          debugLog(`⚠ Local signals error: ${localSignalsError.message}, using fallback`, 'warn');
+        }
+        
         updateProgress(40, 'Fetching schema audit data...');
         debugLog('Fetching schema audit data...', 'info');
         // Fetch schema audit data
@@ -2419,8 +2507,8 @@
         
         updateProgress(70, 'Calculating pillar scores...');
         debugLog('Calculating pillar scores...', 'info');
-        // Calculate scores (pass schema audit data)
-        const scores = calculatePillarScores(searchData, schemaAudit);
+        // Calculate scores (pass schema audit data and local signals)
+        const scores = calculatePillarScores(searchData, schemaAudit, localSignals);
         debugLog('✓ Pillar scores calculated', 'success');
         debugLog(`Scores: ${JSON.stringify(scores)}`, 'info');
 
@@ -2438,7 +2526,7 @@
         debugLog('=== AUDIT COMPLETE: Success ===', 'success');
         
         // Save audit results to localStorage
-        saveAuditResults(scores, searchData, snippetReadiness, schemaAudit);
+        saveAuditResults(scores, searchData, snippetReadiness, schemaAudit, localSignals);
         
         // Save audit results to Supabase for historical tracking
         saveAuditToSupabase(propertyUrl, scores, searchData, snippetReadiness, schemaAudit);
