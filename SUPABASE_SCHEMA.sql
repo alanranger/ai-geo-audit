@@ -95,3 +95,4 @@ CREATE INDEX IF NOT EXISTS idx_gsc_timeseries_property
 --    if you want to restrict access (optional for service role key usage)
 
 
+

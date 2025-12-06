@@ -273,3 +273,4 @@ CREATE INDEX idx_gsc_timeseries_property
 **Key Benefit:** Massive reduction in API calls, faster dashboard loads, better rate limit management.
 
 
+

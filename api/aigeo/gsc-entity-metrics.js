@@ -240,12 +240,28 @@ export default async function handler(req, res) {
         })
         .then(async (response) => {
           if (response.ok) {
-            const result = await response.json();
-            const savedCount = Array.isArray(result) ? result.length : records.length;
-            console.log(`[GSC Cache] ✓ Saved ${savedCount} timeseries records to Supabase`);
+            try {
+              const contentType = response.headers.get('content-type');
+              if (contentType && contentType.includes('application/json')) {
+                const result = await response.json();
+                const savedCount = Array.isArray(result) ? result.length : records.length;
+                console.log(`[GSC Cache] ✓ Saved ${savedCount} timeseries records to Supabase`);
+              } else {
+                // Empty response is OK for upserts
+                console.log(`[GSC Cache] ✓ Saved ${records.length} timeseries records to Supabase (upsert, no response body)`);
+              }
+            } catch (jsonError) {
+              // Empty response is OK for upserts
+              console.log(`[GSC Cache] ✓ Saved ${records.length} timeseries records to Supabase (upsert, empty response)`);
+            }
           } else {
-            const errorText = await response.text();
-            console.error(`[GSC Cache] ✗ Failed to save: ${response.status} - ${errorText}`);
+            let errorText = '';
+            try {
+              errorText = await response.text();
+            } catch (e) {
+              errorText = `Status ${response.status} - Could not read error message`;
+            }
+            console.error(`[GSC Cache] ✗ Failed to save: ${response.status} - ${errorText.substring(0, 200)}`);
           }
         })
         .catch(err => {

@@ -98,16 +98,32 @@ export default async function handler(req, res) {
     };
 
     // Insert or update (upsert) using Supabase REST API
-    const response = await fetch(`${supabaseUrl}/rest/v1/audit_results`, {
+    // Try POST first with upsert header, if 409 conflict then PATCH
+    let response = await fetch(`${supabaseUrl}/rest/v1/audit_results`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'apikey': supabaseKey,
         'Authorization': `Bearer ${supabaseKey}`,
-        'Prefer': 'resolution=merge-duplicates' // Upsert behavior
+        'Prefer': 'resolution=merge-duplicates,return=representation'
       },
       body: JSON.stringify(auditRecord)
     });
+    
+    // If 409 conflict (unique constraint violation), use PATCH to update existing record
+    if (response.status === 409) {
+      console.log('[Supabase Save] Record exists, updating with PATCH...');
+      response = await fetch(`${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${auditDate}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`,
+          'Prefer': 'return=representation'
+        },
+        body: JSON.stringify(auditRecord)
+      });
+    }
 
     if (!response.ok) {
       const errorText = await response.text();
