@@ -868,11 +868,14 @@ export default async function handler(req, res) {
       .map(([type, count]) => `${type}: ${count}`)
       .join(', '));
     
-    // Convert schemaTypes to array format, limit to top 10
+    // Convert schemaTypes to array format, limit to top 10 for display
     const schemaTypesArray = Object.entries(schemaTypes)
       .map(([type, count]) => ({ type, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
+    
+    // Return ALL detected types as an array for calculation purposes
+    const allTypesArray = Array.from(allTypes);
     
     return res.status(200).json({
       status: 'ok',
@@ -882,7 +885,8 @@ export default async function handler(req, res) {
         pagesWithSchema, // Pages with inline schema
         pagesWithInheritedSchema, // Pages with inherited schema only
         coverage: Math.round(coverage * 100) / 100, // Coverage based on inline schema only
-        schemaTypes: schemaTypesArray,
+        schemaTypes: schemaTypesArray, // Top 10 for display
+        allDetectedTypes: allTypesArray, // ALL detected types for accurate calculation
         missingTypes: missingTypes.length > 0 ? missingTypes : undefined,
         missingSchemaCount: missingSchemaPages.length,
         missingSchemaPages: missingSchemaPages.length > 0 ? missingSchemaPages : undefined,

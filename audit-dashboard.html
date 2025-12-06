@@ -2177,8 +2177,14 @@
         const schemaData = schemaAudit.data;
         const allTypes = new Set();
         
-        // Collect all schema types from schemaTypes array
-        if (schemaData.schemaTypes && Array.isArray(schemaData.schemaTypes)) {
+        // Use allDetectedTypes if available (all types), otherwise fall back to schemaTypes (top 10)
+        if (schemaData.allDetectedTypes && Array.isArray(schemaData.allDetectedTypes)) {
+          // Use all detected types for accurate calculation
+          schemaData.allDetectedTypes.forEach(type => {
+            if (type) allTypes.add(type);
+          });
+        } else if (schemaData.schemaTypes && Array.isArray(schemaData.schemaTypes)) {
+          // Fallback: collect from top 10 schemaTypes array (may miss some types)
           schemaData.schemaTypes.forEach(item => {
             if (item.type) allTypes.add(item.type);
           });
