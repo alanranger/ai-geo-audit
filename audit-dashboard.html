@@ -2127,15 +2127,15 @@
         const serviceAreasCount = localData.serviceAreas?.length || 0;
         
         // Normalize service areas count to 0-100 score
-        // 0 areas = 0, 5 areas = 50, 10+ areas = 100
-        // Using a logarithmic scale for better distribution
+        // 0 areas = 0, 8+ areas = 100 (more reasonable threshold)
+        // Linear scale: 1 area = 12.5 points (8 areas = 100)
         if (serviceAreasCount === 0) {
           serviceArea = 0;
-        } else if (serviceAreasCount >= 10) {
+        } else if (serviceAreasCount >= 8) {
           serviceArea = 100;
         } else {
-          // Linear scale: 1 area = 10 points, 2 = 20, ..., 5 = 50, 6 = 60, ..., 9 = 90
-          serviceArea = Math.min(100, serviceAreasCount * 10);
+          // Linear scale: 1 area = 12.5 points, 2 = 25, ..., 8 = 100
+          serviceArea = Math.min(100, serviceAreasCount * 12.5);
         }
         
         // Apply NAP consistency as a multiplier (if NAP is low, reduce service area score)
@@ -3915,6 +3915,51 @@
               debugLog(`No historical Content/Schema data found. Using current score (${currentContentSchema}) for all points. Dashed line will indicate estimated data.`, 'info');
             }
             
+            // Get current Business Profile data for Local Entity and Service Area (used for all historical dates)
+            // Note: Business Profile data is current, not historical, so we use the same values for all dates
+            const hasLocalSignals = saved && saved.localSignals && saved.localSignals.status === 'ok' && saved.localSignals.data;
+            const localSignalsData = hasLocalSignals ? saved.localSignals.data : null;
+            
+            // Calculate current Local Entity and Service Area scores from Business Profile data (if available)
+            let currentLocalEntity, currentServiceArea;
+            if (hasLocalSignals && localSignalsData) {
+              // Local Entity: NAP consistency + bonuses
+              let baseScore = localSignalsData.napConsistencyScore || 0;
+              if (localSignalsData.knowledgePanelDetected) {
+                baseScore = Math.min(100, baseScore + 10);
+              }
+              if (localSignalsData.locations && localSignalsData.locations.length > 0) {
+                baseScore = Math.min(100, baseScore + 5);
+              }
+              currentLocalEntity = clampScore(baseScore);
+              
+              // Service Area: based on service areas count
+              const serviceAreasCount = localSignalsData.serviceAreas?.length || 0;
+              if (serviceAreasCount === 0) {
+                currentServiceArea = 0;
+              } else if (serviceAreasCount >= 8) {
+                // 8+ service areas = 100 (more reasonable threshold)
+                currentServiceArea = 100;
+              } else {
+                // Linear scale: 1 area = 12.5 points (8 areas = 100)
+                currentServiceArea = Math.min(100, serviceAreasCount * 12.5);
+              }
+              
+              // Apply NAP consistency as a multiplier (if NAP is low, reduce service area score)
+              if (localSignalsData.napConsistencyScore !== null && localSignalsData.napConsistencyScore < 100) {
+                const napMultiplier = localSignalsData.napConsistencyScore / 100;
+                currentServiceArea = Math.round(currentServiceArea * napMultiplier);
+              }
+              currentServiceArea = clampScore(currentServiceArea);
+              
+              debugLog(`Trend chart: Using current Business Profile data - Local Entity=${currentLocalEntity}, Service Area=${currentServiceArea} (for all historical dates)`, 'info');
+            } else {
+              // Fallback: use derived calculation
+              currentLocalEntity = null;
+              currentServiceArea = null;
+              debugLog('Trend chart: No Business Profile data available, using derived calculation for historical dates', 'warn');
+            }
+            
             // Calculate pillar scores for each timeseries point
             const calculatePillarFromMetrics = (position, ctr) => {
               // Position score (same formula as main calculation)
@@ -3930,8 +3975,15 @@
               // Calculate each pillar (same formulas as main calculation)
               const visibility = clampScore(posScore);
               const authority = clampScore(0.6 * ctrScore + 0.4 * posScore);
-              const localEntity = clampScore(60 + 0.3 * (posScore - 50) + 0.2 * (ctrScore - 50));
-              const serviceArea = clampScore(localEntity - 5);
+              
+              // Use current Business Profile data for Local Entity and Service Area (if available)
+              // Otherwise fall back to derived calculation
+              const localEntity = currentLocalEntity !== null 
+                ? currentLocalEntity 
+                : clampScore(60 + 0.3 * (posScore - 50) + 0.2 * (ctrScore - 50));
+              const serviceArea = currentServiceArea !== null 
+                ? currentServiceArea 
+                : clampScore(localEntity - 5);
               
               return { visibility, authority, localEntity, serviceArea };
             };
@@ -4028,12 +4080,22 @@
                 allDateObjects.push(dateObj);
                 allDates.push(dateObj.toLocaleDateString('en-GB', dateFormat));
                 
-                // Add null values for GSC-based pillars (no data for these dates yet due to GSC delay)
-                // These are NOT mock/estimated values - they are null because GSC hasn't updated yet
-                localEntityData.push(null);
-                serviceAreaData.push(null);
+                // For GSC-based pillars (Authority, Visibility), add null (no data yet due to GSC delay)
                 authorityData.push(null);
                 visibilityData.push(null);
+                
+                // For Local Entity and Service Area, use current Business Profile data (if available)
+                // Business Profile data is current, not historical, so we use the same values for all dates
+                if (currentLocalEntity !== null) {
+                  localEntityData.push(currentLocalEntity);
+                } else {
+                  localEntityData.push(null);
+                }
+                if (currentServiceArea !== null) {
+                  serviceAreaData.push(currentServiceArea);
+                } else {
+                  serviceAreaData.push(null);
+                }
                 
               // For Content/Schema, check if we have real data for this date
               const realScore = contentSchemaMap.get(dateStr);
@@ -4058,11 +4120,21 @@
               allDateObjects.push(todayDateObj);
               allDates.push(todayDateObj.toLocaleDateString('en-GB', dateFormat));
               
-              // Add null values for GSC-based pillars
-              localEntityData.push(null);
-              serviceAreaData.push(null);
+              // For GSC-based pillars (Authority, Visibility), add null
               authorityData.push(null);
               visibilityData.push(null);
+              
+              // For Local Entity and Service Area, use current Business Profile data (if available)
+              if (currentLocalEntity !== null) {
+                localEntityData.push(currentLocalEntity);
+              } else {
+                localEntityData.push(null);
+              }
+              if (currentServiceArea !== null) {
+                serviceAreaData.push(currentServiceArea);
+              } else {
+                serviceAreaData.push(null);
+              }
               
               // For Content/Schema, check if we have real data for today
               const todayRealScore = contentSchemaMap.get(todayStr);
