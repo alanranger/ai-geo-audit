@@ -54,53 +54,118 @@ export default async function handler(req, res) {
     const searchConsoleUrl = `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`;
     
     // 1. Get overview (aggregate totals, no dimensions)
-    const overviewResponse = await fetch(searchConsoleUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        startDate,
-        endDate,
-        // No dimensions = aggregate totals
-      }),
-    });
+    // First, check if we can calculate overview from cached timeseries data
+    let totalClicks = 0;
+    let totalImpressions = 0;
+    let avgPosition = 0;
+    let ctr = 0;
+    let overviewFromCache = false;
     
-    if (!overviewResponse.ok) {
-      const errorText = await overviewResponse.text();
-      let errorData;
+    // Check if we have complete timeseries data in cache
+    if (supabaseUrl && supabaseKey) {
       try {
-        errorData = JSON.parse(errorText);
-      } catch (e) {
-        errorData = { error: { message: errorText } };
+        const baseUrl = req.headers.host 
+          ? `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}`
+          : 'http://localhost:3000';
+        const cacheResponse = await fetch(`${baseUrl}/api/supabase/get-gsc-timeseries?propertyUrl=${encodeURIComponent(siteUrl)}&startDate=${startDate}&endDate=${endDate}`);
+        
+        if (cacheResponse.ok) {
+          const cacheData = await cacheResponse.json();
+          if (cacheData.status === 'ok' && cacheData.data && cacheData.data.length > 0) {
+            // Check if we have data for all dates in range
+            const start = new Date(startDate);
+            const end = new Date(endDate);
+            const expectedDays = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
+            const cachedDates = new Set(cacheData.data.map(r => r.date));
+            
+            // Count how many dates we have
+            let actualDays = 0;
+            for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+              const dateStr = d.toISOString().split('T')[0];
+              if (cachedDates.has(dateStr)) {
+                actualDays++;
+              }
+            }
+            
+            // If we have data for most dates (>= 90%), calculate overview from cache
+            if (actualDays >= expectedDays * 0.9) {
+              console.log(`[GSC Cache] Calculating overview from ${cacheData.data.length} cached timeseries records`);
+              
+              // Calculate aggregate metrics from timeseries
+              let totalWeightedPosition = 0;
+              cacheData.data.forEach(point => {
+                totalClicks += point.clicks || 0;
+                totalImpressions += point.impressions || 0;
+                // Position is weighted by impressions
+                totalWeightedPosition += (point.position || 0) * (point.impressions || 0);
+              });
+              
+              // Calculate average position (weighted by impressions)
+              avgPosition = totalImpressions > 0 ? totalWeightedPosition / totalImpressions : 0;
+              
+              // Calculate CTR
+              ctr = totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0;
+              
+              overviewFromCache = true;
+              console.log(`[GSC Cache] ✓ Overview calculated from cache: ${totalClicks} clicks, ${totalImpressions} impressions, position ${avgPosition.toFixed(2)}, CTR ${ctr.toFixed(2)}%`);
+            }
+          }
+        }
+      } catch (cacheError) {
+        console.warn('[GSC Cache] Error checking cache for overview, will fetch from GSC API:', cacheError.message);
       }
+    }
+    
+    // If we couldn't calculate from cache, fetch from GSC API
+    if (!overviewFromCache) {
+      const overviewResponse = await fetch(searchConsoleUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          startDate,
+          endDate,
+          // No dimensions = aggregate totals
+        }),
+      });
       
-      if (overviewResponse.status === 403) {
-        return res.status(403).json({
+      if (!overviewResponse.ok) {
+        const errorText = await overviewResponse.text();
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch (e) {
+          errorData = { error: { message: errorText } };
+        }
+        
+        if (overviewResponse.status === 403) {
+          return res.status(403).json({
+            status: 'error',
+            source: 'gsc-entity-metrics',
+            message: 'Permission denied',
+            details: errorData.error?.message || 'User does not have access to this Search Console property',
+            meta: { generatedAt: new Date().toISOString() }
+          });
+        }
+        
+        return res.status(overviewResponse.status).json({
           status: 'error',
           source: 'gsc-entity-metrics',
-          message: 'Permission denied',
-          details: errorData.error?.message || 'User does not have access to this Search Console property',
+          message: 'Failed to fetch Search Console data',
+          details: errorData,
           meta: { generatedAt: new Date().toISOString() }
         });
       }
       
-      return res.status(overviewResponse.status).json({
-        status: 'error',
-        source: 'gsc-entity-metrics',
-        message: 'Failed to fetch Search Console data',
-        details: errorData,
-        meta: { generatedAt: new Date().toISOString() }
-      });
+      const overviewData = await overviewResponse.json();
+      const overviewRow = overviewData.rows?.[0] || {};
+      totalClicks = overviewRow.clicks || 0;
+      totalImpressions = overviewRow.impressions || 0;
+      avgPosition = overviewRow.position || 0;
+      ctr = overviewRow.ctr ? overviewRow.ctr * 100 : (totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0);
     }
-    
-    const overviewData = await overviewResponse.json();
-    const overviewRow = overviewData.rows?.[0] || {};
-    const totalClicks = overviewRow.clicks || 0;
-    const totalImpressions = overviewRow.impressions || 0;
-    const avgPosition = overviewRow.position || 0;
-    const ctr = overviewRow.ctr ? overviewRow.ctr * 100 : (totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0);
     
     // 2. Get timeseries data (by date) - WITH CACHING
     let timeseries = [];
