@@ -4436,31 +4436,37 @@
         // Create report HTML
         const reportHTML = createReportHTML(savedAudit, propertyUrl, dateRange, auditDate);
 
-        // Create a temporary container for the report
-        const reportContainer = document.createElement('div');
-        reportContainer.id = 'pdfReportContainer';
-        // Position visible but off-screen for html2pdf to capture
-        // Use a position that's still in the viewport but not visible
-        reportContainer.style.position = 'absolute';
-        reportContainer.style.top = '0';
-        reportContainer.style.left = '-9999px';
-        reportContainer.style.width = '210mm'; // A4 width
-        reportContainer.style.minHeight = '297mm'; // A4 height
-        reportContainer.style.padding = '20mm';
-        reportContainer.style.backgroundColor = '#ffffff';
-        reportContainer.style.zIndex = '9999';
-        reportContainer.style.visibility = 'visible';
-        reportContainer.style.opacity = '1';
-        reportContainer.style.display = 'block';
-        
         // Verify reportHTML has content
         if (!reportHTML || reportHTML.length < 100) {
           throw new Error('Report HTML is empty or too short. Cannot generate PDF.');
         }
         
         console.log('Report HTML length:', reportHTML.length);
+        console.log('Report HTML preview (first 500 chars):', reportHTML.substring(0, 500));
+        
+        // Create a temporary container for the report
+        // Make it visible but positioned off-screen so html2pdf can capture it
+        const reportContainer = document.createElement('div');
+        reportContainer.id = 'pdfReportContainer';
+        reportContainer.style.position = 'fixed';
+        reportContainer.style.top = '0';
+        reportContainer.style.left = '0';
+        reportContainer.style.width = '210mm'; // A4 width
+        reportContainer.style.minHeight = '297mm'; // A4 height
+        reportContainer.style.padding = '20mm';
+        reportContainer.style.backgroundColor = '#ffffff';
+        reportContainer.style.zIndex = '99999';
+        reportContainer.style.visibility = 'visible';
+        reportContainer.style.opacity = '1';
+        reportContainer.style.display = 'block';
+        reportContainer.style.overflow = 'visible';
+        
         reportContainer.innerHTML = reportHTML;
         document.body.appendChild(reportContainer);
+        
+        // Make container visible briefly for html2pdf to capture, then hide it
+        // html2pdf needs the element to be in the DOM and renderable
+        reportContainer.style.transform = 'translateX(-100%)'; // Move off-screen but keep in viewport
 
         // Wait for DOM to update
         await new Promise(resolve => setTimeout(resolve, 500));
@@ -4523,8 +4529,25 @@
 
         console.log('Starting PDF generation, container content length:', reportContainer.innerHTML.length);
         console.log('Container dimensions:', reportContainer.offsetWidth, 'x', reportContainer.offsetHeight);
+        console.log('Container scrollHeight:', reportContainer.scrollHeight);
+        console.log('Container has children:', reportContainer.children.length);
         
-        await html2pdf().set(opt).from(reportContainer).save();
+        // Temporarily make container fully visible for html2pdf capture
+        const originalTransform = reportContainer.style.transform;
+        reportContainer.style.transform = 'translateX(0)';
+        reportContainer.style.position = 'fixed';
+        reportContainer.style.top = '0';
+        reportContainer.style.left = '0';
+        
+        // Wait a moment for rendering
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        try {
+          await html2pdf().set(opt).from(reportContainer).save();
+        } finally {
+          // Restore original position
+          reportContainer.style.transform = originalTransform || 'translateX(-100%)';
+        }
 
         // Wait a bit before cleanup to ensure PDF is saved
         await new Promise(resolve => setTimeout(resolve, 1000));
