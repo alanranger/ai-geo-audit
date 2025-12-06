@@ -875,25 +875,69 @@
           </ul>
           <p><strong>Data Checked:</strong> Search Console impressions/clicks, average position, CTR, featured snippet appearances, local pack visibility, SERP feature presence, ranking distribution.</p>
 
-          <h5>2. Authority (E-A-T)</h5>
+          <h5>2. Authority (E-E-A-T)</h5>
+          <p><strong>What Authority Represents:</strong></p>
+          <p>Authority is not "how good the content is", it's "how much the outside world and searchers trust and choose you". It approximates E-E-A-T using four ingredients:</p>
+          <ul>
+            <li><strong>Behavioural signals</strong> – do people click your results when they see them?</li>
+            <li><strong>Ranking strength</strong> – how often do you show near the top of organic results?</li>
+            <li><strong>Off-site credibility</strong> – backlinks from other domains (Phase 3)</li>
+            <li><strong>Reputation & reviews</strong> – ratings and review volume across GBP + website</li>
+          </ul>
           <p><strong>Measurement:</strong></p>
           <ul>
             <li>Four-component model: Behaviour (40%), Ranking (20%), Backlinks (20%), Reviews (20%)</li>
             <li>Formula: <code>authority = 0.4 * behaviourScore + 0.2 * rankingScore + 0.2 * backlinkScore + 0.2 * reviewScore</code></li>
-            <li><strong>Behaviour Score (40%):</strong> CTR for ranking queries (position ≤20) + top-10 CTR</li>
-            <li><strong>Ranking Score (20%):</strong> Average position + top-10 impression share</li>
-            <li><strong>Backlink Score (20%):</strong> Referring domains count + quality ratio (from CSV upload)</li>
-            <li><strong>Review Score (20%):</strong> Combined ratings and counts from Google Business Profile + on-site/Trustpilot reviews</li>
+            <li>Each sub-score is normalized to 0-100, then combined with weights above</li>
             <li>Score range: 0-100</li>
+          </ul>
+          <p><strong>2.1 Behaviour Score (40%):</strong></p>
+          <ul>
+            <li>From Google Search Console: Only uses queries where average position ≤ 20</li>
+            <li>Computes: ctrAll = CTR for all ranking queries, ctrTop10 = CTR for impressions where position ≤ 10</li>
+            <li>Maps: ctrAll 0-10% → 0-100 (values >10% capped at 100), ctrTop10 0-20% → 0-100</li>
+            <li>Combines: <code>BehaviourScore = 0.5 * score(ctrAll) + 0.5 * score(ctrTop10)</code></li>
+            <li>This stops long-tail / low-rank pages dragging the whole site down</li>
+          </ul>
+          <p><strong>2.2 Ranking Score (20%):</strong></p>
+          <ul>
+            <li>From GSC, again only for position ≤ 20</li>
+            <li>avgPos = impression-weighted average position</li>
+            <li>top10Share = % of impressions where position ≤ 10</li>
+            <li>posScore = map(avgPos, 1 → 100, 20 → 0) (clamped)</li>
+            <li>top10Score = top10Share as a % (0-100)</li>
+            <li>Combines: <code>RankingScore = 0.5 * posScore + 0.5 * top10Score</code></li>
+          </ul>
+          <p><strong>2.3 Review Score (20%):</strong></p>
+          <ul>
+            <li>Inputs: From GBP API (gbpRating 0-5, gbpReviewCount) and site-reviews.json (siteRating, siteReviewCount)</li>
+            <li>Per source: ratingScore = (rating/5)*100, countScore = min(reviewCount, 500)/500*100</li>
+            <li>sourceScore = 0.6 * ratingScore + 0.4 * countScore</li>
+            <li>Final: <code>ReviewScore = 0.6 * gbpSourceScore + 0.4 * siteSourceScore</code></li>
+            <li>If one source missing, falls back to the other; if both missing, uses neutral default (50)</li>
+          </ul>
+          <p><strong>2.4 Backlink Score (20%):</strong></p>
+          <ul>
+            <li>Phase 3 – using CSVs: refDomainCount, qualityDomains, qualityRatio</li>
+            <li>countScore = map(refDomainCount, 0 → 0, N → 100) where N is cap (e.g. 150-200)</li>
+            <li>qualityScore = qualityRatio * 100</li>
+            <li>Combines: <code>BacklinkScore = 0.5 * countScore + 0.5 * qualityScore</code></li>
+            <li>Currently placeholder (50) until Phase 3 is implemented</li>
           </ul>
           <p><strong>Data Sources:</strong></p>
           <ul>
             <li>Google Search Console API (CTR, position, impressions by position bucket)</li>
             <li>Google Business Profile API (ratings, review count)</li>
-            <li>On-site/Trustpilot reviews (ratings, review count)</li>
-            <li>Backlink CSV upload (referring domains, quality metrics)</li>
+            <li>On-site/Trustpilot reviews (ratings, review count from site-reviews.json)</li>
+            <li>Backlink CSV upload (referring domains, quality metrics) - Phase 3</li>
           </ul>
-          <p><strong>Data Checked:</strong> Ranking query CTR (position ≤20), top-10 CTR, average position, top-10 impression share, referring domains count, backlink quality, Google Business Profile ratings/reviews, on-site review ratings/counts.</p>
+          <p><strong>How to Improve Authority:</strong></p>
+          <ul>
+            <li><strong>Behaviour:</strong> Improve titles/meta descriptions on pages already in top 10-20. Focus on high-impression queries in GSC.</li>
+            <li><strong>Ranking:</strong> Push more core pages into top 10 (content refreshes, internal links, stronger schema).</li>
+            <li><strong>Reviews:</strong> Keep growing GBP and Trustpilot/on-site reviews; higher rating and more volume both help.</li>
+            <li><strong>Backlinks:</strong> Acquire more distinct linking domains, favouring sites with real traffic/authority (Phase 3).</li>
+          </ul>
 
           <h5>3. Local Entity</h5>
           <p><strong>Measurement:</strong></p>
