@@ -120,9 +120,12 @@
 
     <div id="step3" class="step" style="display: none;">
       <div class="step-number">Step 3:</div>
-      <p>After authorization, Google will redirect you back. Paste the full redirect URL here (it will contain a "code" parameter):</p>
-      <input type="text" id="redirectUrl" placeholder="https://local.alanranger.com/callbacks/oauth/google?code=...">
+      <p>After you click "Authorize", Google will show you an authorization code on the page (instead of redirecting). Copy that code and paste it here:</p>
+      <input type="text" id="authCode" placeholder="4/0ATX87IMzHV9HhSkvPTNc7IN9SlduxyqgJl_fMq7WmLDd3OX_JEV_g6pc9sTaaeWhXWohKg">
       <button onclick="exchangeCode()">Exchange Code for Refresh Token</button>
+      <p style="margin-top: 10px; font-size: 14px; color: #666;">
+        <strong>Note:</strong> The code will look like: <code>4/0ATX87IMzHV9HhSkvPTNc7IN9SlduxyqgJl_fMq7WmLDd3OX_JEV_g6pc9sTaaeWhXWohKg</code>
+      </p>
     </div>
 
     <div id="result" style="display: none;"></div>
@@ -144,7 +147,8 @@
       sessionStorage.setItem('clientSecret', clientSecret);
 
       // Generate authorization URL
-      const redirectUri = 'https://local.alanranger.com/callbacks/oauth/google';
+      // Use 'urn:ietf:wg:oauth:2.0:oob' which shows the code on the page instead of redirecting
+      const redirectUri = 'urn:ietf:wg:oauth:2.0:oob';
       const scopes = [
         'https://www.googleapis.com/auth/webmasters', // GSC (existing)
         'https://www.googleapis.com/auth/business.manage' // Business Profile (new)
@@ -172,25 +176,19 @@
     }
 
     async function exchangeCode() {
-      const redirectUrl = document.getElementById('redirectUrl').value.trim();
+      const authCode = document.getElementById('authCode').value.trim();
       const clientSecret = sessionStorage.getItem('clientSecret');
 
-      if (!redirectUrl) {
-        alert('Please paste the redirect URL');
+      if (!authCode) {
+        alert('Please paste the authorization code');
         return;
       }
 
-      // Extract code from URL
-      const urlParams = new URLSearchParams(redirectUrl.split('?')[1] || redirectUrl.split('#')[1]);
-      const code = urlParams.get('code');
-
-      if (!code) {
-        alert('Could not find "code" parameter in the URL. Please check the redirect URL.');
-        return;
-      }
+      // Code is already extracted (user pastes it directly)
+      const code = authCode;
 
       const clientId = document.getElementById('clientId').value.trim();
-      const redirectUri = 'https://local.alanranger.com/callbacks/oauth/google';
+      const redirectUri = 'urn:ietf:wg:oauth:2.0:oob';
 
       // Show loading
       const resultDiv = document.getElementById('result');
@@ -252,12 +250,7 @@
       }
     }
 
-    // Check if we're coming back from OAuth redirect
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get('code')) {
-      document.getElementById('redirectUrl').value = window.location.href;
-      document.getElementById('step3').style.display = 'block';
-    }
+    // No need to check for URL params since we're using 'oob' redirect
   </script>
 </body>
 </html>
