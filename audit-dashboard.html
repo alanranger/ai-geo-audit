@@ -975,14 +975,12 @@
             <strong>Current data as of:</strong> <span id="snippetReadinessAuditTime">-</span> <span style="color: #666; font-size: 0.75rem;">(Not historical - reflects last audit scan)</span>
           </div>
           
-          <div id="snippetReadinessExplanation" style="display: none; background: #f0f9ff; border-left: 4px solid #3b82f6; padding: 1rem; margin-bottom: 1rem; border-radius: 4px; font-size: 0.85rem; color: #1e40af;">
-            <strong id="explanationTitle">Why is Snippet Readiness 0%?</strong> The score is calculated from three weighted components:
-            <ul style="margin: 0.5rem 0 0 1.5rem; padding: 0;">
-              <li><strong>Content/Schema (40% weight):</strong> <span id="explainContentSchema">-</span> - <span id="explainContentSchemaDetail">-</span></li>
-              <li><strong>Visibility (35% weight):</strong> <span id="explainVisibility">-</span> - <span id="explainVisibilityDetail">-</span></li>
-              <li><strong>Authority (25% weight):</strong> <span id="explainAuthority">-</span> - <span id="explainAuthorityDetail">-</span></li>
-            </ul>
-            <div style="margin-top: 0.5rem; font-weight: 600;" id="explanationFormula">Formula: (Content/Schema × 40%) + (Visibility × 35%) + (Authority × 25%) = 0%</div>
+          <div id="snippetReadinessExplanation" style="display: none; background: #fff7ed; border-left: 4px solid #f59e0b; padding: 1rem; margin-bottom: 1rem; border-radius: 4px; font-size: 0.85rem; color: #92400e;">
+            <strong id="explanationTitle">Top 5 Actions to Improve Snippet Readiness</strong>
+            <p style="margin: 0.5rem 0; color: #78350f;">Prioritized actions based on your current scores and their impact on overall snippet readiness:</p>
+            <ol id="topActionsList" style="margin: 0.5rem 0 0 1.5rem; padding: 0; list-style-type: decimal;">
+              <!-- Top 5 actions will be populated dynamically -->
+            </ol>
           </div>
           
           <!-- Overall Combined Score -->
@@ -2884,24 +2882,45 @@
         const visibilityScore = Math.round(scores.visibility || 0);
         const authorityScore = Math.round(scores.authority || 0);
         
-        // Show Snippet Readiness explanation with all three components
+        // Generate top 5 actionable levers to improve snippet readiness
         const explanationDiv = document.getElementById('snippetReadinessExplanation');
-        if (explanationDiv && scores) {
+        const topActionsList = document.getElementById('topActionsList');
+        if (explanationDiv && topActionsList && scores) {
           const contentSchemaScore = Math.round(scores.contentSchema || 0);
           const visibilityScore = Math.round(scores.visibility || 0);
           const authorityScore = Math.round(scores.authority || 0);
           
-          // Calculate contributions
-          const contentSchemaContribution = (contentSchemaScore * 0.4).toFixed(1);
-          const visibilityContribution = (visibilityScore * 0.35).toFixed(1);
-          const authorityContribution = (authorityScore * 0.25).toFixed(1);
+          const actions = [];
           
-          // Update title with actual score
-          document.getElementById('explanationTitle').textContent = `Why is Snippet Readiness ${snippetReadiness}%?`;
+          // Authority (25% weight) - usually lowest, highest impact potential
+          if (authorityScore < 70) {
+            const potentialGain = (70 - authorityScore) * 0.25; // Max potential points if improved to 70
+            if (data && data.ctr !== undefined) {
+              const ctr = data.ctr || 0;
+              if (ctr < 1.5) {
+                actions.push({
+                  priority: 1,
+                  impact: potentialGain,
+                  text: `Improve Authority (currently ${authorityScore}%): Increase CTR from ${ctr.toFixed(2)}% to 2%+ by optimizing titles and meta descriptions. Potential gain: +${potentialGain.toFixed(1)} points.`
+                });
+              } else {
+                actions.push({
+                  priority: 1,
+                  impact: potentialGain,
+                  text: `Improve Authority (currently ${authorityScore}%): Build backlinks and improve E-A-T signals. Potential gain: +${potentialGain.toFixed(1)} points.`
+                });
+              }
+            } else {
+              actions.push({
+                priority: 1,
+                impact: potentialGain,
+                text: `Improve Authority (currently ${authorityScore}%): Build backlinks, improve E-A-T signals, and optimize CTR. Potential gain: +${potentialGain.toFixed(1)} points.`
+              });
+            }
+          }
           
-          // Content/Schema details
-          let contentSchemaDetail = '';
-          if (schemaAudit && schemaAudit.status === 'ok' && schemaAudit.data) {
+          // Content/Schema (40% weight) - highest weight
+          if (contentSchemaScore < 100 && schemaAudit && schemaAudit.status === 'ok' && schemaAudit.data) {
             const schemaData = schemaAudit.data;
             const allTypes = new Set();
             if (schemaData.schemaTypes && Array.isArray(schemaData.schemaTypes)) {
@@ -2909,42 +2928,75 @@
                 if (item.type) allTypes.add(item.type);
               });
             }
+            
             const foundationTypes = ['Organization', 'Person', 'WebSite', 'BreadcrumbList'];
             const foundationPresent = foundationTypes.filter(type => allTypes.has(type)).length;
             const richEligibleCount = Object.values(schemaData.richEligible || {}).filter(eligible => eligible === true).length;
             const uniqueTypesCount = allTypes.size;
-            contentSchemaDetail = `Foundation: ${foundationPresent}/4, Rich Results: ${richEligibleCount}/10, Coverage: ${(schemaData.coverage || 0).toFixed(1)}%, Diversity: ${uniqueTypesCount} types`;
-          } else {
-            contentSchemaDetail = 'Schema audit data not available';
+            
+            // Calculate potential improvements
+            if (foundationPresent < 4) {
+              const missingFoundation = foundationTypes.filter(type => !allTypes.has(type));
+              const potentialGain = ((4 - foundationPresent) / 4) * 30 * 0.4; // 30% weight of 40% total
+              actions.push({
+                priority: 2,
+                impact: potentialGain,
+                text: `Add missing foundation schemas: ${missingFoundation.join(', ')}. Currently ${foundationPresent}/4. Potential gain: +${potentialGain.toFixed(1)} points.`
+              });
+            }
+            
+            if (richEligibleCount < 10) {
+              const potentialGain = ((10 - richEligibleCount) / 10) * 35 * 0.4; // 35% weight of 40% total
+              actions.push({
+                priority: 3,
+                impact: potentialGain,
+                text: `Add more rich result types. Currently ${richEligibleCount}/10 eligible. Add: Review, VideoObject, Recipe, or Course schemas. Potential gain: +${potentialGain.toFixed(1)} points.`
+              });
+            }
+            
+            if (uniqueTypesCount < 15) {
+              const potentialGain = ((15 - uniqueTypesCount) / 15) * 15 * 0.4; // 15% weight of 40% total
+              actions.push({
+                priority: 4,
+                impact: potentialGain,
+                text: `Increase schema diversity. Currently ${uniqueTypesCount} types (target: 15+). Add more schema types across different page types. Potential gain: +${potentialGain.toFixed(1)} points.`
+              });
+            }
           }
           
-          // Visibility details
-          let visibilityDetail = '';
-          if (data && data.averagePosition !== undefined) {
-            visibilityDetail = `Position: ${data.averagePosition.toFixed(1)}, CTR: ${(data.ctr || 0).toFixed(2)}%, Clicks: ${(data.totalClicks || 0).toLocaleString()}`;
-          } else {
-            visibilityDetail = 'GSC data not available';
+          // Visibility (35% weight)
+          if (visibilityScore < 90 && data && data.averagePosition !== undefined) {
+            const position = data.averagePosition || 0;
+            const ctr = data.ctr || 0;
+            const potentialGain = (90 - visibilityScore) * 0.35;
+            
+            if (position > 10) {
+              actions.push({
+                priority: 5,
+                impact: potentialGain,
+                text: `Improve Visibility (currently ${visibilityScore}%): Target top 10 positions. Current average position: ${position.toFixed(1)}. Optimize for featured snippets. Potential gain: +${potentialGain.toFixed(1)} points.`
+              });
+            } else if (ctr < 2.0) {
+              actions.push({
+                priority: 5,
+                impact: potentialGain,
+                text: `Improve Visibility (currently ${visibilityScore}%): Increase CTR from ${ctr.toFixed(2)}% to 2%+ with better titles and meta descriptions. Potential gain: +${potentialGain.toFixed(1)} points.`
+              });
+            }
           }
           
-          // Authority details
-          let authorityDetail = '';
-          if (data && data.ctr !== undefined) {
-            authorityDetail = `CTR: ${(data.ctr || 0).toFixed(2)}%, Position: ${(data.averagePosition || 0).toFixed(1)}`;
-          } else {
-            authorityDetail = 'GSC data not available';
+          // Sort by impact (highest first) and take top 5
+          actions.sort((a, b) => b.impact - a.impact);
+          const top5Actions = actions.slice(0, 5);
+          
+          // Update the list
+          topActionsList.innerHTML = top5Actions.map((action, index) => 
+            `<li style="margin: 0.5rem 0; line-height: 1.5;">${action.text}</li>`
+          ).join('');
+          
+          if (top5Actions.length === 0) {
+            topActionsList.innerHTML = '<li style="margin: 0.5rem 0;">All components are performing well! Maintain current performance.</li>';
           }
-          
-          // Update explanation text
-          document.getElementById('explainContentSchema').textContent = `${contentSchemaScore}% (contributes ${contentSchemaContribution} pts)`;
-          document.getElementById('explainContentSchemaDetail').textContent = contentSchemaDetail;
-          document.getElementById('explainVisibility').textContent = `${visibilityScore}% (contributes ${visibilityContribution} pts)`;
-          document.getElementById('explainVisibilityDetail').textContent = visibilityDetail;
-          document.getElementById('explainAuthority').textContent = `${authorityScore}% (contributes ${authorityContribution} pts)`;
-          document.getElementById('explainAuthorityDetail').textContent = authorityDetail;
-          
-          // Update formula
-          document.getElementById('explanationFormula').textContent = 
-            `Formula: (Content/Schema ${contentSchemaScore}% × 40%) + (Visibility ${visibilityScore}% × 35%) + (Authority ${authorityScore}% × 25%) = ${snippetReadiness}%`;
           
           explanationDiv.style.display = 'block';
         } else if (explanationDiv) {
@@ -3431,12 +3483,11 @@
                   const labelX = centerX + Math.cos(angle) * labelRadius;
                   const labelY = centerY + Math.sin(angle) * labelRadius;
                   
-                  // Position score label underneath the pillar label
-                  // For labels at top/bottom, offset vertically
-                  // For labels at sides, offset vertically (always down from label)
-                  const verticalOffset = 25; // Distance below the pillar label
-                  const scoreLabelX = labelX;
-                  const scoreLabelY = labelY + verticalOffset;
+                  // Position score label directly underneath the pillar label
+                  // Offset along the radial direction (same angle, further out)
+                  const scoreLabelOffset = 30; // Distance below the pillar label
+                  const scoreLabelX = labelX; // Same X position (aligned)
+                  const scoreLabelY = labelY + scoreLabelOffset; // Directly below
                   
                   // Get RAG color
                   const ragColor = getRAGColor(score);
@@ -3727,7 +3778,19 @@
             authorityData = makeSeries(scores.authority, 1.9);
             visibilityData = makeSeries(scores.visibility, 1.1);
             contentSchemaData = makeSeries(scores.contentSchema, 1.4);
-            contentSchemaDataEstimated = []; // Initialize empty array for fallback case
+            contentSchemaDataEstimated = new Array(numDataPoints).fill(null); // Initialize with nulls for fallback case
+            
+            // Generate dates for fallback case
+            const fallbackDates = [];
+            const fallbackDateObjects = [];
+            for (let i = 0; i < numDataPoints; i++) {
+              const dateObj = new Date();
+              dateObj.setDate(dateObj.getDate() - (numDataPoints - 1 - i));
+              fallbackDateObjects.push(dateObj);
+              fallbackDates.push(dateObj.toLocaleDateString('en-GB', dateFormat));
+            }
+            chartDates = fallbackDates;
+            chartDateObjects = fallbackDateObjects;
           }
           
           // Calculate min and max across all datasets
