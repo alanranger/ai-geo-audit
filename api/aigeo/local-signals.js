@@ -86,7 +86,12 @@ export default async function handler(req, res) {
     const account = accounts[0];
     const accountName = account.name; // e.g., "accounts/109345350307918860454"
     
-    const locationsResponse = await fetch(`https://mybusinessbusinessinformation.googleapis.com/v1/${accountName}/locations?readMask=name,title,storefrontAddress,websiteUri,phoneNumbers,primaryPhone,serviceArea`, {
+    console.log('[Local Signals] Fetching locations for account:', accountName);
+    
+    const locationsUrl = `https://mybusinessbusinessinformation.googleapis.com/v1/${accountName}/locations?readMask=name,title,storefrontAddress,websiteUri,phoneNumbers,primaryPhone,serviceArea`;
+    console.log('[Local Signals] Locations URL:', locationsUrl);
+    
+    const locationsResponse = await fetch(locationsUrl, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -94,13 +99,17 @@ export default async function handler(req, res) {
       },
     });
     
+    console.log('[Local Signals] Locations response status:', locationsResponse.status);
+    
     let locations = [];
     let serviceAreas = [];
     let napData = [];
     
     if (locationsResponse.ok) {
       const locationsData = await locationsResponse.json();
+      console.log('[Local Signals] Locations response data:', JSON.stringify(locationsData, null, 2));
       locations = locationsData.locations || [];
+      console.log('[Local Signals] Found', locations.length, 'locations');
       
       // Debug: Log location data to see what we're getting
       if (locations.length > 0) {
@@ -169,7 +178,17 @@ export default async function handler(req, res) {
         }
       });
     } else {
-      console.warn('Failed to fetch locations:', await locationsResponse.text());
+      const errorText = await locationsResponse.text();
+      console.error('[Local Signals] Failed to fetch locations. Status:', locationsResponse.status);
+      console.error('[Local Signals] Error response:', errorText);
+      
+      // Try to parse error for better logging
+      try {
+        const errorData = JSON.parse(errorText);
+        console.error('[Local Signals] Parsed error:', JSON.stringify(errorData, null, 2));
+      } catch (e) {
+        console.error('[Local Signals] Error text (not JSON):', errorText);
+      }
     }
     
     // Step 3: Calculate NAP consistency score
