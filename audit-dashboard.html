@@ -2159,17 +2159,19 @@
         ? ranking.reduce((s, q) => s + q.position * q.impressions, 0) / totalImpr
         : 0;
 
-      // Normalize position score (1-20 -> 100-10)
-      const posScore = normalisePosition(weightedPos, 1, 20);
+      // Normalize position score (1-30 -> 100-0 per design, but we filter to <=20 so use 1-20)
+      // Design: rank_pos = clamp((30 - avgPosition_ranked) / 29, 0, 1) * 60
+      const posScore = normalisePosition(weightedPos, 1, 20) * 0.6; // Max 60 points
 
       // Calculate top-10 impression share
+      // Design: rank_share = clamp(share_top10, 0, 1) * 40
       const top10Impr = ranking
         .filter(q => q.position <= 10)
         .reduce((s, q) => s + q.impressions, 0);
       const shareTop10 = totalImpr > 0 ? top10Impr / totalImpr : 0; // 0-1
-      const shareScore = shareTop10 * 100; // 0-100
+      const shareScore = shareTop10 * 40; // Max 40 points
 
-      return 0.6 * posScore + 0.4 * shareScore;
+      return posScore + shareScore; // 0-100
     }
 
     function calculatePillarScores(data, schemaAudit = null, localSignals = null) {
