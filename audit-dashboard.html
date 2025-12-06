@@ -3026,41 +3026,76 @@
                 ctx.stroke();
                 ctx.restore();
                 
-                // Draw label in the middle of the segment
+                // Draw label in the center area, aligned to segment
                 const midAngle = (startAngle + endAngle) / 2;
-                const midRadius = (outerInnerRadius + innerRadius) / 2;
-                const labelX = centerX + Math.cos(midAngle) * midRadius;
-                const labelY = centerY + Math.sin(midAngle) * midRadius;
+                // Position label in center area (about 30% from center, well inside the 75% cutout)
+                const labelRadius = outerRadius * 0.25; // Position in center area
+                const labelX = centerX + Math.cos(midAngle) * labelRadius;
+                const labelY = centerY + Math.sin(midAngle) * labelRadius;
                 
                 // Get component names
                 const componentNames = ['Content/Schema', 'Visibility', 'Authority'];
                 const weight = weights[index];
                 
-                // Draw label background for better readability
+                // Draw dotted arrow from label to segment edge
                 ctx.save();
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
-                ctx.beginPath();
-                ctx.arc(labelX, labelY, 40, 0, Math.PI * 2);
-                ctx.fill();
                 ctx.strokeStyle = colors[index];
                 ctx.lineWidth = 2;
+                ctx.setLineDash([5, 5]); // Dotted line
+                ctx.beginPath();
+                // Start from label edge (pointing outward)
+                const labelEdgeX = labelX + Math.cos(midAngle) * 50; // 50px radius for label circle
+                const labelEdgeY = labelY + Math.sin(midAngle) * 50;
+                // End at inner ring edge
+                const segmentEdgeX = centerX + Math.cos(midAngle) * innerRadius;
+                const segmentEdgeY = centerY + Math.sin(midAngle) * innerRadius;
+                ctx.moveTo(labelEdgeX, labelEdgeY);
+                ctx.lineTo(segmentEdgeX, segmentEdgeY);
                 ctx.stroke();
                 
-                // Draw text
+                // Draw arrowhead
+                const arrowLength = 8;
+                const arrowAngle = Math.atan2(segmentEdgeY - labelEdgeY, segmentEdgeX - labelEdgeX);
+                ctx.setLineDash([]); // Solid for arrowhead
+                ctx.beginPath();
+                ctx.moveTo(segmentEdgeX, segmentEdgeY);
+                ctx.lineTo(
+                  segmentEdgeX - arrowLength * Math.cos(arrowAngle - Math.PI / 6),
+                  segmentEdgeY - arrowLength * Math.sin(arrowAngle - Math.PI / 6)
+                );
+                ctx.moveTo(segmentEdgeX, segmentEdgeY);
+                ctx.lineTo(
+                  segmentEdgeX - arrowLength * Math.cos(arrowAngle + Math.PI / 6),
+                  segmentEdgeY - arrowLength * Math.sin(arrowAngle + Math.PI / 6)
+                );
+                ctx.stroke();
+                ctx.restore();
+                
+                // Draw larger label background circle
+                ctx.save();
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.98)';
+                ctx.beginPath();
+                ctx.arc(labelX, labelY, 60, 0, Math.PI * 2); // Larger circle (60px radius)
+                ctx.fill();
+                ctx.strokeStyle = colors[index];
+                ctx.lineWidth = 3;
+                ctx.stroke();
+                
+                // Draw text with larger fonts
                 ctx.fillStyle = colors[index];
-                ctx.font = 'bold 11px system-ui';
+                ctx.font = 'bold 14px system-ui';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 
-                // First line: Component name
-                ctx.fillText(`${componentNames[index]}`, labelX, labelY - 10);
+                // First line: Component name (larger)
+                ctx.fillText(`${componentNames[index]}`, labelX, labelY - 12);
                 // Second line: Weight
-                ctx.font = '10px system-ui';
-                ctx.fillText(`Weight: ${weight}%`, labelX, labelY + 2);
-                // Third line: Score percentage
+                ctx.font = '12px system-ui';
+                ctx.fillText(`Weight: ${weight}%`, labelX, labelY + 4);
+                // Third line: Score percentage (larger, colored)
                 ctx.fillStyle = fillColor;
-                ctx.font = 'bold 12px system-ui';
-                ctx.fillText(`Score: ${score}%`, labelX, labelY + 14);
+                ctx.font = 'bold 16px system-ui';
+                ctx.fillText(`Score: ${score}%`, labelX, labelY + 20);
                 
                 ctx.restore();
               });
