@@ -4497,6 +4497,7 @@
         }
 
         // Create report HTML with embedded chart images
+        console.log('[PDF] Creating report HTML...');
         const reportHTML = createReportHTML(savedAudit, propertyUrl, dateRange, auditDate, {
           radarChart: radarImgData,
           trendChart: trendImgData,
@@ -4505,10 +4506,19 @@
 
         // Verify reportHTML has content
         if (!reportHTML || reportHTML.length < 100) {
+          console.error('[PDF] Report HTML is empty or too short:', reportHTML ? reportHTML.length : 'null/undefined');
           throw new Error('Report HTML is empty or too short. Cannot generate PDF.');
         }
         
+        console.log('[PDF] Report HTML created successfully');
         console.log('[PDF] Report HTML length:', reportHTML.length);
+        console.log('[PDF] Report HTML starts with:', reportHTML.substring(0, 100));
+        console.log('[PDF] Report HTML ends with:', reportHTML.substring(reportHTML.length - 100));
+        
+        // Check if reportHTML contains expected content
+        if (!reportHTML.includes('AI GEO Audit Report')) {
+          console.warn('[PDF] Warning: Report HTML may not contain expected content');
+        }
         
         // Use Workshop Planner approach: open new window and generate PDF there
         const printWindow = window.open('', '_blank', 'width=900,height=1200');
@@ -4516,14 +4526,19 @@
           throw new Error('Could not open print window. Please allow popups for this site.');
         }
         
+        console.log('[PDF] Print window opened');
+        
         // Create filename safely
         const safePropertyUrl = propertyUrl.replace(/https?:\/\//, '').replace(/\//g, '-');
         const pdfFilename = 'AI-GEO-Audit-Report-' + safePropertyUrl + '-' + auditDate + '.pdf';
         
         // Write the complete report HTML directly (it already includes full HTML structure)
         printWindow.document.open();
+        console.log('[PDF] Document opened, writing HTML...');
         printWindow.document.write(reportHTML);
+        console.log('[PDF] HTML written, closing document...');
         printWindow.document.close();
+        console.log('[PDF] Document closed');
         
         // Wait for content to load, then print
         printWindow.onload = function() {
