@@ -2372,6 +2372,98 @@
     }
 
     // Calculate pillar scores (deterministic, based on GSC data and schema audit)
+    
+    // Page Segment Classifier
+    // NOTE: PageSegment classification is derived from the canonical site-urls CSV.
+    // GSC page URLs are matched by path against this inventory and then classified by
+    // classifyPageSegment(...) to keep behaviour/ranking segments aligned with the UI.
+    const PageSegment = {
+      EDUCATION: 'education',
+      MONEY: 'money',
+      SUPPORT: 'support',
+      SYSTEM: 'system'
+    };
+    
+    function normalisePath(rawUrlOrPath) {
+      try {
+        let url;
+        if (rawUrlOrPath && rawUrlOrPath.startsWith('http')) {
+          url = new URL(rawUrlOrPath);
+        } else {
+          url = new URL(rawUrlOrPath || '/', 'https://www.alanranger.com');
+        }
+        let p = url.pathname.toLowerCase();
+        if (p.length > 1 && p.endsWith('/')) p = p.slice(0, -1);
+        return p;
+      } catch {
+        return '/';
+      }
+    }
+    
+    function classifyPageSegment(rawUrlOrPath, title = null, kindOverride = null) {
+      const path = normalisePath(rawUrlOrPath);
+      
+      // Manual overrides via CSV column
+      if (kindOverride) {
+        const v = kindOverride.toLowerCase().trim();
+        if (v === 'education' || v === 'educational') return PageSegment.EDUCATION;
+        if (v === 'money' || v === 'commercial') return PageSegment.MONEY;
+        if (v === 'support') return PageSegment.SUPPORT;
+        if (v === 'system') return PageSegment.SYSTEM;
+      }
+      
+      // Education — all blogs + free course + calculator + tips hub
+      if (path.startsWith('/blog-on-photography/')) return PageSegment.EDUCATION;
+      if (
+        path === '/blog-on-photography' ||
+        path === '/free-online-photography-course' ||
+        path === '/outdoor-photography-exposure-calculator' ||
+        path === '/free-photography-tips' ||
+        path === '/photography-news-blog'
+      ) {
+        return PageSegment.EDUCATION;
+      }
+      
+      // Money — explicit slugs
+      const MONEY_EXACT = new Set([
+        '/photography-workshops', '/photography-workshops-near-me', '/photography-workshops-uk',
+        '/landscape-photography-workshops', '/outdoor-photography-workshops',
+        '/photographic-workshops-near-me', '/photographic-workshops-uk',
+        '/photography-courses-coventry', '/course-finder-photography-classes-near-me',
+        '/photography-tuition-services', '/photography-services-near-me', '/photography-shop-services',
+        '/rps-courses-mentoring-distinctions', '/hire-a-professional-photographer-in-coventry',
+        '/professional-commercial-photographer-coventry', '/professional-photographer-near-me',
+        '/coventry-photographer', '/photographer-in-coventry', '/photography-mentoring-programme',
+        '/photography-academy-membership', '/photography-academy', '/photography-session-vouchers',
+        '/photography-gift-vouchers', '/photography-presents-for-photographers', '/fine-art-prints',
+        '/batsford-arboretum-photography', '/bluebell-woods-near-me',
+      ]);
+      if (MONEY_EXACT.has(path)) return PageSegment.MONEY;
+      
+      // Money by keyword heuristics
+      const MONEY_KEYWORDS = [
+        'workshop', 'workshops', 'lesson', 'lessons', 'course', 'courses', 'course-finder',
+        'class', 'classes', 'training', 'tuition', 'mentoring', 'academy',
+        'gift-voucher', 'gift-vouchers', 'presents-for-photographers', 'session-vouchers',
+        'photography-services-near-me', 'photography-services', 'photography-shop',
+        '1-2-1', 'hire-a-professional-photographer', 'prints', 'fine-art-prints',
+        'print-preparation-service', 'special-offers',
+      ];
+      if (MONEY_KEYWORDS.some((k) => path.includes(k))) return PageSegment.MONEY;
+      
+      // Support
+      const SUPPORT_EXACT = new Set([
+        '/', '/about-alan-ranger', '/testimonials-customer-reviews', '/awards-and-qualifications',
+        '/gallery-image-portfolios', '/help-site-map', '/help-portrait-uk-coventry',
+        '/photography-equipment-recommendations', '/newsletter-signup-form',
+        '/which-photography-style-is-right-for-you', '/contact-us',
+      ]);
+      if (SUPPORT_EXACT.has(path)) return PageSegment.SUPPORT;
+      
+      // Everything else = system
+      return PageSegment.SYSTEM;
+    }
+    
     // Helper functions for Authority score calculation
     function normalisePct(value, max) {
       // value in 0-1 range; scale to 0-100 and cap
@@ -2386,7 +2478,8 @@
       return 100 - t * 90; // 100 at best, 10 at worst
     }
 
-    function computeBehaviourScore(queries) {
+    // Raw Behaviour score calculation (internal, used by segmented version)
+    function computeBehaviourScoreRaw(queries) {
       if (!queries || !Array.isArray(queries) || queries.length === 0) {
         return 50; // neutral fallback
       }
@@ -2418,8 +2511,52 @@
       // Combine: 50% ctrAll + 50% ctrTop10
       return 0.5 * ctrScoreAll + 0.5 * ctrScoreTop10; // 0-100
     }
+    
+    // Public Behaviour score (backward compatible, uses all queries)
+    function computeBehaviourScore(queries) {
+      return computeBehaviourScoreRaw(queries);
+    }
+    
+    // Segmented Behaviour score calculation
+    // queryPages: Array of {query, page, clicks, impressions, ctr, position}
+    // Returns: {all, nonBlog, money}
+    function computeBehaviourScoreWithSegment(queryPages) {
+      if (!queryPages || !Array.isArray(queryPages) || queryPages.length === 0) {
+        return { all: 50, nonBlog: 50, money: 50 };
+      }
+      
+      // Classify each query+page row by page segment
+      const withSegment = queryPages.map(row => {
+        const segment = classifyPageSegment(row.page || row.url || '/');
+        return { ...row, __segment: segment };
+      });
+      
+      // Convert to format expected by computeBehaviourScoreRaw
+      const toQueryFormat = (rows) => rows.map(r => ({
+        clicks: r.clicks || 0,
+        impressions: r.impressions || 0,
+        ctr: (r.ctr || 0) / 100, // Convert percentage to decimal
+        position: r.position || 0
+      }));
+      
+      // All queries
+      const all = computeBehaviourScoreRaw(toQueryFormat(withSegment));
+      
+      // Non-blog (exclude education)
+      const nonBlog = computeBehaviourScoreRaw(
+        toQueryFormat(withSegment.filter(r => r.__segment !== PageSegment.EDUCATION))
+      );
+      
+      // Money pages only
+      const money = computeBehaviourScoreRaw(
+        toQueryFormat(withSegment.filter(r => r.__segment === PageSegment.MONEY))
+      );
+      
+      return { all, nonBlog, money };
+    }
 
-    function computeRankingScore(queries) {
+    // Raw Ranking score calculation (internal, used by segmented version)
+    function computeRankingScoreRaw(queries) {
       if (!queries || !Array.isArray(queries) || queries.length === 0) {
         return 50; // neutral fallback
       }
@@ -2450,6 +2587,49 @@
 
       // Combine: 50% posScore + 50% top10Score
       return 0.5 * posScore + 0.5 * top10Score; // 0-100
+    }
+    
+    // Public Ranking score (backward compatible, uses all queries)
+    function computeRankingScore(queries) {
+      return computeRankingScoreRaw(queries);
+    }
+    
+    // Segmented Ranking score calculation
+    // queryPages: Array of {query, page, clicks, impressions, ctr, position}
+    // Returns: {all, nonBlog, money}
+    function computeRankingScoreWithSegment(queryPages) {
+      if (!queryPages || !Array.isArray(queryPages) || queryPages.length === 0) {
+        return { all: 50, nonBlog: 50, money: 50 };
+      }
+      
+      // Classify each query+page row by page segment
+      const withSegment = queryPages.map(row => {
+        const segment = classifyPageSegment(row.page || row.url || '/');
+        return { ...row, __segment: segment };
+      });
+      
+      // Convert to format expected by computeRankingScoreRaw
+      const toQueryFormat = (rows) => rows.map(r => ({
+        clicks: r.clicks || 0,
+        impressions: r.impressions || 0,
+        ctr: (r.ctr || 0) / 100, // Convert percentage to decimal
+        position: r.position || 0
+      }));
+      
+      // All queries
+      const all = computeRankingScoreRaw(toQueryFormat(withSegment));
+      
+      // Non-blog (exclude education)
+      const nonBlog = computeRankingScoreRaw(
+        toQueryFormat(withSegment.filter(r => r.__segment !== PageSegment.EDUCATION))
+      );
+      
+      // Money pages only
+      const money = computeRankingScoreRaw(
+        toQueryFormat(withSegment.filter(r => r.__segment === PageSegment.MONEY))
+      );
+      
+      return { all, nonBlog, money };
     }
 
     function computeReviewScore(opts) {
@@ -2592,6 +2772,7 @@
       const position = data.averagePosition || 40; // 1 (best) - 100 (worst)
       const ctr = data.ctr || 0; // 0-100 percentage from API (e.g., 10 = 10%)
       const topQueries = data.topQueries || []; // Array of query objects with clicks, impressions, ctr, position
+      const queryPages = data.queryPages || []; // Array of query+page objects for segmentation
 
       // Map average position (1-40) -> 100-10 (better position => higher score)
       const posScore = (() => {
@@ -2603,17 +2784,51 @@
       // Visibility is primarily driven by position
       const visibility = clampScore(posScore);
 
-      // Authority: New 4-component model
-      // Convert topQueries CTR from percentage (0-100) to decimal (0-1) for calculations
-      const queriesForCalculation = topQueries.map(q => ({
-        clicks: q.clicks || 0,
-        impressions: q.impressions || 0,
-        ctr: (q.ctr || 0) / 100, // Convert percentage to decimal
-        position: q.position || 0
-      }));
-
-      const behaviourScore = computeBehaviourScore(queriesForCalculation);
-      const rankingScore = computeRankingScore(queriesForCalculation);
+      // Authority: New 4-component model with segmentation support
+      let behaviourScore, rankingScore;
+      let behaviourScoresSegmented = null;
+      let rankingScoresSegmented = null;
+      
+      // If we have queryPages data, use segmented calculation
+      if (queryPages && queryPages.length > 0) {
+        debugLog(`📊 Segmentation: Received ${queryPages.length} query+page combinations from GSC API`, 'info');
+        
+        // Classify all pages and show distribution
+        const segmentCounts = {};
+        queryPages.forEach(row => {
+          const segment = classifyPageSegment(row.page || row.url || '/');
+          segmentCounts[segment] = (segmentCounts[segment] || 0) + 1;
+        });
+        
+        debugLog(`📊 Segmentation: Page distribution - Education: ${segmentCounts[PageSegment.EDUCATION] || 0}, Money: ${segmentCounts[PageSegment.MONEY] || 0}, Support: ${segmentCounts[PageSegment.SUPPORT] || 0}, System: ${segmentCounts[PageSegment.SYSTEM] || 0}`, 'info');
+        
+        // Use segmented calculation
+        debugLog('📊 Segmentation: Calculating Behaviour scores for all segments...', 'info');
+        behaviourScoresSegmented = computeBehaviourScoreWithSegment(queryPages);
+        debugLog(`📊 Segmentation: Behaviour scores - All: ${behaviourScoresSegmented.all.toFixed(1)}, Non-blog: ${behaviourScoresSegmented.nonBlog.toFixed(1)}, Money: ${behaviourScoresSegmented.money.toFixed(1)}`, 'success');
+        
+        debugLog('📊 Segmentation: Calculating Ranking scores for all segments...', 'info');
+        rankingScoresSegmented = computeRankingScoreWithSegment(queryPages);
+        debugLog(`📊 Segmentation: Ranking scores - All: ${rankingScoresSegmented.all.toFixed(1)}, Non-blog: ${rankingScoresSegmented.nonBlog.toFixed(1)}, Money: ${rankingScoresSegmented.money.toFixed(1)}`, 'success');
+        
+        // Use 'all' segment for main Authority score (backward compatible)
+        behaviourScore = behaviourScoresSegmented.all;
+        rankingScore = rankingScoresSegmented.all;
+        
+        debugLog(`✓ Using segmented calculation (queryPages available). Main scores use 'all' segment.`, 'success');
+      } else {
+        // Fallback to non-segmented calculation (backward compatible)
+        debugLog('⚠ Segmentation: queryPages not available, using non-segmented calculation (backward compatible)', 'warn');
+        const queriesForCalculation = topQueries.map(q => ({
+          clicks: q.clicks || 0,
+          impressions: q.impressions || 0,
+          ctr: (q.ctr || 0) / 100, // Convert percentage to decimal
+          position: q.position || 0
+        }));
+        behaviourScore = computeBehaviourScore(queriesForCalculation);
+        rankingScore = computeRankingScore(queriesForCalculation);
+        debugLog(`⚠ Non-segmented scores: Behaviour=${behaviourScore.toFixed(1)}, Ranking=${rankingScore.toFixed(1)}`, 'warn');
+      }
 
       // Review Score: Phase 2 - Use real review data if available
       // Get GBP data (may be null if not available, don't default to 0)
@@ -2650,22 +2865,92 @@
       // backlinkMetrics is passed as a parameter (fetched from API)
       const backlinkScore = computeBacklinkScore(backlinkMetrics);
 
-      const authority = clampScore(
-        0.4 * behaviourScore +
-        0.2 * rankingScore +
-        0.2 * backlinkScore +
-        0.2 * reviewScore
-      );
-
+      // Authority weights (constant across all segments)
+      const AUTHORITY_WEIGHTS = {
+        behaviour: 0.4,
+        ranking: 0.2,
+        backlinks: 0.2,
+        reviews: 0.2
+      };
+      
+      // Helper to compute Authority from component scores
+      function computeAuthorityFromComponents(components) {
+        const total = clampScore(
+          AUTHORITY_WEIGHTS.behaviour * components.behaviour +
+          AUTHORITY_WEIGHTS.ranking * components.ranking +
+          AUTHORITY_WEIGHTS.backlinks * components.backlinks +
+          AUTHORITY_WEIGHTS.reviews * components.reviews
+        );
+        return {
+          behaviour: clampScore(components.behaviour),
+          ranking: clampScore(components.ranking),
+          backlinks: clampScore(components.backlinks),
+          reviews: clampScore(components.reviews),
+          total: total
+        };
+      }
+      
+      // Base Authority (all pages) - current behaviour
+      const authorityAll = computeAuthorityFromComponents({
+        behaviour: behaviourScore,
+        ranking: rankingScore,
+        backlinks: backlinkScore,
+        reviews: reviewScore
+      });
+      
+      // Per-segment Authority scores (if segmentation available)
+      let authorityBySegment = null;
+      if (behaviourScoresSegmented && rankingScoresSegmented) {
+        // Non-education (exclude education pages)
+        const authorityNonEducation = computeAuthorityFromComponents({
+          behaviour: behaviourScoresSegmented.nonBlog,
+          ranking: rankingScoresSegmented.nonBlog,
+          backlinks: backlinkScore, // Same across all segments
+          reviews: reviewScore      // Same across all segments
+        });
+        
+        // Money pages only
+        const authorityMoney = computeAuthorityFromComponents({
+          behaviour: behaviourScoresSegmented.money,
+          ranking: rankingScoresSegmented.money,
+          backlinks: backlinkScore, // Same across all segments
+          reviews: reviewScore      // Same across all segments
+        });
+        
+        authorityBySegment = {
+          all: authorityAll,
+          nonEducation: authorityNonEducation,
+          money: authorityMoney
+        };
+        
+        debugLog(`📊 Authority by segment - All: ${authorityAll.total.toFixed(1)}, Non-education: ${authorityNonEducation.total.toFixed(1)}, Money: ${authorityMoney.total.toFixed(1)}`, 'info');
+      }
+      
+      // Main Authority score (default: all pages)
+      const authority = authorityAll.total;
+      
       debugLog(`Authority calculation: Behaviour=${behaviourScore.toFixed(1)}, Ranking=${rankingScore.toFixed(1)}, Backlinks=${backlinkScore}, Reviews=${reviewScore}, Final=${authority}`, 'info');
       
-      // Store component scores for historical tracking
+      // Store component scores for historical tracking (backward compatible)
       const authorityComponents = {
-        behaviour: clampScore(behaviourScore),
-        ranking: clampScore(rankingScore),
-        backlinks: clampScore(backlinkScore),
-        reviews: clampScore(reviewScore)
+        behaviour: authorityAll.behaviour,
+        ranking: authorityAll.ranking,
+        backlinks: authorityAll.backlinks,
+        reviews: authorityAll.reviews,
+        // Segmented scores (if available) - for backward compatibility
+        behaviourScoreAll: behaviourScoresSegmented ? clampScore(behaviourScoresSegmented.all) : clampScore(behaviourScore),
+        behaviourScoreNonBlog: behaviourScoresSegmented ? clampScore(behaviourScoresSegmented.nonBlog) : null,
+        behaviourScoreMoney: behaviourScoresSegmented ? clampScore(behaviourScoresSegmented.money) : null,
+        rankingScoreAll: rankingScoresSegmented ? clampScore(rankingScoresSegmented.all) : clampScore(rankingScore),
+        rankingScoreNonBlog: rankingScoresSegmented ? clampScore(rankingScoresSegmented.nonBlog) : null,
+        rankingScoreMoney: rankingScoresSegmented ? clampScore(rankingScoresSegmented.money) : null
       };
+      
+      // Log final segmented scores stored
+      if (behaviourScoresSegmented) {
+        debugLog(`📊 Segmentation: Final stored scores - Behaviour: All=${authorityComponents.behaviourScoreAll}, NonBlog=${authorityComponents.behaviourScoreNonBlog}, Money=${authorityComponents.behaviourScoreMoney}`, 'info');
+        debugLog(`📊 Segmentation: Final stored scores - Ranking: All=${authorityComponents.rankingScoreAll}, NonBlog=${authorityComponents.rankingScoreNonBlog}, Money=${authorityComponents.rankingScoreMoney}`, 'info');
+      }
 
       // Local Entity: Use real Business Profile data if available, otherwise fallback to derived calculation
       let localEntity;
@@ -2782,10 +3067,13 @@
       const scores = {
         localEntity,
         serviceArea,
-        authority,
+        authority: {
+          score: authority, // Main score (default: all pages)
+          bySegment: authorityBySegment // Per-segment Authority scores (if available)
+        },
         visibility,
         contentSchema,
-        // Authority component scores for historical tracking
+        // Authority component scores for historical tracking (backward compatible)
         authorityComponents: authorityComponents
       };
 
@@ -2799,10 +3087,12 @@
       // 2. Visibility score (SERP feature presence)
       // 3. Authority score (content depth and trust)
       // Weighted average: 40% Content/Schema, 35% Visibility, 25% Authority
+      // Handle both old format (number) and new format (object with score)
+      const authorityScore = typeof scores.authority === 'object' ? scores.authority.score : scores.authority;
       const readiness = (
         scores.contentSchema * 0.4 +
         scores.visibility * 0.35 +
-        scores.authority * 0.25
+        authorityScore * 0.25
       );
       return Math.round(Math.min(100, Math.max(0, readiness)));
     }
@@ -2857,6 +3147,13 @@
         
         debugLog(`✓ Real GSC data fetched: ${gsc.data.overview.totalClicks} clicks, ${gsc.data.overview.totalImpressions} impressions`, 'success');
         
+        // Log segmentation data availability
+        if (gsc.data.queryPages && gsc.data.queryPages.length > 0) {
+          debugLog(`✓ GSC API returned ${gsc.data.queryPages.length} query+page combinations for segmentation`, 'success');
+        } else {
+          debugLog('⚠ GSC API did not return queryPages data. Segmentation will use fallback calculation.', 'warn');
+        }
+        
         // Return data in format expected by existing code
         return {
           totalClicks: gsc.data.overview.totalClicks || 0,
@@ -2864,6 +3161,7 @@
           averagePosition: gsc.data.overview.avgPosition || 0,
           ctr: gsc.data.overview.ctr || 0, // Already 0-100 from API
           topQueries: gsc.data.topQueries || [],
+          queryPages: gsc.data.queryPages || [], // Query+page combinations for segmentation
           timeseries: gsc.data.timeseries || [], // For trend chart
           dateRange: days,
           // Store full GSC response for trend chart access
@@ -3360,7 +3658,15 @@
       const hasLocalSignals = saved && saved.localSignals && saved.localSignals.status === 'ok' && saved.localSignals.data;
       const localSignalsData = hasLocalSignals ? saved.localSignals.data : null;
       
-      getOrderedPillars(scores).forEach(([key, score]) => {
+      getOrderedPillars(scores).forEach(([key, scoreValue]) => {
+        // Handle new Authority structure (object with score and bySegment) or legacy (number)
+        let score = scoreValue;
+        let authorityBySegment = null;
+        if (key === 'authority' && typeof scoreValue === 'object' && scoreValue !== null) {
+          score = scoreValue.score || 0;
+          authorityBySegment = scoreValue.bySegment || null;
+        }
+        
         const rag = getRAGStatus(score);
         const card = document.createElement('div');
         card.className = 'pillar-card';
@@ -3389,8 +3695,8 @@
         // Build Authority breakdown if this is the Authority pillar
         let authorityBreakdown = '';
         let authorityDetails = '';
-        if (key === 'authority' && scores.authorityComponents) {
-          const components = scores.authorityComponents;
+        let authorityModeToggle = '';
+        if (key === 'authority') {
           const savedAudit = loadAuditResults();
           const backlinkMetrics = savedAudit?.backlinkMetrics;
           const localSignals = savedAudit?.localSignals;
@@ -3398,47 +3704,192 @@
           const siteReviews = getTrustpilotSnapshot(savedAudit?.siteReviews);
           const searchData = savedAudit?.searchData;
           
-          // Build breakdown display with color-coded scores
+          // Authority mode state (stored per card instance)
+          const modeId = `authority-mode-${Date.now()}`;
+          let currentMode = 'all'; // Default mode
+          
+          // Get selected Authority scores based on mode
+          const getAuthorityForMode = (mode) => {
+            if (authorityBySegment && authorityBySegment[mode]) {
+              return authorityBySegment[mode];
+            }
+            // Fallback to all or legacy structure
+            if (authorityBySegment && authorityBySegment.all) {
+              return authorityBySegment.all;
+            }
+            // Legacy fallback
+            const components = scores.authorityComponents || {};
+            return {
+              total: score,
+              behaviour: components.behaviour || 0,
+              ranking: components.ranking || 0,
+              backlinks: components.backlinks || 0,
+              reviews: components.reviews || 0
+            };
+          };
+          
+          // Get current Authority data
+          let selectedAuthority = getAuthorityForMode(currentMode);
+          
+          // Build mode toggle UI (only if bySegment is available)
+          if (authorityBySegment) {
+            authorityModeToggle = `
+              <div class="authority-mode-toggle" style="margin-top: 0.5rem; margin-bottom: 0.5rem; padding: 0.5rem; background: #f8f9fa; border-radius: 4px; font-size: 0.75rem;">
+                <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                  <span style="font-weight: 600; color: #666;">Mode:</span>
+                  <button id="${modeId}-all" class="authority-mode-btn" data-mode="all" style="padding: 0.25rem 0.75rem; border: 1px solid #d1d5db; border-radius: 4px; background: #10b981; color: white; cursor: pointer; font-size: 0.75rem;">
+                    All pages
+                  </button>
+                  <button id="${modeId}-nonEducation" class="authority-mode-btn" data-mode="nonEducation" style="padding: 0.25rem 0.75rem; border: 1px solid #d1d5db; border-radius: 4px; background: white; color: #666; cursor: pointer; font-size: 0.75rem;">
+                    Exclude education
+                  </button>
+                  <button id="${modeId}-money" class="authority-mode-btn" data-mode="money" style="padding: 0.25rem 0.75rem; border: 1px solid #d1d5db; border-radius: 4px; background: white; color: #666; cursor: pointer; font-size: 0.75rem;">
+                    Money pages only
+                  </button>
+                </div>
+              </div>
+            `;
+          }
+          
+          // Build breakdown display with color-coded scores (will be updated by mode toggle)
+          const updateAuthorityDisplay = () => {
+            const mode = card._authorityMode || currentMode;
+            selectedAuthority = getAuthorityForMode(mode);
+            const breakdownDiv = document.getElementById(`${modeId}-breakdown`);
+            const scoreDiv = document.getElementById(`${modeId}-score`);
+            if (breakdownDiv) {
+              breakdownDiv.innerHTML = `
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+                  ${formatComponentScore('Behaviour', selectedAuthority.behaviour)}
+                  ${formatComponentScore('Ranking', selectedAuthority.ranking)}
+                  ${formatComponentScore('Backlinks', selectedAuthority.backlinks)}
+                  ${formatComponentScore('Reviews', selectedAuthority.reviews)}
+                </div>
+              `;
+            }
+            if (scoreDiv) {
+              scoreDiv.textContent = Math.round(selectedAuthority.total);
+              const newRag = getRAGStatus(selectedAuthority.total);
+              scoreDiv.className = `pillar-score rag-${newRag.status}`;
+            }
+          };
+          
+          // Initial breakdown
           authorityBreakdown = `
-            <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #e2e8f0; font-size: 0.8rem;">
+            <div id="${modeId}-breakdown" style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #e2e8f0; font-size: 0.8rem;">
               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
-                ${formatComponentScore('Behaviour', components.behaviour)}
-                ${formatComponentScore('Ranking', components.ranking)}
-                ${formatComponentScore('Backlinks', components.backlinks)}
-                ${formatComponentScore('Reviews', components.reviews)}
+                ${formatComponentScore('Behaviour', selectedAuthority.behaviour)}
+                ${formatComponentScore('Ranking', selectedAuthority.ranking)}
+                ${formatComponentScore('Backlinks', selectedAuthority.backlinks)}
+                ${formatComponentScore('Reviews', selectedAuthority.reviews)}
               </div>
             </div>
           `;
+          
+          // Store update function for mode toggle handlers
+          card._updateAuthorityDisplay = updateAuthorityDisplay;
+          card._authorityMode = currentMode;
+          card._authorityBySegment = authorityBySegment;
+          card._modeId = modeId;
           
           // Build details panel (hidden by default, toggled by button)
           const detailsId = `authority-details-${Date.now()}`;
           const buttonId = `authority-details-btn-${Date.now()}`;
           
-          // Get GSC metrics for details
+          // Get GSC metrics for details (segment-aware)
+          const queryPages = searchData?.queryPages || [];
           const topQueries = searchData?.topQueries || [];
-          const rankingQueries = topQueries.filter(q => q.position > 0 && q.position <= 20 && q.impressions > 0);
-          const top10Queries = rankingQueries.filter(q => q.position <= 10);
           
-          let siteCtr = 0;
-          let top10Ctr = 0;
-          let avgPosition = 0;
-          let top10ImpressionShare = 0;
+          // Function to calculate GSC metrics for a specific segment
+          const getGSCMetricsForSegment = (mode) => {
+            let dataToUse = [];
+            
+            if (queryPages && queryPages.length > 0) {
+              // Use queryPages with segmentation
+              let filtered = queryPages;
+              if (mode === 'nonEducation') {
+                filtered = queryPages.filter(row => {
+                  const segment = classifyPageSegment(row.page || row.url || '/');
+                  return segment !== PageSegment.EDUCATION;
+                });
+              } else if (mode === 'money') {
+                filtered = queryPages.filter(row => {
+                  const segment = classifyPageSegment(row.page || row.url || '/');
+                  return segment === PageSegment.MONEY;
+                });
+              }
+              
+              // Convert to query format for calculation
+              dataToUse = filtered.map(row => ({
+                query: row.query || '',
+                clicks: row.clicks || 0,
+                impressions: row.impressions || 0,
+                ctr: (row.ctr || 0) / 100,
+                position: row.position || 0
+              }));
+            } else {
+              // Fallback to topQueries (all pages)
+              dataToUse = topQueries.map(q => ({
+                query: q.query || '',
+                clicks: q.clicks || 0,
+                impressions: q.impressions || 0,
+                ctr: (q.ctr || 0) / 100,
+                position: q.position || 0
+              }));
+            }
+            
+            const rankingQueries = dataToUse.filter(q => q.position > 0 && q.position <= 20 && q.impressions > 0);
+            const top10Queries = rankingQueries.filter(q => q.position <= 10);
+            
+            let siteCtr = 0;
+            let top10Ctr = 0;
+            let avgPosition = 0;
+            let top10ImpressionShare = 0;
+            
+            if (rankingQueries.length > 0) {
+              const totalClicks = rankingQueries.reduce((s, q) => s + (q.clicks || 0), 0);
+              const totalImpr = rankingQueries.reduce((s, q) => s + (q.impressions || 0), 0);
+              siteCtr = totalImpr > 0 ? (totalClicks / totalImpr) * 100 : 0;
+              
+              const top10Clicks = top10Queries.reduce((s, q) => s + (q.clicks || 0), 0);
+              const top10Impr = top10Queries.reduce((s, q) => s + (q.impressions || 0), 0);
+              top10Ctr = top10Impr > 0 ? (top10Clicks / top10Impr) * 100 : 0;
+              
+              avgPosition = totalImpr > 0
+                ? rankingQueries.reduce((s, q) => s + (q.position || 0) * (q.impressions || 0), 0) / totalImpr
+                : 0;
+              
+              top10ImpressionShare = totalImpr > 0 ? (top10Impr / totalImpr) * 100 : 0;
+            }
+            
+            return { siteCtr, top10Ctr, avgPosition, top10ImpressionShare };
+          };
           
-          if (rankingQueries.length > 0) {
-            const totalClicks = rankingQueries.reduce((s, q) => s + (q.clicks || 0), 0);
-            const totalImpr = rankingQueries.reduce((s, q) => s + (q.impressions || 0), 0);
-            siteCtr = totalImpr > 0 ? (totalClicks / totalImpr) * 100 : 0;
-            
-            const top10Clicks = top10Queries.reduce((s, q) => s + (q.clicks || 0), 0);
-            const top10Impr = top10Queries.reduce((s, q) => s + (q.impressions || 0), 0);
-            top10Ctr = top10Impr > 0 ? (top10Clicks / top10Impr) * 100 : 0;
-            
-            avgPosition = totalImpr > 0
-              ? rankingQueries.reduce((s, q) => s + (q.position || 0) * (q.impressions || 0), 0) / totalImpr
-              : 0;
-            
-            top10ImpressionShare = totalImpr > 0 ? (top10Impr / totalImpr) * 100 : 0;
-          }
+          // Get initial metrics (all pages)
+          let gscMetrics = getGSCMetricsForSegment(currentMode);
+          let siteCtr = gscMetrics.siteCtr;
+          let top10Ctr = gscMetrics.top10Ctr;
+          let avgPosition = gscMetrics.avgPosition;
+          let top10ImpressionShare = gscMetrics.top10ImpressionShare;
+          
+          // Function to update GSC metrics display
+          const updateGSCMetrics = (mode) => {
+            const metrics = getGSCMetricsForSegment(mode);
+            const metricsDiv = document.getElementById(`${modeId}-gsc-metrics`);
+            if (metricsDiv) {
+              metricsDiv.innerHTML = `
+                <div style="margin-bottom: 0.5rem;"><strong>GSC Metrics:</strong></div>
+                <div style="margin-bottom: 0.25rem; font-size: 0.7rem; color: #999;">Segment: ${mode === 'all' ? 'All pages' : mode === 'nonEducation' ? 'Exclude education (blogs / free course)' : 'Money pages only'}</div>
+                <div>Site CTR (ranking queries): ${metrics.siteCtr.toFixed(2)}%</div>
+                <div>Top-10 CTR: ${metrics.top10Ctr.toFixed(2)}%</div>
+                <div>Avg position (ranking): ${metrics.avgPosition.toFixed(1)}</div>
+                <div>Top-10 impression share: ${metrics.top10ImpressionShare.toFixed(1)}%</div>
+              `;
+            }
+          };
+          
+          // Store update function
+          card._updateGSCMetrics = updateGSCMetrics;
           
           // Get review data
           const gbpRating = (localSignals && localSignals.status === 'ok' && localSignals.data) 
@@ -3456,11 +3907,14 @@
                 Show details
               </button>
               <div id="${detailsId}" style="display: none; margin-top: 0.75rem; padding: 0.75rem; background: #f8f9fa; border-radius: 4px; font-size: 0.75rem; color: #666; line-height: 1.6;">
-                <div style="margin-bottom: 0.5rem;"><strong>GSC Metrics:</strong></div>
-                <div>Site CTR (ranking queries): ${siteCtr.toFixed(2)}%</div>
-                <div>Top-10 CTR: ${top10Ctr.toFixed(2)}%</div>
-                <div>Avg position (ranking): ${avgPosition.toFixed(1)}</div>
-                <div>Top-10 impression share: ${top10ImpressionShare.toFixed(1)}%</div>
+                <div id="${modeId}-gsc-metrics">
+                  <div style="margin-bottom: 0.5rem;"><strong>GSC Metrics:</strong></div>
+                  <div style="margin-bottom: 0.25rem; font-size: 0.7rem; color: #999;">Segment: ${currentMode === 'all' ? 'All pages' : currentMode === 'nonEducation' ? 'Exclude education (blogs / free course)' : 'Money pages only'}</div>
+                  <div>Site CTR (ranking queries): ${siteCtr.toFixed(2)}%</div>
+                  <div>Top-10 CTR: ${top10Ctr.toFixed(2)}%</div>
+                  <div>Avg position (ranking): ${avgPosition.toFixed(1)}</div>
+                  <div>Top-10 impression share: ${top10ImpressionShare.toFixed(1)}%</div>
+                </div>
                 ${backlinkMetrics ? `
                   <div style="margin-top: 0.75rem; margin-bottom: 0.5rem;"><strong>Backlink Metrics:</strong></div>
                   <div>Referring domains: ${backlinkMetrics.referringDomains || 0}</div>
@@ -3477,7 +3931,7 @@
             </div>
           `;
           
-          // Add click handler for details toggle
+          // Add click handlers for details toggle and mode toggle
           setTimeout(() => {
             const btn = document.getElementById(buttonId);
             const details = document.getElementById(detailsId);
@@ -3488,12 +3942,53 @@
                 btn.textContent = isVisible ? 'Show details' : 'Hide details';
               });
             }
+            
+            // Add mode toggle handlers
+            if (authorityBySegment) {
+              ['all', 'nonEducation', 'money'].forEach(mode => {
+                const modeBtn = document.getElementById(`${modeId}-${mode}`);
+                if (modeBtn) {
+                  modeBtn.addEventListener('click', () => {
+                    // Update current mode
+                    currentMode = mode;
+                    card._authorityMode = mode;
+                    
+                    // Update button styles
+                    ['all', 'nonEducation', 'money'].forEach(m => {
+                      const btn = document.getElementById(`${modeId}-${m}`);
+                      if (btn) {
+                        if (m === mode) {
+                          btn.style.background = '#10b981';
+                          btn.style.color = 'white';
+                        } else {
+                          btn.style.background = 'white';
+                          btn.style.color = '#666';
+                        }
+                      }
+                    });
+                    
+                    // Update Authority score and breakdown
+                    if (card._updateAuthorityDisplay) {
+                      card._updateAuthorityDisplay();
+                    }
+                    
+                    // Update GSC metrics
+                    if (card._updateGSCMetrics) {
+                      card._updateGSCMetrics(mode);
+                    }
+                    
+                    debugLog(`📊 Authority mode changed to: ${mode === 'all' ? 'All pages' : mode === 'nonEducation' ? 'Exclude education' : 'Money pages only'}`, 'info');
+                  });
+                }
+              });
+            }
           }, 0);
         }
         
         card.innerHTML = `
           <h3>${pillarNames[key]}</h3>
-          <div class="pillar-score rag-${rag.status}">${Math.round(score)}</div>
+          ${key === 'authority' ? authorityModeToggle : ''}
+          <div id="${key === 'authority' ? card._modeId + '-score' : ''}" class="pillar-score rag-${rag.status}">${Math.round(score)}</div>
           <div class="rag-badge ${rag.status}">${rag.label}</div>
           <p style="font-size: 0.85rem; color: #666; margin-top: 0.5rem; line-height: 1.5; flex-grow: 1;">${descriptions[key] || ''}</p>
           ${authorityBreakdown}
@@ -4102,7 +4597,7 @@
         
         const contentSchemaScore = Math.round(scores.contentSchema || 0);
         const visibilityScore = Math.round(scores.visibility || 0);
-        const authorityScore = Math.round(scores.authority || 0);
+        const authorityScore = Math.round(typeof scores.authority === 'object' ? (scores.authority.score || 0) : (scores.authority || 0));
         
         // Generate top 5 actionable levers to improve snippet readiness
         const explanationDiv = document.getElementById('snippetReadinessExplanation');
@@ -4110,7 +4605,7 @@
         if (explanationDiv && topActionsList && scores) {
           const contentSchemaScore = Math.round(scores.contentSchema || 0);
           const visibilityScore = Math.round(scores.visibility || 0);
-          const authorityScore = Math.round(scores.authority || 0);
+          const authorityScore = Math.round(typeof scores.authority === 'object' ? (scores.authority.score || 0) : (scores.authority || 0));
           
           const actions = [];
           
@@ -5187,7 +5682,9 @@
                 authorityData.push(historicalAuthority);
                 debugLog(`Using historical Authority (${historicalAuthority}) for ${pointDate}`, 'info');
               } else {
-                authorityData.push(pillarScores.authority);
+                // Handle new Authority structure (object with score) or legacy (number)
+                const authScore = typeof pillarScores.authority === 'object' ? pillarScores.authority.score : pillarScores.authority;
+                authorityData.push(authScore);
               }
               
               visibilityData.push(pillarScores.visibility);
@@ -5305,8 +5802,9 @@
                         currentLocalSignals,
                         currentSiteReviews
                       );
-                      authorityData.push(pillarScores.authority);
-                      debugLog(`✓ Calculated Authority score (${pillarScores.authority}) for ${dateStr} from current audit data`, 'info');
+                      const authScore = typeof pillarScores.authority === 'object' ? pillarScores.authority.score : pillarScores.authority;
+                      authorityData.push(authScore);
+                      debugLog(`✓ Calculated Authority score (${authScore}) for ${dateStr} from current audit data`, 'info');
                     }
                   } else {
                     // No current search data - use null
@@ -5393,10 +5891,11 @@
                       currentTopQueries,
                       currentBacklinkMetrics,
                       currentLocalSignals,
-                      currentSiteReviews
-                    );
-                    authorityData.push(pillarScores.authority);
-                    debugLog(`✓ Calculated Authority score (${pillarScores.authority}) for today from current audit data`, 'info');
+                        currentSiteReviews
+                      );
+                    const authScore = typeof pillarScores.authority === 'object' ? pillarScores.authority.score : pillarScores.authority;
+                    authorityData.push(authScore);
+                    debugLog(`✓ Calculated Authority score (${authScore}) for today from current audit data`, 'info');
                   }
                 } else {
                   // No current search data - use null

@@ -124,49 +124,49 @@ export default async function handler(req, res) {
     
     // If we couldn't calculate from cache, fetch from GSC API
     if (!overviewFromCache) {
-      const overviewResponse = await fetch(searchConsoleUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          startDate,
-          endDate,
-          // No dimensions = aggregate totals
-        }),
-      });
+    const overviewResponse = await fetch(searchConsoleUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        startDate,
+        endDate,
+        // No dimensions = aggregate totals
+      }),
+    });
+    
+    if (!overviewResponse.ok) {
+      const errorText = await overviewResponse.text();
+      let errorData;
+      try {
+        errorData = JSON.parse(errorText);
+      } catch (e) {
+        errorData = { error: { message: errorText } };
+      }
       
-      if (!overviewResponse.ok) {
-        const errorText = await overviewResponse.text();
-        let errorData;
-        try {
-          errorData = JSON.parse(errorText);
-        } catch (e) {
-          errorData = { error: { message: errorText } };
-        }
-        
-        if (overviewResponse.status === 403) {
-          return res.status(403).json({
-            status: 'error',
-            source: 'gsc-entity-metrics',
-            message: 'Permission denied',
-            details: errorData.error?.message || 'User does not have access to this Search Console property',
-            meta: { generatedAt: new Date().toISOString() }
-          });
-        }
-        
-        return res.status(overviewResponse.status).json({
+      if (overviewResponse.status === 403) {
+        return res.status(403).json({
           status: 'error',
           source: 'gsc-entity-metrics',
-          message: 'Failed to fetch Search Console data',
-          details: errorData,
+          message: 'Permission denied',
+          details: errorData.error?.message || 'User does not have access to this Search Console property',
           meta: { generatedAt: new Date().toISOString() }
         });
       }
       
-      const overviewData = await overviewResponse.json();
-      const overviewRow = overviewData.rows?.[0] || {};
+      return res.status(overviewResponse.status).json({
+        status: 'error',
+        source: 'gsc-entity-metrics',
+        message: 'Failed to fetch Search Console data',
+        details: errorData,
+        meta: { generatedAt: new Date().toISOString() }
+      });
+    }
+    
+    const overviewData = await overviewResponse.json();
+    const overviewRow = overviewData.rows?.[0] || {};
       totalClicks = overviewRow.clicks || 0;
       totalImpressions = overviewRow.impressions || 0;
       avgPosition = overviewRow.position || 0;
@@ -247,33 +247,33 @@ export default async function handler(req, res) {
         ? missingDates[missingDates.length - 1] // Fetch to last missing date
         : endDate;
       
-      const timeseriesResponse = await fetch(searchConsoleUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
+    const timeseriesResponse = await fetch(searchConsoleUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
           startDate: fetchStartDate,
           endDate: fetchEndDate,
-          dimensions: ['date'],
-          rowLimit: 1000,
-        }),
-      });
-      
+        dimensions: ['date'],
+        rowLimit: 1000,
+      }),
+    });
+    
       let newTimeseries = [];
-      if (timeseriesResponse.ok) {
-        const timeseriesData = await timeseriesResponse.json();
-        if (timeseriesData.rows && Array.isArray(timeseriesData.rows)) {
-          timeseriesData.rows.forEach(row => {
+    if (timeseriesResponse.ok) {
+      const timeseriesData = await timeseriesResponse.json();
+      if (timeseriesData.rows && Array.isArray(timeseriesData.rows)) {
+        timeseriesData.rows.forEach(row => {
             newTimeseries.push({
-              date: row.keys[0],
-              clicks: row.clicks || 0,
-              impressions: row.impressions || 0,
-              ctr: row.ctr ? row.ctr * 100 : 0,
-              position: row.position || 0
-            });
+            date: row.keys[0],
+            clicks: row.clicks || 0,
+            impressions: row.impressions || 0,
+            ctr: row.ctr ? row.ctr * 100 : 0,
+            position: row.position || 0
           });
+        });
           console.log(`[GSC Cache] Fetched ${newTimeseries.length} timeseries records from GSC API for date range ${fetchStartDate} to ${fetchEndDate}`);
         } else {
           console.warn(`[GSC Cache] GSC API returned no rows for timeseries. Response:`, JSON.stringify(timeseriesData).substring(0, 200));
@@ -447,6 +447,38 @@ export default async function handler(req, res) {
       }
     }
     
+    // 4b. Get query+page combinations for segmentation
+    const queryPageResponse = await fetch(searchConsoleUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        startDate,
+        endDate,
+        dimensions: ['query', 'page'],
+        rowLimit: 10000, // Higher limit for segmentation
+      }),
+    });
+    
+    const queryPages = [];
+    if (queryPageResponse.ok) {
+      const queryPageData = await queryPageResponse.json();
+      if (queryPageData.rows && Array.isArray(queryPageData.rows)) {
+        queryPageData.rows.forEach(row => {
+          queryPages.push({
+            query: row.keys[0] || '',
+            page: row.keys[1] || '',
+            clicks: row.clicks || 0,
+            impressions: row.impressions || 0,
+            ctr: row.ctr ? row.ctr * 100 : 0,
+            position: row.position || 0
+          });
+        });
+      }
+    }
+    
     // 5. Get search appearance (SERP features)
     const appearanceResponse = await fetch(searchConsoleUrl, {
       method: 'POST',
@@ -496,6 +528,7 @@ export default async function handler(req, res) {
         timeseries: timeseries || [], // Ensure it's always an array
         topQueries,
         topPages,
+        queryPages, // Query+page combinations for segmentation
         searchAppearance
       },
       meta: {
@@ -504,6 +537,7 @@ export default async function handler(req, res) {
           timeseries: timeseries.length,
           topQueries: topQueries.length,
           topPages: topPages.length,
+          queryPages: queryPages.length,
           searchAppearance: searchAppearance.length
         }
       }
