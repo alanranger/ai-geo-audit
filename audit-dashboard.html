@@ -4634,15 +4634,101 @@
           
           debugLog(`📊 Top Pages: Updating to segment "${mode}", found ${topPages.length} pages`, 'info');
           
+          // Update segment label
           const labelEl = document.getElementById('top-pages-segment-label');
-          const tableContainer = document.getElementById('top-pages-table-container');
-          
           if (labelEl) labelEl.textContent = segmentLabel;
+          
+          // Update summary if available
+          const getSegmentSummary = (m) => {
+            if (!authorityBySegment || !authorityBySegment[m]) return null;
+            const segmentData = authorityBySegment[m];
+            return {
+              behaviour: segmentData.behaviour || 0,
+              ranking: segmentData.ranking || 0,
+              total: segmentData.total || segmentData.score || 0
+            };
+          };
+          
+          const summary = getSegmentSummary(mode);
+          const summaryDiv = document.getElementById('top-pages-segment-summary');
+          if (summary && summaryDiv) {
+            const rag = getRAGStatus(summary.total);
+            summaryDiv.innerHTML = `
+              ${formatComponentScore('Behaviour', summary.behaviour)}
+              ${formatComponentScore('Ranking', summary.ranking)}
+            `;
+            // Update RAG badge and score
+            const ragBadge = summaryDiv.parentElement.querySelector('.rag-badge');
+            const scoreSpan = summaryDiv.parentElement.querySelector('span[style*="font-size: 1.1rem"]');
+            if (ragBadge) {
+              ragBadge.className = `rag-badge ${rag.status}`;
+              ragBadge.textContent = rag.label;
+            }
+            if (scoreSpan) {
+              scoreSpan.textContent = Math.round(summary.total);
+              scoreSpan.style.color = rag.status === 'green' ? '#10b981' : rag.status === 'amber' ? '#f59e0b' : '#ef4444';
+            }
+          }
+          
+          // Update toggle buttons
+          ['all', 'nonEducation', 'money'].forEach(m => {
+            const btn = document.getElementById(`top-pages-mode-${m}`);
+            if (btn) {
+              if (m === mode) {
+                btn.style.background = '#10b981';
+                btn.style.color = 'white';
+                btn.style.fontWeight = '600';
+              } else {
+                btn.style.background = 'white';
+                btn.style.color = '#666';
+                btn.style.fontWeight = '400';
+              }
+            }
+          });
+          
+          // Update table
+          const tableContainer = document.getElementById('top-pages-table-container');
           if (tableContainer) {
             tableContainer.innerHTML = renderFullWidthTopPagesTable(topPages, segmentLabel);
             attachCopyButtonHandler();
           }
         };
+        
+        // Attach toggle button handlers
+        setTimeout(() => {
+          ['all', 'nonEducation', 'money'].forEach(mode => {
+            const btn = document.getElementById(`top-pages-mode-${mode}`);
+            if (btn) {
+              btn.addEventListener('click', () => {
+                window.currentAuthorityMode = mode;
+                window.updateTopPagesSection(mode);
+                // Also update Authority pillar card if it exists
+                const authorityCard = Array.from(document.querySelectorAll('.pillar-card')).find(card => {
+                  const h3 = card.querySelector('h3');
+                  return h3 && h3.textContent === 'Authority';
+                });
+                if (authorityCard && authorityCard._updateAuthorityDisplay) {
+                  authorityCard._authorityMode = mode;
+                  authorityCard._updateAuthorityDisplay();
+                  // Update Authority pillar toggle buttons
+                  const modeId = authorityCard._modeId;
+                  ['all', 'nonEducation', 'money'].forEach(m => {
+                    const authBtn = document.getElementById(`${modeId}-${m}`);
+                    if (authBtn) {
+                      if (m === mode) {
+                        authBtn.style.background = '#10b981';
+                        authBtn.style.color = 'white';
+                      } else {
+                        authBtn.style.background = 'white';
+                        authBtn.style.color = '#666';
+                      }
+                    }
+                  });
+                }
+              });
+            }
+          });
+        }, 0);
         
         // Attach initial copy button handler
         attachCopyButtonHandler();
