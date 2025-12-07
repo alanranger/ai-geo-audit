@@ -4676,17 +4676,46 @@
         return `${v.toFixed(2)}%`;
       }
       
+      // Helper to extract target value from target text
+      function extractTargetValue(targetText, metricType) {
+        if (metricType === 'ctr' || metricType === 'percentage') {
+          // Extract range like "2–3%+" or "75–85%+"
+          const match = targetText.match(/(\d+(?:\.\d+)?)[–-](\d+(?:\.\d+)?)%/);
+          if (match) {
+            const min = parseFloat(match[1]);
+            const max = parseFloat(match[2]);
+            return (min + max) / 2; // Return midpoint
+          }
+        } else if (metricType === 'position') {
+          // Extract range like "3–6"
+          const match = targetText.match(/(\d+(?:\.\d+)?)[–-](\d+(?:\.\d+)?)/);
+          if (match) {
+            const min = parseFloat(match[1]);
+            const max = parseFloat(match[2]);
+            return (min + max) / 2; // Return midpoint
+          }
+        }
+        return null;
+      }
+      
       // Build recommendation rows from segment metrics
       function buildBehaviourRankingRecommendations(segment, m) {
         const rows = [];
         
         // Site CTR recommendation
         const siteStatus = classifySiteCtr(m.siteCtr);
+        const siteCurrent = m.siteCtr;
+        const siteTargetText = 'Aim for 2–3%+ overall CTR';
+        const siteTargetValue = extractTargetValue(siteTargetText, 'ctr'); // 2.5%
+        const siteDiff = siteTargetValue ? Math.abs(siteCurrent - siteTargetValue) : null;
         rows.push({
           metric: 'Overall CTR (all ranking queries)',
           status: siteStatus,
           value: pct(m.siteCtr),
-          target: 'Aim for 2–3%+ overall CTR',
+          currentValue: siteCurrent,
+          target: siteTargetText,
+          targetValue: siteTargetValue,
+          difference: siteDiff,
           action: siteStatus === 'poor'
             ? (segment === 'money'
                 ? 'Rewrite titles and descriptions on the top money pages (table below). Add intent phrases ("workshop", "course", "near me") and stronger benefits to lift clicks.'
@@ -4698,11 +4727,18 @@
         
         // Top-10 CTR recommendation
         const top10Status = classifyTop10Ctr(m.top10Ctr);
+        const top10Current = m.top10Ctr;
+        const top10TargetText = 'Aim for 3–5%+ in top-10';
+        const top10TargetValue = extractTargetValue(top10TargetText, 'ctr'); // 4%
+        const top10Diff = top10TargetValue ? Math.abs(top10Current - top10TargetValue) : null;
         rows.push({
           metric: 'Top-10 CTR (positions 1–10)',
           status: top10Status,
           value: pct(m.top10Ctr),
-          target: 'Aim for 3–5%+ in top-10',
+          currentValue: top10Current,
+          target: top10TargetText,
+          targetValue: top10TargetValue,
+          difference: top10Diff,
           action: top10Status === 'poor'
             ? 'When you are already in positions 1–10 but clicks are low, re-write titles/meta to be more specific: include location, level (beginner/advanced), and outcome ("learn to…", "master…").'
             : top10Status === 'ok'
@@ -4712,11 +4748,18 @@
         
         // Average position recommendation
         const posStatus = classifyAvgPos(m.avgPosition);
+        const posCurrent = m.avgPosition;
+        const posTargetText = 'Aim for average position 3–6 on core queries';
+        const posTargetValue = extractTargetValue(posTargetText, 'position'); // 4.5
+        const posDiff = posTargetValue ? Math.abs(posCurrent - posTargetValue) : null;
         rows.push({
           metric: 'Average position (ranking queries)',
           status: posStatus,
           value: m.avgPosition.toFixed(1),
-          target: 'Aim for average position 3–6 on core queries',
+          currentValue: posCurrent,
+          target: posTargetText,
+          targetValue: posTargetValue,
+          difference: posDiff,
           action: posStatus === 'poor'
             ? 'Most impressions are coming from low positions. Strengthen internal links to money pages, add more supporting content, and build links from relevant blogs/assignments into these URLs.'
             : posStatus === 'ok'
@@ -4726,11 +4769,18 @@
         
         // Top-10 share recommendation
         const shareStatus = classifyTop10Share(m.top10Share);
+        const shareCurrent = m.top10Share * 100; // Convert to percentage
+        const shareTargetText = 'Aim for 75–85%+ of impressions in top-10';
+        const shareTargetValue = extractTargetValue(shareTargetText, 'percentage'); // 80%
+        const shareDiff = shareTargetValue ? Math.abs(shareCurrent - shareTargetValue) : null;
         rows.push({
           metric: 'Top-10 impression share',
           status: shareStatus,
           value: pct(m.top10Share, true), // top10Share is stored as decimal (0-1)
-          target: 'Aim for 75–85%+ of impressions in top-10',
+          currentValue: shareCurrent,
+          target: shareTargetText,
+          targetValue: shareTargetValue,
+          difference: shareDiff,
           action: shareStatus === 'poor'
             ? 'Large share of impressions are outside the top-10. Review which queries are generating impressions but no clicks and decide: improve those pages or deliberately de-optimise low-value queries.'
             : shareStatus === 'ok'
@@ -4771,7 +4821,8 @@
                   <th style="text-align: left; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Metric</th>
                   <th style="text-align: center; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Status</th>
                   <th style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Current</th>
-                  <th style="text-align: left; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Target</th>
+                  <th style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Target</th>
+                  <th style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Difference</th>
                   <th style="text-align: left; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Suggested action</th>
                 </tr>
               </thead>
@@ -4780,12 +4831,36 @@
         
         recommendations.forEach((row, idx) => {
           const isEven = idx % 2 === 0;
+          
+          // Format target value and difference based on metric type
+          let targetDisplay = row.target;
+          let diffDisplay = '—';
+          
+          if (row.targetValue !== null && row.targetValue !== undefined) {
+            if (row.metric.includes('CTR') || row.metric.includes('impression share')) {
+              // For CTR and percentage metrics
+              targetDisplay = `${row.target}<br><span style="color: #475569; font-size: 0.8rem; font-weight: 600;">(${row.targetValue.toFixed(2)}%)</span>`;
+              if (row.difference !== null && row.difference !== undefined) {
+                const diffColor = row.difference <= 1 ? '#10b981' : row.difference <= 3 ? '#f59e0b' : '#ef4444';
+                diffDisplay = `<span style="color: ${diffColor}; font-weight: 600;">${row.difference.toFixed(2)}%</span>`;
+              }
+            } else if (row.metric.includes('position')) {
+              // For position metrics
+              targetDisplay = `${row.target}<br><span style="color: #475569; font-size: 0.8rem; font-weight: 600;">(${row.targetValue.toFixed(1)})</span>`;
+              if (row.difference !== null && row.difference !== undefined) {
+                const diffColor = row.difference <= 1 ? '#10b981' : row.difference <= 2 ? '#f59e0b' : '#ef4444';
+                diffDisplay = `<span style="color: ${diffColor}; font-weight: 600;">${row.difference.toFixed(1)}</span>`;
+              }
+            }
+          }
+          
           tableHtml += `
             <tr style="border-bottom: 1px solid #f1f5f9; background: ${isEven ? '#ffffff' : '#fafafa'}; transition: background 0.2s;" onmouseover="this.style.background='#f8f9fa';" onmouseout="this.style.background='${isEven ? '#ffffff' : '#fafafa'}';">
               <td style="padding: 0.75rem; color: #0f172a; font-weight: 600;">${row.metric}</td>
               <td style="padding: 0.75rem; text-align: center;">${getStatusPill(row.status)}</td>
               <td style="padding: 0.75rem; text-align: right; color: #0f172a; font-weight: 600;">${row.value}</td>
-              <td style="padding: 0.75rem; color: #0f172a; font-weight: 500;">${row.target}</td>
+              <td style="padding: 0.75rem; text-align: right; color: #0f172a; font-weight: 500; line-height: 1.4;">${targetDisplay}</td>
+              <td style="padding: 0.75rem; text-align: right; color: #0f172a; font-weight: 600;">${diffDisplay}</td>
               <td style="padding: 0.75rem; color: #0f172a; font-weight: 400; line-height: 1.5;">${row.action}</td>
             </tr>
           `;
