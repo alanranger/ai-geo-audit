@@ -13,7 +13,7 @@
 
 import fs from 'fs/promises';
 import path from 'path';
-import { parse } from 'csv-parse';
+// csv-parse will be imported dynamically to work in Vercel ESM environment
 
 const METRICS_FILE = path.join(process.cwd(), 'data', 'backlink-metrics.json');
 
@@ -284,10 +284,12 @@ export default async function handler(req, res) {
       console.log('CSV content received, length:', csvContent.length);
       console.log('First 200 chars:', csvContent.substring(0, 200));
 
-      // Parse CSV
+      // Parse CSV (synchronous parsing)
       let rows;
       try {
-        rows = parse(csvContent, {
+        // Use dynamic import for csv-parse/sync to work in Vercel ESM environment
+        const { parseSync } = await import('csv-parse/sync');
+        rows = parseSync(csvContent, {
           columns: true,
           skip_empty_lines: true,
           trim: true,
