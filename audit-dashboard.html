@@ -14,19 +14,22 @@
     // Note: config.js is gitignored and won't be deployed to Vercel
     // Silently fail if config.js doesn't exist (expected on Vercel)
     try {
-      const configScript = document.createElement('script');
-      configScript.src = 'config.js';
-      configScript.onerror = function() {
-        // Silently ignore - config.js is optional (expected on Vercel)
-        // Prevent console error from showing
-        return true;
-      };
-      configScript.onload = function() {
-        // Successfully loaded
-      };
-      // Suppress syntax errors if file returns HTML (404 page)
-      configScript.setAttribute('type', 'text/javascript');
-      document.head.appendChild(configScript);
+      // First check if file exists via fetch to avoid syntax errors
+      fetch('config.js')
+        .then(response => {
+          if (response.ok && response.headers.get('content-type')?.includes('javascript')) {
+            const configScript = document.createElement('script');
+            configScript.src = 'config.js';
+            configScript.type = 'text/javascript';
+            configScript.onerror = function() {
+              // Silently ignore
+            };
+            document.head.appendChild(configScript);
+          }
+        })
+        .catch(() => {
+          // Silently ignore - config.js is optional
+        });
     } catch (e) {
       // Silently ignore - config.js is optional
     }
@@ -5464,6 +5467,25 @@
             attachSortHandlers();
           }
         };
+        
+        // Helper to attach sort handlers after table is in DOM
+        function attachSortHandlers() {
+          setTimeout(() => {
+            ['ctr', 'impressions', 'clicks', 'position'].forEach(col => {
+              const th = document.getElementById(`sort-${col}`);
+              if (th) {
+                // Remove existing listeners by cloning
+                const newTh = th.cloneNode(true);
+                th.parentNode.replaceChild(newTh, th);
+                newTh.addEventListener('click', () => {
+                  if (window.handleSort) {
+                    window.handleSort(col);
+                  }
+                });
+              }
+            });
+          }, 50);
+        }
         
         // Attach initial handlers after section is created
         setTimeout(() => {
