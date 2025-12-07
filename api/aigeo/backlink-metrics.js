@@ -80,26 +80,44 @@ function isFollow(linkTypeRaw) {
 
 /**
  * Find column name that matches the pattern (case-insensitive, flexible matching)
+ * Handles special characters like +, -, etc.
  */
 function findColumn(rows, patterns) {
   if (!rows || rows.length === 0) return null;
   
   // Get all column names from first row
   const columns = Object.keys(rows[0]);
+  console.log('Available columns for matching:', columns);
+  console.log('Patterns to match:', patterns);
   
   // Try to find a column that matches any of the patterns
   for (const pattern of patterns) {
-    const lowerPattern = pattern.toLowerCase();
+    // Normalize pattern: lowercase, replace special chars with spaces, then split
+    const normalizedPattern = pattern.toLowerCase()
+      .replace(/[+\-]/g, ' ')  // Replace + and - with spaces
+      .replace(/\s+/g, ' ')     // Normalize multiple spaces
+      .trim();
+    const patternWords = normalizedPattern.split(/\s+/).filter(w => w.length > 0);
+    
     for (const col of columns) {
-      const lowerCol = col.toLowerCase();
-      // Check if column contains all words from pattern
-      const patternWords = lowerPattern.split(/\s+/);
-      if (patternWords.every(word => lowerCol.includes(word))) {
+      // Normalize column name the same way
+      const normalizedCol = col.toLowerCase()
+        .replace(/[+\-]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      
+      // Check if column contains all words from pattern (order doesn't matter)
+      const matches = patternWords.every(word => normalizedCol.includes(word));
+      console.log(`  Checking "${col}" (normalized: "${normalizedCol}") against pattern "${pattern}" (normalized: "${normalizedPattern}"): ${matches}`);
+      
+      if (matches) {
+        console.log(`  ✓ Found matching column: "${col}" for pattern "${pattern}"`);
         return col;
       }
     }
   }
   
+  console.log('  ✗ No matching column found for patterns:', patterns);
   return null;
 }
 
