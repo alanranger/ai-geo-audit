@@ -101,6 +101,9 @@ export default async function handler(req, res) {
       // Segmented Authority Scores (for building historical segmented data)
       authority_by_segment: scores?.authority?.bySegment || null, // JSON object with {all, nonEducation, money}
       
+      // Debug: Log authority_by_segment structure for verification
+      // (This will be stored as JSON in Supabase)
+      
       // GSC Data (for reference)
       gsc_clicks: searchData?.totalClicks || null,
       gsc_impressions: searchData?.totalImpressions || null,
