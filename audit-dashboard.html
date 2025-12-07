@@ -1032,20 +1032,6 @@
       <div class="metrics-section">
         <h3 style="color: var(--brand-orange); margin-bottom: 0.5rem;">Key Performance Indicators</h3>
         <p style="font-size: 0.9rem; color: #666; margin-bottom: 1rem;">Core metrics from Google Search Console showing overall search performance for the entity. <strong>Note:</strong> Small differences from live GSC may occur due to data processing delays (up to 48 hours) and exact date range calculations.</p>
-        <div id="kpiAuthorityModeToggle" class="authority-mode-toggle" style="margin-bottom: 1rem; padding: 0.5rem; background: #f8f9fa; border-radius: 4px; font-size: 0.75rem; display: none;">
-          <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
-            <span style="font-weight: 600; color: #666;">Authority Mode:</span>
-            <button id="kpi-mode-all" class="authority-mode-btn" data-mode="all" style="padding: 0.25rem 0.75rem; border: 1px solid #d1d5db; border-radius: 4px; background: #10b981; color: white; cursor: pointer; font-size: 0.75rem;">
-              All pages
-            </button>
-            <button id="kpi-mode-nonEducation" class="authority-mode-btn" data-mode="nonEducation" style="padding: 0.25rem 0.75rem; border: 1px solid #d1d5db; border-radius: 4px; background: white; color: #666; cursor: pointer; font-size: 0.75rem;">
-              Exclude education
-            </button>
-            <button id="kpi-mode-money" class="authority-mode-btn" data-mode="money" style="padding: 0.25rem 0.75rem; border: 1px solid #d1d5db; border-radius: 4px; background: white; color: #666; cursor: pointer; font-size: 0.75rem;">
-              Money pages only
-            </button>
-          </div>
-        </div>
         <div class="metrics-grid" id="metricsGrid"></div>
       </div>
 
@@ -5093,37 +5079,6 @@
         return num.toLocaleString();
       };
 
-      // Check if segmentation data is available and show/hide KPI toggle
-      // Reuse 'saved' variable from function start (line 3617) to avoid redeclaration
-      const currentScores = saved?.scores;
-      const authorityBySegment = currentScores?.authority?.bySegment || null;
-      const kpiToggle = document.getElementById('kpiAuthorityModeToggle');
-      if (kpiToggle) {
-        if (authorityBySegment) {
-          kpiToggle.style.display = 'block';
-          // Initialize mode if not set
-          if (!window.trendAuthorityMode) {
-            window.trendAuthorityMode = 'all';
-          }
-          // Sync button states with current mode
-          const currentMode = window.trendAuthorityMode || 'all';
-          ['all', 'nonEducation', 'money'].forEach(mode => {
-            const btn = document.getElementById(`kpi-mode-${mode}`);
-            if (btn) {
-              if (mode === currentMode) {
-                btn.style.background = '#10b981';
-                btn.style.color = 'white';
-              } else {
-                btn.style.background = 'white';
-                btn.style.color = '#666';
-              }
-            }
-          });
-        } else {
-          kpiToggle.style.display = 'none';
-        }
-      }
-
       // Display metrics
       const metricsGrid = document.getElementById('metricsGrid');
       metricsGrid.innerHTML = `
@@ -5144,49 +5099,6 @@
           <div class="label">CTR</div>
         </div>
       `;
-      
-      // Add event listeners for KPI Authority mode toggle buttons
-      ['all', 'nonEducation', 'money'].forEach(mode => {
-        const btn = document.getElementById(`kpi-mode-${mode}`);
-        if (btn) {
-          btn.addEventListener('click', () => {
-            // Update selected mode (shared with trend chart)
-            window.trendAuthorityMode = mode;
-            debugLog(`📊 KPI Authority mode changed to: ${mode === 'all' ? 'All pages' : mode === 'nonEducation' ? 'Exclude education' : 'Money pages only'}`, 'info');
-            
-            // Update button styles for both KPI and trend toggles
-            ['all', 'nonEducation', 'money'].forEach(m => {
-              // Update KPI toggle buttons
-              const kpiBtn = document.getElementById(`kpi-mode-${m}`);
-              if (kpiBtn) {
-                if (m === mode) {
-                  kpiBtn.style.background = '#10b981';
-                  kpiBtn.style.color = 'white';
-                } else {
-                  kpiBtn.style.background = 'white';
-                  kpiBtn.style.color = '#666';
-                }
-              }
-              // Update trend toggle buttons
-              const trendBtn = document.getElementById(`trend-mode-${m}`);
-              if (trendBtn) {
-                if (m === mode) {
-                  trendBtn.style.background = '#10b981';
-                  trendBtn.style.color = 'white';
-                } else {
-                  trendBtn.style.background = 'white';
-                  trendBtn.style.color = '#666';
-                }
-              }
-            });
-            
-            // Redraw the trend chart with new Authority data
-            if (window.trendChart && typeof displayDashboard === 'function') {
-              displayDashboard();
-            }
-          });
-        }
-      });
 
       // Wait a moment for DOM to update, then create charts (charts need visible canvas)
       setTimeout(async () => {
@@ -5494,7 +5406,8 @@
           let contentSchemaMap = new Map();
           let localEntityMap = new Map();
           let serviceAreaMap = new Map();
-          let authorityMap = new Map(); // Store historical Authority scores from Supabase
+          let authorityMap = new Map(); // Store historical Authority scores from Supabase (legacy: single value)
+          let authorityBySegmentMap = new Map(); // Store historical segmented Authority scores from Supabase (new: {all, nonEducation, money})
           const currentContentSchema = scores.contentSchema || 0;
           
           if (timeseries.length > 0) {
@@ -5553,6 +5466,12 @@
                     if (record.authorityScore !== null && record.authorityScore !== undefined) {
                       authorityMap.set(normalizedDate, record.authorityScore);
                       debugLog(`Mapped Authority: ${normalizedDate} = ${record.authorityScore}`, 'info');
+                    }
+                    // Segmented Authority data (new: store segmented scores for historical tracking)
+                    if (record.authorityBySegment !== null && record.authorityBySegment !== undefined) {
+                      // authorityBySegment is a JSON object: {all: {total, behaviour, ranking, backlinks, reviews}, nonEducation: {...}, money: {...}}
+                      authorityBySegmentMap.set(normalizedDate, record.authorityBySegment);
+                      debugLog(`Mapped Authority by Segment: ${normalizedDate} = ${JSON.stringify(record.authorityBySegment)}`, 'info');
                     }
                   }
                 });
@@ -5843,22 +5762,25 @@
                 serviceAreaData.push(pillarScores.serviceArea);
               }
               
-              // Use Authority score based on selected mode for recent dates, historical data for older dates
-              // For recent dates (today and last 2-3 days), prioritize selected mode over historical data
-              // This allows users to see segmented Authority scores for recent dates
-              const daysSincePoint = Math.floor((new Date(todayStr) - new Date(pointDate)) / (1000 * 60 * 60 * 24));
-              const isRecentDate = daysSincePoint <= 3; // Last 3 days (including today)
+              // Use Authority score based on selected mode, prioritizing segmented historical data when available
+              // Check if we have segmented Authority data for this date in Supabase
+              const historicalAuthorityBySegment = authorityBySegmentMap.get(pointDate);
+              const selectedMode = window.trendAuthorityMode || 'all';
               
-              if (isRecentDate && authorityBySegment) {
-                // For recent dates, use selected mode (allows toggling between segments)
-                const selectedMode = window.trendAuthorityMode || 'all';
+              if (historicalAuthorityBySegment && historicalAuthorityBySegment[selectedMode]) {
+                // Use segmented Authority score from Supabase for the selected mode
+                const modeScore = historicalAuthorityBySegment[selectedMode].total || historicalAuthorityBySegment[selectedMode].score || historicalAuthorityBySegment[selectedMode];
+                authorityData.push(modeScore);
+                debugLog(`Using historical segmented Authority (${modeScore}) for ${pointDate} (mode: ${selectedMode})`, 'info');
+              } else if (isToday && authorityBySegment) {
+                // For today, use current segmented Authority scores (allows toggling between segments)
                 const modeScore = getAuthorityForMode(selectedMode);
                 authorityData.push(modeScore);
-                debugLog(`Using Authority score (${modeScore}) for ${pointDate} (mode: ${selectedMode}, recent date)`, 'info');
+                debugLog(`Using current Authority score (${modeScore}) for ${pointDate} (mode: ${selectedMode}, today)`, 'info');
               } else if (historicalAuthority !== undefined && historicalAuthority !== null) {
-                // For older dates, use historical Authority from Supabase (not segmented)
+                // Fallback: use legacy historical Authority from Supabase (single value, not segmented)
                 authorityData.push(historicalAuthority);
-                debugLog(`Using historical Authority (${historicalAuthority}) for ${pointDate}`, 'info');
+                debugLog(`Using legacy historical Authority (${historicalAuthority}) for ${pointDate}`, 'info');
               } else {
                 // Fallback: use calculated Authority score
                 const authScore = typeof pillarScores.authority === 'object' ? pillarScores.authority.score : pillarScores.authority;

@@ -83,7 +83,10 @@ export default async function handler(req, res) {
       
       // Pillar Scores
       visibility_score: scores?.visibility || null,
-      authority_score: scores?.authority || null,
+      // Authority score: extract numeric score from object structure if needed
+      authority_score: (typeof scores?.authority === 'object' && scores?.authority !== null) 
+        ? scores.authority.score 
+        : (scores?.authority || null),
       local_entity_score: scores?.localEntity || null,
       service_area_score: scores?.serviceArea || null,
       content_schema_score: scores?.contentSchema || null,
@@ -94,6 +97,9 @@ export default async function handler(req, res) {
       authority_ranking_score: scores?.authorityComponents?.ranking || null,
       authority_backlink_score: scores?.authorityComponents?.backlinks || null,
       authority_review_score: scores?.authorityComponents?.reviews || null,
+      
+      // Segmented Authority Scores (for building historical segmented data)
+      authority_by_segment: scores?.authority?.bySegment || null, // JSON object with {all, nonEducation, money}
       
       // GSC Data (for reference)
       gsc_clicks: searchData?.totalClicks || null,

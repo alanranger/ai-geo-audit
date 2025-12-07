@@ -104,7 +104,9 @@ export default async function handler(req, res) {
       authorityBehaviourScore: record.authority_behaviour_score,
       authorityRankingScore: record.authority_ranking_score,
       authorityBacklinkScore: record.authority_backlink_score,
-      authorityReviewScore: record.authority_review_score
+      authorityReviewScore: record.authority_review_score,
+      // Segmented Authority scores (new: for building historical segmented data)
+      authorityBySegment: record.authority_by_segment || null // JSON object with {all, nonEducation, money}
     }));
 
     return res.status(200).json({
