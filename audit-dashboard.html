@@ -6132,12 +6132,57 @@
                 const ctx = chart.ctx;
                 const scale = chart.scales.r;
                 const pointLabelItems = scale._pointLabelItems || [];
+                const dataset = chart.data.datasets[0];
+                const meta = chart.getDatasetMeta(0);
                 
-                // Draw score percentages directly under each label
+                // Color each segment with its pillar color
                 pointLabelItems.forEach((item, index) => {
                   if (item && orderedData[index] !== undefined) {
                     const score = orderedData[index];
-                    // Get RAG color based on score
+                    const label = orderedLabels[index];
+                    const color = radarPillarColors[label] || 'rgba(37, 99, 235, 1)';
+                    
+                    // Get the point for this index
+                    const point = meta.data[index];
+                    if (point) {
+                      // Draw line segment in pillar color
+                      ctx.save();
+                      ctx.strokeStyle = color;
+                      ctx.lineWidth = 3;
+                      ctx.beginPath();
+                      if (index === 0) {
+                        // First point - draw from center to first point
+                        const centerX = scale.xCenter;
+                        const centerY = scale.yCenter;
+                        ctx.moveTo(centerX, centerY);
+                        ctx.lineTo(point.x, point.y);
+                      } else {
+                        // Draw from previous point to current point
+                        const prevPoint = meta.data[index - 1];
+                        ctx.moveTo(prevPoint.x, prevPoint.y);
+                        ctx.lineTo(point.x, point.y);
+                      }
+                      // Draw from last point back to first to close the shape
+                      if (index === pointLabelItems.length - 1) {
+                        const firstPoint = meta.data[0];
+                        ctx.lineTo(firstPoint.x, firstPoint.y);
+                      }
+                      ctx.stroke();
+                      ctx.restore();
+                      
+                      // Draw point in pillar color
+                      ctx.save();
+                      ctx.fillStyle = color;
+                      ctx.beginPath();
+                      ctx.arc(point.x, point.y, 5, 0, Math.PI * 2);
+                      ctx.fill();
+                      ctx.strokeStyle = '#fff';
+                      ctx.lineWidth = 2;
+                      ctx.stroke();
+                      ctx.restore();
+                    }
+                    
+                    // Get RAG color based on score for text
                     let ragColor = '#1e293b'; // Default dark
                     if (score >= 70) ragColor = '#10b981'; // Green
                     else if (score >= 40) ragColor = '#f59e0b'; // Amber
