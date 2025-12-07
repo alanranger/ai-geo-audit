@@ -210,12 +210,12 @@
     .chart-container {
       background: linear-gradient(135deg, #f0f4f8 0%, #e2e8f0 100%);
       padding: 1.5rem;
-      padding-bottom: 6rem; /* Extra padding at bottom for rotated axis labels - increased significantly to prevent overflow */
+      padding-bottom: 8rem; /* Extra padding at bottom for rotated axis labels - increased to 8rem to prevent overflow */
       border-radius: 8px;
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
       margin-bottom: 6rem; /* extra breathing room below charts */
-      height: 400px;
-      min-height: 400px; /* Ensure minimum height */
+      height: 450px; /* Increased from 400px to 450px */
+      min-height: 450px; /* Ensure minimum height */
       border: 1px solid rgba(100, 116, 139, 0.2);
       overflow: visible; /* Allow axis labels to extend beyond container */
     }
@@ -5843,21 +5843,27 @@
                 serviceAreaData.push(pillarScores.serviceArea);
               }
               
-              // Use historical Authority score if available, otherwise use calculated
-              // For today's date, use selected mode; for historical dates, use stored score
-              if (historicalAuthority !== undefined && historicalAuthority !== null) {
-                authorityData.push(historicalAuthority);
-                debugLog(`Using historical Authority (${historicalAuthority}) for ${pointDate}`, 'info');
-              } else if (isToday && authorityBySegment) {
-                // For today, use selected mode
+              // Use Authority score based on selected mode for recent dates, historical data for older dates
+              // For recent dates (today and last 2-3 days), prioritize selected mode over historical data
+              // This allows users to see segmented Authority scores for recent dates
+              const daysSincePoint = Math.floor((new Date(todayStr) - new Date(pointDate)) / (1000 * 60 * 60 * 24));
+              const isRecentDate = daysSincePoint <= 3; // Last 3 days (including today)
+              
+              if (isRecentDate && authorityBySegment) {
+                // For recent dates, use selected mode (allows toggling between segments)
                 const selectedMode = window.trendAuthorityMode || 'all';
                 const modeScore = getAuthorityForMode(selectedMode);
                 authorityData.push(modeScore);
-                debugLog(`Using Authority score (${modeScore}) for ${pointDate} (mode: ${selectedMode})`, 'info');
+                debugLog(`Using Authority score (${modeScore}) for ${pointDate} (mode: ${selectedMode}, recent date)`, 'info');
+              } else if (historicalAuthority !== undefined && historicalAuthority !== null) {
+                // For older dates, use historical Authority from Supabase (not segmented)
+                authorityData.push(historicalAuthority);
+                debugLog(`Using historical Authority (${historicalAuthority}) for ${pointDate}`, 'info');
               } else {
-                // Handle new Authority structure (object with score) or legacy (number)
+                // Fallback: use calculated Authority score
                 const authScore = typeof pillarScores.authority === 'object' ? pillarScores.authority.score : pillarScores.authority;
                 authorityData.push(authScore);
+                debugLog(`Using calculated Authority (${authScore}) for ${pointDate}`, 'info');
               }
               
               visibilityData.push(pillarScores.visibility);
