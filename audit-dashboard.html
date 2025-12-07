@@ -3676,13 +3676,27 @@
 
       // Create pillar cards (ordered by weight)
       const pillarCards = document.getElementById('pillarCards');
+      if (!pillarCards) {
+        debugLog('✗ Pillar cards container not found', 'error');
+        console.error('Pillar cards container (id="pillarCards") not found in DOM');
+        return;
+      }
+      debugLog('✓ Pillar cards container found', 'success');
       pillarCards.innerHTML = '';
 
       // Check if we have real Business Profile data
       const hasLocalSignals = saved && saved.localSignals && saved.localSignals.status === 'ok' && saved.localSignals.data;
       const localSignalsData = hasLocalSignals ? saved.localSignals.data : null;
       
-      getOrderedPillars(scores).forEach(([key, scoreValue]) => {
+      const orderedPillars = getOrderedPillars(scores);
+      debugLog(`Creating ${orderedPillars.length} pillar cards from scores: ${JSON.stringify(scores)}`, 'info');
+      
+      if (orderedPillars.length === 0) {
+        debugLog('⚠ No pillars found in scores object!', 'warn');
+        console.warn('No pillars found in scores:', scores);
+      }
+      
+      orderedPillars.forEach(([key, scoreValue]) => {
         // Handle new Authority structure (object with score and bySegment) or legacy (number)
         // Note: getOrderedPillars extracts the score, so we need to get bySegment from original scores object
         let score = scoreValue;
