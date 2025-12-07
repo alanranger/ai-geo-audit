@@ -4151,7 +4151,7 @@
           <!-- AI GEO Health Top Card -->
           <div style="text-align: center; margin-bottom: 3rem; padding: 2rem 0; border-bottom: 2px solid #e2e8f0;">
             <div style="display: flex; align-items: center; justify-content: center; gap: 4rem; margin-bottom: 2rem; flex-wrap: wrap;">
-              <!-- Circular Progress Ring - Clean Design -->
+              <!-- Circular Progress Ring - Speedometer Style -->
               <div style="position: relative; width: 340px; height: 340px; margin: 0 auto;">
                 ${(() => {
                   const score = aiGeoHealth.aiGeoScore;
@@ -4160,14 +4160,27 @@
                   const strokeWidth = 18;
                   const normalizedRadius = radius - strokeWidth / 2;
                   const circumference = normalizedRadius * 2 * Math.PI;
-                  const strokeDasharray = circumference;
-                  const strokeDashoffset = circumference - (score / 100) * circumference;
                   
                   // Determine colors based on status
                   const color = aiGeoHealth.aiGeoStatus === 'green' ? '#10b981' : 
                                aiGeoHealth.aiGeoStatus === 'amber' ? '#f59e0b' : '#ef4444';
                   const bgColor = aiGeoHealth.aiGeoStatus === 'green' ? '#d1fae5' : 
                                  aiGeoHealth.aiGeoStatus === 'amber' ? '#fef3c7' : '#fee2e2';
+                  
+                  // Angle calculations: 0% at 12:05 (-85°), 50% at 6pm (90°), 100% at 12pm (-90°)
+                  // Progress goes clockwise from 0% to 100%
+                  const startAngle = -85; // 12:05 position (5 minutes past 12)
+                  const endAngle = -90; // 12pm position
+                  const angleRange = 360 - 5; // Full circle minus 5° gap
+                  
+                  // Segment lengths as percentages of circumference
+                  const redLength = circumference * 0.5;      // 0-50%
+                  const amberLength = circumference * 0.2;     // 50-70%
+                  const greenLength = circumference * 0.3;      // 70-100%
+                  
+                  // Calculate dash offsets to position segments correctly
+                  // Start from 12:05, so we need to offset by the start angle
+                  const startOffset = (startAngle + 90) / 360 * circumference;
                   
                   return `
                     <svg width="340" height="340" style="filter: drop-shadow(0 4px 12px rgba(0,0,0,0.08));">
@@ -4181,58 +4194,118 @@
                         stroke-width="${strokeWidth}"
                       />
                       
-                      <!-- Progress circle (rotated -90deg to start from top) -->
+                      <!-- Red segment: 0-50% -->
                       <circle
                         cx="${center}"
                         cy="${center}"
                         r="${normalizedRadius}"
                         fill="none"
-                        stroke="${color}"
+                        stroke="#ef4444"
                         stroke-width="${strokeWidth}"
-                        stroke-dasharray="${strokeDasharray}"
-                        stroke-dashoffset="${strokeDashoffset}"
+                        stroke-dasharray="${redLength} ${circumference - redLength}"
+                        stroke-dashoffset="${-startOffset}"
                         stroke-linecap="round"
                         transform="rotate(-90 ${center} ${center})"
-                        style="transition: stroke-dashoffset 1.2s cubic-bezier(0.4, 0, 0.2, 1); filter: drop-shadow(0 0 12px ${color}50);"
                       />
                       
-                      <!-- Tick marks and labels positioned to match rotated progress ring -->
+                      <!-- Amber segment: 50-70% -->
+                      <circle
+                        cx="${center}"
+                        cy="${center}"
+                        r="${normalizedRadius}"
+                        fill="none"
+                        stroke="#f59e0b"
+                        stroke-width="${strokeWidth}"
+                        stroke-dasharray="${amberLength} ${circumference - amberLength}"
+                        stroke-dashoffset="${-startOffset - redLength}"
+                        stroke-linecap="round"
+                        transform="rotate(-90 ${center} ${center})"
+                      />
+                      
+                      <!-- Green segment: 70-100% -->
+                      <circle
+                        cx="${center}"
+                        cy="${center}"
+                        r="${normalizedRadius}"
+                        fill="none"
+                        stroke="#10b981"
+                        stroke-width="${strokeWidth}"
+                        stroke-dasharray="${greenLength} ${circumference - greenLength}"
+                        stroke-dashoffset="${-startOffset - redLength - amberLength}"
+                        stroke-linecap="round"
+                        transform="rotate(-90 ${center} ${center})"
+                      />
+                      
+                      <!-- Progress indicator (current score) - thicker overlay -->
+                      ${score > 0 ? (() => {
+                        const progressLength = (score / 100) * circumference * (angleRange / 360);
+                        const progressOffset = circumference - progressLength + startOffset;
+                        return `
+                          <circle
+                            cx="${center}"
+                            cy="${center}"
+                            r="${normalizedRadius}"
+                            fill="none"
+                            stroke="${color}"
+                            stroke-width="${strokeWidth + 3}"
+                            stroke-dasharray="${progressLength} ${circumference}"
+                            stroke-dashoffset="${progressOffset}"
+                            stroke-linecap="round"
+                            opacity="0.95"
+                            transform="rotate(-90 ${center} ${center})"
+                            style="transition: stroke-dashoffset 1.2s cubic-bezier(0.4, 0, 0.2, 1); filter: drop-shadow(0 0 10px ${color}70);"
+                          />
+                        `;
+                      })() : ''}
+                      
+                      <!-- Proportional tick marks (every 10%) -->
+                      <g>
+                        ${Array.from({ length: 11 }, (_, i) => {
+                          const value = i * 10;
+                          const angle = startAngle + (value / 100) * angleRange;
+                          const rad = (angle * Math.PI) / 180;
+                          const isMajor = value % 50 === 0;
+                          const tickLength = isMajor ? 20 : 12;
+                          const tickWidth = isMajor ? 3 : 2;
+                          
+                          const tickX1 = center + (normalizedRadius - tickLength) * Math.cos(rad);
+                          const tickY1 = center + (normalizedRadius - tickLength) * Math.sin(rad);
+                          const tickX2 = center + (normalizedRadius + tickLength) * Math.cos(rad);
+                          const tickY2 = center + (normalizedRadius + tickLength) * Math.sin(rad);
+                          
+                          return `
+                            <line x1="${tickX1}" y1="${tickY1}" 
+                                  x2="${tickX2}" y2="${tickY2}" 
+                                  stroke="${isMajor ? '#1e293b' : '#94a3b8'}" 
+                                  stroke-width="${tickWidth}" 
+                                  stroke-linecap="round"/>
+                          `;
+                        }).join('')}
+                      </g>
+                      
+                      <!-- Major labels: 0%, 50%, 100% -->
                       <g>
                         ${(() => {
-                          // Calculate positions for 0%, 50%, 100% on the circle
-                          // Progress ring is rotated -90deg, so 0% starts at top (12 o'clock)
-                          const markers = [
-                            { value: 0, angle: -90, color: '#ef4444' },   // Top (12 o'clock)
-                            { value: 50, angle: 0, color: '#f59e0b' },    // Right (3 o'clock)
-                            { value: 100, angle: 90, color: '#10b981' }   // Bottom (6 o'clock)
+                          const majorMarkers = [
+                            { value: 0, angle: startAngle },      // 12:05
+                            { value: 50, angle: startAngle + angleRange * 0.5 },  // 6pm
+                            { value: 100, angle: startAngle + angleRange }        // 12pm
                           ];
                           
-                          return markers.map(m => {
+                          return majorMarkers.map(m => {
                             const rad = (m.angle * Math.PI) / 180;
-                            const tickLength = 16;
-                            const labelOffset = 32;
-                            
-                            // Tick mark position
-                            const tickX1 = center + (normalizedRadius - tickLength) * Math.cos(rad);
-                            const tickY1 = center + (normalizedRadius - tickLength) * Math.sin(rad);
-                            const tickX2 = center + (normalizedRadius + tickLength) * Math.cos(rad);
-                            const tickY2 = center + (normalizedRadius + tickLength) * Math.sin(rad);
-                            
-                            // Label position (further out)
+                            const labelOffset = 38;
                             const labelX = center + (normalizedRadius + labelOffset) * Math.cos(rad);
                             const labelY = center + (normalizedRadius + labelOffset) * Math.sin(rad);
                             
-                            // Adjust label Y for better vertical centering
-                            const labelYAdj = labelY + (m.value === 0 ? -2 : m.value === 100 ? 5 : 0);
+                            // Determine color for label
+                            const labelColor = m.value === 0 ? '#ef4444' : m.value === 50 ? '#f59e0b' : '#10b981';
                             
                             return `
-                              <line x1="${tickX1}" y1="${tickY1}" 
-                                    x2="${tickX2}" y2="${tickY2}" 
-                                    stroke="${m.color}" stroke-width="3" stroke-linecap="round"/>
-                              <text x="${labelX}" y="${labelYAdj}" 
+                              <text x="${labelX}" y="${labelY}" 
                                     text-anchor="middle" dominant-baseline="middle"
-                                    fill="#64748b" 
-                                    font-size="14" font-weight="700">${m.value}</text>
+                                    fill="${labelColor}" 
+                                    font-size="16" font-weight="700">${m.value}</text>
                             `;
                           }).join('');
                         })()}
