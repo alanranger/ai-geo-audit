@@ -2474,12 +2474,21 @@
      */
     function computeBacklinkScore(m) {
       if (!m) {
-        // If metrics not present at all, treat as zero domains and neutral follow ratio
+        // If metrics not present at all, return 0 (no backlink data)
         return 0;
       }
 
       const rd = m.referringDomains ?? 0;
-      const fb = m.followRatio ?? 0.5;
+      // If followRatio is missing, it means data integrity issue - log warning and use 0
+      const fb = m.followRatio ?? (() => {
+        debugLog('⚠ Backlink metrics missing followRatio - data integrity issue', 'warn');
+        return 0;
+      })();
+
+      // If no backlinks at all, score is 0
+      if (rd === 0 && (m.totalBacklinks ?? 0) === 0) {
+        return 0;
+      }
 
       // Referring domains score: 100+ domains = max score (100)
       const rdScore = Math.min(rd / 100, 1) * 100;

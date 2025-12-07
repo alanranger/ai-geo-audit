@@ -78,7 +78,7 @@ function computeBacklinkMetrics(rows) {
     return {
       referringDomains: 0,
       totalBacklinks: 0,
-      followRatio: 0.5,
+      followRatio: 0, // No data = 0, not 0.5
       generatedAt: new Date().toISOString()
     };
   }
@@ -144,7 +144,9 @@ function computeBacklinkMetrics(rows) {
 
   const referringDomains = domains.size;
   const totalBacklinks = total;
-  const followRatio = totalBacklinks > 0 ? followCount / totalBacklinks : 0.5; // Fallback 0.5 if no data
+  // Calculate follow ratio only if we have backlinks
+  // If no backlinks, followRatio is 0 (not 0.5) since there's no data to calculate from
+  const followRatio = totalBacklinks > 0 ? followCount / totalBacklinks : 0;
 
   return {
     referringDomains,
@@ -163,11 +165,12 @@ async function readBacklinkMetrics() {
     const metrics = JSON.parse(content);
     return metrics;
   } catch (error) {
-    // File doesn't exist or invalid - return safe default
+    // File doesn't exist or invalid - return safe default (no data = 0)
+    // This is for when no CSV has been uploaded yet
     return {
       referringDomains: 0,
       totalBacklinks: 0,
-      followRatio: 0.5,
+      followRatio: 0, // No data = 0, not 0.5
       generatedAt: null
     };
   }
@@ -301,11 +304,11 @@ export default async function handler(req, res) {
       }
 
       if (!rows || rows.length === 0) {
-        // Empty CSV - return default metrics
+        // Empty CSV - return default metrics (no data = 0)
         const defaultMetrics = {
           referringDomains: 0,
           totalBacklinks: 0,
-          followRatio: 0.5,
+          followRatio: 0, // No data = 0, not 0.5
           generatedAt: new Date().toISOString()
         };
         
