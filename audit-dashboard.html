@@ -4861,7 +4861,7 @@
           }, 0);
         }
         
-        function renderFullWidthTopPagesTable(topPages, segmentLabel) {
+        function renderFullWidthTopPagesTable(topPages, segmentLabel, dateRangeText = '30 days') {
           if (!topPages || topPages.length === 0) {
             return '<div style="font-size: 0.85rem; color: #999; padding: 1rem; text-align: center;">No page data available for this segment. This table shows the latest snapshot from your most recent audit (static data, not affected by time period selections). If you see this message, the data may not have been computed during the last audit. Make sure your audit includes Google Search Console query+page metrics (queryPages dimension) and that you have uploaded site-urls.csv for segmentation.</div>';
           }
@@ -4914,7 +4914,10 @@
           
           let tableHtml = `
             <div style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; padding-bottom: 0.75rem; border-bottom: 2px solid #e2e8f0;">
-              <h4 style="margin: 0; font-size: 1rem; font-weight: 700; color: #1e293b;">Top 10 pages by impressions</h4>
+              <div>
+                <h4 style="margin: 0 0 0.25rem 0; font-size: 1rem; font-weight: 700; color: #1e293b;">Top 10 pages by impressions</h4>
+                <span style="font-size: 0.75rem; color: #64748b; font-weight: 500;">Data period: Last ${dateRangeText}</span>
+              </div>
               <button id="top-pages-copy-urls" type="button" style="font-size: 0.8rem; padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #d1d5db; background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%); cursor: pointer; color: #475569; font-weight: 500; transition: all 0.2s; box-shadow: 0 1px 2px rgba(0,0,0,0.05);" onmouseover="this.style.background='#f1f5f9'; this.style.borderColor='#99004C';" onmouseout="this.style.background='linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%)'; this.style.borderColor='#d1d5db';">
                 Copy URLs
               </button>
@@ -5054,9 +5057,13 @@
         const currentSummary = getSegmentSummary(currentMode);
         const rag = currentSummary ? getRAGStatus(currentSummary.total) : { status: 'amber', label: 'N/A' };
         
-        // Create section HTML with improved styling
+        // Get date range for display
+        const dateRange = parseInt(localStorage.getItem('gsc_date_range') || '30', 10);
+        const dateRangeText = dateRange === 30 ? '30 days' : dateRange === 60 ? '60 days' : dateRange === 90 ? '90 days' : dateRange === 120 ? '120 days' : dateRange === 180 ? '180 days' : dateRange === 365 ? '365 days' : dateRange === 540 ? '540 days' : `${dateRange} days`;
+        
+        // Create section HTML with improved styling and pastel background
         topPagesSection.innerHTML = `
-          <div style="background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-left: 4px solid #99004C;">
+          <div style="background: linear-gradient(135deg, #fef2f8 0%, #fce7f3 100%); padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-left: 4px solid #99004C;">
             <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem;">
               <div style="flex: 1;">
                 <h3 style="margin: 0 0 0.5rem 0; color: var(--brand-dark); font-size: 1.25rem; font-weight: 700;">Authority - Behaviour & Ranking</h3>
@@ -5123,13 +5130,26 @@
         // Insert after pillar cards
         pillarCards.parentNode.insertBefore(topPagesSection, pillarCards.nextSibling);
         
+        // Store authorityBySegment globally so updateTopPagesSection can access it
+        window.authorityBySegment = authorityBySegment;
+        
         // Store update function globally so Authority mode toggle can call it
         window.updateTopPagesSection = function(mode) {
+          // Get fresh authorityBySegment from global or try to get from current scores
+          let segData = window.authorityBySegment;
+          if (!segData) {
+            // Try to get from current scores
+            const authorityObj = scores?.authority;
+            segData = (typeof authorityObj === 'object' && authorityObj !== null) 
+              ? authorityObj.bySegment 
+              : null;
+          }
+          
           const topPages = mode === 'all'
-            ? (authorityBySegment?.all?.topPages || [])
+            ? (segData?.all?.topPages || [])
             : mode === 'nonEducation'
-            ? (authorityBySegment?.nonEducation?.topPages || [])
-            : (authorityBySegment?.money?.topPages || []);
+            ? (segData?.nonEducation?.topPages || [])
+            : (segData?.money?.topPages || []);
           
           const segmentLabel = mode === 'all'
             ? 'All pages'
@@ -5137,10 +5157,71 @@
             ? 'Exclude education (blogs / free course)'
             : 'Money pages only';
           
-          const labelEl = document.getElementById('top-pages-segment-label');
-          const tableContainer = document.getElementById('top-pages-table-container');
+          debugLog(`📊 Top Pages: Updating to segment "${mode}", found ${topPages.length} pages`, 'info');
           
+          // Update segment label
+          const labelEl = document.getElementById('top-pages-segment-label');
           if (labelEl) labelEl.textContent = segmentLabel;
+          
+          // Update summary if available
+          const getSegmentSummary = (m) => {
+            if (!segData || !segData[m]) return null;
+            const segmentData = segData[m];
+            return {
+              behaviour: segmentData.behaviour || 0,
+              ranking: segmentData.ranking || 0,
+              total: segmentData.total || segmentData.score || 0
+            };
+          };
+          
+          const summary = getSegmentSummary(mode);
+          const summaryDiv = document.getElementById('top-pages-segment-summary');
+          if (summary && summaryDiv) {
+            const rag = getRAGStatus(summary.total);
+            summaryDiv.innerHTML = `
+              ${formatComponentScore('Behaviour', summary.behaviour)}
+              ${formatComponentScore('Ranking', summary.ranking)}
+            `;
+            // Update RAG badge and score
+            const ragBadge = summaryDiv.parentElement.querySelector('.rag-badge');
+            const scoreSpan = summaryDiv.parentElement.querySelector('span[style*="font-size: 1.1rem"]');
+            if (ragBadge) {
+              ragBadge.className = `rag-badge ${rag.status}`;
+              ragBadge.textContent = rag.label;
+            }
+            if (scoreSpan) {
+              scoreSpan.textContent = Math.round(summary.total);
+              scoreSpan.style.color = rag.status === 'green' ? '#10b981' : rag.status === 'amber' ? '#f59e0b' : '#ef4444';
+            }
+          }
+          
+          // Update toggle buttons
+          ['all', 'nonEducation', 'money'].forEach(m => {
+            const btn = document.getElementById(`top-pages-mode-${m}`);
+            if (btn) {
+              if (m === mode) {
+                btn.style.background = '#10b981';
+                btn.style.color = 'white';
+                btn.style.fontWeight = '600';
+              } else {
+                btn.style.background = 'white';
+                btn.style.color = '#666';
+                btn.style.fontWeight = '400';
+              }
+            }
+          });
+          
+          // Update comparison table
+          const comparisonDiv = document.getElementById('top-pages-comparison-table');
+          if (comparisonDiv && segData) {
+            comparisonDiv.innerHTML = renderSegmentComparisonTable(segData, mode);
+          }
+          
+          // Update table (reset sort when switching segments)
+          window.topPagesData = topPages;
+          window.topPagesSortColumn = null;
+          window.topPagesSortDirection = 'desc';
+          const tableContainer = document.getElementById('top-pages-table-container');
           if (tableContainer) {
             tableContainer.innerHTML = renderFullWidthTopPagesTable(topPages, segmentLabel);
             attachCopyButtonHandler();
