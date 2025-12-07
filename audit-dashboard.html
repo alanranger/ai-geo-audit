@@ -7025,7 +7025,19 @@
               </tr>
             </thead>
             <tbody>
-              ${getOrderedPillars(scores).map(([key, score], index) => {
+              ${(() => {
+                // Phase 3: Insert Brand & Entity row after Authority
+                const orderedPillars = getOrderedPillars(scores);
+                const brandOverlay = scores.brandOverlay;
+                const brandRowIndex = orderedPillars.findIndex(([key]) => key === 'authority');
+                
+                // Insert Brand row after Authority if it exists
+                if (brandRowIndex >= 0 && brandOverlay) {
+                  orderedPillars.splice(brandRowIndex + 1, 0, ['brandOverlay', brandOverlay.score || 0]);
+                }
+                
+                return orderedPillars;
+              })().map(([key, score], index) => {
                 const rag = getRAGStatus(score);
                 
                 // Define pillar colors for scorecard table (matching charts)
@@ -7040,7 +7052,7 @@
                 const pillarColor = scorecardPillarColors[key] || '#666';
                 
                 // Build Content/Schema description with schema audit data
-                let contentSchemaDesc = 'Quality and completeness of structured data markup across your domain.<br><strong>AI Importance:</strong> Structured data is the primary way AI understands your content. Schema markup directly feeds AI systems, enabling them to extract facts, relationships, and context for use in AI Overviews and answer generation.<br><strong>Data Source:</strong> ✅ <span style="color: #10b981;">Live data</span> from schema audit (crawls actual website pages for JSON-LD markup).<br><strong>Calculation:</strong> Weighted score based on Foundation schemas (30%), Rich Result eligibility (35%), Coverage (20%), and Type Diversity (15%).';
+                let contentSchemaDesc = 'Quality and completeness of structured data markup across your domain.<br><strong>AI Importance:</strong> Structured data is the primary way AI understands your content. Schema markup directly feeds AI systems, enabling them to extract facts, relationships, and context for use in AI Overviews and answer generation.<br><strong>Diversity:</strong> Measures how varied your structured content is – different schema types (Article, Event, Course, FAQPage, HowTo, Product, Review, VideoObject, ImageObject, ItemList, LocalBusiness) and formats across the site. A broader mix of types gives AI more reliable, context-rich signals for understanding what you do and for building accurate summaries.<br><strong>Data Source:</strong> ✅ <span style="color: #10b981;">Live data</span> from schema audit (crawls actual website pages for JSON-LD markup).<br><strong>Calculation:</strong> Weighted score based on Foundation schemas (30%), Rich Result eligibility (35%), Coverage (20%), and Type Diversity (15%).';
                 
                 if (schemaAudit && schemaAudit.status === 'ok' && schemaAudit.data) {
                   const schemaData = schemaAudit.data;
@@ -7067,7 +7079,8 @@
                   const uniqueTypesCount = allTypes.size;
                   
                   const richResultTypesList = ['Article', 'Event', 'FAQPage', 'Product', 'LocalBusiness', 'Course', 'Review', 'HowTo', 'VideoObject', 'ImageObject', 'ItemList'];
-                  contentSchemaDesc += ` <strong>Data Checked:</strong> Foundation schemas: ${foundationPresent}/4 (${foundationTypes.filter(t => allTypes.has(t)).join(', ') || 'none'}), Rich result types: ${richEligibleCount}/${richResultTypesList.length} eligible, Coverage: ${coverage}% (${pagesWithSchema}/${totalPages} pages), Type diversity: ${uniqueTypesCount} unique types. `;
+                  const richTypesPresent = richResultTypesList.filter(type => allTypes.has(type));
+                  contentSchemaDesc += ` <strong>Data Checked:</strong> Foundation schemas: ${foundationPresent}/4 (${foundationTypes.filter(t => allTypes.has(t)).join(', ') || 'none'}), Rich result types: ${richEligibleCount}/${richResultTypesList.length} eligible, Coverage: ${coverage}% (${pagesWithSchema}/${totalPages} pages), Type diversity: ${richTypesPresent.length}/${richResultTypesList.length} rich result types present (${richTypesPresent.join(', ') || 'none'}), ${uniqueTypesCount} total unique types across the site. `;
                   
                   if (schemaTypes && schemaTypes.length > 0) {
                     // Show top 15 most common types for readability (still sorted by count)
@@ -7128,12 +7141,34 @@
                 const totalClicks = currentGSCData.totalClicks || 0;
                 const totalImpressions = currentGSCData.totalImpressions || 0;
                 
+                // Phase 3: Build Brand & Entity description
+                let brandDesc = '';
+                if (key === 'brandOverlay') {
+                  const brand = scores.brandOverlay;
+                  if (brand) {
+                    const share = brand.brandQueryShare || 0;
+                    const brandCtr = brand.brandCtr || 0;
+                    const pos = brand.brandAvgPosition || 0;
+                    const reviewScore = brand.reviewScore || 0;
+                    const entityScore = brand.entityScore || 0;
+                    
+                    brandDesc = `E-A-T overlay for brand demand, reviews, and entity strength. Shows how clearly "Alan Ranger / Alan Ranger Photography" is recognised as a distinct brand in search and AI systems.<br><strong>AI Importance:</strong> Strong branded signals make it easier for AI to trust and summarise you correctly. High branded search share, strong review footprint and a clear entity graph (GBP + knowledge panel) all increase the chance of accurate AI overviews.<br><strong>Calculation:</strong> Combined overlay score from:<br>• Brand search: share of branded queries, CTR, and average position<br>• Reviews: Google Business Profile + on-site review scores and volumes<br>• Entity: NAP consistency, locations, and knowledge panel detection<br><strong>Data Source:</strong> Live data from Google Search Console (brand queries), Google Business Profile API (rating, reviews, locations, service areas), and site reviews snapshot.`;
+                    
+                    if (share > 0 || brandCtr > 0 || pos > 0) {
+                      brandDesc += ` <strong>Current Metrics:</strong> Brand queries: ${(share * 100).toFixed(1)}% of impressions, brand CTR ${(brandCtr * 100).toFixed(1)}%, avg position ${pos.toFixed(1)}.`;
+                    }
+                  } else {
+                    brandDesc = 'Brand overlay not available – run an audit with GSC + GBP configured to populate these metrics.';
+                  }
+                }
+                
                 const descriptions = {
                   localEntity: localEntityDesc,
                   serviceArea: serviceAreaDesc,
                   authority: `E-A-T (Experience, Expertise, Authoritativeness, Trustworthiness): Depth of educational content, references, reviews, external citations, and demonstrated expertise.<br><strong>AI Importance:</strong> E-A-T is critical for AI systems - they prioritize authoritative, trustworthy sources. Strong E-A-T signals help AI confidently feature your content in AI Overviews and answer boxes.<br><strong>Calculation:</strong> Behaviour Score (40%): CTR for ranking queries + top-10 CTR. Ranking Score (20%): Average position + top-10 impression share. Backlink Score (20%): Referring domains + quality. Review Score (20%): Combined ratings and counts from GBP + Trustpilot snapshot.<br><strong>Data Source:</strong> ✅ <span style="color: #10b981;">Live data</span> from Google Search Console API, Google Business Profile API, historic Trustpilot reviews snapshot, and backlink CSV upload.<br><strong>Data Checked:</strong> CTR ${ctr.toFixed(2)}%, average position ${avgPosition.toFixed(1)}, clicks ${totalClicks.toLocaleString()}, impressions ${totalImpressions.toLocaleString()}, ranking query performance, backlink metrics, review ratings and counts.`,
                   visibility: `Frequency and prominence in organic search, local pack, snippets and AI Overviews.<br><strong>AI Importance:</strong> AI systems learn from existing search performance. Higher visibility signals quality and relevance, making AI more likely to surface your content in AI-powered results and featured snippets.<br><strong>Data Source:</strong> ✅ <span style="color: #10b981;">Live data</span> from Google Search Console API.<br><strong>Data Checked:</strong> Average position ${avgPosition.toFixed(1)}, CTR ${ctr.toFixed(2)}%, total clicks ${totalClicks.toLocaleString()}, total impressions ${totalImpressions.toLocaleString()}, SERP feature appearances.`,
-                  contentSchema: contentSchemaDesc
+                  contentSchema: contentSchemaDesc,
+                  brandOverlay: brandDesc
                 };
                 
                 // Generate dynamic next steps based on actual data and scores
@@ -7403,6 +7438,68 @@
                   return selectedSuggestions.slice(0, 4).map(s => `• ${s}`).join('<br>') || 'No suggestions available';
                 };
                 
+                // Phase 3: Handle Brand & Entity overlay row
+                if (key === 'brandOverlay') {
+                  const brand = scores.brandOverlay;
+                  const brandScore = brand?.score ?? 0;
+                  let brandStatus = 'red';
+                  let brandLabel = 'Red';
+                  if (brandScore >= 70) {
+                    brandStatus = 'green';
+                    brandLabel = 'Green';
+                  } else if (brandScore >= 40) {
+                    brandStatus = 'amber';
+                    brandLabel = 'Amber';
+                  }
+                  
+                  // Get brand priority for improvement suggestions
+                  const brandPriority = getBrandPriority({ brandOverlay: brand });
+                  let brandSuggestion = '';
+                  if (brandPriority) {
+                    brandSuggestion = brandPriority.message;
+                  } else if (brandScore >= 70) {
+                    brandSuggestion = 'Brand & entity signals are strong. Maintain a steady flow of new reviews and consistent use of your full brand name across site and off-site mentions.';
+                  } else if (!brand) {
+                    brandSuggestion = 'Configure GSC and Google Business Profile access, then re-run the audit.';
+                  }
+                  
+                  const brandDataDate = getPillarDataDate('authority'); // Use same date as Authority (GSC-based)
+                  const brandDataDateDisplay = brandDataDate 
+                    ? `<span style="font-size: 0.8rem; color: #666;">${brandDataDate}</span>`
+                    : '<span style="font-size: 0.8rem; color: #999;">N/A</span>';
+                  
+                  return `
+                    <tr style="border-bottom: 1px solid #eee; background: ${index % 2 === 0 ? '#ffffff' : '#fafafa'};">
+                      <td style="padding: 0.75rem; font-weight: 500;">
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                          <div style="width: 16px; height: 16px; background: #f59e0b; border-radius: 2px; border: 1px solid rgba(0,0,0,0.1); flex-shrink: 0;" title="Brand & Entity overlay"></div>
+                          <span>Brand & Entity <span style="color: #999; font-size: 0.85em;">(overlay)</span></span>
+                        </div>
+                      </td>
+                      <td style="padding: 0.75rem; text-align: center; font-size: 1.1rem; font-weight: 600; color: ${brandStatus === 'green' ? '#10b981' : brandStatus === 'amber' ? '#f59e0b' : '#ef4444'};">
+                        ${brand ? Math.round(brandScore) : 0}
+                      </td>
+                      <td style="padding: 0.75rem; text-align: center; font-size: 0.9rem; font-weight: 600; color: #999;" title="Overlay only - does not affect AI GEO score">
+                        <span style="color: #999;">—</span>
+                      </td>
+                      <td style="padding: 0.75rem; text-align: center;">
+                        ${brand ? `
+                          <span class="rag-badge ${brandStatus}" style="display: inline-block; padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.8rem;">
+                            ${brandLabel}
+                          </span>
+                        ` : `
+                          <span style="display: inline-block; padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.8rem; background: #e5e7eb; color: #6b7280;">
+                            N/A
+                          </span>
+                        `}
+                      </td>
+                      <td style="padding: 0.75rem; color: #666; font-size: 0.85rem; line-height: 1.6; width: 42%;">${descriptions.brandOverlay || ''}</td>
+                      <td style="padding: 0.75rem; color: #555; font-size: 0.85rem; line-height: 1.6; width: 22%;">${brandSuggestion || 'No suggestions available'}</td>
+                      <td style="padding: 0.75rem; text-align: center; width: 6%;">${brandDataDateDisplay}</td>
+                    </tr>
+                  `;
+                }
+                
                 const weight = pillarWeights[key] || 0;
                 const isEven = index % 2 === 0;
                 
@@ -7470,7 +7567,7 @@
             <span style="color: #ef4444; font-weight: 600;">Red (0-39)</span> = Critical issues
           </p>
           <p style="margin: 0; font-size: 0.9rem; color: #555; line-height: 1.6;">
-            <strong>Weighting:</strong> Pillars are weighted by their importance for AI search systems. Authority (30%) and Content/Schema (25%) are most critical, as AI relies heavily on E-A-T signals and structured data. Visibility (20%) reflects how AI learns from existing performance, while Local Entity (15%) and Service Area (10%) are less critical for AI-powered results.
+            <strong>Weighting:</strong> Pillars are weighted by their importance for AI search systems. Authority (30%) and Content/Schema (25%) are most critical, as AI relies heavily on E-A-T signals and structured data. Visibility (20%) reflects how AI learns from existing performance, while Local Entity (15%) and Service Area (10%) are less critical for AI-powered results.<br><br>Brand & Entity is shown as a separate overlay row. It does not change the AI GEO score directly, but it strongly influences how confidently AI systems can attribute content and build accurate entity-level summaries.
           </p>
         </div>
       `;
