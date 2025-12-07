@@ -96,10 +96,20 @@
 
 5. UI RENDERING
    └─> displayDashboard(scores, data, snippetReadiness, schemaAudit)
+       ├─> Render Site AI Health Dashboard
+       │   ├─> Calculate AI GEO Score (weighted average of 5 pillars)
+       │   ├─> Calculate AI Summary Likelihood (high/medium/low)
+       │   ├─> Render Speedometer Gauge (SVG-based circular progress ring)
+       │   │   ├─> Color segments: Red (0-50%), Amber (50-70%), Green (70-100%)
+       │   │   ├─> Needle indicator pointing to current score
+       │   │   ├─> Tick marks for current score and AI threshold (55)
+       │   │   └─> Labels: 50%, 100%, current score, AI threshold
+       │   └─> Display status badge and AI summary likelihood
        ├─> Update 5 Pillar Score Cards
        ├─> Render Radar Chart (5 pillars)
        ├─> Render Trend Chart (timeseries data)
        ├─> Render Metrics Cards (clicks, impressions, CTR, position)
+       ├─> Render Recommended Actions Table (segment-aware recommendations)
        ├─> Render Top Queries Table
        └─> Show Completion Modal (with schema audit summary)
 
@@ -796,7 +806,23 @@ Applied to all 5 pillar scores and snippet readiness.
 
 ### Libraries
 - Chart.js (via CDN) - Chart rendering
+- SVG (for speedometer gauge rendering)
 - Vanilla JavaScript - No framework dependencies
+
+### UI Components
+
+#### Site AI Health Dashboard
+- **Location**: Top of dashboard, above pillar cards
+- **Components**:
+  - Speedometer-style circular gauge (SVG-based)
+  - Color-coded segments: Red (0-50%), Amber (50-70%), Green (70-100%)
+  - Visual needle indicator pointing to current score
+  - Tick marks for current score and AI summary likelihood threshold (55)
+  - Labels: 50%, 100%, current score with "Score" label, AI threshold with "AI Medium" label
+  - Status badge: "Excellent" (green), "Good" (amber), "Needs Work" (red)
+  - AI Summary Likelihood indicator: High/Medium/Low
+- **Score Calculation**: Weighted average of 5 pillar scores
+- **AI Summary Likelihood**: Based on AI GEO Score and component scores (Authority, Content, Coverage)
 
 ### Infrastructure
 - Vercel - Hosting and serverless functions

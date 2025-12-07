@@ -27,18 +27,28 @@ Vercel will automatically rebuild and deploy (usually takes 1-2 minutes).
 
 ## Features
 
+- **Site AI Health Score**: Prominent speedometer-style gauge showing overall AI GEO Score
+  - Color-coded segments (Red/Amber/Green) with visual needle indicator
+  - Current score and AI summary likelihood threshold markers
+  - Status badge and AI summary likelihood indicator
 - **5 Pillar Score Tracking**: Local Entity, Service Area, Authority (4-component: Behaviour, Ranking, Backlinks, Reviews), Visibility, Content/Schema
 - **Real-time Data**: Google Search Console API integration
 - **Visual Dashboards**: 
+  - Site AI Health speedometer gauge
   - Radar chart with RAG color-coded score labels at each data point
   - Trend graphs showing historical performance
   - Snippet Readiness nested doughnut chart with weighted segments and score indicators
   - Metrics cards with real-time data
+- **Recommended Actions Table**: Data-driven recommendations based on segment metrics
+  - Priority highlighting for critical issues
+  - Segment-aware action suggestions
+  - Current vs target comparisons with gap analysis
 - **RAG Status**: Color-coded Red/Amber/Green indicators on all scores
 - **Historical Data**: Supabase integration for Content/Schema trend tracking
 - **Dashboard Persistence**: Automatically loads last audit results on page reload
 - **Retry Failed URLs**: Rescan failed/missing URLs without running full audit
 - **Configuration**: Save API keys and settings locally
+- **Page Segmentation**: Smart classification of pages into segments (All pages, Exclude education, Money pages only)
 
 ## Setup
 
@@ -56,6 +66,7 @@ Vercel will automatically rebuild and deploy (usually takes 1-2 minutes).
 ## Current Status
 
 - ✅ Dashboard UI complete with enhanced visualizations
+- ✅ **Site AI Health speedometer** with color-coded segments and needle indicator
 - ✅ Visual charts and graphs (radar, trend, snippet readiness)
 - ✅ Google Search Console API integration (OAuth2)
 - ✅ Schema audit and coverage scanning with retry mechanism
@@ -66,6 +77,8 @@ Vercel will automatically rebuild and deploy (usually takes 1-2 minutes).
 - ✅ Retry failed URLs functionality
 - ✅ Configuration management
 - ✅ Tooltips on all interactive buttons
+- ✅ Recommended actions table with priority highlighting
+- ✅ Page segmentation with fine-art print page reclassification
 
 ## API Endpoints
 
