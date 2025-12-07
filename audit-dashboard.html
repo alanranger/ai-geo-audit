@@ -4248,6 +4248,94 @@
       pillarCards.parentNode.insertBefore(healthDashboard, pillarCards);
       debugLog('✓ AI GEO Health Dashboard created', 'success');
       
+      // Draw speedometer gauge after DOM insertion
+      setTimeout(() => {
+        const speedometerCanvas = document.getElementById('ai-geo-speedometer');
+        if (speedometerCanvas) {
+          const ctx = speedometerCanvas.getContext('2d');
+          const centerX = speedometerCanvas.width / 2;
+          const centerY = speedometerCanvas.height;
+          const radius = 90;
+          const startAngle = Math.PI; // 180 degrees (left)
+          const endAngle = 0; // 0 degrees (right)
+          const score = aiGeoHealth.aiGeoScore;
+          const maxScore = 100;
+          
+          // Clear canvas
+          ctx.clearRect(0, 0, speedometerCanvas.width, speedometerCanvas.height);
+          
+          // Draw background arc (grey)
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, radius, startAngle, endAngle, false);
+          ctx.strokeStyle = '#e2e8f0';
+          ctx.lineWidth = 12;
+          ctx.lineCap = 'round';
+          ctx.stroke();
+          
+          // Calculate angle for score (0-100 maps to 180-0 degrees)
+          const scoreAngle = startAngle - (score / maxScore) * (startAngle - endAngle);
+          
+          // Determine color based on status
+          const gaugeColor = aiGeoHealth.aiGeoStatus === 'green' ? '#10b981' : 
+                            aiGeoHealth.aiGeoStatus === 'amber' ? '#f59e0b' : '#ef4444';
+          
+          // Draw score arc
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, radius, startAngle, scoreAngle, false);
+          ctx.strokeStyle = gaugeColor;
+          ctx.lineWidth = 12;
+          ctx.lineCap = 'round';
+          ctx.stroke();
+          
+          // Draw tick marks
+          for (let i = 0; i <= 10; i++) {
+            const tickValue = i * 10;
+            const tickAngle = startAngle - (tickValue / maxScore) * (startAngle - endAngle);
+            const tickStartX = centerX + (radius - 15) * Math.cos(tickAngle);
+            const tickStartY = centerY + (radius - 15) * Math.sin(tickAngle);
+            const tickEndX = centerX + (radius - 5) * Math.cos(tickAngle);
+            const tickEndY = centerY + (radius - 5) * Math.sin(tickAngle);
+            
+            ctx.beginPath();
+            ctx.moveTo(tickStartX, tickStartY);
+            ctx.lineTo(tickEndX, tickEndY);
+            ctx.strokeStyle = '#94a3b8';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            // Add labels for major ticks (0, 50, 100)
+            if (tickValue === 0 || tickValue === 50 || tickValue === 100) {
+              const labelX = centerX + (radius - 25) * Math.cos(tickAngle);
+              const labelY = centerY + (radius - 25) * Math.sin(tickAngle);
+              ctx.fillStyle = '#64748b';
+              ctx.font = '12px sans-serif';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(tickValue.toString(), labelX, labelY);
+            }
+          }
+          
+          // Draw needle
+          const needleAngle = scoreAngle;
+          const needleLength = radius - 20;
+          const needleX = centerX + needleLength * Math.cos(needleAngle);
+          const needleY = centerY + needleLength * Math.sin(needleAngle);
+          
+          ctx.beginPath();
+          ctx.moveTo(centerX, centerY);
+          ctx.lineTo(needleX, needleY);
+          ctx.strokeStyle = '#1e293b';
+          ctx.lineWidth = 3;
+          ctx.stroke();
+          
+          // Draw center circle
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, 6, 0, 2 * Math.PI);
+          ctx.fillStyle = '#1e293b';
+          ctx.fill();
+        }
+      }, 100);
+      
       // Clear pillar cards for fresh render
       pillarCards.innerHTML = '';
       
