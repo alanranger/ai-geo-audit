@@ -368,16 +368,51 @@ export default async function handler(req, res) {
       console.log('CSV content received, length:', csvContent.length);
       console.log('First 200 chars:', csvContent.substring(0, 200));
 
-      // Parse CSV using custom parser (same approach as schema-audit.js)
+      // Parse CSV - handle multi-line quoted fields properly
       let rows = [];
       try {
-        const lines = csvContent.split('\n').filter(line => line.trim());
+        // First, we need to properly handle multi-line quoted fields
+        // Split by lines but respect quoted fields that span multiple lines
+        const lines = [];
+        let currentLine = '';
+        let inQuotes = false;
+        
+        for (let i = 0; i < csvContent.length; i++) {
+          const char = csvContent[i];
+          const nextChar = csvContent[i + 1];
+          
+          if (char === '"') {
+            if (inQuotes && nextChar === '"') {
+              // Escaped quote
+              currentLine += '"';
+              i++; // Skip next quote
+            } else {
+              // Toggle quote state
+              inQuotes = !inQuotes;
+              currentLine += char;
+            }
+          } else if (char === '\n' && !inQuotes) {
+            // End of line (and not inside quotes)
+            if (currentLine.trim()) {
+              lines.push(currentLine.trim());
+            }
+            currentLine = '';
+          } else {
+            currentLine += char;
+          }
+        }
+        
+        // Add last line if any
+        if (currentLine.trim()) {
+          lines.push(currentLine.trim());
+        }
+        
         if (lines.length === 0) {
           throw new Error('CSV is empty');
         }
         
         // Parse header row
-        const headerLine = lines[0].trim();
+        const headerLine = lines[0];
         const headers = parseCsvLine(headerLine).map(h => h.trim().replace(/^"|"$/g, ''));
         
         console.log('CSV headers:', headers);
@@ -385,13 +420,25 @@ export default async function handler(req, res) {
         
         // Parse data rows
         for (let i = 1; i < lines.length; i++) {
-          const line = lines[i].trim();
+          const line = lines[i];
           if (!line) continue;
           
           try {
             const columns = parseCsvLine(line);
-            const row = {};
             
+            // Ensure we have the right number of columns
+            if (columns.length !== headers.length) {
+              console.warn(`Row ${i}: Column count mismatch. Expected ${headers.length}, got ${columns.length}`);
+              // Pad or truncate as needed
+              while (columns.length < headers.length) {
+                columns.push('');
+              }
+              if (columns.length > headers.length) {
+                columns = columns.slice(0, headers.length);
+              }
+            }
+            
+            const row = {};
             headers.forEach((header, index) => {
               row[header] = columns[index] ? columns[index].trim().replace(/^"|"$/g, '') : '';
             });
@@ -400,7 +447,7 @@ export default async function handler(req, res) {
             
             // Log first few rows for debugging
             if (i <= 3) {
-              console.log(`Row ${i}:`, JSON.stringify(row).substring(0, 200));
+              console.log(`Row ${i}:`, JSON.stringify(row).substring(0, 300));
             }
           } catch (e) {
             console.warn(`Error parsing line ${i}:`, e.message);
@@ -411,7 +458,7 @@ export default async function handler(req, res) {
         console.log(`Parsed ${rows.length} rows from CSV`);
         if (rows.length > 0) {
           console.log('First row keys:', Object.keys(rows[0]));
-          console.log('First row sample:', JSON.stringify(rows[0]).substring(0, 300));
+          console.log('First row sample:', JSON.stringify(rows[0]).substring(0, 400));
         }
       } catch (parseError) {
         console.error('CSV parse error:', parseError);
