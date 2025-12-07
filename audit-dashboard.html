@@ -1669,6 +1669,8 @@
           
           // Store in localStorage for persistence
           localStorage.setItem('backlink_csv_content', csvContent);
+          localStorage.setItem('backlink_metrics', JSON.stringify(metrics));
+          debugLog(`✓ Backlink metrics stored in localStorage`, 'success');
         } else {
           // Error response - log debug info to UI
           const errorMsg = result.message || result.error || 'Upload failed - invalid response format';
@@ -2931,24 +2933,42 @@
         
         updateProgress(38, 'Fetching backlink metrics data...');
         debugLog('Fetching backlink metrics data...', 'info');
-        // Fetch backlink metrics
+        // Fetch backlink metrics - try localStorage first (from CSV upload), then API
         let backlinkMetrics = null;
+        
+        // First, try to get from localStorage (stored when CSV was uploaded)
         try {
-          const backlinkResponse = await fetch('/api/aigeo/backlink-metrics');
-          if (backlinkResponse.ok) {
-            const backlinkData = await backlinkResponse.json();
-            if (backlinkData.status === 'ok' && backlinkData.data) {
-              backlinkMetrics = backlinkData.data;
-              debugLog('✓ Backlink metrics data fetched successfully', 'success');
-              debugLog(`Backlink metrics: domains=${backlinkMetrics.referringDomains}, links=${backlinkMetrics.totalBacklinks}, followRatio=${(backlinkMetrics.followRatio * 100).toFixed(1)}%`, 'info');
-            } else {
-              debugLog('⚠ Backlink metrics returned error, using fallback', 'warn');
-            }
-          } else {
-            debugLog('⚠ Backlink metrics endpoint not available, using fallback', 'warn');
+          const storedMetrics = localStorage.getItem('backlink_metrics');
+          if (storedMetrics) {
+            backlinkMetrics = JSON.parse(storedMetrics);
+            debugLog('✓ Backlink metrics loaded from localStorage', 'success');
+            debugLog(`Backlink metrics: domains=${backlinkMetrics.referringDomains}, links=${backlinkMetrics.totalBacklinks}, followRatio=${(backlinkMetrics.followRatio * 100).toFixed(1)}%`, 'info');
           }
-        } catch (backlinkError) {
-          debugLog(`⚠ Backlink metrics error: ${backlinkError.message}, using fallback`, 'warn');
+        } catch (e) {
+          debugLog(`⚠ Error reading backlink metrics from localStorage: ${e.message}`, 'warn');
+        }
+        
+        // If not in localStorage, try API (for cases where metrics were uploaded via API directly)
+        if (!backlinkMetrics) {
+          try {
+            const backlinkResponse = await fetch('/api/aigeo/backlink-metrics');
+            if (backlinkResponse.ok) {
+              const backlinkData = await backlinkResponse.json();
+              if (backlinkData.status === 'ok' && backlinkData.data && backlinkData.data.totalBacklinks > 0) {
+                backlinkMetrics = backlinkData.data;
+                // Store in localStorage for next time
+                localStorage.setItem('backlink_metrics', JSON.stringify(backlinkMetrics));
+                debugLog('✓ Backlink metrics data fetched from API and stored', 'success');
+                debugLog(`Backlink metrics: domains=${backlinkMetrics.referringDomains}, links=${backlinkMetrics.totalBacklinks}, followRatio=${(backlinkMetrics.followRatio * 100).toFixed(1)}%`, 'info');
+              } else {
+                debugLog('⚠ Backlink metrics returned empty/zero, using fallback', 'warn');
+              }
+            } else {
+              debugLog('⚠ Backlink metrics endpoint not available, using fallback', 'warn');
+            }
+          } catch (backlinkError) {
+            debugLog(`⚠ Backlink metrics error: ${backlinkError.message}, using fallback`, 'warn');
+          }
         }
         
         updateProgress(40, 'Fetching schema audit data...');
