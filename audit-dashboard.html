@@ -975,7 +975,7 @@
             <li>Weighted calculation based on four components: Foundation schemas, Rich Results, Coverage, and Diversity</li>
             <li>Formula: <code>contentSchema = (Foundation × 30%) + (Rich Results × 35%) + (Coverage × 20%) + (Diversity × 15%)</code></li>
             <li><strong>Foundation Schemas (30%):</strong> Organization, Person, WebSite, BreadcrumbList presence. Score = (types present / 4) × 100</li>
-            <li><strong>Rich Results (35%):</strong> Article, Event, Course, FAQ, HowTo, VideoObject, Recipe, Product, LocalBusiness, Review eligibility. Score = (eligible types / 10) × 100</li>
+            <li><strong>Rich Results (35%):</strong> Article, Event, Course, FAQ, HowTo, VideoObject, Product, LocalBusiness, Review, ImageObject, ItemList eligibility. Score = (eligible types / 11) × 100</li>
             <li><strong>Coverage (20%):</strong> Pages with schema / total pages. Score = coverage percentage</li>
             <li><strong>Diversity (15%):</strong> Number of unique schema types across site. Score = min((unique types / 15) × 100, 100)</li>
             <li><strong>Data Source:</strong> Schema audit API (crawls actual pages for JSON-LD markup)</li>
@@ -987,7 +987,7 @@
             <li>Schema Audit API: CSV-based domain crawl of all site URLs</li>
             <li>Schema markup detection and type counting</li>
             <li>Foundation schema presence detection (Organization, Person, WebSite, BreadcrumbList)</li>
-            <li>Rich result eligibility detection (Article, Event, Course, FAQ, HowTo, VideoObject, Recipe, Product, LocalBusiness, Review)</li>
+            <li>Rich result eligibility detection (Article, Event, Course, FAQ, HowTo, VideoObject, Product, LocalBusiness, Review, ImageObject, ItemList)</li>
           </ul>
           <p><strong>Data Checked:</strong> Total pages scanned, pages with schema, schema coverage percentage, schema types present (Organization, Person, LocalBusiness, Article, Course, Event, FAQ, HowTo, etc.), missing schema types, rich result eligibility (Article, Event, FAQ, Product, LocalBusiness, Course, Review, HowTo).</p>
 
@@ -2436,7 +2436,7 @@
         
         // 2. Rich Result Eligibility Score (35% weight): Count eligible rich result types
         // Note: This list must match RICH_RESULT_TYPES in api/schema-audit.js
-        const richResultTypes = ['Article', 'Event', 'FAQPage', 'Product', 'LocalBusiness', 'Course', 'Review', 'HowTo', 'VideoObject', 'ImageObject', 'ItemList', 'Recipe'];
+        const richResultTypes = ['Article', 'Event', 'FAQPage', 'Product', 'LocalBusiness', 'Course', 'Review', 'HowTo', 'VideoObject', 'ImageObject', 'ItemList'];
         const richEligibleCount = Object.values(schemaData.richEligible || {}).filter(eligible => eligible === true).length;
         const richResultScore = (richEligibleCount / richResultTypes.length) * 100;
         
@@ -3062,7 +3062,7 @@
                   const richEligibleCount = Object.values(schemaData.richEligible || {}).filter(eligible => eligible === true).length;
                   const uniqueTypesCount = allTypes.size;
                   
-                  const richResultTypesList = ['Article', 'Event', 'FAQPage', 'Product', 'LocalBusiness', 'Course', 'Review', 'HowTo', 'VideoObject', 'ImageObject', 'ItemList', 'Recipe'];
+                  const richResultTypesList = ['Article', 'Event', 'FAQPage', 'Product', 'LocalBusiness', 'Course', 'Review', 'HowTo', 'VideoObject', 'ImageObject', 'ItemList'];
                   contentSchemaDesc += ` <strong>Data Checked:</strong> Foundation schemas: ${foundationPresent}/4 (${foundationTypes.filter(t => allTypes.has(t)).join(', ') || 'none'}), Rich result types: ${richEligibleCount}/${richResultTypesList.length} eligible, Coverage: ${coverage}% (${pagesWithSchema}/${totalPages} pages), Type diversity: ${uniqueTypesCount} unique types. `;
                   
                   if (schemaTypes && schemaTypes.length > 0) {
@@ -3100,7 +3100,7 @@
                     }
                   }
                 } else {
-                  contentSchemaDesc += ' <strong>Data Checked:</strong> Foundation schemas (Organization, Person, WebSite, BreadcrumbList), Rich result eligibility (Article, Event, Course, FAQ, HowTo, VideoObject, Recipe, Product, LocalBusiness, Review), schema coverage percentage, schema type diversity.';
+                  contentSchemaDesc += ' <strong>Data Checked:</strong> Foundation schemas (Organization, Person, WebSite, BreadcrumbList), Rich result eligibility (Article, Event, Course, FAQ, HowTo, VideoObject, Product, LocalBusiness, Review, ImageObject, ItemList), schema coverage percentage, schema type diversity.';
                 }
                 
                 // Build Local Entity and Service Area descriptions based on whether we have real Business Profile data
@@ -3167,7 +3167,7 @@
                         }
                         
                         // 2. Rich Result Eligibility (35% weight)
-                        const richResultTypes = ['Article', 'Event', 'FAQPage', 'Product', 'LocalBusiness', 'Course', 'Review', 'HowTo', 'VideoObject', 'ImageObject', 'ItemList', 'Recipe'];
+                        const richResultTypes = ['Article', 'Event', 'FAQPage', 'Product', 'LocalBusiness', 'Course', 'Review', 'HowTo', 'VideoObject', 'ImageObject', 'ItemList'];
                         const richEligibleCount = Object.values(richEligible || {}).filter(eligible => eligible === true).length;
                         const richMissing = richResultTypes.filter(type => !richEligible[type]);
                         
@@ -3335,7 +3335,7 @@
                     },
                     contentSchema: {
                       high: ['Continue maintaining all foundation schemas (Organization, Person, WebSite, BreadcrumbList)', 'Expand rich result eligible types (Article, Event, Course, FAQ, HowTo)', 'Monitor schema validation errors', 'Add more schema type diversity'],
-                      medium: ['Add missing foundation schemas (Organization, Person, WebSite, BreadcrumbList)', 'Add rich result eligible types (Article, Event, Course, FAQ, HowTo, VideoObject, Recipe)', 'Ensure 100% schema coverage across all pages', 'Increase schema type diversity (target 15+ unique types)', 'Validate all schema using Google Rich Results Test'],
+                      medium: ['Add missing foundation schemas (Organization, Person, WebSite, BreadcrumbList)', 'Add rich result eligible types (Article, Event, Course, FAQ, HowTo, VideoObject, Product, LocalBusiness, Review, ImageObject, ItemList)', 'Ensure 100% schema coverage across all pages', 'Increase schema type diversity (target 15+ unique types)', 'Validate all schema using Google Rich Results Test'],
                       low: ['Implement foundation schemas immediately (Organization, Person, WebSite, BreadcrumbList)', 'Add rich result eligible schemas (Article, Event, Course, FAQ, HowTo)', 'Ensure schema coverage reaches 100%', 'Add schema type diversity (target 15+ unique types)', 'Validate all schema using Google Rich Results Test']
                     }
                   };
@@ -3595,19 +3595,16 @@
             }
             
             // Get list of all rich result types (must match api/schema-audit.js)
-            const richResultTypes = ['Article', 'Event', 'FAQPage', 'Product', 'LocalBusiness', 'Course', 'Review', 'HowTo', 'VideoObject', 'ImageObject', 'ItemList', 'Recipe'];
+            const richResultTypes = ['Article', 'Event', 'FAQPage', 'Product', 'LocalBusiness', 'Course', 'Review', 'HowTo', 'VideoObject', 'ImageObject', 'ItemList'];
             const totalRichResultTypes = richResultTypes.length;
             
             if (richEligibleCount < totalRichResultTypes) {
               const potentialGain = ((totalRichResultTypes - richEligibleCount) / totalRichResultTypes) * 35 * 0.4; // 35% weight of 40% total
               
               // Get list of which rich result types are missing
-              const missingRichTypes = richResultTypes.filter(type => {
+              const applicableMissingTypes = richResultTypes.filter(type => {
                 return !schemaData.richEligible || !schemaData.richEligible[type];
               });
-              
-              // Filter out Recipe for photography businesses (not applicable)
-              const applicableMissingTypes = missingRichTypes.filter(type => type !== 'Recipe');
               
               // Build suggestion text
               let suggestionText;
