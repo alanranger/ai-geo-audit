@@ -288,7 +288,21 @@ export default async function handler(req, res) {
       let rows;
       try {
         // Use dynamic import for csv-parse/sync to work in Vercel ESM environment
-        const { parseSync } = await import('csv-parse/sync');
+        // Try both import paths for compatibility
+        let parseSync;
+        try {
+          const csvParseSync = await import('csv-parse/sync');
+          parseSync = csvParseSync.parseSync || csvParseSync.default?.parseSync || csvParseSync.parse;
+        } catch (e) {
+          // Fallback: try importing from csv-parse directly
+          const csvParse = await import('csv-parse');
+          parseSync = csvParse.parseSync || csvParse.parse;
+        }
+        
+        if (!parseSync) {
+          throw new Error('Could not load csv-parse parser');
+        }
+        
         rows = parseSync(csvContent, {
           columns: true,
           skip_empty_lines: true,
