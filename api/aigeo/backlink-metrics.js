@@ -332,26 +332,28 @@ export default async function handler(req, res) {
           meta: { generatedAt: new Date().toISOString() }
         });
       } else {
-        // Raw CSV body (text/csv or text/plain)
-        // In Vercel, for text/csv, the body might be a string, buffer, or already parsed
-        csvContent = req.body;
-        
-        // Vercel might parse text/csv as a string directly
-        if (typeof csvContent === 'string') {
-          // Already a string, use it directly
-          console.log('Body is already a string, length:', csvContent.length);
-        } else if (Buffer.isBuffer(csvContent)) {
-          // Convert Buffer to string
-          csvContent = csvContent.toString('utf8');
-          console.log('Converted Buffer to string, length:', csvContent.length);
-        } else if (typeof csvContent === 'object' && csvContent !== null) {
-          // Try to extract from object (might be parsed JSON)
-          csvContent = csvContent.csv || csvContent.data || csvContent.body || JSON.stringify(csvContent);
-          console.log('Extracted from object, length:', typeof csvContent === 'string' ? csvContent.length : 'not string');
+        // CSV body - can be sent as JSON (preferred) or raw text/csv
+        // Vercel automatically parses JSON bodies, but not text/csv
+        if (req.headers['content-type']?.includes('application/json')) {
+          // JSON body - extract CSV from 'csv' field
+          csvContent = req.body?.csv || req.body?.data || req.body?.body || '';
+          console.log('Extracted CSV from JSON body, length:', csvContent.length);
         } else {
-          // Convert to string
-          csvContent = String(csvContent || '');
-          console.log('Converted to string, length:', csvContent.length);
+          // Raw CSV body (text/csv or text/plain) - Vercel might not parse this
+          csvContent = req.body;
+          
+          if (typeof csvContent === 'string') {
+            console.log('Body is already a string, length:', csvContent.length);
+          } else if (Buffer.isBuffer(csvContent)) {
+            csvContent = csvContent.toString('utf8');
+            console.log('Converted Buffer to string, length:', csvContent.length);
+          } else if (typeof csvContent === 'object' && csvContent !== null) {
+            csvContent = csvContent.csv || csvContent.data || csvContent.body || '';
+            console.log('Extracted from object, length:', typeof csvContent === 'string' ? csvContent.length : 'not string');
+          } else {
+            csvContent = String(csvContent || '');
+            console.log('Converted to string, length:', csvContent.length);
+          }
         }
       }
 
