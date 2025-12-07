@@ -83,11 +83,15 @@
            └─> Returns: coverage %, schema types, missing pages
 
 4. CLIENT-SIDE CALCULATIONS
-   └─> calculatePillarScores(GSC data, schema audit)
+   └─> calculatePillarScores(GSC data, schema audit, localSignals, siteReviews, backlinkMetrics)
        ├─> Visibility Score: Based on average position (1-40 → 100-10)
-       ├─> Authority Score: 60% CTR + 40% Position
-       ├─> Local Entity Score: 60 + 0.3*(position-50) + 0.2*(CTR-50)
-       ├─> Service Area Score: Local Entity - 5
+       ├─> Authority Score: 4-component model
+       │   ├─> Behaviour (40%): CTR for ranking queries + top-10 CTR
+       │   ├─> Ranking (20%): Average position + top-10 impression share
+       │   ├─> Backlinks (20%): Referring domains + follow ratio
+       │   └─> Reviews (20%): Combined GBP and on-site ratings/counts
+       ├─> Local Entity Score: NAP consistency + knowledge panel + locations (from GBP API)
+       ├─> Service Area Score: Service areas count + NAP multiplier (from GBP API)
        └─> Content/Schema Score: (Foundation × 30%) + (Rich Results × 35%) + (Coverage × 20%) + (Diversity × 15%)
 
 5. UI RENDERING
@@ -289,49 +293,62 @@
 ### ⚠️ Stubs (Placeholder Data)
 
 #### 8. `/api/aigeo/local-signals` (GET)
-**Status**: ⚠️ **STUB** - Returns placeholder data
+**Status**: ✅ **IMPLEMENTED** - Returns real Google Business Profile data
 
 **Returns**:
 ```json
 {
+  "status": "ok",
   "data": {
-    "localBusinessSchemaPages": 0,
-    "napConsistencyScore": null,
-    "knowledgePanelDetected": false,
-    "serviceAreas": [],
-    "notes": "Local signals module is stubbed; implement GBP + LocalBusiness scanning in later batch."
+    "localBusinessSchemaPages": 892,
+    "napConsistencyScore": 100,
+    "knowledgePanelDetected": true,
+    "serviceAreas": [
+      { "name": "UK", "type": "COUNTRY" },
+      { "name": "England", "type": "ADMINISTRATIVE_AREA" },
+      ...
+    ],
+    "locations": [...],
+    "gbpRating": 4.81,
+    "gbpReviewCount": 221
   }
 }
 ```
 
-**Future Implementation**:
-- Google Business Profile API integration
-- LocalBusiness schema scanning
-- NAP (Name, Address, Phone) consistency checking
-- Knowledge panel detection
+**Data Source**: ✅ **REAL** - Google Business Profile API (OAuth2)
+- Fetches location details, service areas, NAP data
+- Attempts to fetch reviews from Reviews API endpoint
+- Falls back to static JSON file (`data/gbp-reviews.json`) if API unavailable
 
 ---
 
-#### 9. `/api/aigeo/backlink-metrics` (GET)
-**Status**: ⚠️ **STUB** - Returns placeholder data
+#### 9. `/api/aigeo/backlink-metrics` (GET/POST)
+**Status**: ✅ **IMPLEMENTED** - Accepts CSV upload and computes metrics
+
+**GET**: Returns default empty metrics (Vercel has read-only filesystem)
+
+**POST**: Accepts CSV body (as JSON `{csv: "..."}` or raw `text/csv`)
+- Parses CSV with custom parser (handles multi-line quoted fields)
+- Extracts URLs from "Linking Page + URL" column
+- Extracts link types from "Link Type" column
+- Computes metrics: referring domains, total backlinks, follow ratio
 
 **Returns**:
 ```json
 {
+  "status": "ok",
   "data": {
-    "totalReferringDomains": null,
-    "totalBacklinks": null,
-    "avgDomainRating": null,
-    "notes": "Backlink metrics API not connected yet; this is a stub."
+    "referringDomains": 356,
+    "totalBacklinks": 1234,
+    "followRatio": 0.567,
+    "generatedAt": "2025-12-07T13:56:00.000Z"
   }
 }
 ```
 
-**Future Implementation**:
-- Ahrefs API integration
-- Semrush API integration
-- Moz API integration
-- Domain rating calculations
+**Data Source**: ✅ **REAL** - CSV upload from user (stored in browser localStorage)
+- Client-side stores computed metrics in localStorage
+- Metrics are used in Authority score calculation
 
 ---
 
@@ -379,34 +396,80 @@ visibility = 100 - scale * 90  // 100 to 10
 ---
 
 #### 2. **Authority Score** (0-100)
-**Formula**: Weighted combination of CTR and Position
+**Formula**: 4-component weighted model
 ```javascript
-ctrDecimal = ctr / 100  // Convert percentage to decimal
-ctrScore = Math.min((ctrDecimal / 0.10) * 100, 100)  // Cap at 100
-authority = 0.6 * ctrScore + 0.4 * posScore
+// Component 1: Behaviour Score (40%)
+// Uses queries with position ≤ 20
+ctrAll = totalClicks / totalImpressions (for ranking queries)
+ctrTop10 = top10Clicks / top10Impressions (for position ≤ 10)
+ctrScoreAll = normalisePct(ctrAll, 0.05)  // 0-5% → 0-100
+ctrScoreTop10 = normalisePct(ctrTop10, 0.10)  // 0-10% → 0-100
+behaviourScore = 0.5 * ctrScoreAll + 0.5 * ctrScoreTop10
+
+// Component 2: Ranking Score (20%)
+avgPos = impression-weighted average position (for position ≤ 20)
+posScore = normalisePosition(avgPos, 1, 20)  // 1 → 100, 20 → 0
+top10Share = % of impressions where position ≤ 10
+top10Score = top10Share * 100
+rankingScore = 0.5 * posScore + 0.5 * top10Score
+
+// Component 3: Backlink Score (20%)
+rdScore = min(referringDomains / 100, 1) * 100  // 100+ domains = 100
+followScore = clamp(followRatio, 0, 1) * 100
+backlinkScore = 0.7 * rdScore + 0.3 * followScore
+
+// Component 4: Review Score (20%)
+// GBP: ratingScore = (gbpRating / 5) * 100, countScore = min(gbpCount / 500, 1) * 100
+// Site: ratingScore = (siteRating / 5) * 100, countScore = min(siteCount / 500, 1) * 100
+// gbpScore = 0.6 * gbpRatingScore + 0.4 * gbpCountScore
+// siteScore = 0.6 * siteRatingScore + 0.4 * siteCountScore
+// reviewScore = 0.6 * gbpScore + 0.4 * siteScore (if both exist)
+
+// Final Authority Score
+authority = 0.4 * behaviourScore + 0.2 * rankingScore + 0.2 * backlinkScore + 0.2 * reviewScore
 ```
 
-**Data Source**: ✅ **REAL** - GSC `ctr` and `avgPosition`
+**Data Source**: ✅ **REAL** - GSC `topQueries` (for Behaviour & Ranking), Backlink CSV upload (for Backlinks), GBP API + site-reviews.json (for Reviews)
 
 ---
 
 #### 3. **Local Entity Score** (0-100)
-**Formula**: Anchored around 60 with position and CTR adjustments
+**Formula**: NAP consistency + bonuses
 ```javascript
-localEntity = 60 + 0.3 * (posScore - 50) + 0.2 * (ctrScore - 50)
+if (localSignals available) {
+  baseScore = napConsistencyScore || 0
+  if (knowledgePanelDetected) baseScore = min(100, baseScore + 10)
+  if (locations.length > 0) baseScore = min(100, baseScore + 5)
+  localEntity = clampScore(baseScore)
+} else {
+  // Fallback: derived from GSC
+  localEntity = 60 + 0.3 * (posScore - 50) + 0.2 * (ctrScore - 50)
+}
 ```
 
-**Data Source**: ⚠️ **DERIVED** - Calculated from GSC data (not using Local Signals API yet)
+**Data Source**: ✅ **REAL** - Google Business Profile API (NAP consistency, knowledge panel, locations)
 
 ---
 
 #### 4. **Service Area Score** (0-100)
-**Formula**: Derived from Local Entity
+**Formula**: Service areas count + NAP multiplier
 ```javascript
-serviceArea = localEntity - 5
+if (localSignals available) {
+  serviceAreasCount = serviceAreas.length
+  if (serviceAreasCount === 0) serviceArea = 0
+  else if (serviceAreasCount >= 8) serviceArea = 100
+  else serviceArea = min(100, serviceAreasCount * 12.5)  // Linear: 1 = 12.5, 8 = 100
+  // Apply NAP consistency multiplier
+  if (napConsistencyScore < 100) {
+    serviceArea = round(serviceArea * (napConsistencyScore / 100))
+  }
+} else {
+  // Fallback: derived from Local Entity
+  serviceArea = localEntity - 5
+}
 ```
 
-**Data Source**: ⚠️ **DERIVED** - Not using real service area data yet
+**Data Source**: ✅ **REAL** - Google Business Profile API (service areas, NAP consistency)
 
 ---
 
@@ -416,8 +479,8 @@ serviceArea = localEntity - 5
 // 1. Foundation Schemas (30%): Organization, Person, WebSite, BreadcrumbList
 foundationScore = (foundationPresent / 4) * 100
 
-// 2. Rich Result Eligibility (35%): Article, Event, Course, FAQ, HowTo, VideoObject, Recipe, Product, LocalBusiness, Review
-richResultScore = (richEligibleCount / 10) * 100
+// 2. Rich Result Eligibility (35%): Article, Event, FAQPage, Product, LocalBusiness, Course, Review, HowTo, VideoObject, ImageObject, ItemList
+richResultScore = (richEligibleCount / 11) * 100
 
 // 3. Coverage (20%): Pages with schema / total pages
 coverageScore = coverage percentage
@@ -549,10 +612,10 @@ Applied to all 5 pillar scores and snippet readiness.
 
 3. **Pillar Scores**
    - Visibility: ✅ Real (from GSC position)
-   - Authority: ✅ Real (from GSC CTR + position)
+   - Authority: ✅ Real (4-component: Behaviour from GSC topQueries, Ranking from GSC topQueries, Backlinks from CSV upload, Reviews from GBP API + site-reviews.json)
    - Content/Schema: ✅ Real (from schema audit: foundation schemas, rich results, coverage, diversity)
-   - Local Entity: ⚠️ Derived (calculated from GSC, not using Local Signals API)
-   - Service Area: ⚠️ Derived (calculated from Local Entity)
+   - Local Entity: ✅ Real (from Google Business Profile API: NAP consistency, knowledge panel, locations)
+   - Service Area: ✅ Real (from Google Business Profile API: service areas count, NAP multiplier)
 
 4. **Snippet Readiness**
    - ✅ Real (calculated from real pillar scores)
@@ -561,18 +624,7 @@ Applied to all 5 pillar scores and snippet readiness.
 
 ### ⚠️ **MOCK/PLACEHOLDER DATA**
 
-1. **Local Signals**
-   - LocalBusiness schema pages: **0** (stub)
-   - NAP consistency: **null** (stub)
-   - Knowledge panel: **false** (stub)
-   - Service areas: **[]** (stub)
-
-2. **Backlink Metrics**
-   - Total referring domains: **null** (stub)
-   - Total backlinks: **null** (stub)
-   - Average domain rating: **null** (stub)
-
-3. **Entity Extraction**
+1. **Entity Extraction**
    - Entities: **Static sample data** (stub)
    - Keywords: **Static sample data** (stub)
 
@@ -636,11 +688,14 @@ Applied to all 5 pillar scores and snippet readiness.
 - [ ] **Historical Schema Coverage Tracking**: Implement Supabase database with cron job to track schema coverage changes over time. This will enable real Content/Schema trend lines showing actual historical schema changes (currently shows flat line because schema audit is only run once per audit, not historically).
 
 **Current State**: 
-- ✅ Supabase integration implemented for Content/Schema historical tracking
-- ✅ Audit results saved to Supabase after each scan
+- ✅ Supabase integration implemented for Content/Schema and Authority historical tracking
+- ✅ Audit results saved to Supabase after each scan (includes Authority component scores)
 - ✅ Historical Content/Schema data fetched from Supabase for trend chart
-- ⚠️ If Supabase not configured, trend chart shows dashed line using current score for all historical points
-- ⚠️ Other pillars (Visibility, Authority) use GSC timeseries data (no storage needed)
+- ✅ Historical Authority scores fetched from Supabase for trend chart
+- ✅ Authority component scores (behaviour, ranking, backlinks, reviews) stored in Supabase
+- ⚠️ If Supabase not configured, trend chart shows simplified calculation for historical Authority scores
+- ⚠️ Other pillars (Visibility) use GSC timeseries data (no storage needed)
+- ✅ Trend chart uses full Authority calculation for today's date, simplified calculation for historical dates
 
 ---
 
@@ -785,16 +840,22 @@ AI GEO Audit/
 
 **Current State**: 
 - ✅ Core functionality working with real GSC and schema data
-- ✅ 3 of 5 pillars use real data (Visibility, Authority, Content/Schema - with weighted foundation/rich results/coverage/diversity calculation)
-- ⚠️ 2 pillars use derived calculations (Local Entity, Service Area)
-- ⚠️ 3 API endpoints are stubs (local-signals, backlink-metrics, entity-extract)
-- ✅ Supabase integration for Content/Schema historical tracking
+- ✅ All 5 pillars use real data:
+  - Visibility: GSC position data
+  - Authority: 4-component model (Behaviour, Ranking, Backlinks, Reviews)
+  - Content/Schema: Schema audit (foundation/rich results/coverage/diversity)
+  - Local Entity: Google Business Profile API
+  - Service Area: Google Business Profile API
+- ✅ Backlink metrics: CSV upload with metrics computation
+- ✅ Review data: GBP API + site-reviews.json
+- ⚠️ 1 API endpoint is a stub (entity-extract)
+- ✅ Supabase integration for historical tracking (Content/Schema, Authority component scores)
 - ✅ Enhanced visualizations (radar chart with score labels, snippet readiness nested doughnut chart)
 - ✅ Dashboard persistence and retry failed URLs functionality
+- ✅ Authority component scores stored in Supabase for historical tracking
 
 **Next Priority**: 
-1. Implement Local Signals API (Google Business Profile)
-2. Implement Backlink Metrics API
-3. Add automated scheduling (cron jobs)
-4. Expand historical tracking to other pillars if needed
+1. Add automated scheduling (cron jobs)
+2. Expand historical tracking to other pillars if needed
+3. Implement Entity Extraction API (optional)
 

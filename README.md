@@ -27,7 +27,7 @@ Vercel will automatically rebuild and deploy (usually takes 1-2 minutes).
 
 ## Features
 
-- **5 Pillar Score Tracking**: Local Entity, Service Area, Authority, Visibility, Content/Schema
+- **5 Pillar Score Tracking**: Local Entity, Service Area, Authority (4-component: Behaviour, Ranking, Backlinks, Reviews), Visibility, Content/Schema
 - **Real-time Data**: Google Search Console API integration
 - **Visual Dashboards**: 
   - Radar chart with RAG color-coded score labels at each data point
@@ -76,8 +76,9 @@ The following serverless functions are available:
 - `/api/aigeo/gsc-entity-metrics` - Comprehensive GSC entity metrics
 - `/api/aigeo/schema-coverage` - Schema coverage analysis
 - `/api/aigeo/serp-features` - SERP feature detection
-- `/api/aigeo/local-signals` - Local SEO signals (stub)
-- `/api/aigeo/backlink-metrics` - Backlink analysis (stub)
+- `/api/aigeo/local-signals` - Google Business Profile data (GBP rating, reviews, NAP consistency, service areas)
+- `/api/aigeo/backlink-metrics` - Backlink metrics (referring domains, total backlinks, follow ratio)
+- `/api/reviews/site-reviews` - On-site/Trustpilot review data
 - `/api/aigeo/entity-extract` - Entity extraction (stub)
 - `/api/supabase/save-audit` - Save audit results to Supabase
 - `/api/supabase/get-audit-history` - Fetch historical Content/Schema data
@@ -99,4 +100,9 @@ The following serverless functions are available:
 - Dashboard state persists in browser localStorage between sessions
 - Snippet Readiness score is calculated as weighted average: Content/Schema (40%), Visibility (35%), Authority (25%)
 - Content/Schema pillar uses weighted formula: Foundation (30%), Rich Results (35%), Coverage (20%), Diversity (15%)
+- Authority pillar uses 4-component model: Behaviour (40%), Ranking (20%), Backlinks (20%), Reviews (20%)
+  - Behaviour: CTR for ranking queries (position ≤ 20) + top-10 CTR
+  - Ranking: Impression-weighted average position + top-10 impression share
+  - Backlinks: Referring domains (100+ = max) + follow ratio (from CSV upload)
+  - Reviews: Combined GBP and on-site ratings/counts (60% GBP, 40% site)
 

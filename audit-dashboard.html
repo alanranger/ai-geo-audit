@@ -919,7 +919,7 @@
           <ul>
             <li>From Google Search Console: Only uses queries where average position ≤ 20</li>
             <li>Computes: ctrAll = CTR for all ranking queries, ctrTop10 = CTR for impressions where position ≤ 10</li>
-            <li>Maps: ctrAll 0-10% → 0-100 (values >10% capped at 100), ctrTop10 0-20% → 0-100</li>
+            <li>Maps: ctrAll 0-5% → 0-100 (values >5% capped at 100), ctrTop10 0-10% → 0-100</li>
             <li>Combines: <code>BehaviourScore = 0.5 * score(ctrAll) + 0.5 * score(ctrTop10)</code></li>
             <li>This stops long-tail / low-rank pages dragging the whole site down</li>
           </ul>
@@ -934,7 +934,7 @@
           </ul>
           <p><strong>2.3 Review Score (20%):</strong></p>
           <ul>
-            <li>Inputs: From GBP API (gbpRating 0-5, gbpReviewCount) and site-reviews.json (siteRating, siteReviewCount)</li>
+            <li>Inputs: From GBP API (gbpRating 0-5, gbpReviewCount) and Trustpilot snapshot (siteRating 4.6, siteReviewCount 610)</li>
             <li>Per source: ratingScore = (rating/5)*100, countScore = min(reviewCount, 500)/500*100</li>
             <li>sourceScore = 0.6 * ratingScore + 0.4 * countScore</li>
             <li>Final: <code>ReviewScore = 0.6 * gbpSourceScore + 0.4 * siteSourceScore</code></li>
@@ -952,14 +952,14 @@
           <ul>
             <li>Google Search Console API (CTR, position, impressions by position bucket)</li>
             <li>Google Business Profile API (ratings, review count)</li>
-            <li>On-site/Trustpilot reviews (ratings, review count from site-reviews.json)</li>
+            <li>Trustpilot reviews (historic snapshot: rating 4.6, count 610)</li>
             <li>Backlink CSV upload (referring domains, quality metrics) - Phase 3</li>
           </ul>
           <p><strong>How to Improve Authority:</strong></p>
           <ul>
             <li><strong>Behaviour:</strong> Improve titles/meta descriptions on pages already in top 10-20. Focus on high-impression queries in GSC.</li>
             <li><strong>Ranking:</strong> Push more core pages into top 10 (content refreshes, internal links, stronger schema).</li>
-            <li><strong>Reviews:</strong> Keep growing GBP and Trustpilot/on-site reviews; higher rating and more volume both help.</li>
+            <li><strong>Reviews:</strong> Keep growing GBP and Trustpilot reviews; higher rating and more volume both help.</li>
             <li><strong>Backlinks:</strong> Acquire more distinct linking domains, favouring sites with real traffic/authority (Phase 3).</li>
           </ul>
 
@@ -2403,11 +2403,11 @@
       const top10Impr = top10.reduce((s, q) => s + q.impressions, 0);
       const ctrTop10 = top10Impr > 0 ? top10Clicks / top10Impr : ctrAll;
 
-      // Normalize CTR scores: 10% CTR = 100 for all ranking, 20% CTR = 100 for top-10
-      // ctrAll 0-10% → 0-100 (values >10% capped at 100)
-      // ctrTop10 0-20% → 0-100 (values >20% capped at 100)
-      const ctrScoreAll = normalisePct(ctrAll, 0.10); // 0-100
-      const ctrScoreTop10 = normalisePct(ctrTop10, 0.20); // 0-100
+      // Normalize CTR scores: 5% CTR = 100 for all ranking, 10% CTR = 100 for top-10
+      // ctrAll 0-5% → 0-100 (values >5% capped at 100)
+      // ctrTop10 0-10% → 0-100 (values >10% capped at 100)
+      const ctrScoreAll = normalisePct(ctrAll, 0.05); // 5% overall CTR -> 100
+      const ctrScoreTop10 = normalisePct(ctrTop10, 0.10); // 10% top-10 CTR -> 100
 
       // Combine: 50% ctrAll + 50% ctrTop10
       return 0.5 * ctrScoreAll + 0.5 * ctrScoreTop10; // 0-100
@@ -2585,8 +2585,8 @@
         ? `GBP (rating=${gbpRating !== null ? gbpRating : 'N/A'}, count=${gbpCount !== null ? gbpCount : 'N/A'})`
         : 'GBP (no data)';
       const siteInfo = siteRating !== null || siteCount !== null
-        ? `Site (rating=${siteRating !== null ? siteRating : 'N/A'}, count=${siteCount !== null ? siteCount : 'N/A'})`
-        : 'Site (no data)';
+        ? `Trustpilot snapshot (rating=${siteRating !== null ? siteRating : 'N/A'}, count=${siteCount !== null ? siteCount : 'N/A'})`
+        : 'Trustpilot snapshot (no data)';
       debugLog(`Review Score: ${gbpInfo}, ${siteInfo}, Final=${reviewScore.toFixed(1)}`, 'info');
 
       // Backlink Score: Phase 3 - Use real backlink metrics if available
@@ -2893,7 +2893,9 @@
       // Initialize with saved data if available (preserves Content/Schema when endpoint unavailable)
       let schemaAudit = savedAudit?.schemaAudit || null;
       let localSignals = savedAudit?.localSignals || null;
-      let siteReviews = savedAudit?.siteReviews || null;
+      // Don't use cached siteReviews - always fetch fresh Trustpilot snapshot
+      // Old cached values (4.8, 127) should be replaced with new snapshot (4.6, 610)
+      let siteReviews = null; // Always fetch fresh
       let backlinkMetrics = savedAudit?.backlinkMetrics || null;
 
       try {
@@ -2932,32 +2934,65 @@
           debugLog('✓ Using saved local signals data', 'info');
         }
         
-        updateProgress(37, 'Fetching site reviews data...');
-        debugLog('Fetching site reviews data...', 'info');
-        // Fetch site reviews (on-site/Trustpilot) data
-        // Only fetch if we don't have saved data, or always fetch fresh
+        updateProgress(37, 'Fetching Trustpilot snapshot data...');
+        debugLog('Fetching Trustpilot snapshot data...', 'info');
+        // Always fetch fresh Trustpilot snapshot data (it's a fixed snapshot, so should always work)
         try {
           const siteReviewsResponse = await fetch('/api/reviews/site-reviews');
           if (siteReviewsResponse.ok) {
             const siteReviewsData = await siteReviewsResponse.json();
-            if (siteReviewsData.status === 'ok') {
+            if (siteReviewsData.status === 'ok' && siteReviewsData.data) {
               siteReviews = siteReviewsData.data;
-              debugLog('✓ Site reviews data fetched successfully', 'success');
-              debugLog(`Site reviews: rating=${siteReviews.siteRating}, count=${siteReviews.siteReviewCount}`, 'info');
+              debugLog('✓ Trustpilot snapshot data fetched successfully', 'success');
+              debugLog(`Trustpilot snapshot: rating=${siteReviews.siteRating}, count=${siteReviews.siteReviewCount}`, 'info');
+              
+              // Force correct Trustpilot snapshot values (4.6, 610) - override API if it returns old values
+              // This ensures we always use the correct snapshot even if API hasn't deployed yet
+              if (siteReviews.siteRating !== 4.6 || siteReviews.siteReviewCount !== 610) {
+                debugLog(`⚠ API returned old values (${siteReviews.siteRating}, ${siteReviews.siteReviewCount}), overriding with Trustpilot snapshot (4.6, 610)`, 'warn');
+                siteReviews = {
+                  siteRating: 4.6,
+                  siteReviewCount: 610,
+                  lastUpdated: '2025-12-07',
+                  notes: 'Fixed Trustpilot snapshot for Authority score calculation. Update manually when Trustpilot metrics change significantly.'
+                };
+              } else {
+                debugLog('✓ Trustpilot snapshot verified (4.6, 610)', 'success');
+              }
             } else {
-              debugLog('⚠ Site reviews returned error, using saved data if available', 'warn');
+              debugLog('⚠ Trustpilot snapshot returned error, using saved data if available', 'warn');
+              // Fallback to saved data only if API completely fails
+              if (savedAudit?.siteReviews) {
+                siteReviews = savedAudit.siteReviews;
+                debugLog('⚠ Using saved Trustpilot data as fallback (may be outdated)', 'warn');
+              }
             }
           } else {
-            debugLog('⚠ Site reviews endpoint not available, using saved data if available', 'warn');
+            debugLog('⚠ Trustpilot snapshot endpoint not available, using saved data if available', 'warn');
+            // Fallback to saved data only if API completely fails
+            if (savedAudit?.siteReviews) {
+              siteReviews = savedAudit.siteReviews;
+              debugLog('⚠ Using saved Trustpilot data as fallback (may be outdated)', 'warn');
+            }
           }
         } catch (siteReviewsError) {
-          debugLog(`⚠ Site reviews error: ${siteReviewsError.message}, using saved data if available`, 'warn');
+          debugLog(`⚠ Trustpilot snapshot error: ${siteReviewsError.message}, using saved data if available`, 'warn');
+          // Fallback to saved data only if API completely fails
+          if (savedAudit?.siteReviews) {
+            siteReviews = savedAudit.siteReviews;
+            debugLog('⚠ Using saved Trustpilot data as fallback (may be outdated)', 'warn');
+          }
         }
         
-        // If fetch failed but we have saved data, keep using it
-        if (!siteReviews && savedAudit?.siteReviews) {
-          siteReviews = savedAudit.siteReviews;
-          debugLog('✓ Using saved site reviews data', 'info');
+        // If we still don't have siteReviews, use default Trustpilot snapshot values
+        if (!siteReviews) {
+          siteReviews = {
+            siteRating: 4.6,
+            siteReviewCount: 610,
+            lastUpdated: '2025-12-07',
+            notes: 'Default Trustpilot snapshot (API unavailable)'
+          };
+          debugLog('⚠ Using default Trustpilot snapshot values (4.6, 610)', 'warn');
         }
         
         updateProgress(38, 'Fetching backlink metrics data...');
@@ -3294,7 +3329,7 @@
         const descriptions = {
           localEntity: localEntityDesc,
           serviceArea: serviceAreaDesc,
-          authority: 'E-A-T (Experience, Expertise, Authoritativeness, Trustworthiness): Perceived expertise and trust in the topic space. <strong>Calculation:</strong> Behaviour (40%) + Ranking (20%) + Backlinks (20%) + Reviews (20%). <strong>Data Source:</strong> ✅ Live data from Google Search Console, Google Business Profile API, on-site reviews, and backlink CSV upload.',
+          authority: 'E-A-T (Experience, Expertise, Authoritativeness, Trustworthiness): Perceived expertise and trust in the topic space. <strong>Calculation:</strong> Behaviour (40%) + Ranking (20%) + Backlinks (20%) + Reviews (20%). <strong>Data Source:</strong> ✅ Live data from Google Search Console, Google Business Profile API, historic Trustpilot reviews snapshot, and backlink CSV upload.',
           visibility: 'How prominently your content appears in AI-powered search results and featured snippets. <strong>Data Source:</strong> ✅ Live data from Google Search Console (impressions, clicks, position, SERP features).',
           contentSchema: 'Quality and completeness of structured data markup across your domain. <strong>Data Source:</strong> ✅ Live data from schema audit. <strong>Calculation:</strong> Foundation schemas (30%) + Rich Results (35%) + Coverage (20%) + Diversity (15%).'
         };
@@ -3384,7 +3419,7 @@
                 `}
                 <div style="margin-top: 0.75rem; margin-bottom: 0.5rem;"><strong>Review Metrics:</strong></div>
                 <div>GBP rating: ${gbpRating !== null ? gbpRating.toFixed(2) : 'N/A'} (${gbpReviewCount !== null ? gbpReviewCount : 'N/A'} reviews)</div>
-                <div>Site rating: ${siteRating !== null ? siteRating.toFixed(2) : 'N/A'} (${siteReviewCount !== null ? siteReviewCount : 'N/A'} reviews)</div>
+                <div>Trustpilot (snapshot): ${siteRating !== null ? siteRating.toFixed(2) : 'N/A'} (${siteReviewCount !== null ? siteReviewCount : 'N/A'} reviews)</div>
               </div>
             </div>
           `;
@@ -3581,7 +3616,7 @@
                 const descriptions = {
                   localEntity: localEntityDesc,
                   serviceArea: serviceAreaDesc,
-                  authority: `E-A-T (Experience, Expertise, Authoritativeness, Trustworthiness): Depth of educational content, references, reviews, external citations, and demonstrated expertise.<br><strong>AI Importance:</strong> E-A-T is critical for AI systems - they prioritize authoritative, trustworthy sources. Strong E-A-T signals help AI confidently feature your content in AI Overviews and answer boxes.<br><strong>Calculation:</strong> Behaviour Score (40%): CTR for ranking queries + top-10 CTR. Ranking Score (20%): Average position + top-10 impression share. Backlink Score (20%): Referring domains + quality. Review Score (20%): Combined ratings and counts from GBP + on-site reviews.<br><strong>Data Source:</strong> ✅ <span style="color: #10b981;">Live data</span> from Google Search Console API, Google Business Profile API, on-site/Trustpilot reviews, and backlink CSV upload.<br><strong>Data Checked:</strong> CTR ${ctr.toFixed(2)}%, average position ${avgPosition.toFixed(1)}, clicks ${totalClicks.toLocaleString()}, impressions ${totalImpressions.toLocaleString()}, ranking query performance, backlink metrics, review ratings and counts.`,
+                  authority: `E-A-T (Experience, Expertise, Authoritativeness, Trustworthiness): Depth of educational content, references, reviews, external citations, and demonstrated expertise.<br><strong>AI Importance:</strong> E-A-T is critical for AI systems - they prioritize authoritative, trustworthy sources. Strong E-A-T signals help AI confidently feature your content in AI Overviews and answer boxes.<br><strong>Calculation:</strong> Behaviour Score (40%): CTR for ranking queries + top-10 CTR. Ranking Score (20%): Average position + top-10 impression share. Backlink Score (20%): Referring domains + quality. Review Score (20%): Combined ratings and counts from GBP + Trustpilot snapshot.<br><strong>Data Source:</strong> ✅ <span style="color: #10b981;">Live data</span> from Google Search Console API, Google Business Profile API, historic Trustpilot reviews snapshot, and backlink CSV upload.<br><strong>Data Checked:</strong> CTR ${ctr.toFixed(2)}%, average position ${avgPosition.toFixed(1)}, clicks ${totalClicks.toLocaleString()}, impressions ${totalImpressions.toLocaleString()}, ranking query performance, backlink metrics, review ratings and counts.`,
                   visibility: `Frequency and prominence in organic search, local pack, snippets and AI Overviews.<br><strong>AI Importance:</strong> AI systems learn from existing search performance. Higher visibility signals quality and relevance, making AI more likely to surface your content in AI-powered results and featured snippets.<br><strong>Data Source:</strong> ✅ <span style="color: #10b981;">Live data</span> from Google Search Console API.<br><strong>Data Checked:</strong> Average position ${avgPosition.toFixed(1)}, CTR ${ctr.toFixed(2)}%, total clicks ${totalClicks.toLocaleString()}, total impressions ${totalImpressions.toLocaleString()}, SERP feature appearances.`,
                   contentSchema: contentSchemaDesc
                 };
@@ -3678,18 +3713,52 @@
                       if (gscData) {
                         const ctr = gscData.ctr || 0;
                         const position = gscData.averagePosition || 0;
+                        const savedAudit = loadAuditResults();
+                        const authorityComponents = scores?.authorityComponents;
+                        const backlinkMetrics = savedAudit?.backlinkMetrics;
+                        const localSignals = savedAudit?.localSignals;
+                        const siteReviews = savedAudit?.siteReviews;
                         
-                        if (ctr < 1.5) {
-                          steps.push(`<strong>CTR: ${ctr.toFixed(2)}%</strong> - Low click-through indicates trust issues. Improve E-A-T signals`);
+                        // Show component-specific suggestions
+                        if (authorityComponents) {
+                          if (authorityComponents.behaviour < 50) {
+                            steps.push(`<strong>Behaviour Score (${Math.round(authorityComponents.behaviour)}):</strong> Improve CTR for ranking queries. Target 5%+ CTR for all queries, 10%+ for top-10 positions`);
+                          }
+                          
+                          if (authorityComponents.ranking < 50) {
+                            steps.push(`<strong>Ranking Score (${Math.round(authorityComponents.ranking)}):</strong> Improve average position and increase top-10 impression share`);
+                          }
+                          
+                          if (authorityComponents.backlinks < 50) {
+                            if (backlinkMetrics && backlinkMetrics.referringDomains > 0) {
+                              steps.push(`<strong>Backlink Score (${Math.round(authorityComponents.backlinks)}):</strong> Increase referring domains (current: ${backlinkMetrics.referringDomains}, target: 100+) and improve follow ratio (current: ${Math.round((backlinkMetrics.followRatio || 0) * 100)}%)`);
+                            } else {
+                              steps.push(`<strong>Backlink Score (${Math.round(authorityComponents.backlinks)}):</strong> Upload backlink CSV to measure domain authority`);
+                            }
+                          }
+                          
+                          if (authorityComponents.reviews < 50) {
+                            const gbpRating = (localSignals && localSignals.status === 'ok' && localSignals.data) ? localSignals.data.gbpRating : null;
+                            const gbpCount = (localSignals && localSignals.status === 'ok' && localSignals.data) ? localSignals.data.gbpReviewCount : null;
+                            const siteRating = siteReviews?.siteRating || null;
+                            const siteCount = siteReviews?.siteReviewCount || null;
+                            
+                            if (!gbpRating && !siteRating) {
+                              steps.push(`<strong>Review Score (${Math.round(authorityComponents.reviews)}):</strong> Add GBP and Trustpilot reviews to build trust signals`);
+                            } else {
+                              steps.push(`<strong>Review Score (${Math.round(authorityComponents.reviews)}):</strong> Increase review count and maintain high ratings (target: 4.5+ rating, 100+ reviews)`);
+                            }
+                          }
                         } else {
-                          steps.push(`<strong>CTR: ${ctr.toFixed(2)}%</strong> - Good engagement. Build more backlinks to strengthen authority`);
+                          // Fallback to general suggestions if components not available
+                          if (ctr < 1.5) {
+                            steps.push(`<strong>CTR: ${ctr.toFixed(2)}%</strong> - Low click-through indicates trust issues. Improve E-A-T signals`);
+                          }
+                          
+                          if (position > 15) {
+                            steps.push(`<strong>Position: ${position.toFixed(1)}</strong> - Improve rankings through comprehensive, expert content`);
+                          }
                         }
-                        
-                        if (position > 15) {
-                          steps.push(`<strong>Position: ${position.toFixed(1)}</strong> - Improve rankings through comprehensive, expert content`);
-                        }
-                        
-                        steps.push(`<strong>Next:</strong> Integrate backlink metrics API to measure domain authority`);
                       }
                       break;
                       
@@ -4869,7 +4938,7 @@
             // Calculate pillar scores for each timeseries point
             // For Local Entity and Service Area: use historical Business Profile data if available,
             // otherwise use calculated data from GSC (derived calculation)
-            const calculatePillarFromMetrics = (position, ctr, dateStr = null, topQueries = null) => {
+            const calculatePillarFromMetrics = (position, ctr, dateStr = null, topQueries = null, backlinkMetrics = null, localSignals = null, siteReviews = null) => {
               // Position score (same formula as main calculation)
               const clampedPos = Math.max(1, Math.min(40, position));
               const scale = (clampedPos - 1) / 39;
@@ -4901,8 +4970,26 @@
                 
                 const behaviourScore = computeBehaviourScore(queriesForCalculation);
                 const rankingScore = computeRankingScore(queriesForCalculation);
-                const backlinkScore = 50; // Placeholder
-                const reviewScore = 50; // Placeholder
+                
+                // Use real backlink and review scores if available (for today's date)
+                const backlinkScore = computeBacklinkScore(backlinkMetrics);
+                
+                // Get review data
+                const gbpRating = (localSignals && localSignals.status === 'ok' && localSignals.data) 
+                  ? (localSignals.data.gbpRating !== null && localSignals.data.gbpRating !== undefined ? localSignals.data.gbpRating : null)
+                  : null;
+                const gbpCount = (localSignals && localSignals.status === 'ok' && localSignals.data) 
+                  ? (localSignals.data.gbpReviewCount !== null && localSignals.data.gbpReviewCount !== undefined ? localSignals.data.gbpReviewCount : null)
+                  : null;
+                const siteRating = siteReviews?.siteRating !== null && siteReviews?.siteRating !== undefined ? siteReviews.siteRating : null;
+                const siteCount = siteReviews?.siteReviewCount !== null && siteReviews?.siteReviewCount !== undefined ? siteReviews.siteReviewCount : null;
+                
+                const reviewScore = computeReviewScore({
+                  gbpRating,
+                  gbpCount,
+                  siteRating,
+                  siteCount
+                });
                 
                 authority = clampScore(
                   0.4 * behaviourScore +
@@ -4910,7 +4997,7 @@
                   0.2 * backlinkScore +
                   0.2 * reviewScore
                 );
-                debugLog(`Authority: Calculated from topQueries for ${dateStr || 'current'}: Behaviour=${behaviourScore.toFixed(1)}, Ranking=${rankingScore.toFixed(1)}, Final=${authority}`, 'info');
+                debugLog(`Authority: Calculated from topQueries for ${dateStr || 'current'}: Behaviour=${behaviourScore.toFixed(1)}, Ranking=${rankingScore.toFixed(1)}, Backlinks=${backlinkScore}, Reviews=${reviewScore}, Final=${authority}`, 'info');
               } else {
                 // Fallback: Simplified Authority calculation from aggregate metrics
                 // Estimate Behaviour and Ranking scores from aggregate metrics
@@ -4987,17 +5074,43 @@
             debugLog(`Service Area map has ${serviceAreaMap.size} entries: ${Array.from(serviceAreaMap.entries()).map(([d, s]) => `${d}=${s}`).join(', ')}`, 'info');
             debugLog(`Timeseries has ${timeseries.length} points`, 'info');
             
+            // Get current audit data for today's full Authority calculation
+            const savedAuditForTrend = loadAuditResults();
+            const currentTopQueries = savedAuditForTrend?.searchData?.topQueries || null;
+            const currentBacklinkMetrics = savedAuditForTrend?.backlinkMetrics || null;
+            const currentLocalSignals = savedAuditForTrend?.localSignals || null;
+            const currentSiteReviews = savedAuditForTrend?.siteReviews || null;
+            
             timeseries.forEach(point => {
               const pointDate = point.date; // YYYY-MM-DD format
+              
+              // Check if this is today's date - if so, use full Authority calculation
+              const isToday = pointDate === todayStr;
               
               // Check if we have historical data from Supabase for Local Entity, Service Area, and Authority
               const historicalLocalEntity = localEntityMap.get(pointDate);
               const historicalServiceArea = serviceAreaMap.get(pointDate);
               const historicalAuthority = authorityMap.get(pointDate);
               
+              // For today's date, use current topQueries, backlinkMetrics, and reviews for full calculation
+              // For historical dates, pass null (will use simplified calculation)
+              const topQueriesForDate = isToday ? currentTopQueries : null;
+              const backlinkMetricsForDate = isToday ? currentBacklinkMetrics : null;
+              const localSignalsForDate = isToday ? currentLocalSignals : null;
+              const siteReviewsForDate = isToday ? currentSiteReviews : null;
+              
               // Pass date to calculatePillarFromMetrics so it can check for historical data
-              // Note: topQueries is not available per-date, so we pass null
-              const pillarScores = calculatePillarFromMetrics(point.position, point.ctr, pointDate, null);
+              // For today, pass topQueries and other data for full calculation
+              // For historical dates, pass null (will use simplified calculation)
+              const pillarScores = calculatePillarFromMetrics(
+                point.position, 
+                point.ctr, 
+                pointDate, 
+                topQueriesForDate,
+                backlinkMetricsForDate,
+                localSignalsForDate,
+                siteReviewsForDate
+              );
               
               // Use historical data from Supabase if available, otherwise use calculated scores
               if (historicalLocalEntity !== undefined && historicalLocalEntity !== null) {
@@ -6039,7 +6152,7 @@
                 }
                 
                 const richEligibleCount = Object.values(richEligible || {}).filter(eligible => eligible === true).length;
-                const richResultTypesCount = ['Article', 'Event', 'FAQPage', 'Product', 'LocalBusiness', 'Course', 'Review', 'HowTo', 'VideoObject', 'ImageObject', 'ItemList', 'Recipe'].length;
+                const richResultTypesCount = ['Article', 'Event', 'FAQPage', 'Product', 'LocalBusiness', 'Course', 'Review', 'HowTo', 'VideoObject', 'ImageObject', 'ItemList'].length;
                 if (richEligibleCount < richResultTypesCount) {
                   steps.push(`Rich results (35%): ${richEligibleCount}/${richResultTypesCount} eligible. Add more rich result types`);
                 } else {

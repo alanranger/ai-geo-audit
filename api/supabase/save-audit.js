@@ -111,23 +111,50 @@ export default async function handler(req, res) {
     };
 
     // Insert or update (upsert) using Supabase REST API
-    // Try POST first with upsert header, if 409 conflict then PATCH
-    let response = await fetch(`${supabaseUrl}/rest/v1/audit_results`, {
-      method: 'POST',
+    // Strategy: Try to UPDATE first (PATCH), if no rows affected, then INSERT
+    // This ensures only ONE record per (property_url, audit_date) combination
+    // The UNIQUE constraint on (property_url, audit_date) prevents duplicates
+    
+    // First, try to update existing record
+    const updateResponse = await fetch(`${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${auditDate}`, {
+      method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
         'apikey': supabaseKey,
         'Authorization': `Bearer ${supabaseKey}`,
-        'Prefer': 'resolution=merge-duplicates,return=representation'
+        'Prefer': 'return=representation'
       },
       body: JSON.stringify(auditRecord)
     });
     
-    // If 409 conflict (unique constraint violation), use PATCH to update existing record
-    if (response.status === 409) {
-      console.log('[Supabase Save] Record exists, updating with PATCH...');
-      response = await fetch(`${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${auditDate}`, {
-        method: 'PATCH',
+    let response = updateResponse;
+    let isUpdate = false;
+    
+    if (updateResponse.ok) {
+      const updateResult = await updateResponse.json();
+      // Check if any rows were actually updated
+      if (Array.isArray(updateResult) && updateResult.length > 0) {
+        console.log('[Supabase Save] ✓ Updated existing audit record for', auditDate);
+        isUpdate = true;
+      } else {
+        // No existing record found, need to INSERT
+        console.log('[Supabase Save] No existing record found, inserting new record...');
+        response = await fetch(`${supabaseUrl}/rest/v1/audit_results`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': supabaseKey,
+            'Authorization': `Bearer ${supabaseKey}`,
+            'Prefer': 'return=representation'
+          },
+          body: JSON.stringify(auditRecord)
+        });
+      }
+    } else if (updateResponse.status === 404 || updateResponse.status === 400) {
+      // Record doesn't exist, insert new one
+      console.log('[Supabase Save] Record not found, inserting new record...');
+      response = await fetch(`${supabaseUrl}/rest/v1/audit_results`, {
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'apikey': supabaseKey,
@@ -136,6 +163,9 @@ export default async function handler(req, res) {
         },
         body: JSON.stringify(auditRecord)
       });
+    } else {
+      // Some other error from PATCH, use it as the response
+      response = updateResponse;
     }
 
     if (!response.ok) {
@@ -151,7 +181,11 @@ export default async function handler(req, res) {
     }
 
     const result = await response.json();
-    console.log('[Supabase Save] ✓ Successfully saved audit results');
+    if (isUpdate) {
+      console.log('[Supabase Save] ✓ Successfully updated audit results (overwrote existing record)');
+    } else {
+      console.log('[Supabase Save] ✓ Successfully inserted new audit results');
+    }
 
     return res.status(200).json({
       status: 'ok',

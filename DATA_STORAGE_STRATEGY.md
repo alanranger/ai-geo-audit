@@ -52,6 +52,12 @@ CREATE INDEX idx_gsc_timeseries_property_date ON gsc_timeseries(property_url, da
 - **Storage:** `audit_results` table (already exists)
 - **Status:** ✅ Implemented
 
+#### 4. **Authority Component Scores** (ALREADY IMPLEMENTED)
+- **Why:** Historical tracking of Authority sub-components for debugging and analysis
+- **What:** Behaviour score, Ranking score, Backlink score, Review score
+- **Storage:** `audit_results` table (columns: `authority_behaviour_score`, `authority_ranking_score`, `authority_backlink_score`, `authority_review_score`)
+- **Status:** ✅ Implemented
+
 #### 4. **GSC Overview/Aggregates** (MEDIUM PRIORITY)
 - **Why:** Can be recalculated from timeseries, but useful for quick access
 - **What:** Total clicks, impressions, avg position, CTR for date range
