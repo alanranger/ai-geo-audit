@@ -3797,27 +3797,36 @@
           const buttonId = `authority-details-btn-${Date.now()}`;
           
           // Get GSC metrics for details (segment-aware)
-          const queryPages = searchData?.queryPages || [];
-          const topQueries = searchData?.topQueries || [];
+          // Store queryPages and searchData on card for access in update functions
+          card._queryPages = searchData?.queryPages || [];
+          card._topQueries = searchData?.topQueries || [];
+          const queryPages = card._queryPages;
+          const topQueries = card._topQueries;
           
           // Function to calculate GSC metrics for a specific segment
-          const getGSCMetricsForSegment = (mode) => {
+          const getGSCMetricsForSegment = (mode, queryPagesData, topQueriesData) => {
             let dataToUse = [];
             
-            if (queryPages && queryPages.length > 0) {
+            // Use the passed data (from card storage) to ensure we have latest
+            const qp = queryPagesData || queryPages;
+            const tq = topQueriesData || topQueries;
+            
+            if (qp && qp.length > 0) {
               // Use queryPages with segmentation
-              let filtered = queryPages;
+              let filtered = qp;
               if (mode === 'nonEducation') {
-                filtered = queryPages.filter(row => {
+                filtered = qp.filter(row => {
                   const segment = classifyPageSegment(row.page || row.url || '/');
                   return segment !== PageSegment.EDUCATION;
                 });
               } else if (mode === 'money') {
-                filtered = queryPages.filter(row => {
+                filtered = qp.filter(row => {
                   const segment = classifyPageSegment(row.page || row.url || '/');
                   return segment === PageSegment.MONEY;
                 });
               }
+              
+              debugLog(`📊 GSC Metrics for ${mode}: Filtered ${filtered.length} rows from ${qp.length} total queryPages`, 'info');
               
               // Convert to query format for calculation
               dataToUse = filtered.map(row => ({
@@ -3829,7 +3838,7 @@
               }));
             } else {
               // Fallback to topQueries (all pages)
-              dataToUse = topQueries.map(q => ({
+              dataToUse = tq.map(q => ({
                 query: q.query || '',
                 clicks: q.clicks || 0,
                 impressions: q.impressions || 0,
@@ -3866,7 +3875,7 @@
           };
           
           // Get initial metrics (all pages)
-          let gscMetrics = getGSCMetricsForSegment(currentMode);
+          let gscMetrics = getGSCMetricsForSegment(currentMode, queryPages, topQueries);
           let siteCtr = gscMetrics.siteCtr;
           let top10Ctr = gscMetrics.top10Ctr;
           let avgPosition = gscMetrics.avgPosition;
@@ -3874,9 +3883,13 @@
           
           // Function to update GSC metrics display
           const updateGSCMetrics = (mode) => {
-            const metrics = getGSCMetricsForSegment(mode);
+            // Get fresh data from card storage
+            const qp = card._queryPages || [];
+            const tq = card._topQueries || [];
+            const metrics = getGSCMetricsForSegment(mode, qp, tq);
             const metricsDiv = document.getElementById(`${modeId}-gsc-metrics`);
             if (metricsDiv) {
+              debugLog(`📊 Updating GSC metrics for mode ${mode}: CTR=${metrics.siteCtr.toFixed(2)}%, Position=${metrics.avgPosition.toFixed(1)}`, 'info');
               metricsDiv.innerHTML = `
                 <div style="margin-bottom: 0.5rem;"><strong>GSC Metrics:</strong></div>
                 <div style="margin-bottom: 0.25rem; font-size: 0.7rem; color: #999;">Segment: ${mode === 'all' ? 'All pages' : mode === 'nonEducation' ? 'Exclude education (blogs / free course)' : 'Money pages only'}</div>
@@ -3885,11 +3898,14 @@
                 <div>Avg position (ranking): ${metrics.avgPosition.toFixed(1)}</div>
                 <div>Top-10 impression share: ${metrics.top10ImpressionShare.toFixed(1)}%</div>
               `;
+            } else {
+              debugLog(`⚠ GSC metrics div not found: ${modeId}-gsc-metrics`, 'warn');
             }
           };
           
-          // Store update function
+          // Store update function and data
           card._updateGSCMetrics = updateGSCMetrics;
+          card._getGSCMetricsForSegment = getGSCMetricsForSegment;
           
           // Get review data
           const gbpRating = (localSignals && localSignals.status === 'ok' && localSignals.data) 
