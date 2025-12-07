@@ -13,9 +13,42 @@
 
 import fs from 'fs/promises';
 import path from 'path';
-// csv-parse will be imported dynamically to work in Vercel ESM environment
+// Use custom CSV parser (same as schema-audit.js) to avoid dependency issues
 
 const METRICS_FILE = path.join(process.cwd(), 'data', 'backlink-metrics.json');
+
+/**
+ * Parse CSV line with proper quote handling (same as schema-audit.js)
+ */
+function parseCsvLine(line) {
+  const columns = [];
+  let current = '';
+  let inQuotes = false;
+  
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    const nextChar = line[i + 1];
+    
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        // Escaped quote
+        current += '"';
+        i++; // Skip next quote
+      } else {
+        // Toggle quote state
+        inQuotes = !inQuotes;
+      }
+    } else if (char === ',' && !inQuotes) {
+      // End of column
+      columns.push(current);
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  columns.push(current); // Add last column
+  return columns;
+}
 
 /**
  * Extract URL from "Linking Page + URL" field (or similar column names)
@@ -284,33 +317,38 @@ export default async function handler(req, res) {
       console.log('CSV content received, length:', csvContent.length);
       console.log('First 200 chars:', csvContent.substring(0, 200));
 
-      // Parse CSV (synchronous parsing)
-      let rows;
+      // Parse CSV using custom parser (same approach as schema-audit.js)
+      let rows = [];
       try {
-        // Use dynamic import for csv-parse/sync to work in Vercel ESM environment
-        // Try both import paths for compatibility
-        let parseSync;
-        try {
-          const csvParseSync = await import('csv-parse/sync');
-          parseSync = csvParseSync.parseSync || csvParseSync.default?.parseSync || csvParseSync.parse;
-        } catch (e) {
-          // Fallback: try importing from csv-parse directly
-          const csvParse = await import('csv-parse');
-          parseSync = csvParse.parseSync || csvParse.parse;
+        const lines = csvContent.split('\n').filter(line => line.trim());
+        if (lines.length === 0) {
+          throw new Error('CSV is empty');
         }
         
-        if (!parseSync) {
-          throw new Error('Could not load csv-parse parser');
+        // Parse header row
+        const headerLine = lines[0].trim();
+        const headers = parseCsvLine(headerLine).map(h => h.trim().replace(/^"|"$/g, ''));
+        
+        console.log('CSV headers:', headers);
+        
+        // Parse data rows
+        for (let i = 1; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (!line) continue;
+          
+          const columns = parseCsvLine(line);
+          const row = {};
+          
+          headers.forEach((header, index) => {
+            row[header] = columns[index] ? columns[index].trim().replace(/^"|"$/g, '') : '';
+          });
+          
+          rows.push(row);
         }
         
-        rows = parseSync(csvContent, {
-          columns: true,
-          skip_empty_lines: true,
-          trim: true,
-          relax_column_count: true // Allow rows with different column counts
-        });
+        console.log(`Parsed ${rows.length} rows from CSV`);
       } catch (parseError) {
-        console.warn('CSV parse error:', parseError);
+        console.error('CSV parse error:', parseError);
         return res.status(400).json({
           status: 'error',
           source: 'backlink-metrics',
