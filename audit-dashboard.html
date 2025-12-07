@@ -1817,11 +1817,11 @@
           };
           
           // Recalculate scores with merged data (use saved localSignals if available)
-          const mergedScores = calculatePillarScores(savedAudit.searchData, mergedSchemaAudit, savedAudit.localSignals || null, savedAudit.siteReviews || null);
+          const mergedScores = calculatePillarScores(savedAudit.searchData, mergedSchemaAudit, savedAudit.localSignals || null, savedAudit.siteReviews || null, savedAudit.backlinkMetrics || null);
           const mergedSnippetReadiness = calculateSnippetReadiness(mergedScores, savedAudit.searchData);
           
-          // Save merged results (preserve localSignals)
-          saveAuditResults(mergedScores, savedAudit.searchData, mergedSnippetReadiness, mergedSchemaAudit, savedAudit.localSignals || null, savedAudit.siteReviews || null);
+          // Save merged results (preserve localSignals, siteReviews, and backlinkMetrics)
+          saveAuditResults(mergedScores, savedAudit.searchData, mergedSnippetReadiness, mergedSchemaAudit, savedAudit.localSignals || null, savedAudit.siteReviews || null, savedAudit.backlinkMetrics || null);
           
           // Update retry button visibility
           updateRetryButtonVisibility(mergedSchemaAudit);
@@ -1856,7 +1856,7 @@
     }
 
     // Save audit results to localStorage
-    function saveAuditResults(scores, searchData, snippetReadiness, schemaAudit, localSignals = null, siteReviews = null) {
+    function saveAuditResults(scores, searchData, snippetReadiness, schemaAudit, localSignals = null, siteReviews = null, backlinkMetrics = null) {
       try {
         const dateRange = parseInt(document.getElementById('dateRange')?.value) || 30;
         const auditData = {
@@ -1866,6 +1866,7 @@
           schemaAudit,
           localSignals, // Store local signals data for future use
           siteReviews, // Store site reviews data for future use (preserve on retry)
+          backlinkMetrics, // Store backlink metrics data
           dateRange, // Store the date range used for this audit
           timestamp: new Date().toISOString()
         };
@@ -1914,7 +1915,7 @@
         
         // Recalculate pillar scores based on new GSC data
         // Keep existing schema audit data (doesn't change with date range)
-        const scores = calculatePillarScores(searchData, savedAudit.schemaAudit, localSignals, savedAudit.siteReviews || null);
+        const scores = calculatePillarScores(searchData, savedAudit.schemaAudit, localSignals, savedAudit.siteReviews || null, savedAudit.backlinkMetrics || null);
         const snippetReadiness = calculateSnippetReadiness(scores, searchData);
         
         debugLog(`Recalculated scores for ${newDateRange} days: ${JSON.stringify(scores)}`, 'info');
@@ -1931,7 +1932,7 @@
         };
         
         // Save updated audit
-        saveAuditResults(scores, searchData, snippetReadiness, savedAudit.schemaAudit, localSignals, savedAudit.siteReviews || null);
+        saveAuditResults(scores, searchData, snippetReadiness, savedAudit.schemaAudit, localSignals, savedAudit.siteReviews || null, savedAudit.backlinkMetrics || null);
         localStorage.setItem('last_audit_results', JSON.stringify(updatedAudit));
         
         // Also save to Supabase for historical tracking
@@ -2272,7 +2273,33 @@
       return clampScore(reviewScore);
     }
 
-    function calculatePillarScores(data, schemaAudit = null, localSignals = null, siteReviews = null) {
+    /**
+     * Compute Backlink Score from backlink metrics
+     * @param {Object|undefined} m - Backlink metrics object with referringDomains, totalBacklinks, followRatio
+     * @returns {number} Score 0-100
+     */
+    function computeBacklinkScore(m) {
+      if (!m) {
+        // If metrics not present at all, treat as zero domains and neutral follow ratio
+        return 0;
+      }
+
+      const rd = m.referringDomains ?? 0;
+      const fb = m.followRatio ?? 0.5;
+
+      // Referring domains score: 100+ domains = max score (100)
+      const rdScore = Math.min(rd / 100, 1) * 100;
+      
+      // Follow ratio score: clamp 0-1 → 0-100
+      const followScore = Math.max(0, Math.min(fb, 1)) * 100;
+
+      // Combined: 70% referring domains, 30% follow ratio
+      const score = 0.7 * rdScore + 0.3 * followScore;
+      
+      return Math.round(clampScore(score));
+    }
+
+    function calculatePillarScores(data, schemaAudit = null, localSignals = null, siteReviews = null, backlinkMetrics = null) {
       // Use new API response format - get values from GSC overview
       const position = data.averagePosition || 40; // 1 (best) - 100 (worst)
       const ctr = data.ctr || 0; // 0-100 percentage from API (e.g., 10 = 10%)
@@ -2330,8 +2357,9 @@
         : 'Site (no data)';
       debugLog(`Review Score: ${gbpInfo}, ${siteInfo}, Final=${reviewScore.toFixed(1)}`, 'info');
 
-      // Temporary placeholder until Phase 3
-      const backlinkScore = 50;
+      // Backlink Score: Phase 3 - Use real backlink metrics if available
+      // backlinkMetrics is passed as a parameter (fetched from API)
+      const backlinkScore = computeBacklinkScore(backlinkMetrics);
 
       const authority = clampScore(
         0.4 * behaviourScore +
@@ -2671,6 +2699,28 @@
           debugLog(`⚠ Site reviews error: ${siteReviewsError.message}, using fallback`, 'warn');
         }
         
+        updateProgress(38, 'Fetching backlink metrics data...');
+        debugLog('Fetching backlink metrics data...', 'info');
+        // Fetch backlink metrics
+        let backlinkMetrics = null;
+        try {
+          const backlinkResponse = await fetch('/api/aigeo/backlink-metrics');
+          if (backlinkResponse.ok) {
+            const backlinkData = await backlinkResponse.json();
+            if (backlinkData.status === 'ok' && backlinkData.data) {
+              backlinkMetrics = backlinkData.data;
+              debugLog('✓ Backlink metrics data fetched successfully', 'success');
+              debugLog(`Backlink metrics: domains=${backlinkMetrics.referringDomains}, links=${backlinkMetrics.totalBacklinks}, followRatio=${(backlinkMetrics.followRatio * 100).toFixed(1)}%`, 'info');
+            } else {
+              debugLog('⚠ Backlink metrics returned error, using fallback', 'warn');
+            }
+          } else {
+            debugLog('⚠ Backlink metrics endpoint not available, using fallback', 'warn');
+          }
+        } catch (backlinkError) {
+          debugLog(`⚠ Backlink metrics error: ${backlinkError.message}, using fallback`, 'warn');
+        }
+        
         updateProgress(40, 'Fetching schema audit data...');
         debugLog('Fetching schema audit data...', 'info');
         // Fetch schema audit data
@@ -2796,8 +2846,8 @@
         
         updateProgress(70, 'Calculating pillar scores...');
         debugLog('Calculating pillar scores...', 'info');
-        // Calculate scores (pass schema audit data, local signals, and site reviews)
-        const scores = calculatePillarScores(searchData, schemaAudit, localSignals, siteReviews);
+        // Calculate scores (pass schema audit data, local signals, site reviews, and backlink metrics)
+        const scores = calculatePillarScores(searchData, schemaAudit, localSignals, siteReviews, backlinkMetrics);
         debugLog('✓ Pillar scores calculated', 'success');
         debugLog(`Scores: ${JSON.stringify(scores)}`, 'info');
 
@@ -2815,7 +2865,7 @@
         debugLog('=== AUDIT COMPLETE: Success ===', 'success');
         
         // Save audit results to localStorage
-        saveAuditResults(scores, searchData, snippetReadiness, schemaAudit, localSignals, siteReviews);
+        saveAuditResults(scores, searchData, snippetReadiness, schemaAudit, localSignals, siteReviews, backlinkMetrics);
         
         // Save audit results to Supabase for historical tracking
         saveAuditToSupabase(propertyUrl, scores, searchData, snippetReadiness, schemaAudit, localSignals);
@@ -2950,11 +3000,117 @@
           contentSchema: 'Quality and completeness of structured data markup across your domain. <strong>Data Source:</strong> ✅ Live data from schema audit. <strong>Calculation:</strong> Foundation schemas (30%) + Rich Results (35%) + Coverage (20%) + Diversity (15%).'
         };
         
+        // Build Authority breakdown if this is the Authority pillar
+        let authorityBreakdown = '';
+        let authorityDetails = '';
+        if (key === 'authority' && scores.authorityComponents) {
+          const components = scores.authorityComponents;
+          const savedAudit = loadAuditResults();
+          const backlinkMetrics = savedAudit?.backlinkMetrics;
+          const localSignals = savedAudit?.localSignals;
+          const siteReviews = savedAudit?.siteReviews;
+          const searchData = savedAudit?.searchData;
+          
+          // Build breakdown display
+          authorityBreakdown = `
+            <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #e2e8f0; font-size: 0.8rem; color: #666;">
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+                <div>Behaviour: <strong>${Math.round(components.behaviour)}</strong></div>
+                <div>Ranking: <strong>${Math.round(components.ranking)}</strong></div>
+                <div>Backlinks: <strong>${Math.round(components.backlinks)}</strong></div>
+                <div>Reviews: <strong>${Math.round(components.reviews)}</strong></div>
+              </div>
+            </div>
+          `;
+          
+          // Build details panel (hidden by default, toggled by button)
+          const detailsId = `authority-details-${Date.now()}`;
+          const buttonId = `authority-details-btn-${Date.now()}`;
+          
+          // Get GSC metrics for details
+          const topQueries = searchData?.topQueries || [];
+          const rankingQueries = topQueries.filter(q => q.position > 0 && q.position <= 20 && q.impressions > 0);
+          const top10Queries = rankingQueries.filter(q => q.position <= 10);
+          
+          let siteCtr = 0;
+          let top10Ctr = 0;
+          let avgPosition = 0;
+          let top10ImpressionShare = 0;
+          
+          if (rankingQueries.length > 0) {
+            const totalClicks = rankingQueries.reduce((s, q) => s + (q.clicks || 0), 0);
+            const totalImpr = rankingQueries.reduce((s, q) => s + (q.impressions || 0), 0);
+            siteCtr = totalImpr > 0 ? (totalClicks / totalImpr) * 100 : 0;
+            
+            const top10Clicks = top10Queries.reduce((s, q) => s + (q.clicks || 0), 0);
+            const top10Impr = top10Queries.reduce((s, q) => s + (q.impressions || 0), 0);
+            top10Ctr = top10Impr > 0 ? (top10Clicks / top10Impr) * 100 : 0;
+            
+            avgPosition = totalImpr > 0
+              ? rankingQueries.reduce((s, q) => s + (q.position || 0) * (q.impressions || 0), 0) / totalImpr
+              : 0;
+            
+            top10ImpressionShare = totalImpr > 0 ? (top10Impr / totalImpr) * 100 : 0;
+          }
+          
+          // Get review data
+          const gbpRating = (localSignals && localSignals.status === 'ok' && localSignals.data) 
+            ? (localSignals.data.gbpRating !== null ? localSignals.data.gbpRating : null)
+            : null;
+          const gbpReviewCount = (localSignals && localSignals.status === 'ok' && localSignals.data) 
+            ? (localSignals.data.gbpReviewCount !== null ? localSignals.data.gbpReviewCount : null)
+            : null;
+          const siteRating = siteReviews?.siteRating !== null ? siteReviews?.siteRating : null;
+          const siteReviewCount = siteReviews?.siteReviewCount !== null ? siteReviews?.siteReviewCount : null;
+          
+          authorityDetails = `
+            <div style="margin-top: 0.5rem;">
+              <button id="${buttonId}" type="button" style="font-size: 0.75rem; color: #3b82f6; text-decoration: underline; background: none; border: none; cursor: pointer; padding: 0;">
+                Show details
+              </button>
+              <div id="${detailsId}" style="display: none; margin-top: 0.75rem; padding: 0.75rem; background: #f8f9fa; border-radius: 4px; font-size: 0.75rem; color: #666; line-height: 1.6;">
+                <div style="margin-bottom: 0.5rem;"><strong>GSC Metrics:</strong></div>
+                <div>Site CTR (ranking queries): ${siteCtr.toFixed(2)}%</div>
+                <div>Top-10 CTR: ${top10Ctr.toFixed(2)}%</div>
+                <div>Avg position (ranking): ${avgPosition.toFixed(1)}</div>
+                <div>Top-10 impression share: ${top10ImpressionShare.toFixed(1)}%</div>
+                ${backlinkMetrics ? `
+                  <div style="margin-top: 0.75rem; margin-bottom: 0.5rem;"><strong>Backlink Metrics:</strong></div>
+                  <div>Referring domains: ${backlinkMetrics.referringDomains || 0}</div>
+                  <div>Total backlinks: ${backlinkMetrics.totalBacklinks || 0}</div>
+                  <div>Follow ratio: ${backlinkMetrics.followRatio ? Math.round(backlinkMetrics.followRatio * 100) : 50}%</div>
+                ` : `
+                  <div style="margin-top: 0.75rem; margin-bottom: 0.5rem;"><strong>Backlink Metrics:</strong></div>
+                  <div>No backlink data uploaded</div>
+                `}
+                <div style="margin-top: 0.75rem; margin-bottom: 0.5rem;"><strong>Review Metrics:</strong></div>
+                <div>GBP rating: ${gbpRating !== null ? gbpRating.toFixed(2) : 'N/A'} (${gbpReviewCount !== null ? gbpReviewCount : 'N/A'} reviews)</div>
+                <div>Site rating: ${siteRating !== null ? siteRating.toFixed(2) : 'N/A'} (${siteReviewCount !== null ? siteReviewCount : 'N/A'} reviews)</div>
+              </div>
+            </div>
+          `;
+          
+          // Add click handler for details toggle
+          setTimeout(() => {
+            const btn = document.getElementById(buttonId);
+            const details = document.getElementById(detailsId);
+            if (btn && details) {
+              btn.addEventListener('click', () => {
+                const isVisible = details.style.display !== 'none';
+                details.style.display = isVisible ? 'none' : 'block';
+                btn.textContent = isVisible ? 'Show details' : 'Hide details';
+              });
+            }
+          }, 0);
+        }
+        
         card.innerHTML = `
           <h3>${pillarNames[key]}</h3>
           <div class="pillar-score rag-${rag.status}">${Math.round(score)}</div>
           <div class="rag-badge ${rag.status}">${rag.label}</div>
           <p style="font-size: 0.85rem; color: #666; margin-top: 0.5rem; line-height: 1.5; flex-grow: 1;">${descriptions[key] || ''}</p>
+          ${authorityBreakdown}
+          ${authorityDetails}
         `;
         pillarCards.appendChild(card);
       });

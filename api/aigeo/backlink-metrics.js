@@ -1,73 +1,275 @@
 /**
  * Backlink Metrics API
  * 
- * Stub for future backlink/Authority integration.
+ * Accepts CSV uploads of backlink data, computes metrics, and stores them as JSON.
  * 
- * v1: Returns placeholder structure.
- * Future batches will implement:
- * - Ahrefs API integration
- * - Semrush API integration
- * - Moz API integration
- * - Domain rating calculations
- * - Referring domain analysis
+ * GET: Returns stored backlink metrics from data/backlink-metrics.json
+ * POST: Accepts CSV body, parses it, computes metrics, and stores them
+ * 
+ * CSV Format:
+ * - "Linking Page + URL" column: Contains page title and URL (extract first http(s):// URL)
+ * - "Link Type" column: Values like DoFollow, Dofollow, Follow, Nofollow (case-insensitive)
  */
+
+import fs from 'fs/promises';
+import path from 'path';
+import { parse } from 'csv-parse/sync';
+
+const METRICS_FILE = path.join(process.cwd(), 'data', 'backlink-metrics.json');
+
+/**
+ * Extract URL from "Linking Page + URL" field
+ * Finds first http(s):// substring and trims trailing brackets/parentheses
+ */
+function extractUrl(raw) {
+  if (!raw || typeof raw !== 'string') return null;
+  
+  // Find first http(s) substring
+  const match = raw.match(/https?:\/\/\S+/);
+  if (!match) return null;
+  
+  // Trim trailing ) or ] or other closing brackets
+  return match[0].replace(/[)\]]+$/, '');
+}
+
+/**
+ * Check if link type is a follow link (not nofollow)
+ */
+function isFollow(linkTypeRaw) {
+  if (!linkTypeRaw || typeof linkTypeRaw !== 'string') return false;
+  
+  const t = linkTypeRaw.toLowerCase().replace(/\s+/g, '');
+  // Must contain "follow" but not "no"
+  return t.includes('follow') && !t.includes('no');
+}
+
+/**
+ * Compute backlink metrics from CSV rows
+ */
+function computeBacklinkMetrics(rows) {
+  const domains = new Set();
+  let total = 0;
+  let followCount = 0;
+
+  for (const row of rows) {
+    const urlField = row['Linking Page + URL'];
+    const url = extractUrl(urlField);
+    
+    if (!url) continue; // Skip rows without valid URLs
+
+    let hostname = null;
+    try {
+      hostname = new URL(url).hostname;
+    } catch (e) {
+      // Invalid URL, skip
+      continue;
+    }
+
+    domains.add(hostname);
+    total += 1;
+
+    const linkType = row['Link Type'];
+    if (isFollow(linkType)) {
+      followCount += 1;
+    }
+  }
+
+  const referringDomains = domains.size;
+  const totalBacklinks = total;
+  const followRatio = totalBacklinks > 0 ? followCount / totalBacklinks : 0.5; // Fallback 0.5 if no data
+
+  return {
+    referringDomains,
+    totalBacklinks,
+    followRatio,
+    generatedAt: new Date().toISOString()
+  };
+}
+
+/**
+ * Read backlink metrics from file, return default if missing
+ */
+async function readBacklinkMetrics() {
+  try {
+    const content = await fs.readFile(METRICS_FILE, 'utf8');
+    const metrics = JSON.parse(content);
+    return metrics;
+  } catch (error) {
+    // File doesn't exist or invalid - return safe default
+    return {
+      referringDomains: 0,
+      totalBacklinks: 0,
+      followRatio: 0.5,
+      generatedAt: null
+    };
+  }
+}
+
+/**
+ * Write backlink metrics to file
+ */
+async function writeBacklinkMetrics(metrics) {
+  try {
+    // Ensure data directory exists
+    const dataDir = path.dirname(METRICS_FILE);
+    await fs.mkdir(dataDir, { recursive: true });
+    
+    // Write metrics
+    await fs.writeFile(METRICS_FILE, JSON.stringify(metrics, null, 2), 'utf8');
+    return true;
+  } catch (error) {
+    console.error('Error writing backlink metrics:', error);
+    return false;
+  }
+}
 
 export default async function handler(req, res) {
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   
   // Handle preflight
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
-  
-  // Only allow GET requests
-  if (req.method !== 'GET') {
-    return res.status(405).json({
-      status: 'error',
-      source: 'backlink-metrics',
-      message: 'Method not allowed. Use GET.',
-      meta: { generatedAt: new Date().toISOString() }
-    });
-  }
 
-  try {
-    const { property } = req.query;
-    
-    if (!property) {
-      return res.status(400).json({
+  // GET: Return stored metrics
+  if (req.method === 'GET') {
+    try {
+      const metrics = await readBacklinkMetrics();
+      return res.status(200).json({
+        status: 'ok',
+        source: 'backlink-metrics',
+        data: metrics,
+        meta: { generatedAt: new Date().toISOString() }
+      });
+    } catch (error) {
+      console.error('Error reading backlink metrics:', error);
+      return res.status(500).json({
         status: 'error',
         source: 'backlink-metrics',
-        message: 'Missing required parameter: property',
+        message: error.message || 'Unknown error',
         meta: { generatedAt: new Date().toISOString() }
       });
     }
-    
-    // STUB: Return placeholder structure
-    // This will be implemented in a later batch with actual backlink APIs
-    return res.status(200).json({
-      status: 'ok',
-      source: 'backlink-metrics',
-      params: { property },
-      data: {
-        totalReferringDomains: null,
-        totalBacklinks: null,
-        avgDomainRating: null,
-        notes: 'Backlink metrics API not connected yet; this is a stub. Do not use placeholder values for Authority pillar scoring.'
-      },
-      meta: { generatedAt: new Date().toISOString() }
-    });
-    
-  } catch (error) {
-    console.error('Error in backlink-metrics:', error);
-    return res.status(500).json({
-      status: 'error',
-      source: 'backlink-metrics',
-      message: error.message || 'Unknown error',
-      meta: { generatedAt: new Date().toISOString() }
-    });
   }
-}
 
+  // POST: Accept CSV and compute metrics
+  if (req.method === 'POST') {
+    try {
+      // Get CSV content from request body
+      let csvContent;
+      
+      if (req.headers['content-type']?.includes('multipart/form-data')) {
+        // Handle multipart form data (file upload)
+        // This is a simplified version - in production you might want to use a library like multer
+        return res.status(400).json({
+          status: 'error',
+          source: 'backlink-metrics',
+          message: 'Multipart form data not yet supported. Send CSV as raw text/csv body.',
+          meta: { generatedAt: new Date().toISOString() }
+        });
+      } else {
+        // Raw CSV body (text/csv or text/plain)
+        csvContent = req.body;
+        
+        // If body is an object, try to get the CSV from a field
+        if (typeof csvContent === 'object' && csvContent !== null) {
+          csvContent = csvContent.csv || csvContent.data || csvContent.body || '';
+        }
+        
+        // Convert to string if needed
+        if (typeof csvContent !== 'string') {
+          csvContent = String(csvContent);
+        }
+      }
+
+      if (!csvContent || csvContent.trim().length === 0) {
+        return res.status(400).json({
+          status: 'error',
+          source: 'backlink-metrics',
+          message: 'Missing CSV content in request body',
+          meta: { generatedAt: new Date().toISOString() }
+        });
+      }
+
+      // Parse CSV
+      let rows;
+      try {
+        rows = parse(csvContent, {
+          columns: true,
+          skip_empty_lines: true,
+          trim: true,
+          relax_column_count: true // Allow rows with different column counts
+        });
+      } catch (parseError) {
+        console.warn('CSV parse error:', parseError);
+        return res.status(400).json({
+          status: 'error',
+          source: 'backlink-metrics',
+          message: `CSV parsing failed: ${parseError.message}`,
+          meta: { generatedAt: new Date().toISOString() }
+        });
+      }
+
+      if (!rows || rows.length === 0) {
+        // Empty CSV - return default metrics
+        const defaultMetrics = {
+          referringDomains: 0,
+          totalBacklinks: 0,
+          followRatio: 0.5,
+          generatedAt: new Date().toISOString()
+        };
+        
+        await writeBacklinkMetrics(defaultMetrics);
+        
+        return res.status(200).json({
+          status: 'ok',
+          source: 'backlink-metrics',
+          data: defaultMetrics,
+          meta: { generatedAt: new Date().toISOString() }
+        });
+      }
+
+      // Compute metrics
+      const metrics = computeBacklinkMetrics(rows);
+
+      // Write to file
+      const writeSuccess = await writeBacklinkMetrics(metrics);
+      
+      if (!writeSuccess) {
+        return res.status(500).json({
+          status: 'error',
+          source: 'backlink-metrics',
+          message: 'Failed to write metrics to file',
+          meta: { generatedAt: new Date().toISOString() }
+        });
+      }
+
+      return res.status(200).json({
+        status: 'ok',
+        source: 'backlink-metrics',
+        data: metrics,
+        meta: { generatedAt: new Date().toISOString() }
+      });
+
+    } catch (error) {
+      console.error('Error in backlink-metrics POST:', error);
+      return res.status(500).json({
+        status: 'error',
+        source: 'backlink-metrics',
+        message: error.message || 'Unknown error',
+        meta: { generatedAt: new Date().toISOString() }
+      });
+    }
+  }
+
+  // Method not allowed
+  return res.status(405).json({
+    status: 'error',
+    source: 'backlink-metrics',
+    message: 'Method not allowed. Use GET or POST.',
+    meta: { generatedAt: new Date().toISOString() }
+  });
+}
