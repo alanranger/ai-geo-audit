@@ -2204,6 +2204,25 @@
         const saved = localStorage.getItem('last_audit_results');
         if (saved) {
           const auditData = JSON.parse(saved);
+          
+          // Fix old Trustpilot snapshot data if present (override old cached values)
+          if (auditData.siteReviews) {
+            const oldRating = auditData.siteReviews.siteRating;
+            const oldCount = auditData.siteReviews.siteReviewCount;
+            // If it's the old values (4.8, 127), replace with correct snapshot (4.6, 610)
+            if (oldRating === 4.8 && oldCount === 127) {
+              debugLog(`⚠ Found old Trustpilot data (${oldRating}, ${oldCount}), overriding with correct snapshot (4.6, 610)`, 'warn');
+              auditData.siteReviews = {
+                siteRating: 4.6,
+                siteReviewCount: 610,
+                lastUpdated: '2025-12-07',
+                notes: 'Fixed Trustpilot snapshot for Authority score calculation. Update manually when Trustpilot metrics change significantly.'
+              };
+              // Save the corrected data back to localStorage
+              localStorage.setItem('last_audit_results', JSON.stringify(auditData));
+            }
+          }
+          
           debugLog('✓ Audit results loaded from localStorage', 'success');
           return auditData;
         }
@@ -3394,8 +3413,16 @@
           const gbpReviewCount = (localSignals && localSignals.status === 'ok' && localSignals.data) 
             ? (localSignals.data.gbpReviewCount !== null ? localSignals.data.gbpReviewCount : null)
             : null;
-          const siteRating = siteReviews?.siteRating !== null ? siteReviews?.siteRating : null;
-          const siteReviewCount = siteReviews?.siteReviewCount !== null ? siteReviews?.siteReviewCount : null;
+          // Get site review data, but override old cached values (4.8, 127) with correct snapshot (4.6, 610)
+          let siteRating = siteReviews?.siteRating !== null ? siteReviews?.siteRating : null;
+          let siteReviewCount = siteReviews?.siteReviewCount !== null ? siteReviews?.siteReviewCount : null;
+          
+          // Override old Trustpilot snapshot values if detected
+          if (siteRating === 4.8 && siteReviewCount === 127) {
+            debugLog(`⚠ Overriding old Trustpilot data (4.8, 127) with correct snapshot (4.6, 610)`, 'warn');
+            siteRating = 4.6;
+            siteReviewCount = 610;
+          }
           
           authorityDetails = `
             <div style="margin-top: 0.5rem;">
