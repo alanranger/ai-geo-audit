@@ -4237,29 +4237,48 @@
                         stroke-linecap="round"
                       />
                       
-                      <!-- Proportional tick marks (every 10%) -->
+                      <!-- Tick marks for current score and AI summary likelihood threshold -->
                       <g>
-                        ${Array.from({ length: 11 }, (_, i) => {
-                          const value = i * 10;
-                          const angle = startAngle + (value / 100) * angleRange;
-                          const rad = (angle * Math.PI) / 180;
-                          const isMajor = value % 50 === 0;
-                          const tickLength = isMajor ? 22 : 14;
-                          const tickWidth = isMajor ? 3.5 : 2;
+                        ${(() => {
+                          // AI summary likelihood threshold: 55 for "Medium"
+                          const aiThreshold = 55;
+                          const aiThresholdAngle = startAngle + (aiThreshold / 100) * angleRange;
+                          const aiThresholdRad = (aiThresholdAngle * Math.PI) / 180;
                           
-                          const tickX1 = center + (normalizedRadius - tickLength) * Math.cos(rad);
-                          const tickY1 = center + (normalizedRadius - tickLength) * Math.sin(rad);
-                          const tickX2 = center + (normalizedRadius + tickLength) * Math.cos(rad);
-                          const tickY2 = center + (normalizedRadius + tickLength) * Math.sin(rad);
+                          // Current score tick mark
+                          const scoreTickLength = 24;
+                          const scoreTickWidth = 4;
+                          const scoreTickX1 = center + (normalizedRadius - scoreTickLength) * Math.cos(scoreRad);
+                          const scoreTickY1 = center + (normalizedRadius - scoreTickLength) * Math.sin(scoreRad);
+                          const scoreTickX2 = center + (normalizedRadius + scoreTickLength) * Math.cos(scoreRad);
+                          const scoreTickY2 = center + (normalizedRadius + scoreTickLength) * Math.sin(scoreRad);
+                          
+                          // AI threshold tick mark
+                          const aiTickLength = 20;
+                          const aiTickWidth = 3;
+                          const aiTickX1 = center + (normalizedRadius - aiTickLength) * Math.cos(aiThresholdRad);
+                          const aiTickY1 = center + (normalizedRadius - aiTickLength) * Math.sin(aiThresholdRad);
+                          const aiTickX2 = center + (normalizedRadius + aiTickLength) * Math.cos(aiThresholdRad);
+                          const aiTickY2 = center + (normalizedRadius + aiTickLength) * Math.sin(aiThresholdRad);
                           
                           return `
-                            <line x1="${tickX1}" y1="${tickY1}" 
-                                  x2="${tickX2}" y2="${tickY2}" 
-                                  stroke="${isMajor ? '#1e293b' : '#94a3b8'}" 
-                                  stroke-width="${tickWidth}" 
-                                  stroke-linecap="round"/>
+                            <!-- Current score tick mark (86) -->
+                            <line x1="${scoreTickX1}" y1="${scoreTickY1}" 
+                                  x2="${scoreTickX2}" y2="${scoreTickY2}" 
+                                  stroke="${color}" 
+                                  stroke-width="${scoreTickWidth}" 
+                                  stroke-linecap="round"
+                                  style="filter: drop-shadow(0 2px 4px rgba(0,0,0,0.15));"/>
+                            
+                            <!-- AI summary likelihood threshold tick mark (55 for Medium) -->
+                            <line x1="${aiTickX1}" y1="${aiTickY1}" 
+                                  x2="${aiTickX2}" y2="${aiTickY2}" 
+                                  stroke="#f59e0b" 
+                                  stroke-width="${aiTickWidth}" 
+                                  stroke-linecap="round"
+                                  style="filter: drop-shadow(0 2px 4px rgba(0,0,0,0.15));"/>
                           `;
-                        }).join('')}
+                        })()}
                       </g>
                       
                       <!-- Needle indicator for current score -->
@@ -4284,27 +4303,51 @@
                         />
                       </g>
                       
-                      <!-- Major labels: 0%, 50%, 100% -->
+                      <!-- Labels: 50%, 100%, Current Score, AI Threshold -->
                       <g>
                         ${(() => {
-                          const majorMarkers = [
+                          const aiThreshold = 55;
+                          const aiThresholdAngle = startAngle + (aiThreshold / 100) * angleRange;
+                          const aiThresholdRad = (aiThresholdAngle * Math.PI) / 180;
+                          
+                          const labels = [
                             { value: 50, angle: angle50, color: '#f59e0b' },   // 6pm
-                            { value: 100, angle: angle100, color: '#10b981' }  // 12pm
+                            { value: 100, angle: angle100, color: '#10b981' },  // 12pm
+                            { value: score, angle: scoreAngle, color: color, label: 'Score' },  // Current score
+                            { value: aiThreshold, angle: aiThresholdAngle, color: '#f59e0b', label: 'AI Medium' }  // AI threshold
                           ];
                           
-                          return majorMarkers.map(m => {
+                          return labels.map(m => {
                             const rad = (m.angle * Math.PI) / 180;
-                            const labelOffset = 50; // Increased for better spacing
+                            const labelOffset = 50;
                             const labelX = center + (normalizedRadius + labelOffset) * Math.cos(rad);
                             const labelY = center + (normalizedRadius + labelOffset) * Math.sin(rad);
                             
-                            return `
-                              <text x="${labelX}" y="${labelY}" 
-                                    text-anchor="middle" dominant-baseline="middle"
-                                    fill="${m.color}" 
-                                    font-size="18" font-weight="700"
-                                    style="text-shadow: 0 1px 2px rgba(255,255,255,0.8);">${m.value}</text>
-                            `;
+                            // For score and AI threshold, show value with label below
+                            if (m.label) {
+                              return `
+                                <g>
+                                  <text x="${labelX}" y="${labelY - 8}" 
+                                        text-anchor="middle" dominant-baseline="middle"
+                                        fill="${m.color}" 
+                                        font-size="16" font-weight="700"
+                                        style="text-shadow: 0 1px 2px rgba(255,255,255,0.8);">${m.value}</text>
+                                  <text x="${labelX}" y="${labelY + 10}" 
+                                        text-anchor="middle" dominant-baseline="middle"
+                                        fill="#64748b" 
+                                        font-size="11" font-weight="500"
+                                        style="text-shadow: 0 1px 2px rgba(255,255,255,0.8);">${m.label}</text>
+                                </g>
+                              `;
+                            } else {
+                              return `
+                                <text x="${labelX}" y="${labelY}" 
+                                      text-anchor="middle" dominant-baseline="middle"
+                                      fill="${m.color}" 
+                                      font-size="18" font-weight="700"
+                                      style="text-shadow: 0 1px 2px rgba(255,255,255,0.8);">${m.value}</text>
+                              `;
+                            }
                           }).join('');
                         })()}
                       </g>
