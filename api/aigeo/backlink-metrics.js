@@ -150,17 +150,36 @@ function computeBacklinkMetrics(rows) {
   const domains = new Set();
   let total = 0;
   let followCount = 0;
+  let skippedNoUrl = 0;
+  let skippedInvalidUrl = 0;
 
-  for (const row of rows) {
+  console.log(`Processing ${rows.length} rows...`);
+  
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
     const urlField = row[urlColumn];
+    
+    if (!urlField) {
+      skippedNoUrl++;
+      if (i < 3) console.log(`Row ${i}: No URL field value`);
+      continue;
+    }
+    
     const url = extractUrl(urlField);
     
-    if (!url) continue; // Skip rows without valid URLs
+    if (!url) {
+      skippedNoUrl++;
+      if (i < 3) console.log(`Row ${i}: Could not extract URL from: "${urlField.substring(0, 100)}"`);
+      continue; // Skip rows without valid URLs
+    }
 
     let hostname = null;
     try {
       hostname = new URL(url).hostname;
+      if (i < 3) console.log(`Row ${i}: Extracted URL: ${url}, hostname: ${hostname}`);
     } catch (e) {
+      skippedInvalidUrl++;
+      if (i < 3) console.log(`Row ${i}: Invalid URL format: ${url}, error: ${e.message}`);
       // Invalid URL, skip
       continue;
     }
@@ -170,10 +189,15 @@ function computeBacklinkMetrics(rows) {
 
     // Link Type column is required - check it
     const linkType = row[linkTypeColumn];
-    if (isFollow(linkType)) {
+    const isFollowLink = isFollow(linkType);
+    if (isFollowLink) {
       followCount += 1;
     }
+    if (i < 3) console.log(`Row ${i}: Link type: "${linkType}", isFollow: ${isFollowLink}`);
   }
+  
+  console.log(`Processing complete: ${total} valid backlinks, ${domains.size} unique domains, ${followCount} follow links`);
+  console.log(`Skipped: ${skippedNoUrl} no URL, ${skippedInvalidUrl} invalid URL`);
 
   const referringDomains = domains.size;
   const totalBacklinks = total;
@@ -330,23 +354,38 @@ export default async function handler(req, res) {
         const headers = parseCsvLine(headerLine).map(h => h.trim().replace(/^"|"$/g, ''));
         
         console.log('CSV headers:', headers);
+        console.log('Total lines in CSV:', lines.length);
         
         // Parse data rows
         for (let i = 1; i < lines.length; i++) {
           const line = lines[i].trim();
           if (!line) continue;
           
-          const columns = parseCsvLine(line);
-          const row = {};
-          
-          headers.forEach((header, index) => {
-            row[header] = columns[index] ? columns[index].trim().replace(/^"|"$/g, '') : '';
-          });
-          
-          rows.push(row);
+          try {
+            const columns = parseCsvLine(line);
+            const row = {};
+            
+            headers.forEach((header, index) => {
+              row[header] = columns[index] ? columns[index].trim().replace(/^"|"$/g, '') : '';
+            });
+            
+            rows.push(row);
+            
+            // Log first few rows for debugging
+            if (i <= 3) {
+              console.log(`Row ${i}:`, JSON.stringify(row).substring(0, 200));
+            }
+          } catch (e) {
+            console.warn(`Error parsing line ${i}:`, e.message);
+            // Continue with next line
+          }
         }
         
         console.log(`Parsed ${rows.length} rows from CSV`);
+        if (rows.length > 0) {
+          console.log('First row keys:', Object.keys(rows[0]));
+          console.log('First row sample:', JSON.stringify(rows[0]).substring(0, 300));
+        }
       } catch (parseError) {
         console.error('CSV parse error:', parseError);
         return res.status(400).json({
@@ -366,7 +405,12 @@ export default async function handler(req, res) {
           generatedAt: new Date().toISOString()
         };
         
-        await writeBacklinkMetrics(defaultMetrics);
+        // Try to write (will fail in Vercel, but that's OK)
+        try {
+          await writeBacklinkMetrics(defaultMetrics);
+        } catch (e) {
+          console.warn('Could not write default metrics (expected in Vercel)');
+        }
         
         return res.status(200).json({
           status: 'ok',
@@ -378,17 +422,21 @@ export default async function handler(req, res) {
 
       // Compute metrics
       const metrics = computeBacklinkMetrics(rows);
-
-      // Write to file
-      const writeSuccess = await writeBacklinkMetrics(metrics);
       
-      if (!writeSuccess) {
-        return res.status(500).json({
-          status: 'error',
-          source: 'backlink-metrics',
-          message: 'Failed to write metrics to file',
-          meta: { generatedAt: new Date().toISOString() }
-        });
+      console.log('Computed metrics:', JSON.stringify(metrics));
+
+      // Note: Vercel serverless functions have read-only filesystem
+      // We can't write to files, so we'll store metrics in Supabase or return them directly
+      // For now, just return the metrics - they'll be recalculated on each audit
+      // TODO: Store in Supabase for persistence across deployments
+      
+      // Try to write to file (will fail in Vercel, but that's OK - we still return the metrics)
+      try {
+        await writeBacklinkMetrics(metrics);
+        console.log('Metrics written to file (local dev only)');
+      } catch (writeError) {
+        console.warn('Could not write metrics to file (expected in Vercel):', writeError.message);
+        // Continue anyway - metrics are still returned
       }
 
       return res.status(200).json({
