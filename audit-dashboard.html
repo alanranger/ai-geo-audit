@@ -3564,56 +3564,36 @@
     }
     
     // Calculate AI GEO Health Score
+    // IMPORTANT: AI GEO score uses ONLY the 5 pillars - brandOverlay and aiSummary are overlay metrics only
     function calculateAiGeoScore(scores, schemaAudit = null, snippetReadiness = null) {
-      // AI GEO weights
+      // AI GEO weights - ONLY the 5 pillars
       const AIGEO_WEIGHTS = {
         authority: 0.30,
         content: 0.25,
-        coverage: 0.15,
-        diversity: 0.15,
-        locations: 0.15
+        visibility: 0.20,
+        localEntity: 0.15,
+        serviceArea: 0.10
       };
       
-      // Extract scores
+      // Extract scores from the 5 pillars ONLY
       const authorityScore = (typeof scores.authority === 'object' && scores.authority !== null) 
         ? scores.authority.score 
         : scores.authority || 0;
       const contentScore = scores.contentSchema || 0;
       const visibilityScore = scores.visibility || 0;
+      const localEntityScore = scores.localEntity || 0;
+      const serviceAreaScore = scores.serviceArea || 0;
       
-      // Extract coverage and diversity from schema audit or scores
-      let coverage = scores.coverage || 0;
-      let diversity = scores.diversity || 0;
-      if (schemaAudit && schemaAudit.status === 'ok' && schemaAudit.data) {
-        const schemaData = schemaAudit.data;
-        coverage = schemaData.coverage || 0;
-        const allTypes = new Set();
-        if (schemaData.allDetectedTypes && Array.isArray(schemaData.allDetectedTypes)) {
-          schemaData.allDetectedTypes.forEach(type => {
-            if (type) allTypes.add(type);
-          });
-        } else if (schemaData.schemaTypes && Array.isArray(schemaData.schemaTypes)) {
-          schemaData.schemaTypes.forEach(item => {
-            if (item.type) allTypes.add(item.type);
-          });
-        }
-        const uniqueTypesCount = allTypes.size;
-        diversity = Math.min((uniqueTypesCount / 15) * 100, 100);
-      }
-      
-      // Locations: average of localEntity and serviceArea
-      const locationsScore = ((scores.localEntity || 0) + (scores.serviceArea || 0)) / 2;
-      
-      // Calculate weighted score
+      // Calculate weighted score using ONLY the 5 pillars
       const aiGeoScore = Math.round(
         authorityScore * AIGEO_WEIGHTS.authority +
         contentScore * AIGEO_WEIGHTS.content +
-        coverage * AIGEO_WEIGHTS.coverage +
-        diversity * AIGEO_WEIGHTS.diversity +
-        locationsScore * AIGEO_WEIGHTS.locations
+        visibilityScore * AIGEO_WEIGHTS.visibility +
+        localEntityScore * AIGEO_WEIGHTS.localEntity +
+        serviceAreaScore * AIGEO_WEIGHTS.serviceArea
       );
       
-      // Phase 1: Calculate AI Summary Likelihood using new method
+      // Phase 1: Calculate AI Summary Likelihood using new method (overlay only, not part of AI GEO score)
       const snippetReadinessScore = snippetReadiness?.overallScore || 0;
       const brandScore = scores.brandOverlay?.score || 0;
       
@@ -3628,7 +3608,7 @@
             aiGeoScore,
             authority: authorityScore,
             content: contentScore,
-            coverage: coverage
+            coverage: 0 // Not used in new calculation
           }),
           score: aiGeoScore, // Use aiGeoScore as fallback
           reasons: []
@@ -3636,10 +3616,10 @@
       }
       
       return {
-        aiGeoScore,
+        aiGeoScore, // Calculated from 5 pillars ONLY
         aiGeoStatus: aiGeoScore >= 70 ? 'green' : aiGeoScore >= 50 ? 'amber' : 'red',
         aiSummaryLikelihood: aiSummary.label, // Keep backward compatibility
-        aiSummary: aiSummary // New Phase 1 field
+        aiSummary: aiSummary // New Phase 1 field (overlay only)
       };
     }
     
@@ -4319,6 +4299,68 @@
         }
       };
       
+      // Phase 2: Get brand priority
+      const getBrandPriority = (summary) => {
+        const b = summary.brandOverlay;
+        if (!b) return null;
+        if (b.score >= 70) return null; // only suggest actions if score is below "Strong"
+        
+        const share = b.brandQueryShare || 0;
+        const ctr = b.brandCtr || 0;
+        const entity = b.entityScore ?? 0;
+        const review = b.reviewScore ?? 0;
+        
+        // Decide the most important brand-related action
+        if (share < 0.10) {
+          return {
+            pillar: 'Brand & Entity',
+            severity: 'medium',
+            message: 'Increase the share of branded searches (e.g. "Alan Ranger Photography") by using your full brand name consistently in campaigns, key landing pages and off-site mentions.',
+            link: '#pillarCards',
+            score: b.score
+          };
+        }
+        
+        if (ctr < 0.25) {
+          return {
+            pillar: 'Brand & Entity',
+            severity: 'medium',
+            message: 'Improve titles and meta descriptions on core brand pages (home, about, tuition, workshops) to raise CTR on branded queries above 25%.',
+            link: '#pillarCards',
+            score: b.score
+          };
+        }
+        
+        if (entity < 70) {
+          return {
+            pillar: 'Brand & Entity',
+            severity: 'medium',
+            message: 'Strengthen entity signals by maintaining NAP consistency, adding more detail to GBP and About/Press pages, and earning mentions on relevant third-party sites.',
+            link: '#pillarCards',
+            score: b.score
+          };
+        }
+        
+        if (review < 70) {
+          return {
+            pillar: 'Brand & Entity',
+            severity: 'medium',
+            message: 'Boost review signals with a steady flow of new Google reviews and clear calls-to-review after workshops and lessons.',
+            link: '#pillarCards',
+            score: b.score
+          };
+        }
+        
+        // Fallback for mid-range scores
+        return {
+          pillar: 'Brand & Entity',
+          severity: 'low',
+          message: 'Continue building branded visibility by consolidating strong informational content into clear "hub" pages that use your brand name and service area.',
+          link: '#pillarCards',
+          score: b.score
+        };
+      };
+      
       // Generate priorities list from pillar diagnostics
       const getPriorities = (scoresObj, schemaAuditData, localSignalsData, authorityComponents) => {
         const priorities = [];
@@ -4400,11 +4442,20 @@
           }
         }
         
-        // Sort by severity (high > medium > low) and limit to top 5
+        // Phase 2: Add brand priority if applicable
+        const brandPriority = getBrandPriority({ brandOverlay: scoresObj.brandOverlay });
+        if (brandPriority) {
+          priorities.push(brandPriority);
+        }
+        
+        // Sort by severity (high > medium > low) and limit to top 5 (or 4 if brand is included)
         const severityOrder = { high: 3, medium: 2, low: 1 };
-        return priorities
-          .sort((a, b) => severityOrder[b.severity] - severityOrder[a.severity])
-          .slice(0, 5);
+        const sorted = priorities.sort((a, b) => severityOrder[b.severity] - severityOrder[a.severity]);
+        
+        // If we have a brand priority and more than 4 items, keep highest severity items
+        // Allow up to 4 items when brand is present, or 5 otherwise
+        const maxItems = brandPriority ? 4 : 5;
+        return sorted.slice(0, maxItems);
       };
       
       const priorities = getPriorities(scores, schemaAudit, localSignalsData, scores.authorityComponents);
@@ -4642,15 +4693,44 @@
                 </div>
                 <div style="text-align: center;">
                   <div style="font-size: 0.9rem; color: #64748b; margin-bottom: 0.5rem; font-weight: 500;">AI summary likelihood:</div>
-                  <span style="display: inline-block; padding: 0.5rem 1rem; border-radius: 6px; font-size: 1rem; font-weight: 600; background: ${aiGeoHealth.aiSummaryLikelihood === 'high' ? '#d1fae5' : aiGeoHealth.aiSummaryLikelihood === 'medium' ? '#fef3c7' : '#fee2e2'}; color: ${aiGeoHealth.aiSummaryLikelihood === 'high' ? '#065f46' : aiGeoHealth.aiSummaryLikelihood === 'medium' ? '#92400e' : '#991b1b'};">
-                    ${aiGeoHealth.aiSummaryLikelihood === 'high' ? 'High' : aiGeoHealth.aiSummaryLikelihood === 'medium' ? 'Medium' : 'Low'}
-                  </span>
-                  <span style="font-size: 0.75rem; color: #94a3b8; cursor: help; margin-left: 0.5rem;" title="High = score ≥75 and solid content/coverage. Medium = score ≥55. Low = score <55.">ℹ️</span>
+                  ${(() => {
+                    // Phase 2: Use aiSummary.label if available, otherwise fallback to aiSummaryLikelihood
+                    const aiSummary = aiGeoHealth.aiSummary || { label: aiGeoHealth.aiSummaryLikelihood || 'Low', score: 0 };
+                    const label = aiSummary.label || 'Low';
+                    const score = aiSummary.score || 0;
+                    const bgColor = label === 'High' ? '#d1fae5' : label === 'Medium' ? '#fef3c7' : '#fee2e2';
+                    const textColor = label === 'High' ? '#065f46' : label === 'Medium' ? '#92400e' : '#991b1b';
+                    const tooltipText = `AI summary likelihood: ${label} (score ${score}/100)`;
+                    const infoTooltip = 'Based on snippet-friendly content (FAQ / HowTo / Article / Event blocks), how often your content appears in rich results, and the strength of your brand & entity signals (branded searches, reviews, knowledge panel).';
+                    return `
+                      <span style="display: inline-block; padding: 0.5rem 1rem; border-radius: 6px; font-size: 1rem; font-weight: 600; background: ${bgColor}; color: ${textColor};" title="${tooltipText}">
+                        ${label}
+                      </span>
+                      <span style="font-size: 0.75rem; color: #94a3b8; cursor: help; margin-left: 0.5rem;" title="${infoTooltip}">ℹ️</span>
+                    `;
+                  })()}
+                  ${(() => {
+                    // Phase 2: Brand & Entity chip
+                    const brandOverlay = scores.brandOverlay;
+                    if (!brandOverlay) return '';
+                    const score = brandOverlay.score || 0;
+                    const label = brandOverlay.label || 'Weak';
+                    const bgColor = score >= 70 ? '#d1fae5' : score >= 40 ? '#fef3c7' : '#fee2e2';
+                    const textColor = score >= 70 ? '#065f46' : score >= 40 ? '#92400e' : '#991b1b';
+                    return `
+                      <div style="margin-top: 1rem;">
+                        <div style="font-size: 0.9rem; color: #64748b; margin-bottom: 0.5rem; font-weight: 500;">Brand & entity:</div>
+                        <span style="display: inline-block; padding: 0.5rem 1rem; border-radius: 6px; font-size: 1rem; font-weight: 600; background: ${bgColor}; color: ${textColor};">
+                          ${label} (score ${score}/100)
+                        </span>
+                      </div>
+                    `;
+                  })()}
                 </div>
               </div>
             </div>
             <p style="margin: 0; font-size: 0.95rem; color: #475569; font-weight: 500;">
-              Based on Authority, Content & Schema, Coverage, Diversity and Locations.
+              Based on Authority, Content & Schema, Coverage, Diversity, Locations and Brand & entity signals.
             </p>
           </div>
           
@@ -4681,6 +4761,9 @@
                 `;
               }).join('')}
             </div>
+            <p style="margin-top: 1rem; font-size: 0.85rem; color: #64748b; font-style: italic; text-align: center;">
+              Brand & entity strength is shown above as an overlay and does not currently change the AI GEO score.
+            </p>
           </div>
           
           <!-- This Month's Priorities -->
@@ -4690,7 +4773,13 @@
             <div style="background: #f8f9fa; border-radius: 8px; padding: 1rem; border-left: 4px solid #ef4444;">
               <ul style="margin: 0; padding-left: 1.5rem; list-style: none;">
                 ${priorities.map((p, idx) => {
-                  const severityColor = p.severity === 'high' ? '#ef4444' : p.severity === 'medium' ? '#f59e0b' : '#10b981';
+                  // Phase 2: For brand priorities, use brandOverlay score for color
+                  let severityColor;
+                  if (p.pillar === 'Brand & Entity' && p.score !== undefined) {
+                    severityColor = p.score >= 70 ? '#10b981' : p.score >= 40 ? '#f59e0b' : '#ef4444';
+                  } else {
+                    severityColor = p.severity === 'high' ? '#ef4444' : p.severity === 'medium' ? '#f59e0b' : '#10b981';
+                  }
                   return `
                     <li style="margin-bottom: ${idx < priorities.length - 1 ? '0.75rem' : '0'}; padding-left: 0.5rem; position: relative;">
                       <span style="position: absolute; left: -1.5rem; color: ${severityColor}; font-weight: 700;">•</span>
