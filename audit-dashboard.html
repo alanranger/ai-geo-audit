@@ -4892,18 +4892,74 @@
           ? 'Exclude education (blogs / free course)'
           : 'Money pages only';
         
-        // Create section HTML
+        // Get segment metrics for summary display
+        const getSegmentSummary = (mode) => {
+          if (!authorityBySegment || !authorityBySegment[mode]) return null;
+          const segmentData = authorityBySegment[mode];
+          return {
+            behaviour: segmentData.behaviour || 0,
+            ranking: segmentData.ranking || 0,
+            total: segmentData.total || segmentData.score || 0
+          };
+        };
+        
+        const currentSummary = getSegmentSummary(currentMode);
+        const rag = currentSummary ? getRAGStatus(currentSummary.total) : { status: 'amber', label: 'N/A' };
+        
+        // Create section HTML with improved styling
         topPagesSection.innerHTML = `
-          <div style="background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-            <h3 style="margin: 0 0 1rem 0; color: var(--brand-dark);">Authority - Behaviour & Ranking</h3>
-            <div style="margin-bottom: 1rem; padding: 1rem; background: #f8f9fa; border-radius: 4px; font-size: 0.85rem; line-height: 1.6; color: #666;">
-              <p style="margin: 0 0 0.75rem 0;"><strong>Behaviour:</strong> Measures click-through rate (CTR) performance. Combines Overall CTR (50% weight) for all ranking search terms and Top-10 Ranked Search Terms CTR (50% weight) for queries ranking in positions 1-10. Indicates how well your titles and descriptions convert impressions to clicks. Data source: Google Search Console query+page metrics.</p>
-              <p style="margin: 0;"><strong>Ranking:</strong> Measures search visibility and position quality. Combines Average Position Score (50% weight) and Top-10 Impression Share (50% weight). Shows how high you rank on average and what percentage of impressions appear in positions 1-10. Data source: Google Search Console query+page metrics.</p>
+          <div style="background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-left: 4px solid #99004C;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem;">
+              <div style="flex: 1;">
+                <h3 style="margin: 0 0 0.5rem 0; color: var(--brand-dark); font-size: 1.25rem; font-weight: 700;">Authority - Behaviour & Ranking</h3>
+                <div style="margin-bottom: 1rem; padding: 1rem; background: linear-gradient(135deg, #f8f9fa 0%, #f1f5f9 100%); border-radius: 6px; font-size: 0.85rem; line-height: 1.6; color: #555; border-left: 3px solid #99004C;">
+                  <p style="margin: 0 0 0.75rem 0;"><strong style="color: #99004C;">Behaviour:</strong> Measures click-through rate (CTR) performance. Combines Overall CTR (50% weight) for all ranking search terms and Top-10 Ranked Search Terms CTR (50% weight) for queries ranking in positions 1-10. Indicates how well your titles and descriptions convert impressions to clicks. Data source: Google Search Console query+page metrics.</p>
+                  <p style="margin: 0;"><strong style="color: #99004C;">Ranking:</strong> Measures search visibility and position quality. Combines Average Position Score (50% weight) and Top-10 Impression Share (50% weight). Shows how high you rank on average and what percentage of impressions appear in positions 1-10. Data source: Google Search Console query+page metrics.</p>
+                </div>
+              </div>
             </div>
-            <div style="margin-bottom: 1rem; padding: 0.5rem; background: #f8f9fa; border-radius: 4px; font-size: 0.75rem;">
+            
+            ${currentSummary ? `
+            <div style="margin-bottom: 1rem; padding: 1rem; background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%); border-radius: 6px; border: 1px solid #e2e8f0;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                  <span style="font-weight: 600; color: #333; font-size: 0.9rem;">Segment Summary:</span>
+                  <span id="top-pages-segment-label" style="color: #666; font-size: 0.85rem; padding: 0.25rem 0.75rem; background: #f1f5f9; border-radius: 4px;">${segmentLabel}</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                  <span style="font-size: 1.1rem; font-weight: 700; color: ${rag.status === 'green' ? '#10b981' : rag.status === 'amber' ? '#f59e0b' : '#ef4444'};">${Math.round(currentSummary.total)}</span>
+                  <span class="rag-badge ${rag.status}" style="display: inline-block; padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">${rag.label}</span>
+                </div>
+              </div>
+              <div id="top-pages-segment-summary" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; font-size: 0.8rem;">
+                ${formatComponentScore('Behaviour', currentSummary.behaviour)}
+                ${formatComponentScore('Ranking', currentSummary.ranking)}
+              </div>
+            </div>
+            ` : `
+            <div style="margin-bottom: 1rem; padding: 0.75rem; background: #f8f9fa; border-radius: 4px; font-size: 0.75rem;">
               <span style="font-weight: 600; color: #666;">Current Segment:</span>
               <span id="top-pages-segment-label" style="color: #333; margin-left: 0.5rem;">${segmentLabel}</span>
             </div>
+            `}
+            
+            ${authorityBySegment ? `
+            <div style="margin-bottom: 1rem; padding: 0.75rem; background: #f8f9fa; border-radius: 4px; font-size: 0.75rem;">
+              <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                <span style="font-weight: 600; color: #666;">View:</span>
+                <button id="top-pages-mode-all" class="authority-mode-btn" data-mode="all" style="padding: 0.35rem 0.75rem; border: 1px solid #d1d5db; border-radius: 4px; background: ${currentMode === 'all' ? '#10b981' : 'white'}; color: ${currentMode === 'all' ? 'white' : '#666'}; cursor: pointer; font-size: 0.75rem; font-weight: ${currentMode === 'all' ? '600' : '400'}; transition: all 0.2s;">
+                  All pages
+                </button>
+                <button id="top-pages-mode-nonEducation" class="authority-mode-btn" data-mode="nonEducation" style="padding: 0.35rem 0.75rem; border: 1px solid #d1d5db; border-radius: 4px; background: ${currentMode === 'nonEducation' ? '#10b981' : 'white'}; color: ${currentMode === 'nonEducation' ? 'white' : '#666'}; cursor: pointer; font-size: 0.75rem; font-weight: ${currentMode === 'nonEducation' ? '600' : '400'}; transition: all 0.2s;">
+                  Exclude education
+                </button>
+                <button id="top-pages-mode-money" class="authority-mode-btn" data-mode="money" style="padding: 0.35rem 0.75rem; border: 1px solid #d1d5db; border-radius: 4px; background: ${currentMode === 'money' ? '#10b981' : 'white'}; color: ${currentMode === 'money' ? 'white' : '#666'}; cursor: pointer; font-size: 0.75rem; font-weight: ${currentMode === 'money' ? '600' : '400'}; transition: all 0.2s;">
+                  Money pages only
+                </button>
+              </div>
+            </div>
+            ` : ''}
+            
             <div id="top-pages-table-container">
               ${renderFullWidthTopPagesTable(topPages, segmentLabel)}
             </div>
