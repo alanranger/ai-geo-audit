@@ -4150,11 +4150,19 @@
         <div style="background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 2rem;">
           <!-- AI GEO Health Top Card -->
           <div style="text-align: center; margin-bottom: 2rem; padding-bottom: 2rem; border-bottom: 2px solid #e2e8f0;">
-            <div style="display: flex; align-items: center; justify-content: center; gap: 1rem; margin-bottom: 1rem;">
-              <h2 style="margin: 0; font-size: 3rem; font-weight: 700; color: #1e293b;">${aiGeoHealth.aiGeoScore}</h2>
-              <span class="rag-badge ${aiGeoHealth.aiGeoStatus}" style="display: inline-block; padding: 0.5rem 1rem; border-radius: 6px; font-size: 1rem; font-weight: 600;">
-                ${aiGeoHealth.aiGeoStatus === 'green' ? 'Green' : aiGeoHealth.aiGeoStatus === 'amber' ? 'Amber' : 'Red'}
-              </span>
+            <div style="display: flex; align-items: center; justify-content: center; gap: 2rem; margin-bottom: 1rem; flex-wrap: wrap;">
+              <!-- Speedometer Gauge -->
+              <div style="position: relative; width: 200px; height: 120px;">
+                <canvas id="ai-geo-speedometer" width="200" height="120" style="max-width: 100%; height: auto;"></canvas>
+                <div style="position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); font-size: 2rem; font-weight: 700; color: ${aiGeoHealth.aiGeoStatus === 'green' ? '#10b981' : aiGeoHealth.aiGeoStatus === 'amber' ? '#f59e0b' : '#ef4444'};">
+                  ${aiGeoHealth.aiGeoScore}
+                </div>
+              </div>
+              <div style="display: flex; flex-direction: column; align-items: center; gap: 0.5rem;">
+                <span class="rag-badge ${aiGeoHealth.aiGeoStatus}" style="display: inline-block; padding: 0.5rem 1rem; border-radius: 6px; font-size: 1rem; font-weight: 600;">
+                  ${aiGeoHealth.aiGeoStatus === 'green' ? 'Green' : aiGeoHealth.aiGeoStatus === 'amber' ? 'Amber' : 'Red'}
+                </span>
+              </div>
             </div>
             <p style="margin: 0 0 0.5rem 0; font-size: 0.95rem; color: #475569; font-weight: 500;">
               Based on Authority, Content & Schema, Coverage, Diversity and Locations.
@@ -4194,50 +4202,6 @@
                   </div>
                 `;
               }).join('')}
-            </div>
-          </div>
-          
-          <!-- Segment Comparison Table -->
-          <div style="margin-bottom: 2rem;">
-            <h3 style="margin: 0 0 1rem 0; font-size: 1.1rem; font-weight: 700; color: #1e293b;">Pillar Status Summary</h3>
-            <div style="overflow-x: auto; border-radius: 8px; border: 1px solid #e2e8f0;">
-              <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
-                <thead>
-                  <tr style="background: linear-gradient(135deg, #f8f9fa 0%, #f1f5f9 100%); border-bottom: 2px solid #e2e8f0;">
-                    <th style="text-align: left; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Pillar</th>
-                    <th style="text-align: center; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Score</th>
-                    <th style="text-align: center; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Status</th>
-                    <th style="text-align: left; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Comment</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${[
-                    { key: 'authority', name: 'Authority', score: authorityScore },
-                    { key: 'content', name: 'Content', score: contentScore },
-                    { key: 'coverage', name: 'Coverage', score: coverageScore },
-                    { key: 'diversity', name: 'Diversity', score: diversityScore },
-                    { key: 'locations', name: 'Locations', score: locationsScore }
-                  ].map(({ key, name, score }, idx) => {
-                    const rag = getRAGStatus(score);
-                    const hint = getPillarHint(key, score, scores, schemaAudit, localSignalsData);
-                    const isEven = idx % 2 === 0;
-                    return `
-                      <tr style="border-bottom: 1px solid #f1f5f9; background: ${isEven ? '#ffffff' : '#fafafa'};">
-                        <td style="padding: 0.75rem; font-weight: 600; color: #1e293b;">${name}</td>
-                        <td style="padding: 0.75rem; text-align: center; font-size: 1.1rem; font-weight: 700; color: ${rag.status === 'green' ? '#10b981' : rag.status === 'amber' ? '#f59e0b' : '#ef4444'};">
-                          ${Math.round(score)}
-                        </td>
-                        <td style="padding: 0.75rem; text-align: center;">
-                          <span class="rag-badge ${rag.status}" style="display: inline-block; padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.8rem; font-weight: 600;">
-                            ${rag.label}
-                          </span>
-                        </td>
-                        <td style="padding: 0.75rem; color: #64748b; font-size: 0.85rem;">${hint}</td>
-                      </tr>
-                    `;
-                  }).join('')}
-                </tbody>
-              </table>
             </div>
           </div>
           
