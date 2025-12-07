@@ -117,34 +117,43 @@ function computeBacklinkMetrics(rows) {
   }
 
   // Find the URL column (try various possible names)
+  // Note: "Linking Page + URL" has a plus sign, so we need flexible matching
   const urlColumn = findColumn(rows, [
     'Linking Page + URL',
+    'Linking Page +URL',
+    'Linking Page+ URL',
+    'Linking Page+URL',
     'Linking Page',
     'URL',
     'Source URL',
     'Linking URL',
-    'Page URL'
+    'Page URL',
+    'Linking Page URL'
   ]);
   
   // Find the link type column (try various possible names)
   const linkTypeColumn = findColumn(rows, [
     'Link Type',
+    'LinkType',
     'Type',
     'Follow Type',
-    'Link Type',
+    'FollowType',
     'Follow'
   ]);
 
   console.log('Found columns:', Object.keys(rows[0]));
+  console.log('All column names (exact):', JSON.stringify(Object.keys(rows[0])));
   console.log('URL column:', urlColumn);
   console.log('Link Type column:', linkTypeColumn);
 
   if (!urlColumn) {
-    throw new Error(`Could not find URL column. Available columns: ${Object.keys(rows[0]).join(', ')}`);
+    const availableCols = Object.keys(rows[0]);
+    throw new Error(`Could not find URL column. Available columns: ${availableCols.join(', ')}. Looking for columns containing "linking" and "url" or just "url".`);
   }
 
   if (!linkTypeColumn) {
-    throw new Error(`Could not find Link Type column. Available columns: ${Object.keys(rows[0]).join(', ')}. The Link Type column is required to calculate the follow ratio for the Authority score.`);
+    const availableCols = Object.keys(rows[0]);
+    throw new Error(`Could not find Link Type column. Available columns: ${availableCols.join(', ')}. The Link Type column is required to calculate the follow ratio for the Authority score. Looking for columns containing "link" and "type" or just "type".`);
   }
 
   const domains = new Set();
@@ -421,9 +430,24 @@ export default async function handler(req, res) {
       }
 
       // Compute metrics
-      const metrics = computeBacklinkMetrics(rows);
-      
-      console.log('Computed metrics:', JSON.stringify(metrics));
+      let metrics;
+      try {
+        metrics = computeBacklinkMetrics(rows);
+        console.log('Computed metrics:', JSON.stringify(metrics));
+      } catch (computeError) {
+        console.error('Error computing backlink metrics:', computeError);
+        return res.status(400).json({
+          status: 'error',
+          source: 'backlink-metrics',
+          message: `Failed to compute metrics: ${computeError.message}`,
+          debug: {
+            rowCount: rows.length,
+            firstRowKeys: rows.length > 0 ? Object.keys(rows[0]) : [],
+            error: computeError.message
+          },
+          meta: { generatedAt: new Date().toISOString() }
+        });
+      }
 
       // Note: Vercel serverless functions have read-only filesystem
       // We can't write to files, so we'll store metrics in Supabase or return them directly
