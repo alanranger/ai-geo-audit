@@ -2223,26 +2223,50 @@
 
     function computeReviewScore(opts) {
       const {
-        gbpRating = 0,
-        gbpCount = 0,
-        siteRating = 0,
-        siteCount = 0
+        gbpRating = null,
+        gbpCount = null,
+        siteRating = null,
+        siteCount = null
       } = opts || {};
+
+      // Check if sources have valid data (not null, not 0, not undefined)
+      const hasGBP = (gbpRating !== null && gbpRating !== undefined && gbpRating > 0) || 
+                     (gbpCount !== null && gbpCount !== undefined && gbpCount > 0);
+      const hasSite = (siteRating !== null && siteRating !== undefined && siteRating > 0) || 
+                      (siteCount !== null && siteCount !== undefined && siteCount > 0);
+
+      // If neither source exists, return neutral default
+      if (!hasGBP && !hasSite) {
+        debugLog('Review Score: No review data available (GBP or site), using neutral default (50)', 'warn');
+        return 50;
+      }
 
       const maxCount = 500; // cap so a few extra reviews don't blow up score
 
-      // GBP scores
-      const gbpRatingScore = (gbpRating / 5) * 100;
-      const gbpCountScore = Math.min(gbpCount / maxCount, 1) * 100;
-      const gbpScore = 0.6 * gbpRatingScore + 0.4 * gbpCountScore;
+      let reviewScore;
 
-      // Site scores
-      const siteRatingScore = (siteRating / 5) * 100;
-      const siteCountScore = Math.min(siteCount / maxCount, 1) * 100;
-      const siteScore = 0.6 * siteRatingScore + 0.4 * siteCountScore;
+      if (hasGBP && hasSite) {
+        // Both sources exist: 60% GBP + 40% site
+        const gbpRatingScore = ((gbpRating || 0) / 5) * 100;
+        const gbpCountScore = Math.min((gbpCount || 0) / maxCount, 1) * 100;
+        const gbpScore = 0.6 * gbpRatingScore + 0.4 * gbpCountScore;
 
-      // Slightly favour GBP as a stronger trust signal
-      const reviewScore = 0.6 * gbpScore + 0.4 * siteScore;
+        const siteRatingScore = ((siteRating || 0) / 5) * 100;
+        const siteCountScore = Math.min((siteCount || 0) / maxCount, 1) * 100;
+        const siteScore = 0.6 * siteRatingScore + 0.4 * siteCountScore;
+
+        reviewScore = 0.6 * gbpScore + 0.4 * siteScore;
+      } else if (hasGBP) {
+        // Only GBP exists: 100% GBP
+        const gbpRatingScore = ((gbpRating || 0) / 5) * 100;
+        const gbpCountScore = Math.min((gbpCount || 0) / maxCount, 1) * 100;
+        reviewScore = 0.6 * gbpRatingScore + 0.4 * gbpCountScore;
+      } else {
+        // Only site reviews exist: 100% site
+        const siteRatingScore = ((siteRating || 0) / 5) * 100;
+        const siteCountScore = Math.min((siteCount || 0) / maxCount, 1) * 100;
+        reviewScore = 0.6 * siteRatingScore + 0.4 * siteCountScore;
+      }
 
       return clampScore(reviewScore);
     }

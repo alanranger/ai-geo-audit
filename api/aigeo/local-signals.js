@@ -8,9 +8,12 @@
  * - Service areas
  * - NAP (Name, Address, Phone) consistency data
  * - LocalBusiness schema detection (from website scan)
+ * - GBP rating and review count (with static fallback)
  */
 
 import { getBusinessProfileAccessToken } from './utils.js';
+import fs from 'fs';
+import path from 'path';
 
 export default async function handler(req, res) {
   // Set CORS headers
