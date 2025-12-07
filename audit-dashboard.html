@@ -2040,11 +2040,13 @@
           };
           
           // Recalculate scores with merged data (use saved localSignals if available)
-          const mergedScores = calculatePillarScores(savedAudit.searchData, mergedSchemaAudit, savedAudit.localSignals || null, savedAudit.siteReviews || null, savedAudit.backlinkMetrics || null);
+          // Always use correct Trustpilot snapshot (4.6, 610) - override any old cached values
+          const normalizedSiteReviews = getTrustpilotSnapshot(savedAudit.siteReviews || null);
+          const mergedScores = calculatePillarScores(savedAudit.searchData, mergedSchemaAudit, savedAudit.localSignals || null, normalizedSiteReviews, savedAudit.backlinkMetrics || null);
           const mergedSnippetReadiness = calculateSnippetReadiness(mergedScores, savedAudit.searchData);
           
           // Save merged results (preserve localSignals, siteReviews, and backlinkMetrics)
-          saveAuditResults(mergedScores, savedAudit.searchData, mergedSnippetReadiness, mergedSchemaAudit, savedAudit.localSignals || null, savedAudit.siteReviews || null, savedAudit.backlinkMetrics || null);
+          saveAuditResults(mergedScores, savedAudit.searchData, mergedSnippetReadiness, mergedSchemaAudit, savedAudit.localSignals || null, normalizedSiteReviews, savedAudit.backlinkMetrics || null);
           
           // Update retry button visibility
           updateRetryButtonVisibility(mergedSchemaAudit);
@@ -2138,7 +2140,9 @@
         
         // Recalculate pillar scores based on new GSC data
         // Keep existing schema audit data (doesn't change with date range)
-        const scores = calculatePillarScores(searchData, savedAudit.schemaAudit, localSignals, savedAudit.siteReviews || null, savedAudit.backlinkMetrics || null);
+        // Always use correct Trustpilot snapshot (4.6, 610) - override any old cached values
+        const normalizedSiteReviews = getTrustpilotSnapshot(savedAudit.siteReviews || null);
+        const scores = calculatePillarScores(searchData, savedAudit.schemaAudit, localSignals, normalizedSiteReviews, savedAudit.backlinkMetrics || null);
         const snippetReadiness = calculateSnippetReadiness(scores, searchData);
         
         debugLog(`Recalculated scores for ${newDateRange} days: ${JSON.stringify(scores)}`, 'info');
@@ -2155,7 +2159,9 @@
         };
         
         // Save updated audit
-        saveAuditResults(scores, searchData, snippetReadiness, savedAudit.schemaAudit, localSignals, savedAudit.siteReviews || null, savedAudit.backlinkMetrics || null);
+        // Always use correct Trustpilot snapshot (4.6, 610) - override any old cached values
+        const normalizedSiteReviewsForLoad = getTrustpilotSnapshot(savedAudit.siteReviews || null);
+        saveAuditResults(scores, searchData, snippetReadiness, savedAudit.schemaAudit, localSignals, normalizedSiteReviewsForLoad, savedAudit.backlinkMetrics || null);
         localStorage.setItem('last_audit_results', JSON.stringify(updatedAudit));
         
         // Also save to Supabase for historical tracking
@@ -2204,25 +2210,6 @@
         const saved = localStorage.getItem('last_audit_results');
         if (saved) {
           const auditData = JSON.parse(saved);
-          
-          // Fix old Trustpilot snapshot data if present (override old cached values)
-          if (auditData.siteReviews) {
-            const oldRating = auditData.siteReviews.siteRating;
-            const oldCount = auditData.siteReviews.siteReviewCount;
-            // If it's the old values (4.8, 127), replace with correct snapshot (4.6, 610)
-            if (oldRating === 4.8 && oldCount === 127) {
-              debugLog(`⚠ Found old Trustpilot data (${oldRating}, ${oldCount}), overriding with correct snapshot (4.6, 610)`, 'warn');
-              auditData.siteReviews = {
-                siteRating: 4.6,
-                siteReviewCount: 610,
-                lastUpdated: '2025-12-07',
-                notes: 'Fixed Trustpilot snapshot for Authority score calculation. Update manually when Trustpilot metrics change significantly.'
-              };
-              // Save the corrected data back to localStorage
-              localStorage.setItem('last_audit_results', JSON.stringify(auditData));
-            }
-          }
-          
           debugLog('✓ Audit results loaded from localStorage', 'success');
           return auditData;
         }
@@ -2550,6 +2537,23 @@
       return Math.round(clampScore(score));
     }
 
+    // Helper function to always return correct Trustpilot snapshot values
+    // This ensures we never use old cached values (4.80, 127) - always use (4.6, 610)
+    function getTrustpilotSnapshot(siteReviews = null) {
+      const TRUSTPILOT_SNAPSHOT = {
+        siteRating: 4.6,
+        siteReviewCount: 610,
+        lastUpdated: '2025-12-07',
+        notes: 'Fixed Trustpilot snapshot for Authority score calculation. Update manually when Trustpilot metrics change significantly.'
+      };
+      
+      // Always return the correct snapshot, regardless of input
+      if (!siteReviews || siteReviews.siteRating !== 4.6 || siteReviews.siteReviewCount !== 610) {
+        return TRUSTPILOT_SNAPSHOT;
+      }
+      return siteReviews;
+    }
+
     function calculatePillarScores(data, schemaAudit = null, localSignals = null, siteReviews = null, backlinkMetrics = null) {
       // Use new API response format - get values from GSC overview
       const position = data.averagePosition || 40; // 1 (best) - 100 (worst)
@@ -2587,9 +2591,10 @@
         ? (localSignals.data.gbpReviewCount !== null && localSignals.data.gbpReviewCount !== undefined ? localSignals.data.gbpReviewCount : null)
         : null;
       
-      // Get site review data (may be null if not available, don't default to 0)
-      const siteRating = siteReviews?.siteRating !== null && siteReviews?.siteRating !== undefined ? siteReviews.siteRating : null;
-      const siteCount = siteReviews?.siteReviewCount !== null && siteReviews?.siteReviewCount !== undefined ? siteReviews.siteReviewCount : null;
+      // Get site review data - ALWAYS use correct Trustpilot snapshot (4.6, 610)
+      const normalizedSiteReviews = getTrustpilotSnapshot(siteReviews);
+      const siteRating = normalizedSiteReviews?.siteRating !== null && normalizedSiteReviews?.siteRating !== undefined ? normalizedSiteReviews.siteRating : null;
+      const siteCount = normalizedSiteReviews?.siteReviewCount !== null && normalizedSiteReviews?.siteReviewCount !== undefined ? normalizedSiteReviews.siteReviewCount : null;
       
       // Calculate review score (handles optional sources internally)
       const reviewScore = computeReviewScore({
@@ -2964,26 +2969,12 @@
               siteReviews = siteReviewsData.data;
               debugLog('✓ Trustpilot snapshot data fetched successfully', 'success');
               debugLog(`Trustpilot snapshot: rating=${siteReviews.siteRating}, count=${siteReviews.siteReviewCount}`, 'info');
-              
-              // Force correct Trustpilot snapshot values (4.6, 610) - override API if it returns old values
-              // This ensures we always use the correct snapshot even if API hasn't deployed yet
-              if (siteReviews.siteRating !== 4.6 || siteReviews.siteReviewCount !== 610) {
-                debugLog(`⚠ API returned old values (${siteReviews.siteRating}, ${siteReviews.siteReviewCount}), overriding with Trustpilot snapshot (4.6, 610)`, 'warn');
-                siteReviews = {
-                  siteRating: 4.6,
-                  siteReviewCount: 610,
-                  lastUpdated: '2025-12-07',
-                  notes: 'Fixed Trustpilot snapshot for Authority score calculation. Update manually when Trustpilot metrics change significantly.'
-                };
-              } else {
-                debugLog('✓ Trustpilot snapshot verified (4.6, 610)', 'success');
-              }
             } else {
               debugLog('⚠ Trustpilot snapshot returned error, using saved data if available', 'warn');
               // Fallback to saved data only if API completely fails
               if (savedAudit?.siteReviews) {
                 siteReviews = savedAudit.siteReviews;
-                debugLog('⚠ Using saved Trustpilot data as fallback (may be outdated)', 'warn');
+                debugLog('⚠ Using saved Trustpilot data as fallback (will override with correct values)', 'warn');
               }
             }
           } else {
@@ -2991,7 +2982,7 @@
             // Fallback to saved data only if API completely fails
             if (savedAudit?.siteReviews) {
               siteReviews = savedAudit.siteReviews;
-              debugLog('⚠ Using saved Trustpilot data as fallback (may be outdated)', 'warn');
+              debugLog('⚠ Using saved Trustpilot data as fallback (will override with correct values)', 'warn');
             }
           }
         } catch (siteReviewsError) {
@@ -2999,19 +2990,28 @@
           // Fallback to saved data only if API completely fails
           if (savedAudit?.siteReviews) {
             siteReviews = savedAudit.siteReviews;
-            debugLog('⚠ Using saved Trustpilot data as fallback (may be outdated)', 'warn');
+            debugLog('⚠ Using saved Trustpilot data as fallback (will override with correct values)', 'warn');
           }
         }
         
-        // If we still don't have siteReviews, use default Trustpilot snapshot values
-        if (!siteReviews) {
-          siteReviews = {
-            siteRating: 4.6,
-            siteReviewCount: 610,
-            lastUpdated: '2025-12-07',
-            notes: 'Default Trustpilot snapshot (API unavailable)'
-          };
-          debugLog('⚠ Using default Trustpilot snapshot values (4.6, 610)', 'warn');
+        // ALWAYS force correct Trustpilot snapshot values (4.6, 610) - override ANY old values
+        // This ensures we always use the correct snapshot regardless of API response or cached data
+        const TRUSTPILOT_SNAPSHOT = {
+          siteRating: 4.6,
+          siteReviewCount: 610,
+          lastUpdated: '2025-12-07',
+          notes: 'Fixed Trustpilot snapshot for Authority score calculation. Update manually when Trustpilot metrics change significantly.'
+        };
+        
+        if (!siteReviews || siteReviews.siteRating !== 4.6 || siteReviews.siteReviewCount !== 610) {
+          if (siteReviews) {
+            debugLog(`⚠ Overriding old Trustpilot values (${siteReviews.siteRating}, ${siteReviews.siteReviewCount}) with correct snapshot (4.6, 610)`, 'warn');
+          } else {
+            debugLog('⚠ Using default Trustpilot snapshot values (4.6, 610)', 'warn');
+          }
+          siteReviews = TRUSTPILOT_SNAPSHOT;
+        } else {
+          debugLog('✓ Trustpilot snapshot verified (4.6, 610)', 'success');
         }
         
         updateProgress(38, 'Fetching backlink metrics data...');
@@ -3361,7 +3361,8 @@
           const savedAudit = loadAuditResults();
           const backlinkMetrics = savedAudit?.backlinkMetrics;
           const localSignals = savedAudit?.localSignals;
-          const siteReviews = savedAudit?.siteReviews;
+          // Always use correct Trustpilot snapshot (4.6, 610) - override any old cached values
+          const siteReviews = getTrustpilotSnapshot(savedAudit?.siteReviews);
           const searchData = savedAudit?.searchData;
           
           // Build breakdown display
@@ -3413,16 +3414,8 @@
           const gbpReviewCount = (localSignals && localSignals.status === 'ok' && localSignals.data) 
             ? (localSignals.data.gbpReviewCount !== null ? localSignals.data.gbpReviewCount : null)
             : null;
-          // Get site review data, but override old cached values (4.8, 127) with correct snapshot (4.6, 610)
-          let siteRating = siteReviews?.siteRating !== null ? siteReviews?.siteRating : null;
-          let siteReviewCount = siteReviews?.siteReviewCount !== null ? siteReviews?.siteReviewCount : null;
-          
-          // Override old Trustpilot snapshot values if detected
-          if (siteRating === 4.8 && siteReviewCount === 127) {
-            debugLog(`⚠ Overriding old Trustpilot data (4.8, 127) with correct snapshot (4.6, 610)`, 'warn');
-            siteRating = 4.6;
-            siteReviewCount = 610;
-          }
+          const siteRating = siteReviews?.siteRating !== null ? siteReviews?.siteRating : null;
+          const siteReviewCount = siteReviews?.siteReviewCount !== null ? siteReviews?.siteReviewCount : null;
           
           authorityDetails = `
             <div style="margin-top: 0.5rem;">
@@ -3744,7 +3737,8 @@
                         const authorityComponents = scores?.authorityComponents;
                         const backlinkMetrics = savedAudit?.backlinkMetrics;
                         const localSignals = savedAudit?.localSignals;
-                        const siteReviews = savedAudit?.siteReviews;
+                        // Always use correct Trustpilot snapshot (4.6, 610) - override any old cached values
+                        const siteReviews = getTrustpilotSnapshot(savedAudit?.siteReviews);
                         
                         // Show component-specific suggestions
                         if (authorityComponents) {
@@ -5106,7 +5100,8 @@
             const currentTopQueries = savedAuditForTrend?.searchData?.topQueries || null;
             const currentBacklinkMetrics = savedAuditForTrend?.backlinkMetrics || null;
             const currentLocalSignals = savedAuditForTrend?.localSignals || null;
-            const currentSiteReviews = savedAuditForTrend?.siteReviews || null;
+            // Always use correct Trustpilot snapshot (4.6, 610) - override any old cached values
+            const currentSiteReviews = getTrustpilotSnapshot(savedAuditForTrend?.siteReviews || null);
             
             timeseries.forEach(point => {
               const pointDate = point.date; // YYYY-MM-DD format
