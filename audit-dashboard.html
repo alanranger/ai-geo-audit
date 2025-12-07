@@ -4686,10 +4686,32 @@
                 </div>
               </div>
               <div style="display: flex; flex-direction: column; align-items: center; gap: 1.5rem; justify-content: center;">
-                <div>
-                  <span class="rag-badge ${aiGeoHealth.aiGeoStatus}" style="display: inline-block; padding: 0.75rem 1.5rem; border-radius: 8px; font-size: 1.25rem; font-weight: 600;">
-                    ${aiGeoHealth.aiGeoStatus === 'green' ? 'Green' : aiGeoHealth.aiGeoStatus === 'amber' ? 'Amber' : 'Red'} (${aiGeoHealth.aiGeoScore}/100)
-                  </span>
+                <div style="text-align: center;">
+                  <div style="font-size: 0.9rem; color: #64748b; margin-bottom: 0.5rem; font-weight: 500;">AI GEO Status:</div>
+                  ${(() => {
+                    // Build AI GEO score breakdown summary
+                    const authorityScore = (typeof scores.authority === 'object' && scores.authority !== null) 
+                      ? scores.authority.score 
+                      : scores.authority || 0;
+                    const contentScore = scores.contentSchema || 0;
+                    const visibilityScore = scores.visibility || 0;
+                    const localEntityScore = scores.localEntity || 0;
+                    const serviceAreaScore = scores.serviceArea || 0;
+                    
+                    const aiGeoBreakdown = `AI GEO Score Breakdown:
+• Authority: ${Math.round(authorityScore)} (30% weight)
+• Content/Schema: ${Math.round(contentScore)} (25% weight)
+• Visibility: ${Math.round(visibilityScore)} (20% weight)
+• Local Entity: ${Math.round(localEntityScore)} (15% weight)
+• Service Area: ${Math.round(serviceAreaScore)} (10% weight)
+Final Score: ${aiGeoHealth.aiGeoScore}/100`;
+                    
+                    return `
+                      <span class="rag-badge ${aiGeoHealth.aiGeoStatus}" style="display: inline-block; padding: 0.75rem 1.5rem; border-radius: 8px; font-size: 1.25rem; font-weight: 600; cursor: help;" title="${aiGeoBreakdown}">
+                        ${aiGeoHealth.aiGeoStatus === 'green' ? 'Green' : aiGeoHealth.aiGeoStatus === 'amber' ? 'Amber' : 'Red'} (${aiGeoHealth.aiGeoScore}/100)
+                      </span>
+                    `;
+                  })()}
                 </div>
                 <div style="text-align: center;">
                   <div style="font-size: 0.9rem; color: #64748b; margin-bottom: 0.5rem; font-weight: 500;">AI summary likelihood:</div>
@@ -4700,10 +4722,21 @@
                     const score = aiSummary.score || 0;
                     const bgColor = label === 'High' ? '#d1fae5' : label === 'Medium' ? '#fef3c7' : '#fee2e2';
                     const textColor = label === 'High' ? '#065f46' : label === 'Medium' ? '#92400e' : '#991b1b';
-                    const tooltipText = `AI summary likelihood: ${label} (score ${score}/100)`;
+                    
+                    // Build AI Summary breakdown
+                    const snippetReadinessScore = snippetReadiness?.overallScore || 0;
+                    const visibilityScore = scores.visibility || 0;
+                    const brandScore = scores.brandOverlay?.score || 0;
+                    
+                    const aiSummaryBreakdown = `AI Summary Likelihood Breakdown:
+• Snippet Readiness: ${Math.round(snippetReadinessScore)} (50% weight)
+• Visibility: ${Math.round(visibilityScore)} (30% weight)
+• Brand & Entity: ${Math.round(brandScore)} (20% weight)
+Final Score: ${score}/100`;
+                    
                     const infoTooltip = 'Based on snippet-friendly content (FAQ / HowTo / Article / Event blocks), how often your content appears in rich results, and the strength of your brand & entity signals (branded searches, reviews, knowledge panel).';
                     return `
-                      <span style="display: inline-block; padding: 0.5rem 1rem; border-radius: 6px; font-size: 1rem; font-weight: 600; background: ${bgColor}; color: ${textColor};" title="${tooltipText}">
+                      <span style="display: inline-block; padding: 0.5rem 1rem; border-radius: 6px; font-size: 1rem; font-weight: 600; background: ${bgColor}; color: ${textColor}; cursor: help;" title="${aiSummaryBreakdown}">
                         ${label} (${score}/100)
                       </span>
                       <span style="font-size: 0.75rem; color: #94a3b8; cursor: help; margin-left: 0.5rem;" title="${infoTooltip}">ℹ️</span>
