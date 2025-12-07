@@ -161,6 +161,12 @@ export default async function handler(req, res) {
       // Get CSV content from request body
       let csvContent;
       
+      console.log('POST request received');
+      console.log('Content-Type:', req.headers['content-type']);
+      console.log('Body type:', typeof req.body);
+      console.log('Body is Buffer:', Buffer.isBuffer(req.body));
+      console.log('Body length:', req.body ? (typeof req.body === 'string' ? req.body.length : 'not string') : 'null/undefined');
+      
       if (req.headers['content-type']?.includes('multipart/form-data')) {
         // Handle multipart form data (file upload)
         // This is a simplified version - in production you might want to use a library like multer
@@ -172,20 +178,30 @@ export default async function handler(req, res) {
         });
       } else {
         // Raw CSV body (text/csv or text/plain)
+        // In Vercel, req.body might be a string or buffer for text/csv
         csvContent = req.body;
         
+        // If body is a Buffer, convert to string
+        if (Buffer.isBuffer(csvContent)) {
+          csvContent = csvContent.toString('utf8');
+          console.log('Converted Buffer to string, length:', csvContent.length);
+        }
+        
         // If body is an object, try to get the CSV from a field
-        if (typeof csvContent === 'object' && csvContent !== null) {
+        if (typeof csvContent === 'object' && csvContent !== null && !Buffer.isBuffer(csvContent)) {
           csvContent = csvContent.csv || csvContent.data || csvContent.body || '';
+          console.log('Extracted from object, length:', typeof csvContent === 'string' ? csvContent.length : 'not string');
         }
         
         // Convert to string if needed
         if (typeof csvContent !== 'string') {
           csvContent = String(csvContent);
+          console.log('Converted to string, length:', csvContent.length);
         }
       }
 
       if (!csvContent || csvContent.trim().length === 0) {
+        console.error('CSV content is empty or missing');
         return res.status(400).json({
           status: 'error',
           source: 'backlink-metrics',
@@ -193,6 +209,9 @@ export default async function handler(req, res) {
           meta: { generatedAt: new Date().toISOString() }
         });
       }
+      
+      console.log('CSV content received, length:', csvContent.length);
+      console.log('First 200 chars:', csvContent.substring(0, 200));
 
       // Parse CSV
       let rows;

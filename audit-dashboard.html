@@ -1619,11 +1619,27 @@
         });
 
         if (!response.ok) {
-          const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
-          throw new Error(errorData.message || `HTTP ${response.status}`);
+          let errorMessage = `HTTP ${response.status}`;
+          try {
+            const errorData = await response.json();
+            errorMessage = errorData.message || errorData.error || errorMessage;
+            debugLog(`API error response: ${JSON.stringify(errorData)}`, 'error');
+          } catch (e) {
+            // If response is not JSON, try to get text
+            try {
+              const errorText = await response.text();
+              if (errorText) {
+                errorMessage = errorText.substring(0, 200);
+              }
+            } catch (e2) {
+              // Ignore
+            }
+          }
+          throw new Error(errorMessage);
         }
 
         const result = await response.json();
+        debugLog(`API response: ${JSON.stringify(result).substring(0, 200)}...`, 'info');
         
         if (result.status === 'ok' && result.data) {
           const metrics = result.data;
@@ -1634,12 +1650,14 @@
           // Store in localStorage for persistence
           localStorage.setItem('backlink_csv_content', csvContent);
         } else {
-          throw new Error(result.message || 'Upload failed');
+          throw new Error(result.message || result.error || 'Upload failed - invalid response format');
         }
       } catch (error) {
-        statusDiv.innerHTML = `<span style="color: #ef4444;">✗ ${error.message}</span>`;
-        debugLog(`✗ Backlink CSV upload error: ${error.message}`, 'error');
-        showStatus(`Backlink CSV error: ${error.message}`, 'error');
+        const errorMsg = error.message || error.toString() || 'Unknown error';
+        statusDiv.innerHTML = `<span style="color: #ef4444;">✗ ${errorMsg}</span>`;
+        debugLog(`✗ Backlink CSV upload error: ${errorMsg}`, 'error');
+        debugLog(`Error stack: ${error.stack || 'No stack trace'}`, 'error');
+        showStatus(`Backlink CSV error: ${errorMsg}`, 'error');
       }
     }
 
