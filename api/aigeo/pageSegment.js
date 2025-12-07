@@ -36,6 +36,34 @@ function normalisePath(rawUrlOrPath) {
 }
 
 /**
+ * Check if a path is a fine-art gallery/portfolio page
+ * These pages showcase fine-art prints and should be treated as informational/portfolio,
+ * not "Money pages" (even though they may have purchase options).
+ * 
+ * @param {string} path - Normalized path (e.g., "/fine-art-prints")
+ * @returns {boolean}
+ */
+function isFineArtGalleryPage(path) {
+  const p = path.toLowerCase();
+
+  // Explicit known fine-art URLs from 06-site-urls.csv
+  if (
+    p === '/fine-art-prints' ||
+    p === '/photography-services-near-me/fine-art-photography-prints-unframed' ||
+    p === '/photography-services-near-me/framed-fine-art-photography-prints' ||
+    p === '/photography-services-near-me/fine-art-photography-prints-canvas'
+  ) {
+    return true;
+  }
+
+  // Safety net: treat any future fine-art print variants as gallery/info too
+  return (
+    p.includes('fine-art-prints') ||
+    p.includes('fine-art-photography-prints')
+  );
+}
+
+/**
  * Main classifier function
  * 
  * @param {string} rawUrlOrPath - Full URL or path
@@ -67,6 +95,10 @@ export function classifyPageSegment(rawUrlOrPath, title = null, kindOverride = n
     return PageSegment.EDUCATION;
   }
 
+  // 1.5) Fine-art gallery pages — portfolio/informational, NOT money pages
+  // These must be checked BEFORE money classification
+  if (isFineArtGalleryPage(path)) return PageSegment.SYSTEM;
+
   // 2) Money — explicit slugs first (hand-picked from 06-site-urls.csv)
   const MONEY_EXACT = new Set([
     // Workshop / lessons / course landing pages
@@ -95,7 +127,7 @@ export function classifyPageSegment(rawUrlOrPath, title = null, kindOverride = n
     '/photography-session-vouchers',
     '/photography-gift-vouchers',
     '/photography-presents-for-photographers',
-    '/fine-art-prints',
+    // NOTE: '/fine-art-prints' removed from MONEY_EXACT - now handled by isFineArtGalleryPage()
     // Location-landing "money" pages you flagged
     '/batsford-arboretum-photography',
     '/bluebell-woods-near-me',
@@ -104,36 +136,39 @@ export function classifyPageSegment(rawUrlOrPath, title = null, kindOverride = n
   if (MONEY_EXACT.has(path)) return PageSegment.MONEY;
 
   // 2b) Money by keyword heuristics (non-blog URLs with clear commercial intent)
-  const MONEY_KEYWORDS = [
-    'workshop',
-    'workshops',
-    'lesson',
-    'lessons',
-    'course',
-    'courses',
-    'course-finder',
-    'class',
-    'classes',
-    'training',
-    'tuition',
-    'mentoring',
-    'academy',
-    'gift-voucher',
-    'gift-vouchers',
-    'presents-for-photographers',
-    'session-vouchers',
-    'photography-services-near-me',
-    'photography-services',
-    'photography-shop',
-    '1-2-1',
-    'hire-a-professional-photographer',
-    'prints',
-    'fine-art-prints',
-    'print-preparation-service',
-    'special-offers',
-  ];
+  // NOTE: Exclude fine-art print pages from keyword matching
+  if (!isFineArtGalleryPage(path)) {
+    const MONEY_KEYWORDS = [
+      'workshop',
+      'workshops',
+      'lesson',
+      'lessons',
+      'course',
+      'courses',
+      'course-finder',
+      'class',
+      'classes',
+      'training',
+      'tuition',
+      'mentoring',
+      'academy',
+      'gift-voucher',
+      'gift-vouchers',
+      'presents-for-photographers',
+      'session-vouchers',
+      'photography-services-near-me',
+      'photography-services',
+      'photography-shop',
+      '1-2-1',
+      'hire-a-professional-photographer',
+      'prints',
+      // NOTE: 'fine-art-prints' removed - fine-art pages handled separately above
+      'print-preparation-service',
+      'special-offers',
+    ];
 
-  if (MONEY_KEYWORDS.some((k) => path.includes(k))) return PageSegment.MONEY;
+    if (MONEY_KEYWORDS.some((k) => path.includes(k))) return PageSegment.MONEY;
+  }
 
   // 3) Support — important but not directly commercial
   const SUPPORT_EXACT = new Set([

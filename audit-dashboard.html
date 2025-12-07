@@ -2422,6 +2422,24 @@
       }
     }
     
+    function isFineArtGalleryPage(path) {
+      const p = path.toLowerCase();
+      // Explicit known fine-art URLs from 06-site-urls.csv
+      if (
+        p === '/fine-art-prints' ||
+        p === '/photography-services-near-me/fine-art-photography-prints-unframed' ||
+        p === '/photography-services-near-me/framed-fine-art-photography-prints' ||
+        p === '/photography-services-near-me/fine-art-photography-prints-canvas'
+      ) {
+        return true;
+      }
+      // Safety net: treat any future fine-art print variants as gallery/info too
+      return (
+        p.includes('fine-art-prints') ||
+        p.includes('fine-art-photography-prints')
+      );
+    }
+    
     function classifyPageSegment(rawUrlOrPath, title = null, kindOverride = null) {
       const path = normalisePath(rawUrlOrPath);
       
@@ -2446,6 +2464,10 @@
         return PageSegment.EDUCATION;
       }
       
+      // Fine-art gallery pages — portfolio/informational, NOT money pages
+      // These must be checked BEFORE money classification
+      if (isFineArtGalleryPage(path)) return PageSegment.SYSTEM;
+      
       // Money — explicit slugs
       const MONEY_EXACT = new Set([
         '/photography-workshops', '/photography-workshops-near-me', '/photography-workshops-uk',
@@ -2457,21 +2479,25 @@
         '/professional-commercial-photographer-coventry', '/professional-photographer-near-me',
         '/coventry-photographer', '/photographer-in-coventry', '/photography-mentoring-programme',
         '/photography-academy-membership', '/photography-academy', '/photography-session-vouchers',
-        '/photography-gift-vouchers', '/photography-presents-for-photographers', '/fine-art-prints',
+        '/photography-gift-vouchers', '/photography-presents-for-photographers',
+        // NOTE: '/fine-art-prints' removed from MONEY_EXACT - now handled by isFineArtGalleryPage()
         '/batsford-arboretum-photography', '/bluebell-woods-near-me',
       ]);
       if (MONEY_EXACT.has(path)) return PageSegment.MONEY;
       
-      // Money by keyword heuristics
-      const MONEY_KEYWORDS = [
-        'workshop', 'workshops', 'lesson', 'lessons', 'course', 'courses', 'course-finder',
-        'class', 'classes', 'training', 'tuition', 'mentoring', 'academy',
-        'gift-voucher', 'gift-vouchers', 'presents-for-photographers', 'session-vouchers',
-        'photography-services-near-me', 'photography-services', 'photography-shop',
-        '1-2-1', 'hire-a-professional-photographer', 'prints', 'fine-art-prints',
-        'print-preparation-service', 'special-offers',
-      ];
-      if (MONEY_KEYWORDS.some((k) => path.includes(k))) return PageSegment.MONEY;
+      // Money by keyword heuristics (exclude fine-art print pages)
+      if (!isFineArtGalleryPage(path)) {
+        const MONEY_KEYWORDS = [
+          'workshop', 'workshops', 'lesson', 'lessons', 'course', 'courses', 'course-finder',
+          'class', 'classes', 'training', 'tuition', 'mentoring', 'academy',
+          'gift-voucher', 'gift-vouchers', 'presents-for-photographers', 'session-vouchers',
+          'photography-services-near-me', 'photography-services', 'photography-shop',
+          '1-2-1', 'hire-a-professional-photographer', 'prints',
+          // NOTE: 'fine-art-prints' removed - fine-art pages handled separately above
+          'print-preparation-service', 'special-offers',
+        ];
+        if (MONEY_KEYWORDS.some((k) => path.includes(k))) return PageSegment.MONEY;
+      }
       
       // Support
       const SUPPORT_EXACT = new Set([
