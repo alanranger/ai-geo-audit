@@ -464,6 +464,20 @@ export default async function handler(req, res) {
           console.error('CSV content length:', csvContent.length);
           console.error('CSV first 500 chars:', csvContent.substring(0, 500));
           console.error('Number of logical lines:', lines.length);
+          
+          // Return debug info in response
+          return res.status(400).json({
+            status: 'error',
+            source: 'backlink-metrics',
+            message: 'No rows parsed from CSV',
+            debug: {
+              csvLength: csvContent.length,
+              logicalLines: lines.length,
+              firstChars: csvContent.substring(0, 500),
+              headers: headers || []
+            },
+            meta: { generatedAt: new Date().toISOString() }
+          });
         }
       } catch (parseError) {
         console.error('CSV parse error:', parseError);
@@ -482,25 +496,16 @@ export default async function handler(req, res) {
       }
 
       if (!rows || rows.length === 0) {
-        // Empty CSV - return default metrics (no data = 0)
-        const defaultMetrics = {
-          referringDomains: 0,
-          totalBacklinks: 0,
-          followRatio: 0, // No data = 0, not 0.5
-          generatedAt: new Date().toISOString()
-        };
-        
-        // Try to write (will fail in Vercel, but that's OK)
-        try {
-          await writeBacklinkMetrics(defaultMetrics);
-        } catch (e) {
-          console.warn('Could not write default metrics (expected in Vercel)');
-        }
-        
-        return res.status(200).json({
-          status: 'ok',
+        // This should not happen if parsing succeeded, but handle it anyway
+        console.error('ERROR: Rows array is empty after parsing!');
+        return res.status(400).json({
+          status: 'error',
           source: 'backlink-metrics',
-          data: defaultMetrics,
+          message: 'No rows parsed from CSV. Check CSV format.',
+          debug: {
+            csvLength: csvContent.length,
+            firstChars: csvContent.substring(0, 500)
+          },
           meta: { generatedAt: new Date().toISOString() }
         });
       }
