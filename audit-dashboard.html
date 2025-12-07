@@ -4786,16 +4786,42 @@
           const tableContainer = document.getElementById('top-pages-table-container');
           if (tableContainer) {
             tableContainer.innerHTML = renderFullWidthTopPagesTable(topPages, segmentLabel, dateRangeText);
-            // attachCopyButtonHandler and attachSortHandlers need to be called, but they're in the createTopPagesSection scope
-            // So we'll call them via setTimeout to ensure they're available
+            // attachCopyButtonHandler and attachSortHandlers are in shared scope, so they're accessible
+            attachSortHandlers();
+            // attachCopyButtonHandler is defined inside createTopPagesSection, so we need to find it or define it globally
+            // For now, attach the copy button handler directly
             setTimeout(() => {
-              if (typeof attachCopyButtonHandler === 'function') {
-                attachCopyButtonHandler();
+              const copyBtn = document.getElementById('top-pages-copy-urls');
+              if (copyBtn) {
+                const newCopyBtn = copyBtn.cloneNode(true);
+                copyBtn.parentNode.replaceChild(newCopyBtn, copyBtn);
+                newCopyBtn.addEventListener('click', async () => {
+                  const currentMode = window.currentAuthorityMode || 'all';
+                  const segData = window.authorityBySegment;
+                  const currentTopPages = currentMode === 'all'
+                    ? (segData?.all?.topPages || [])
+                    : currentMode === 'nonEducation'
+                    ? (segData?.nonEducation?.topPages || [])
+                    : (segData?.money?.topPages || []);
+                  const text = currentTopPages.map(p => p.url).join('\n');
+                  try {
+                    await navigator.clipboard.writeText(text);
+                    newCopyBtn.textContent = 'Copied!';
+                    newCopyBtn.style.color = '#10b981';
+                    setTimeout(() => {
+                      newCopyBtn.textContent = 'Copy URLs';
+                      newCopyBtn.style.color = '#666';
+                    }, 2000);
+                  } catch (err) {
+                    console.error('Failed to copy URLs:', err);
+                    newCopyBtn.textContent = 'Copy failed';
+                    setTimeout(() => {
+                      newCopyBtn.textContent = 'Copy URLs';
+                    }, 2000);
+                  }
+                });
               }
-              if (typeof attachSortHandlers === 'function') {
-                attachSortHandlers();
-              }
-            }, 100);
+            }, 50);
           } else {
             console.error('top-pages-table-container not found');
           }
