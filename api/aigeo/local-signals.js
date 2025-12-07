@@ -110,6 +110,8 @@ export default async function handler(req, res) {
     let serviceAreas = [];
     let napData = [];
     let locationsToProcess = []; // Initialize to avoid undefined errors
+    let gbpRating = null; // Declare at top level so fallback can access it
+    let gbpReviewCount = null; // Declare at top level so fallback can access it
     
     if (locationsResponse.ok) {
       const locationsData = await locationsResponse.json();
@@ -174,8 +176,6 @@ export default async function handler(req, res) {
       // Extract rating and review count from location details
       // Note: The Business Information API may not include rating/review count in location details
       // We need to check the actual response structure or use a different endpoint
-      let gbpRating = null;
-      let gbpReviewCount = null;
       
       // Try to fetch GBP rating/review count from API (wrapped in try/catch so failures don't crash endpoint)
       try {
