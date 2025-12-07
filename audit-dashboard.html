@@ -5271,9 +5271,53 @@
                 allDateObjects.push(dateObj);
                 allDates.push(dateObj.toLocaleDateString('en-GB', dateFormat));
                 
-                // For GSC-based pillars (Authority, Visibility), add null (no data yet due to GSC delay)
-                authorityData.push(null);
-                visibilityData.push(null);
+                // For GSC-based pillars (Authority, Visibility), use current audit data if available
+                // Check if this is today or recent date - if so, use current audit data
+                const isTodayOrRecent = dateStr === todayStr || (currentDate >= lastDate && currentDate <= today);
+                if (isTodayOrRecent && savedAuditForTrend) {
+                  // Use current audit data for Authority and Visibility
+                  const currentSearchData = savedAuditForTrend?.searchData;
+                  const currentScores = savedAuditForTrend?.scores;
+                  
+                  if (currentSearchData) {
+                    // Calculate Visibility from current position
+                    const currentPosition = currentSearchData.averagePosition || 40;
+                    const clampedPos = Math.max(1, Math.min(40, currentPosition));
+                    const scale = (clampedPos - 1) / 39;
+                    const posScore = 100 - scale * 90;
+                    const visibility = clampScore(posScore);
+                    visibilityData.push(visibility);
+                    debugLog(`✓ Added Visibility score (${visibility}) for ${dateStr} from current audit`, 'info');
+                    
+                    // Calculate Authority from current audit scores
+                    const currentAuthority = currentScores?.authority || null;
+                    if (currentAuthority !== null && currentAuthority !== undefined) {
+                      authorityData.push(currentAuthority);
+                      debugLog(`✓ Added Authority score (${currentAuthority}) for ${dateStr} from current audit`, 'info');
+                    } else {
+                      // Fallback: calculate Authority from current data
+                      const pillarScores = calculatePillarFromMetrics(
+                        currentPosition,
+                        currentSearchData.ctr || 0,
+                        dateStr,
+                        currentTopQueries,
+                        currentBacklinkMetrics,
+                        currentLocalSignals,
+                        currentSiteReviews
+                      );
+                      authorityData.push(pillarScores.authority);
+                      debugLog(`✓ Calculated Authority score (${pillarScores.authority}) for ${dateStr} from current audit data`, 'info');
+                    }
+                  } else {
+                    // No current search data - use null
+                    authorityData.push(null);
+                    visibilityData.push(null);
+                  }
+                } else {
+                  // Not today/recent - no data yet due to GSC delay
+                  authorityData.push(null);
+                  visibilityData.push(null);
+                }
                 
                 // For Local Entity and Service Area, check if we have historical data from Supabase
                 const historicalLocalEntity = localEntityMap.get(dateStr);
@@ -5320,9 +5364,50 @@
               allDateObjects.push(todayDateObj);
               allDates.push(todayDateObj.toLocaleDateString('en-GB', dateFormat));
               
-              // For GSC-based pillars (Authority, Visibility), add null
-              authorityData.push(null);
-              visibilityData.push(null);
+              // For GSC-based pillars (Authority, Visibility), use current audit data if available
+              if (savedAuditForTrend) {
+                const currentSearchData = savedAuditForTrend?.searchData;
+                const currentScores = savedAuditForTrend?.scores;
+                
+                if (currentSearchData) {
+                  // Calculate Visibility from current position
+                  const currentPosition = currentSearchData.averagePosition || 40;
+                  const clampedPos = Math.max(1, Math.min(40, currentPosition));
+                  const scale = (clampedPos - 1) / 39;
+                  const posScore = 100 - scale * 90;
+                  const visibility = clampScore(posScore);
+                  visibilityData.push(visibility);
+                  debugLog(`✓ Added Visibility score (${visibility}) for today from current audit`, 'info');
+                  
+                  // Use current Authority score if available
+                  const currentAuthority = currentScores?.authority || null;
+                  if (currentAuthority !== null && currentAuthority !== undefined) {
+                    authorityData.push(currentAuthority);
+                    debugLog(`✓ Added Authority score (${currentAuthority}) for today from current audit`, 'info');
+                  } else {
+                    // Fallback: calculate Authority from current data
+                    const pillarScores = calculatePillarFromMetrics(
+                      currentPosition,
+                      currentSearchData.ctr || 0,
+                      todayStr,
+                      currentTopQueries,
+                      currentBacklinkMetrics,
+                      currentLocalSignals,
+                      currentSiteReviews
+                    );
+                    authorityData.push(pillarScores.authority);
+                    debugLog(`✓ Calculated Authority score (${pillarScores.authority}) for today from current audit data`, 'info');
+                  }
+                } else {
+                  // No current search data - use null
+                  authorityData.push(null);
+                  visibilityData.push(null);
+                }
+              } else {
+                // No saved audit data - use null
+                authorityData.push(null);
+                visibilityData.push(null);
+              }
               
               // For today, use current Business Profile data if available, otherwise calculated
               if (currentLocalEntity !== null) {
