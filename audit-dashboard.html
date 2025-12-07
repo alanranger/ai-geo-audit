@@ -4519,15 +4519,28 @@
       
       // Function to create Top Pages section (full width, below pillar cards)
       function createTopPagesSection(scores, saved) {
-        // Get Authority segment data
+        // Get Authority segment data from current scores (latest snapshot, not historical)
+        // This uses the most recent audit data, not historical Supabase data
         const authorityObj = scores?.authority;
-        const authorityBySegment = (typeof authorityObj === 'object' && authorityObj !== null) 
+        let authorityBySegment = (typeof authorityObj === 'object' && authorityObj !== null) 
           ? authorityObj.bySegment 
           : null;
         
+        // If no segment data in scores, try to get from saved audit (latest audit data from localStorage)
+        if (!authorityBySegment && saved) {
+          const savedScores = saved.scores;
+          if (savedScores && savedScores.authority) {
+            const savedAuthorityObj = savedScores.authority;
+            if (typeof savedAuthorityObj === 'object' && savedAuthorityObj !== null) {
+              authorityBySegment = savedAuthorityObj.bySegment || null;
+              debugLog('📊 Top Pages: Using Authority segment data from saved audit (latest snapshot)', 'info');
+            }
+          }
+        }
+        
         if (!authorityBySegment) {
-          debugLog('⚠ No Authority segment data available for Top Pages table', 'warn');
-          return;
+          debugLog('⚠ No Authority segment data available for Top Pages table. This requires GSC queryPages data from your most recent audit.', 'warn');
+          // Still create the section but show a helpful message - don't return early
         }
         
         // Remove existing top pages section if it exists
@@ -4720,15 +4733,28 @@
       
       // Function to create Top Pages section (full width, below pillar cards)
       function createTopPagesSection(scores, saved) {
-        // Get Authority segment data
+        // Get Authority segment data from current scores (latest snapshot, not historical)
+        // This uses the most recent audit data, not historical Supabase data
         const authorityObj = scores?.authority;
-        const authorityBySegment = (typeof authorityObj === 'object' && authorityObj !== null) 
+        let authorityBySegment = (typeof authorityObj === 'object' && authorityObj !== null) 
           ? authorityObj.bySegment 
           : null;
         
+        // If no segment data in scores, try to get from saved audit (latest audit data from localStorage)
+        if (!authorityBySegment && saved) {
+          const savedScores = saved.scores;
+          if (savedScores && savedScores.authority) {
+            const savedAuthorityObj = savedScores.authority;
+            if (typeof savedAuthorityObj === 'object' && savedAuthorityObj !== null) {
+              authorityBySegment = savedAuthorityObj.bySegment || null;
+              debugLog('📊 Top Pages: Using Authority segment data from saved audit (latest snapshot)', 'info');
+            }
+          }
+        }
+        
         if (!authorityBySegment) {
-          debugLog('⚠ No Authority segment data available for Top Pages table', 'warn');
-          return;
+          debugLog('⚠ No Authority segment data available for Top Pages table. This requires GSC queryPages data from your most recent audit.', 'warn');
+          // Still create the section but show a helpful message - don't return early
         }
         
         // Remove existing top pages section if it exists
