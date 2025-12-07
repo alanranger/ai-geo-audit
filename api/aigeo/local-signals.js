@@ -236,6 +236,26 @@ export default async function handler(req, res) {
         console.log('[Local Signals] GBP Rating:', gbpRating, 'Review Count:', gbpReviewCount);
       }
       
+      // Fallback to static JSON file if API didn't return rating/review count
+      if ((gbpRating === null || gbpRating === 0) || (gbpReviewCount === null || gbpReviewCount === 0)) {
+        try {
+          const gbpReviewsPath = path.join(process.cwd(), 'data', 'gbp-reviews.json');
+          const gbpReviewsContent = fs.readFileSync(gbpReviewsPath, 'utf8');
+          const gbpReviews = JSON.parse(gbpReviewsContent);
+          
+          if (gbpReviews.gbpRating && (gbpRating === null || gbpRating === 0)) {
+            gbpRating = parseFloat(gbpReviews.gbpRating);
+            console.log('[Local Signals] Using GBP rating from fallback file:', gbpRating);
+          }
+          if (gbpReviews.gbpReviewCount && (gbpReviewCount === null || gbpReviewCount === 0)) {
+            gbpReviewCount = parseInt(gbpReviews.gbpReviewCount);
+            console.log('[Local Signals] Using GBP review count from fallback file:', gbpReviewCount);
+          }
+        } catch (fileError) {
+          console.warn('[Local Signals] Could not read gbp-reviews.json fallback file:', fileError.message);
+        }
+      }
+      
       // Extract service areas and NAP data
       locationsToProcess.forEach(location => {
         // Service areas - check both SERVICE_AREA_BUSINESS and places data
