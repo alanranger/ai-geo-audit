@@ -4156,14 +4156,13 @@
           <div style="text-align: center; margin-bottom: 3rem; padding: 2rem 0; border-bottom: 2px solid #e2e8f0;">
             <div style="display: flex; align-items: center; justify-content: center; gap: 4rem; margin-bottom: 2rem; flex-wrap: wrap;">
               <!-- Circular Progress Ring - Speedometer Style -->
-              <div style="position: relative; width: 340px; height: 340px; margin: 0 auto;">
+              <div style="position: relative; width: 400px; height: 400px; margin: 0 auto; overflow: visible;">
                 ${(() => {
                   const score = aiGeoHealth.aiGeoScore;
-                  const center = 170;
-                  const radius = 140;
-                  const strokeWidth = 18;
+                  const center = 200;
+                  const radius = 150;
+                  const strokeWidth = 20;
                   const normalizedRadius = radius - strokeWidth / 2;
-                  const circumference = normalizedRadius * 2 * Math.PI;
                   
                   // Determine colors based on status
                   const color = aiGeoHealth.aiGeoStatus === 'green' ? '#10b981' : 
@@ -4172,22 +4171,34 @@
                                  aiGeoHealth.aiGeoStatus === 'amber' ? '#fef3c7' : '#fee2e2';
                   
                   // Angle calculations: 0% at 12:05 (-85°), 50% at 6pm (90°), 100% at 12pm (-90°)
-                  // Progress goes clockwise from 0% to 100%
-                  const startAngle = -85; // 12:05 position (5 minutes past 12)
-                  const endAngle = -90; // 12pm position
+                  const startAngle = -85; // 12:05 position
+                  const endAngle = -90;   // 12pm position
                   const angleRange = 360 - 5; // Full circle minus 5° gap
                   
-                  // Segment lengths as percentages of circumference
-                  const redLength = circumference * 0.5;      // 0-50%
-                  const amberLength = circumference * 0.2;     // 50-70%
-                  const greenLength = circumference * 0.3;      // 70-100%
+                  // Helper function to create arc path
+                  const createArc = (start, end, r) => {
+                    const startRad = (start * Math.PI) / 180;
+                    const endRad = (end * Math.PI) / 180;
+                    const largeArc = Math.abs(end - start) > 180 ? 1 : 0;
+                    const x1 = center + r * Math.cos(startRad);
+                    const y1 = center + r * Math.sin(startRad);
+                    const x2 = center + r * Math.cos(endRad);
+                    const y2 = center + r * Math.sin(endRad);
+                    return `M ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2}`;
+                  };
                   
-                  // Calculate dash offsets to position segments correctly
-                  // Start from 12:05, so we need to offset by the start angle
-                  const startOffset = (startAngle + 90) / 360 * circumference;
+                  // Calculate segment angles
+                  const angle0 = startAngle;
+                  const angle50 = startAngle + angleRange * 0.5;
+                  const angle70 = startAngle + angleRange * 0.7;
+                  const angle100 = startAngle + angleRange;
+                  
+                  // Calculate current score angle
+                  const scoreAngle = startAngle + (score / 100) * angleRange;
+                  const scoreRad = (scoreAngle * Math.PI) / 180;
                   
                   return `
-                    <svg width="340" height="340" style="filter: drop-shadow(0 4px 12px rgba(0,0,0,0.08));">
+                    <svg width="400" height="400" style="filter: drop-shadow(0 4px 12px rgba(0,0,0,0.08)); overflow: visible;">
                       <!-- Background circle -->
                       <circle
                         cx="${center}"
@@ -4199,68 +4210,31 @@
                       />
                       
                       <!-- Red segment: 0-50% -->
-                      <circle
-                        cx="${center}"
-                        cy="${center}"
-                        r="${normalizedRadius}"
+                      <path
+                        d="${createArc(angle0, angle50, normalizedRadius)}"
                         fill="none"
                         stroke="#ef4444"
                         stroke-width="${strokeWidth}"
-                        stroke-dasharray="${redLength} ${circumference - redLength}"
-                        stroke-dashoffset="${-startOffset}"
                         stroke-linecap="round"
-                        transform="rotate(-90 ${center} ${center})"
                       />
                       
                       <!-- Amber segment: 50-70% -->
-                      <circle
-                        cx="${center}"
-                        cy="${center}"
-                        r="${normalizedRadius}"
+                      <path
+                        d="${createArc(angle50, angle70, normalizedRadius)}"
                         fill="none"
                         stroke="#f59e0b"
                         stroke-width="${strokeWidth}"
-                        stroke-dasharray="${amberLength} ${circumference - amberLength}"
-                        stroke-dashoffset="${-startOffset - redLength}"
                         stroke-linecap="round"
-                        transform="rotate(-90 ${center} ${center})"
                       />
                       
                       <!-- Green segment: 70-100% -->
-                      <circle
-                        cx="${center}"
-                        cy="${center}"
-                        r="${normalizedRadius}"
+                      <path
+                        d="${createArc(angle70, angle100, normalizedRadius)}"
                         fill="none"
                         stroke="#10b981"
                         stroke-width="${strokeWidth}"
-                        stroke-dasharray="${greenLength} ${circumference - greenLength}"
-                        stroke-dashoffset="${-startOffset - redLength - amberLength}"
                         stroke-linecap="round"
-                        transform="rotate(-90 ${center} ${center})"
                       />
-                      
-                      <!-- Progress indicator (current score) - thicker overlay -->
-                      ${score > 0 ? (() => {
-                        const progressLength = (score / 100) * circumference * (angleRange / 360);
-                        const progressOffset = circumference - progressLength + startOffset;
-                        return `
-                          <circle
-                            cx="${center}"
-                            cy="${center}"
-                            r="${normalizedRadius}"
-                            fill="none"
-                            stroke="${color}"
-                            stroke-width="${strokeWidth + 3}"
-                            stroke-dasharray="${progressLength} ${circumference}"
-                            stroke-dashoffset="${progressOffset}"
-                            stroke-linecap="round"
-                            opacity="0.95"
-                            transform="rotate(-90 ${center} ${center})"
-                            style="transition: stroke-dashoffset 1.2s cubic-bezier(0.4, 0, 0.2, 1); filter: drop-shadow(0 0 10px ${color}70);"
-                          />
-                        `;
-                      })() : ''}
                       
                       <!-- Proportional tick marks (every 10%) -->
                       <g>
@@ -4269,8 +4243,8 @@
                           const angle = startAngle + (value / 100) * angleRange;
                           const rad = (angle * Math.PI) / 180;
                           const isMajor = value % 50 === 0;
-                          const tickLength = isMajor ? 20 : 12;
-                          const tickWidth = isMajor ? 3 : 2;
+                          const tickLength = isMajor ? 22 : 14;
+                          const tickWidth = isMajor ? 3.5 : 2;
                           
                           const tickX1 = center + (normalizedRadius - tickLength) * Math.cos(rad);
                           const tickY1 = center + (normalizedRadius - tickLength) * Math.sin(rad);
@@ -4287,29 +4261,49 @@
                         }).join('')}
                       </g>
                       
+                      <!-- Needle indicator for current score -->
+                      <g>
+                        <line
+                          x1="${center}"
+                          y1="${center}"
+                          x2="${center + (normalizedRadius + 15) * Math.cos(scoreRad)}"
+                          y2="${center + (normalizedRadius + 15) * Math.sin(scoreRad)}"
+                          stroke="${color}"
+                          stroke-width="4"
+                          stroke-linecap="round"
+                          style="filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2)); transition: all 1.2s cubic-bezier(0.4, 0, 0.2, 1);"
+                        />
+                        <!-- Needle center dot -->
+                        <circle
+                          cx="${center}"
+                          cy="${center}"
+                          r="8"
+                          fill="${color}"
+                          style="filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));"
+                        />
+                      </g>
+                      
                       <!-- Major labels: 0%, 50%, 100% -->
                       <g>
                         ${(() => {
                           const majorMarkers = [
-                            { value: 0, angle: startAngle },      // 12:05
-                            { value: 50, angle: startAngle + angleRange * 0.5 },  // 6pm
-                            { value: 100, angle: startAngle + angleRange }        // 12pm
+                            { value: 0, angle: angle0, color: '#ef4444' },      // 12:05
+                            { value: 50, angle: angle50, color: '#f59e0b' },   // 6pm
+                            { value: 100, angle: angle100, color: '#10b981' }  // 12pm
                           ];
                           
                           return majorMarkers.map(m => {
                             const rad = (m.angle * Math.PI) / 180;
-                            const labelOffset = 38;
+                            const labelOffset = 50; // Increased for better spacing
                             const labelX = center + (normalizedRadius + labelOffset) * Math.cos(rad);
                             const labelY = center + (normalizedRadius + labelOffset) * Math.sin(rad);
-                            
-                            // Determine color for label
-                            const labelColor = m.value === 0 ? '#ef4444' : m.value === 50 ? '#f59e0b' : '#10b981';
                             
                             return `
                               <text x="${labelX}" y="${labelY}" 
                                     text-anchor="middle" dominant-baseline="middle"
-                                    fill="${labelColor}" 
-                                    font-size="16" font-weight="700">${m.value}</text>
+                                    fill="${m.color}" 
+                                    font-size="18" font-weight="700"
+                                    style="text-shadow: 0 1px 2px rgba(255,255,255,0.8);">${m.value}</text>
                             `;
                           }).join('');
                         })()}
