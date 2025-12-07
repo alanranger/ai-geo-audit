@@ -119,6 +119,26 @@ export default async function handler(req, res) {
       updated_at: new Date().toISOString()
     };
 
+    // Debug: Log authority_by_segment structure for verification
+    if (auditRecord.authority_by_segment) {
+      const segKeys = Object.keys(auditRecord.authority_by_segment);
+      console.log('[Supabase Save] ✓ authority_by_segment contains segments:', segKeys);
+      if (auditRecord.authority_by_segment.all) {
+        const allKeys = Object.keys(auditRecord.authority_by_segment.all);
+        console.log('[Supabase Save] ✓ "all" segment contains:', allKeys);
+      }
+      if (auditRecord.authority_by_segment.nonEducation) {
+        const nonEduKeys = Object.keys(auditRecord.authority_by_segment.nonEducation);
+        console.log('[Supabase Save] ✓ "nonEducation" segment contains:', nonEduKeys);
+      }
+      if (auditRecord.authority_by_segment.money) {
+        const moneyKeys = Object.keys(auditRecord.authority_by_segment.money);
+        console.log('[Supabase Save] ✓ "money" segment contains:', moneyKeys);
+      }
+    } else {
+      console.log('[Supabase Save] ⚠ authority_by_segment is null or missing');
+    }
+
     // Insert or update (upsert) using Supabase REST API
     // Strategy: Try to UPDATE first (PATCH), if no rows affected, then INSERT
     // This ensures only ONE record per (property_url, audit_date) combination
