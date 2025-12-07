@@ -3277,6 +3277,29 @@
         debugLog('⚠ No schema audit data available, Content/Schema score set to 0', 'warn');
       }
 
+      // Extract coverage and diversity scores from contentSchema calculation for AI GEO health
+      let coverageScore = 0;
+      let diversityScore = 0;
+      if (schemaAudit && schemaAudit.status === 'ok' && schemaAudit.data) {
+        const schemaData = schemaAudit.data;
+        // Coverage: Pages with schema / total pages (0-100)
+        coverageScore = schemaData.coverage || 0;
+        
+        // Diversity: Number of unique schema types (normalized to 15 types, 0-100)
+        const allTypes = new Set();
+        if (schemaData.allDetectedTypes && Array.isArray(schemaData.allDetectedTypes)) {
+          schemaData.allDetectedTypes.forEach(type => {
+            if (type) allTypes.add(type);
+          });
+        } else if (schemaData.schemaTypes && Array.isArray(schemaData.schemaTypes)) {
+          schemaData.schemaTypes.forEach(item => {
+            if (item.type) allTypes.add(item.type);
+          });
+        }
+        const uniqueTypesCount = allTypes.size;
+        diversityScore = Math.min((uniqueTypesCount / 15) * 100, 100);
+      }
+
       const scores = {
         localEntity,
         serviceArea,
@@ -3287,11 +3310,90 @@
         visibility,
         contentSchema,
         // Authority component scores for historical tracking (backward compatible)
-        authorityComponents: authorityComponents
+        authorityComponents: authorityComponents,
+        // AI GEO health components (extracted from contentSchema)
+        coverage: coverageScore,
+        diversity: diversityScore
       };
 
       debugLog(`Deterministic pillar scores: ${JSON.stringify(scores)}`, 'info');
       return scores;
+    }
+    
+    // Calculate AI GEO Health Score
+    function calculateAiGeoScore(scores, schemaAudit = null) {
+      // AI GEO weights
+      const AIGEO_WEIGHTS = {
+        authority: 0.30,
+        content: 0.25,
+        coverage: 0.15,
+        diversity: 0.15,
+        locations: 0.15
+      };
+      
+      // Extract scores
+      const authorityScore = (typeof scores.authority === 'object' && scores.authority !== null) 
+        ? scores.authority.score 
+        : scores.authority || 0;
+      const contentScore = scores.contentSchema || 0;
+      
+      // Extract coverage and diversity from schema audit or scores
+      let coverage = scores.coverage || 0;
+      let diversity = scores.diversity || 0;
+      if (schemaAudit && schemaAudit.status === 'ok' && schemaAudit.data) {
+        const schemaData = schemaAudit.data;
+        coverage = schemaData.coverage || 0;
+        const allTypes = new Set();
+        if (schemaData.allDetectedTypes && Array.isArray(schemaData.allDetectedTypes)) {
+          schemaData.allDetectedTypes.forEach(type => {
+            if (type) allTypes.add(type);
+          });
+        } else if (schemaData.schemaTypes && Array.isArray(schemaData.schemaTypes)) {
+          schemaData.schemaTypes.forEach(item => {
+            if (item.type) allTypes.add(item.type);
+          });
+        }
+        const uniqueTypesCount = allTypes.size;
+        diversity = Math.min((uniqueTypesCount / 15) * 100, 100);
+      }
+      
+      // Locations: average of localEntity and serviceArea
+      const locationsScore = ((scores.localEntity || 0) + (scores.serviceArea || 0)) / 2;
+      
+      // Calculate weighted score
+      const aiGeoScore = Math.round(
+        authorityScore * AIGEO_WEIGHTS.authority +
+        contentScore * AIGEO_WEIGHTS.content +
+        coverage * AIGEO_WEIGHTS.coverage +
+        diversity * AIGEO_WEIGHTS.diversity +
+        locationsScore * AIGEO_WEIGHTS.locations
+      );
+      
+      return {
+        aiGeoScore,
+        aiGeoStatus: aiGeoScore >= 70 ? 'green' : aiGeoScore >= 50 ? 'amber' : 'red',
+        aiSummaryLikelihood: calculateAiSummaryLikelihood({
+          aiGeoScore,
+          authority: authorityScore,
+          content: contentScore,
+          coverage: coverage
+        })
+      };
+    }
+    
+    // Calculate AI Summary Likelihood
+    function calculateAiSummaryLikelihood({ aiGeoScore, authority, content, coverage }) {
+      const strongAuthority = authority >= 65;
+      const strongContent = content >= 70;
+      const strongCoverage = coverage >= 80;
+      
+      if (aiGeoScore >= 75 && strongAuthority && strongContent && strongCoverage) {
+        return 'high';
+      }
+      if (aiGeoScore >= 55) {
+        return 'medium';
+      }
+      return 'low';
     }
 
     function calculateSnippetReadiness(scores, data) {
@@ -3871,7 +3973,270 @@
           });
       };
 
-      // Create pillar cards (ordered by weight)
+      // Calculate AI GEO Health Score
+      const aiGeoHealth = calculateAiGeoScore(scores, schemaAudit);
+      debugLog(`AI GEO Health: Score=${aiGeoHealth.aiGeoScore}, Status=${aiGeoHealth.aiGeoStatus}, Likelihood=${aiGeoHealth.aiSummaryLikelihood}`, 'info');
+      
+      // Extract component scores for health dashboard
+      const authorityScore = (typeof scores.authority === 'object' && scores.authority !== null) 
+        ? scores.authority.score 
+        : scores.authority || 0;
+      const contentScore = scores.contentSchema || 0;
+      const coverageScore = scores.coverage || 0;
+      const diversityScore = scores.diversity || 0;
+      const locationsScore = ((scores.localEntity || 0) + (scores.serviceArea || 0)) / 2;
+      
+      // Create AI GEO Health Dashboard (insert before pillar cards)
+      const healthDashboard = document.createElement('div');
+      healthDashboard.id = 'ai-geo-health-dashboard';
+      healthDashboard.style.marginBottom = '2rem';
+      
+      // Get pillar hints/comments for the comparison table
+      const getPillarHint = (pillarKey, score, scoresObj, schemaAuditData, localSignalsData) => {
+        switch(pillarKey) {
+          case 'authority':
+            const authComponents = scoresObj?.authorityComponents;
+            if (authComponents) {
+              if (authComponents.behaviour < 30 && authComponents.backlinks >= 50 && authComponents.reviews >= 50) {
+                return 'Backlinks and reviews strong; CTR weak';
+              } else if (authComponents.behaviour >= 50 && authComponents.ranking < 30) {
+                return 'CTR strong; ranking needs improvement';
+              } else if (authComponents.behaviour < 30) {
+                return 'Behaviour is weak; backlinks/reviews strong';
+              }
+            }
+            return 'E-A-T signals balanced';
+          case 'content':
+            if (score >= 90) return 'Fully structured, rich schema';
+            if (score >= 70) return 'Good schema coverage';
+            return 'Schema needs improvement';
+          case 'coverage':
+            if (score >= 90) return 'All priority pages ingested';
+            if (score >= 70) return 'Most pages covered';
+            return 'Coverage gaps present';
+          case 'diversity':
+            if (score >= 80) return 'Good mix of topics and formats';
+            if (score >= 60) return 'Moderate diversity';
+            return 'Limited schema diversity';
+          case 'locations':
+            if (score >= 85) return 'GBP + core locations covered well';
+            if (score >= 70) return 'Local entity and service areas solid';
+            return 'Location signals need strengthening';
+          default:
+            return '';
+        }
+      };
+      
+      // Generate priorities list from pillar diagnostics
+      const getPriorities = (scoresObj, schemaAuditData, localSignalsData, authorityComponents) => {
+        const priorities = [];
+        
+        // Authority priorities
+        if (authorityComponents) {
+          if (authorityComponents.behaviour < 30) {
+            priorities.push({
+              pillar: 'Authority',
+              severity: 'high',
+              message: 'Improve Top-10 CTR on money pages (Authority → Behaviour table, status = Poor)',
+              link: '#authority-top-pages-section'
+            });
+          }
+          if (authorityComponents.ranking < 30) {
+            priorities.push({
+              pillar: 'Authority',
+              severity: 'medium',
+              message: 'Improve average position and top-10 impression share',
+              link: '#authority-top-pages-section'
+            });
+          }
+        }
+        
+        // Content/Schema priorities
+        if (schemaAuditData && schemaAuditData.status === 'ok' && schemaAuditData.data) {
+          const schemaData = schemaAuditData.data;
+          if (schemaData.coverage < 100) {
+            // Use missingSchemaCount if available, otherwise calculate from coverage
+            const missingCount = schemaData.missingSchemaCount || 
+              (schemaData.totalPages ? Math.round((100 - schemaData.coverage) / 100 * schemaData.totalPages) : 0);
+            priorities.push({
+              pillar: 'Content',
+              severity: 'medium',
+              message: `Add schema to ${missingCount > 0 ? missingCount : 'remaining'} pages (Content/Schema → coverage ${schemaData.coverage.toFixed(0)}%)`,
+              link: '#pillarCards'
+            });
+          }
+          const foundationTypes = ['Organization', 'Person', 'WebSite', 'BreadcrumbList'];
+          const allTypes = new Set();
+          if (schemaData.allDetectedTypes && Array.isArray(schemaData.allDetectedTypes)) {
+            schemaData.allDetectedTypes.forEach(type => {
+              if (type) allTypes.add(type);
+            });
+          } else if (schemaData.schemaTypes && Array.isArray(schemaData.schemaTypes)) {
+            schemaData.schemaTypes.forEach(item => {
+              if (item.type) allTypes.add(item.type);
+            });
+          }
+          const foundationPresent = foundationTypes.filter(type => allTypes.has(type)).length;
+          if (foundationPresent < 4) {
+            priorities.push({
+              pillar: 'Content',
+              severity: 'high',
+              message: `Add missing foundation schemas: ${foundationTypes.filter(t => !allTypes.has(t)).join(', ')}`,
+              link: '#pillarCards'
+            });
+          }
+        }
+        
+        // Locations priorities
+        if (localSignalsData) {
+          if (localSignalsData.napConsistencyScore < 100) {
+            priorities.push({
+              pillar: 'Locations',
+              severity: 'medium',
+              message: `Improve NAP consistency (currently ${localSignalsData.napConsistencyScore}%)`,
+              link: '#pillarCards'
+            });
+          }
+          const serviceAreasCount = localSignalsData.serviceAreas?.length || 0;
+          if (serviceAreasCount < 5) {
+            priorities.push({
+              pillar: 'Locations',
+              severity: 'low',
+              message: `Add more service areas to Google Business Profile (currently ${serviceAreasCount}, target: 5+)`,
+              link: '#pillarCards'
+            });
+          }
+        }
+        
+        // Sort by severity (high > medium > low) and limit to top 5
+        const severityOrder = { high: 3, medium: 2, low: 1 };
+        return priorities
+          .sort((a, b) => severityOrder[b.severity] - severityOrder[a.severity])
+          .slice(0, 5);
+      };
+      
+      const priorities = getPriorities(scores, schemaAudit, localSignalsData, scores.authorityComponents);
+      
+      healthDashboard.innerHTML = `
+        <div style="background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 2rem;">
+          <!-- AI GEO Health Top Card -->
+          <div style="text-align: center; margin-bottom: 2rem; padding-bottom: 2rem; border-bottom: 2px solid #e2e8f0;">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 1rem; margin-bottom: 1rem;">
+              <h2 style="margin: 0; font-size: 3rem; font-weight: 700; color: #1e293b;">${aiGeoHealth.aiGeoScore}</h2>
+              <span class="rag-badge ${aiGeoHealth.aiGeoStatus}" style="display: inline-block; padding: 0.5rem 1rem; border-radius: 6px; font-size: 1rem; font-weight: 600;">
+                ${aiGeoHealth.aiGeoStatus === 'green' ? 'Green' : aiGeoHealth.aiGeoStatus === 'amber' ? 'Amber' : 'Red'}
+              </span>
+            </div>
+            <p style="margin: 0 0 0.5rem 0; font-size: 0.95rem; color: #475569; font-weight: 500;">
+              Based on Authority, Content & Schema, Coverage, Diversity and Locations.
+            </p>
+            <div style="display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
+              <span style="font-size: 0.9rem; color: #64748b; font-weight: 500;">AI summary likelihood:</span>
+              <span style="display: inline-block; padding: 0.35rem 0.75rem; border-radius: 4px; font-size: 0.85rem; font-weight: 600; background: ${aiGeoHealth.aiSummaryLikelihood === 'high' ? '#d1fae5' : aiGeoHealth.aiSummaryLikelihood === 'medium' ? '#fef3c7' : '#fee2e2'}; color: ${aiGeoHealth.aiSummaryLikelihood === 'high' ? '#065f46' : aiGeoHealth.aiSummaryLikelihood === 'medium' ? '#92400e' : '#991b1b'};">
+                ${aiGeoHealth.aiSummaryLikelihood === 'high' ? 'High' : aiGeoHealth.aiSummaryLikelihood === 'medium' ? 'Medium' : 'Low'}
+              </span>
+              <span style="font-size: 0.75rem; color: #94a3b8; cursor: help;" title="High = score ≥75 and solid content/coverage. Medium = score ≥55. Low = score <55.">ℹ️</span>
+            </div>
+          </div>
+          
+          <!-- Pillar Snapshot Strip -->
+          <div style="margin-bottom: 2rem;">
+            <h3 style="margin: 0 0 1rem 0; font-size: 1.1rem; font-weight: 700; color: #1e293b;">Pillar Overview</h3>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem;">
+              ${[
+                { key: 'authority', name: 'Authority', score: authorityScore },
+                { key: 'content', name: 'Content', score: contentScore },
+                { key: 'coverage', name: 'Coverage', score: coverageScore },
+                { key: 'diversity', name: 'Diversity', score: diversityScore },
+                { key: 'locations', name: 'Locations', score: locationsScore }
+              ].map(({ key, name, score }) => {
+                const rag = getRAGStatus(score);
+                const hint = getPillarHint(key, score, scores, schemaAudit, localSignalsData);
+                const pillarColor = key === 'authority' ? '#99004C' : key === 'content' ? 'rgba(107, 114, 128, 1)' : key === 'coverage' ? 'rgba(37, 99, 235, 1)' : key === 'diversity' ? 'rgba(147, 51, 234, 1)' : '#00FFFF';
+                return `
+                  <div onclick="document.getElementById('pillarCards')?.scrollIntoView({ behavior: 'smooth', block: 'start' });" style="background: ${rag.status === 'green' ? '#f0fdf4' : rag.status === 'amber' ? '#fffbeb' : '#fef2f2'}; border: 2px solid ${rag.status === 'green' ? '#10b981' : rag.status === 'amber' ? '#f59e0b' : '#ef4444'}; border-radius: 8px; padding: 1rem; cursor: pointer; transition: all 0.2s; text-align: center;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 8px rgba(0,0,0,0.15)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='none';">
+                    <div style="display: flex; align-items: center; justify-content: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+                      <div style="width: 12px; height: 12px; background: ${pillarColor}; border-radius: 2px;"></div>
+                      <h4 style="margin: 0; font-size: 0.9rem; font-weight: 600; color: #1e293b;">${name}</h4>
+                    </div>
+                    <div style="font-size: 1.5rem; font-weight: 700; color: ${rag.status === 'green' ? '#10b981' : rag.status === 'amber' ? '#f59e0b' : '#ef4444'}; margin-bottom: 0.25rem;">${Math.round(score)}</div>
+                    <span class="rag-badge ${rag.status}" style="display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.5rem;">${rag.label}</span>
+                    <p style="margin: 0; font-size: 0.75rem; color: #64748b; line-height: 1.4;">${hint}</p>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          </div>
+          
+          <!-- Segment Comparison Table -->
+          <div style="margin-bottom: 2rem;">
+            <h3 style="margin: 0 0 1rem 0; font-size: 1.1rem; font-weight: 700; color: #1e293b;">Pillar Status Summary</h3>
+            <div style="overflow-x: auto; border-radius: 8px; border: 1px solid #e2e8f0;">
+              <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+                <thead>
+                  <tr style="background: linear-gradient(135deg, #f8f9fa 0%, #f1f5f9 100%); border-bottom: 2px solid #e2e8f0;">
+                    <th style="text-align: left; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Pillar</th>
+                    <th style="text-align: center; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Score</th>
+                    <th style="text-align: center; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Status</th>
+                    <th style="text-align: left; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Comment</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${[
+                    { key: 'authority', name: 'Authority', score: authorityScore },
+                    { key: 'content', name: 'Content', score: contentScore },
+                    { key: 'coverage', name: 'Coverage', score: coverageScore },
+                    { key: 'diversity', name: 'Diversity', score: diversityScore },
+                    { key: 'locations', name: 'Locations', score: locationsScore }
+                  ].map(({ key, name, score }, idx) => {
+                    const rag = getRAGStatus(score);
+                    const hint = getPillarHint(key, score, scores, schemaAudit, localSignalsData);
+                    const isEven = idx % 2 === 0;
+                    return `
+                      <tr style="border-bottom: 1px solid #f1f5f9; background: ${isEven ? '#ffffff' : '#fafafa'};">
+                        <td style="padding: 0.75rem; font-weight: 600; color: #1e293b;">${name}</td>
+                        <td style="padding: 0.75rem; text-align: center; font-size: 1.1rem; font-weight: 700; color: ${rag.status === 'green' ? '#10b981' : rag.status === 'amber' ? '#f59e0b' : '#ef4444'};">
+                          ${Math.round(score)}
+                        </td>
+                        <td style="padding: 0.75rem; text-align: center;">
+                          <span class="rag-badge ${rag.status}" style="display: inline-block; padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.8rem; font-weight: 600;">
+                            ${rag.label}
+                          </span>
+                        </td>
+                        <td style="padding: 0.75rem; color: #64748b; font-size: 0.85rem;">${hint}</td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          
+          <!-- This Month's Priorities -->
+          ${priorities.length > 0 ? `
+          <div>
+            <h3 style="margin: 0 0 1rem 0; font-size: 1.1rem; font-weight: 700; color: #1e293b;">This Month's Priorities</h3>
+            <div style="background: #f8f9fa; border-radius: 8px; padding: 1rem; border-left: 4px solid #ef4444;">
+              <ul style="margin: 0; padding-left: 1.5rem; list-style: none;">
+                ${priorities.map((p, idx) => {
+                  const severityColor = p.severity === 'high' ? '#ef4444' : p.severity === 'medium' ? '#f59e0b' : '#10b981';
+                  return `
+                    <li style="margin-bottom: ${idx < priorities.length - 1 ? '0.75rem' : '0'}; padding-left: 0.5rem; position: relative;">
+                      <span style="position: absolute; left: -1.5rem; color: ${severityColor}; font-weight: 700;">•</span>
+                      <a href="${p.link}" style="color: #1e293b; text-decoration: none; font-weight: 500; border-bottom: 1px solid transparent; transition: border-color 0.2s;" onmouseover="this.style.borderBottomColor='#1e293b';" onmouseout="this.style.borderBottomColor='transparent';">
+                        ${p.message}
+                      </a>
+                    </li>
+                  `;
+                }).join('')}
+              </ul>
+            </div>
+          </div>
+          ` : ''}
+        </div>
+      `;
+      
+      // Insert health dashboard before pillar cards
       const pillarCards = document.getElementById('pillarCards');
       if (!pillarCards) {
         debugLog('✗ Pillar cards container not found', 'error');
@@ -3879,6 +4244,18 @@
         return;
       }
       debugLog('✓ Pillar cards container found', 'success');
+      
+      // Remove existing health dashboard if present
+      const existingHealth = document.getElementById('ai-geo-health-dashboard');
+      if (existingHealth) {
+        existingHealth.remove();
+      }
+      
+      // Insert health dashboard before pillar cards
+      pillarCards.parentNode.insertBefore(healthDashboard, pillarCards);
+      debugLog('✓ AI GEO Health Dashboard created', 'success');
+      
+      // Clear pillar cards for fresh render
       pillarCards.innerHTML = '';
 
       // Check if we have real Business Profile data
