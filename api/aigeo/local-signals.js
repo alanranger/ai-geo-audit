@@ -331,6 +331,7 @@ export default async function handler(req, res) {
           });
         }
       });
+      console.log('[Local Signals] After extraction: serviceAreas.length=', serviceAreas.length, 'napData.length=', napData.length);
     } else {
       const errorText = await locationsResponse.text();
       console.error('[Local Signals] Failed to fetch locations. Status:', locationsResponse.status);
