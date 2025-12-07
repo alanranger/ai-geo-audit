@@ -2877,8 +2877,24 @@
       document.getElementById('dashboard').style.display = 'none';
       updateProgress(0, 'Initializing audit scan...');
 
+      // Load saved audit data first to use as defaults (preserve data when sources unavailable)
+      let savedAudit = null;
+      try {
+        const saved = localStorage.getItem('last_audit_results');
+        if (saved) {
+          savedAudit = JSON.parse(saved);
+          debugLog('✓ Loaded previous audit data for fallback', 'info');
+        }
+      } catch (e) {
+        debugLog(`⚠ Could not load previous audit data: ${e.message}`, 'warn');
+      }
+
       // Declare schemaAudit outside try block so it's accessible in finally
-      let schemaAudit = null;
+      // Initialize with saved data if available (preserves Content/Schema when endpoint unavailable)
+      let schemaAudit = savedAudit?.schemaAudit || null;
+      let localSignals = savedAudit?.localSignals || null;
+      let siteReviews = savedAudit?.siteReviews || null;
+      let backlinkMetrics = savedAudit?.backlinkMetrics || null;
 
       try {
         updateProgress(10, 'Fetching Search Console data...');
@@ -2891,28 +2907,35 @@
         updateProgress(35, 'Fetching local signals data...');
         debugLog('Fetching local signals data...', 'info');
         // Fetch local signals (Business Profile) data
-        let localSignals = null;
+        // Only fetch if we don't have saved data, or always fetch fresh (Business Profile can change)
         try {
           const localSignalsResponse = await fetch(`/api/aigeo/local-signals?property=${encodeURIComponent(propertyUrl)}`);
           if (localSignalsResponse.ok) {
-            localSignals = await localSignalsResponse.json();
-            if (localSignals.status === 'ok') {
+            const freshLocalSignals = await localSignalsResponse.json();
+            if (freshLocalSignals.status === 'ok') {
+              localSignals = freshLocalSignals;
               debugLog('✓ Local signals data fetched successfully', 'success');
               debugLog(`Service areas: ${localSignals.data.serviceAreas?.length || 0}, NAP score: ${localSignals.data.napConsistencyScore || 'N/A'}`, 'info');
             } else {
-              debugLog('⚠ Local signals returned error, using fallback', 'warn');
+              debugLog('⚠ Local signals returned error, using saved data if available', 'warn');
             }
           } else {
-            debugLog('⚠ Local signals endpoint not available, using fallback', 'warn');
+            debugLog('⚠ Local signals endpoint not available, using saved data if available', 'warn');
           }
         } catch (localSignalsError) {
-          debugLog(`⚠ Local signals error: ${localSignalsError.message}, using fallback`, 'warn');
+          debugLog(`⚠ Local signals error: ${localSignalsError.message}, using saved data if available`, 'warn');
+        }
+        
+        // If fetch failed but we have saved data, keep using it
+        if (!localSignals && savedAudit?.localSignals) {
+          localSignals = savedAudit.localSignals;
+          debugLog('✓ Using saved local signals data', 'info');
         }
         
         updateProgress(37, 'Fetching site reviews data...');
         debugLog('Fetching site reviews data...', 'info');
         // Fetch site reviews (on-site/Trustpilot) data
-        let siteReviews = null;
+        // Only fetch if we don't have saved data, or always fetch fresh
         try {
           const siteReviewsResponse = await fetch('/api/reviews/site-reviews');
           if (siteReviewsResponse.ok) {
@@ -2922,13 +2945,19 @@
               debugLog('✓ Site reviews data fetched successfully', 'success');
               debugLog(`Site reviews: rating=${siteReviews.siteRating}, count=${siteReviews.siteReviewCount}`, 'info');
             } else {
-              debugLog('⚠ Site reviews returned error, using fallback', 'warn');
+              debugLog('⚠ Site reviews returned error, using saved data if available', 'warn');
             }
           } else {
-            debugLog('⚠ Site reviews endpoint not available, using fallback', 'warn');
+            debugLog('⚠ Site reviews endpoint not available, using saved data if available', 'warn');
           }
         } catch (siteReviewsError) {
-          debugLog(`⚠ Site reviews error: ${siteReviewsError.message}, using fallback`, 'warn');
+          debugLog(`⚠ Site reviews error: ${siteReviewsError.message}, using saved data if available`, 'warn');
+        }
+        
+        // If fetch failed but we have saved data, keep using it
+        if (!siteReviews && savedAudit?.siteReviews) {
+          siteReviews = savedAudit.siteReviews;
+          debugLog('✓ Using saved site reviews data', 'info');
         }
         
         updateProgress(38, 'Fetching backlink metrics data...');
@@ -2961,14 +2990,20 @@
                 debugLog('✓ Backlink metrics data fetched from API and stored', 'success');
                 debugLog(`Backlink metrics: domains=${backlinkMetrics.referringDomains}, links=${backlinkMetrics.totalBacklinks}, followRatio=${(backlinkMetrics.followRatio * 100).toFixed(1)}%`, 'info');
               } else {
-                debugLog('⚠ Backlink metrics returned empty/zero, using fallback', 'warn');
+                debugLog('⚠ Backlink metrics returned empty/zero, using saved data if available', 'warn');
               }
             } else {
-              debugLog('⚠ Backlink metrics endpoint not available, using fallback', 'warn');
+              debugLog('⚠ Backlink metrics endpoint not available, using saved data if available', 'warn');
             }
           } catch (backlinkError) {
-            debugLog(`⚠ Backlink metrics error: ${backlinkError.message}, using fallback`, 'warn');
+            debugLog(`⚠ Backlink metrics error: ${backlinkError.message}, using saved data if available`, 'warn');
           }
+        }
+        
+        // If fetch failed but we have saved data, keep using it
+        if (!backlinkMetrics && savedAudit?.backlinkMetrics) {
+          backlinkMetrics = savedAudit.backlinkMetrics;
+          debugLog('✓ Using saved backlink metrics data', 'info');
         }
         
         updateProgress(40, 'Fetching schema audit data...');
@@ -3088,37 +3123,23 @@
               debugLog('⚠ Schema audit returned error, using fallback', 'warn');
             }
           } else {
-            debugLog('⚠ Schema audit endpoint not available, trying saved data', 'warn');
-            // Try to use saved schema audit data from localStorage
-            try {
-              const savedAudit = localStorage.getItem('last_audit_results');
-              if (savedAudit) {
-                const parsed = JSON.parse(savedAudit);
-                if (parsed.schemaAudit && parsed.schemaAudit.status === 'ok') {
-                  schemaAudit = parsed.schemaAudit;
-                  debugLog('✓ Using saved schema audit data from previous audit', 'success');
-                  debugLog(`Schema coverage: ${schemaAudit.data?.coverage || 'N/A'}%`, 'info');
-                }
-              }
-            } catch (e) {
-              debugLog(`⚠ Could not load saved schema audit: ${e.message}`, 'warn');
+            debugLog('⚠ Schema audit endpoint not available, using saved data', 'warn');
+            // schemaAudit already initialized with saved data at start, so it's preserved
+            if (schemaAudit) {
+              debugLog('✓ Using saved schema audit data from previous audit', 'success');
+              debugLog(`Schema coverage: ${schemaAudit.data?.coverage || 'N/A'}%`, 'info');
+            } else {
+              debugLog('⚠ No saved schema audit data available', 'warn');
             }
           }
         } catch (schemaError) {
-          debugLog(`⚠ Schema audit error: ${schemaError.message}, trying saved data`, 'warn');
-          // Try to use saved schema audit data from localStorage
-          try {
-            const savedAudit = localStorage.getItem('last_audit_results');
-            if (savedAudit) {
-              const parsed = JSON.parse(savedAudit);
-              if (parsed.schemaAudit && parsed.schemaAudit.status === 'ok') {
-                schemaAudit = parsed.schemaAudit;
-                debugLog('✓ Using saved schema audit data from previous audit (fallback)', 'success');
-                debugLog(`Schema coverage: ${schemaAudit.data?.coverage || 'N/A'}%`, 'info');
-              }
-            }
-          } catch (e) {
-            debugLog(`⚠ Could not load saved schema audit: ${e.message}`, 'warn');
+          debugLog(`⚠ Schema audit error: ${schemaError.message}, using saved data`, 'warn');
+          // schemaAudit already initialized with saved data at start, so it's preserved
+          if (schemaAudit) {
+            debugLog('✓ Using saved schema audit data from previous audit (fallback)', 'success');
+            debugLog(`Schema coverage: ${schemaAudit.data?.coverage || 'N/A'}%`, 'info');
+          } else {
+            debugLog('⚠ No saved schema audit data available', 'warn');
           }
         }
         
