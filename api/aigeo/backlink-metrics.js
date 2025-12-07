@@ -110,6 +110,10 @@ function computeBacklinkMetrics(rows) {
     throw new Error(`Could not find URL column. Available columns: ${Object.keys(rows[0]).join(', ')}`);
   }
 
+  if (!linkTypeColumn) {
+    throw new Error(`Could not find Link Type column. Available columns: ${Object.keys(rows[0]).join(', ')}. The Link Type column is required to calculate the follow ratio for the Authority score.`);
+  }
+
   const domains = new Set();
   let total = 0;
   let followCount = 0;
@@ -131,14 +135,9 @@ function computeBacklinkMetrics(rows) {
     domains.add(hostname);
     total += 1;
 
-    // If link type column exists, check it; otherwise assume follow
-    if (linkTypeColumn) {
-      const linkType = row[linkTypeColumn];
-      if (isFollow(linkType)) {
-        followCount += 1;
-      }
-    } else {
-      // No link type column - assume all are follow
+    // Link Type column is required - check it
+    const linkType = row[linkTypeColumn];
+    if (isFollow(linkType)) {
       followCount += 1;
     }
   }
