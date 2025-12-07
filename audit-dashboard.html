@@ -3645,6 +3645,14 @@
         const validPillars = ['localEntity', 'serviceArea', 'authority', 'visibility', 'contentSchema'];
         return Object.entries(scoresObj)
           .filter(([key]) => validPillars.includes(key))
+          .map(([key, scoreValue]) => {
+            // Handle new Authority structure (object with score) or legacy (number)
+            let score = scoreValue;
+            if (key === 'authority' && typeof scoreValue === 'object' && scoreValue !== null) {
+              score = scoreValue.score || 0;
+            }
+            return [key, score];
+          })
           .sort((a, b) => {
             return (pillarWeights[b[0]] || 0) - (pillarWeights[a[0]] || 0);
           });
@@ -5803,7 +5811,11 @@
                     debugLog(`✓ Added Visibility score (${visibility}) for ${dateStr} from current audit`, 'info');
                     
                     // Calculate Authority from current audit scores
-                    const currentAuthority = currentScores?.authority || null;
+                    // Handle new Authority structure (object with score) or legacy (number)
+                    const currentAuthorityRaw = currentScores?.authority || null;
+                    const currentAuthority = (currentAuthorityRaw !== null && currentAuthorityRaw !== undefined)
+                      ? (typeof currentAuthorityRaw === 'object' ? currentAuthorityRaw.score : currentAuthorityRaw)
+                      : null;
                     if (currentAuthority !== null && currentAuthority !== undefined) {
                       authorityData.push(currentAuthority);
                       debugLog(`✓ Added Authority score (${currentAuthority}) for ${dateStr} from current audit`, 'info');
