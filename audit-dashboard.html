@@ -2554,6 +2554,27 @@
       return siteReviews;
     }
 
+    // Helper function to get color for score (same thresholds as main pillars)
+    function getScoreColor(score) {
+      if (score >= 70) return { color: '#10b981', label: 'Green', bg: '#d1fae5' }; // Green
+      if (score >= 40) return { color: '#f59e0b', label: 'Amber', bg: '#fef3c7' }; // Amber
+      return { color: '#ef4444', label: 'Red', bg: '#fee2e2' }; // Red
+    }
+
+    // Helper function to format component score with color and scale indicator
+    function formatComponentScore(label, score) {
+      const rounded = Math.round(score);
+      const colorInfo = getScoreColor(rounded);
+      return `
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background-color: ${colorInfo.color};"></span>
+          <span style="color: #666;">${label}:</span>
+          <strong style="color: ${colorInfo.color};">${rounded}</strong>
+          <span style="color: #999; font-size: 0.75em;">/100</span>
+        </div>
+      `;
+    }
+
     function calculatePillarScores(data, schemaAudit = null, localSignals = null, siteReviews = null, backlinkMetrics = null) {
       // Use new API response format - get values from GSC overview
       const position = data.averagePosition || 40; // 1 (best) - 100 (worst)
@@ -3365,14 +3386,14 @@
           const siteReviews = getTrustpilotSnapshot(savedAudit?.siteReviews);
           const searchData = savedAudit?.searchData;
           
-          // Build breakdown display
+          // Build breakdown display with color-coded scores
           authorityBreakdown = `
-            <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #e2e8f0; font-size: 0.8rem; color: #666;">
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
-                <div>Behaviour: <strong>${Math.round(components.behaviour)}</strong></div>
-                <div>Ranking: <strong>${Math.round(components.ranking)}</strong></div>
-                <div>Backlinks: <strong>${Math.round(components.backlinks)}</strong></div>
-                <div>Reviews: <strong>${Math.round(components.reviews)}</strong></div>
+            <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #e2e8f0; font-size: 0.8rem;">
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+                ${formatComponentScore('Behaviour', components.behaviour)}
+                ${formatComponentScore('Ranking', components.ranking)}
+                ${formatComponentScore('Backlinks', components.backlinks)}
+                ${formatComponentScore('Reviews', components.reviews)}
               </div>
             </div>
           `;
