@@ -4151,58 +4151,106 @@
           <!-- AI GEO Health Top Card -->
           <div style="text-align: center; margin-bottom: 3rem; padding: 2rem 0; border-bottom: 2px solid #e2e8f0;">
             <div style="display: flex; align-items: center; justify-content: center; gap: 4rem; margin-bottom: 2rem; flex-wrap: wrap;">
-              <!-- Circular Progress Ring -->
-              <div style="position: relative; width: 280px; height: 280px; margin: 0 auto;">
+              <!-- Circular Progress Ring - Enhanced -->
+              <div style="position: relative; width: 320px; height: 320px; margin: 0 auto;">
                 ${(() => {
                   const score = aiGeoHealth.aiGeoScore;
-                  const radius = 120;
-                  const strokeWidth = 24;
-                  const normalizedRadius = radius - strokeWidth * 2;
+                  const radius = 130;
+                  const strokeWidth = 20;
+                  const normalizedRadius = radius - strokeWidth;
                   const circumference = normalizedRadius * 2 * Math.PI;
                   const strokeDasharray = circumference;
                   const strokeDashoffset = circumference - (score / 100) * circumference;
+                  
+                  // Determine colors based on status
                   const color = aiGeoHealth.aiGeoStatus === 'green' ? '#10b981' : 
                                aiGeoHealth.aiGeoStatus === 'amber' ? '#f59e0b' : '#ef4444';
+                  const bgColor = aiGeoHealth.aiGeoStatus === 'green' ? '#d1fae5' : 
+                                 aiGeoHealth.aiGeoStatus === 'amber' ? '#fef3c7' : '#fee2e2';
+                  
+                  // Calculate segment boundaries for colored arcs
+                  const redEnd = (50 / 100) * circumference;
+                  const amberEnd = (70 / 100) * circumference;
                   
                   return `
-                    <svg width="280" height="280" style="transform: rotate(-90deg);">
-                      <!-- Background circle -->
+                    <svg width="320" height="320" style="transform: rotate(-90deg); filter: drop-shadow(0 4px 6px rgba(0,0,0,0.1));">
+                      <defs>
+                        <linearGradient id="progressGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                          <stop offset="0%" style="stop-color:#ef4444;stop-opacity:1" />
+                          <stop offset="50%" style="stop-color:#f59e0b;stop-opacity:1" />
+                          <stop offset="70%" style="stop-color:#f59e0b;stop-opacity:1" />
+                          <stop offset="100%" style="stop-color:#10b981;stop-opacity:1" />
+                        </linearGradient>
+                      </defs>
+                      
+                      <!-- Background circle with subtle shadow -->
                       <circle
-                        cx="140"
-                        cy="140"
+                        cx="160"
+                        cy="160"
+                        r="${normalizedRadius}"
+                        fill="none"
+                        stroke="#f1f5f9"
+                        stroke-width="${strokeWidth + 4}"
+                        opacity="0.3"
+                      />
+                      <circle
+                        cx="160"
+                        cy="160"
                         r="${normalizedRadius}"
                         fill="none"
                         stroke="#e2e8f0"
                         stroke-width="${strokeWidth}"
                       />
-                      <!-- Progress circle -->
-                      <circle
-                        cx="140"
-                        cy="140"
-                        r="${normalizedRadius}"
-                        fill="none"
-                        stroke="${color}"
-                        stroke-width="${strokeWidth}"
-                        stroke-dasharray="${strokeDasharray}"
-                        stroke-dashoffset="${strokeDashoffset}"
-                        stroke-linecap="round"
-                        style="transition: stroke-dashoffset 0.5s ease-in-out;"
-                      />
-                      <!-- Segment markers -->
-                      <circle cx="140" cy="20" r="4" fill="#ef4444"/>
-                      <circle cx="260" cy="140" r="4" fill="#10b981"/>
-                      <circle cx="140" cy="260" r="4" fill="#e2e8f0"/>
-                      <!-- Segment labels -->
-                      <text x="140" y="15" text-anchor="middle" fill="#64748b" font-size="14" font-weight="600" transform="rotate(90 140 140)">0</text>
-                      <text x="265" y="145" text-anchor="middle" fill="#64748b" font-size="14" font-weight="600" transform="rotate(90 140 140)">50</text>
-                      <text x="140" y="270" text-anchor="middle" fill="#64748b" font-size="14" font-weight="600" transform="rotate(90 140 140)">100</text>
+                      
+                      <!-- Colored progress segments -->
+                      ${score > 0 ? `
+                        <circle
+                          cx="160"
+                          cy="160"
+                          r="${normalizedRadius}"
+                          fill="none"
+                          stroke="${color}"
+                          stroke-width="${strokeWidth}"
+                          stroke-dasharray="${strokeDasharray}"
+                          stroke-dashoffset="${strokeDashoffset}"
+                          stroke-linecap="round"
+                          style="transition: stroke-dashoffset 1s ease-out; filter: drop-shadow(0 0 8px ${color}40);"
+                        />
+                      ` : ''}
+                      
+                      <!-- Major tick marks at 0, 50, 100 -->
+                      ${[0, 50, 100].map(value => {
+                        const angle = (value / 100) * 360 - 90;
+                        const rad = (angle * Math.PI) / 180;
+                        const x1 = 160 + (normalizedRadius - 8) * Math.cos(rad);
+                        const y1 = 160 + (normalizedRadius - 8) * Math.sin(rad);
+                        const x2 = 160 + (normalizedRadius + 12) * Math.cos(rad);
+                        const y2 = 160 + (normalizedRadius + 12) * Math.sin(rad);
+                        const labelX = 160 + (normalizedRadius + 35) * Math.cos(rad);
+                        const labelY = 160 + (normalizedRadius + 35) * Math.sin(rad);
+                        const tickColor = value === 0 ? '#ef4444' : value === 50 ? '#f59e0b' : '#10b981';
+                        return `
+                          <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" 
+                                stroke="${tickColor}" stroke-width="3" stroke-linecap="round"/>
+                          <text x="${labelX}" y="${labelY}" 
+                                text-anchor="middle" dominant-baseline="middle" 
+                                fill="#1e293b" font-size="16" font-weight="700" 
+                                font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+                                transform="rotate(${angle + 90} ${labelX} ${labelY})">${value}</text>
+                        `;
+                      }).join('')}
                     </svg>
-                    <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center;">
-                      <div style="font-size: 4.5rem; font-weight: 700; color: ${color}; line-height: 1; margin-bottom: 0.5rem;">
+                    <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; width: 100%;">
+                      <div style="font-size: 5rem; font-weight: 800; color: ${color}; line-height: 1; margin-bottom: 0.5rem; letter-spacing: -0.02em; text-shadow: 0 2px 8px ${color}30;">
                         ${score}
                       </div>
-                      <div style="font-size: 1.1rem; color: #64748b; font-weight: 500;">
+                      <div style="font-size: 0.95rem; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">
                         AI GEO Score
+                      </div>
+                      <div style="margin-top: 0.75rem; padding: 0.4rem 0.8rem; background: ${bgColor}; border-radius: 20px; display: inline-block;">
+                        <span style="font-size: 0.85rem; color: ${color}; font-weight: 700;">
+                          ${aiGeoHealth.aiGeoStatus === 'green' ? '✓ Excellent' : aiGeoHealth.aiGeoStatus === 'amber' ? '⚠ Good' : '✗ Needs Work'}
+                        </span>
                       </div>
                     </div>
                   `;
