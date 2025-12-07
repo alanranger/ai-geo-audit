@@ -2075,7 +2075,7 @@
           
           // Refresh dashboard with merged results
           updateProgress(80, 'Refreshing dashboard with merged results...');
-          displayDashboard(mergedScores, savedAudit.searchData, mergedSnippetReadiness, mergedSchemaAudit);
+          displayDashboard(mergedScores, savedAudit.searchData, mergedSnippetReadiness, mergedSchemaAudit, savedAudit.localSignals || null);
           
           updateProgress(100, 'Retry completed and dashboard updated!');
           showStatus(`Retry completed: ${retrySuccessful} URLs now have schema. Dashboard updated with merged results.`, 'success');
@@ -2193,7 +2193,7 @@
         
         // Update dashboard with new data - ensure scores object has all required properties
         debugLog(`Updating dashboard with scores: ${JSON.stringify(scores)}`, 'info');
-        displayDashboard(scores, searchData, snippetReadiness, savedAudit.schemaAudit);
+        displayDashboard(scores, searchData, snippetReadiness, savedAudit.schemaAudit, localSignals);
         
         showStatus(`Metrics updated for ${newDateRange} day period.`, 'success');
         debugLog(`✓ Audit updated for ${newDateRange} day period`, 'success');
@@ -3857,8 +3857,8 @@
 
         updateProgress(95, 'Generating dashboard...');
         debugLog('Displaying dashboard...', 'info');
-        // Display results (pass schema audit data)
-        displayDashboard(scores, searchData, snippetReadiness, schemaAudit);
+        // Display results (pass current audit data including localSignals)
+        displayDashboard(scores, searchData, snippetReadiness, schemaAudit, localSignals);
         
         updateProgress(100, 'Audit completed successfully!');
         debugLog('=== AUDIT COMPLETE: Success ===', 'success');
@@ -3898,17 +3898,22 @@
     }
 
     // Display dashboard
-    async function displayDashboard(scores, data, snippetReadiness = 0, schemaAudit = null) {
+    async function displayDashboard(scores, data, snippetReadiness = 0, schemaAudit = null, localSignals = null) {
       // Update timestamp if this is a fresh display
       const saved = loadAuditResults();
       if (saved && saved.timestamp) {
         updateAuditTimestamp(saved.timestamp);
       }
       
+      // Use current audit data (passed as parameter) or fallback to saved data
+      // This ensures we always use the most recent audit run data, not stale localStorage
+      const currentLocalSignals = localSignals || (saved && saved.localSignals) || null;
+      
       // Update retry button visibility
       updateRetryButtonVisibility(schemaAudit);
       
       debugLog('=== DISPLAY DASHBOARD: Starting ===', 'info');
+      debugLog(`Using current audit data: schemaAudit=${schemaAudit ? 'yes' : 'no'}, localSignals=${currentLocalSignals ? 'yes' : 'no'}`, 'info');
       
       // Show dashboard first (canvas elements need to be visible for Chart.js)
       const dashboardDiv = document.getElementById('dashboard');
@@ -3973,9 +3978,10 @@
           });
       };
 
-      // Check if we have real Business Profile data (needed for health dashboard)
-      const hasLocalSignals = saved && saved.localSignals && saved.localSignals.status === 'ok' && saved.localSignals.data;
-      const localSignalsData = hasLocalSignals ? saved.localSignals.data : null;
+      // Use current audit data (passed as parameter) for health dashboard
+      // This ensures we use the most recent audit run data, not stale localStorage
+      const hasLocalSignals = currentLocalSignals && currentLocalSignals.status === 'ok' && currentLocalSignals.data;
+      const localSignalsData = hasLocalSignals ? currentLocalSignals.data : null;
       
       // Calculate AI GEO Health Score
       const aiGeoHealth = calculateAiGeoScore(scores, schemaAudit);
