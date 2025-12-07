@@ -4501,7 +4501,7 @@
         // Define pillar colors for consistency across all reports
         const pillarColors = {
           localEntity: 'rgba(147, 51, 234, 1)', // Purple
-          serviceArea: '#CC99FF', // Light purple (not RAG color)
+          serviceArea: '#00FFFF', // Cyan (not RAG color)
           authority: '#99004C', // Dark pink/magenta
           visibility: 'rgba(37, 99, 235, 1)', // Blue
           contentSchema: 'rgba(107, 114, 128, 1)' // Grey
@@ -5011,6 +5011,17 @@
               ${getOrderedPillars(scores).map(([key, score], index) => {
                 const rag = getRAGStatus(score);
                 
+                // Define pillar colors for scorecard table (matching charts)
+                const scorecardPillarColors = {
+                  localEntity: 'rgba(147, 51, 234, 1)', // Purple
+                  serviceArea: '#00FFFF', // Cyan
+                  authority: '#99004C', // Dark pink/magenta
+                  visibility: 'rgba(37, 99, 235, 1)', // Blue
+                  contentSchema: 'rgba(107, 114, 128, 1)' // Grey
+                };
+                
+                const pillarColor = scorecardPillarColors[key] || '#666';
+                
                 // Build Content/Schema description with schema audit data
                 let contentSchemaDesc = 'Quality and completeness of structured data markup across your domain.<br><strong>AI Importance:</strong> Structured data is the primary way AI understands your content. Schema markup directly feeds AI systems, enabling them to extract facts, relationships, and context for use in AI Overviews and answer generation.<br><strong>Data Source:</strong> ✅ <span style="color: #10b981;">Live data</span> from schema audit (crawls actual website pages for JSON-LD markup).<br><strong>Calculation:</strong> Weighted score based on Foundation schemas (30%), Rich Result eligibility (35%), Coverage (20%), and Type Diversity (15%).';
                 
@@ -5400,7 +5411,12 @@
                 
                 return `
                   <tr style="border-bottom: 1px solid #eee; background: ${isEven ? '#ffffff' : '#fafafa'};">
-                    <td style="padding: 0.75rem; font-weight: 500;">${pillarNames[key]}</td>
+                    <td style="padding: 0.75rem; font-weight: 500;">
+                      <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <div style="width: 16px; height: 16px; background: ${pillarColor}; border-radius: 2px; border: 1px solid rgba(0,0,0,0.1); flex-shrink: 0;" title="Color key for ${pillarNames[key]} in all reports"></div>
+                        <span>${pillarNames[key]}</span>
+                      </div>
+                    </td>
                     <td style="padding: 0.75rem; text-align: center; font-size: 1.1rem; font-weight: 600; color: ${rag.status === 'green' ? '#10b981' : rag.status === 'amber' ? '#f59e0b' : '#ef4444'};">
                       ${Math.round(score)}
                     </td>
@@ -6057,7 +6073,7 @@
           // Define pillar colors for radar chart (matching trend chart)
           const radarPillarColors = {
             'Local Entity': 'rgba(147, 51, 234, 1)', // Purple
-            'Service Area': '#CC99FF', // Light purple (not RAG color)
+            'Service Area': '#00FFFF', // Cyan (not RAG color)
             'Authority': '#99004C', // Dark pink/magenta
             'Visibility': 'rgba(37, 99, 235, 1)', // Blue
             'Content / Schema': 'rgba(107, 114, 128, 1)' // Grey
@@ -6139,7 +6155,7 @@
                 const dataset = chart.data.datasets[0];
                 const meta = chart.getDatasetMeta(0);
                 
-                // Color each segment with its pillar color
+                // Color each point with its pillar color (Chart.js already draws the lines)
                 pointLabelItems.forEach((item, index) => {
                   if (item && orderedData[index] !== undefined) {
                     const score = orderedData[index];
@@ -6149,36 +6165,11 @@
                     // Get the point for this index
                     const point = meta.data[index];
                     if (point) {
-                      // Draw line segment in pillar color
-                      ctx.save();
-                      ctx.strokeStyle = color;
-                      ctx.lineWidth = 3;
-                      ctx.beginPath();
-                      if (index === 0) {
-                        // First point - draw from center to first point
-                        const centerX = scale.xCenter;
-                        const centerY = scale.yCenter;
-                        ctx.moveTo(centerX, centerY);
-                        ctx.lineTo(point.x, point.y);
-                      } else {
-                        // Draw from previous point to current point
-                        const prevPoint = meta.data[index - 1];
-                        ctx.moveTo(prevPoint.x, prevPoint.y);
-                        ctx.lineTo(point.x, point.y);
-                      }
-                      // Draw from last point back to first to close the shape
-                      if (index === pointLabelItems.length - 1) {
-                        const firstPoint = meta.data[0];
-                        ctx.lineTo(firstPoint.x, firstPoint.y);
-                      }
-                      ctx.stroke();
-                      ctx.restore();
-                      
-                      // Draw point in pillar color
+                      // Draw point in pillar color (Chart.js already draws the connecting lines)
                       ctx.save();
                       ctx.fillStyle = color;
                       ctx.beginPath();
-                      ctx.arc(point.x, point.y, 5, 0, Math.PI * 2);
+                      ctx.arc(point.x, point.y, 6, 0, Math.PI * 2);
                       ctx.fill();
                       ctx.strokeStyle = '#fff';
                       ctx.lineWidth = 2;
@@ -7327,8 +7318,8 @@
                 {
                   label: 'Service Area',
                   data: serviceAreaData,
-                  borderColor: '#CC99FF', // Light purple (not RAG color)
-                  backgroundColor: 'rgba(204, 153, 255, 0.1)',
+                  borderColor: '#00FFFF', // Cyan (not RAG color)
+                  backgroundColor: 'rgba(0, 255, 255, 0.1)',
                   borderWidth: 3,
                   tension: 0.4,
                   pointRadius: 0,
@@ -7340,7 +7331,7 @@
                   data: authorityData,
                   borderColor: '#99004C', // Dark pink/magenta
                   backgroundColor: 'rgba(153, 0, 76, 0.1)',
-                  borderWidth: 4,
+                  borderWidth: 3,
                   tension: 0.4,
                   pointRadius: 0,
                   pointHoverRadius: 5
@@ -7351,7 +7342,7 @@
                   data: visibilityData,
                   borderColor: 'rgba(37, 99, 235, 1)', // Blue
                   backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                  borderWidth: 2.5,
+                  borderWidth: 3,
                   tension: 0.4,
                   pointRadius: 0,
                   pointHoverRadius: 5
@@ -7362,7 +7353,7 @@
                   data: contentSchemaData,
                   borderColor: 'rgba(107, 114, 128, 1)', // Grey
                   backgroundColor: 'rgba(107, 114, 128, 0.1)',
-                  borderWidth: 2.5,
+                  borderWidth: 3,
                   tension: 0.4,
                   pointRadius: 0, // Hide points - show as solid line
                   pointHoverRadius: 5,
