@@ -4639,16 +4639,16 @@
       
       // Classification functions for metric status
       function classifySiteCtr(v) {
-        // v is 0-1 (percentage as decimal)
-        if (v < 0.01) return 'poor';      // <1%
-        if (v < 0.03) return 'ok';        // 1-3%
+        // v is already a percentage (0-100), not a decimal
+        if (v < 1) return 'poor';      // <1%
+        if (v < 3) return 'ok';        // 1-3%
         return 'strong';                  // 3%+
       }
       
       function classifyTop10Ctr(v) {
-        // v is 0-1 (percentage as decimal)
-        if (v < 0.02) return 'poor';      // <2%
-        if (v < 0.05) return 'ok';        // 2-5%
+        // v is already a percentage (0-100), not a decimal
+        if (v < 2) return 'poor';      // <2%
+        if (v < 5) return 'ok';        // 2-5%
         return 'strong';                  // 5%+
       }
       
@@ -4659,15 +4659,21 @@
       }
       
       function classifyTop10Share(v) {
-        // v is 0-1 (percentage as decimal)
-        if (v < 0.6) return 'poor';       // <60% of impressions in top 10
-        if (v < 0.8) return 'ok';         // 60-80%
+        // v is stored as decimal (0-1), needs to be converted to percentage for comparison
+        const pct = v * 100;
+        if (pct < 60) return 'poor';       // <60% of impressions in top 10
+        if (pct < 80) return 'ok';         // 60-80%
         return 'strong';                  // 80%+
       }
       
       // Helper to format percentage
-      function pct(v) {
-        return `${(v * 100).toFixed(2)}%`;
+      // For CTR values: already percentages (0-100), just format
+      // For top10Share: stored as decimal (0-1), convert to percentage
+      function pct(v, isDecimal = false) {
+        if (isDecimal) {
+          return `${(v * 100).toFixed(2)}%`;
+        }
+        return `${v.toFixed(2)}%`;
       }
       
       // Build recommendation rows from segment metrics
@@ -4723,7 +4729,7 @@
         rows.push({
           metric: 'Top-10 impression share',
           status: shareStatus,
-          value: pct(m.top10Share),
+          value: pct(m.top10Share, true), // top10Share is stored as decimal (0-1)
           target: 'Aim for 75–85%+ of impressions in top-10',
           action: shareStatus === 'poor'
             ? 'Large share of impressions are outside the top-10. Review which queries are generating impressions but no clicks and decide: improve those pages or deliberately de-optimise low-value queries.'
