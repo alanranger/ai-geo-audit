@@ -3986,8 +3986,27 @@
         ? scores.authority.score 
         : scores.authority || 0;
       const contentScore = scores.contentSchema || 0;
-      const coverageScore = scores.coverage || 0;
-      const diversityScore = scores.diversity || 0;
+      
+      // Extract coverage and diversity from schema audit (same logic as calculateAiGeoScore)
+      let coverageScore = scores.coverage || 0;
+      let diversityScore = scores.diversity || 0;
+      if (schemaAudit && schemaAudit.status === 'ok' && schemaAudit.data) {
+        const schemaData = schemaAudit.data;
+        coverageScore = schemaData.coverage || 0;
+        const allTypes = new Set();
+        if (schemaData.allDetectedTypes && Array.isArray(schemaData.allDetectedTypes)) {
+          schemaData.allDetectedTypes.forEach(type => {
+            if (type) allTypes.add(type);
+          });
+        } else if (schemaData.schemaTypes && Array.isArray(schemaData.schemaTypes)) {
+          schemaData.schemaTypes.forEach(item => {
+            if (item.type) allTypes.add(item.type);
+          });
+        }
+        const uniqueTypesCount = allTypes.size;
+        diversityScore = Math.min((uniqueTypesCount / 15) * 100, 100);
+      }
+      
       const locationsScore = ((scores.localEntity || 0) + (scores.serviceArea || 0)) / 2;
       
       // Create AI GEO Health Dashboard (insert before pillar cards)
