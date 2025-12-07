@@ -459,13 +459,24 @@ export default async function handler(req, res) {
         if (rows.length > 0) {
           console.log('First row keys:', Object.keys(rows[0]));
           console.log('First row sample:', JSON.stringify(rows[0]).substring(0, 400));
+        } else {
+          console.error('WARNING: No rows parsed from CSV!');
+          console.error('CSV content length:', csvContent.length);
+          console.error('CSV first 500 chars:', csvContent.substring(0, 500));
+          console.error('Number of logical lines:', lines.length);
         }
       } catch (parseError) {
         console.error('CSV parse error:', parseError);
+        console.error('Error stack:', parseError.stack);
         return res.status(400).json({
           status: 'error',
           source: 'backlink-metrics',
           message: `CSV parsing failed: ${parseError.message}`,
+          debug: {
+            csvLength: csvContent.length,
+            firstChars: csvContent.substring(0, 200),
+            error: parseError.message
+          },
           meta: { generatedAt: new Date().toISOString() }
         });
       }
