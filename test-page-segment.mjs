@@ -22,7 +22,7 @@ const testCases = [
   { url: 'https://www.alanranger.com/photography-workshops-near-me', expected: PageSegment.MONEY },
   { url: 'https://www.alanranger.com/batsford-arboretum-photography', expected: PageSegment.MONEY },
   { url: 'https://www.alanranger.com/bluebell-woods-near-me', expected: PageSegment.MONEY },
-  { url: 'https://www.alanranger.com/fine-art-prints', expected: PageSegment.MONEY },
+  { url: 'https://www.alanranger.com/fine-art-prints', expected: PageSegment.SYSTEM }, // Fine-art pages are portfolio/info, not money
   
   // Money - keyword matches
   { url: 'https://www.alanranger.com/photography-courses-coventry', expected: PageSegment.MONEY },
