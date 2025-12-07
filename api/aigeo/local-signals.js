@@ -264,6 +264,7 @@ export default async function handler(req, res) {
       }
       
       // Extract service areas and NAP data FIRST (before any file I/O that might fail)
+      console.log('[Local Signals] About to extract service areas/NAP. locationsToProcess.length:', locationsToProcess.length);
       locationsToProcess.forEach(location => {
         // Service areas - check both SERVICE_AREA_BUSINESS and places data
         if (location.serviceArea) {
