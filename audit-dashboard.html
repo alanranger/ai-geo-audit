@@ -4151,10 +4151,125 @@
           <!-- AI GEO Health Top Card -->
           <div style="text-align: center; margin-bottom: 3rem; padding: 2rem 0; border-bottom: 2px solid #e2e8f0;">
             <div style="display: flex; align-items: center; justify-content: center; gap: 3rem; margin-bottom: 2rem; flex-wrap: wrap;">
-              <!-- Speedometer Gauge -->
-              <div style="position: relative; width: 400px; height: 240px; margin: 0 auto;">
-                <canvas id="ai-geo-speedometer" width="400" height="240" style="max-width: 100%; height: auto; display: block;"></canvas>
-                <div style="position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); font-size: 3.5rem; font-weight: 700; color: ${aiGeoHealth.aiGeoStatus === 'green' ? '#10b981' : aiGeoHealth.aiGeoStatus === 'amber' ? '#f59e0b' : '#ef4444'}; text-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+              <!-- Speedometer Gauge (SVG) -->
+              <div style="position: relative; width: 450px; height: 280px; margin: 0 auto;">
+                ${(() => {
+                  const score = aiGeoHealth.aiGeoScore;
+                  const centerX = 225;
+                  const centerY = 240;
+                  const radius = 160;
+                  const startAngle = 180;
+                  const endAngle = 0;
+                  
+                  // Calculate angles for segments
+                  const redEnd = 180 - (50 / 100) * 180;
+                  const amberEnd = 180 - (70 / 100) * 180;
+                  const needleAngle = 180 - (score / 100) * 180;
+                  
+                  // Helper to convert angle to SVG arc
+                  const angleToPoint = (angle) => {
+                    const rad = (angle * Math.PI) / 180;
+                    return {
+                      x: centerX + radius * Math.cos(rad),
+                      y: centerY + radius * Math.sin(rad)
+                    };
+                  };
+                  
+                  const start = angleToPoint(startAngle);
+                  const redEndPt = angleToPoint(redEnd);
+                  const amberEndPt = angleToPoint(amberEnd);
+                  const end = angleToPoint(endAngle);
+                  
+                  // SVG path for arcs (large-arc-flag=0 for arcs < 180deg)
+                  const arcPath = (startPt, endPt, angle) => {
+                    const largeArc = Math.abs(angle - startAngle) > 90 ? 1 : 0;
+                    return `M ${startPt.x} ${startPt.y} A ${radius} ${radius} 0 ${largeArc} 0 ${endPt.x} ${endPt.y}`;
+                  };
+                  
+                  const needlePt = angleToPoint(needleAngle);
+                  
+                  return `
+                    <svg width="450" height="280" style="display: block;">
+                      <!-- Red segment (0-50) -->
+                      <path d="${arcPath(start, redEndPt, redEnd)}" 
+                            stroke="#ef4444" 
+                            stroke-width="32" 
+                            fill="none" 
+                            stroke-linecap="round"/>
+                      
+                      <!-- Amber segment (50-70) -->
+                      <path d="${arcPath(redEndPt, amberEndPt, amberEnd)}" 
+                            stroke="#f59e0b" 
+                            stroke-width="32" 
+                            fill="none" 
+                            stroke-linecap="round"/>
+                      
+                      <!-- Green segment (70-100) -->
+                      <path d="${arcPath(amberEndPt, end, endAngle)}" 
+                            stroke="#10b981" 
+                            stroke-width="32" 
+                            fill="none" 
+                            stroke-linecap="round"/>
+                      
+                      <!-- Tick marks -->
+                      ${Array.from({length: 11}, (_, i) => {
+                        const value = i * 10;
+                        const angle = 180 - (value / 100) * 180;
+                        const rad = (angle * Math.PI) / 180;
+                        const isMajor = value === 0 || value === 50 || value === 100;
+                        const tickLength = isMajor ? 20 : 12;
+                        const tickInner = radius - tickLength;
+                        const tickOuter = radius;
+                        const x1 = centerX + tickInner * Math.cos(rad);
+                        const y1 = centerY + tickInner * Math.sin(rad);
+                        const x2 = centerX + tickOuter * Math.cos(rad);
+                        const y2 = centerY + tickOuter * Math.sin(rad);
+                        return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#64748b" stroke-width="${isMajor ? 3 : 2}"/>`;
+                      }).join('')}
+                      
+                      <!-- Labels -->
+                      <text x="${centerX + (radius + 55) * Math.cos(Math.PI)}" 
+                            y="${centerY + (radius + 55) * Math.sin(Math.PI)}" 
+                            text-anchor="middle" 
+                            dominant-baseline="middle" 
+                            fill="#1e293b" 
+                            font-size="24" 
+                            font-weight="bold" 
+                            font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">0</text>
+                      
+                      <text x="${centerX + (radius + 55) * Math.cos((180 - 90) * Math.PI / 180)}" 
+                            y="${centerY + (radius + 55) * Math.sin((180 - 90) * Math.PI / 180)}" 
+                            text-anchor="middle" 
+                            dominant-baseline="middle" 
+                            fill="#1e293b" 
+                            font-size="24" 
+                            font-weight="bold" 
+                            font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">50</text>
+                      
+                      <text x="${centerX + (radius + 55) * Math.cos(0)}" 
+                            y="${centerY + (radius + 55) * Math.sin(0)}" 
+                            text-anchor="middle" 
+                            dominant-baseline="middle" 
+                            fill="#1e293b" 
+                            font-size="24" 
+                            font-weight="bold" 
+                            font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">100</text>
+                      
+                      <!-- Needle -->
+                      <g transform="translate(${centerX}, ${centerY}) rotate(${needleAngle})">
+                        <polygon points="0,0 ${radius - 25},-14 ${radius - 25},14" 
+                                 fill="#1e293b" 
+                                 stroke="#ffffff" 
+                                 stroke-width="3"/>
+                      </g>
+                      
+                      <!-- Center circle -->
+                      <circle cx="${centerX}" cy="${centerY}" r="16" fill="#1e293b"/>
+                      <circle cx="${centerX}" cy="${centerY}" r="10" fill="#ffffff"/>
+                    </svg>
+                  `;
+                })()}
+                <div style="position: absolute; bottom: 25px; left: 50%; transform: translateX(-50%); font-size: 3.5rem; font-weight: 700; color: ${aiGeoHealth.aiGeoStatus === 'green' ? '#10b981' : aiGeoHealth.aiGeoStatus === 'amber' ? '#f59e0b' : '#ef4444'}; text-shadow: 0 2px 4px rgba(0,0,0,0.1); pointer-events: none;">
                   ${aiGeoHealth.aiGeoScore}
                 </div>
               </div>
@@ -4248,159 +4363,7 @@
       pillarCards.parentNode.insertBefore(healthDashboard, pillarCards);
       debugLog('✓ AI GEO Health Dashboard created', 'success');
       
-      // Draw speedometer gauge after DOM insertion
-      const drawSpeedometer = () => {
-        const speedometerCanvas = document.getElementById('ai-geo-speedometer');
-        if (!speedometerCanvas) {
-          console.error('Speedometer canvas not found');
-          return;
-        }
-        
-        const ctx = speedometerCanvas.getContext('2d');
-        if (!ctx) {
-          console.error('Could not get 2d context');
-          return;
-        }
-        
-        // Set up dimensions - use actual canvas size
-        const width = speedometerCanvas.width;
-        const height = speedometerCanvas.height;
-        const centerX = width / 2;
-        const centerY = height - 40; // Leave space at bottom for labels and score
-        const radius = 140;
-        const arcWidth = 32;
-        
-        // Angles: 180° (left) to 0° (right) - semi-circle
-        const startAngle = Math.PI; // 180 degrees (left)
-        const endAngle = 0; // 0 degrees (right)
-        const totalAngle = Math.PI; // 180 degrees total
-        
-        const score = aiGeoHealth.aiGeoScore;
-        const maxScore = 100;
-        
-        // Clear canvas with white background
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, width, height);
-        
-        // Helper function to draw an arc segment
-        const drawArc = (start, end, color, lineWidth) => {
-          ctx.beginPath();
-          ctx.arc(centerX, centerY, radius, start, end, false);
-          ctx.strokeStyle = color;
-          ctx.lineWidth = lineWidth;
-          ctx.lineCap = 'round';
-          ctx.stroke();
-        };
-        
-        // Calculate segment boundaries (0-50 red, 50-70 amber, 70-100 green)
-        const redEndAngle = startAngle - (50 / maxScore) * totalAngle;
-        const amberEndAngle = startAngle - (70 / maxScore) * totalAngle;
-        
-        // Draw color segments - Red (0-50)
-        drawArc(startAngle, redEndAngle, '#ef4444', arcWidth);
-        
-        // Draw color segments - Amber (50-70)
-        drawArc(redEndAngle, amberEndAngle, '#f59e0b', arcWidth);
-        
-        // Draw color segments - Green (70-100)
-        drawArc(amberEndAngle, endAngle, '#10b981', arcWidth);
-        
-        // Draw tick marks (scale) - every 10 points
-        const tickRadius = radius - arcWidth / 2;
-        for (let i = 0; i <= 10; i++) {
-          const value = i * 10;
-          const angle = startAngle - (value / maxScore) * totalAngle;
-          const cos = Math.cos(angle);
-          const sin = Math.sin(angle);
-          
-          // Major ticks (0, 50, 100) are longer
-          const isMajor = (value === 0 || value === 50 || value === 100);
-          const tickLength = isMajor ? 20 : 12;
-          
-          ctx.beginPath();
-          ctx.moveTo(
-            centerX + (tickRadius - tickLength) * cos,
-            centerY + (tickRadius - tickLength) * sin
-          );
-          ctx.lineTo(
-            centerX + tickRadius * cos,
-            centerY + tickRadius * sin
-          );
-          ctx.strokeStyle = '#64748b';
-          ctx.lineWidth = isMajor ? 3 : 2;
-          ctx.stroke();
-        }
-        
-        // Draw scale labels (0, 50, 100) - positioned outside the gauge
-        const labelRadius = radius + 55;
-        ctx.fillStyle = '#1e293b';
-        ctx.font = 'bold 24px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        
-        // Label "0" (left)
-        const angle0 = startAngle;
-        ctx.fillText('0', 
-          centerX + labelRadius * Math.cos(angle0),
-          centerY + labelRadius * Math.sin(angle0)
-        );
-        
-        // Label "50" (center)
-        const angle50 = startAngle - (50 / maxScore) * totalAngle;
-        ctx.fillText('50',
-          centerX + labelRadius * Math.cos(angle50),
-          centerY + labelRadius * Math.sin(angle50)
-        );
-        
-        // Label "100" (right)
-        const angle100 = endAngle;
-        ctx.fillText('100',
-          centerX + labelRadius * Math.cos(angle100),
-          centerY + labelRadius * Math.sin(angle100)
-        );
-        
-        // Calculate needle angle for current score
-        const needleAngle = startAngle - (score / maxScore) * totalAngle;
-        
-        // Draw needle - thick, visible triangle pointing to score
-        ctx.save();
-        ctx.translate(centerX, centerY);
-        ctx.rotate(needleAngle);
-        
-        // Needle triangle (pointing up when rotated)
-        const needleLength = tickRadius - 15;
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.lineTo(needleLength, -14);
-        ctx.lineTo(needleLength, 14);
-        ctx.closePath();
-        ctx.fillStyle = '#1e293b';
-        ctx.fill();
-        
-        // White outline for needle visibility
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 3;
-        ctx.stroke();
-        
-        ctx.restore();
-        
-        // Draw center circle (pivot point)
-        ctx.beginPath();
-        ctx.arc(centerX, centerY, 16, 0, 2 * Math.PI);
-        ctx.fillStyle = '#1e293b';
-        ctx.fill();
-        
-        // Inner white circle
-        ctx.beginPath();
-        ctx.arc(centerX, centerY, 10, 0, 2 * Math.PI);
-        ctx.fillStyle = '#ffffff';
-        ctx.fill();
-      };
-      
-      // Try drawing immediately, then retry after a short delay to ensure DOM is ready
-      drawSpeedometer();
-      setTimeout(drawSpeedometer, 100);
-      setTimeout(drawSpeedometer, 300);
+      // Speedometer is now SVG-based, no canvas drawing needed
       
       // Clear pillar cards for fresh render
       pillarCards.innerHTML = '';
