@@ -3024,14 +3024,28 @@
           reviews: reviewScore      // Same across all segments
         });
         
-        // Helper to compute GSC metrics for a segment
-        const computeGSCMetricsForSegment = (segmentPages) => {
-          if (!segmentPages || segmentPages.length === 0) {
+        // Helper to compute GSC metrics for a segment from queryPages data
+        const computeGSCMetricsForSegment = (queryPagesData, segmentFilter) => {
+          if (!queryPagesData || queryPagesData.length === 0) {
             return { siteCtr: 0, top10Ctr: 0, avgPosition: 0, top10Share: 0 };
           }
           
-          const rankingQueries = segmentPages.filter(q => q.position > 0 && q.position <= 20 && q.impressions > 0);
-          const top10Queries = rankingQueries.filter(q => q.position <= 10);
+          // Filter by segment if filter function provided
+          let filteredData = queryPagesData;
+          if (segmentFilter) {
+            filteredData = queryPagesData.filter(row => {
+              const segment = classifyPageSegment(row.page || row.url || '/');
+              return segmentFilter(segment);
+            });
+          }
+          
+          // Filter to ranking queries (position 1-20, with impressions)
+          const rankingQueries = filteredData.filter(q => {
+            const pos = q.position || 0;
+            const impr = q.impressions || 0;
+            return pos > 0 && pos <= 20 && impr > 0;
+          });
+          const top10Queries = rankingQueries.filter(q => (q.position || 0) <= 10);
           
           let siteCtr = 0;
           let top10Ctr = 0;
@@ -3057,10 +3071,10 @@
           return { siteCtr, top10Ctr, avgPosition, top10Share };
         };
         
-        // Compute GSC metrics for each segment
-        const allGSCMetrics = computeGSCMetricsForSegment(allPages);
-        const excludeEduGSCMetrics = computeGSCMetricsForSegment(excludeEduPages);
-        const moneyGSCMetrics = computeGSCMetricsForSegment(moneyPages);
+        // Compute GSC metrics for each segment using queryPages data
+        const allGSCMetrics = computeGSCMetricsForSegment(rankingPages, null); // All pages
+        const excludeEduGSCMetrics = computeGSCMetricsForSegment(rankingPages, (seg) => seg !== PageSegment.EDUCATION);
+        const moneyGSCMetrics = computeGSCMetricsForSegment(rankingPages, (seg) => seg === PageSegment.MONEY);
         
         authorityBySegment = {
           all: { 
@@ -5217,7 +5231,7 @@
         
         // Create section HTML with improved styling and pastel background
         topPagesSection.innerHTML = `
-          <div style="background: linear-gradient(135deg, #fef2f8 0%, #fce7f3 100%); padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-left: 4px solid #99004C;">
+          <div style="background: #DDA0DD; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-left: 4px solid #99004C;">
             <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem;">
               <div style="flex: 1;">
                 <h3 style="margin: 0 0 0.5rem 0; color: var(--brand-dark); font-size: 1.25rem; font-weight: 700;">Authority - Behaviour & Ranking</h3>
@@ -5229,20 +5243,20 @@
             </div>
             
             ${currentSummary ? `
-            <div style="margin-bottom: 1rem; padding: 1rem; background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%); border-radius: 6px; border: 1px solid #e2e8f0;">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-                <div style="display: flex; align-items: center; gap: 0.75rem;">
-                  <span style="font-weight: 600; color: #333; font-size: 0.9rem;">Segment Summary:</span>
-                  <span id="top-pages-segment-label" style="color: #666; font-size: 0.85rem; padding: 0.25rem 0.75rem; background: #f1f5f9; border-radius: 4px;">${segmentLabel}</span>
+            <div style="margin-bottom: 1rem; padding: 1rem; background: rgba(255, 255, 255, 0.9); border-radius: 6px; border: 1px solid #e2e8f0;">
+              <div style="text-align: center; margin-bottom: 0.75rem;">
+                <span style="font-weight: 600; color: #333; font-size: 0.9rem;">Segment Summary: </span>
+                <span id="top-pages-segment-label" style="color: #666; font-size: 0.85rem; padding: 0.25rem 0.75rem; background: #f1f5f9; border-radius: 4px;">${segmentLabel}</span>
+              </div>
+              <div style="display: flex; justify-content: center; align-items: center; gap: 1.5rem; flex-wrap: wrap;">
+                <div id="top-pages-segment-summary" style="display: flex; align-items: center; gap: 1.5rem; font-size: 1rem;">
+                  ${formatComponentScore('Behaviour', currentSummary.behaviour)}
+                  ${formatComponentScore('Ranking', currentSummary.ranking)}
                 </div>
                 <div style="display: flex; align-items: center; gap: 0.5rem;">
-                  <span style="font-size: 1.1rem; font-weight: 700; color: ${rag.status === 'green' ? '#10b981' : rag.status === 'amber' ? '#f59e0b' : '#ef4444'};">${Math.round(currentSummary.total)}</span>
-                  <span class="rag-badge ${rag.status}" style="display: inline-block; padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">${rag.label}</span>
+                  <span style="font-size: 1.5rem; font-weight: 700; color: ${rag.status === 'green' ? '#10b981' : rag.status === 'amber' ? '#f59e0b' : '#ef4444'};">${Math.round(currentSummary.total)}</span>
+                  <span class="rag-badge ${rag.status}" style="display: inline-block; padding: 0.35rem 0.85rem; border-radius: 4px; font-size: 0.85rem; font-weight: 600;">${rag.label}</span>
                 </div>
-              </div>
-              <div id="top-pages-segment-summary" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; font-size: 0.8rem;">
-                ${formatComponentScore('Behaviour', currentSummary.behaviour)}
-                ${formatComponentScore('Ranking', currentSummary.ranking)}
               </div>
             </div>
             ` : `
