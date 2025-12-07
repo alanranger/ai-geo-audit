@@ -5938,16 +5938,22 @@
       }
       
       // Add pillar scorecard table
-      // Determine last data date for each pillar
-      const savedAudit = loadAuditResults();
-      const auditTimestamp = savedAudit?.timestamp;
+      // Use current audit data (from function parameters) instead of stale localStorage data
+      const auditTimestamp = saved?.timestamp;
       
-      // Get last GSC data date from timeseries (for Authority and Visibility)
+      // Get last GSC data date from current data (for Authority and Visibility)
       let gscLastDate = null;
-      if (data && data.timeseries && Array.isArray(data.timeseries) && data.timeseries.length > 0) {
-        const lastTimeseriesPoint = data.timeseries[data.timeseries.length - 1];
-        if (lastTimeseriesPoint && lastTimeseriesPoint.date) {
-          gscLastDate = lastTimeseriesPoint.date;
+      if (data) {
+        // Try timeseries first
+        if (data.timeseries && Array.isArray(data.timeseries) && data.timeseries.length > 0) {
+          const lastTimeseriesPoint = data.timeseries[data.timeseries.length - 1];
+          if (lastTimeseriesPoint && lastTimeseriesPoint.date) {
+            gscLastDate = lastTimeseriesPoint.date;
+          }
+        }
+        // Fallback to date from current data if available
+        if (!gscLastDate && data.date) {
+          gscLastDate = data.date;
         }
       }
       
@@ -6100,11 +6106,12 @@
                   serviceAreaDesc = 'How clearly AI understands where lessons/workshops run and which regions you cover.<br><strong>AI Importance:</strong> AI uses geographic signals to match queries with local intent. Clear service area data helps AI surface your content for location-specific searches and local AI Overviews.<br><strong>Data Source:</strong> ⚠️ <span style="color: #f59e0b;">Derived calculation</span> from Local Entity score (not using real service area data yet).<br><strong>Data Checked:</strong> Currently calculated from Local Entity. Real data pending: ServiceArea schema markup, Google Business Profile service areas, geographic keywords, location pages.';
                 }
                 
-                // Format GSC data for display
-                const ctr = data?.ctr || 0;
-                const avgPosition = data?.averagePosition || 0;
-                const totalClicks = data?.totalClicks || 0;
-                const totalImpressions = data?.totalImpressions || 0;
+                // Format GSC data for display - use current data parameter
+                const currentGSCData = data || searchDataForBreakdown || {};
+                const ctr = currentGSCData.ctr || 0;
+                const avgPosition = currentGSCData.averagePosition || 0;
+                const totalClicks = currentGSCData.totalClicks || 0;
+                const totalImpressions = currentGSCData.totalImpressions || 0;
                 
                 const descriptions = {
                   localEntity: localEntityDesc,
@@ -6115,7 +6122,10 @@
                 };
                 
                 // Generate dynamic next steps based on actual data and scores
+                // Use current data from function parameters
                 const getNextSteps = (pillarKey, pillarScore, gscData, schemaData) => {
+                  // Ensure we use the current schema audit data
+                  const currentSchemaData = schemaAuditData || schemaData;
                   const steps = [];
                   
                   switch(pillarKey) {
@@ -6180,9 +6190,11 @@
                       break;
                       
                     case 'visibility':
-                      if (gscData) {
-                        const position = gscData.averagePosition || 0;
-                        const ctr = gscData.ctr || 0;
+                      // Use current data from function parameters
+                      const currentGSCForVisibility = data || searchDataForBreakdown || {};
+                      if (currentGSCForVisibility) {
+                        const position = currentGSCForVisibility.averagePosition || 0;
+                        const ctr = currentGSCForVisibility.ctr || 0;
                         
                         if (position > 10) {
                           steps.push(`<strong>Average position: ${position.toFixed(1)}</strong> - Target top 10 positions (currently ranking ${position > 20 ? 'below' : 'in'} page ${Math.ceil(position / 10)})`);
@@ -6196,22 +6208,24 @@
                           steps.push(`<strong>CTR: ${ctr.toFixed(2)}%</strong> - Good CTR! Continue optimizing for featured snippets`);
                         }
                         
-                        if (gscData.totalImpressions < 1000) {
-                          steps.push(`<strong>Impressions: ${gscData.totalImpressions}</strong> - Increase visibility by targeting more keywords`);
+                        if (currentGSCForVisibility.totalImpressions < 1000) {
+                          steps.push(`<strong>Impressions: ${currentGSCForVisibility.totalImpressions}</strong> - Increase visibility by targeting more keywords`);
                         }
                       }
                       break;
                       
                     case 'authority':
-                      if (gscData) {
-                        const ctr = gscData.ctr || 0;
-                        const position = gscData.averagePosition || 0;
-                        const savedAudit = loadAuditResults();
+                      // Use current data from function parameters, not stale localStorage
+                      const currentGSCForAuthority = data || searchDataForBreakdown || {};
+                      if (currentGSCForAuthority) {
+                        const ctr = currentGSCForAuthority.ctr || 0;
+                        const position = currentGSCForAuthority.averagePosition || 0;
+                        // Use current saved data (already loaded at function start)
                         const authorityComponents = scores?.authorityComponents;
-                        const backlinkMetrics = savedAudit?.backlinkMetrics;
-                        const localSignals = savedAudit?.localSignals;
+                        const backlinkMetrics = saved?.backlinkMetrics;
+                        const localSignals = saved?.localSignals;
                         // Always use correct Trustpilot snapshot (4.6, 610) - override any old cached values
-                        const siteReviews = getTrustpilotSnapshot(savedAudit?.siteReviews);
+                        const siteReviews = getTrustpilotSnapshot(saved?.siteReviews);
                         
                         // Show component-specific suggestions
                         if (authorityComponents) {
@@ -6425,7 +6439,7 @@
                       </span>
                     </td>
                     <td style="padding: 0.75rem; color: #666; font-size: 0.85rem; line-height: 1.6; width: 42%;">${descriptionCell}</td>
-                    <td style="padding: 0.75rem; color: #555; font-size: 0.85rem; line-height: 1.6; width: 22%;">${getNextSteps(key, score, data, schemaAudit)}</td>
+                    <td style="padding: 0.75rem; color: #555; font-size: 0.85rem; line-height: 1.6; width: 22%;">${getNextSteps(key, score, currentGSCData, schemaAuditData)}</td>
                     <td style="padding: 0.75rem; text-align: center; width: 6%;">${dataDateDisplay}</td>
                   </tr>
                 `;
