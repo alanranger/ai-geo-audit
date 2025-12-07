@@ -4228,6 +4228,35 @@
               });
             }
             
+            // Add initial copy button handler
+            const copyBtn = document.getElementById(card._copyButtonId);
+            if (copyBtn) {
+              copyBtn.addEventListener('click', async () => {
+                const currentTopPages = currentMode === 'all'
+                  ? (authorityBySegment?.all?.topPages || [])
+                  : currentMode === 'nonEducation'
+                  ? (authorityBySegment?.nonEducation?.topPages || [])
+                  : (authorityBySegment?.money?.topPages || []);
+                
+                const text = currentTopPages.map(p => p.url).join('\n');
+                try {
+                  await navigator.clipboard.writeText(text);
+                  copyBtn.textContent = 'Copied!';
+                  copyBtn.style.color = '#10b981';
+                  setTimeout(() => {
+                    copyBtn.textContent = 'Copy URLs';
+                    copyBtn.style.color = '#666';
+                  }, 2000);
+                } catch (err) {
+                  console.error('Failed to copy URLs:', err);
+                  copyBtn.textContent = 'Copy failed';
+                  setTimeout(() => {
+                    copyBtn.textContent = 'Copy URLs';
+                  }, 2000);
+                }
+              });
+            }
+            
             // Add mode toggle handlers
             if (authorityBySegment) {
               ['all', 'nonEducation', 'money'].forEach(mode => {
