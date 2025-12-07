@@ -3668,11 +3668,16 @@
       
       getOrderedPillars(scores).forEach(([key, scoreValue]) => {
         // Handle new Authority structure (object with score and bySegment) or legacy (number)
+        // Note: getOrderedPillars extracts the score, so we need to get bySegment from original scores object
         let score = scoreValue;
         let authorityBySegment = null;
-        if (key === 'authority' && typeof scoreValue === 'object' && scoreValue !== null) {
-          score = scoreValue.score || 0;
-          authorityBySegment = scoreValue.bySegment || null;
+        if (key === 'authority') {
+          // Get the original Authority object from scores (not from getOrderedPillars result)
+          const authorityObj = scores.authority;
+          if (typeof authorityObj === 'object' && authorityObj !== null) {
+            score = authorityObj.score || 0;
+            authorityBySegment = authorityObj.bySegment || null;
+          }
         }
         
         const rag = getRAGStatus(score);
