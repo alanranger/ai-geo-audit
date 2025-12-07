@@ -4820,9 +4820,9 @@
                 <tr style="background: linear-gradient(135deg, #f8f9fa 0%, #f1f5f9 100%); border-bottom: 2px solid #e2e8f0;">
                   <th style="text-align: left; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Metric</th>
                   <th style="text-align: center; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Status</th>
-                  <th style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Current</th>
-                  <th style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Target</th>
-                  <th style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Difference</th>
+                  <th style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Current Value</th>
+                  <th style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Target Value</th>
+                  <th style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Gap</th>
                   <th style="text-align: left; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Suggested action</th>
                 </tr>
               </thead>
@@ -4832,24 +4832,44 @@
         recommendations.forEach((row, idx) => {
           const isEven = idx % 2 === 0;
           
-          // Format target value and difference based on metric type
+          // Determine metric type and format accordingly
+          let currentDisplay = row.value;
           let targetDisplay = row.target;
           let diffDisplay = '—';
+          let isPercentage = false;
+          let isPosition = false;
           
-          if (row.targetValue !== null && row.targetValue !== undefined) {
-            if (row.metric.includes('CTR') || row.metric.includes('impression share')) {
-              // For CTR and percentage metrics
-              targetDisplay = `${row.target}<br><span style="color: #475569; font-size: 0.8rem; font-weight: 600;">(${row.targetValue.toFixed(2)}%)</span>`;
+          if (row.metric.includes('CTR')) {
+            // CTR metrics: show as percentages
+            isPercentage = true;
+            currentDisplay = `${row.currentValue.toFixed(2)}%`;
+            if (row.targetValue !== null && row.targetValue !== undefined) {
+              targetDisplay = `${row.targetValue.toFixed(2)}%`;
               if (row.difference !== null && row.difference !== undefined) {
                 const diffColor = row.difference <= 1 ? '#10b981' : row.difference <= 3 ? '#f59e0b' : '#ef4444';
                 diffDisplay = `<span style="color: ${diffColor}; font-weight: 600;">${row.difference.toFixed(2)}%</span>`;
               }
-            } else if (row.metric.includes('position')) {
-              // For position metrics
-              targetDisplay = `${row.target}<br><span style="color: #475569; font-size: 0.8rem; font-weight: 600;">(${row.targetValue.toFixed(1)})</span>`;
+            }
+          } else if (row.metric.includes('position')) {
+            // Position metrics: show as numbers (no %)
+            isPosition = true;
+            currentDisplay = row.currentValue.toFixed(1);
+            if (row.targetValue !== null && row.targetValue !== undefined) {
+              targetDisplay = row.targetValue.toFixed(1);
               if (row.difference !== null && row.difference !== undefined) {
                 const diffColor = row.difference <= 1 ? '#10b981' : row.difference <= 2 ? '#f59e0b' : '#ef4444';
                 diffDisplay = `<span style="color: ${diffColor}; font-weight: 600;">${row.difference.toFixed(1)}</span>`;
+              }
+            }
+          } else if (row.metric.includes('impression share')) {
+            // Share metrics: show as percentages
+            isPercentage = true;
+            currentDisplay = `${row.currentValue.toFixed(2)}%`;
+            if (row.targetValue !== null && row.targetValue !== undefined) {
+              targetDisplay = `${row.targetValue.toFixed(2)}%`;
+              if (row.difference !== null && row.difference !== undefined) {
+                const diffColor = row.difference <= 5 ? '#10b981' : row.difference <= 10 ? '#f59e0b' : '#ef4444';
+                diffDisplay = `<span style="color: ${diffColor}; font-weight: 600;">${row.difference.toFixed(2)}%</span>`;
               }
             }
           }
@@ -4858,8 +4878,8 @@
             <tr style="border-bottom: 1px solid #f1f5f9; background: ${isEven ? '#ffffff' : '#fafafa'}; transition: background 0.2s;" onmouseover="this.style.background='#f8f9fa';" onmouseout="this.style.background='${isEven ? '#ffffff' : '#fafafa'}';">
               <td style="padding: 0.75rem; color: #0f172a; font-weight: 600;">${row.metric}</td>
               <td style="padding: 0.75rem; text-align: center;">${getStatusPill(row.status)}</td>
-              <td style="padding: 0.75rem; text-align: right; color: #0f172a; font-weight: 600;">${row.value}</td>
-              <td style="padding: 0.75rem; text-align: right; color: #0f172a; font-weight: 500; line-height: 1.4;">${targetDisplay}</td>
+              <td style="padding: 0.75rem; text-align: right; color: #0f172a; font-weight: 600;">${currentDisplay}</td>
+              <td style="padding: 0.75rem; text-align: right; color: #0f172a; font-weight: 600;">${targetDisplay}</td>
               <td style="padding: 0.75rem; text-align: right; color: #0f172a; font-weight: 600;">${diffDisplay}</td>
               <td style="padding: 0.75rem; color: #0f172a; font-weight: 400; line-height: 1.5;">${row.action}</td>
             </tr>
