@@ -2527,6 +2527,211 @@
     }
 
     // Raw Behaviour score calculation (internal, used by segmented version)
+    // ============================================================================
+    // PHASE 1: Brand Overlay Metrics
+    // ============================================================================
+    
+    /**
+     * @typedef {Object} BrandOverlay
+     * @property {number} score - 0-100
+     * @property {'Weak'|'Developing'|'Strong'} label
+     * @property {number} brandQueryShare - 0-1, impressions share
+     * @property {number} brandCtr - 0-1
+     * @property {number} brandAvgPosition - numeric position
+     * @property {number} reviewScore - 0-100, from existing review metrics
+     * @property {number} entityScore - 0-100, based on knowledge panel / GBP presence
+     * @property {string[]} notes - short machine-generated reasons for the label
+     */
+    
+    /**
+     * @typedef {Object} AiSummaryLikelihood
+     * @property {number} score - 0-100 composite
+     * @property {'Low'|'Medium'|'High'} label
+     * @property {string[]} reasons - short bullets used in UI tooltip / priorities
+     */
+    
+    // Brand query classification
+    const BRAND_TERMS = ['alan ranger', 'alanranger', 'alan ranger photography'];
+    
+    /**
+     * Check if a query is a brand query
+     * @param {string} query - Search query text
+     * @returns {boolean}
+     */
+    function isBrandQuery(query) {
+      if (!query || typeof query !== 'string') return false;
+      const q = query.toLowerCase();
+      return BRAND_TERMS.some(term => q.includes(term));
+    }
+    
+    /**
+     * Calculate brand metrics from GSC query data
+     * @param {Array} queries - Array of query objects with {query, clicks, impressions, position}
+     * @returns {Object} Brand metrics {brandQueryShare, brandCtr, brandAvgPosition}
+     */
+    function calculateBrandMetrics(queries) {
+      if (!queries || !Array.isArray(queries) || queries.length === 0) {
+        return {
+          brandQueryShare: 0,
+          brandCtr: 0,
+          brandAvgPosition: null
+        };
+      }
+      
+      // Filter to ranking queries (position 1-20, with impressions)
+      const ranking = queries.filter(q => {
+        const pos = q.position || 0;
+        const impr = q.impressions || 0;
+        return pos > 0 && pos <= 20 && impr > 0;
+      });
+      
+      if (ranking.length === 0) {
+        return {
+          brandQueryShare: 0,
+          brandCtr: 0,
+          brandAvgPosition: null
+        };
+      }
+      
+      // Split into brand vs non-brand
+      const brandQueries = ranking.filter(q => isBrandQuery(q.query || ''));
+      const nonBrandQueries = ranking.filter(q => !isBrandQuery(q.query || ''));
+      
+      // Calculate totals
+      const totalImpressions = ranking.reduce((s, q) => s + (q.impressions || 0), 0);
+      const brandImpressions = brandQueries.reduce((s, q) => s + (q.impressions || 0), 0);
+      const brandClicks = brandQueries.reduce((s, q) => s + (q.clicks || 0), 0);
+      
+      // Brand query share (0-1)
+      const brandQueryShare = totalImpressions > 0 ? brandImpressions / totalImpressions : 0;
+      
+      // Brand CTR (0-1)
+      const brandCtr = brandImpressions > 0 ? brandClicks / brandImpressions : 0;
+      
+      // Brand average position (weighted by impressions)
+      const brandAvgPosition = brandImpressions > 0
+        ? brandQueries.reduce((s, q) => s + (q.position || 0) * (q.impressions || 0), 0) / brandImpressions
+        : null;
+      
+      return {
+        brandQueryShare,
+        brandCtr,
+        brandAvgPosition
+      };
+    }
+    
+    /**
+     * Normalize position to 0-100 score (for brand overlay)
+     * @param {number|null} pos - Position value
+     * @param {number} minPos - Minimum position (default 1)
+     * @param {number} maxPos - Maximum position (default 10)
+     * @returns {number} Score 0-100
+     */
+    function normalisePositionForBrand(pos, minPos = 1, maxPos = 10) {
+      if (pos == null) return 0;
+      const clamped = Math.max(minPos, Math.min(maxPos, pos));
+      const t = (clamped - minPos) / (maxPos - minPos); // 0..1
+      return 100 - t * 100;
+    }
+    
+    /**
+     * Compute Brand Overlay score
+     * @param {Object} args - Brand overlay parameters
+     * @param {number} args.brandQueryShare - 0-1, impressions share
+     * @param {number} args.brandCtr - 0-1
+     * @param {number|null} args.brandAvgPosition - numeric position
+     * @param {number} args.reviewScore - 0-100, from existing Authority review score
+     * @param {number} args.entityScore - 0-100, from Local Entity pillar
+     * @returns {BrandOverlay}
+     */
+    function computeBrandOverlay(args) {
+      const {
+        brandQueryShare = 0,
+        brandCtr = 0,
+        brandAvgPosition = null,
+        reviewScore = 0,
+        entityScore = 0
+      } = args;
+      
+      // Brand search component
+      const shareScore = Math.min(brandQueryShare / 0.30, 1) * 100; // 30%+ share = 100
+      const ctrScore = Math.min(brandCtr / 0.40, 1) * 100; // 40%+ CTR = 100
+      const posScore = normalisePositionForBrand(brandAvgPosition, 1, 10);
+      
+      const brandSearchScore =
+        0.4 * shareScore +
+        0.3 * ctrScore +
+        0.3 * posScore;
+      
+      // Combine with review + entity strength
+      const combined =
+        0.4 * brandSearchScore +
+        0.3 * reviewScore +
+        0.3 * entityScore;
+      
+      let label;
+      if (combined < 40) label = 'Weak';
+      else if (combined < 70) label = 'Developing';
+      else label = 'Strong';
+      
+      const notes = [];
+      if (brandQueryShare < 0.1) notes.push('Low share of branded searches in GSC.');
+      if (brandCtr < 0.25) notes.push('Branded CTR is below 25%.');
+      if (brandAvgPosition == null || brandAvgPosition > 5)
+        notes.push('Branded queries do not consistently rank in top-5.');
+      if (reviewScore < 70) notes.push('Review rating / volume is still maturing.');
+      if (entityScore < 70) notes.push('Knowledge-panel / entity coverage could be stronger.');
+      
+      return {
+        score: Math.round(combined),
+        label,
+        brandQueryShare,
+        brandCtr,
+        brandAvgPosition: brandAvgPosition ?? 0,
+        reviewScore,
+        entityScore,
+        notes
+      };
+    }
+    
+    /**
+     * Compute AI Summary Likelihood
+     * @param {number} snippetReadinessScore - Existing donut score
+     * @param {number} visibilityScore - Current Visibility pillar score
+     * @param {number} brandScore - Brand overlay score
+     * @returns {AiSummaryLikelihood}
+     */
+    function computeAiSummaryLikelihood(snippetReadinessScore, visibilityScore, brandScore) {
+      const composite =
+        0.5 * snippetReadinessScore +
+        0.3 * visibilityScore +
+        0.2 * brandScore;
+      
+      let label;
+      if (composite < 50) label = 'Low';
+      else if (composite < 75) label = 'Medium';
+      else label = 'High';
+      
+      const reasons = [];
+      
+      if (snippetReadinessScore < 70)
+        reasons.push('Improve FAQ/HowTo/Article blocks and schema to raise snippet readiness.');
+      if (visibilityScore < 70)
+        reasons.push('Improve average position and top-10 impression share.');
+      if (brandScore < 70)
+        reasons.push('Strengthen branded search and entity signals.');
+      
+      return {
+        score: Math.round(composite),
+        label,
+        reasons
+      };
+    }
+    
+    // ============================================================================
+    // End Phase 1: Brand Overlay Metrics
+    // ============================================================================
+
     function computeBehaviourScoreRaw(queries) {
       if (!queries || !Array.isArray(queries) || queries.length === 0) {
         return 50; // neutral fallback
@@ -3300,6 +3505,42 @@
         diversityScore = Math.min((uniqueTypesCount / 15) * 100, 100);
       }
 
+      // ============================================================================
+      // PHASE 1: Brand Overlay Calculation
+      // ============================================================================
+      
+      // Calculate brand metrics from GSC query data
+      // Use queryPages if available (more accurate), otherwise fall back to topQueries
+      let brandMetrics;
+      if (queryPages && queryPages.length > 0) {
+        // Convert queryPages to query format for brand metrics calculation
+        const queriesForBrand = queryPages.map(row => ({
+          query: row.query || '',
+          clicks: row.clicks || 0,
+          impressions: row.impressions || 0,
+          position: row.position || 0
+        }));
+        brandMetrics = calculateBrandMetrics(queriesForBrand);
+      } else {
+        // Fallback to topQueries
+        brandMetrics = calculateBrandMetrics(topQueries);
+      }
+      debugLog(`Brand Metrics: Share=${(brandMetrics.brandQueryShare * 100).toFixed(2)}%, CTR=${(brandMetrics.brandCtr * 100).toFixed(2)}%, AvgPos=${brandMetrics.brandAvgPosition?.toFixed(1) || 'N/A'}`, 'info');
+      
+      // Compute brand overlay score
+      const brandOverlay = computeBrandOverlay({
+        brandQueryShare: brandMetrics.brandQueryShare,
+        brandCtr: brandMetrics.brandCtr,
+        brandAvgPosition: brandMetrics.brandAvgPosition,
+        reviewScore: reviewScore,
+        entityScore: localEntity
+      });
+      debugLog(`Brand Overlay: Score=${brandOverlay.score}, Label=${brandOverlay.label}, Notes=${brandOverlay.notes.length}`, 'info');
+      
+      // ============================================================================
+      // End Phase 1: Brand Overlay Calculation
+      // ============================================================================
+
       const scores = {
         localEntity,
         serviceArea,
@@ -3313,7 +3554,9 @@
         authorityComponents: authorityComponents,
         // AI GEO health components (extracted from contentSchema)
         coverage: coverageScore,
-        diversity: diversityScore
+        diversity: diversityScore,
+        // Phase 1: Brand overlay (overlay only, not weighted in AI GEO score)
+        brandOverlay: brandOverlay
       };
 
       debugLog(`Deterministic pillar scores: ${JSON.stringify(scores)}`, 'info');
@@ -3321,7 +3564,7 @@
     }
     
     // Calculate AI GEO Health Score
-    function calculateAiGeoScore(scores, schemaAudit = null) {
+    function calculateAiGeoScore(scores, schemaAudit = null, snippetReadiness = null) {
       // AI GEO weights
       const AIGEO_WEIGHTS = {
         authority: 0.30,
@@ -3336,6 +3579,7 @@
         ? scores.authority.score 
         : scores.authority || 0;
       const contentScore = scores.contentSchema || 0;
+      const visibilityScore = scores.visibility || 0;
       
       // Extract coverage and diversity from schema audit or scores
       let coverage = scores.coverage || 0;
@@ -3369,19 +3613,38 @@
         locationsScore * AIGEO_WEIGHTS.locations
       );
       
+      // Phase 1: Calculate AI Summary Likelihood using new method
+      const snippetReadinessScore = snippetReadiness?.overallScore || 0;
+      const brandScore = scores.brandOverlay?.score || 0;
+      
+      // Use new computeAiSummaryLikelihood if we have all required data
+      let aiSummary;
+      if (snippetReadinessScore > 0 && brandScore > 0) {
+        aiSummary = computeAiSummaryLikelihood(snippetReadinessScore, visibilityScore, brandScore);
+      } else {
+        // Fallback to old method for backward compatibility
+        aiSummary = {
+          label: calculateAiSummaryLikelihood({
+            aiGeoScore,
+            authority: authorityScore,
+            content: contentScore,
+            coverage: coverage
+          }),
+          score: aiGeoScore, // Use aiGeoScore as fallback
+          reasons: []
+        };
+      }
+      
       return {
         aiGeoScore,
         aiGeoStatus: aiGeoScore >= 70 ? 'green' : aiGeoScore >= 50 ? 'amber' : 'red',
-        aiSummaryLikelihood: calculateAiSummaryLikelihood({
-          aiGeoScore,
-          authority: authorityScore,
-          content: contentScore,
-          coverage: coverage
-        })
+        aiSummaryLikelihood: aiSummary.label, // Keep backward compatibility
+        aiSummary: aiSummary // New Phase 1 field
       };
     }
     
-    // Calculate AI Summary Likelihood
+    // Calculate AI Summary Likelihood (OLD - kept for backward compatibility, but will be replaced)
+    // NOTE: This is being replaced by computeAiSummaryLikelihood which uses snippetReadiness, visibility, and brand
     function calculateAiSummaryLikelihood({ aiGeoScore, authority, content, coverage }) {
       const strongAuthority = authority >= 65;
       const strongContent = content >= 70;
@@ -3984,7 +4247,7 @@
       const localSignalsData = hasLocalSignals ? currentLocalSignals.data : null;
       
       // Calculate AI GEO Health Score
-      const aiGeoHealth = calculateAiGeoScore(scores, schemaAudit);
+      const aiGeoHealth = calculateAiGeoScore(scores, schemaAudit, snippetReadiness);
       debugLog(`AI GEO Health: Score=${aiGeoHealth.aiGeoScore}, Status=${aiGeoHealth.aiGeoStatus}, Likelihood=${aiGeoHealth.aiSummaryLikelihood}`, 'info');
       
       // Extract component scores for health dashboard

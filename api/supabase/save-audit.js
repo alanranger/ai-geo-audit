@@ -92,6 +92,49 @@ export default async function handler(req, res) {
       content_schema_score: scores?.contentSchema || null,
       snippet_readiness: snippetReadiness || null,
       
+      // Phase 1: Brand Overlay and AI Summary (stored as JSON)
+      brand_overlay: scores?.brandOverlay || null, // JSON object with score, label, metrics, notes
+      brand_score: scores?.brandOverlay?.score || null, // For trend charting
+      
+      // Calculate AI Summary Likelihood (Phase 1)
+      // Uses snippetReadiness, visibility, and brand score
+      ai_summary: (() => {
+        if (!snippetReadiness || !scores) return null;
+        const snippetReadinessScore = snippetReadiness.overallScore || 0;
+        const visibilityScore = scores.visibility || 0;
+        const brandScore = scores.brandOverlay?.score || 0;
+        
+        if (snippetReadinessScore === 0 && brandScore === 0) return null;
+        
+        const composite = 0.5 * snippetReadinessScore + 0.3 * visibilityScore + 0.2 * brandScore;
+        let label;
+        if (composite < 50) label = 'Low';
+        else if (composite < 75) label = 'Medium';
+        else label = 'High';
+        
+        const reasons = [];
+        if (snippetReadinessScore < 70)
+          reasons.push('Improve FAQ/HowTo/Article blocks and schema to raise snippet readiness.');
+        if (visibilityScore < 70)
+          reasons.push('Improve average position and top-10 impression share.');
+        if (brandScore < 70)
+          reasons.push('Strengthen branded search and entity signals.');
+        
+        return {
+          score: Math.round(composite),
+          label,
+          reasons
+        };
+      })(),
+      ai_summary_score: (() => {
+        if (!snippetReadiness || !scores) return null;
+        const snippetReadinessScore = snippetReadiness.overallScore || 0;
+        const visibilityScore = scores.visibility || 0;
+        const brandScore = scores.brandOverlay?.score || 0;
+        if (snippetReadinessScore === 0 && brandScore === 0) return null;
+        return Math.round(0.5 * snippetReadinessScore + 0.3 * visibilityScore + 0.2 * brandScore);
+      })()
+      
       // Authority Component Scores (for historical tracking and debugging)
       authority_behaviour_score: scores?.authorityComponents?.behaviour || null,
       authority_ranking_score: scores?.authorityComponents?.ranking || null,
