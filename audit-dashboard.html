@@ -3088,10 +3088,38 @@
               debugLog('⚠ Schema audit returned error, using fallback', 'warn');
             }
           } else {
-            debugLog('⚠ Schema audit endpoint not available, using fallback', 'warn');
+            debugLog('⚠ Schema audit endpoint not available, trying saved data', 'warn');
+            // Try to use saved schema audit data from localStorage
+            try {
+              const savedAudit = localStorage.getItem('last_audit_results');
+              if (savedAudit) {
+                const parsed = JSON.parse(savedAudit);
+                if (parsed.schemaAudit && parsed.schemaAudit.status === 'ok') {
+                  schemaAudit = parsed.schemaAudit;
+                  debugLog('✓ Using saved schema audit data from previous audit', 'success');
+                  debugLog(`Schema coverage: ${schemaAudit.data?.coverage || 'N/A'}%`, 'info');
+                }
+              }
+            } catch (e) {
+              debugLog(`⚠ Could not load saved schema audit: ${e.message}`, 'warn');
+            }
           }
         } catch (schemaError) {
-          debugLog(`⚠ Schema audit error: ${schemaError.message}, using fallback`, 'warn');
+          debugLog(`⚠ Schema audit error: ${schemaError.message}, trying saved data`, 'warn');
+          // Try to use saved schema audit data from localStorage
+          try {
+            const savedAudit = localStorage.getItem('last_audit_results');
+            if (savedAudit) {
+              const parsed = JSON.parse(savedAudit);
+              if (parsed.schemaAudit && parsed.schemaAudit.status === 'ok') {
+                schemaAudit = parsed.schemaAudit;
+                debugLog('✓ Using saved schema audit data from previous audit (fallback)', 'success');
+                debugLog(`Schema coverage: ${schemaAudit.data?.coverage || 'N/A'}%`, 'info');
+              }
+            }
+          } catch (e) {
+            debugLog(`⚠ Could not load saved schema audit: ${e.message}`, 'warn');
+          }
         }
         
         updateProgress(70, 'Calculating pillar scores...');
