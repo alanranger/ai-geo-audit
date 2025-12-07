@@ -732,9 +732,17 @@
     <h1>AI GEO Audit Dashboard</h1>
     <p>Automated SEO Analysis & Pillar Score Tracking</p>
     <p style="font-size: 0.9rem; margin-top: 0.5rem; opacity: 1; background: rgba(0,0,0,0.3); padding: 0.25rem 0.5rem; border-radius: 4px; display: inline-block;">
-      <strong>Version: 80c0dd8</strong> | Built: 2025-01-27 19:20 UTC | 
-      <span id="loadTime" style="color: #4f4;">Loaded: <script>document.write(new Date().toLocaleTimeString())</script></span>
+      <strong>Version: <span id="gitVersion">37685db</span></strong> | Built: <span id="buildDate"></span> GMT | 
+      <span id="loadTime" style="color: #4f4;">Loaded: <span id="loadTimeValue"></span></span>
     </p>
+    <script>
+      // Set build date to today in GMT
+      const now = new Date();
+      const gmtDate = now.toISOString().split('T')[0]; // YYYY-MM-DD
+      const gmtTime = now.toISOString().split('T')[1].split('.')[0] + ' GMT'; // HH:MM:SS GMT
+      document.getElementById('buildDate').textContent = gmtDate + ' ' + gmtTime;
+      document.getElementById('loadTimeValue').textContent = now.toLocaleTimeString();
+    </script>
   </div>
 
   <div class="container">
@@ -786,8 +794,24 @@
         </div>
         <div id="urlListStatus" style="margin-top: 0.5rem; font-size: 0.85rem;"></div>
       </div>
+      <div class="form-group">
+        <label for="backlinkCsvFile">Backlink CSV Upload (Optional)</label>
+        <div style="font-size: 0.85rem; color: #666; margin-bottom: 0.5rem;">
+          Upload backlink data CSV file for Authority score calculation. Can be uploaded independently of site URLs CSV.
+        </div>
+        <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+          <input type="file" id="backlinkCsvFile" accept=".csv" style="flex: 1; padding: 0.5rem; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 0.9rem;">
+          <button class="btn btn-small" onclick="uploadBacklinkCsv()" style="padding: 0.5rem 1rem;" title="Upload a CSV file containing backlink data. The CSV must have 'Linking Page + URL' and 'Link Type' columns. This data is used to calculate the Backlink component of the Authority score.">Upload CSV</button>
+          <button class="btn btn-small" onclick="clearBacklinkCsv()" style="padding: 0.5rem 1rem; background: #ef4444; color: white; border-color: #ef4444;" title="Clear the uploaded backlink CSV data">Clear</button>
+        </div>
+        <textarea id="backlinkCsvContent" placeholder="Or paste backlink CSV content here (must include 'Linking Page + URL' and 'Link Type' columns in header row)..." style="width: 100%; min-height: 100px; padding: 0.75rem; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 0.9rem; font-family: monospace; resize: vertical;"></textarea>
+        <div class="help-text">
+          <strong>Required columns:</strong> <code>Linking Page + URL</code> (contains page title and URL), <code>Link Type</code> (DoFollow, Follow, Nofollow, etc.). Other columns are optional. This CSV is used only for Authority score calculation and is independent of the site URLs CSV.
+        </div>
+        <div id="backlinkCsvStatus" style="margin-top: 0.5rem; font-size: 0.85rem;"></div>
+      </div>
       <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
-        <button class="btn" onclick="runAudit()" title="Start a comprehensive audit scan. Fetches Google Search Console data and performs schema audit on all site URLs. Results will appear in the dashboard below.">Run Audit Scan</button>
+        <button class="btn" onclick="runAudit()" title="Start a comprehensive audit scan. Fetches Google Search Console data, performs schema audit (if site URLs CSV loaded), and uses backlink data (if backlink CSV uploaded). Results will appear in the dashboard below.">Run Audit Scan</button>
         <button class="btn btn-secondary" id="retryFailedUrlsBtn" onclick="retryFailedUrlsFromLastAudit()" style="background: #f59e0b; color: white; border-color: #f59e0b; display: none;" title="Retry scanning the failed URLs from the last audit. This will rescan only the URLs that failed during the previous audit scan.">
           🔄 Retry Failed URLs
         </button>
@@ -1288,6 +1312,32 @@
         }
       }
       
+      // Load backlink CSV content if saved
+      const savedBacklinkCsv = localStorage.getItem('backlink_csv_content');
+      if (savedBacklinkCsv) {
+        const textarea = document.getElementById('backlinkCsvContent');
+        if (textarea) {
+          textarea.value = savedBacklinkCsv;
+        }
+        // Check if backlink metrics are already uploaded
+        try {
+          const backlinkResponse = await fetch('/api/aigeo/backlink-metrics');
+          if (backlinkResponse.ok) {
+            const backlinkData = await backlinkResponse.json();
+            if (backlinkData.status === 'ok' && backlinkData.data && backlinkData.data.totalBacklinks > 0) {
+              const metrics = backlinkData.data;
+              const statusDiv = document.getElementById('backlinkCsvStatus');
+              if (statusDiv) {
+                statusDiv.innerHTML = `<span style="color: #10b981;">✓ Backlink CSV loaded: ${metrics.referringDomains} domains, ${metrics.totalBacklinks} links</span>`;
+              }
+              debugLog(`✓ Backlink CSV already uploaded: ${metrics.referringDomains} domains`, 'success');
+            }
+          }
+        } catch (e) {
+          // Ignore errors - backlink metrics may not be uploaded yet
+        }
+      }
+      
       debugLog('=== Configuration load complete ===', 'info');
     }
 
@@ -1498,6 +1548,113 @@
       statusDiv.innerHTML = '<span style="color: #666;">Manual URL list cleared</span>';
       debugLog('Manual URL list cleared', 'info');
       showStatus('Manual URL list cleared', 'success');
+    }
+
+    // Upload backlink CSV file
+    async function uploadBacklinkCsv() {
+      const fileInput = document.getElementById('backlinkCsvFile');
+      const statusDiv = document.getElementById('backlinkCsvStatus');
+      const textarea = document.getElementById('backlinkCsvContent');
+      
+      let csvContent = '';
+      
+      if (fileInput.files && fileInput.files.length > 0) {
+        const file = fileInput.files[0];
+        debugLog(`Uploading backlink CSV from file: ${file.name} (${file.size} bytes)`, 'info');
+        
+        try {
+          csvContent = await file.text();
+          // Also populate textarea with the CSV content
+          textarea.value = csvContent;
+        } catch (error) {
+          statusDiv.innerHTML = `<span style="color: #ef4444;">✗ Error reading file: ${error.message}</span>`;
+          debugLog(`✗ Backlink CSV file read error: ${error.message}`, 'error');
+          showStatus(`Backlink CSV error: ${error.message}`, 'error');
+          return;
+        }
+      } else {
+        // If no file, try to get from textarea
+        csvContent = textarea.value.trim();
+        if (!csvContent) {
+          statusDiv.innerHTML = '<span style="color: #ef4444;">⚠ Please select a CSV file or paste CSV content</span>';
+          return;
+        }
+      }
+
+      if (!csvContent) {
+        statusDiv.innerHTML = '<span style="color: #ef4444;">⚠ No CSV content to upload</span>';
+        return;
+      }
+
+      // Validate CSV has required columns
+      const lines = csvContent.split('\n').filter(line => line.trim());
+      if (lines.length === 0) {
+        statusDiv.innerHTML = '<span style="color: #ef4444;">✗ CSV is empty</span>';
+        return;
+      }
+
+      const headerLine = lines[0].trim();
+      const headers = headerLine.split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+      
+      const hasLinkingPageUrl = headers.some(h => h.toLowerCase().includes('linking page') && h.toLowerCase().includes('url'));
+      const hasLinkType = headers.some(h => h.toLowerCase().includes('link type'));
+      
+      if (!hasLinkingPageUrl || !hasLinkType) {
+        statusDiv.innerHTML = `<span style="color: #ef4444;">✗ Missing required columns. Found: ${headers.join(', ')}. Required: 'Linking Page + URL' and 'Link Type'</span>`;
+        debugLog(`✗ Backlink CSV missing required columns. Found: ${headers.join(', ')}`, 'error');
+        return;
+      }
+
+      // Upload to API
+      try {
+        statusDiv.innerHTML = '<span style="color: #666;">⏳ Uploading and processing backlink CSV...</span>';
+        debugLog('Uploading backlink CSV to API...', 'info');
+        
+        const response = await fetch('/api/aigeo/backlink-metrics', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'text/csv',
+          },
+          body: csvContent
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
+          throw new Error(errorData.message || `HTTP ${response.status}`);
+        }
+
+        const result = await response.json();
+        
+        if (result.status === 'ok' && result.data) {
+          const metrics = result.data;
+          statusDiv.innerHTML = `<span style="color: #10b981;">✓ Backlink CSV uploaded successfully! Found ${metrics.referringDomains} referring domains, ${metrics.totalBacklinks} backlinks, ${Math.round(metrics.followRatio * 100)}% follow ratio</span>`;
+          debugLog(`✓ Backlink CSV uploaded: ${metrics.referringDomains} domains, ${metrics.totalBacklinks} links, ${(metrics.followRatio * 100).toFixed(1)}% follow`, 'success');
+          showStatus(`Backlink CSV uploaded! ${metrics.referringDomains} referring domains found.`, 'success');
+          
+          // Store in localStorage for persistence
+          localStorage.setItem('backlink_csv_content', csvContent);
+        } else {
+          throw new Error(result.message || 'Upload failed');
+        }
+      } catch (error) {
+        statusDiv.innerHTML = `<span style="color: #ef4444;">✗ ${error.message}</span>`;
+        debugLog(`✗ Backlink CSV upload error: ${error.message}`, 'error');
+        showStatus(`Backlink CSV error: ${error.message}`, 'error');
+      }
+    }
+
+    // Clear backlink CSV
+    function clearBacklinkCsv() {
+      const textarea = document.getElementById('backlinkCsvContent');
+      const fileInput = document.getElementById('backlinkCsvFile');
+      const statusDiv = document.getElementById('backlinkCsvStatus');
+      
+      textarea.value = '';
+      fileInput.value = '';
+      localStorage.removeItem('backlink_csv_content');
+      statusDiv.innerHTML = '<span style="color: #666;">Backlink CSV cleared</span>';
+      debugLog('Backlink CSV cleared', 'info');
+      showStatus('Backlink CSV cleared', 'success');
     }
 
     // Sync CSV from alan-shared-resources
