@@ -4226,6 +4226,10 @@
       const hasLocalSignals = currentLocalSignals && currentLocalSignals.status === 'ok' && currentLocalSignals.data;
       const localSignalsData = hasLocalSignals ? currentLocalSignals.data : null;
       
+      // DEBUG: Verify brandOverlay is populated
+      console.log('DEBUG brandOverlay', scores.brandOverlay);
+      debugLog(`DEBUG brandOverlay: ${JSON.stringify(scores.brandOverlay)}`, 'info');
+      
       // Calculate AI GEO Health Score
       const aiGeoHealth = calculateAiGeoScore(scores, schemaAudit, snippetReadiness);
       debugLog(`AI GEO Health: Score=${aiGeoHealth.aiGeoScore}, Status=${aiGeoHealth.aiGeoStatus}, Likelihood=${aiGeoHealth.aiSummaryLikelihood}`, 'info');
@@ -4714,51 +4718,63 @@ Final Score: ${aiGeoHealth.aiGeoScore}/100`;
                   })()}
                 </div>
                 <div style="text-align: center;">
-                  <div style="font-size: 0.9rem; color: #64748b; margin-bottom: 0.5rem; font-weight: 500;">AI summary likelihood:</div>
-                  ${(() => {
-                    // Phase 2: Use aiSummary.label if available, otherwise fallback to aiSummaryLikelihood
-                    const aiSummary = aiGeoHealth.aiSummary || { label: aiGeoHealth.aiSummaryLikelihood || 'Low', score: 0 };
-                    const label = aiSummary.label || 'Low';
-                    const score = aiSummary.score || 0;
-                    const bgColor = label === 'High' ? '#d1fae5' : label === 'Medium' ? '#fef3c7' : '#fee2e2';
-                    const textColor = label === 'High' ? '#065f46' : label === 'Medium' ? '#92400e' : '#991b1b';
-                    
-                    // Build AI Summary breakdown
-                    const snippetReadinessScore = snippetReadiness?.overallScore || 0;
-                    const visibilityScore = scores.visibility || 0;
-                    const brandScore = scores.brandOverlay?.score || 0;
-                    
-                    const aiSummaryBreakdown = `AI Summary Likelihood Breakdown:
+                  <div style="display: flex; flex-direction: column; gap: 1rem;">
+                    <div>
+                      <div style="font-size: 0.9rem; color: #64748b; margin-bottom: 0.5rem; font-weight: 500;">AI summary likelihood:</div>
+                      ${(() => {
+                        // Phase 2: Use aiSummary.label if available, otherwise fallback to aiSummaryLikelihood
+                        const aiSummary = aiGeoHealth.aiSummary || { label: aiGeoHealth.aiSummaryLikelihood || 'Low', score: 0 };
+                        const label = aiSummary.label || 'Low';
+                        const score = aiSummary.score || 0;
+                        const bgColor = label === 'High' ? '#d1fae5' : label === 'Medium' ? '#fef3c7' : '#fee2e2';
+                        const textColor = label === 'High' ? '#065f46' : label === 'Medium' ? '#92400e' : '#991b1b';
+                        
+                        // Build AI Summary breakdown
+                        const snippetReadinessScore = snippetReadiness?.overallScore || 0;
+                        const visibilityScore = scores.visibility || 0;
+                        const brandScore = scores.brandOverlay?.score || 0;
+                        
+                        const aiSummaryBreakdown = `AI Summary Likelihood Breakdown:
 • Snippet Readiness: ${Math.round(snippetReadinessScore)} (50% weight)
 • Visibility: ${Math.round(visibilityScore)} (30% weight)
 • Brand & Entity: ${Math.round(brandScore)} (20% weight)
 Final Score: ${score}/100`;
-                    
-                    const infoTooltip = 'Based on snippet-friendly content (FAQ / HowTo / Article / Event blocks), how often your content appears in rich results, and the strength of your brand & entity signals (branded searches, reviews, knowledge panel).';
-                    return `
-                      <span style="display: inline-block; padding: 0.5rem 1rem; border-radius: 6px; font-size: 1rem; font-weight: 600; background: ${bgColor}; color: ${textColor}; cursor: help;" title="${aiSummaryBreakdown}">
-                        ${label} (${score}/100)
-                      </span>
-                      <span style="font-size: 0.75rem; color: #94a3b8; cursor: help; margin-left: 0.5rem;" title="${infoTooltip}">ℹ️</span>
-                    `;
-                  })()}
-                  ${(() => {
-                    // Phase 2: Brand & Entity chip
-                    const brandOverlay = scores.brandOverlay;
-                    if (!brandOverlay) return '';
-                    const score = brandOverlay.score || 0;
-                    const label = brandOverlay.label || 'Weak';
-                    const bgColor = score >= 70 ? '#d1fae5' : score >= 40 ? '#fef3c7' : '#fee2e2';
-                    const textColor = score >= 70 ? '#065f46' : score >= 40 ? '#92400e' : '#991b1b';
-                    return `
-                      <div style="margin-top: 1rem;">
-                        <div style="font-size: 0.9rem; color: #64748b; margin-bottom: 0.5rem; font-weight: 500;">Brand & entity:</div>
-                        <span style="display: inline-block; padding: 0.5rem 1rem; border-radius: 6px; font-size: 1rem; font-weight: 600; background: ${bgColor}; color: ${textColor};">
-                          ${label} (score ${score}/100)
-                        </span>
-                      </div>
-                    `;
-                  })()}
+                        
+                        const infoTooltip = 'Based on snippet-friendly content (FAQ / HowTo / Article / Event blocks), how often your content appears in rich results, and the strength of your brand & entity signals (branded searches, reviews, knowledge panel).';
+                        return `
+                          <span style="display: inline-block; padding: 0.5rem 1rem; border-radius: 6px; font-size: 1rem; font-weight: 600; background: ${bgColor}; color: ${textColor}; cursor: help;" title="${aiSummaryBreakdown}">
+                            ${label} (${score}/100)
+                          </span>
+                          <span style="font-size: 0.75rem; color: #94a3b8; cursor: help; margin-left: 0.5rem;" title="${infoTooltip}">ℹ️</span>
+                        `;
+                      })()}
+                    </div>
+                    <div>
+                      <div style="font-size: 0.9rem; color: #64748b; margin-bottom: 0.5rem; font-weight: 500;">Brand & entity:</div>
+                      ${(() => {
+                        // Brand & Entity chip - show even if missing (with N/A)
+                        const brandOverlay = scores.brandOverlay;
+                        if (brandOverlay) {
+                          const score = brandOverlay.score || 0;
+                          const label = brandOverlay.label || 'Weak';
+                          const bgColor = score >= 70 ? '#d1fae5' : score >= 40 ? '#fef3c7' : '#fee2e2';
+                          const textColor = score >= 70 ? '#065f46' : score >= 40 ? '#92400e' : '#991b1b';
+                          return `
+                            <span style="display: inline-block; padding: 0.5rem 1rem; border-radius: 6px; font-size: 1rem; font-weight: 600; background: ${bgColor}; color: ${textColor};">
+                              ${label} (${score}/100)
+                            </span>
+                          `;
+                        } else {
+                          // Show N/A if brandOverlay is missing
+                          return `
+                            <span style="display: inline-block; padding: 0.5rem 1rem; border-radius: 6px; font-size: 1rem; font-weight: 600; background: #e5e7eb; color: #6b7280;">
+                              N/A
+                            </span>
+                          `;
+                        }
+                      })()}
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -7187,11 +7203,12 @@ Final Score: ${score}/100`;
                     
                     brandDesc = `E-A-T overlay for brand demand, reviews, and entity strength. Shows how clearly "Alan Ranger / Alan Ranger Photography" is recognised as a distinct brand in search and AI systems.<br><strong>AI Importance:</strong> Strong branded signals make it easier for AI to trust and summarise you correctly. High branded search share, strong review footprint and a clear entity graph (GBP + knowledge panel) all increase the chance of accurate AI overviews.<br><strong>Calculation:</strong> Combined overlay score from:<br>• Brand search: share of branded queries, CTR, and average position<br>• Reviews: Google Business Profile + on-site review scores and volumes<br>• Entity: NAP consistency, locations, and knowledge panel detection<br><strong>Data Source:</strong> Live data from Google Search Console (brand queries), Google Business Profile API (rating, reviews, locations, service areas), and site reviews snapshot.`;
                     
+                    // Show metrics when available
                     if (share > 0 || brandCtr > 0 || pos > 0) {
-                      brandDesc += ` <strong>Current Metrics:</strong> Brand queries: ${(share * 100).toFixed(1)}% of impressions, brand CTR ${(brandCtr * 100).toFixed(1)}%, avg position ${pos.toFixed(1)}.`;
+                      brandDesc += ` <strong>Current Metrics:</strong> Brand queries: ${(share * 100).toFixed(1)}% of impressions, brand CTR ${(brandCtr * 100).toFixed(1)}%, avg brand position ${pos.toFixed(1)}.`;
                     }
                   } else {
-                    brandDesc = 'Brand overlay not available – run an audit with GSC + GBP configured to populate these metrics.';
+                    brandDesc = 'No brand overlay data available – run an audit with access to query data.';
                   }
                 }
                 
