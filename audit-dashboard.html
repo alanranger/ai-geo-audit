@@ -1596,13 +1596,31 @@
       const headerLine = lines[0].trim();
       const headers = headerLine.split(',').map(h => h.trim().replace(/^"|"$/g, ''));
       
-      const hasLinkingPageUrl = headers.some(h => h.toLowerCase().includes('linking page') && h.toLowerCase().includes('url'));
-      const hasLinkType = headers.some(h => h.toLowerCase().includes('link type'));
+      // More flexible column matching - check for URL column (required) and Link Type (optional)
+      const hasUrlColumn = headers.some(h => {
+        const lower = h.toLowerCase();
+        return (lower.includes('linking') && lower.includes('url')) ||
+               lower.includes('url') ||
+               lower.includes('source url') ||
+               lower.includes('page url');
+      });
       
-      if (!hasLinkingPageUrl || !hasLinkType) {
-        statusDiv.innerHTML = `<span style="color: #ef4444;">✗ Missing required columns. Found: ${headers.join(', ')}. Required: 'Linking Page + URL' and 'Link Type'</span>`;
-        debugLog(`✗ Backlink CSV missing required columns. Found: ${headers.join(', ')}`, 'error');
+      const hasLinkType = headers.some(h => {
+        const lower = h.toLowerCase();
+        return lower.includes('link type') ||
+               lower.includes('type') ||
+               lower.includes('follow');
+      });
+      
+      if (!hasUrlColumn) {
+        statusDiv.innerHTML = `<span style="color: #ef4444;">✗ Missing URL column. Found columns: ${headers.join(', ')}. Need a column containing 'URL' or 'Linking Page + URL'</span>`;
+        debugLog(`✗ Backlink CSV missing URL column. Found: ${headers.join(', ')}`, 'error');
         return;
+      }
+      
+      if (!hasLinkType) {
+        debugLog(`⚠ Backlink CSV missing Link Type column. Will assume all links are follow. Found: ${headers.join(', ')}`, 'warn');
+        // Don't block upload - just warn
       }
 
       // Upload to API

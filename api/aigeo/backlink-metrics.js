@@ -18,8 +18,9 @@ import { parse } from 'csv-parse/sync';
 const METRICS_FILE = path.join(process.cwd(), 'data', 'backlink-metrics.json');
 
 /**
- * Extract URL from "Linking Page + URL" field
+ * Extract URL from "Linking Page + URL" field (or similar column names)
  * Finds first http(s):// substring and trims trailing brackets/parentheses
+ * Handles various column name variations
  */
 function extractUrl(raw) {
   if (!raw || typeof raw !== 'string') return null;
@@ -34,6 +35,7 @@ function extractUrl(raw) {
 
 /**
  * Check if link type is a follow link (not nofollow)
+ * Handles various formats: DoFollow, Dofollow, Follow, Nofollow, etc.
  */
 function isFollow(linkTypeRaw) {
   if (!linkTypeRaw || typeof linkTypeRaw !== 'string') return false;
@@ -44,15 +46,76 @@ function isFollow(linkTypeRaw) {
 }
 
 /**
+ * Find column name that matches the pattern (case-insensitive, flexible matching)
+ */
+function findColumn(rows, patterns) {
+  if (!rows || rows.length === 0) return null;
+  
+  // Get all column names from first row
+  const columns = Object.keys(rows[0]);
+  
+  // Try to find a column that matches any of the patterns
+  for (const pattern of patterns) {
+    const lowerPattern = pattern.toLowerCase();
+    for (const col of columns) {
+      const lowerCol = col.toLowerCase();
+      // Check if column contains all words from pattern
+      const patternWords = lowerPattern.split(/\s+/);
+      if (patternWords.every(word => lowerCol.includes(word))) {
+        return col;
+      }
+    }
+  }
+  
+  return null;
+}
+
+/**
  * Compute backlink metrics from CSV rows
  */
 function computeBacklinkMetrics(rows) {
+  if (!rows || rows.length === 0) {
+    return {
+      referringDomains: 0,
+      totalBacklinks: 0,
+      followRatio: 0.5,
+      generatedAt: new Date().toISOString()
+    };
+  }
+
+  // Find the URL column (try various possible names)
+  const urlColumn = findColumn(rows, [
+    'Linking Page + URL',
+    'Linking Page',
+    'URL',
+    'Source URL',
+    'Linking URL',
+    'Page URL'
+  ]);
+  
+  // Find the link type column (try various possible names)
+  const linkTypeColumn = findColumn(rows, [
+    'Link Type',
+    'Type',
+    'Follow Type',
+    'Link Type',
+    'Follow'
+  ]);
+
+  console.log('Found columns:', Object.keys(rows[0]));
+  console.log('URL column:', urlColumn);
+  console.log('Link Type column:', linkTypeColumn);
+
+  if (!urlColumn) {
+    throw new Error(`Could not find URL column. Available columns: ${Object.keys(rows[0]).join(', ')}`);
+  }
+
   const domains = new Set();
   let total = 0;
   let followCount = 0;
 
   for (const row of rows) {
-    const urlField = row['Linking Page + URL'];
+    const urlField = row[urlColumn];
     const url = extractUrl(urlField);
     
     if (!url) continue; // Skip rows without valid URLs
@@ -68,8 +131,14 @@ function computeBacklinkMetrics(rows) {
     domains.add(hostname);
     total += 1;
 
-    const linkType = row['Link Type'];
-    if (isFollow(linkType)) {
+    // If link type column exists, check it; otherwise assume follow
+    if (linkTypeColumn) {
+      const linkType = row[linkTypeColumn];
+      if (isFollow(linkType)) {
+        followCount += 1;
+      }
+    } else {
+      // No link type column - assume all are follow
       followCount += 1;
     }
   }
