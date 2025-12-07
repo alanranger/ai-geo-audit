@@ -12,7 +12,7 @@
  */
 
 import { getBusinessProfileAccessToken } from './utils.js';
-import fs from 'fs';
+import fs from 'fs/promises';
 import path from 'path';
 
 export default async function handler(req, res) {
@@ -171,98 +171,112 @@ export default async function handler(req, res) {
       let gbpRating = null;
       let gbpReviewCount = null;
       
-      if (locationsToProcess.length > 0) {
-        const firstLocation = locationsToProcess[0];
-        
-        // Check various possible field names for rating and review count in the location detail
-        // The Business Information API might have these fields nested or named differently
-        gbpRating = firstLocation.rating 
-          || firstLocation.averageRating 
-          || firstLocation.primaryRating 
-          || (firstLocation.primaryCategory && firstLocation.primaryCategory.rating)
-          || (firstLocation.moreHours && firstLocation.moreHours.rating)
-          || null;
+      // Try to fetch GBP rating/review count from API (wrapped in try/catch so failures don't crash endpoint)
+      try {
+        if (locationsToProcess && locationsToProcess.length > 0) {
+          const firstLocation = locationsToProcess[0];
           
-        gbpReviewCount = firstLocation.totalReviewCount 
-          || firstLocation.reviewCount 
-          || firstLocation.numberOfReviews
-          || (firstLocation.primaryCategory && firstLocation.primaryCategory.totalReviewCount)
-          || null;
-        
-        // If not found in detail, try fetching from the Reviews API endpoint
-        if ((gbpRating === null || gbpReviewCount === null) && firstLocation.name) {
-          try {
-            // Use the proper accounts.locations.reviews endpoint
-            // Format: accounts/{account}/locations/{location}/reviews
-            const reviewsUrl = `https://mybusiness.googleapis.com/v4/${firstLocation.name}/reviews`;
-            console.log('[Local Signals] Attempting to fetch reviews from proper endpoint:', reviewsUrl);
+          // Check various possible field names for rating and review count in the location detail
+          // The Business Information API might have these fields nested or named differently
+          gbpRating = firstLocation.rating 
+            || firstLocation.averageRating 
+            || firstLocation.primaryRating 
+            || (firstLocation.primaryCategory && firstLocation.primaryCategory.rating)
+            || (firstLocation.moreHours && firstLocation.moreHours.rating)
+            || null;
             
-            const reviewsResponse = await fetch(reviewsUrl, {
-              method: 'GET',
-              headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'Content-Type': 'application/json',
-              },
-            });
-            
-            console.log('[Local Signals] Reviews API response status:', reviewsResponse.status);
-            
-            if (reviewsResponse.ok) {
-              const reviewsData = await reviewsResponse.json();
-              console.log('[Local Signals] Reviews API response:', JSON.stringify(reviewsData, null, 2));
+          gbpReviewCount = firstLocation.totalReviewCount 
+            || firstLocation.reviewCount 
+            || firstLocation.numberOfReviews
+            || (firstLocation.primaryCategory && firstLocation.primaryCategory.totalReviewCount)
+            || null;
+          
+          // If not found in detail, try fetching from the Reviews API endpoint
+          if ((gbpRating === null || gbpReviewCount === null) && firstLocation.name) {
+            try {
+              // Use the proper accounts.locations.reviews endpoint
+              // Format: accounts/{account}/locations/{location}/reviews
+              const reviewsUrl = `https://mybusiness.googleapis.com/v4/${firstLocation.name}/reviews`;
+              console.log('[Local Signals] Attempting to fetch reviews from proper endpoint:', reviewsUrl);
               
-              // Extract rating and review count from reviews response
-              // The structure might be: { reviews: [...], averageRating: X, totalReviewCount: Y }
-              if (reviewsData.averageRating !== undefined) {
-                gbpRating = reviewsData.averageRating;
-                console.log('[Local Signals] Extracted rating from Reviews API:', gbpRating);
-              }
-              if (reviewsData.totalReviewCount !== undefined) {
-                gbpReviewCount = reviewsData.totalReviewCount;
-                console.log('[Local Signals] Extracted review count from Reviews API:', gbpReviewCount);
-              } else if (reviewsData.reviews && Array.isArray(reviewsData.reviews)) {
-                // If we have the reviews array, calculate from it
-                gbpReviewCount = reviewsData.reviews.length;
-                console.log('[Local Signals] Calculated review count from reviews array:', gbpReviewCount);
-                if (reviewsData.reviews.length > 0) {
-                  const sumRating = reviewsData.reviews.reduce((sum, review) => sum + (review.starRating || review.rating || 0), 0);
-                  gbpRating = sumRating / reviewsData.reviews.length;
-                  console.log('[Local Signals] Calculated average rating from reviews array:', gbpRating);
+              const reviewsResponse = await fetch(reviewsUrl, {
+                method: 'GET',
+                headers: {
+                  'Authorization': `Bearer ${accessToken}`,
+                  'Content-Type': 'application/json',
+                },
+              });
+              
+              console.log('[Local Signals] Reviews API response status:', reviewsResponse.status);
+              
+              if (reviewsResponse.ok) {
+                const reviewsData = await reviewsResponse.json();
+                console.log('[Local Signals] Reviews API response:', JSON.stringify(reviewsData, null, 2));
+                
+                // Extract rating and review count from reviews response
+                // The structure might be: { reviews: [...], averageRating: X, totalReviewCount: Y }
+                if (reviewsData.averageRating !== undefined) {
+                  gbpRating = reviewsData.averageRating;
+                  console.log('[Local Signals] Extracted rating from Reviews API:', gbpRating);
+                }
+                if (reviewsData.totalReviewCount !== undefined) {
+                  gbpReviewCount = reviewsData.totalReviewCount;
+                  console.log('[Local Signals] Extracted review count from Reviews API:', gbpReviewCount);
+                } else if (reviewsData.reviews && Array.isArray(reviewsData.reviews)) {
+                  // If we have the reviews array, calculate from it
+                  gbpReviewCount = reviewsData.reviews.length;
+                  console.log('[Local Signals] Calculated review count from reviews array:', gbpReviewCount);
+                  if (reviewsData.reviews.length > 0) {
+                    const sumRating = reviewsData.reviews.reduce((sum, review) => sum + (review.starRating || review.rating || 0), 0);
+                    gbpRating = sumRating / reviewsData.reviews.length;
+                    console.log('[Local Signals] Calculated average rating from reviews array:', gbpRating);
+                  }
+                } else {
+                  console.log('[Local Signals] Reviews API response does not contain rating/review count data');
                 }
               } else {
-                console.log('[Local Signals] Reviews API response does not contain rating/review count data');
+                const errorText = await reviewsResponse.text();
+                console.log('[Local Signals] Reviews API response error:', reviewsResponse.status, errorText);
+                // Don't assume it's a scope problem - log the actual error for debugging
               }
-            } else {
-              const errorText = await reviewsResponse.text();
-              console.log('[Local Signals] Reviews API response error:', reviewsResponse.status, errorText);
-              // Don't assume it's a scope problem - log the actual error for debugging
+            } catch (error) {
+              console.warn('[Local Signals] Error fetching reviews from Reviews API:', error.message);
+              console.warn('[Local Signals] Error stack:', error.stack);
             }
-          } catch (error) {
-            console.warn('[Local Signals] Error fetching reviews from Reviews API:', error.message);
-            console.warn('[Local Signals] Error stack:', error.stack);
           }
+          
+          console.info('[Local Signals] GBP API rating from Google:', {
+            rating: gbpRating,
+            count: gbpReviewCount,
+          });
+        } else {
+          console.warn('[Local Signals] No GBP locations to process, will rely on fallback if available');
         }
-        
-        console.log('[Local Signals] GBP Rating:', gbpRating, 'Review Count:', gbpReviewCount);
+      } catch (err) {
+        console.error('[Local Signals] Error while calling GBP API:', err);
+        // swallow the error so we can still serve fallback
       }
       
       // Fallback to static JSON file if API didn't return rating/review count
-      if ((gbpRating === null || gbpRating === 0) || (gbpReviewCount === null || gbpReviewCount === 0)) {
+      // This runs ANY TIME there's no usable GBP data (outside the try/catch and locations check)
+      if (!gbpRating || !gbpReviewCount) {
         try {
           const gbpReviewsPath = path.join(process.cwd(), 'data', 'gbp-reviews.json');
-          const gbpReviewsContent = fs.readFileSync(gbpReviewsPath, 'utf8');
+          const gbpReviewsContent = await fs.readFile(gbpReviewsPath, 'utf8');
           const gbpReviews = JSON.parse(gbpReviewsContent);
           
-          if (gbpReviews.gbpRating && (gbpRating === null || gbpRating === 0)) {
-            gbpRating = parseFloat(gbpReviews.gbpRating);
-            console.log('[Local Signals] Using GBP rating from fallback file:', gbpRating);
-          }
-          if (gbpReviews.gbpReviewCount && (gbpReviewCount === null || gbpReviewCount === 0)) {
-            gbpReviewCount = parseInt(gbpReviews.gbpReviewCount);
-            console.log('[Local Signals] Using GBP review count from fallback file:', gbpReviewCount);
+          const rating = Number(gbpReviews.gbpRating || gbpReviews.rating);
+          const count = Number(gbpReviews.gbpReviewCount || gbpReviews.reviewCount || gbpReviews.count);
+          
+          if (rating && count) {
+            gbpRating = rating;
+            gbpReviewCount = count;
+            console.info('[Local Signals] Using GBP rating from fallback file:', { rating, count });
+          } else {
+            console.warn('[Local Signals] Fallback file is missing rating or count', gbpReviews);
           }
         } catch (fileError) {
-          console.warn('[Local Signals] Could not read gbp-reviews.json fallback file:', fileError.message);
+          console.error('[Local Signals] Could not read gbp-reviews.json fallback file:', fileError.message);
         }
       }
       
@@ -430,11 +444,44 @@ export default async function handler(req, res) {
     });
     
   } catch (error) {
-    console.error('Error in local-signals:', error);
-    return res.status(500).json({
-      status: 'error',
+    console.error('[Local Signals] Error in local-signals handler:', error);
+    
+    // Even on error, try to return fallback GBP data and basic structure
+    let gbpRating = null;
+    let gbpReviewCount = null;
+    
+    try {
+      const gbpReviewsPath = path.join(process.cwd(), 'data', 'gbp-reviews.json');
+      const gbpReviewsContent = await fs.readFile(gbpReviewsPath, 'utf8');
+      const gbpReviews = JSON.parse(gbpReviewsContent);
+      
+      const rating = Number(gbpReviews.gbpRating || gbpReviews.rating);
+      const count = Number(gbpReviews.gbpReviewCount || gbpReviews.reviewCount || gbpReviews.count);
+      
+      if (rating && count) {
+        gbpRating = rating;
+        gbpReviewCount = count;
+        console.info('[Local Signals] Using GBP rating from fallback file (error recovery):', { rating, count });
+      }
+    } catch (fileError) {
+      console.error('[Local Signals] Could not read gbp-reviews.json fallback file (error recovery):', fileError.message);
+    }
+    
+    // Always return 200 with JSON, even on error (so client doesn't hit "endpoint not available")
+    return res.status(200).json({
+      status: 'ok',
       source: 'local-signals',
-      message: error.message || 'Unknown error',
+      params: { property: req.query.property || null },
+      data: {
+        localBusinessSchemaPages: 0,
+        napConsistencyScore: null,
+        knowledgePanelDetected: false,
+        serviceAreas: [],
+        locations: [],
+        gbpRating: gbpRating !== null ? parseFloat(gbpRating) : null,
+        gbpReviewCount: gbpReviewCount !== null ? parseInt(gbpReviewCount) : null,
+        notes: `Error occurred: ${error.message || 'Unknown error'}. Using fallback data where available.`
+      },
       meta: { generatedAt: new Date().toISOString() }
     });
   }
