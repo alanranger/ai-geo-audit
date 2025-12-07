@@ -4254,8 +4254,8 @@
         if (speedometerCanvas) {
           const ctx = speedometerCanvas.getContext('2d');
           const centerX = speedometerCanvas.width / 2;
-          const centerY = speedometerCanvas.height;
-          const radius = 180; // Increased from 90 for larger gauge
+          const centerY = speedometerCanvas.height - 20; // Move center up to give space for labels
+          const radius = 160; // Slightly smaller to ensure labels fit
           const startAngle = Math.PI; // 180 degrees (left)
           const endAngle = 0; // 0 degrees (right)
           const score = aiGeoHealth.aiGeoScore;
@@ -4264,74 +4264,118 @@
           // Clear canvas
           ctx.clearRect(0, 0, speedometerCanvas.width, speedometerCanvas.height);
           
-          // Draw background arc (grey)
+          // Draw color segments: Red (0-50), Amber (50-70), Green (70-100)
+          const redEndAngle = startAngle - (50 / maxScore) * (startAngle - endAngle);
+          const amberEndAngle = startAngle - (70 / maxScore) * (startAngle - endAngle);
+          
+          // Red segment (0-50)
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, radius, startAngle, redEndAngle, false);
+          ctx.strokeStyle = '#ef4444';
+          ctx.lineWidth = 28;
+          ctx.lineCap = 'round';
+          ctx.stroke();
+          
+          // Amber segment (50-70)
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, radius, redEndAngle, amberEndAngle, false);
+          ctx.strokeStyle = '#f59e0b';
+          ctx.lineWidth = 28;
+          ctx.lineCap = 'round';
+          ctx.stroke();
+          
+          // Green segment (70-100)
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, radius, amberEndAngle, endAngle, false);
+          ctx.strokeStyle = '#10b981';
+          ctx.lineWidth = 28;
+          ctx.lineCap = 'round';
+          ctx.stroke();
+          
+          // Draw background arc (grey) behind segments for any gaps
           ctx.beginPath();
           ctx.arc(centerX, centerY, radius, startAngle, endAngle, false);
           ctx.strokeStyle = '#e2e8f0';
-          ctx.lineWidth = 24; // Increased from 12
+          ctx.lineWidth = 24;
           ctx.lineCap = 'round';
+          ctx.globalCompositeOperation = 'destination-over';
           ctx.stroke();
+          ctx.globalCompositeOperation = 'source-over';
           
           // Calculate angle for score (0-100 maps to 180-0 degrees)
           const scoreAngle = startAngle - (score / maxScore) * (startAngle - endAngle);
-          
-          // Determine color based on status
-          const gaugeColor = aiGeoHealth.aiGeoStatus === 'green' ? '#10b981' : 
-                            aiGeoHealth.aiGeoStatus === 'amber' ? '#f59e0b' : '#ef4444';
-          
-          // Draw score arc
-          ctx.beginPath();
-          ctx.arc(centerX, centerY, radius, startAngle, scoreAngle, false);
-          ctx.strokeStyle = gaugeColor;
-          ctx.lineWidth = 24; // Increased from 12
-          ctx.lineCap = 'round';
-          ctx.stroke();
           
           // Draw tick marks
           for (let i = 0; i <= 10; i++) {
             const tickValue = i * 10;
             const tickAngle = startAngle - (tickValue / maxScore) * (startAngle - endAngle);
-            const tickStartX = centerX + (radius - 30) * Math.cos(tickAngle);
-            const tickStartY = centerY + (radius - 30) * Math.sin(tickAngle);
-            const tickEndX = centerX + (radius - 10) * Math.cos(tickAngle);
-            const tickEndY = centerY + (radius - 10) * Math.sin(tickAngle);
+            const tickStartX = centerX + (radius - 35) * Math.cos(tickAngle);
+            const tickStartY = centerY + (radius - 35) * Math.sin(tickAngle);
+            const tickEndX = centerX + (radius - 15) * Math.cos(tickAngle);
+            const tickEndY = centerY + (radius - 15) * Math.sin(tickAngle);
             
             ctx.beginPath();
             ctx.moveTo(tickStartX, tickStartY);
             ctx.lineTo(tickEndX, tickEndY);
-            ctx.strokeStyle = '#94a3b8';
-            ctx.lineWidth = 3; // Increased from 2
+            ctx.strokeStyle = '#64748b';
+            ctx.lineWidth = 3;
             ctx.stroke();
-            
-            // Add labels for major ticks (0, 50, 100)
-            if (tickValue === 0 || tickValue === 50 || tickValue === 100) {
-              const labelX = centerX + (radius - 50) * Math.cos(tickAngle);
-              const labelY = centerY + (radius - 50) * Math.sin(tickAngle);
-              ctx.fillStyle = '#64748b';
-              ctx.font = 'bold 20px sans-serif'; // Increased from 12px
-              ctx.textAlign = 'center';
-              ctx.textBaseline = 'middle';
-              ctx.fillText(tickValue.toString(), labelX, labelY);
-            }
           }
           
-          // Draw needle
+          // Draw labels for 0, 50, 100 - positioned outside the gauge with proper spacing
+          const labelRadius = radius + 45; // Position labels well outside the gauge
+          
+          // Label "0" (left side)
+          const label0Angle = startAngle;
+          const label0X = centerX + labelRadius * Math.cos(label0Angle);
+          const label0Y = centerY + labelRadius * Math.sin(label0Angle);
+          ctx.fillStyle = '#1e293b';
+          ctx.font = 'bold 24px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('0', label0X, label0Y);
+          
+          // Label "50" (center)
+          const label50Angle = startAngle - (50 / maxScore) * (startAngle - endAngle);
+          const label50X = centerX + labelRadius * Math.cos(label50Angle);
+          const label50Y = centerY + labelRadius * Math.sin(label50Angle);
+          ctx.fillText('50', label50X, label50Y);
+          
+          // Label "100" (right side)
+          const label100Angle = endAngle;
+          const label100X = centerX + labelRadius * Math.cos(label100Angle);
+          const label100Y = centerY + labelRadius * Math.sin(label100Angle);
+          ctx.fillText('100', label100X, label100Y);
+          
+          // Draw needle (thick, visible)
           const needleAngle = scoreAngle;
-          const needleLength = radius - 40; // Increased from 20
+          const needleLength = radius - 25;
           const needleX = centerX + needleLength * Math.cos(needleAngle);
           const needleY = centerY + needleLength * Math.sin(needleAngle);
           
+          // Draw needle as a triangle for better visibility
+          ctx.save();
+          ctx.translate(centerX, centerY);
+          ctx.rotate(needleAngle);
           ctx.beginPath();
-          ctx.moveTo(centerX, centerY);
-          ctx.lineTo(needleX, needleY);
-          ctx.strokeStyle = '#1e293b';
-          ctx.lineWidth = 5; // Increased from 3
-          ctx.stroke();
-          
-          // Draw center circle
-          ctx.beginPath();
-          ctx.arc(centerX, centerY, 10, 0, 2 * Math.PI); // Increased from 6
+          ctx.moveTo(0, 0);
+          ctx.lineTo(needleLength, -8);
+          ctx.lineTo(needleLength, 8);
+          ctx.closePath();
           ctx.fillStyle = '#1e293b';
+          ctx.fill();
+          ctx.restore();
+          
+          // Draw center circle (larger for better visibility)
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, 12, 0, 2 * Math.PI);
+          ctx.fillStyle = '#1e293b';
+          ctx.fill();
+          
+          // Draw inner white circle for center
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, 6, 0, 2 * Math.PI);
+          ctx.fillStyle = '#ffffff';
           ctx.fill();
         }
       }, 100);
