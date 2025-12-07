@@ -1669,7 +1669,33 @@
           // Store in localStorage for persistence
           localStorage.setItem('backlink_csv_content', csvContent);
         } else {
-          throw new Error(result.message || result.error || 'Upload failed - invalid response format');
+          // Error response - log debug info to UI
+          const errorMsg = result.message || result.error || 'Upload failed - invalid response format';
+          statusDiv.innerHTML = `<span style="color: #ef4444;">✗ ${errorMsg}</span>`;
+          debugLog(`✗ Backlink CSV upload error: ${errorMsg}`, 'error');
+          
+          // Log debug info if available
+          if (result.debug) {
+            debugLog(`[DEBUG] CSV Length: ${result.debug.csvLength || 'N/A'}`, 'info');
+            debugLog(`[DEBUG] Logical Lines: ${result.debug.logicalLines || 'N/A'}`, 'info');
+            debugLog(`[DEBUG] Headers Found: ${result.debug.headers ? result.debug.headers.join(', ') : 'N/A'}`, 'info');
+            if (result.debug.firstChars) {
+              debugLog(`[DEBUG] First 500 chars: ${result.debug.firstChars}`, 'info');
+            }
+            if (result.debug.rowCount !== undefined) {
+              debugLog(`[DEBUG] Rows parsed: ${result.debug.rowCount}`, 'info');
+            }
+            if (result.debug.firstRowKeys) {
+              debugLog(`[DEBUG] First row keys: ${result.debug.firstRowKeys.join(', ')}`, 'info');
+            }
+            if (result.debug.error) {
+              debugLog(`[DEBUG] Error details: ${result.debug.error}`, 'error');
+            }
+          }
+          
+          // Also log full error response for debugging
+          debugLog(`[DEBUG] Full error response: ${JSON.stringify(result, null, 2)}`, 'error');
+          showStatus(`Backlink CSV error: ${errorMsg}`, 'error');
         }
       } catch (error) {
         const errorMsg = error.message || error.toString() || 'Unknown error';
