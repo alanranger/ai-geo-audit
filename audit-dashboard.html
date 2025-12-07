@@ -4150,145 +4150,82 @@
         <div style="background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 2rem;">
           <!-- AI GEO Health Top Card -->
           <div style="text-align: center; margin-bottom: 3rem; padding: 2rem 0; border-bottom: 2px solid #e2e8f0;">
-            <div style="display: flex; align-items: center; justify-content: center; gap: 3rem; margin-bottom: 2rem; flex-wrap: wrap;">
-              <!-- Speedometer Gauge (SVG) -->
-              <div style="position: relative; width: 450px; height: 280px; margin: 0 auto;">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 4rem; margin-bottom: 2rem; flex-wrap: wrap;">
+              <!-- Circular Progress Ring -->
+              <div style="position: relative; width: 280px; height: 280px; margin: 0 auto;">
                 ${(() => {
                   const score = aiGeoHealth.aiGeoScore;
-                  const centerX = 225;
-                  const centerY = 240;
-                  const radius = 160;
-                  const startAngle = 180;
-                  const endAngle = 0;
-                  
-                  // Calculate angles for segments
-                  const redEnd = 180 - (50 / 100) * 180;
-                  const amberEnd = 180 - (70 / 100) * 180;
-                  const needleAngle = 180 - (score / 100) * 180;
-                  
-                  // Helper to convert angle to SVG arc
-                  const angleToPoint = (angle) => {
-                    const rad = (angle * Math.PI) / 180;
-                    return {
-                      x: centerX + radius * Math.cos(rad),
-                      y: centerY + radius * Math.sin(rad)
-                    };
-                  };
-                  
-                  const start = angleToPoint(startAngle);
-                  const redEndPt = angleToPoint(redEnd);
-                  const amberEndPt = angleToPoint(amberEnd);
-                  const end = angleToPoint(endAngle);
-                  
-                  // SVG path for arcs (large-arc-flag=0 for arcs < 180deg)
-                  const arcPath = (startPt, endPt, angle) => {
-                    const largeArc = Math.abs(angle - startAngle) > 90 ? 1 : 0;
-                    return `M ${startPt.x} ${startPt.y} A ${radius} ${radius} 0 ${largeArc} 0 ${endPt.x} ${endPt.y}`;
-                  };
-                  
-                  const needlePt = angleToPoint(needleAngle);
+                  const radius = 120;
+                  const strokeWidth = 24;
+                  const normalizedRadius = radius - strokeWidth * 2;
+                  const circumference = normalizedRadius * 2 * Math.PI;
+                  const strokeDasharray = circumference;
+                  const strokeDashoffset = circumference - (score / 100) * circumference;
+                  const color = aiGeoHealth.aiGeoStatus === 'green' ? '#10b981' : 
+                               aiGeoHealth.aiGeoStatus === 'amber' ? '#f59e0b' : '#ef4444';
                   
                   return `
-                    <svg width="450" height="280" style="display: block;">
-                      <!-- Red segment (0-50) -->
-                      <path d="${arcPath(start, redEndPt, redEnd)}" 
-                            stroke="#ef4444" 
-                            stroke-width="32" 
-                            fill="none" 
-                            stroke-linecap="round"/>
-                      
-                      <!-- Amber segment (50-70) -->
-                      <path d="${arcPath(redEndPt, amberEndPt, amberEnd)}" 
-                            stroke="#f59e0b" 
-                            stroke-width="32" 
-                            fill="none" 
-                            stroke-linecap="round"/>
-                      
-                      <!-- Green segment (70-100) -->
-                      <path d="${arcPath(amberEndPt, end, endAngle)}" 
-                            stroke="#10b981" 
-                            stroke-width="32" 
-                            fill="none" 
-                            stroke-linecap="round"/>
-                      
-                      <!-- Tick marks -->
-                      ${Array.from({length: 11}, (_, i) => {
-                        const value = i * 10;
-                        const angle = 180 - (value / 100) * 180;
-                        const rad = (angle * Math.PI) / 180;
-                        const isMajor = value === 0 || value === 50 || value === 100;
-                        const tickLength = isMajor ? 20 : 12;
-                        const tickInner = radius - tickLength;
-                        const tickOuter = radius;
-                        const x1 = centerX + tickInner * Math.cos(rad);
-                        const y1 = centerY + tickInner * Math.sin(rad);
-                        const x2 = centerX + tickOuter * Math.cos(rad);
-                        const y2 = centerY + tickOuter * Math.sin(rad);
-                        return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#64748b" stroke-width="${isMajor ? 3 : 2}"/>`;
-                      }).join('')}
-                      
-                      <!-- Labels -->
-                      <text x="${centerX + (radius + 55) * Math.cos(Math.PI)}" 
-                            y="${centerY + (radius + 55) * Math.sin(Math.PI)}" 
-                            text-anchor="middle" 
-                            dominant-baseline="middle" 
-                            fill="#1e293b" 
-                            font-size="24" 
-                            font-weight="bold" 
-                            font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">0</text>
-                      
-                      <text x="${centerX + (radius + 55) * Math.cos((180 - 90) * Math.PI / 180)}" 
-                            y="${centerY + (radius + 55) * Math.sin((180 - 90) * Math.PI / 180)}" 
-                            text-anchor="middle" 
-                            dominant-baseline="middle" 
-                            fill="#1e293b" 
-                            font-size="24" 
-                            font-weight="bold" 
-                            font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">50</text>
-                      
-                      <text x="${centerX + (radius + 55) * Math.cos(0)}" 
-                            y="${centerY + (radius + 55) * Math.sin(0)}" 
-                            text-anchor="middle" 
-                            dominant-baseline="middle" 
-                            fill="#1e293b" 
-                            font-size="24" 
-                            font-weight="bold" 
-                            font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">100</text>
-                      
-                      <!-- Needle -->
-                      <g transform="translate(${centerX}, ${centerY}) rotate(${needleAngle})">
-                        <polygon points="0,0 ${radius - 25},-14 ${radius - 25},14" 
-                                 fill="#1e293b" 
-                                 stroke="#ffffff" 
-                                 stroke-width="3"/>
-                      </g>
-                      
-                      <!-- Center circle -->
-                      <circle cx="${centerX}" cy="${centerY}" r="16" fill="#1e293b"/>
-                      <circle cx="${centerX}" cy="${centerY}" r="10" fill="#ffffff"/>
+                    <svg width="280" height="280" style="transform: rotate(-90deg);">
+                      <!-- Background circle -->
+                      <circle
+                        cx="140"
+                        cy="140"
+                        r="${normalizedRadius}"
+                        fill="none"
+                        stroke="#e2e8f0"
+                        stroke-width="${strokeWidth}"
+                      />
+                      <!-- Progress circle -->
+                      <circle
+                        cx="140"
+                        cy="140"
+                        r="${normalizedRadius}"
+                        fill="none"
+                        stroke="${color}"
+                        stroke-width="${strokeWidth}"
+                        stroke-dasharray="${strokeDasharray}"
+                        stroke-dashoffset="${strokeDashoffset}"
+                        stroke-linecap="round"
+                        style="transition: stroke-dashoffset 0.5s ease-in-out;"
+                      />
+                      <!-- Segment markers -->
+                      <circle cx="140" cy="20" r="4" fill="#ef4444"/>
+                      <circle cx="260" cy="140" r="4" fill="#10b981"/>
+                      <circle cx="140" cy="260" r="4" fill="#e2e8f0"/>
+                      <!-- Segment labels -->
+                      <text x="140" y="15" text-anchor="middle" fill="#64748b" font-size="14" font-weight="600" transform="rotate(90 140 140)">0</text>
+                      <text x="265" y="145" text-anchor="middle" fill="#64748b" font-size="14" font-weight="600" transform="rotate(90 140 140)">50</text>
+                      <text x="140" y="270" text-anchor="middle" fill="#64748b" font-size="14" font-weight="600" transform="rotate(90 140 140)">100</text>
                     </svg>
+                    <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center;">
+                      <div style="font-size: 4.5rem; font-weight: 700; color: ${color}; line-height: 1; margin-bottom: 0.5rem;">
+                        ${score}
+                      </div>
+                      <div style="font-size: 1.1rem; color: #64748b; font-weight: 500;">
+                        AI GEO Score
+                      </div>
+                    </div>
                   `;
                 })()}
-                <div style="position: absolute; bottom: 25px; left: 50%; transform: translateX(-50%); font-size: 3.5rem; font-weight: 700; color: ${aiGeoHealth.aiGeoStatus === 'green' ? '#10b981' : aiGeoHealth.aiGeoStatus === 'amber' ? '#f59e0b' : '#ef4444'}; text-shadow: 0 2px 4px rgba(0,0,0,0.1); pointer-events: none;">
-                  ${aiGeoHealth.aiGeoScore}
+              </div>
+              <div style="display: flex; flex-direction: column; align-items: center; gap: 1.5rem; justify-content: center;">
+                <div>
+                  <span class="rag-badge ${aiGeoHealth.aiGeoStatus}" style="display: inline-block; padding: 0.75rem 1.5rem; border-radius: 8px; font-size: 1.25rem; font-weight: 600;">
+                    ${aiGeoHealth.aiGeoStatus === 'green' ? 'Green' : aiGeoHealth.aiGeoStatus === 'amber' ? 'Amber' : 'Red'}
+                  </span>
+                </div>
+                <div style="text-align: center;">
+                  <div style="font-size: 0.9rem; color: #64748b; margin-bottom: 0.5rem; font-weight: 500;">AI summary likelihood:</div>
+                  <span style="display: inline-block; padding: 0.5rem 1rem; border-radius: 6px; font-size: 1rem; font-weight: 600; background: ${aiGeoHealth.aiSummaryLikelihood === 'high' ? '#d1fae5' : aiGeoHealth.aiSummaryLikelihood === 'medium' ? '#fef3c7' : '#fee2e2'}; color: ${aiGeoHealth.aiSummaryLikelihood === 'high' ? '#065f46' : aiGeoHealth.aiSummaryLikelihood === 'medium' ? '#92400e' : '#991b1b'};">
+                    ${aiGeoHealth.aiSummaryLikelihood === 'high' ? 'High' : aiGeoHealth.aiSummaryLikelihood === 'medium' ? 'Medium' : 'Low'}
+                  </span>
+                  <span style="font-size: 0.75rem; color: #94a3b8; cursor: help; margin-left: 0.5rem;" title="High = score ≥75 and solid content/coverage. Medium = score ≥55. Low = score <55.">ℹ️</span>
                 </div>
               </div>
-              <div style="display: flex; flex-direction: column; align-items: center; gap: 1rem; justify-content: center;">
-                <span class="rag-badge ${aiGeoHealth.aiGeoStatus}" style="display: inline-block; padding: 0.75rem 1.5rem; border-radius: 8px; font-size: 1.25rem; font-weight: 600;">
-                  ${aiGeoHealth.aiGeoStatus === 'green' ? 'Green' : aiGeoHealth.aiGeoStatus === 'amber' ? 'Amber' : 'Red'}
-                </span>
-              </div>
             </div>
-            <p style="margin: 0 0 0.5rem 0; font-size: 0.95rem; color: #475569; font-weight: 500;">
+            <p style="margin: 0; font-size: 0.95rem; color: #475569; font-weight: 500;">
               Based on Authority, Content & Schema, Coverage, Diversity and Locations.
             </p>
-            <div style="display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
-              <span style="font-size: 0.9rem; color: #64748b; font-weight: 500;">AI summary likelihood:</span>
-              <span style="display: inline-block; padding: 0.35rem 0.75rem; border-radius: 4px; font-size: 0.85rem; font-weight: 600; background: ${aiGeoHealth.aiSummaryLikelihood === 'high' ? '#d1fae5' : aiGeoHealth.aiSummaryLikelihood === 'medium' ? '#fef3c7' : '#fee2e2'}; color: ${aiGeoHealth.aiSummaryLikelihood === 'high' ? '#065f46' : aiGeoHealth.aiSummaryLikelihood === 'medium' ? '#92400e' : '#991b1b'};">
-                ${aiGeoHealth.aiSummaryLikelihood === 'high' ? 'High' : aiGeoHealth.aiSummaryLikelihood === 'medium' ? 'Medium' : 'Low'}
-              </span>
-              <span style="font-size: 0.75rem; color: #94a3b8; cursor: help;" title="High = score ≥75 and solid content/coverage. Medium = score ≥55. Low = score <55.">ℹ️</span>
-            </div>
           </div>
           
           <!-- Pillar Snapshot Strip -->
@@ -4363,7 +4300,7 @@
       pillarCards.parentNode.insertBefore(healthDashboard, pillarCards);
       debugLog('✓ AI GEO Health Dashboard created', 'success');
       
-      // Speedometer is now SVG-based, no canvas drawing needed
+      // Circular progress ring is SVG-based, no additional drawing needed
       
       // Clear pillar cards for fresh render
       pillarCards.innerHTML = '';
