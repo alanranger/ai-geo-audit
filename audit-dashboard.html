@@ -2300,25 +2300,34 @@
       const rankingScore = computeRankingScore(queriesForCalculation);
 
       // Review Score: Phase 2 - Use real review data if available
-      let reviewScore = 50; // Default placeholder
-      const gbpRating = (localSignals && localSignals.status === 'ok' && localSignals.data) ? (localSignals.data.gbpRating || 0) : 0;
-      const gbpCount = (localSignals && localSignals.status === 'ok' && localSignals.data) ? (localSignals.data.gbpReviewCount || 0) : 0;
-      const siteRating = siteReviews?.siteRating || 0;
-      const siteCount = siteReviews?.siteReviewCount || 0;
+      // Get GBP data (may be null if not available, don't default to 0)
+      const gbpRating = (localSignals && localSignals.status === 'ok' && localSignals.data) 
+        ? (localSignals.data.gbpRating !== null && localSignals.data.gbpRating !== undefined ? localSignals.data.gbpRating : null)
+        : null;
+      const gbpCount = (localSignals && localSignals.status === 'ok' && localSignals.data) 
+        ? (localSignals.data.gbpReviewCount !== null && localSignals.data.gbpReviewCount !== undefined ? localSignals.data.gbpReviewCount : null)
+        : null;
       
-      // Calculate review score if we have any review data (GBP or site)
-      if (gbpRating > 0 || gbpCount > 0 || siteRating > 0 || siteCount > 0) {
-        reviewScore = computeReviewScore({
-          gbpRating,
-          gbpCount,
-          siteRating,
-          siteCount
-        });
-        
-        debugLog(`Review Score: GBP (rating=${gbpRating}, count=${gbpCount}), Site (rating=${siteRating}, count=${siteCount}), Final=${reviewScore.toFixed(1)}`, 'info');
-      } else {
-        debugLog('Review Score: Using placeholder (50) - no review data available', 'warn');
-      }
+      // Get site review data (may be null if not available, don't default to 0)
+      const siteRating = siteReviews?.siteRating !== null && siteReviews?.siteRating !== undefined ? siteReviews.siteRating : null;
+      const siteCount = siteReviews?.siteReviewCount !== null && siteReviews?.siteReviewCount !== undefined ? siteReviews.siteReviewCount : null;
+      
+      // Calculate review score (handles optional sources internally)
+      const reviewScore = computeReviewScore({
+        gbpRating,
+        gbpCount,
+        siteRating,
+        siteCount
+      });
+      
+      // Log the calculation details
+      const gbpInfo = gbpRating !== null || gbpCount !== null 
+        ? `GBP (rating=${gbpRating !== null ? gbpRating : 'N/A'}, count=${gbpCount !== null ? gbpCount : 'N/A'})`
+        : 'GBP (no data)';
+      const siteInfo = siteRating !== null || siteCount !== null
+        ? `Site (rating=${siteRating !== null ? siteRating : 'N/A'}, count=${siteCount !== null ? siteCount : 'N/A'})`
+        : 'Site (no data)';
+      debugLog(`Review Score: ${gbpInfo}, ${siteInfo}, Final=${reviewScore.toFixed(1)}`, 'info');
 
       // Temporary placeholder until Phase 3
       const backlinkScore = 50;
