@@ -3024,10 +3024,69 @@
           reviews: reviewScore      // Same across all segments
         });
         
+        // Helper to compute GSC metrics for a segment
+        const computeGSCMetricsForSegment = (segmentPages) => {
+          if (!segmentPages || segmentPages.length === 0) {
+            return { siteCtr: 0, top10Ctr: 0, avgPosition: 0, top10Share: 0 };
+          }
+          
+          const rankingQueries = segmentPages.filter(q => q.position > 0 && q.position <= 20 && q.impressions > 0);
+          const top10Queries = rankingQueries.filter(q => q.position <= 10);
+          
+          let siteCtr = 0;
+          let top10Ctr = 0;
+          let avgPosition = 0;
+          let top10Share = 0;
+          
+          if (rankingQueries.length > 0) {
+            const totalClicks = rankingQueries.reduce((s, q) => s + (q.clicks || 0), 0);
+            const totalImpr = rankingQueries.reduce((s, q) => s + (q.impressions || 0), 0);
+            siteCtr = totalImpr > 0 ? (totalClicks / totalImpr) * 100 : 0;
+            
+            const top10Clicks = top10Queries.reduce((s, q) => s + (q.clicks || 0), 0);
+            const top10Impr = top10Queries.reduce((s, q) => s + (q.impressions || 0), 0);
+            top10Ctr = top10Impr > 0 ? (top10Clicks / top10Impr) * 100 : 0;
+            
+            avgPosition = totalImpr > 0
+              ? rankingQueries.reduce((s, q) => s + (q.position || 0) * (q.impressions || 0), 0) / totalImpr
+              : 0;
+            
+            top10Share = totalImpr > 0 ? (top10Impr / totalImpr) : 0; // Store as 0-1 fraction
+          }
+          
+          return { siteCtr, top10Ctr, avgPosition, top10Share };
+        };
+        
+        // Compute GSC metrics for each segment
+        const allGSCMetrics = computeGSCMetricsForSegment(allPages);
+        const excludeEduGSCMetrics = computeGSCMetricsForSegment(excludeEduPages);
+        const moneyGSCMetrics = computeGSCMetricsForSegment(moneyPages);
+        
         authorityBySegment = {
-          all: { ...authorityAll, topPages: allTopPages },
-          nonEducation: { ...authorityNonEducation, topPages: excludeEduTopPages },
-          money: { ...authorityMoney, topPages: moneyTopPages }
+          all: { 
+            ...authorityAll, 
+            topPages: allTopPages,
+            siteCtr: allGSCMetrics.siteCtr,
+            top10Ctr: allGSCMetrics.top10Ctr,
+            avgPosition: allGSCMetrics.avgPosition,
+            top10Share: allGSCMetrics.top10Share
+          },
+          nonEducation: { 
+            ...authorityNonEducation, 
+            topPages: excludeEduTopPages,
+            siteCtr: excludeEduGSCMetrics.siteCtr,
+            top10Ctr: excludeEduGSCMetrics.top10Ctr,
+            avgPosition: excludeEduGSCMetrics.avgPosition,
+            top10Share: excludeEduGSCMetrics.top10Share
+          },
+          money: { 
+            ...authorityMoney, 
+            topPages: moneyTopPages,
+            siteCtr: moneyGSCMetrics.siteCtr,
+            top10Ctr: moneyGSCMetrics.top10Ctr,
+            avgPosition: moneyGSCMetrics.avgPosition,
+            top10Share: moneyGSCMetrics.top10Share
+          }
         };
         
         debugLog(`📊 Authority by segment - All: ${authorityAll.total.toFixed(1)}, Non-education: ${authorityNonEducation.total.toFixed(1)}, Money: ${authorityMoney.total.toFixed(1)}`, 'info');
@@ -4686,7 +4745,48 @@
             }
           });
           
-          // Update table
+          // Update comparison table
+          const comparisonDiv = document.getElementById('top-pages-comparison-table');
+          if (comparisonDiv && authorityBySegment) {
+            comparisonDiv.innerHTML = renderSegmentComparisonTable(authorityBySegment, mode);
+          }
+          
+          // Update table (reset sort when switching segments)
+          window.topPagesData = topPages;
+          window.topPagesSortColumn = null;
+          window.topPagesSortDirection = 'desc';
+          const tableContainer = document.getElementById('top-pages-table-container');
+          if (tableContainer) {
+            tableContainer.innerHTML = renderFullWidthTopPagesTable(topPages, segmentLabel);
+            attachCopyButtonHandler();
+          }
+        };
+        
+        // Make handleSort available globally
+        window.handleSort = function(column) {
+          if (window.topPagesSortColumn === column) {
+            window.topPagesSortDirection = window.topPagesSortDirection === 'asc' ? 'desc' : 'asc';
+          } else {
+            window.topPagesSortColumn = column;
+            window.topPagesSortDirection = 'desc';
+          }
+          // Re-render table
+          const currentMode = window.currentAuthorityMode || 'all';
+          const authorityObj = scores?.authority;
+          const authorityBySegment = (typeof authorityObj === 'object' && authorityObj !== null) 
+            ? authorityObj.bySegment 
+            : null;
+          const topPages = currentMode === 'all'
+            ? (authorityBySegment?.all?.topPages || [])
+            : currentMode === 'nonEducation'
+            ? (authorityBySegment?.nonEducation?.topPages || [])
+            : (authorityBySegment?.money?.topPages || []);
+          const segmentLabel = currentMode === 'all'
+            ? 'All pages'
+            : currentMode === 'nonEducation'
+            ? 'Exclude education (blogs / free course)'
+            : 'Money pages only';
+          window.topPagesData = topPages;
           const tableContainer = document.getElementById('top-pages-table-container');
           if (tableContainer) {
             tableContainer.innerHTML = renderFullWidthTopPagesTable(topPages, segmentLabel);
@@ -4957,6 +5057,12 @@
                   Money pages only
                 </button>
               </div>
+            </div>
+            ` : ''}
+            
+            ${authorityBySegment ? `
+            <div id="top-pages-comparison-table" style="margin-bottom: 1.5rem;">
+              ${renderSegmentComparisonTable(authorityBySegment, currentMode)}
             </div>
             ` : ''}
             
