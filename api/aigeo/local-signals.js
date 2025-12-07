@@ -117,6 +117,12 @@ export default async function handler(req, res) {
       locations = locationsData.locations || [];
       console.log('[Local Signals] Found', locations.length, 'locations');
       
+      // If no locations found, log warning with full response for debugging
+      if (locations.length === 0) {
+        console.warn('[Local Signals] ⚠️ No locations returned from API. Full response:', JSON.stringify(locationsData, null, 2));
+        console.warn('[Local Signals] This could mean: 1) Account has no locations set up, 2) API permissions issue, 3) Account name format incorrect');
+      }
+      
       // Fetch detailed information for each location (phone numbers might be in details)
       const locationDetails = [];
       for (const location of locations) {
@@ -257,30 +263,7 @@ export default async function handler(req, res) {
         // swallow the error so we can still serve fallback
       }
       
-      // Fallback to static JSON file if API didn't return rating/review count
-      // This runs ANY TIME there's no usable GBP data (outside the try/catch and locations check)
-      if (!gbpRating || !gbpReviewCount) {
-        try {
-          const gbpReviewsPath = path.join(process.cwd(), 'data', 'gbp-reviews.json');
-          const gbpReviewsContent = await fs.readFile(gbpReviewsPath, 'utf8');
-          const gbpReviews = JSON.parse(gbpReviewsContent);
-          
-          const rating = Number(gbpReviews.gbpRating || gbpReviews.rating);
-          const count = Number(gbpReviews.gbpReviewCount || gbpReviews.reviewCount || gbpReviews.count);
-          
-          if (rating && count) {
-            gbpRating = rating;
-            gbpReviewCount = count;
-            console.info('[Local Signals] Using GBP rating from fallback file:', { rating, count });
-          } else {
-            console.warn('[Local Signals] Fallback file is missing rating or count', gbpReviews);
-          }
-        } catch (fileError) {
-          console.error('[Local Signals] Could not read gbp-reviews.json fallback file:', fileError.message);
-        }
-      }
-      
-      // Extract service areas and NAP data
+      // Extract service areas and NAP data FIRST (before any file I/O that might fail)
       locationsToProcess.forEach(location => {
         // Service areas - check both SERVICE_AREA_BUSINESS and places data
         if (location.serviceArea) {
@@ -374,6 +357,30 @@ export default async function handler(req, res) {
         return score;
       });
       napConsistencyScore = Math.round(scores.reduce((sum, s) => sum + s, 0) / scores.length);
+    }
+    
+    // Fallback to static JSON file if API didn't return rating/review count
+    // This runs AFTER locations processing to avoid interfering with it
+    if (!gbpRating || !gbpReviewCount) {
+      try {
+        const gbpReviewsPath = path.join(process.cwd(), 'data', 'gbp-reviews.json');
+        const gbpReviewsContent = await fs.readFile(gbpReviewsPath, 'utf8');
+        const gbpReviews = JSON.parse(gbpReviewsContent);
+        
+        const rating = Number(gbpReviews.gbpRating || gbpReviews.rating);
+        const count = Number(gbpReviews.gbpReviewCount || gbpReviews.reviewCount || gbpReviews.count);
+        
+        if (rating && count) {
+          gbpRating = rating;
+          gbpReviewCount = count;
+          console.info('[Local Signals] Using GBP rating from fallback file:', { rating, count });
+        } else {
+          console.warn('[Local Signals] Fallback file is missing rating or count', gbpReviews);
+        }
+      } catch (fileError) {
+        console.error('[Local Signals] Could not read gbp-reviews.json fallback file:', fileError.message);
+        // Don't let file read errors affect locations processing
+      }
     }
     
     // Step 4: LocalBusiness schema detection would require website scanning
