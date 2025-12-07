@@ -4722,6 +4722,29 @@
         return tableHtml;
       }
       
+      // Helper to attach sort handlers after table is in DOM (shared by both createTopPagesSection functions)
+      function attachSortHandlers() {
+        setTimeout(() => {
+          ['ctr', 'impressions', 'clicks', 'position'].forEach(col => {
+            const th = document.getElementById(`sort-${col}`);
+            if (th) {
+              // Remove existing listeners by cloning
+              const newTh = th.cloneNode(true);
+              th.parentNode.replaceChild(newTh, th);
+              newTh.addEventListener('click', () => {
+                if (window.handleSort) {
+                  window.handleSort(col);
+                } else {
+                  console.error('window.handleSort is not defined');
+                }
+              });
+            } else {
+              console.warn(`Sort header not found: sort-${col}`);
+            }
+          });
+        }, 50);
+      }
+      
       // Function to render segment comparison table (shared by both createTopPagesSection functions)
       function renderSegmentComparisonTable(authorityBySegment, currentMode) {
         const segments = [
