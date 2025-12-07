@@ -210,7 +210,7 @@
     .chart-container {
       background: linear-gradient(135deg, #f0f4f8 0%, #e2e8f0 100%);
       padding: 1.5rem;
-      padding-bottom: 3rem; /* Extra padding at bottom for rotated axis labels */
+      padding-bottom: 4rem; /* Extra padding at bottom for rotated axis labels - increased to prevent overflow */
       border-radius: 8px;
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
       margin-bottom: 6rem; /* extra breathing room below charts */
@@ -1093,6 +1093,20 @@
       <div class="chart-container">
         <h3>Score Trends</h3>
         <p style="font-size: 0.9rem; color: #666; margin-bottom: 1rem;">Historical performance tracking for all five pillars (Local Entity, Service Area, Authority, Visibility, Content/Schema) over the selected date range.</p>
+        <div id="trendAuthorityModeToggle" class="authority-mode-toggle" style="margin-bottom: 1rem; padding: 0.5rem; background: #f8f9fa; border-radius: 4px; font-size: 0.75rem; display: none;">
+          <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+            <span style="font-weight: 600; color: #666;">Authority Mode:</span>
+            <button id="trend-mode-all" class="authority-mode-btn" data-mode="all" style="padding: 0.25rem 0.75rem; border: 1px solid #d1d5db; border-radius: 4px; background: #10b981; color: white; cursor: pointer; font-size: 0.75rem;">
+              All pages
+            </button>
+            <button id="trend-mode-nonEducation" class="authority-mode-btn" data-mode="nonEducation" style="padding: 0.25rem 0.75rem; border: 1px solid #d1d5db; border-radius: 4px; background: white; color: #666; cursor: pointer; font-size: 0.75rem;">
+              Exclude education
+            </button>
+            <button id="trend-mode-money" class="authority-mode-btn" data-mode="money" style="padding: 0.25rem 0.75rem; border: 1px solid #d1d5db; border-radius: 4px; background: white; color: #666; cursor: pointer; font-size: 0.75rem;">
+              Money pages only
+            </button>
+          </div>
+        </div>
         <div id="trendSummaryRow" class="trend-summary-row"></div>
         <canvas id="trendChart"></canvas>
       </div>
@@ -5659,6 +5673,40 @@
             const currentLocalSignals = savedAuditForTrend?.localSignals || null;
             // Always use correct Trustpilot snapshot (4.6, 610) - override any old cached values
             const currentSiteReviews = getTrustpilotSnapshot(savedAuditForTrend?.siteReviews || null);
+            const currentScores = savedAuditForTrend?.scores;
+            
+            // Check if segmentation data is available and show/hide toggle
+            const authorityBySegment = currentScores?.authority?.bySegment || null;
+            const trendToggle = document.getElementById('trendAuthorityModeToggle');
+            if (trendToggle) {
+              if (authorityBySegment) {
+                trendToggle.style.display = 'block';
+                // Initialize mode if not set
+                if (!window.trendAuthorityMode) {
+                  window.trendAuthorityMode = 'all';
+                }
+              } else {
+                trendToggle.style.display = 'none';
+                window.trendAuthorityMode = 'all'; // Default to all
+              }
+            }
+            
+            // Get Authority score for selected mode
+            const getAuthorityForMode = (mode) => {
+              if (authorityBySegment && authorityBySegment[mode]) {
+                return authorityBySegment[mode].total || authorityBySegment[mode].score || 0;
+              }
+              // Fallback to all or main score
+              if (authorityBySegment && authorityBySegment.all) {
+                return authorityBySegment.all.total || authorityBySegment.all.score || 0;
+              }
+              // Legacy fallback
+              const authObj = currentScores?.authority;
+              if (typeof authObj === 'object' && authObj !== null) {
+                return authObj.score || 0;
+              }
+              return authObj || 0;
+            };
             
             timeseries.forEach(point => {
               const pointDate = point.date; // YYYY-MM-DD format
@@ -5707,9 +5755,16 @@
               }
               
               // Use historical Authority score if available, otherwise use calculated
+              // For today's date, use selected mode; for historical dates, use stored score
               if (historicalAuthority !== undefined && historicalAuthority !== null) {
                 authorityData.push(historicalAuthority);
                 debugLog(`Using historical Authority (${historicalAuthority}) for ${pointDate}`, 'info');
+              } else if (isToday && authorityBySegment) {
+                // For today, use selected mode
+                const selectedMode = window.trendAuthorityMode || 'all';
+                const modeScore = getAuthorityForMode(selectedMode);
+                authorityData.push(modeScore);
+                debugLog(`Using Authority score (${modeScore}) for ${pointDate} (mode: ${selectedMode})`, 'info');
               } else {
                 // Handle new Authority structure (object with score) or legacy (number)
                 const authScore = typeof pillarScores.authority === 'object' ? pillarScores.authority.score : pillarScores.authority;
@@ -5815,15 +5870,12 @@
                     visibilityData.push(visibility);
                     debugLog(`✓ Added Visibility score (${visibility}) for ${dateStr} from current audit`, 'info');
                     
-                    // Calculate Authority from current audit scores
-                    // Handle new Authority structure (object with score) or legacy (number)
-                    const currentAuthorityRaw = currentScores?.authority || null;
-                    const currentAuthority = (currentAuthorityRaw !== null && currentAuthorityRaw !== undefined)
-                      ? (typeof currentAuthorityRaw === 'object' ? currentAuthorityRaw.score : currentAuthorityRaw)
-                      : null;
+                    // Calculate Authority from current audit scores using selected mode
+                    const selectedMode = window.trendAuthorityMode || 'all';
+                    const currentAuthority = getAuthorityForMode(selectedMode);
                     if (currentAuthority !== null && currentAuthority !== undefined) {
                       authorityData.push(currentAuthority);
-                      debugLog(`✓ Added Authority score (${currentAuthority}) for ${dateStr} from current audit`, 'info');
+                      debugLog(`✓ Added Authority score (${currentAuthority}) for ${dateStr} from current audit (mode: ${selectedMode})`, 'info');
                     } else {
                       // Fallback: calculate Authority from current data
                       const pillarScores = calculatePillarFromMetrics(
@@ -6457,6 +6509,39 @@
           debugLog(`trendChart type after creation: ${typeof window.trendChart}`, 'info');
           debugLog(`trendChart instanceof Chart: ${window.trendChart instanceof Chart}`, 'info');
           debugLog(`Chart data points: Local Entity=${localEntityData.length}, Visibility=${visibilityData.length}, Authority=${authorityData.length}`, 'info');
+          
+          // Add event listeners for Authority mode toggle buttons
+          ['all', 'nonEducation', 'money'].forEach(mode => {
+            const btn = document.getElementById(`trend-mode-${mode}`);
+            if (btn) {
+              btn.addEventListener('click', () => {
+                // Update selected mode
+                window.trendAuthorityMode = mode;
+                debugLog(`📊 Trend chart Authority mode changed to: ${mode === 'all' ? 'All pages' : mode === 'nonEducation' ? 'Exclude education' : 'Money pages only'}`, 'info');
+                
+                // Update button styles
+                ['all', 'nonEducation', 'money'].forEach(m => {
+                  const b = document.getElementById(`trend-mode-${m}`);
+                  if (b) {
+                    if (m === mode) {
+                      b.style.background = '#10b981';
+                      b.style.color = 'white';
+                    } else {
+                      b.style.background = 'white';
+                      b.style.color = '#666';
+                    }
+                  }
+                });
+                
+                // Redraw the chart with new Authority data
+                if (window.trendChart && typeof displayDashboard === 'function') {
+                  // Re-run displayDashboard to recalculate with new mode
+                  displayDashboard();
+                }
+              });
+            }
+          });
+          
           debugLog('=== DISPLAY DASHBOARD: Complete ===', 'success');
         } catch (e) {
           debugLog(`✗ Error creating trend chart: ${e.message}`, 'error');
