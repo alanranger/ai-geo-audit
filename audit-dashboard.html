@@ -4637,6 +4637,163 @@
       
       // Shared functions for Top Pages section (used by both createTopPagesSection functions)
       
+      // Classification functions for metric status
+      function classifySiteCtr(v) {
+        // v is 0-1 (percentage as decimal)
+        if (v < 0.01) return 'poor';      // <1%
+        if (v < 0.03) return 'ok';        // 1-3%
+        return 'strong';                  // 3%+
+      }
+      
+      function classifyTop10Ctr(v) {
+        // v is 0-1 (percentage as decimal)
+        if (v < 0.02) return 'poor';      // <2%
+        if (v < 0.05) return 'ok';        // 2-5%
+        return 'strong';                  // 5%+
+      }
+      
+      function classifyAvgPos(p) {
+        if (p > 10) return 'poor';        // mostly bottom of page 1 / page 2
+        if (p > 5) return 'ok';           // mid-page 1
+        return 'strong';                  // positions 1-5
+      }
+      
+      function classifyTop10Share(v) {
+        // v is 0-1 (percentage as decimal)
+        if (v < 0.6) return 'poor';       // <60% of impressions in top 10
+        if (v < 0.8) return 'ok';         // 60-80%
+        return 'strong';                  // 80%+
+      }
+      
+      // Helper to format percentage
+      function pct(v) {
+        return `${(v * 100).toFixed(2)}%`;
+      }
+      
+      // Build recommendation rows from segment metrics
+      function buildBehaviourRankingRecommendations(segment, m) {
+        const rows = [];
+        
+        // Site CTR recommendation
+        const siteStatus = classifySiteCtr(m.siteCtr);
+        rows.push({
+          metric: 'Overall CTR (all ranking queries)',
+          status: siteStatus,
+          value: pct(m.siteCtr),
+          target: 'Aim for 2–3%+ overall CTR',
+          action: siteStatus === 'poor'
+            ? (segment === 'money'
+                ? 'Rewrite titles and descriptions on the top money pages (table below). Add intent phrases ("workshop", "course", "near me") and stronger benefits to lift clicks.'
+                : 'Focus on high-impression pages with weak CTR. Tighten titles and descriptions so they clearly answer the search intent and highlight the benefit.')
+            : siteStatus === 'ok'
+            ? 'CTR is reasonable. Prioritise the worst pages in the table below for A/B-style tests on titles and descriptions.'
+            : 'CTR is strong for this segment. Keep monitoring but prioritise ranking and impression share improvements.'
+        });
+        
+        // Top-10 CTR recommendation
+        const top10Status = classifyTop10Ctr(m.top10Ctr);
+        rows.push({
+          metric: 'Top-10 CTR (positions 1–10)',
+          status: top10Status,
+          value: pct(m.top10Ctr),
+          target: 'Aim for 3–5%+ in top-10',
+          action: top10Status === 'poor'
+            ? 'When you are already in positions 1–10 but clicks are low, re-write titles/meta to be more specific: include location, level (beginner/advanced), and outcome ("learn to…", "master…").'
+            : top10Status === 'ok'
+            ? 'Identify top-10 pages with below-average CTR and iterate on their SERP snippet (titles, descriptions, rich results where available).'
+            : 'Top-10 CTR is healthy. Focus on pushing more queries into the top-10 (see avg position & top-10 share).'
+        });
+        
+        // Average position recommendation
+        const posStatus = classifyAvgPos(m.avgPosition);
+        rows.push({
+          metric: 'Average position (ranking queries)',
+          status: posStatus,
+          value: m.avgPosition.toFixed(1),
+          target: 'Aim for average position 3–6 on core queries',
+          action: posStatus === 'poor'
+            ? 'Most impressions are coming from low positions. Strengthen internal links to money pages, add more supporting content, and build links from relevant blogs/assignments into these URLs.'
+            : posStatus === 'ok'
+            ? 'You are mid-page 1 on average. Use on-page tuning (H1, sub-heads, FAQs) and internal links from strong blogs to nudge key URLs into positions 1–3.'
+            : 'Positions are strong overall. Concentrate on CTR and expanding coverage to more relevant queries.'
+        });
+        
+        // Top-10 share recommendation
+        const shareStatus = classifyTop10Share(m.top10Share);
+        rows.push({
+          metric: 'Top-10 impression share',
+          status: shareStatus,
+          value: pct(m.top10Share),
+          target: 'Aim for 75–85%+ of impressions in top-10',
+          action: shareStatus === 'poor'
+            ? 'Large share of impressions are outside the top-10. Review which queries are generating impressions but no clicks and decide: improve those pages or deliberately de-optimise low-value queries.'
+            : shareStatus === 'ok'
+            ? 'Gradually push more impressions into the top-10 by strengthening key hub pages (workshops, courses, tuition) and consolidating thin or overlapping content.'
+            : 'Most impressions are already top-10. Shift effort to CTR and conversion on the URLs listed below.'
+        });
+        
+        return rows;
+      }
+      
+      // Render recommendations table
+      function renderRecommendationsTable(segment, metrics) {
+        if (!metrics) {
+          return '<div style="font-size: 0.85rem; color: #999; padding: 1rem; text-align: center;">No metrics available for recommendations.</div>';
+        }
+        
+        const recommendations = buildBehaviourRankingRecommendations(segment, metrics);
+        
+        const getStatusPill = (status) => {
+          const colors = {
+            poor: { bg: '#fee2e2', text: '#991b1b', label: 'Poor' },
+            ok: { bg: '#fef3c7', text: '#92400e', label: 'OK' },
+            strong: { bg: '#d1fae5', text: '#065f46', label: 'Strong' }
+          };
+          const color = colors[status] || colors.ok;
+          return `<span style="display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; background: ${color.bg}; color: ${color.text}; font-size: 0.75rem; font-weight: 600;">${color.label}</span>`;
+        };
+        
+        let tableHtml = `
+          <div style="margin-bottom: 0.75rem; padding-bottom: 0.75rem; border-bottom: 2px solid #e2e8f0;">
+            <h4 style="margin: 0 0 0.25rem 0; font-size: 1rem; font-weight: 700; color: #1e293b;">Recommended actions for this segment</h4>
+            <p style="margin: 0; font-size: 0.75rem; color: #334155; font-weight: 500;">Based on last 30 days of Google Search Console data for the currently selected segment.</p>
+          </div>
+          <div style="overflow-x: auto; border-radius: 6px; border: 1px solid #e2e8f0;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+              <thead>
+                <tr style="background: linear-gradient(135deg, #f8f9fa 0%, #f1f5f9 100%); border-bottom: 2px solid #e2e8f0;">
+                  <th style="text-align: left; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Metric</th>
+                  <th style="text-align: center; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Status</th>
+                  <th style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Current</th>
+                  <th style="text-align: left; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Target</th>
+                  <th style="text-align: left; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Suggested action</th>
+                </tr>
+              </thead>
+              <tbody>
+        `;
+        
+        recommendations.forEach((row, idx) => {
+          const isEven = idx % 2 === 0;
+          tableHtml += `
+            <tr style="border-bottom: 1px solid #f1f5f9; background: ${isEven ? '#ffffff' : '#fafafa'}; transition: background 0.2s;" onmouseover="this.style.background='#f8f9fa';" onmouseout="this.style.background='${isEven ? '#ffffff' : '#fafafa'}';">
+              <td style="padding: 0.75rem; color: #0f172a; font-weight: 600;">${row.metric}</td>
+              <td style="padding: 0.75rem; text-align: center;">${getStatusPill(row.status)}</td>
+              <td style="padding: 0.75rem; text-align: right; color: #0f172a; font-weight: 600;">${row.value}</td>
+              <td style="padding: 0.75rem; color: #0f172a; font-weight: 500;">${row.target}</td>
+              <td style="padding: 0.75rem; color: #0f172a; font-weight: 400; line-height: 1.5;">${row.action}</td>
+            </tr>
+          `;
+        });
+        
+        tableHtml += `
+              </tbody>
+            </table>
+          </div>
+        `;
+        
+        return tableHtml;
+      }
+      
       // Function to render full-width top pages table (shared by both createTopPagesSection functions)
       function renderFullWidthTopPagesTable(topPages, segmentLabel, dateRangeText = '30 days') {
         if (!topPages || topPages.length === 0) {
@@ -5009,6 +5166,19 @@
             <div id="top-pages-table-container">
               ${renderFullWidthTopPagesTable(topPages, segmentLabel, dateRangeText)}
             </div>
+            
+            ${authorityBySegment && authorityBySegment[currentMode] ? `
+            <div id="top-pages-recommendations-container" style="margin-top: 2rem;">
+              ${renderRecommendationsTable(currentMode, {
+                siteCtr: authorityBySegment[currentMode].siteCtr || 0,
+                top10Ctr: authorityBySegment[currentMode].top10Ctr || 0,
+                avgPosition: authorityBySegment[currentMode].avgPosition || 0,
+                top10Share: authorityBySegment[currentMode].top10Share || 0,
+                behaviourScore: authorityBySegment[currentMode].behaviour || 0,
+                rankingScore: authorityBySegment[currentMode].ranking || 0
+              })}
+            </div>
+            ` : ''}
           </div>
         `;
         
@@ -5105,6 +5275,19 @@
             tableContainer.innerHTML = renderFullWidthTopPagesTable(topPages, segmentLabel, dateRangeText);
             attachCopyButtonHandler();
             attachSortHandlers();
+          }
+          
+          // Update recommendations table
+          const recommendationsContainer = document.getElementById('top-pages-recommendations-container');
+          if (recommendationsContainer && authorityBySegment && authorityBySegment[mode]) {
+            recommendationsContainer.innerHTML = renderRecommendationsTable(mode, {
+              siteCtr: authorityBySegment[mode].siteCtr || 0,
+              top10Ctr: authorityBySegment[mode].top10Ctr || 0,
+              avgPosition: authorityBySegment[mode].avgPosition || 0,
+              top10Share: authorityBySegment[mode].top10Share || 0,
+              behaviourScore: authorityBySegment[mode].behaviour || 0,
+              rankingScore: authorityBySegment[mode].ranking || 0
+            });
           }
         };
         
@@ -5413,6 +5596,19 @@
             <div id="top-pages-table-container">
               ${renderFullWidthTopPagesTable(topPages, segmentLabel, dateRangeText)}
             </div>
+            
+            ${authorityBySegment && authorityBySegment[currentMode] ? `
+            <div id="top-pages-recommendations-container" style="margin-top: 2rem;">
+              ${renderRecommendationsTable(currentMode, {
+                siteCtr: authorityBySegment[currentMode].siteCtr || 0,
+                top10Ctr: authorityBySegment[currentMode].top10Ctr || 0,
+                avgPosition: authorityBySegment[currentMode].avgPosition || 0,
+                top10Share: authorityBySegment[currentMode].top10Share || 0,
+                behaviourScore: authorityBySegment[currentMode].behaviour || 0,
+                rankingScore: authorityBySegment[currentMode].ranking || 0
+              })}
+            </div>
+            ` : ''}
           </div>
         `;
         
@@ -5561,6 +5757,19 @@
             tableContainer.innerHTML = renderFullWidthTopPagesTable(topPages, segmentLabel, dateRangeText);
             attachCopyButtonHandler();
             attachSortHandlers();
+          }
+          
+          // Update recommendations table
+          const recommendationsContainer = document.getElementById('top-pages-recommendations-container');
+          if (recommendationsContainer && segData && segData[mode]) {
+            recommendationsContainer.innerHTML = renderRecommendationsTable(mode, {
+              siteCtr: segData[mode].siteCtr || 0,
+              top10Ctr: segData[mode].top10Ctr || 0,
+              avgPosition: segData[mode].avgPosition || 0,
+              top10Share: segData[mode].top10Share || 0,
+              behaviourScore: segData[mode].behaviour || 0,
+              rankingScore: segData[mode].ranking || 0
+            });
           }
         };
         
