@@ -13,7 +13,7 @@
 
 import fs from 'fs/promises';
 import path from 'path';
-import { parse } from 'csv-parse/sync';
+import { parse } from 'csv-parse';
 
 const METRICS_FILE = path.join(process.cwd(), 'data', 'backlink-metrics.json');
 
