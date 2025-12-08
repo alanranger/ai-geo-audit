@@ -4169,7 +4169,8 @@
       }
       
       // Compute money pages behaviour score (for Authority overlay)
-      function computeMoneyPagesBehaviour(gscQueries, moneyPages) {
+      // Define globally to ensure accessibility from event handlers
+      window.computeMoneyPagesBehaviour = function(gscQueries, moneyPages) {
         if (!gscQueries || !gscQueries.length || !moneyPages || !moneyPages.length) {
           return null;
         }
@@ -4241,7 +4242,7 @@
           clicks,
           impressions
         };
-      }
+      };
       
       // Compute money pages metrics if we have queryPages data
       let moneyPagesMetrics = null;
@@ -4333,7 +4334,7 @@
         
         // Compute money pages behaviour score
         const moneyPagesList = moneyPagesMetrics.rows || [];
-        const moneyBehaviour = computeMoneyPagesBehaviour(
+        const moneyBehaviour = window.computeMoneyPagesBehaviour(
           queryPages,
           moneyPagesList
         );
@@ -8135,9 +8136,12 @@ Final Score: ${score}/100`;
               const moneyPagesMetrics = window.currentMoneyPagesMetrics;
               const queryPages = window.currentQueryPages || null;
               if (moneyPagesMetrics) {
-                renderMoneyPagesCategoryChart(moneyPagesMetrics, 0);
-                renderMoneyPagesBehaviourKpis(moneyPagesMetrics.behaviour, moneyPagesMetrics, queryPages);
-                updateMoneyPagesSummaryMetrics(moneyPagesMetrics);
+                // Use setTimeout to ensure DOM is ready
+                setTimeout(() => {
+                  renderMoneyPagesCategoryChart(moneyPagesMetrics, 0);
+                  renderMoneyPagesBehaviourKpis(moneyPagesMetrics.behaviour, moneyPagesMetrics, queryPages);
+                  updateMoneyPagesSummaryMetrics(moneyPagesMetrics);
+                }, 100);
               }
             }
           };
@@ -8240,12 +8244,17 @@ Final Score: ${score}/100`;
       let moneyPagesCategoryChart = null;
       
       function renderMoneyPagesCategoryChart(moneyPagesMetrics, retryCount = 0) {
+        // Prevent excessive retries
+        if (retryCount > 5) {
+          debugLog('⚠ Max retries reached for money pages chart, giving up', 'warn');
+          return;
+        }
+        
         debugLog(`renderMoneyPagesCategoryChart called (attempt ${retryCount + 1})`, 'info');
         
         // Check if Chart.js is available
         if (typeof Chart === 'undefined') {
           debugLog('⚠ Chart.js not loaded, cannot render money pages chart', 'warn');
-          console.warn('Chart.js not available for money pages category chart');
           // Retry after a delay if Chart.js might still be loading
           if (retryCount < 3) {
             setTimeout(() => renderMoneyPagesCategoryChart(moneyPagesMetrics, retryCount + 1), 500);
@@ -8256,7 +8265,6 @@ Final Score: ${score}/100`;
         const canvas = document.getElementById('money-pages-category-chart');
         if (!canvas) {
           debugLog(`⚠ Money pages chart canvas not found (attempt ${retryCount + 1})`, 'warn');
-          console.warn('Money pages chart canvas element not found');
           // Retry if canvas doesn't exist yet (DOM might not be ready)
           if (retryCount < 5) {
             setTimeout(() => renderMoneyPagesCategoryChart(moneyPagesMetrics, retryCount + 1), 200);
@@ -8321,11 +8329,7 @@ Final Score: ${score}/100`;
         
         // Show chart row and ensure it's visible
         const chartRow = document.getElementById('money-pages-chart-row');
-        if (chartRow) {
-          chartRow.style.display = 'block';
-          chartRow.style.visibility = 'visible';
-          debugLog('✓ Chart row is visible', 'success');
-        } else {
+        if (!chartRow) {
           debugLog('⚠ Chart row element not found', 'warn');
           // Retry if chart row doesn't exist yet
           if (retryCount < 3) {
@@ -8334,17 +8338,36 @@ Final Score: ${score}/100`;
           return;
         }
         
-        // Prevent multiple simultaneous renders
-        if (moneyPagesCategoryChart) {
-          debugLog('⚠ Chart already exists, skipping render to prevent loop', 'warn');
+        // Ensure chart row is visible
+        chartRow.style.display = 'block';
+        chartRow.style.visibility = 'visible';
+        debugLog('✓ Chart row is visible', 'success');
+        
+        // Re-check canvas after ensuring row is visible (in case it wasn't accessible before)
+        const canvasCheck = document.getElementById('money-pages-category-chart');
+        if (!canvasCheck) {
+          debugLog('⚠ Canvas still not found after showing row, retrying...', 'warn');
+          if (retryCount < 3) {
+            setTimeout(() => renderMoneyPagesCategoryChart(moneyPagesMetrics, retryCount + 1), 200);
+          }
           return;
+        }
+        
+        // Destroy existing chart if it exists to prevent memory leaks
+        if (moneyPagesCategoryChart) {
+          try {
+            moneyPagesCategoryChart.destroy();
+            moneyPagesCategoryChart = null;
+          } catch (e) {
+            debugLog('Error destroying existing chart: ' + e.message, 'warn');
+          }
         }
         
         // Check if canvas is actually visible and has dimensions
         const canvasRect = canvas.getBoundingClientRect();
         if (canvasRect.width === 0 || canvasRect.height === 0) {
           debugLog('⚠ Canvas has zero dimensions, retrying...', 'warn');
-          if (retryCount < 2) {
+          if (retryCount < 3) {
             setTimeout(() => renderMoneyPagesCategoryChart(moneyPagesMetrics, retryCount + 1), 300);
           }
           return;
@@ -8493,7 +8516,7 @@ Final Score: ${score}/100`;
         if (filteredRows.length === 0) return null;
         
         // Recalculate behaviour for filtered URLs only
-        return computeMoneyPagesBehaviour(queryPages, filteredRows);
+        return window.computeMoneyPagesBehaviour(queryPages, filteredRows);
       }
       
       // Render Money Pages Behaviour KPIs
