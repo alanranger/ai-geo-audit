@@ -40,6 +40,9 @@ CREATE TABLE IF NOT EXISTS audit_results (
   ai_summary JSONB, -- JSON object: {score, label, reasons}
   ai_summary_score INTEGER, -- AI Summary Likelihood score (0-100) for trend charting
   
+  -- Money Pages Performance (Phase 1 - overlay metrics)
+  money_pages_metrics JSONB, -- JSON object: {overview: {moneyClicks, moneyImpressions, moneyCtr, moneyAvgPosition, ...}, rows: [{url, title, clicks, impressions, ctr, avgPosition, category, categoryLabel, categoryColor, recommendation}]}
+  
   -- Local Signals (when GBP API integrated)
   local_business_schema_pages INTEGER,
   nap_consistency_score INTEGER,

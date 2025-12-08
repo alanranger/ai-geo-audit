@@ -125,6 +125,9 @@ export default async function handler(req, res) {
       brand_overlay: ensureJson(scores?.brandOverlay), // JSON object with score, label, metrics, notes
       brand_score: ensureNumber(scores?.brandOverlay?.score), // For trend charting
       
+      // Money Pages Performance (Phase 1 - stored as JSON)
+      money_pages_metrics: ensureJson(scores?.moneyPagesMetrics), // JSON object: {overview: {...}, rows: [...]}
+      
       // Calculate AI Summary Likelihood (Phase 1)
       // Uses snippetReadiness, visibility, and brand score
       ai_summary: (() => {
