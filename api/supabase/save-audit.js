@@ -26,33 +26,57 @@ export default async function handler(req, res) {
   }
 
   try {
-    // In Vercel serverless functions, req.body is automatically parsed for JSON
-    // But we need to ensure it exists and is an object
-    let bodyData = req.body;
+    // In Vercel serverless functions, req.body should be automatically parsed for JSON
+    // Access it once and immediately extract all needed data to avoid "body already read" errors
+    let bodyData;
     
-    // If body is not already parsed (shouldn't happen in Vercel, but safety check)
-    if (!bodyData && req.body && typeof req.body === 'string') {
-      try {
-        bodyData = JSON.parse(req.body);
-      } catch (parseError) {
+    try {
+      // Access req.body once - Vercel should have already parsed it if Content-Type is application/json
+      bodyData = req.body;
+      
+      // If body is undefined or null, the request might not have a body
+      if (bodyData === undefined || bodyData === null) {
         return res.status(400).json({
           status: 'error',
-          message: 'Invalid JSON in request body',
-          details: parseError.message,
+          message: 'Request body is missing',
           meta: { generatedAt: new Date().toISOString() }
         });
       }
-    }
-    
-    // Ensure bodyData is an object
-    if (!bodyData || typeof bodyData !== 'object') {
+      
+      // If body is a string, try to parse it (shouldn't happen in Vercel, but safety check)
+      if (typeof bodyData === 'string') {
+        try {
+          bodyData = JSON.parse(bodyData);
+        } catch (parseError) {
+          return res.status(400).json({
+            status: 'error',
+            message: 'Invalid JSON in request body',
+            details: parseError.message,
+            meta: { generatedAt: new Date().toISOString() }
+          });
+        }
+      }
+      
+      // Validate body is an object (not array, not null)
+      if (typeof bodyData !== 'object' || Array.isArray(bodyData) || bodyData === null) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Request body must be a JSON object',
+          meta: { generatedAt: new Date().toISOString() }
+        });
+      }
+    } catch (bodyError) {
+      // If we can't read the body, it might have already been consumed
+      console.error('[Supabase Save] Error reading request body:', bodyError.message);
       return res.status(400).json({
         status: 'error',
-        message: 'Request body must be a JSON object',
+        message: 'Could not read request body',
+        details: bodyError.message,
         meta: { generatedAt: new Date().toISOString() }
       });
     }
     
+    // Extract all needed data in one go - don't access bodyData again after this
     const {
       propertyUrl,
       auditDate,
@@ -269,11 +293,28 @@ export default async function handler(req, res) {
     let isUpdate = false;
     
     if (updateResponse.ok) {
-      const updateResult = await updateResponse.json();
+      let updateResult;
+      try {
+        // Read response body once
+        const responseText = await updateResponse.text();
+        updateResult = responseText ? JSON.parse(responseText) : [];
+      } catch (parseError) {
+        console.error('[Supabase Save] Error parsing update response:', parseError.message);
+        updateResult = [];
+      }
+      
       // Check if any rows were actually updated
       if (Array.isArray(updateResult) && updateResult.length > 0) {
         console.log('[Supabase Save] ✓ Updated existing audit record for', auditDate);
         isUpdate = true;
+        // Use the update result as the final result
+        const finalResult = updateResult;
+        return res.status(200).json({
+          status: 'ok',
+          message: 'Audit results saved successfully',
+          data: finalResult,
+          meta: { generatedAt: new Date().toISOString() }
+        });
       } else {
         // No existing record found, need to INSERT
         console.log('[Supabase Save] No existing record found, inserting new record...');
@@ -302,12 +343,34 @@ export default async function handler(req, res) {
         body: JSON.stringify(auditRecord)
       });
     } else {
-      // Some other error from PATCH, use it as the response
-      response = updateResponse;
+      // Some other error from PATCH, read the error response
+      let errorText = '';
+      try {
+        errorText = await updateResponse.text();
+      } catch (e) {
+        errorText = `HTTP ${updateResponse.status}: ${updateResponse.statusText}`;
+      }
+      
+      console.error('[Supabase Save] Update failed with status:', updateResponse.status);
+      console.error('[Supabase Save] Error response:', errorText);
+      
+      return res.status(updateResponse.status).json({
+        status: 'error',
+        message: 'Failed to update audit results in Supabase',
+        details: errorText,
+        statusCode: updateResponse.status,
+        meta: { generatedAt: new Date().toISOString() }
+      });
     }
 
     if (!response.ok) {
-      const errorText = await response.text();
+      let errorText = '';
+      try {
+        errorText = await response.text();
+      } catch (e) {
+        errorText = `HTTP ${response.status}: ${response.statusText}`;
+      }
+      
       console.error('[Supabase Save] Error response status:', response.status);
       console.error('[Supabase Save] Error response text:', errorText);
       console.error('[Supabase Save] Request data (first 1000 chars):', JSON.stringify(auditRecord, null, 2).substring(0, 1000));
@@ -331,7 +394,20 @@ export default async function handler(req, res) {
       });
     }
 
-    const result = await response.json();
+    // Read response body once
+    let result;
+    try {
+      const responseText = await response.text();
+      result = responseText ? JSON.parse(responseText) : null;
+    } catch (parseError) {
+      console.error('[Supabase Save] Error parsing response:', parseError.message);
+      return res.status(500).json({
+        status: 'error',
+        message: 'Failed to parse Supabase response',
+        details: parseError.message,
+        meta: { generatedAt: new Date().toISOString() }
+      });
+    }
     if (isUpdate) {
       console.log('[Supabase Save] ✓ Successfully updated audit results (overwrote existing record)');
     } else {
