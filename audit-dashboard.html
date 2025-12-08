@@ -1412,7 +1412,7 @@
       }
     }
     
-    function toggleCsvSection(sectionId) {
+    window.toggleCsvSection = function(sectionId) {
       const section = document.getElementById(sectionId);
       const contentId = sectionId === 'urlListSection' ? 'urlListContent' : 'backlinkCsvContentWrapper';
       const toggleId = sectionId === 'urlListSection' ? 'urlListToggle' : 'backlinkCsvToggle';
@@ -2270,7 +2270,7 @@
           // Recalculate scores with merged data (use saved localSignals if available)
           // Always use correct Trustpilot snapshot (4.6, 610) - override any old cached values
           const normalizedSiteReviews = getTrustpilotSnapshot(savedAudit.siteReviews || null);
-          const mergedScores = calculatePillarScores(savedAudit.searchData, mergedSchemaAudit, savedAudit.localSignals || null, normalizedSiteReviews, savedAudit.backlinkMetrics || null);
+          const mergedScores = await calculatePillarScores(savedAudit.searchData, mergedSchemaAudit, savedAudit.localSignals || null, normalizedSiteReviews, savedAudit.backlinkMetrics || null);
           const mergedSnippetReadiness = calculateSnippetReadiness(mergedScores, savedAudit.searchData);
           
           // Save merged results (preserve localSignals, siteReviews, and backlinkMetrics)
@@ -2370,7 +2370,7 @@
         // Keep existing schema audit data (doesn't change with date range)
         // Always use correct Trustpilot snapshot (4.6, 610) - override any old cached values
         const normalizedSiteReviews = getTrustpilotSnapshot(savedAudit.siteReviews || null);
-        const scores = calculatePillarScores(searchData, savedAudit.schemaAudit, localSignals, normalizedSiteReviews, savedAudit.backlinkMetrics || null);
+        const scores = await calculatePillarScores(searchData, savedAudit.schemaAudit, localSignals, normalizedSiteReviews, savedAudit.backlinkMetrics || null);
         const snippetReadiness = calculateSnippetReadiness(scores, searchData);
         
         debugLog(`Recalculated scores for ${newDateRange} days: ${JSON.stringify(scores)}`, 'info');
@@ -3291,7 +3291,7 @@
       `;
     }
 
-    function calculatePillarScores(data, schemaAudit = null, localSignals = null, siteReviews = null, backlinkMetrics = null) {
+    async function calculatePillarScores(data, schemaAudit = null, localSignals = null, siteReviews = null, backlinkMetrics = null) {
       // Use new API response format - get values from GSC overview
       const position = data.averagePosition || 40; // 1 (best) - 100 (worst)
       const ctr = data.ctr || 0; // 0-100 percentage from API (e.g., 10 = 10%)
@@ -5059,7 +5059,7 @@
         updateProgress(70, 'Calculating pillar scores...');
         debugLog('Calculating pillar scores...', 'info');
         // Calculate scores (pass schema audit data, local signals, site reviews, and backlink metrics)
-        const scores = calculatePillarScores(searchData, schemaAudit, localSignals, siteReviews, backlinkMetrics);
+        const scores = await calculatePillarScores(searchData, schemaAudit, localSignals, siteReviews, backlinkMetrics);
         debugLog('✓ Pillar scores calculated', 'success');
         debugLog(`Scores: ${JSON.stringify(scores)}`, 'info');
 
