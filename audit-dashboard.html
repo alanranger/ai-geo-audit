@@ -3860,28 +3860,34 @@
         
         // Check which schema types are missing (for money pages, we typically want Product, Event, FAQPage)
         const desiredSchemaTypes = ['Product', 'Event', 'FAQPage'];
+        // Normalize present types to lowercase for case-insensitive comparison
         const presentTypes = Array.isArray(schemaTypes) && schemaTypes.length > 0 
-          ? schemaTypes.map(t => String(t).trim()) 
+          ? schemaTypes.map(t => String(t).trim().toLowerCase()) 
           : [];
-        const missingTypes = desiredSchemaTypes.filter(type => !presentTypes.includes(type));
+        // Check for missing types (case-insensitive comparison)
+        const missingTypes = desiredSchemaTypes.filter(type => {
+          const typeLower = type.toLowerCase();
+          return !presentTypes.includes(typeLower);
+        });
         
         // Build schema recommendation based on what's actually missing
+        // Only recommend schema types that are NOT already present
         let schemaRecommendation = '';
         if (hasSchema === false) {
           // No schema at all - generic recommendation
           schemaRecommendation = 'ensure Product/Event/FAQ schema is present, and ';
-        } else if (presentTypes.length > 0 && missingTypes.length > 0) {
-          // Has some schema but missing specific types - be specific
+        } else if (missingTypes.length > 0) {
+          // Has schema but missing some or all desired types
           if (missingTypes.length === desiredSchemaTypes.length) {
-            // Has schema but none of the desired types - generic
+            // Has schema but none of the desired types (Product, Event, FAQPage) - generic
             schemaRecommendation = 'ensure Product/Event/FAQ schema is present, and ';
           } else {
-            // Missing specific types - be specific
+            // Missing specific types - only recommend what's actually missing (e.g., "add Product/Event schema")
             const missingTypesText = missingTypes.join('/');
             schemaRecommendation = `add ${missingTypesText} schema, and `;
           }
         }
-        // If hasSchema === true and missingTypes.length === 0, no recommendation needed
+        // If hasSchema === true AND missingTypes.length === 0, no schema recommendation (all desired types present)
         
         // 1) High opportunity: decent position, impressions, but weak CTR
         const hasDecentPosition = safePos >= 3 && safePos <= HIGH_OPP_MAX_POS;
@@ -3898,10 +3904,19 @@
           // Add schema recommendation if missing (use same logic as visibility fix)
           let schemaNote = '';
           if (hasSchema === false) {
+            // No schema at all
             schemaNote = ' Add Product/Event/FAQ schema to improve rich result eligibility. ';
-          } else if (presentTypes.length > 0 && missingTypes.length > 0 && missingTypes.length < desiredSchemaTypes.length) {
-            schemaNote = ` Add ${missingTypes.join('/')} schema to improve rich result eligibility. `;
+          } else if (missingTypes.length > 0) {
+            // Has schema but missing some or all desired types
+            if (missingTypes.length === desiredSchemaTypes.length) {
+              // Has schema but none of the desired types
+              schemaNote = ' Add Product/Event/FAQ schema to improve rich result eligibility. ';
+            } else {
+              // Missing specific types - only recommend what's actually missing
+              schemaNote = ` Add ${missingTypes.join('/')} schema to improve rich result eligibility. `;
+            }
           }
+          // If missingTypes.length === 0, no schema recommendation (all desired types present)
           recommendation =
             `Good visibility (avg position ${safePos.toFixed(1)}) and ` +
             `${imp.toLocaleString()} impressions, but low CTR (${(safeCtr * 100).toFixed(1)}%). ` +
