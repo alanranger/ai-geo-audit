@@ -5050,12 +5050,16 @@
       // Helper to generate money pages priority (Phase 2)
       function getMoneyPagesPriority(moneyPagesMetrics) {
         if (!moneyPagesMetrics || !moneyPagesMetrics.rows || !moneyPagesMetrics.rows.length) {
+          debugLog('getMoneyPagesPriority: No rows data', 'warn');
           return null;
         }
         
         const { rows, summaryByCategory, overview } = moneyPagesMetrics;
         const moneyImpressions = overview.moneyImpressions || 0;
-        if (moneyImpressions === 0) return null;
+        if (moneyImpressions === 0) {
+          debugLog('getMoneyPagesPriority: No money impressions', 'warn');
+          return null;
+        }
         
         const high = summaryByCategory?.HIGH_OPPORTUNITY || { count: 0, impressions: 0 };
         const vis = summaryByCategory?.VISIBILITY_FIX || { count: 0, impressions: 0 };
@@ -5065,8 +5069,11 @@
         const visCount = vis.count || 0;
         const visImps = vis.impressions || 0;
         
+        debugLog(`getMoneyPagesPriority: high=${highCount} pages/${highImps} imps, vis=${visCount} pages/${visImps} imps, total=${moneyImpressions}`, 'info');
+        
         const totalFocusImps = highImps + visImps;
         if (totalFocusImps === 0) {
+          debugLog('getMoneyPagesPriority: No focus impressions (high+vis)', 'warn');
           return null;
         }
         
@@ -5194,9 +5201,16 @@
         }
         
         // Phase 2: Add money pages priority if applicable
+        debugLog(`Checking for money pages priority - moneyPagesMetrics exists: ${!!scoresObj.moneyPagesMetrics}`, 'info');
+        if (scoresObj.moneyPagesMetrics) {
+          debugLog(`Money pages metrics: rows=${scoresObj.moneyPagesMetrics.rows?.length || 0}, summaryByCategory=${!!scoresObj.moneyPagesMetrics.summaryByCategory}`, 'info');
+        }
         const moneyPriority = getMoneyPagesPriority(scoresObj.moneyPagesMetrics);
         if (moneyPriority) {
+          debugLog(`✓ Adding money pages priority: ${moneyPriority.message}`, 'success');
           priorities.push(moneyPriority);
+        } else {
+          debugLog('⚠ No money pages priority generated', 'warn');
         }
         
         // Sort by severity (high > medium > low) and limit to top items
@@ -8007,8 +8021,24 @@ Final Score: ${score}/100`;
       let moneyPagesCategoryChart = null;
       
       function renderMoneyPagesCategoryChart(moneyPagesMetrics) {
+        debugLog('renderMoneyPagesCategoryChart called', 'info');
+        
+        // Check if Chart.js is available
+        if (typeof Chart === 'undefined') {
+          debugLog('⚠ Chart.js not loaded, cannot render money pages chart', 'warn');
+          console.warn('Chart.js not available for money pages category chart');
+          return;
+        }
+        
         const canvas = document.getElementById('money-pages-category-chart');
-        if (!canvas || !moneyPagesMetrics || !moneyPagesMetrics.summaryByCategory) {
+        if (!canvas) {
+          debugLog('⚠ Money pages chart canvas not found', 'warn');
+          console.warn('Money pages chart canvas element not found');
+          return;
+        }
+        
+        if (!moneyPagesMetrics || !moneyPagesMetrics.summaryByCategory) {
+          debugLog('⚠ Money pages metrics or summaryByCategory missing', 'warn');
           // Hide chart row if no data
           const chartRow = document.getElementById('money-pages-chart-row');
           if (chartRow) {
@@ -8018,6 +8048,7 @@ Final Score: ${score}/100`;
         }
         
         const { summaryByCategory } = moneyPagesMetrics;
+        debugLog(`Money pages summaryByCategory: ${JSON.stringify(summaryByCategory)}`, 'info');
         
         const labels = [
           'High opportunity',
@@ -8029,9 +8060,12 @@ Final Score: ${score}/100`;
         const counts = keys.map(k => (summaryByCategory[k]?.count || 0));
         const impressions = keys.map(k => (summaryByCategory[k]?.impressions || 0));
         
+        debugLog(`Money pages chart data - counts: [${counts.join(', ')}], impressions: [${impressions.join(', ')}]`, 'info');
+        
         // If no data, show a simple message and skip chart
         const totalCount = counts.reduce((a, b) => a + b, 0);
         if (totalCount === 0) {
+          debugLog('⚠ No money pages data for chart', 'warn');
           const chartRow = document.getElementById('money-pages-chart-row');
           if (chartRow) {
             chartRow.innerHTML = `
@@ -8053,7 +8087,10 @@ Final Score: ${score}/100`;
         }
         
         const ctx = canvas.getContext('2d');
-        if (!ctx) return;
+        if (!ctx) {
+          debugLog('⚠ Could not get canvas context', 'warn');
+          return;
+        }
         
         if (moneyPagesCategoryChart) {
           moneyPagesCategoryChart.destroy();
@@ -8062,7 +8099,10 @@ Final Score: ${score}/100`;
         // Use impressions as weight for the chart slices
         const dataValues = impressions;
         
-        moneyPagesCategoryChart = new Chart(ctx, {
+        debugLog(`Creating money pages category chart with data: [${dataValues.join(', ')}]`, 'info');
+        
+        try {
+          moneyPagesCategoryChart = new Chart(ctx, {
           type: 'doughnut',
           data: {
             labels,
@@ -8113,6 +8153,11 @@ Final Score: ${score}/100`;
             cutout: '60%'
           }
         });
+        debugLog('✓ Money pages category chart created successfully', 'success');
+        } catch (error) {
+          debugLog(`✗ Error creating money pages chart: ${error.message}`, 'error');
+          console.error('Error creating money pages category chart:', error);
+        }
       }
 
       // Create Top Pages section (full width, below pillar cards)
@@ -8200,8 +8245,11 @@ Final Score: ${score}/100`;
           debugLog('⚠ Money Pages: No metrics data, will show "No data" message', 'warn');
         }
         renderMoneyPagesSection(scores.moneyPagesMetrics || null);
+        // Render chart after a longer delay to ensure DOM and Chart.js are ready
         if (scores.moneyPagesMetrics) {
-          renderMoneyPagesCategoryChart(scores.moneyPagesMetrics);
+          setTimeout(() => {
+            renderMoneyPagesCategoryChart(scores.moneyPagesMetrics);
+          }, 300);
         }
       }, 100);
       
