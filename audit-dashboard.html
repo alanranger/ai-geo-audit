@@ -9864,7 +9864,8 @@ Final Score: ${score}/100`;
           };
           
           // Debug: Log the actual data arrays being passed to the chart
-          debugLog(`Chart creation: Local Entity data length=${localEntityData.length}, last 3 values=${localEntityData.slice(-3).join(', ')}, Service Area data length=${serviceAreaData.length}, last 3 values=${serviceAreaData.slice(-3).join(', ')}`, 'info');
+          const brandOverlayValid = brandOverlayData.filter(v => v !== null && v !== undefined && !isNaN(v));
+          debugLog(`Chart creation: Local Entity data length=${localEntityData.length}, last 3 values=${localEntityData.slice(-3).join(', ')}, Service Area data length=${serviceAreaData.length}, last 3 values=${serviceAreaData.slice(-3).join(', ')}, Brand & Entity data length=${brandOverlayData.length}, valid values=${brandOverlayValid.length}, last 3 values=${brandOverlayData.slice(-3).join(', ')}, all values=${brandOverlayData.join(', ')}`, 'info');
           
           window.trendChart = new Chart(trendCtx, {
             type: 'line',
@@ -9931,15 +9932,25 @@ Final Score: ${score}/100`;
                 },
                 {
                   label: 'Brand & Entity',
-                  data: brandOverlayData,
+                  data: brandOverlayData.length === chartDates.length ? brandOverlayData : (() => {
+                    // Ensure data array matches labels length
+                    const adjusted = [...brandOverlayData];
+                    while (adjusted.length < chartDates.length) {
+                      adjusted.push(null);
+                    }
+                    return adjusted.slice(0, chartDates.length);
+                  })(),
                   borderColor: '#FFFF66', // Bright yellow
                   backgroundColor: 'rgba(255, 255, 102, 0.1)', // Bright yellow with transparency
-                  borderWidth: 2,
+                  borderWidth: 3, // Increased from 2 to make more visible
                   borderDash: [5, 5], // Dashed line to indicate overlay
                   tension: 0.4,
-                  pointRadius: 0,
-                  pointHoverRadius: 5,
-                  spanGaps: true
+                  pointRadius: 3, // Show points to make line more visible
+                  pointHoverRadius: 6,
+                  pointBackgroundColor: '#FFFF66',
+                  pointBorderColor: '#FFFF66',
+                  spanGaps: true,
+                  hidden: false // Explicitly ensure dataset is visible
                 }
               ]
             },
