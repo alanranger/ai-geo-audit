@@ -696,6 +696,9 @@ export default async function handler(req, res) {
       richEligible[type] = false;
     });
     
+    // Store schema types per page
+    const pageSchemaTypesMap = new Map();
+    
     // First pass: check for inline schema
     results.forEach(result => {
       if (!result.success) {
@@ -703,6 +706,8 @@ export default async function handler(req, res) {
           url: result.url,
           error: result.error
         });
+        // Store empty schema types for failed pages
+        pageSchemaTypesMap.set(result.url, []);
         return;
       }
       
@@ -722,8 +727,11 @@ export default async function handler(req, res) {
           });
         });
         
-        // Check rich result eligibility
+        // Store schema types for this page
         const pageTypesArray = Array.from(pageTypes);
+        pageSchemaTypesMap.set(result.url, pageTypesArray);
+        
+        // Check rich result eligibility
         const pageEligible = detectRichResultEligibility(pageTypesArray);
         RICH_RESULT_TYPES.forEach(type => {
           if (pageEligible[type]) {
@@ -731,7 +739,9 @@ export default async function handler(req, res) {
           }
         });
       } else {
-        // No inline schema - check if we should look for inherited schema
+        // No inline schema - store empty array
+        pageSchemaTypesMap.set(result.url, []);
+        // Check if we should look for inherited schema
         const parentUrl = getParentCollectionPageUrl(result.url);
         if (parentUrl) {
           pagesNeedingInheritanceCheck.push({
@@ -933,13 +943,14 @@ export default async function handler(req, res) {
     // Return ALL detected types as an array for accurate calculations
     const allTypesArray = Array.from(allTypes);
     
-    // Build pages array with metadata (title, metaDescription) for all crawled pages
+    // Build pages array with metadata (title, metaDescription) and schema types for all crawled pages
     const pages = results.map(result => ({
       url: result.url,
       title: result.title || null,
       metaDescription: result.metaDescription || null,
       hasSchema: result.success && result.schemas && result.schemas.length > 0,
       hasInheritedSchema: result.success && !result.schemas?.length && inheritanceMap.get(result.url) === true,
+      schemaTypes: pageSchemaTypesMap.get(result.url) || [],
       error: result.success ? null : (result.error || null)
     }));
     

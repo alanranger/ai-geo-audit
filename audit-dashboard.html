@@ -3971,11 +3971,14 @@
         
         // Build schema lookup map from schema audit data
         const schemaLookup = new Map();
+        const schemaTypesLookup = new Map();
         if (schemaAudit && schemaAudit.status === 'ok' && schemaAudit.data && schemaAudit.data.pages) {
           schemaAudit.data.pages.forEach(page => {
             if (page.url) {
               // hasSchema is true if page has inline schema OR inherited schema
               schemaLookup.set(page.url, page.hasSchema || page.hasInheritedSchema || false);
+              // Store schema types array
+              schemaTypesLookup.set(page.url, page.schemaTypes || []);
             }
           });
         }
@@ -4010,6 +4013,7 @@
           
           // Check if schema exists for this page
           const hasSchema = schemaLookup.has(url) ? schemaLookup.get(url) : null;
+          const schemaTypes = schemaTypesLookup.get(url) || [];
           
           // Classify opportunity
           const { category, categoryLabel, categoryColor, recommendation } =
@@ -4027,7 +4031,8 @@
             category,
             categoryLabel,
             categoryColor,
-            recommendation
+            recommendation,
+            schemaTypes
           });
         });
         
@@ -7366,6 +7371,7 @@ Final Score: ${score}/100`;
                   <th id="money-sort-opportunity" style="text-align: center; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; transition: background 0.2s; white-space: nowrap;" onmouseover="this.style.background='#e2e8f0';" onmouseout="this.style.background='transparent';" title="Click to sort by Opportunity">
                     Opportunity${getSortIcon('opportunity')}
                   </th>
+                  <th style="text-align: left; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; width: 200px; min-width: 200px;">Schema Types</th>
                   <th style="text-align: left; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Recommended action</th>
                 </tr>
               </thead>
@@ -7417,6 +7423,20 @@ Final Score: ${score}/100`;
                 <span style="display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; background: ${categoryColor}20; color: ${categoryColor}; border: 1px solid ${categoryColor}40;">
                   ${row.categoryLabel}
                 </span>
+              </td>
+              <td style="padding: 0.75rem; vertical-align: top; width: 200px; min-width: 200px;">
+                ${(() => {
+                  const schemaTypes = row.schemaTypes || [];
+                  if (schemaTypes.length === 0) {
+                    return '<span style="color: #94a3b8; font-style: italic; font-size: 0.8rem;">None</span>';
+                  }
+                  // Show first 5 types, then "+X more" if there are more
+                  const displayTypes = schemaTypes.slice(0, 5);
+                  const remaining = schemaTypes.length - 5;
+                  const typesText = displayTypes.join(', ');
+                  const moreText = remaining > 0 ? ` <span style="color: #64748b; font-size: 0.75rem;">+${remaining} more</span>` : '';
+                  return `<span style="color: #475569; font-size: 0.8rem; line-height: 1.4;" title="${schemaTypes.join(', ')}">${typesText}${moreText}</span>`;
+                })()}
               </td>
               <td style="padding: 0.75rem; color: #475569; font-size: 0.8rem; line-height: 1.5; vertical-align: top;">${row.recommendation}</td>
             </tr>
