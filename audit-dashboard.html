@@ -380,6 +380,52 @@
     .calculation-content.collapsed {
       display: none;
     }
+    .csv-upload-section {
+      background: #f8f9fa;
+      border: 2px solid #e2e8f0;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+      overflow: hidden;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    .csv-section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.75rem 1rem;
+      background: #f8f9fa;
+      border-bottom: 2px solid #e2e8f0;
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.2s;
+    }
+    .csv-upload-section.collapsed .csv-section-header {
+      border-bottom: none;
+    }
+    .csv-section-header:hover {
+      background: #f0f0f0;
+    }
+    .csv-section-header h3 {
+      margin: 0;
+      color: #1e293b;
+      font-size: 1rem;
+      font-weight: 600;
+    }
+    .csv-section-toggle {
+      font-size: 1rem;
+      color: #64748b;
+      font-weight: bold;
+      transition: transform 0.3s;
+    }
+    .csv-upload-section.collapsed .csv-section-toggle {
+      transform: rotate(-90deg);
+    }
+    .csv-section-content {
+      padding: 1rem;
+    }
+    .csv-section-content.collapsed {
+      display: none;
+    }
     .calculation-content h5 {
       color: var(--brand-dark);
       margin-top: 1.5rem;
@@ -786,37 +832,54 @@
       <div style="background: #f0f0f0; padding: 0.75rem; border-radius: 4px; margin-bottom: 1rem; font-size: 0.85rem; color: #555;">
         <strong>API Key:</strong> Loaded automatically from Vercel environment variables. No manual entry required.
       </div>
-      <div class="form-group">
-        <label for="manualUrlList">Manual URL List (Optional)</label>
-        <div style="font-size: 0.85rem; color: #666; margin-bottom: 0.5rem;">
-          Load list of site URLs from a CSV file
+      <!-- Manual URL List Section (Collapsible) -->
+      <div class="csv-upload-section collapsed" id="urlListSection">
+        <div class="csv-section-header" onclick="toggleCsvSection('urlListSection')">
+          <h3>Manual URL List (Optional)</h3>
+          <span class="csv-section-toggle" id="urlListToggle">▶</span>
         </div>
-        <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
-          <input type="file" id="urlListFile" accept=".csv" style="flex: 1; padding: 0.5rem; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 0.9rem;">
-          <button class="btn btn-small" onclick="loadUrlListFromFile()" style="padding: 0.5rem 1rem;" title="Load a CSV file containing site URLs. The CSV must have a 'url' column in the header row. URLs will be used for schema audit instead of the default CSV source.">Load CSV</button>
-          <button class="btn btn-small" onclick="clearManualUrlList()" style="padding: 0.5rem 1rem; background: #ef4444; color: white; border-color: #ef4444;" title="Clear the manually loaded URL list and revert to using the default CSV source for schema audit">Clear</button>
+        <div class="csv-section-content collapsed" id="urlListContent">
+          <div class="form-group" style="margin-bottom: 0;">
+            <div style="font-size: 0.85rem; color: #666; margin-bottom: 0.5rem;">
+              Load list of site URLs from a CSV file
+            </div>
+            <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+              <input type="file" id="urlListFile" accept=".csv" style="flex: 1; padding: 0.5rem; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 0.9rem;">
+              <button class="btn btn-small" onclick="loadUrlListFromFile()" style="padding: 0.5rem 1rem;" title="Load a CSV file containing site URLs. The CSV must have a 'url' column in the header row. URLs will be used for schema audit instead of the default CSV source.">Load CSV</button>
+              <button class="btn btn-small" onclick="clearManualUrlList()" style="padding: 0.5rem 1rem; background: #ef4444; color: white; border-color: #ef4444;" title="Clear the manually loaded URL list and revert to using the default CSV source for schema audit">Clear</button>
+            </div>
+            <textarea id="manualUrlList" placeholder="Or paste CSV content here (must include 'url' column in header row)..." style="width: 100%; min-height: 100px; padding: 0.75rem; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 0.9rem; font-family: monospace; resize: vertical;"></textarea>
+            <div class="help-text">
+              <strong>Required column:</strong> <code>url</code> (case-insensitive). CSV must have a header row. URLs will be extracted from the 'url' column.
+            </div>
+            <div id="urlListStatus" style="margin-top: 0.5rem; font-size: 0.85rem;"></div>
+          </div>
         </div>
-        <textarea id="manualUrlList" placeholder="Or paste CSV content here (must include 'url' column in header row)..." style="width: 100%; min-height: 100px; padding: 0.75rem; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 0.9rem; font-family: monospace; resize: vertical;"></textarea>
-        <div class="help-text">
-          <strong>Required column:</strong> <code>url</code> (case-insensitive). CSV must have a header row. URLs will be extracted from the 'url' column.
-        </div>
-        <div id="urlListStatus" style="margin-top: 0.5rem; font-size: 0.85rem;"></div>
       </div>
-      <div class="form-group">
-        <label for="backlinkCsvFile">Backlink CSV Upload (Optional)</label>
-        <div style="font-size: 0.85rem; color: #666; margin-bottom: 0.5rem;">
-          Upload backlink data CSV file for Authority score calculation. Can be uploaded independently of site URLs CSV.
+      
+      <!-- Backlink CSV Upload Section (Collapsible) -->
+      <div class="csv-upload-section collapsed" id="backlinkCsvSection">
+        <div class="csv-section-header" onclick="toggleCsvSection('backlinkCsvSection')">
+          <h3>Backlink CSV Upload (Optional)</h3>
+          <span class="csv-section-toggle" id="backlinkCsvToggle">▶</span>
         </div>
-        <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
-          <input type="file" id="backlinkCsvFile" accept=".csv" style="flex: 1; padding: 0.5rem; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 0.9rem;">
-          <button class="btn btn-small" onclick="uploadBacklinkCsv()" style="padding: 0.5rem 1rem;" title="Upload a CSV file containing backlink data. The CSV must have 'Linking Page + URL' and 'Link Type' columns. This data is used to calculate the Backlink component of the Authority score.">Upload CSV</button>
-          <button class="btn btn-small" onclick="clearBacklinkCsv()" style="padding: 0.5rem 1rem; background: #ef4444; color: white; border-color: #ef4444;" title="Clear the uploaded backlink CSV data">Clear</button>
+        <div class="csv-section-content collapsed" id="backlinkCsvContent">
+          <div class="form-group" style="margin-bottom: 0;">
+            <div style="font-size: 0.85rem; color: #666; margin-bottom: 0.5rem;">
+              Upload backlink data CSV file for Authority score calculation. Can be uploaded independently of site URLs CSV.
+            </div>
+            <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+              <input type="file" id="backlinkCsvFile" accept=".csv" style="flex: 1; padding: 0.5rem; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 0.9rem;">
+              <button class="btn btn-small" onclick="uploadBacklinkCsv()" style="padding: 0.5rem 1rem;" title="Upload a CSV file containing backlink data. The CSV must have 'Linking Page + URL' and 'Link Type' columns. This data is used to calculate the Backlink component of the Authority score.">Upload CSV</button>
+              <button class="btn btn-small" onclick="clearBacklinkCsv()" style="padding: 0.5rem 1rem; background: #ef4444; color: white; border-color: #ef4444;" title="Clear the uploaded backlink CSV data">Clear</button>
+            </div>
+            <textarea id="backlinkCsvContent" placeholder="Or paste backlink CSV content here (must include 'Linking Page + URL' and 'Link Type' columns in header row)..." style="width: 100%; min-height: 100px; padding: 0.75rem; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 0.9rem; font-family: monospace; resize: vertical;"></textarea>
+            <div class="help-text">
+              <strong>Required columns:</strong> <code>Linking Page + URL</code> (contains page title and URL), <code>Link Type</code> (DoFollow, Follow, Nofollow, etc.). Other columns are optional. This CSV is used only for Authority score calculation and is independent of the site URLs CSV.
+            </div>
+            <div id="backlinkCsvStatus" style="margin-top: 0.5rem; font-size: 0.85rem;"></div>
+          </div>
         </div>
-        <textarea id="backlinkCsvContent" placeholder="Or paste backlink CSV content here (must include 'Linking Page + URL' and 'Link Type' columns in header row)..." style="width: 100%; min-height: 100px; padding: 0.75rem; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 0.9rem; font-family: monospace; resize: vertical;"></textarea>
-        <div class="help-text">
-          <strong>Required columns:</strong> <code>Linking Page + URL</code> (contains page title and URL), <code>Link Type</code> (DoFollow, Follow, Nofollow, etc.). Other columns are optional. This CSV is used only for Authority score calculation and is independent of the site URLs CSV.
-        </div>
-        <div id="backlinkCsvStatus" style="margin-top: 0.5rem; font-size: 0.85rem;"></div>
       </div>
       <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
         <button class="btn" onclick="runAudit()" title="Start a comprehensive audit scan. Fetches Google Search Console data, performs schema audit (if site URLs CSV loaded), and uses backlink data (if backlink CSV uploaded). Results will appear in the dashboard below.">Run Audit Scan</button>
@@ -1284,6 +1347,24 @@
         if (toggle) toggle.textContent = '▼';
       } else {
         explanation.classList.add('collapsed');
+        content.classList.add('collapsed');
+        if (toggle) toggle.textContent = '▶';
+      }
+    }
+    
+    function toggleCsvSection(sectionId) {
+      const section = document.getElementById(sectionId);
+      const contentId = sectionId === 'urlListSection' ? 'urlListContent' : 'backlinkCsvContent';
+      const toggleId = sectionId === 'urlListSection' ? 'urlListToggle' : 'backlinkCsvToggle';
+      const content = document.getElementById(contentId);
+      const toggle = document.getElementById(toggleId);
+      
+      if (section.classList.contains('collapsed')) {
+        section.classList.remove('collapsed');
+        content.classList.remove('collapsed');
+        if (toggle) toggle.textContent = '▼';
+      } else {
+        section.classList.add('collapsed');
         content.classList.add('collapsed');
         if (toggle) toggle.textContent = '▶';
       }
