@@ -4392,17 +4392,103 @@
         }
         
         // Compute money pages metrics
-        // Use ALL pages from GSC data (not just position 1-20) to get complete money pages list
-        // Include pages with zero impressions to validate segmentation
+        // Use CSV as source of truth for all pages, then match GSC data to CSV URLs
+        // This ensures we segment ALL pages (433 URLs) not just those in GSC data (78 pages)
         const allGSCPages = data.queryPages || [];
-        const allPagesAggregated = computeAllPagesForSegment(allGSCPages); // Get all pages including zero impressions
-        moneyPagesMetrics = computeMoneyPagesMetrics(
-          allPagesAggregated,
-          classifyPageSegment,
-          siteAgg,
-          pageMetadataLookup, // Pass metadata lookup
-          schemaAudit // Pass schema audit data to check for schema presence
-        );
+        const allPagesAggregated = computeAllPagesForSegment(allGSCPages); // Aggregate GSC data by page
+        
+        // Fetch CSV and segment all URLs
+        try {
+          const csvUrls = await fetchAndParseSiteUrlsCsv();
+          debugLog(`✓ Fetched ${csvUrls.length} URLs from CSV`, 'info');
+          
+          // Segment all CSV URLs
+          const allCsvPages = csvUrls.map(url => {
+            const segment = classifyPageSegment(url);
+            return {
+              url: url,
+              segment: segment,
+              // GSC data will be matched below
+              clicks: 0,
+              impressions: 0,
+              ctr: 0,
+              avgPosition: null,
+              position: null
+            };
+          });
+          
+          // Create a map of GSC data by URL (normalized)
+          const gscDataMap = new Map();
+          allPagesAggregated.forEach(page => {
+            const normalizedUrl = (page.url || page.page || '').replace(/\/$/, '');
+            gscDataMap.set(normalizedUrl, page);
+          });
+          
+          // Match GSC data to CSV URLs (normalize URLs for matching)
+          const csvPagesWithGsc = allCsvPages.map(csvPage => {
+            const normalizedCsvUrl = csvPage.url.replace(/\/$/, '');
+            
+            // Try to find matching GSC data (check both with and without trailing slash)
+            let gscData = gscDataMap.get(normalizedCsvUrl);
+            if (!gscData) {
+              // Try with trailing slash
+              gscData = gscDataMap.get(normalizedCsvUrl + '/');
+            }
+            if (!gscData) {
+              // Try without trailing slash (if CSV had one)
+              gscData = gscDataMap.get(normalizedCsvUrl.replace(/\/$/, ''));
+            }
+            
+            if (gscData) {
+              // Merge GSC data - format expected by computeMoneyPagesMetrics
+              return {
+                url: csvPage.url,
+                page: csvPage.url, // Also set page property for compatibility
+                segment: csvPage.segment,
+                clicks: gscData.clicks || 0,
+                impressions: gscData.impressions || 0,
+                ctr: gscData.ctr || 0,
+                avgPosition: gscData.avgPosition || gscData.position || null,
+                position: gscData.position || gscData.avgPosition || null
+              };
+            } else {
+              // No GSC data for this URL (zero impressions or never appeared in search)
+              // Format expected by computeMoneyPagesMetrics
+              return {
+                url: csvPage.url,
+                page: csvPage.url, // Also set page property for compatibility
+                segment: csvPage.segment,
+                clicks: 0,
+                impressions: 0,
+                ctr: 0,
+                avgPosition: null,
+                position: null
+              };
+            }
+          });
+          
+          // Filter to money pages only and compute metrics
+          const moneyPagesFromCsv = csvPagesWithGsc.filter(page => page.segment === PageSegment.MONEY);
+          debugLog(`✓ Segmented ${moneyPagesFromCsv.length} money pages from CSV (out of ${csvUrls.length} total URLs)`, 'info');
+          
+          moneyPagesMetrics = computeMoneyPagesMetrics(
+            moneyPagesFromCsv, // Use CSV URLs with matched GSC data
+            classifyPageSegment,
+            siteAgg,
+            pageMetadataLookup, // Pass metadata lookup
+            schemaAudit // Pass schema audit data to check for schema presence
+          );
+        } catch (csvError) {
+          debugLog(`⚠ Failed to fetch CSV, falling back to GSC data only: ${csvError.message}`, 'warn');
+          // Fallback to GSC data only if CSV fetch fails
+          moneyPagesMetrics = computeMoneyPagesMetrics(
+            allPagesAggregated,
+            classifyPageSegment,
+            siteAgg,
+            pageMetadataLookup,
+            schemaAudit
+          );
+        }
         
         // Compute money pages behaviour score
         const moneyPagesList = moneyPagesMetrics.rows || [];
@@ -5024,6 +5110,135 @@
       }
     }
 
+    // Fetch and parse site-urls.csv from GitHub
+    async function fetchAndParseSiteUrlsCsv() {
+      const GITHUB_CSV_URL = "https://raw.githubusercontent.com/alanranger/alan-shared-resources/main/csv/06-site-urls.csv";
+      const FALLBACK_CSV_URL = "https://schema-tools-six.vercel.app/06-site-urls.csv";
+      
+      try {
+        // Try GitHub first
+        const res = await fetch(GITHUB_CSV_URL);
+        if (!res.ok) throw new Error(`GitHub fetch failed: HTTP ${res.status}`);
+        const csvText = await res.text();
+        
+        // Parse CSV - extract URLs from url column
+        const lines = csvText.split('\n').filter(line => line.trim());
+        const urls = [];
+        
+        // Parse header row to find URL column index
+        let urlColumnIndex = 0;
+        if (lines.length > 0) {
+          const headerLine = lines[0].trim();
+          const headers = parseCsvLine(headerLine);
+          const urlHeaderIndex = headers.findIndex(h => h.toLowerCase() === 'url');
+          if (urlHeaderIndex !== -1) {
+            urlColumnIndex = urlHeaderIndex;
+          }
+        }
+        
+        // Helper function to parse CSV line with proper quote handling
+        function parseCsvLine(line) {
+          const columns = [];
+          let current = '';
+          let inQuotes = false;
+          
+          for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+            const nextChar = line[i + 1];
+            
+            if (char === '"') {
+              if (inQuotes && nextChar === '"') {
+                current += '"';
+                i++;
+              } else {
+                inQuotes = !inQuotes;
+              }
+            } else if (char === ',' && !inQuotes) {
+              columns.push(current.trim());
+              current = '';
+            } else {
+              current += char;
+            }
+          }
+          columns.push(current.trim());
+          return columns;
+        }
+        
+        // Parse data rows (skip header)
+        for (let i = 1; i < lines.length; i++) {
+          const columns = parseCsvLine(lines[i]);
+          if (columns[urlColumnIndex]) {
+            const url = columns[urlColumnIndex].trim();
+            if (url && url.startsWith('http')) {
+              urls.push(url);
+            }
+          }
+        }
+        
+        return urls;
+      } catch (githubErr) {
+        // Try fallback
+        try {
+          const fallbackRes = await fetch(FALLBACK_CSV_URL);
+          if (!fallbackRes.ok) throw new Error(`Fallback fetch failed: HTTP ${fallbackRes.status}`);
+          const csvText = await fallbackRes.text();
+          
+          // Same parsing logic as above
+          const lines = csvText.split('\n').filter(line => line.trim());
+          const urls = [];
+          let urlColumnIndex = 0;
+          
+          if (lines.length > 0) {
+            const headerLine = lines[0].trim();
+            const headers = parseCsvLine(headerLine);
+            const urlHeaderIndex = headers.findIndex(h => h.toLowerCase() === 'url');
+            if (urlHeaderIndex !== -1) {
+              urlColumnIndex = urlHeaderIndex;
+            }
+          }
+          
+          function parseCsvLine(line) {
+            const columns = [];
+            let current = '';
+            let inQuotes = false;
+            for (let i = 0; i < line.length; i++) {
+              const char = line[i];
+              const nextChar = line[i + 1];
+              if (char === '"') {
+                if (inQuotes && nextChar === '"') {
+                  current += '"';
+                  i++;
+                } else {
+                  inQuotes = !inQuotes;
+                }
+              } else if (char === ',' && !inQuotes) {
+                columns.push(current.trim());
+                current = '';
+              } else {
+                current += char;
+              }
+            }
+            columns.push(current.trim());
+            return columns;
+          }
+          
+          for (let i = 1; i < lines.length; i++) {
+            const columns = parseCsvLine(lines[i]);
+            if (columns[urlColumnIndex]) {
+              const url = columns[urlColumnIndex].trim();
+              if (url && url.startsWith('http')) {
+                urls.push(url);
+              }
+            }
+          }
+          
+          return urls;
+        } catch (fallbackErr) {
+          throw new Error(`Unable to load site URLs CSV: ${githubErr.message}`);
+        }
+      }
+    }
+    
     // Display dashboard
     async function displayDashboard(scores, data, snippetReadiness = 0, schemaAudit = null, localSignals = null) {
       // Update timestamp if this is a fresh display

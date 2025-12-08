@@ -245,7 +245,20 @@ function computeBacklinkMetrics(rows) {
  */
 async function readBacklinkMetrics() {
   try {
-    const content = await fs.readFile(METRICS_FILE, 'utf8');
+    // Try to read from /tmp first (Vercel writable location), then fallback to original path
+    let content = null;
+    try {
+      const tmpFile = path.join('/tmp', 'backlink-metrics.json');
+      content = await fs.readFile(tmpFile, 'utf8');
+    } catch (tmpError) {
+      try {
+        content = await fs.readFile(METRICS_FILE, 'utf8');
+      } catch (fileError) {
+        // File doesn't exist or can't be read - return empty metrics
+        console.warn(`[Backlink Metrics] Could not read metrics file: ${fileError.message}`);
+        return null;
+      }
+    }
     const metrics = JSON.parse(content);
     return metrics;
   } catch (error) {
@@ -270,7 +283,18 @@ async function writeBacklinkMetrics(metrics) {
     await fs.mkdir(dataDir, { recursive: true });
     
     // Write metrics
-    await fs.writeFile(METRICS_FILE, JSON.stringify(metrics, null, 2), 'utf8');
+    // Vercel serverless functions have read-only filesystem (except /tmp)
+    // Store in /tmp instead, or skip file write and return data directly
+    // For now, skip file write - data is returned in response and can be stored client-side
+    try {
+      const tmpFile = path.join('/tmp', 'backlink-metrics.json');
+      await fs.writeFile(tmpFile, JSON.stringify(metrics, null, 2), 'utf8');
+      console.log(`[Backlink Metrics] Saved to ${tmpFile}`);
+    } catch (writeError) {
+      // File write is optional - data is still returned in response
+      console.warn(`[Backlink Metrics] Could not write to file (read-only filesystem): ${writeError.message}`);
+      console.log(`[Backlink Metrics] Data returned in response - can be stored client-side`);
+    }
     return true;
   } catch (error) {
     console.error('Error writing backlink metrics:', error);
