@@ -120,12 +120,25 @@ The following serverless functions are available:
 - `/api/supabase/create-shared-audit` - Create shareable audit link
 - `/api/supabase/get-shared-audit` - Retrieve shared audit by ID
 
-## Next Steps
+## Planned Features
 
-- [ ] Add Google Analytics integration
-- [ ] Implement automated scheduling
-- [ ] Add email notifications
-- [ ] Expand entity extraction capabilities
+### Money Pages Performance & Actions
+A dedicated section tracking money pages performance vs the rest of the site, with URL-level opportunity identification and actionable recommendations. See `MONEY_PAGES_PERFORMANCE.md` for full specification.
+
+**Implementation Phases:**
+- Phase 1: Data model + calculations (money-segment aggregates, opportunity flags)
+- Phase 2: UI block (summary strip, charts, KPIs, opportunity table)
+- Phase 3: Recommendation text engine (dynamic action suggestions)
+
+### Other Planned Enhancements
+- [ ] Real-time SERP feature monitoring and alerts
+- [ ] Advanced backlink analysis with automated discovery
+- [ ] Competitive analysis and benchmarking
+- [ ] Automated action recommendations engine
+- [ ] Export capabilities (PDF, CSV reports)
+- [ ] Google Analytics integration
+- [ ] Automated scheduling (cron jobs)
+- [ ] Email notifications
 
 ## Notes
 
