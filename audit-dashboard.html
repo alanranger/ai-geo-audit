@@ -7351,20 +7351,27 @@ Final Score: ${score}/100`;
       // Define schemaAuditData in scope accessible to scorecard table
       const schemaAuditData = schemaAudit || saved?.schemaAudit;
       
-      // Get last GSC data date from current data (for Authority and Visibility)
+      // Get last GSC data date from current data (for Authority, Visibility, and Brand & Entity)
       let gscLastDate = null;
       if (data) {
-        // Try timeseries first
+        // Try timeseries first (most accurate)
         if (data.timeseries && Array.isArray(data.timeseries) && data.timeseries.length > 0) {
           const lastTimeseriesPoint = data.timeseries[data.timeseries.length - 1];
           if (lastTimeseriesPoint && lastTimeseriesPoint.date) {
             gscLastDate = lastTimeseriesPoint.date;
+            debugLog(`Using last GSC timeseries date: ${gscLastDate}`, 'info');
           }
         }
         // Fallback to date from current data if available
         if (!gscLastDate && data.date) {
           gscLastDate = data.date;
+          debugLog(`Using GSC data date: ${gscLastDate}`, 'info');
         }
+      }
+      // If still no date, try to get it from saved audit data
+      if (!gscLastDate && saved && saved.searchData && saved.searchData.date) {
+        gscLastDate = saved.searchData.date;
+        debugLog(`Using saved GSC data date: ${gscLastDate}`, 'info');
       }
       
       // Format date for display
@@ -9271,7 +9278,7 @@ Final Score: ${score}/100`;
                 contentSchemaDataEstimated.push(null);
               }
               
-              // Brand Overlay data (check historical data from Supabase)
+              // Brand Overlay data (check historical data from Supabase, then fallback calculation)
               const historicalBrandOverlay = brandOverlayMap.get(pointDate);
               if (historicalBrandOverlay !== undefined && historicalBrandOverlay !== null) {
                 brandOverlayData.push(historicalBrandOverlay);
@@ -9281,8 +9288,50 @@ Final Score: ${score}/100`;
                 brandOverlayData.push(currentBrandOverlay);
                 debugLog(`✓ Added Brand Overlay score (${currentBrandOverlay}) for ${pointDate} from current audit`, 'info');
               } else {
-                brandOverlayData.push(null);
-                debugLog(`No Brand Overlay data for ${pointDate}`, 'info');
+                // Fallback: Calculate Brand Overlay from GSC timeseries data
+                // Use historical review/entity scores if available, otherwise use current
+                const historicalRecord = contentSchemaHistory.find(r => {
+                  const rDate = typeof r.date === 'string' ? r.date.split('T')[0] : (r.date instanceof Date ? r.date.toISOString().split('T')[0] : String(r.date).split('T')[0]);
+                  return rDate === pointDate;
+                });
+                const historicalReviewScore = historicalRecord?.authorityReviewScore;
+                const historicalEntityScore = historicalLocalEntity !== undefined && historicalLocalEntity !== null ? historicalLocalEntity : null;
+                
+                // Use historical scores if available, otherwise use current scores from saved audit
+                const reviewScore = historicalReviewScore !== undefined && historicalReviewScore !== null 
+                  ? historicalReviewScore 
+                  : (currentScores?.authorityComponents?.reviews || currentScores?.authority?.bySegment?.all?.reviews || 0);
+                const entityScore = historicalEntityScore !== null && historicalEntityScore !== undefined
+                  ? historicalEntityScore
+                  : (currentScores?.localEntity || 0);
+                
+                // Calculate fallback brand overlay using GSC position/CTR as proxy
+                // Since we don't have brand-specific queries for historical dates,
+                // we'll estimate brand performance from overall GSC metrics
+                const position = point.position || 40;
+                const ctr = point.ctr || 0;
+                
+                // Estimate brand metrics from overall performance
+                // Brand queries typically have better CTR and position, so we'll use a multiplier
+                const estimatedBrandCtr = Math.min(ctr * 1.5, 0.4); // Cap at 40% (typical max brand CTR)
+                const estimatedBrandPosition = Math.max(position * 0.7, 1); // Brand queries typically rank better
+                const estimatedBrandShare = 0.02; // Assume 2% brand share as baseline (will be adjusted by position/CTR)
+                
+                // Calculate fallback brand overlay score
+                try {
+                  const fallbackBrandOverlay = computeBrandOverlay({
+                    brandQueryShare: estimatedBrandShare,
+                    brandCtr: estimatedBrandCtr,
+                    brandAvgPosition: estimatedBrandPosition,
+                    reviewScore: reviewScore,
+                    entityScore: entityScore
+                  });
+                  brandOverlayData.push(fallbackBrandOverlay.score);
+                  debugLog(`✓ Calculated fallback Brand Overlay score (${fallbackBrandOverlay.score}) for ${pointDate} from GSC timeseries data`, 'info');
+                } catch (e) {
+                  debugLog(`⚠ Error calculating fallback Brand Overlay for ${pointDate}: ${e.message}`, 'warn');
+                  brandOverlayData.push(null);
+                }
               }
               
               // Format date for chart (timeseries dates are YYYY-MM-DD)
