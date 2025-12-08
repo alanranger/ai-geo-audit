@@ -3958,12 +3958,40 @@
        * @param {Object} schemaAudit - Optional schema audit data with pages array
        * @returns {Object} { overview, rows }
        */
+      // Classify money page sub-segment (Product, Event, Landing)
+      function classifyMoneyPageSubSegment(url) {
+        if (!url) return 'LANDING';
+        const urlLower = url.toLowerCase();
+        
+        // Product Pages
+        if (urlLower.includes('/photography-services-near-me') || 
+            urlLower.includes('/photo-workshops-uk')) {
+          return 'PRODUCT';
+        }
+        
+        // Event Pages
+        if (urlLower.includes('/photographic-workshops-near-me') || 
+            urlLower.includes('/beginners-photography-lessons')) {
+          return 'EVENT';
+        }
+        
+        // Landing Pages (default - anything not matching above)
+        return 'LANDING';
+      }
+      
       function computeMoneyPagesMetrics(topPages, classifySegment, siteAgg, pageTitleLookup = null, schemaAudit = null) {
         // Initialize summary by category (Phase 2)
         const summaryByCategory = {
           HIGH_OPPORTUNITY: { count: 0, impressions: 0, clicks: 0 },
           VISIBILITY_FIX: { count: 0, impressions: 0, clicks: 0 },
           MAINTAIN: { count: 0, impressions: 0, clicks: 0 }
+        };
+        
+        // Initialize summary by sub-segment
+        const summaryBySubSegment = {
+          PRODUCT: { count: 0, impressions: 0, clicks: 0 },
+          EVENT: { count: 0, impressions: 0, clicks: 0 },
+          LANDING: { count: 0, impressions: 0, clicks: 0 }
         };
         
         if (!topPages || !Array.isArray(topPages) || topPages.length === 0) {
@@ -4073,12 +4101,23 @@
           const { category, categoryLabel, categoryColor, recommendation } =
             classifyMoneyPageOpportunity({ ctr, avgPosition, impressions }, siteAgg, hasSchema, schemaTypes);
           
+          // Classify sub-segment
+          const subSegment = classifyMoneyPageSubSegment(url);
+          
           // Update category summary (Phase 2)
           const bucket = summaryByCategory[category];
           if (bucket) {
             bucket.count += 1;
             bucket.impressions += impressions;
             bucket.clicks += clicks;
+          }
+          
+          // Update sub-segment summary
+          const subBucket = summaryBySubSegment[subSegment];
+          if (subBucket) {
+            subBucket.count += 1;
+            subBucket.impressions += impressions;
+            subBucket.clicks += clicks;
           }
           
           // Push row
@@ -4094,7 +4133,8 @@
             categoryLabel,
             categoryColor,
             recommendation,
-            schemaTypes
+            schemaTypes,
+            subSegment // Add sub-segment to each row
           });
         });
         
@@ -4125,7 +4165,7 @@
           return (b.impressions || 0) - (a.impressions || 0);
         });
         
-        return { overview, rows: moneyRows, summaryByCategory };
+        return { overview, rows: moneyRows, summaryByCategory, summaryBySubSegment };
       }
       
       // Compute money pages behaviour score (for Authority overlay)
@@ -7567,13 +7607,15 @@ Final Score: ${score}/100`;
         
         // Get current filter values (stored globally)
         const currentCategoryFilter = window.moneyPagesCategoryFilter || 'ALL';
+        const currentSubSegmentFilter = window.moneyPagesSubSegmentFilter || 'ALL';
         const currentMinImpressions = window.moneyPagesMinImpressions || 0;
         
         // Apply filters before sorting/pagination
         let filteredRows = sortedRows.filter(row => {
           const matchCat = currentCategoryFilter === 'ALL' || row.category === currentCategoryFilter;
+          const matchSubSeg = currentSubSegmentFilter === 'ALL' || row.subSegment === currentSubSegmentFilter;
           const matchImp = (row.impressions || 0) >= currentMinImpressions;
-          return matchCat && matchImp;
+          return matchCat && matchSubSeg && matchImp;
         });
         
         // Update pagination based on filtered rows
@@ -7594,12 +7636,21 @@ Final Score: ${score}/100`;
               </div>
               <div class="table-controls" style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
                 <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #475569;">
-                  Show:
+                  Category:
                   <select id="money-pages-filter-category" style="padding: 0.4rem 0.6rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.85rem; background: white; cursor: pointer;">
                     <option value="ALL" ${currentCategoryFilter === 'ALL' ? 'selected' : ''}>All categories</option>
                     <option value="HIGH_OPPORTUNITY" ${currentCategoryFilter === 'HIGH_OPPORTUNITY' ? 'selected' : ''}>High opportunity</option>
                     <option value="VISIBILITY_FIX" ${currentCategoryFilter === 'VISIBILITY_FIX' ? 'selected' : ''}>Visibility fix</option>
                     <option value="MAINTAIN" ${currentCategoryFilter === 'MAINTAIN' ? 'selected' : ''}>Maintain</option>
+                  </select>
+                </label>
+                <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #475569;">
+                  Sub-segment:
+                  <select id="money-pages-filter-subsegment" style="padding: 0.4rem 0.6rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.85rem; background: white; cursor: pointer;">
+                    <option value="ALL" ${currentSubSegmentFilter === 'ALL' ? 'selected' : ''}>All sub-segments</option>
+                    <option value="PRODUCT" ${currentSubSegmentFilter === 'PRODUCT' ? 'selected' : ''}>Product Pages</option>
+                    <option value="EVENT" ${currentSubSegmentFilter === 'EVENT' ? 'selected' : ''}>Event Pages</option>
+                    <option value="LANDING" ${currentSubSegmentFilter === 'LANDING' ? 'selected' : ''}>Landing Pages</option>
                   </select>
                 </label>
                 <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #475569;">
@@ -7747,6 +7798,89 @@ Final Score: ${score}/100`;
         return tableHtml;
       }
       
+      // Update summary metrics with sub-segment filtering
+      function updateMoneyPagesSummaryMetrics(moneyPagesMetrics) {
+        if (!moneyPagesMetrics) return;
+        
+        const subSegmentFilter = window.moneyPagesSubSegmentFilter || 'ALL';
+        const filteredMetrics = filterMoneyPagesBySubSegment(moneyPagesMetrics, subSegmentFilter);
+        
+        const { overview } = filteredMetrics;
+        const summaryClickEl = document.getElementById('money-summary-click-share');
+        const summaryCtrEl = document.getElementById('money-summary-ctr');
+        const summaryPosEl = document.getElementById('money-summary-position');
+        const summaryCovEl = document.getElementById('money-summary-coverage');
+        
+        if (!overview || !summaryClickEl || !summaryCtrEl || !summaryPosEl || !summaryCovEl) {
+          return;
+        }
+        
+        const moneyClicks = overview.moneyClicks || 0;
+        const moneyImpressions = overview.moneyImpressions || 0;
+        const siteClicks = overview.siteTotalClicks || 0;
+        const siteImpressions = overview.siteTotalImpressions || 0;
+        
+        // Summary metrics
+        const clickSharePct = siteClicks && siteClicks > 0 ? (moneyClicks / siteClicks) * 100 : null;
+        const moneyCtrPct = (overview.moneyCtr || 0) * 100;
+        const siteCtrPct = (overview.siteCtr || 0) * 100;
+        const moneyPos = overview.moneyAvgPosition;
+        const sitePos = overview.siteAvgPosition;
+        const coverageCount = overview.moneyCoverageCount || 0;
+        
+        // Helper for RAG label class
+        function labelClass(score) {
+          if (score == null) return 'pill pill-muted';
+          if (score >= 70) return 'pill pill-success';
+          if (score >= 40) return 'pill pill-warning';
+          return 'pill pill-danger';
+        }
+        
+        // Update cards
+        summaryClickEl.innerHTML =
+          `<div class="metric-label">Share of site clicks</div>
+           <div class="metric-value">
+             ${clickSharePct != null ? clickSharePct.toFixed(1) + '%' : '—'}
+           </div>
+           <div class="metric-sub">
+             Money pages clicks: ${moneyClicks.toLocaleString()}
+             ${siteClicks ? ` of ${siteClicks.toLocaleString()} total` : ''}
+           </div>`;
+        
+        let ctrScore = null;
+        if (siteCtrPct > 0) {
+          ctrScore = moneyCtrPct >= siteCtrPct ? 75 : 30;
+        }
+        summaryCtrEl.innerHTML =
+          `<div class="metric-label">CTR vs site</div>
+           <div class="metric-value">
+             ${moneyCtrPct.toFixed(2)}%
+             <span class="metric-sub">vs ${siteCtrPct.toFixed(2)}% site</span>
+           </div>`;
+        summaryCtrEl.className = 'metric-card ' + labelClass(ctrScore);
+        
+        let posScore = null;
+        if (moneyPos && sitePos) {
+          posScore = moneyPos <= sitePos ? 70 : 30;
+        }
+        summaryPosEl.innerHTML =
+          `<div class="metric-label">Average position</div>
+           <div class="metric-value">
+             ${moneyPos ? moneyPos.toFixed(1) : '—'}
+             <span class="metric-sub">vs ${sitePos ? sitePos.toFixed(1) : '—'} site</span>
+           </div>`;
+        summaryPosEl.className = 'metric-card ' + labelClass(posScore);
+        
+        summaryCovEl.innerHTML =
+          `<div class="metric-label">Money pages with impressions</div>
+           <div class="metric-value">
+             ${coverageCount}
+           </div>
+           <div class="metric-sub">
+             Based on GSC pages only
+           </div>`;
+      }
+      
       // Function to render Money Pages Performance section
       function renderMoneyPagesSection(moneyPagesMetrics) {
         const section = document.getElementById('money-pages-section');
@@ -7777,90 +7911,12 @@ Final Score: ${score}/100`;
           return;
         }
         
-        const { overview, rows } = moneyPagesMetrics;
-        const summaryClickEl = document.getElementById('money-summary-click-share');
-        const summaryCtrEl = document.getElementById('money-summary-ctr');
-        const summaryPosEl = document.getElementById('money-summary-position');
-        const summaryCovEl = document.getElementById('money-summary-coverage');
+        const { rows } = moneyPagesMetrics;
         const tableContainer = document.getElementById('money-pages-table-container');
         
-        if (!overview || !tableContainer || !summaryClickEl || !summaryCtrEl || !summaryPosEl || !summaryCovEl) {
+        if (!tableContainer) {
           return;
         }
-        
-        const moneyClicks = overview.moneyClicks || 0;
-        const moneyImpressions = overview.moneyImpressions || 0;
-        const siteClicks = overview.siteTotalClicks || 0;
-        const siteImpressions = overview.siteTotalImpressions || 0;
-        
-        // Summary metrics
-        const clickSharePct = siteClicks && siteClicks > 0 ? (moneyClicks / siteClicks) * 100 : null;
-        const impressionSharePct = siteImpressions && siteImpressions > 0 ? (moneyImpressions / siteImpressions) * 100 : null;
-        
-        const moneyCtrPct = (overview.moneyCtr || 0) * 100;
-        const siteCtrPct = (overview.siteCtr || 0) * 100;
-        
-        const moneyPos = overview.moneyAvgPosition;
-        const sitePos = overview.siteAvgPosition;
-        
-        const coverageCount = overview.moneyCoverageCount || 0;
-        const coverageTotal = overview.moneyTotalKnown || null;
-        const coveragePct = coverageTotal && coverageTotal > 0 ? (coverageCount / coverageTotal) * 100 : null;
-        
-        // Helper for RAG label class
-        function labelClass(score) {
-          if (score == null) return 'pill pill-muted';
-          if (score >= 70) return 'pill pill-success';
-          if (score >= 40) return 'pill pill-warning';
-          return 'pill pill-danger';
-        }
-        
-        // 1) Click / impression share card
-        summaryClickEl.innerHTML =
-          `<div class="metric-label">Share of site clicks</div>
-           <div class="metric-value">
-             ${clickSharePct != null ? clickSharePct.toFixed(1) + '%' : '—'}
-           </div>
-           <div class="metric-sub">
-             Money pages clicks: ${moneyClicks.toLocaleString()}
-             ${siteClicks ? ` of ${siteClicks.toLocaleString()} total` : ''}
-           </div>`;
-        
-        // 2) CTR card
-        let ctrScore = null;
-        if (siteCtrPct > 0) {
-          ctrScore = moneyCtrPct >= siteCtrPct ? 75 : 30; // simple: better/worse than site
-        }
-        summaryCtrEl.innerHTML =
-          `<div class="metric-label">CTR vs site</div>
-           <div class="metric-value">
-             ${moneyCtrPct.toFixed(2)}%
-             <span class="metric-sub">vs ${siteCtrPct.toFixed(2)}% site</span>
-           </div>`;
-        summaryCtrEl.className = 'metric-card ' + labelClass(ctrScore);
-        
-        // 3) Position card
-        let posScore = null;
-        if (moneyPos && sitePos) {
-          posScore = moneyPos <= sitePos ? 70 : 30;
-        }
-        summaryPosEl.innerHTML =
-          `<div class="metric-label">Average position</div>
-           <div class="metric-value">
-             ${moneyPos ? moneyPos.toFixed(1) : '—'}
-             <span class="metric-sub">vs ${sitePos ? sitePos.toFixed(1) : '—'} site</span>
-           </div>`;
-        summaryPosEl.className = 'metric-card ' + labelClass(posScore);
-        
-        // 4) Coverage card
-        summaryCovEl.innerHTML =
-          `<div class="metric-label">Money pages with impressions</div>
-           <div class="metric-value">
-             ${coverageCount}${coverageTotal ? ` / ${coverageTotal}` : ''}
-           </div>
-           <div class="metric-sub">
-             ${coveragePct != null ? coveragePct.toFixed(1) + '% of known money URLs' : 'Based on GSC pages only'}
-           </div>`;
         
         // Store data globally for sorting/pagination
         window.currentMoneyPagesMetrics = moneyPagesMetrics;
@@ -7877,6 +7933,12 @@ Final Score: ${score}/100`;
         if (window.moneyPagesCategoryFilter === undefined) {
           window.moneyPagesCategoryFilter = 'ALL';
         }
+        if (window.moneyPagesSubSegmentFilter === undefined) {
+          window.moneyPagesSubSegmentFilter = 'ALL';
+        }
+        
+        // Update summary metrics with current filters
+        updateMoneyPagesSummaryMetrics(moneyPagesMetrics);
         if (window.moneyPagesMinImpressions === undefined) {
           window.moneyPagesMinImpressions = 0;
         }
@@ -8036,25 +8098,28 @@ Final Score: ${score}/100`;
       function attachMoneyPagesFilterHandlers(allRows, onFilterChange) {
         setTimeout(() => {
           const categoryFilterEl = document.getElementById('money-pages-filter-category');
+          const subSegmentFilterEl = document.getElementById('money-pages-filter-subsegment');
           const minImpressionsEl = document.getElementById('money-pages-min-impressions');
           const copyBtn = document.getElementById('money-pages-copy-urls');
           const tableContainer = document.getElementById('money-pages-table-container');
           
-          if (!categoryFilterEl || !minImpressionsEl || !tableContainer) return;
+          if (!categoryFilterEl || !subSegmentFilterEl || !minImpressionsEl || !tableContainer) return;
           
           // Function to apply filters and re-render
           const applyFilters = () => {
             const filterCat = categoryFilterEl.value || 'ALL';
+            const filterSubSeg = subSegmentFilterEl.value || 'ALL';
             const minImp = parseInt(minImpressionsEl.value, 10) || 0;
             
             // Store filter state globally
             window.moneyPagesCategoryFilter = filterCat;
+            window.moneyPagesSubSegmentFilter = filterSubSeg;
             window.moneyPagesMinImpressions = minImp;
             
             // Reset to page 1 when filters change
             window.moneyPagesCurrentPage = 1;
             
-            // Re-render table with filters
+            // Re-render everything with filters (table, chart, KPIs, summary)
             if (onFilterChange) {
               onFilterChange();
             } else {
@@ -8065,11 +8130,21 @@ Final Score: ${score}/100`;
               attachMoneyPagesPaginationHandlers(allRows);
               attachMoneyPagesCopyHandler(allRows);
               attachMoneyPagesFilterHandlers(allRows, onFilterChange);
+              
+              // Re-render chart and KPIs with filters
+              const moneyPagesMetrics = window.currentMoneyPagesMetrics;
+              const queryPages = window.currentQueryPages || null;
+              if (moneyPagesMetrics) {
+                renderMoneyPagesCategoryChart(moneyPagesMetrics, 0);
+                renderMoneyPagesBehaviourKpis(moneyPagesMetrics.behaviour, moneyPagesMetrics, queryPages);
+                updateMoneyPagesSummaryMetrics(moneyPagesMetrics);
+              }
             }
           };
           
           // Attach filter change handlers
           categoryFilterEl.addEventListener('change', applyFilters);
+          subSegmentFilterEl.addEventListener('change', applyFilters);
           minImpressionsEl.addEventListener('change', applyFilters);
           
           // Update copy button to use filtered data
@@ -8078,12 +8153,14 @@ Final Score: ${score}/100`;
             copyBtn.parentNode.replaceChild(newCopyBtn, copyBtn);
             newCopyBtn.addEventListener('click', async () => {
               const filterCat = categoryFilterEl.value || 'ALL';
+              const filterSubSeg = subSegmentFilterEl.value || 'ALL';
               const minImp = parseInt(minImpressionsEl.value, 10) || 0;
               
               const filtered = (allRows || []).filter(row => {
                 const matchCat = filterCat === 'ALL' || row.category === filterCat;
+                const matchSubSeg = filterSubSeg === 'ALL' || row.subSegment === filterSubSeg;
                 const matchImp = (row.impressions || 0) >= minImp;
-                return matchCat && matchImp;
+                return matchCat && matchSubSeg && matchImp;
               });
               
               const urls = filtered.map(r => r.url).join('\n');
@@ -8108,6 +8185,55 @@ Final Score: ${score}/100`;
             });
           }
         }, 50);
+      }
+      
+      // Helper function to filter money pages data by sub-segment
+      function filterMoneyPagesBySubSegment(moneyPagesMetrics, subSegmentFilter) {
+        if (!moneyPagesMetrics || !moneyPagesMetrics.rows || subSegmentFilter === 'ALL') {
+          return moneyPagesMetrics;
+        }
+        
+        const filteredRows = moneyPagesMetrics.rows.filter(row => row.subSegment === subSegmentFilter);
+        
+        // Recalculate summaryByCategory from filtered rows
+        const filteredSummaryByCategory = {
+          HIGH_OPPORTUNITY: { count: 0, impressions: 0, clicks: 0 },
+          VISIBILITY_FIX: { count: 0, impressions: 0, clicks: 0 },
+          MAINTAIN: { count: 0, impressions: 0, clicks: 0 }
+        };
+        
+        let filteredClicks = 0;
+        let filteredImpressions = 0;
+        let filteredWeightedPosSum = 0;
+        
+        filteredRows.forEach(row => {
+          const bucket = filteredSummaryByCategory[row.category];
+          if (bucket) {
+            bucket.count += 1;
+            bucket.impressions += row.impressions || 0;
+            bucket.clicks += row.clicks || 0;
+          }
+          filteredClicks += row.clicks || 0;
+          filteredImpressions += row.impressions || 0;
+          filteredWeightedPosSum += (row.avgPosition || 0) * (row.impressions || 0);
+        });
+        
+        const filteredCtr = filteredImpressions > 0 ? filteredClicks / filteredImpressions : 0;
+        const filteredAvgPosition = filteredImpressions > 0 ? filteredWeightedPosSum / filteredImpressions : null;
+        
+        return {
+          ...moneyPagesMetrics,
+          rows: filteredRows,
+          summaryByCategory: filteredSummaryByCategory,
+          overview: {
+            ...moneyPagesMetrics.overview,
+            moneyClicks: filteredClicks,
+            moneyImpressions: filteredImpressions,
+            moneyCtr: filteredCtr,
+            moneyAvgPosition: filteredAvgPosition,
+            moneyCoverageCount: filteredRows.length
+          }
+        };
       }
       
       // Render Money Pages category chart (Phase 2)
@@ -8148,7 +8274,11 @@ Final Score: ${score}/100`;
           return;
         }
         
-        const { summaryByCategory } = moneyPagesMetrics;
+        // Apply sub-segment filter if set
+        const subSegmentFilter = window.moneyPagesSubSegmentFilter || 'ALL';
+        const filteredMetrics = filterMoneyPagesBySubSegment(moneyPagesMetrics, subSegmentFilter);
+        
+        const { summaryByCategory } = filteredMetrics;
         debugLog(`Money pages summaryByCategory: ${JSON.stringify(summaryByCategory)}`, 'info');
         
         const labels = [
@@ -8351,15 +8481,38 @@ Final Score: ${score}/100`;
         }
       }
       
+      // Recalculate behaviour for filtered sub-segment
+      function recalculateMoneyPagesBehaviour(moneyPagesMetrics, queryPages, subSegmentFilter) {
+        if (!moneyPagesMetrics || !moneyPagesMetrics.rows || !queryPages || subSegmentFilter === 'ALL') {
+          return moneyPagesMetrics?.behaviour || null;
+        }
+        
+        // Get filtered money page URLs
+        const filteredRows = moneyPagesMetrics.rows.filter(row => row.subSegment === subSegmentFilter);
+        
+        if (filteredRows.length === 0) return null;
+        
+        // Recalculate behaviour for filtered URLs only
+        return computeMoneyPagesBehaviour(queryPages, filteredRows);
+      }
+      
       // Render Money Pages Behaviour KPIs
-      function renderMoneyPagesBehaviourKpis(behaviour) {
+      function renderMoneyPagesBehaviourKpis(behaviour, moneyPagesMetrics = null, queryPages = null) {
         const scoreEl = document.getElementById('money-behaviour-score');
         const statusEl = document.getElementById('money-behaviour-status');
         const ctrEl = document.getElementById('money-ctr-value');
         const top10El = document.getElementById('money-top10-ctr-value');
         const cardEl = document.getElementById('money-behaviour-card');
 
-        if (!scoreEl || !behaviour || !behaviour.impressions) {
+        // Apply sub-segment filter if needed
+        const subSegmentFilter = window.moneyPagesSubSegmentFilter || 'ALL';
+        let filteredBehaviour = behaviour;
+        
+        if (subSegmentFilter !== 'ALL' && moneyPagesMetrics && queryPages) {
+          filteredBehaviour = recalculateMoneyPagesBehaviour(moneyPagesMetrics, queryPages, subSegmentFilter);
+        }
+
+        if (!scoreEl || !filteredBehaviour || !filteredBehaviour.impressions) {
           if (scoreEl) scoreEl.textContent = 'N/A';
           if (statusEl) statusEl.textContent = 'Not enough data for money pages in this window.';
           if (ctrEl) ctrEl.textContent = '—';
@@ -8367,9 +8520,9 @@ Final Score: ${score}/100`;
           return;
         }
 
-        const score = Math.round(behaviour.score);
-        const ctrPct = (behaviour.siteCtr * 100);
-        const top10Pct = (behaviour.top10Ctr * 100);
+        const score = Math.round(filteredBehaviour.score);
+        const ctrPct = (filteredBehaviour.siteCtr * 100);
+        const top10Pct = (filteredBehaviour.top10Ctr * 100);
 
         scoreEl.textContent = `${score}/100`;
         ctrEl.textContent = `${ctrPct.toFixed(2)}%`;
@@ -8524,12 +8677,17 @@ Final Score: ${score}/100`;
           debugLog('⚠ Money Pages: No metrics data, will show "No data" message', 'warn');
         }
         renderMoneyPagesSection(scores.moneyPagesMetrics || null);
+        // Store queryPages globally for filtering
+        if (saved && saved.searchData && saved.searchData.queryPages) {
+          window.currentQueryPages = saved.searchData.queryPages;
+        }
         // Render behaviour KPIs and chart after a delay to ensure DOM and Chart.js are ready
         // Only render once to prevent infinite loops
         if (scores.moneyPagesMetrics) {
           setTimeout(() => {
+            const queryPages = window.currentQueryPages || null;
             // Render behaviour KPIs
-            renderMoneyPagesBehaviourKpis(scores.moneyPagesMetrics.behaviour);
+            renderMoneyPagesBehaviourKpis(scores.moneyPagesMetrics.behaviour, scores.moneyPagesMetrics, queryPages);
             // Double-check chart doesn't exist before rendering
             if (!moneyPagesCategoryChart) {
               renderMoneyPagesCategoryChart(scores.moneyPagesMetrics, 0);
