@@ -4240,15 +4240,29 @@
       // Define globally to ensure accessibility from event handlers
       window.computeMoneyPagesBehaviour = function(gscQueries, moneyPages) {
         if (!gscQueries || !gscQueries.length || !moneyPages || !moneyPages.length) {
+          debugLog(`🎯 computeMoneyPagesBehaviour: Missing data - gscQueries=${!!gscQueries}(${gscQueries?.length || 0}), moneyPages=${!!moneyPages}(${moneyPages?.length || 0})`, 'warn');
           return null;
         }
 
+        // Normalize URLs: remove trailing slash, convert to lowercase, remove protocol if present
+        const normalizeUrl = (url) => {
+          if (!url) return '';
+          let normalized = url.toString().trim().toLowerCase();
+          // Remove protocol (http:// or https://)
+          normalized = normalized.replace(/^https?:\/\//, '');
+          // Remove trailing slash
+          normalized = normalized.replace(/\/$/, '');
+          return normalized;
+        };
+
         const moneySet = new Set(
           moneyPages.map(p => {
-            const url = (p.url || p.page || '').replace(/\/$/, '');
+            const url = normalizeUrl(p.url || p.page || '');
             return url;
           })
         );
+
+        debugLog(`🎯 computeMoneyPagesBehaviour: Created moneySet with ${moneySet.size} URLs. Sample URLs: ${Array.from(moneySet).slice(0, 3).join(', ')}`, 'info');
 
         let clicks = 0;
         let impressions = 0;
@@ -4256,10 +4270,16 @@
         let top10Impressions = 0;
         let weightedPosSum = 0;
         let weightedPosImps = 0;
+        let matchedUrls = 0;
+        let unmatchedUrls = 0;
 
         gscQueries.forEach(row => {
-          const url = (row.page || row.url || '').replace(/\/$/, '');
-          if (!moneySet.has(url)) return;
+          const url = normalizeUrl(row.page || row.url || '');
+          if (!moneySet.has(url)) {
+            unmatchedUrls++;
+            return;
+          }
+          matchedUrls++;
 
           const pos = typeof row.position === 'number'
             ? row.position
@@ -4281,7 +4301,10 @@
           }
         });
 
+        debugLog(`🎯 computeMoneyPagesBehaviour: Matched ${matchedUrls} URLs, unmatched ${unmatchedUrls} URLs. Total impressions: ${impressions}, clicks: ${clicks}`, 'info');
+
         if (!impressions || !weightedPosImps) {
+          debugLog(`🎯 computeMoneyPagesBehaviour: No valid impressions (${impressions}) or weighted positions (${weightedPosImps}), returning null`, 'warn');
           return null;
         }
 
@@ -4293,7 +4316,7 @@
         // Reuse existing Behaviour score calculation (same as Authority)
         // Filter to ranking queries only (position 1-20)
         const rankingQueries = gscQueries.filter(row => {
-          const url = (row.page || row.url || '').replace(/\/$/, '');
+          const url = normalizeUrl(row.page || row.url || '');
           if (!moneySet.has(url)) return false;
           const pos = typeof row.position === 'number' ? row.position : (row.avgPosition || null);
           return pos > 0 && pos <= 20 && (row.impressions || 0) > 0;
