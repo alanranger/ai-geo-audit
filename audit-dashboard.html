@@ -9271,6 +9271,20 @@ Final Score: ${score}/100`;
                 contentSchemaDataEstimated.push(null);
               }
               
+              // Brand Overlay data (check historical data from Supabase)
+              const historicalBrandOverlay = brandOverlayMap.get(pointDate);
+              if (historicalBrandOverlay !== undefined && historicalBrandOverlay !== null) {
+                brandOverlayData.push(historicalBrandOverlay);
+                debugLog(`✓ Added Brand Overlay score (${historicalBrandOverlay}) for ${pointDate} from Supabase`, 'info');
+              } else if (isToday && currentBrandOverlay !== null) {
+                // For today, use current Brand Overlay score if available
+                brandOverlayData.push(currentBrandOverlay);
+                debugLog(`✓ Added Brand Overlay score (${currentBrandOverlay}) for ${pointDate} from current audit`, 'info');
+              } else {
+                brandOverlayData.push(null);
+                debugLog(`No Brand Overlay data for ${pointDate}`, 'info');
+              }
+              
               // Format date for chart (timeseries dates are YYYY-MM-DD)
               const dateObj = new Date(point.date);
               allDateObjects.push(dateObj);
@@ -9418,6 +9432,20 @@ Final Score: ${score}/100`;
                   contentSchemaData.push(null);
                   contentSchemaDataEstimated.push(null);
                   debugLog(`No Content/Schema data for ${dateStr} (checked map, not found)`, 'info');
+                }
+                
+                // Brand Overlay data (check historical data from Supabase)
+                const historicalBrandOverlay = brandOverlayMap.get(dateStr);
+                if (historicalBrandOverlay !== undefined && historicalBrandOverlay !== null) {
+                  brandOverlayData.push(historicalBrandOverlay);
+                  debugLog(`✓ Added Brand Overlay score (${historicalBrandOverlay}) for ${dateStr} from Supabase`, 'info');
+                } else if (dateStr === todayStr && currentBrandOverlay !== null) {
+                  // For today, use current Brand Overlay score if available
+                  brandOverlayData.push(currentBrandOverlay);
+                  debugLog(`✓ Added Brand Overlay score (${currentBrandOverlay}) for ${dateStr} from current audit`, 'info');
+                } else {
+                  brandOverlayData.push(null);
+                  debugLog(`No Brand Overlay data for ${dateStr}`, 'info');
                 }
                 
                 // Move to next day
