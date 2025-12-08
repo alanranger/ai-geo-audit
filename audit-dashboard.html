@@ -9028,6 +9028,9 @@ Final Score: ${score}/100`;
       }
       
       // Render Money Pages Behaviour KPIs
+      // behaviour: pre-calculated behaviour object (already filtered if needed)
+      // moneyPagesMetrics: optional, for backward compatibility
+      // queryPages: optional, for backward compatibility
       function renderMoneyPagesBehaviourKpis(behaviour, moneyPagesMetrics = null, queryPages = null) {
         const scoreEl = document.getElementById('money-behaviour-score');
         const statusEl = document.getElementById('money-behaviour-status');
@@ -9035,12 +9038,18 @@ Final Score: ${score}/100`;
         const top10El = document.getElementById('money-top10-ctr-value');
         const cardEl = document.getElementById('money-behaviour-card');
 
-        // Apply sub-segment filter if needed
-        const subSegmentFilter = window.moneyPagesSubSegmentFilter || 'ALL';
+        // Use the behaviour passed in (should already be filtered)
+        // Only recalculate if behaviour is null and we have the data to calculate it
         let filteredBehaviour = behaviour;
         
-        if (subSegmentFilter !== 'ALL' && moneyPagesMetrics && queryPages) {
-          filteredBehaviour = recalculateMoneyPagesBehaviour(moneyPagesMetrics, queryPages, subSegmentFilter);
+        // Fallback: if no behaviour passed but we have metrics and queryPages, try to calculate
+        if (!filteredBehaviour && moneyPagesMetrics && queryPages) {
+          // Get filtered metrics based on ALL current filters
+          const filteredMetrics = getFilteredMoneyPagesMetrics(moneyPagesMetrics);
+          if (filteredMetrics && filteredMetrics.rows && filteredMetrics.rows.length > 0) {
+            filteredBehaviour = window.computeMoneyPagesBehaviour ? 
+              window.computeMoneyPagesBehaviour(queryPages, filteredMetrics.rows) : null;
+          }
         }
 
         if (!scoreEl || !filteredBehaviour || !filteredBehaviour.impressions) {
@@ -9048,6 +9057,11 @@ Final Score: ${score}/100`;
           if (statusEl) statusEl.textContent = 'Not enough data for money pages in this window.';
           if (ctrEl) ctrEl.textContent = '—';
           if (top10El) top10El.textContent = '—';
+          if (cardEl) {
+            cardEl.classList.remove('status-green', 'status-amber', 'status-red');
+            cardEl.style.borderLeft = '';
+            cardEl.style.background = '';
+          }
           return;
         }
 
