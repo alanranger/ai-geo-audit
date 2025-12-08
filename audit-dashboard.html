@@ -4586,13 +4586,13 @@
                         stroke-linecap="round"
                       />
                       
-                      <!-- Tick marks for current score and AI summary likelihood threshold -->
+                      <!-- Tick marks for current score and Brand & Entity -->
                       <g>
                         ${(() => {
-                          // AI summary likelihood threshold: 55 for "Medium"
-                          const aiThreshold = 55;
-                          const aiThresholdAngle = startAngle + (aiThreshold / 100) * angleRange;
-                          const aiThresholdRad = (aiThresholdAngle * Math.PI) / 180;
+                          // Get Brand & Entity score for tick mark
+                          const brandScore = scores?.brandOverlay?.score || 0;
+                          const brandAngle = startAngle + (brandScore / 100) * angleRange;
+                          const brandRad = (brandAngle * Math.PI) / 180;
                           
                           // Current score tick mark
                           const scoreTickLength = 24;
@@ -4602,16 +4602,19 @@
                           const scoreTickX2 = center + (normalizedRadius + scoreTickLength) * Math.cos(scoreRad);
                           const scoreTickY2 = center + (normalizedRadius + scoreTickLength) * Math.sin(scoreRad);
                           
-                          // AI threshold tick mark
-                          const aiTickLength = 20;
-                          const aiTickWidth = 3;
-                          const aiTickX1 = center + (normalizedRadius - aiTickLength) * Math.cos(aiThresholdRad);
-                          const aiTickY1 = center + (normalizedRadius - aiTickLength) * Math.sin(aiThresholdRad);
-                          const aiTickX2 = center + (normalizedRadius + aiTickLength) * Math.cos(aiThresholdRad);
-                          const aiTickY2 = center + (normalizedRadius + aiTickLength) * Math.sin(aiThresholdRad);
+                          // Brand & Entity tick mark
+                          const brandTickLength = 18;
+                          const brandTickWidth = 3;
+                          const brandTickX1 = center + (normalizedRadius - brandTickLength) * Math.cos(brandRad);
+                          const brandTickY1 = center + (normalizedRadius - brandTickLength) * Math.sin(brandRad);
+                          const brandTickX2 = center + (normalizedRadius + brandTickLength) * Math.cos(brandRad);
+                          const brandTickY2 = center + (normalizedRadius + brandTickLength) * Math.sin(brandRad);
+                          
+                          // Brand color based on score (same as badge logic)
+                          const brandColor = brandScore >= 70 ? '#10b981' : brandScore >= 40 ? '#f59e0b' : '#ef4444';
                           
                           return `
-                            <!-- Current score tick mark (86) -->
+                            <!-- Current AI GEO score tick mark -->
                             <line x1="${scoreTickX1}" y1="${scoreTickY1}" 
                                   x2="${scoreTickX2}" y2="${scoreTickY2}" 
                                   stroke="${color}" 
@@ -4619,13 +4622,16 @@
                                   stroke-linecap="round"
                                   style="filter: drop-shadow(0 2px 4px rgba(0,0,0,0.15));"/>
                             
-                            <!-- AI summary likelihood threshold tick mark (55 for Medium) -->
-                            <line x1="${aiTickX1}" y1="${aiTickY1}" 
-                                  x2="${aiTickX2}" y2="${aiTickY2}" 
-                                  stroke="#f59e0b" 
-                                  stroke-width="${aiTickWidth}" 
+                            <!-- Brand & Entity score tick mark -->
+                            ${brandScore > 0 ? `
+                            <line x1="${brandTickX1}" y1="${brandTickY1}" 
+                                  x2="${brandTickX2}" y2="${brandTickY2}" 
+                                  stroke="${brandColor}" 
+                                  stroke-width="${brandTickWidth}" 
                                   stroke-linecap="round"
+                                  stroke-dasharray="4,2"
                                   style="filter: drop-shadow(0 2px 4px rgba(0,0,0,0.15));"/>
+                            ` : ''}
                           `;
                         })()}
                       </g>
