@@ -883,6 +883,9 @@
       </div>
       <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
         <button class="btn" onclick="runAudit()" title="Start a comprehensive audit scan. Fetches Google Search Console data, performs schema audit (if site URLs CSV loaded), and uses backlink data (if backlink CSV uploaded). Results will appear in the dashboard below.">Run Audit Scan</button>
+        <button class="btn btn-secondary" id="shareAuditBtn" onclick="createShareableLink()" style="background: #3b82f6; color: white; border-color: #3b82f6;" title="Create a shareable link to this audit. The link will be valid for 30 days and can be shared with anyone to view the audit results.">
+          📤 Share Audit
+        </button>
         <button class="btn btn-secondary" id="retryFailedUrlsBtn" onclick="retryFailedUrlsFromLastAudit()" style="background: #f59e0b; color: white; border-color: #f59e0b; display: none;" title="Retry scanning the failed URLs from the last audit. This will rescan only the URLs that failed during the previous audit scan.">
           🔄 Retry Failed URLs
         </button>
@@ -10166,6 +10169,73 @@ Final Score: ${score}/100`;
       }, 100);
     }
 
+    // Function to load shared audit data
+    async function loadSharedAudit(shareId) {
+      try {
+        debugLog(`Loading shared audit: ${shareId}`, 'info');
+        const response = await fetch(`/api/supabase/get-shared-audit?shareId=${encodeURIComponent(shareId)}`);
+        
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.message || 'Failed to load shared audit');
+        }
+        
+        const result = await response.json();
+        if (result.status === 'ok' && result.data) {
+          debugLog('✓ Shared audit loaded successfully', 'success');
+          return result.data;
+        } else {
+          throw new Error('Invalid shared audit data');
+        }
+      } catch (error) {
+        debugLog(`✗ Error loading shared audit: ${error.message}`, 'error');
+        showStatus(`Failed to load shared audit: ${error.message}`, 'error');
+        return null;
+      }
+    }
+
+    // Function to create shareable link (exposed globally for onclick)
+    window.createShareableLink = async function() {
+      const savedAudit = loadAuditResults();
+      if (!savedAudit || !savedAudit.scores) {
+        showStatus('No audit data available to share. Please run an audit first.', 'error');
+        return;
+      }
+
+      try {
+        showStatus('Creating shareable link...', 'info');
+        const response = await fetch('/api/supabase/create-shared-audit', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            auditData: savedAudit
+          })
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.message || 'Failed to create shareable link');
+        }
+
+        const result = await response.json();
+        if (result.status === 'ok' && result.shareUrl) {
+          // Copy to clipboard
+          await navigator.clipboard.writeText(result.shareUrl);
+          showStatus(`Shareable link created and copied to clipboard! Link expires in 30 days.`, 'success');
+          
+          // Show the link in an alert or modal
+          alert(`Shareable link created!\n\n${result.shareUrl}\n\n(Link copied to clipboard)\n\nThis link expires in 30 days.`);
+        } else {
+          throw new Error('Invalid response from server');
+        }
+      } catch (error) {
+        debugLog(`✗ Error creating shareable link: ${error.message}`, 'error');
+        showStatus(`Failed to create shareable link: ${error.message}`, 'error');
+      }
+    }
+
     // Initialize on load
     window.addEventListener('DOMContentLoaded', () => {
       debugLog('=== PAGE LOAD: DOMContentLoaded event fired ===', 'info');
@@ -10173,10 +10243,44 @@ Final Score: ${score}/100`;
       debugLog(`User agent: ${navigator.userAgent}`, 'info');
       loadConfig();
       
+      // Check for share parameter in URL
+      const urlParams = new URLSearchParams(window.location.search);
+      const shareId = urlParams.get('share');
+      
       // Load and display last audit results if available
       // Wait a tick to ensure loadConfig() has finished updating the date range input
-      setTimeout(() => {
-        const savedAudit = loadAuditResults();
+      setTimeout(async () => {
+        let auditToDisplay = null;
+        
+        if (shareId) {
+          // Load shared audit
+          debugLog(`Share ID detected: ${shareId}`, 'info');
+          auditToDisplay = await loadSharedAudit(shareId);
+          if (auditToDisplay) {
+            // Save shared audit to localStorage temporarily for display
+            localStorage.setItem('last_audit_results', JSON.stringify(auditToDisplay));
+            // Show a banner indicating this is a shared view
+            const banner = document.createElement('div');
+            banner.style.cssText = 'background: #dbeafe; padding: 1rem; border-radius: 4px; border-left: 4px solid #3b82f6; margin-bottom: 1rem; font-size: 0.9rem; color: #1e40af;';
+            banner.innerHTML = '<strong>📤 Shared Audit View</strong> - This is a shared audit. You can view all results but cannot run new audits from this view.';
+            const dashboard = document.getElementById('dashboard');
+            if (dashboard) {
+              dashboard.insertBefore(banner, dashboard.firstChild);
+            }
+            // Hide the run audit button
+            const runAuditBtn = document.getElementById('runAudit');
+            if (runAuditBtn) {
+              runAuditBtn.style.display = 'none';
+            }
+          }
+        }
+        
+        // If no shared audit or failed to load, try localStorage
+        if (!auditToDisplay) {
+          auditToDisplay = loadAuditResults();
+        }
+        
+        const savedAudit = auditToDisplay;
         if (savedAudit && savedAudit.scores && savedAudit.searchData) {
           // If saved audit has a date range, use it to set the input field and button
           // This ensures the UI matches the saved audit's date range
