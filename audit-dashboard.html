@@ -2693,10 +2693,11 @@
       }
       
       // Education — all blogs + free course + calculator + tips hub
-      // EXCLUDE blog posts from money pages
-      if (path.startsWith('/blog-on-photography/')) return PageSegment.EDUCATION;
+      // EXCLUDE blog posts from money pages (check both /blog-on-photography/ and /blogs/)
+      if (path.startsWith('/blog-on-photography/') || path.startsWith('/blogs/')) return PageSegment.EDUCATION;
       if (
         path === '/blog-on-photography' ||
+        path === '/blogs' ||
         path === '/free-online-photography-course' ||
         path === '/outdoor-photography-exposure-calculator' ||
         path === '/free-photography-tips' ||
@@ -4341,8 +4342,12 @@
         }
         
         // Compute money pages metrics
+        // Use ALL pages from GSC data (not just position 1-20) to get complete money pages list
+        // Aggregate all pages by URL to get page-level metrics
+        const allGSCPages = data.queryPages || [];
+        const allPagesAggregated = computeTopPagesForSegment(allGSCPages, 10000); // Get all pages, not just top 10
         moneyPagesMetrics = computeMoneyPagesMetrics(
-          allTopPages,
+          allPagesAggregated,
           classifyPageSegment,
           siteAgg,
           pageMetadataLookup, // Pass metadata lookup
@@ -4352,7 +4357,7 @@
         // Compute money pages behaviour score
         const moneyPagesList = moneyPagesMetrics.rows || [];
         const moneyBehaviour = window.computeMoneyPagesBehaviour(
-          queryPages,
+          allGSCPages, // Use all GSC pages for behaviour calculation
           moneyPagesList
         );
         moneyPagesMetrics.behaviour = moneyBehaviour;
