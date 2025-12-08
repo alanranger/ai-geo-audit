@@ -8270,8 +8270,12 @@ Final Score: ${score}/100`;
           window.moneyPagesMinImpressions = 0;
         }
         
-        // Function to apply filters and re-render table
+        // Function to apply filters and re-render ALL sections (table, chart, KPIs, summaries)
         const applyFiltersAndRender = () => {
+          const moneyPagesMetrics = window.currentMoneyPagesMetrics;
+          const queryPages = window.currentQueryPages || null;
+          
+          // Update table
           const currentPage = window.moneyPagesCurrentPage || 1;
           tableContainer.innerHTML = renderMoneyPagesTable(rows, currentPage, 10);
           
@@ -8279,7 +8283,29 @@ Final Score: ${score}/100`;
           attachMoneyPagesSortHandlers();
           attachMoneyPagesPaginationHandlers(rows);
           attachMoneyPagesCopyHandler(rows);
-          attachMoneyPagesFilterHandlers(rows);
+          attachMoneyPagesFilterHandlers(rows, applyFiltersAndRender);
+          
+          // Update all other sections with filtered data
+          if (moneyPagesMetrics) {
+            setTimeout(() => {
+              // Get filtered metrics based on current filters
+              const filteredMetrics = getFilteredMoneyPagesMetrics(moneyPagesMetrics);
+              if (!filteredMetrics) return;
+              
+              // Update doughnut chart with filtered data
+              renderMoneyPagesCategoryChart(moneyPagesMetrics, 0);
+              
+              // Recalculate behaviour for filtered pages
+              const filteredRows = filteredMetrics.rows || [];
+              const filteredBehaviour = window.computeMoneyPagesBehaviour ? 
+                window.computeMoneyPagesBehaviour(queryPages, filteredRows) : null;
+              
+              // Update all sections
+              renderMoneyPagesBehaviourKpis(filteredBehaviour, filteredMetrics, queryPages);
+              updateMoneyPagesSummaryMetrics(filteredMetrics);
+              updateMoneyPagesChartSummary(filteredMetrics);
+            }, 100);
+          }
         };
         
         // Initial render
@@ -8469,16 +8495,22 @@ Final Score: ${score}/100`;
               if (moneyPagesMetrics) {
                 // Use setTimeout to ensure DOM is ready
                 setTimeout(() => {
-                  renderMoneyPagesCategoryChart(moneyPagesMetrics, 0);
-                  // Recalculate behaviour for filtered pages
+                  // Get filtered metrics based on current filters
                   const filteredMetrics = getFilteredMoneyPagesMetrics(moneyPagesMetrics);
-                  if (filteredMetrics) {
-                    const filteredRows = filteredMetrics.rows || [];
-                    const filteredBehaviour = window.computeMoneyPagesBehaviour ? 
-                      window.computeMoneyPagesBehaviour(queryPages, filteredRows) : null;
-                    renderMoneyPagesBehaviourKpis(filteredBehaviour, filteredMetrics, queryPages);
-                    updateMoneyPagesSummaryMetrics(filteredMetrics);
-                  }
+                  if (!filteredMetrics) return;
+                  
+                  // Update doughnut chart with filtered data
+                  renderMoneyPagesCategoryChart(moneyPagesMetrics, 0);
+                  
+                  // Recalculate behaviour for filtered pages
+                  const filteredRows = filteredMetrics.rows || [];
+                  const filteredBehaviour = window.computeMoneyPagesBehaviour ? 
+                    window.computeMoneyPagesBehaviour(queryPages, filteredRows) : null;
+                  
+                  // Update all sections
+                  renderMoneyPagesBehaviourKpis(filteredBehaviour, filteredMetrics, queryPages);
+                  updateMoneyPagesSummaryMetrics(filteredMetrics);
+                  updateMoneyPagesChartSummary(filteredMetrics);
                 }, 100);
               }
             }
