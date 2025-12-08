@@ -7174,6 +7174,173 @@ Final Score: ${score}/100`;
         // renderFullWidthTopPagesTable is now defined in shared scope above
       }
       
+      // Function to render Money Pages table (with pagination and sorting, matching Top Pages format)
+      function renderMoneyPagesTable(moneyRows, currentPage = 1, rowsPerPage = 10) {
+        if (!moneyRows || moneyRows.length === 0) {
+          return '<div style="font-size: 0.85rem; color: #999; padding: 1rem; text-align: center;">No money-page data available for this audit period. Check that your money pages have impressions in the selected date range.</div>';
+        }
+        
+        // Store original data for sorting (across all pages) - update if new data provided
+        window.moneyPagesData = moneyRows;
+        if (window.moneyPagesSortColumn === undefined) {
+          window.moneyPagesSortColumn = null;
+          window.moneyPagesSortDirection = 'desc';
+        }
+        
+        // Sort data if needed (sort ALL rows, not just current page)
+        let sortedRows = [...moneyRows];
+        if (window.moneyPagesSortColumn) {
+          sortedRows.sort((a, b) => {
+            let aVal, bVal;
+            switch(window.moneyPagesSortColumn) {
+              case 'ctr':
+                aVal = (a.ctr || 0) * 100;
+                bVal = (b.ctr || 0) * 100;
+                break;
+              case 'impressions':
+                aVal = a.impressions || 0;
+                bVal = b.impressions || 0;
+                break;
+              case 'clicks':
+                aVal = a.clicks || 0;
+                bVal = b.clicks || 0;
+                break;
+              case 'position':
+                aVal = a.avgPosition || 99;
+                bVal = b.avgPosition || 99;
+                break;
+              case 'opportunity':
+                // Sort by category priority: HIGH_OPPORTUNITY=0, VISIBILITY_FIX=1, MAINTAIN=2
+                const categoryOrder = { HIGH_OPPORTUNITY: 0, VISIBILITY_FIX: 1, MAINTAIN: 2 };
+                aVal = categoryOrder[a.category] ?? 99;
+                bVal = categoryOrder[b.category] ?? 99;
+                break;
+              default:
+                return 0;
+            }
+            const diff = aVal - bVal;
+            return window.moneyPagesSortDirection === 'asc' ? diff : -diff;
+          });
+        }
+        
+        // Update stored sorted data
+        window.moneyPagesData = sortedRows;
+        
+        // Pagination
+        const totalPages = Math.ceil(sortedRows.length / rowsPerPage);
+        const startIdx = (currentPage - 1) * rowsPerPage;
+        const endIdx = startIdx + rowsPerPage;
+        const pageRows = sortedRows.slice(startIdx, endIdx);
+        
+        // Helper function to get sort icon
+        const getSortIcon = (column) => {
+          if (!window.moneyPagesSortColumn || window.moneyPagesSortColumn !== column) {
+            return '<span style="color: #475569; margin-left: 0.25rem; font-size: 0.75rem; font-weight: 600;">↕</span>';
+          }
+          return window.moneyPagesSortDirection === 'asc' 
+            ? '<span style="color: #99004C; margin-left: 0.25rem; font-size: 0.75rem; font-weight: 700;">↑</span>'
+            : '<span style="color: #99004C; margin-left: 0.25rem; font-size: 0.75rem; font-weight: 700;">↓</span>';
+        };
+        
+        // Get date range for display
+        const dateRange = parseInt(localStorage.getItem('gsc_date_range') || '30', 10);
+        const dateRangeText = dateRange === 30 ? '30 days' : dateRange === 60 ? '60 days' : dateRange === 90 ? '90 days' : dateRange === 120 ? '120 days' : dateRange === 180 ? '180 days' : dateRange === 365 ? '365 days' : dateRange === 540 ? '540 days' : `${dateRange} days`;
+        
+        let tableHtml = `
+          <div style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; padding-bottom: 0.75rem; border-bottom: 2px solid #e2e8f0;">
+            <div>
+              <h4 style="margin: 0 0 0.25rem 0; font-size: 1rem; font-weight: 700; color: #1e293b;">Money Pages Opportunity Table</h4>
+              <span style="font-size: 0.75rem; color: #334155; font-weight: 500;">Data period: Last ${dateRangeText} • Showing ${startIdx + 1}-${Math.min(endIdx, sortedRows.length)} of ${sortedRows.length}</span>
+            </div>
+            <button id="money-pages-copy-urls" type="button" style="font-size: 0.8rem; padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #2563eb; background: #2563eb; cursor: pointer; color: white; font-weight: 600; transition: all 0.2s; box-shadow: 0 1px 2px rgba(0,0,0,0.1);" onmouseover="this.style.background='#1d4ed8'; this.style.borderColor='#1d4ed8';" onmouseout="this.style.background='#2563eb'; this.style.borderColor='#2563eb';">
+              Copy URLs
+            </button>
+          </div>
+          <div style="overflow-x: auto; border-radius: 6px; border: 1px solid #e2e8f0;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+              <thead>
+                <tr style="background: linear-gradient(135deg, #f8f9fa 0%, #f1f5f9 100%); border-bottom: 2px solid #e2e8f0;">
+                  <th style="text-align: left; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">#</th>
+                  <th style="text-align: left; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">URL</th>
+                  <th id="money-sort-clicks" style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; transition: background 0.2s;" onmouseover="this.style.background='#e2e8f0';" onmouseout="this.style.background='transparent';" title="Click to sort by Clicks">
+                    Clicks${getSortIcon('clicks')}
+                  </th>
+                  <th id="money-sort-impressions" style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; transition: background 0.2s;" onmouseover="this.style.background='#e2e8f0';" onmouseout="this.style.background='transparent';" title="Click to sort by Impressions">
+                    Impressions${getSortIcon('impressions')}
+                  </th>
+                  <th id="money-sort-ctr" style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; transition: background 0.2s;" onmouseover="this.style.background='#e2e8f0';" onmouseout="this.style.background='transparent';" title="Click to sort by CTR">
+                    CTR${getSortIcon('ctr')}
+                  </th>
+                  <th id="money-sort-position" style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; transition: background 0.2s;" onmouseover="this.style.background='#e2e8f0';" onmouseout="this.style.background='transparent';" title="Click to sort by Avg Position">
+                    Avg Position${getSortIcon('position')}
+                  </th>
+                  <th id="money-sort-opportunity" style="text-align: center; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; transition: background 0.2s;" onmouseover="this.style.background='#e2e8f0';" onmouseout="this.style.background='transparent';" title="Click to sort by Opportunity">
+                    Opportunity${getSortIcon('opportunity')}
+                  </th>
+                  <th style="text-align: left; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Recommended action</th>
+                </tr>
+              </thead>
+              <tbody>
+        `;
+        
+        pageRows.forEach((row, idx) => {
+          const isEven = idx % 2 === 0;
+          const ctrPct = (row.ctr || 0) * 100;
+          const ctrColor = ctrPct >= 2 ? '#10b981' : ctrPct >= 1 ? '#f59e0b' : '#ef4444';
+          const posColor = row.avgPosition <= 5 ? '#10b981' : row.avgPosition <= 10 ? '#f59e0b' : '#ef4444';
+          const categoryColor = row.categoryColor === 'green' ? '#10b981' : row.categoryColor === 'amber' ? '#f59e0b' : '#ef4444';
+          
+          tableHtml += `
+            <tr style="border-bottom: 1px solid #f1f5f9; background: ${isEven ? '#ffffff' : '#fafafa'}; transition: background 0.2s;" onmouseover="this.style.background='#f8f9fa';" onmouseout="this.style.background='${isEven ? '#ffffff' : '#fafafa'}';">
+              <td style="padding: 0.75rem; color: #0f172a; font-weight: 600;">${startIdx + idx + 1}</td>
+              <td style="padding: 0.75rem; word-break: break-all;">
+                <a href="${row.url}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: none; font-weight: 500; border-bottom: 1px solid transparent; transition: all 0.2s;" onmouseover="this.style.color='#1d4ed8'; this.style.borderBottomColor='#1d4ed8';" onmouseout="this.style.color='#2563eb'; this.style.borderBottomColor='transparent';" title="Open ${row.url} in new tab">
+                  <div style="font-weight: 600; color: #1e293b;">${(row.title || row.url).substring(0, 60)}${(row.title || row.url).length > 60 ? '...' : ''}</div>
+                  <div style="font-size: 0.75rem; color: #64748b; margin-top: 0.25rem;">${row.url}</div>
+                </a>
+              </td>
+              <td style="padding: 0.75rem; text-align: right; color: #0f172a; font-weight: 500;">${(row.clicks || 0).toLocaleString()}</td>
+              <td style="padding: 0.75rem; text-align: right; color: #0f172a; font-weight: 500;">${(row.impressions || 0).toLocaleString()}</td>
+              <td style="padding: 0.75rem; text-align: right; color: ${ctrColor}; font-weight: 600;">${ctrPct.toFixed(2)}%</td>
+              <td style="padding: 0.75rem; text-align: right; color: ${posColor}; font-weight: 600;">${row.avgPosition ? row.avgPosition.toFixed(1) : '—'}</td>
+              <td style="padding: 0.75rem; text-align: center;">
+                <span style="display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; background: ${categoryColor}20; color: ${categoryColor}; border: 1px solid ${categoryColor}40;">
+                  ${row.categoryLabel}
+                </span>
+              </td>
+              <td style="padding: 0.75rem; color: #475569; font-size: 0.8rem; line-height: 1.5; max-width: 400px;">${row.recommendation}</td>
+            </tr>
+          `;
+        });
+        
+        tableHtml += `
+              </tbody>
+            </table>
+          </div>
+        `;
+        
+        // Pagination controls
+        if (totalPages > 1) {
+          tableHtml += `
+            <div style="margin-top: 1rem; display: flex; justify-content: space-between; align-items: center; padding-top: 1rem; border-top: 1px solid #e2e8f0;">
+              <div style="font-size: 0.85rem; color: #64748b;">
+                Page ${currentPage} of ${totalPages}
+              </div>
+              <div style="display: flex; gap: 0.5rem;">
+                <button id="money-pages-prev" type="button" ${currentPage === 1 ? 'disabled' : ''} style="font-size: 0.8rem; padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #cbd5e1; background: ${currentPage === 1 ? '#f1f5f9' : 'white'}; cursor: ${currentPage === 1 ? 'not-allowed' : 'pointer'}; color: ${currentPage === 1 ? '#94a3b8' : '#475569'}; font-weight: 600; transition: all 0.2s;" ${currentPage === 1 ? '' : 'onmouseover="this.style.background=\'#f8f9fa\'; this.style.borderColor=\'#94a3b8\';" onmouseout="this.style.background=\'white\'; this.style.borderColor=\'#cbd5e1\';"'}>
+                  Previous
+                </button>
+                <button id="money-pages-next" type="button" ${currentPage === totalPages ? 'disabled' : ''} style="font-size: 0.8rem; padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #cbd5e1; background: ${currentPage === totalPages ? '#f1f5f9' : 'white'}; cursor: ${currentPage === totalPages ? 'not-allowed' : 'pointer'}; color: ${currentPage === totalPages ? '#94a3b8' : '#475569'}; font-weight: 600; transition: all 0.2s;" ${currentPage === totalPages ? '' : 'onmouseover="this.style.background=\'#f8f9fa\'; this.style.borderColor=\'#94a3b8\';" onmouseout="this.style.background=\'white\'; this.style.borderColor=\'#cbd5e1\';"'}>
+                  Next
+                </button>
+              </div>
+            </div>
+          `;
+        }
+        
+        return tableHtml;
+      }
+      
       // Function to render Money Pages Performance section
       function renderMoneyPagesSection(moneyPagesMetrics) {
         const section = document.getElementById('money-pages-section');
@@ -7188,9 +7355,9 @@ Final Score: ${score}/100`;
         if (!moneyPagesMetrics) {
           debugLog('⚠ Money Pages Metrics: No data provided', 'warn');
           // Show "No data" message in table and summary cards
-          const tbody = document.getElementById('money-pages-table-body');
-          if (tbody) {
-            tbody.innerHTML = `<tr><td colspan="7" class="text-muted" style="padding: 2rem; text-align: center;">No money-page data available. Run an audit with GSC data to see money pages performance.</td></tr>`;
+          const tableContainer = document.getElementById('money-pages-table-container');
+          if (tableContainer) {
+            tableContainer.innerHTML = '<div style="font-size: 0.85rem; color: #999; padding: 2rem; text-align: center;">No money-page data available. Run an audit with GSC data to see money pages performance.</div>';
           }
           // Populate summary cards with "—"
           const summaryClickEl = document.getElementById('money-summary-click-share');
@@ -7209,9 +7376,9 @@ Final Score: ${score}/100`;
         const summaryCtrEl = document.getElementById('money-summary-ctr');
         const summaryPosEl = document.getElementById('money-summary-position');
         const summaryCovEl = document.getElementById('money-summary-coverage');
-        const tbody = document.getElementById('money-pages-table-body');
+        const tableContainer = document.getElementById('money-pages-table-container');
         
-        if (!overview || !tbody || !summaryClickEl || !summaryCtrEl || !summaryPosEl || !summaryCovEl) {
+        if (!overview || !tableContainer || !summaryClickEl || !summaryCtrEl || !summaryPosEl || !summaryCovEl) {
           return;
         }
         
@@ -7289,70 +7456,148 @@ Final Score: ${score}/100`;
              ${coveragePct != null ? coveragePct.toFixed(1) + '% of known money URLs' : 'Based on GSC pages only'}
            </div>`;
         
-        // Table rows
-        tbody.innerHTML = '';
+        // Store data globally for sorting/pagination
+        window.currentMoneyPagesMetrics = moneyPagesMetrics;
         
-        if (!rows || !rows.length) {
-          tbody.innerHTML =
-            `<tr><td colspan="7" class="text-muted">
-              No money-page data available for this audit period.
-              Check that your money pages have impressions in the selected date range.
-            </td></tr>`;
-          return;
+        // Initialize pagination state if not set
+        if (window.moneyPagesCurrentPage === undefined) {
+          window.moneyPagesCurrentPage = 1;
         }
         
-        rows.forEach((row) => {
-          const tr = document.createElement('tr');
-          
-          const ctrPct = (row.ctr || 0) * 100;
-          
-          tr.innerHTML = `
-            <td>
-              <div class="url-cell">
-                <div class="url-main">${row.title || row.url}</div>
-                <div class="url-sub">${row.url}</div>
-              </div>
-            </td>
-            <td>${(row.clicks || 0).toLocaleString()}</td>
-            <td>${(row.impressions || 0).toLocaleString()}</td>
-            <td>${ctrPct.toFixed(2)}%</td>
-            <td>${row.avgPosition ? row.avgPosition.toFixed(1) : '—'}</td>
-            <td>
-              <span class="pill pill-small ${row.categoryColor === 'green' ? 'pill-success' : row.categoryColor === 'amber' ? 'pill-warning' : 'pill-danger'}">
-                ${row.categoryLabel}
-              </span>
-            </td>
-            <td class="money-recommendation">
-              ${row.recommendation}
-            </td>
-          `;
-          
-          tbody.appendChild(tr);
-        });
+        // Render table with pagination
+        const currentPage = window.moneyPagesCurrentPage || 1;
+        tableContainer.innerHTML = renderMoneyPagesTable(rows, currentPage, 10);
         
-        // Copy URLs button
-        const copyBtn = document.getElementById('money-pages-copy-urls');
-        if (copyBtn) {
-          copyBtn.onclick = () => {
-            const urls = rows.slice(0, 10).map((r) => r.url).join('\n');
-            if (urls) {
-              navigator.clipboard.writeText(urls).then(() => {
-                copyBtn.textContent = 'Copied!';
-                setTimeout(() => {
-                  copyBtn.textContent = 'Copy top money URLs';
-                }, 2000);
-              }).catch(() => {
-                copyBtn.textContent = 'Copy failed';
-                setTimeout(() => {
-                  copyBtn.textContent = 'Copy top money URLs';
-                }, 2000);
-              });
-            }
-          };
-        }
+        // Attach sort handlers
+        attachMoneyPagesSortHandlers();
+        
+        // Attach pagination handlers
+        attachMoneyPagesPaginationHandlers(rows);
+        
+        // Attach copy button handler
+        attachMoneyPagesCopyHandler(rows);
         
         // Show section
         section.style.display = 'block';
+      }
+      
+      // Attach sort handlers for Money Pages table
+      function attachMoneyPagesSortHandlers() {
+        setTimeout(() => {
+          ['clicks', 'impressions', 'ctr', 'position', 'opportunity'].forEach(col => {
+            const th = document.getElementById(`money-sort-${col}`);
+            if (th) {
+              const newTh = th.cloneNode(true);
+              th.parentNode.replaceChild(newTh, th);
+              newTh.addEventListener('click', () => {
+                handleMoneyPagesSort(col);
+              });
+            }
+          });
+        }, 50);
+      }
+      
+      // Handle sorting for Money Pages table
+      function handleMoneyPagesSort(column) {
+        if (window.moneyPagesSortColumn === column) {
+          window.moneyPagesSortDirection = window.moneyPagesSortDirection === 'asc' ? 'desc' : 'asc';
+        } else {
+          window.moneyPagesSortColumn = column;
+          window.moneyPagesSortDirection = 'desc';
+        }
+        
+        // Reset to page 1 when sorting
+        window.moneyPagesCurrentPage = 1;
+        
+        // Get current data from stored source
+        const allRows = window.moneyPagesData || [];
+        if (allRows.length > 0) {
+          const tableContainer = document.getElementById('money-pages-table-container');
+          if (tableContainer) {
+            tableContainer.innerHTML = renderMoneyPagesTable(allRows, 1, 10);
+            attachMoneyPagesSortHandlers();
+            attachMoneyPagesPaginationHandlers(allRows);
+            attachMoneyPagesCopyHandler(allRows);
+          }
+        }
+      }
+      
+      // Attach pagination handlers
+      function attachMoneyPagesPaginationHandlers(allRows) {
+        setTimeout(() => {
+          const prevBtn = document.getElementById('money-pages-prev');
+          const nextBtn = document.getElementById('money-pages-next');
+          
+          // Use stored sorted data for pagination
+          const sortedRows = window.moneyPagesData || allRows || [];
+          
+          if (prevBtn) {
+            const newPrevBtn = prevBtn.cloneNode(true);
+            prevBtn.parentNode.replaceChild(newPrevBtn, prevBtn);
+            newPrevBtn.addEventListener('click', () => {
+              if (window.moneyPagesCurrentPage > 1) {
+                window.moneyPagesCurrentPage--;
+                const tableContainer = document.getElementById('money-pages-table-container');
+                if (tableContainer) {
+                  tableContainer.innerHTML = renderMoneyPagesTable(sortedRows, window.moneyPagesCurrentPage, 10);
+                  attachMoneyPagesSortHandlers();
+                  attachMoneyPagesPaginationHandlers(sortedRows);
+                  attachMoneyPagesCopyHandler(sortedRows);
+                }
+              }
+            });
+          }
+          
+          if (nextBtn) {
+            const newNextBtn = nextBtn.cloneNode(true);
+            nextBtn.parentNode.replaceChild(newNextBtn, nextBtn);
+            newNextBtn.addEventListener('click', () => {
+              const totalPages = Math.ceil(sortedRows.length / 10);
+              if (window.moneyPagesCurrentPage < totalPages) {
+                window.moneyPagesCurrentPage++;
+                const tableContainer = document.getElementById('money-pages-table-container');
+                if (tableContainer) {
+                  tableContainer.innerHTML = renderMoneyPagesTable(sortedRows, window.moneyPagesCurrentPage, 10);
+                  attachMoneyPagesSortHandlers();
+                  attachMoneyPagesPaginationHandlers(sortedRows);
+                  attachMoneyPagesCopyHandler(sortedRows);
+                }
+              }
+            });
+          }
+        }, 50);
+      }
+      
+      // Attach copy button handler
+      function attachMoneyPagesCopyHandler(allRows) {
+        setTimeout(() => {
+          const copyBtn = document.getElementById('money-pages-copy-urls');
+          if (copyBtn) {
+            const newCopyBtn = copyBtn.cloneNode(true);
+            copyBtn.parentNode.replaceChild(newCopyBtn, copyBtn);
+            newCopyBtn.addEventListener('click', async () => {
+              const urls = (allRows || []).slice(0, 10).map((r) => r.url).join('\n');
+              if (urls) {
+                try {
+                  await navigator.clipboard.writeText(urls);
+                  newCopyBtn.textContent = 'Copied!';
+                  newCopyBtn.style.color = '#10b981';
+                  setTimeout(() => {
+                    newCopyBtn.textContent = 'Copy URLs';
+                    newCopyBtn.style.color = 'white';
+                  }, 2000);
+                } catch (err) {
+                  newCopyBtn.textContent = 'Copy failed';
+                  newCopyBtn.style.color = '#ef4444';
+                  setTimeout(() => {
+                    newCopyBtn.textContent = 'Copy URLs';
+                    newCopyBtn.style.color = 'white';
+                  }, 2000);
+                }
+              }
+            });
+          }
+        }, 50);
       }
 
       // Create Top Pages section (full width, below pillar cards)
@@ -7388,31 +7633,9 @@ Final Score: ${score}/100`;
             <div class="metric-card" id="money-summary-coverage" style="flex: 1; min-width: 200px; padding: 1rem; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"></div>
           </div>
           
-          <!-- Table header + controls -->
-          <div class="table-header-row" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-            <h3 style="margin: 0;">Money Pages Opportunity Table</h3>
-            <button id="money-pages-copy-urls" class="btn btn-secondary" style="padding: 0.5rem 1rem; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer;">
-              Copy top money URLs
-            </button>
-          </div>
-          
-          <div class="table-wrapper" style="overflow-x: auto;">
-            <table id="money-pages-table" class="data-table" style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
-              <thead>
-                <tr style="background: #f5f5f5;">
-                  <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600;">URL</th>
-                  <th style="padding: 0.75rem; text-align: center; border-bottom: 2px solid #ddd; font-weight: 600;">Clicks</th>
-                  <th style="padding: 0.75rem; text-align: center; border-bottom: 2px solid #ddd; font-weight: 600;">Impressions</th>
-                  <th style="padding: 0.75rem; text-align: center; border-bottom: 2px solid #ddd; font-weight: 600;">CTR</th>
-                  <th style="padding: 0.75rem; text-align: center; border-bottom: 2px solid #ddd; font-weight: 600;">Avg position</th>
-                  <th style="padding: 0.75rem; text-align: center; border-bottom: 2px solid #ddd; font-weight: 600;">Opportunity</th>
-                  <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600;">Recommended action</th>
-                </tr>
-              </thead>
-              <tbody id="money-pages-table-body">
-                <!-- JS will insert rows -->
-              </tbody>
-            </table>
+          <!-- Table container (will be populated by renderMoneyPagesTable) -->
+          <div id="money-pages-table-container">
+            <!-- Table will be rendered here -->
           </div>
           
           <p class="card-footnote" style="margin-top: 1rem; font-size: 0.85rem; color: #666;">
