@@ -9189,16 +9189,21 @@ Final Score: ${score}/100`;
       // Create Money Pages Performance section (right after Top Pages section)
       // Use setTimeout to ensure Top Pages section is inserted first
       setTimeout(() => {
-        const existingMoneyPages = document.getElementById('money-pages-section');
-        if (existingMoneyPages) {
-          existingMoneyPages.remove();
+        // Check if section already exists (e.g., from previous render or page refresh)
+        let moneyPagesSection = document.getElementById('money-pages-section');
+        if (moneyPagesSection) {
+          debugLog('✓ Money Pages section already exists, reusing it', 'info');
+          // Clear existing content before re-populating
+          moneyPagesSection.innerHTML = '';
+        } else {
+          // Create new section
+          moneyPagesSection = document.createElement('div');
+          moneyPagesSection.id = 'money-pages-section';
+          moneyPagesSection.className = 'section-break';
+          moneyPagesSection.style.marginTop = '2rem';
+          moneyPagesSection.style.marginBottom = '2rem';
         }
         
-        const moneyPagesSection = document.createElement('div');
-        moneyPagesSection.id = 'money-pages-section';
-        moneyPagesSection.className = 'section-break';
-        moneyPagesSection.style.marginTop = '2rem';
-        moneyPagesSection.style.marginBottom = '2rem';
         moneyPagesSection.innerHTML = `
           <div style="padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); background: rgba(204, 255, 229, 0.3); border-left: 4px solid #10b981;">
             <h3 style="margin: 0 0 1rem 0; color: var(--brand-dark);">Money Pages Performance & Actions</h3>
@@ -9299,13 +9304,8 @@ Final Score: ${score}/100`;
           </div>
         `;
         
-        // Check if section already exists (e.g., from previous render)
-        const existingSection = document.getElementById('money-pages-section');
-        if (existingSection) {
-          // Section already exists, just update its content
-          existingSection.innerHTML = moneyPagesSection.innerHTML;
-          debugLog('✓ Money Pages section already exists, updated content', 'success');
-        } else {
+        // Insert section if it's not already in the DOM
+        if (!moneyPagesSection.parentNode) {
           // Insert after Top Pages section (try multiple insertion points)
           let inserted = false;
           const topPagesSectionEl = document.getElementById('authority-top-pages-section');
@@ -9325,8 +9325,10 @@ Final Score: ${score}/100`;
           
           if (!inserted) {
             debugLog('⚠ Money Pages section could not be inserted - no insertion point found', 'warn');
-            return;
+            // Still try to render even if insertion failed (section might be in DOM already)
           }
+        } else {
+          debugLog('✓ Money Pages section already in DOM, content updated', 'info');
         }
         
         // Always render money pages section (will show "No data" if empty)
@@ -9342,10 +9344,30 @@ Final Score: ${score}/100`;
         debugLog(`Money Pages Metrics available: ${moneyPagesMetricsToRender ? 'yes' : 'no'}`, 'info');
         if (moneyPagesMetricsToRender) {
           debugLog(`Money Pages: Rendering ${moneyPagesMetricsToRender.rows?.length || 0} money pages`, 'info');
+          if (moneyPagesMetricsToRender.rows && moneyPagesMetricsToRender.rows.length > 0) {
+            debugLog(`Money Pages: First row sample: ${JSON.stringify(moneyPagesMetricsToRender.rows[0]).substring(0, 100)}...`, 'info');
+          }
         } else {
           debugLog('⚠ Money Pages: No metrics data available, will show "No data" message', 'warn');
+          debugLog(`Money Pages: scores.moneyPagesMetrics=${!!scores.moneyPagesMetrics}, saved.scores.moneyPagesMetrics=${!!(saved && saved.scores && saved.scores.moneyPagesMetrics)}`, 'warn');
         }
-        renderMoneyPagesSection(moneyPagesMetricsToRender || null);
+        
+        // Ensure section exists before rendering (retry if needed)
+        let sectionExists = document.getElementById('money-pages-section');
+        if (!sectionExists) {
+          debugLog('⚠ Money Pages section not found, waiting 50ms and retrying...', 'warn');
+          setTimeout(() => {
+            sectionExists = document.getElementById('money-pages-section');
+            if (sectionExists) {
+              debugLog('✓ Money Pages section found on retry, rendering...', 'success');
+              renderMoneyPagesSection(moneyPagesMetricsToRender || null);
+            } else {
+              debugLog('✗ Money Pages section still not found after retry', 'error');
+            }
+          }, 50);
+        } else {
+          renderMoneyPagesSection(moneyPagesMetricsToRender || null);
+        }
         // Store queryPages globally for filtering
         // Use data parameter (searchData) first, then fallback to saved data
         if (data && data.queryPages) {
