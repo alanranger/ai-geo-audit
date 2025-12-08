@@ -8469,8 +8469,15 @@ Final Score: ${score}/100`;
                 // Use setTimeout to ensure DOM is ready
                 setTimeout(() => {
                   renderMoneyPagesCategoryChart(moneyPagesMetrics, 0);
-                  renderMoneyPagesBehaviourKpis(moneyPagesMetrics.behaviour, moneyPagesMetrics, queryPages);
-                  updateMoneyPagesSummaryMetrics(moneyPagesMetrics);
+                  // Recalculate behaviour for filtered pages
+                  const filteredMetrics = getFilteredMoneyPagesMetrics(moneyPagesMetrics);
+                  if (filteredMetrics) {
+                    const filteredRows = filteredMetrics.rows || [];
+                    const filteredBehaviour = window.computeMoneyPagesBehaviour ? 
+                      window.computeMoneyPagesBehaviour(queryPages, filteredRows) : null;
+                    renderMoneyPagesBehaviourKpis(filteredBehaviour, filteredMetrics, queryPages);
+                    updateMoneyPagesSummaryMetrics(filteredMetrics);
+                  }
                 }, 100);
               }
             }
@@ -8527,12 +8534,25 @@ Final Score: ${score}/100`;
       }
       
       // Helper function to filter money pages data by sub-segment
-      function filterMoneyPagesBySubSegment(moneyPagesMetrics, subSegmentFilter) {
-        if (!moneyPagesMetrics || !moneyPagesMetrics.rows || subSegmentFilter === 'ALL') {
-          return moneyPagesMetrics;
+      // Apply all filters and calculate filtered metrics
+      function getFilteredMoneyPagesMetrics(moneyPagesMetrics) {
+        if (!moneyPagesMetrics || !moneyPagesMetrics.rows) {
+          return null;
         }
         
-        const filteredRows = moneyPagesMetrics.rows.filter(row => row.subSegment === subSegmentFilter);
+        const currentCategoryFilter = window.moneyPagesCategoryFilter || 'ALL';
+        const currentSubSegmentFilter = window.moneyPagesSubSegmentFilter || 'ALL';
+        const currentMinImpressions = window.moneyPagesMinImpressions || 0;
+        const includeZero = window.moneyPagesIncludeZero !== false;
+        
+        // Apply all filters
+        const filteredRows = moneyPagesMetrics.rows.filter(row => {
+          const matchCat = currentCategoryFilter === 'ALL' || row.category === currentCategoryFilter;
+          const matchSubSeg = currentSubSegmentFilter === 'ALL' || row.subSegment === currentSubSegmentFilter;
+          const matchImp = (row.impressions || 0) >= currentMinImpressions;
+          const matchZero = includeZero || (row.impressions || 0) > 0;
+          return matchCat && matchSubSeg && matchImp && matchZero;
+        });
         
         // Recalculate summaryByCategory from filtered rows
         const filteredSummaryByCategory = {
@@ -8573,6 +8593,100 @@ Final Score: ${score}/100`;
             moneyCoverageCount: filteredRows.length
           }
         };
+      }
+      
+      // Get filter description for chart title
+      function getFilterDescription() {
+        const categoryFilter = window.moneyPagesCategoryFilter || 'ALL';
+        const subSegmentFilter = window.moneyPagesSubSegmentFilter || 'ALL';
+        const minImpressions = window.moneyPagesMinImpressions || 0;
+        const includeZero = window.moneyPagesIncludeZero !== false;
+        
+        const parts = [];
+        
+        if (categoryFilter !== 'ALL') {
+          const categoryLabels = {
+            'HIGH_OPPORTUNITY': 'High opportunity',
+            'VISIBILITY_FIX': 'Visibility fix',
+            'MAINTAIN': 'Maintain'
+          };
+          parts.push(categoryLabels[categoryFilter] || categoryFilter);
+        }
+        
+        if (subSegmentFilter !== 'ALL') {
+          const subSegmentLabels = {
+            'PRODUCT': 'Product',
+            'EVENT': 'Event',
+            'LANDING': 'Landing'
+          };
+          parts.push(subSegmentLabels[subSegmentFilter] || subSegmentFilter);
+        }
+        
+        if (minImpressions > 0) {
+          parts.push(`≥${minImpressions} impressions`);
+        }
+        
+        if (!includeZero) {
+          parts.push('with impressions');
+        }
+        
+        if (parts.length === 0) {
+          return 'Money Pages';
+        }
+        
+        return parts.join(' ') + ' Pages';
+      }
+      
+      // Update chart title and summary box
+      function updateMoneyPagesChartSummary(filteredMetrics) {
+        if (!filteredMetrics) return;
+        
+        // Update chart title
+        const titleEl = document.getElementById('money-pages-chart-title');
+        if (titleEl) {
+          titleEl.textContent = getFilterDescription() + ' Opportunity Mix';
+        }
+        
+        // Calculate behaviour score for filtered pages
+        const queryPages = window.currentQueryPages || [];
+        const filteredRows = filteredMetrics.rows || [];
+        const filteredBehaviour = window.computeMoneyPagesBehaviour ? 
+          window.computeMoneyPagesBehaviour(queryPages, filteredRows) : null;
+        
+        // Update summary box
+        const overview = filteredMetrics.overview || {};
+        const pagesCount = filteredRows.length;
+        const impressions = overview.moneyImpressions || 0;
+        const clicks = overview.moneyClicks || 0;
+        const ctr = overview.moneyCtr || 0;
+        const behaviourScore = filteredBehaviour ? filteredBehaviour.score : null;
+        
+        const pagesEl = document.getElementById('summary-pages-count');
+        const impressionsEl = document.getElementById('summary-impressions');
+        const clicksEl = document.getElementById('summary-clicks');
+        const ctrEl = document.getElementById('summary-ctr');
+        const behaviourEl = document.getElementById('summary-behaviour');
+        
+        if (pagesEl) pagesEl.textContent = pagesCount.toLocaleString();
+        if (impressionsEl) impressionsEl.textContent = impressions.toLocaleString();
+        if (clicksEl) clicksEl.textContent = clicks.toLocaleString();
+        if (ctrEl) ctrEl.textContent = impressions > 0 ? `${(ctr * 100).toFixed(2)}%` : '-';
+        if (behaviourEl) {
+          if (behaviourScore !== null && behaviourScore !== undefined) {
+            behaviourEl.textContent = Math.round(behaviourScore);
+            // Apply RAG color
+            if (behaviourScore >= 70) {
+              behaviourEl.style.color = '#10b981'; // green
+            } else if (behaviourScore >= 40) {
+              behaviourEl.style.color = '#f59e0b'; // amber
+            } else {
+              behaviourEl.style.color = '#ef4444'; // red
+            }
+          } else {
+            behaviourEl.textContent = 'N/A';
+            behaviourEl.style.color = '#64748b';
+          }
+        }
       }
       
       // Render Money Pages category chart (Phase 2)
@@ -8617,9 +8731,12 @@ Final Score: ${score}/100`;
           return;
         }
         
-        // Apply sub-segment filter if set
-        const subSegmentFilter = window.moneyPagesSubSegmentFilter || 'ALL';
-        const filteredMetrics = filterMoneyPagesBySubSegment(moneyPagesMetrics, subSegmentFilter);
+        // Apply all filters
+        const filteredMetrics = getFilteredMoneyPagesMetrics(moneyPagesMetrics);
+        if (!filteredMetrics) {
+          debugLog('⚠ No filtered metrics available', 'warn');
+          return;
+        }
         
         const { summaryByCategory } = filteredMetrics;
         debugLog(`Money pages summaryByCategory: ${JSON.stringify(summaryByCategory)}`, 'info');
@@ -8776,6 +8893,9 @@ Final Score: ${score}/100`;
           }
         });
         debugLog('✓ Money pages category chart created successfully', 'success');
+        
+        // Update chart title and summary box with filtered data
+        updateMoneyPagesChartSummary(filteredMetrics);
         
         // Populate summary and breakdown after chart is created
         const totalPages = counts.reduce((a, b) => a + b, 0);
@@ -8980,16 +9100,43 @@ Final Score: ${score}/100`;
             
             <!-- Chart row (Phase 2) -->
             <div class="chart-row" id="money-pages-chart-row" style="margin-bottom: 1.5rem; display: block; visibility: visible;">
-              <div class="chart-card" style="background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                <h3 style="margin: 0 0 0.5rem 0; font-size: 1rem; font-weight: 700; color: #1e293b;">Money Pages Opportunity Mix</h3>
-                <p class="chart-subtitle" style="margin: 0 0 1rem 0; font-size: 0.85rem; color: #64748b;">
-                  How your money pages are distributed across improvement categories in this audit window.
-                </p>
-                <div style="position: relative; width: 500px; height: 300px; margin: 0 auto; overflow: hidden;">
-                  <canvas id="money-pages-category-chart" width="500" height="300" style="display: block; max-width: 500px; max-height: 300px;"></canvas>
+              <div class="chart-card" style="background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: flex; gap: 1.5rem; align-items: flex-start;">
+                <div style="flex: 1;">
+                  <h3 id="money-pages-chart-title" style="margin: 0 0 0.5rem 0; font-size: 1rem; font-weight: 700; color: #1e293b;">Money Pages Opportunity Mix</h3>
+                  <p class="chart-subtitle" style="margin: 0 0 1rem 0; font-size: 0.85rem; color: #64748b;">
+                    How your money pages are distributed across improvement categories in this audit window.
+                  </p>
+                  <div style="position: relative; width: 500px; height: 300px; margin: 0 auto; overflow: hidden;">
+                    <canvas id="money-pages-category-chart" width="500" height="300" style="display: block; max-width: 500px; max-height: 300px;"></canvas>
+                  </div>
+                  <div id="money-pages-category-summary" class="chart-summary" style="margin-top: 8px; font-size: 0.9rem; color: #1e293b; font-weight: 500; text-align: center;"></div>
+                  <div id="money-pages-category-breakdown" class="chart-breakdown-row" style="margin-top: 4px; display: flex; flex-wrap: wrap; gap: 0.5rem; font-size: 0.85rem; justify-content: center;"></div>
                 </div>
-                <div id="money-pages-category-summary" class="chart-summary" style="margin-top: 8px; font-size: 0.9rem; color: #1e293b; font-weight: 500; text-align: center;"></div>
-                <div id="money-pages-category-breakdown" class="chart-breakdown-row" style="margin-top: 4px; display: flex; flex-wrap: wrap; gap: 0.5rem; font-size: 0.85rem; justify-content: center;"></div>
+                <div id="money-pages-chart-summary-box" style="flex: 0 0 250px; background: #f8fafc; padding: 1rem; border-radius: 6px; border: 1px solid #e2e8f0;">
+                  <h4 style="margin: 0 0 0.75rem 0; font-size: 0.9rem; font-weight: 700; color: #1e293b;">Filtered Summary</h4>
+                  <div style="display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.85rem;">
+                    <div style="display: flex; justify-content: space-between;">
+                      <span style="color: #64748b;">Pages:</span>
+                      <span id="summary-pages-count" style="font-weight: 600; color: #1e293b;">-</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                      <span style="color: #64748b;">Impressions:</span>
+                      <span id="summary-impressions" style="font-weight: 600; color: #1e293b;">-</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                      <span style="color: #64748b;">Clicks:</span>
+                      <span id="summary-clicks" style="font-weight: 600; color: #1e293b;">-</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                      <span style="color: #64748b;">CTR:</span>
+                      <span id="summary-ctr" style="font-weight: 600; color: #1e293b;">-</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-top: 0.25rem; padding-top: 0.5rem; border-top: 1px solid #e2e8f0;">
+                      <span style="color: #64748b;">Behaviour Score:</span>
+                      <span id="summary-behaviour" style="font-weight: 600; color: #1e293b;">-</span>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
             
