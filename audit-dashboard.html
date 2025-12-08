@@ -2693,6 +2693,7 @@
       }
       
       // Education — all blogs + free course + calculator + tips hub
+      // EXCLUDE blog posts from money pages
       if (path.startsWith('/blog-on-photography/')) return PageSegment.EDUCATION;
       if (
         path === '/blog-on-photography' ||
@@ -2708,7 +2709,29 @@
       // These must be checked BEFORE money classification
       if (isFineArtGalleryPage(path)) return PageSegment.SYSTEM;
       
-      // Money — explicit slugs
+      // Support pages (must be checked before money classification)
+      const SUPPORT_EXACT = new Set([
+        '/', '/about-alan-ranger', '/testimonials-customer-reviews', '/awards-and-qualifications',
+        '/gallery-image-portfolios', '/help-site-map', '/help-portrait-uk-coventry',
+        '/photography-equipment-recommendations', '/newsletter-signup-form',
+        '/which-photography-style-is-right-for-you', '/contact-us',
+      ]);
+      if (SUPPORT_EXACT.has(path)) return PageSegment.SUPPORT;
+      
+      // Money pages = Events + Products + Landing pages (excluding blog posts)
+      // Events: URLs starting with specific paths
+      if (path.startsWith('/beginners-photography-lessons/') || 
+          path.startsWith('/photographic-workshops-near-me/')) {
+        return PageSegment.MONEY;
+      }
+      
+      // Products: URLs starting with specific paths
+      if (path.startsWith('/photo-workshops-uk/') || 
+          path.startsWith('/photography-services-near-me/')) {
+        return PageSegment.MONEY;
+      }
+      
+      // Legacy exact matches for money pages (keep for backward compatibility)
       const MONEY_EXACT = new Set([
         '/photography-workshops', '/photography-workshops-near-me', '/photography-workshops-uk',
         '/landscape-photography-workshops', '/outdoor-photography-workshops',
@@ -2720,33 +2743,31 @@
         '/coventry-photographer', '/photographer-in-coventry', '/photography-mentoring-programme',
         '/photography-academy-membership', '/photography-academy', '/photography-session-vouchers',
         '/photography-gift-vouchers', '/photography-presents-for-photographers',
-        // NOTE: '/fine-art-prints' removed from MONEY_EXACT - now handled by isFineArtGalleryPage()
         '/batsford-arboretum-photography', '/bluebell-woods-near-me',
       ]);
       if (MONEY_EXACT.has(path)) return PageSegment.MONEY;
       
-      // Money by keyword heuristics (exclude fine-art print pages)
-      if (!isFineArtGalleryPage(path)) {
-        const MONEY_KEYWORDS = [
-          'workshop', 'workshops', 'lesson', 'lessons', 'course', 'courses', 'course-finder',
-          'class', 'classes', 'training', 'tuition', 'mentoring', 'academy',
-          'gift-voucher', 'gift-vouchers', 'presents-for-photographers', 'session-vouchers',
-          'photography-services-near-me', 'photography-services', 'photography-shop',
-          '1-2-1', 'hire-a-professional-photographer', 'prints',
-          // NOTE: 'fine-art-prints' removed - fine-art pages handled separately above
-          'print-preparation-service', 'special-offers',
-        ];
-        if (MONEY_KEYWORDS.some((k) => path.includes(k))) return PageSegment.MONEY;
+      // Landing pages: Everything else that's NOT blog posts, education, support, or system
+      // Default to MONEY (landing page) if it's not a blog post and doesn't match other categories
+      // This ensures all non-blog pages are treated as money pages (landing pages) by default
+      if (!path.startsWith('/blog-on-photography/')) {
+        // Additional money page keywords for landing pages (exclude fine-art print pages)
+        if (!isFineArtGalleryPage(path)) {
+          const MONEY_KEYWORDS = [
+            'workshop', 'workshops', 'lesson', 'lessons', 'course', 'courses', 'course-finder',
+            'class', 'classes', 'training', 'tuition', 'mentoring', 'academy',
+            'gift-voucher', 'gift-vouchers', 'presents-for-photographers', 'session-vouchers',
+            'photography-services-near-me', 'photography-services', 'photography-shop',
+            '1-2-1', 'hire-a-professional-photographer', 'prints',
+            'print-preparation-service', 'special-offers',
+          ];
+          if (MONEY_KEYWORDS.some((k) => path.includes(k))) return PageSegment.MONEY;
+          
+          // If no keywords match but it's not a blog post, treat as landing page (money page)
+          // This catches any other money pages that don't match the specific patterns above
+          return PageSegment.MONEY;
+        }
       }
-      
-      // Support
-      const SUPPORT_EXACT = new Set([
-        '/', '/about-alan-ranger', '/testimonials-customer-reviews', '/awards-and-qualifications',
-        '/gallery-image-portfolios', '/help-site-map', '/help-portrait-uk-coventry',
-        '/photography-equipment-recommendations', '/newsletter-signup-form',
-        '/which-photography-style-is-right-for-you', '/contact-us',
-      ]);
-      if (SUPPORT_EXACT.has(path)) return PageSegment.SUPPORT;
       
       // Everything else = system
       return PageSegment.SYSTEM;
@@ -3961,17 +3982,17 @@
       // Classify money page sub-segment (Product, Event, Landing)
       function classifyMoneyPageSubSegment(url) {
         if (!url) return 'LANDING';
-        const urlLower = url.toLowerCase();
+        const path = normalisePath(url);
         
-        // Product Pages
-        if (urlLower.includes('/photography-services-near-me') || 
-            urlLower.includes('/photo-workshops-uk')) {
+        // Product Pages: URLs starting with specific paths
+        if (path.startsWith('/photo-workshops-uk/') || 
+            path.startsWith('/photography-services-near-me/')) {
           return 'PRODUCT';
         }
         
-        // Event Pages
-        if (urlLower.includes('/photographic-workshops-near-me') || 
-            urlLower.includes('/beginners-photography-lessons')) {
+        // Event Pages: URLs starting with specific paths
+        if (path.startsWith('/beginners-photography-lessons/') || 
+            path.startsWith('/photographic-workshops-near-me/')) {
           return 'EVENT';
         }
         
