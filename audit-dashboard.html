@@ -8494,10 +8494,14 @@ Final Score: ${score}/100`;
           
           // Function to apply filters and re-render
           const applyFilters = () => {
+            // Re-read checkbox state from DOM (it might have changed)
+            const currentIncludeZeroEl = document.getElementById('money-pages-include-zero');
             const filterCat = categoryFilterEl.value || 'ALL';
             const filterSubSeg = subSegmentFilterEl.value || 'ALL';
             const minImp = parseInt(minImpressionsEl.value, 10) || 0;
-            const includeZero = includeZeroEl ? includeZeroEl.checked : true;
+            const includeZero = currentIncludeZeroEl ? currentIncludeZeroEl.checked : (includeZeroEl ? includeZeroEl.checked : true);
+            
+            debugLog(`🔄 applyFilters: includeZero=${includeZero}, filterCat=${filterCat}, filterSubSeg=${filterSubSeg}, minImp=${minImp}`, 'info');
             
             // Store filter state globally
             window.moneyPagesCategoryFilter = filterCat;
@@ -8622,6 +8626,8 @@ Final Score: ${score}/100`;
         const currentMinImpressions = window.moneyPagesMinImpressions || 0;
         const includeZero = window.moneyPagesIncludeZero !== false;
         
+        debugLog(`🔍 getFilteredMoneyPagesMetrics: includeZero=${includeZero}, category=${currentCategoryFilter}, subSegment=${currentSubSegmentFilter}, minImp=${currentMinImpressions}, totalRows=${moneyPagesMetrics.rows.length}`, 'info');
+        
         // Apply all filters
         const filteredRows = moneyPagesMetrics.rows.filter(row => {
           const matchCat = currentCategoryFilter === 'ALL' || row.category === currentCategoryFilter;
@@ -8656,6 +8662,8 @@ Final Score: ${score}/100`;
         
         const filteredCtr = filteredImpressions > 0 ? filteredClicks / filteredImpressions : 0;
         const filteredAvgPosition = filteredImpressions > 0 ? filteredWeightedPosSum / filteredImpressions : null;
+        
+        debugLog(`🔍 getFilteredMoneyPagesMetrics: Filtered ${filteredRows.length} rows (from ${moneyPagesMetrics.rows.length}), impressions=${filteredImpressions}, clicks=${filteredClicks}`, 'info');
         
         return {
           ...moneyPagesMetrics,
