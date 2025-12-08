@@ -3959,6 +3959,13 @@
        * @returns {Object} { overview, rows }
        */
       function computeMoneyPagesMetrics(topPages, classifySegment, siteAgg, pageTitleLookup = null, schemaAudit = null) {
+        // Initialize summary by category (Phase 2)
+        const summaryByCategory = {
+          HIGH_OPPORTUNITY: { count: 0, impressions: 0, clicks: 0 },
+          VISIBILITY_FIX: { count: 0, impressions: 0, clicks: 0 },
+          MAINTAIN: { count: 0, impressions: 0, clicks: 0 }
+        };
+        
         if (!topPages || !Array.isArray(topPages) || topPages.length === 0) {
           return {
             overview: {
@@ -3974,7 +3981,8 @@
               siteTotalClicks: siteAgg.totalClicks || 0,
               siteTotalImpressions: siteAgg.totalImpressions || 0
             },
-            rows: []
+            rows: [],
+            summaryByCategory
           };
         }
         
@@ -4061,6 +4069,14 @@
           const { category, categoryLabel, categoryColor, recommendation } =
             classifyMoneyPageOpportunity({ ctr, avgPosition, impressions }, siteAgg, hasSchema, schemaTypes);
           
+          // Update category summary (Phase 2)
+          const bucket = summaryByCategory[category];
+          if (bucket) {
+            bucket.count += 1;
+            bucket.impressions += impressions;
+            bucket.clicks += clicks;
+          }
+          
           // Push row
           moneyRows.push({
             url,
@@ -4105,7 +4121,7 @@
           return (b.impressions || 0) - (a.impressions || 0);
         });
         
-        return { overview, rows: moneyRows };
+        return { overview, rows: moneyRows, summaryByCategory };
       }
       
       // Compute money pages metrics if we have queryPages data
@@ -5031,6 +5047,66 @@
       };
       
       // Generate priorities list from pillar diagnostics
+      // Helper to generate money pages priority (Phase 2)
+      function getMoneyPagesPriority(moneyPagesMetrics) {
+        if (!moneyPagesMetrics || !moneyPagesMetrics.rows || !moneyPagesMetrics.rows.length) {
+          return null;
+        }
+        
+        const { rows, summaryByCategory, overview } = moneyPagesMetrics;
+        const moneyImpressions = overview.moneyImpressions || 0;
+        if (moneyImpressions === 0) return null;
+        
+        const high = summaryByCategory?.HIGH_OPPORTUNITY || { count: 0, impressions: 0 };
+        const vis = summaryByCategory?.VISIBILITY_FIX || { count: 0, impressions: 0 };
+        
+        const highCount = high.count || 0;
+        const highImps = high.impressions || 0;
+        const visCount = vis.count || 0;
+        const visImps = vis.impressions || 0;
+        
+        const totalFocusImps = highImps + visImps;
+        if (totalFocusImps === 0) {
+          return null;
+        }
+        
+        const sharePct = (totalFocusImps / moneyImpressions) * 100;
+        
+        let severity = 'medium';
+        if (sharePct >= 60) severity = 'high';
+        else if (sharePct <= 25) severity = 'low';
+        
+        const topExamples = rows
+          .filter((r) => r.category === 'HIGH_OPPORTUNITY' || r.category === 'VISIBILITY_FIX')
+          .slice(0, 3)
+          .map((r) => {
+            try {
+              const urlObj = new URL(r.url);
+              return urlObj.pathname.split('/').filter(p => p).pop() || r.url;
+            } catch (e) {
+              return r.url;
+            }
+          });
+        
+        const description =
+          `Money pages: ${highCount} high-opportunity and ${visCount} visibility-fix URLs ` +
+          `account for ${sharePct.toFixed(1)}% of money-page impressions. ` +
+          `Prioritise improving titles/meta, "best" framing, and FAQs on these pages.`;
+        
+        const detail =
+          topExamples.length
+            ? `Examples: ${topExamples.join(', ')}`
+            : '';
+        
+        return {
+          pillar: 'Money Pages',
+          severity, // 'high' | 'medium' | 'low'
+          message: description,
+          detail: detail,
+          link: '#money-pages-section'
+        };
+      }
+      
       const getPriorities = (scoresObj, schemaAuditData, localSignalsData, authorityComponents) => {
         const priorities = [];
         
@@ -5112,18 +5188,24 @@
         }
         
         // Phase 2: Add brand priority if applicable
-        const brandPriority = getBrandPriority({ brandOverlay: scoresObj.brandOverlay });
+        const brandPriority = getBrandPriority ? getBrandPriority({ brandOverlay: scoresObj.brandOverlay }) : null;
         if (brandPriority) {
           priorities.push(brandPriority);
         }
         
-        // Sort by severity (high > medium > low) and limit to top 5 (or 4 if brand is included)
+        // Phase 2: Add money pages priority if applicable
+        const moneyPriority = getMoneyPagesPriority(scoresObj.moneyPagesMetrics);
+        if (moneyPriority) {
+          priorities.push(moneyPriority);
+        }
+        
+        // Sort by severity (high > medium > low) and limit to top items
         const severityOrder = { high: 3, medium: 2, low: 1 };
         const sorted = priorities.sort((a, b) => severityOrder[b.severity] - severityOrder[a.severity]);
         
-        // If we have a brand priority and more than 4 items, keep highest severity items
-        // Allow up to 4 items when brand is present, or 5 otherwise
-        const maxItems = brandPriority ? 4 : 5;
+        // Allow up to 4 items when brand or money pages priorities are present, or 5 otherwise
+        const hasOverlayPriorities = brandPriority || moneyPriority;
+        const maxItems = hasOverlayPriorities ? 4 : 5;
         return sorted.slice(0, maxItems);
       };
       
@@ -7362,12 +7444,6 @@ Final Score: ${score}/100`;
         // Update stored sorted data
         window.moneyPagesData = sortedRows;
         
-        // Pagination
-        const totalPages = Math.ceil(sortedRows.length / rowsPerPage);
-        const startIdx = (currentPage - 1) * rowsPerPage;
-        const endIdx = startIdx + rowsPerPage;
-        const pageRows = sortedRows.slice(startIdx, endIdx);
-        
         // Helper function to get sort icon
         const getSortIcon = (column) => {
           if (!window.moneyPagesSortColumn || window.moneyPagesSortColumn !== column) {
@@ -7382,15 +7458,52 @@ Final Score: ${score}/100`;
         const dateRange = parseInt(localStorage.getItem('gsc_date_range') || '30', 10);
         const dateRangeText = dateRange === 30 ? '30 days' : dateRange === 60 ? '60 days' : dateRange === 90 ? '90 days' : dateRange === 120 ? '120 days' : dateRange === 180 ? '180 days' : dateRange === 365 ? '365 days' : dateRange === 540 ? '540 days' : `${dateRange} days`;
         
+        // Get current filter values (stored globally)
+        const currentCategoryFilter = window.moneyPagesCategoryFilter || 'ALL';
+        const currentMinImpressions = window.moneyPagesMinImpressions || 0;
+        
+        // Apply filters before sorting/pagination
+        let filteredRows = sortedRows.filter(row => {
+          const matchCat = currentCategoryFilter === 'ALL' || row.category === currentCategoryFilter;
+          const matchImp = (row.impressions || 0) >= currentMinImpressions;
+          return matchCat && matchImp;
+        });
+        
+        // Update pagination based on filtered rows
+        const filteredTotalPages = Math.ceil(filteredRows.length / rowsPerPage);
+        const filteredStartIdx = (currentPage - 1) * rowsPerPage;
+        const filteredEndIdx = filteredStartIdx + rowsPerPage;
+        const pageRows = filteredRows.slice(filteredStartIdx, filteredEndIdx);
+        
         let tableHtml = `
-          <div style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; padding-bottom: 0.75rem; border-bottom: 2px solid #e2e8f0;">
-            <div>
-              <h4 style="margin: 0 0 0.25rem 0; font-size: 1rem; font-weight: 700; color: #1e293b;">Money Pages Opportunity Table</h4>
-              <span style="font-size: 0.75rem; color: #334155; font-weight: 500;">Data period: Last ${dateRangeText} • Showing ${startIdx + 1}-${Math.min(endIdx, sortedRows.length)} of ${sortedRows.length}</span>
+          <div style="margin-bottom: 0.75rem; padding-bottom: 0.75rem; border-bottom: 2px solid #e2e8f0;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem;">
+              <div>
+                <h4 style="margin: 0 0 0.25rem 0; font-size: 1rem; font-weight: 700; color: #1e293b;">Money Pages Opportunity Table</h4>
+                <p class="table-subtitle" style="margin: 0 0 0.5rem 0; font-size: 0.75rem; color: #64748b;">
+                  Filter by opportunity type and impressions to focus optimisation work.
+                </p>
+                <span style="font-size: 0.75rem; color: #334155; font-weight: 500;">Data period: Last ${dateRangeText} • Showing ${filteredStartIdx + 1}-${Math.min(filteredEndIdx, filteredRows.length)} of ${filteredRows.length}</span>
+              </div>
+              <div class="table-controls" style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #475569;">
+                  Show:
+                  <select id="money-pages-filter-category" style="padding: 0.4rem 0.6rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.85rem; background: white; cursor: pointer;">
+                    <option value="ALL" ${currentCategoryFilter === 'ALL' ? 'selected' : ''}>All categories</option>
+                    <option value="HIGH_OPPORTUNITY" ${currentCategoryFilter === 'HIGH_OPPORTUNITY' ? 'selected' : ''}>High opportunity</option>
+                    <option value="VISIBILITY_FIX" ${currentCategoryFilter === 'VISIBILITY_FIX' ? 'selected' : ''}>Visibility fix</option>
+                    <option value="MAINTAIN" ${currentCategoryFilter === 'MAINTAIN' ? 'selected' : ''}>Maintain</option>
+                  </select>
+                </label>
+                <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #475569;">
+                  Min impressions:
+                  <input type="number" id="money-pages-min-impressions" min="0" step="50" value="${currentMinImpressions}" style="padding: 0.4rem 0.6rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.85rem; width: 100px;" />
+                </label>
+                <button id="money-pages-copy-urls" type="button" style="font-size: 0.8rem; padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #2563eb; background: #2563eb; cursor: pointer; color: white; font-weight: 600; transition: all 0.2s; box-shadow: 0 1px 2px rgba(0,0,0,0.1);" onmouseover="this.style.background='#1d4ed8'; this.style.borderColor='#1d4ed8';" onmouseout="this.style.background='#2563eb'; this.style.borderColor='#2563eb';">
+                  Copy current URLs
+                </button>
+              </div>
             </div>
-            <button id="money-pages-copy-urls" type="button" style="font-size: 0.8rem; padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #2563eb; background: #2563eb; cursor: pointer; color: white; font-weight: 600; transition: all 0.2s; box-shadow: 0 1px 2px rgba(0,0,0,0.1);" onmouseover="this.style.background='#1d4ed8'; this.style.borderColor='#1d4ed8';" onmouseout="this.style.background='#2563eb'; this.style.borderColor='#2563eb';">
-              Copy URLs
-            </button>
           </div>
           <div style="overflow-x: auto; border-radius: 6px; border: 1px solid #e2e8f0;">
             <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
@@ -7449,7 +7562,7 @@ Final Score: ${score}/100`;
           
           tableHtml += `
             <tr style="border-bottom: 1px solid #f1f5f9; background: ${rowBg}; transition: background 0.2s;" onmouseover="this.style.background='#f8f9fa';" onmouseout="this.style.background='${rowBg}';">
-              <td style="padding: 0.75rem; color: #0f172a; font-weight: 600; vertical-align: top; width: 40px;">${startIdx + idx + 1}</td>
+              <td style="padding: 0.75rem; color: #0f172a; font-weight: 600; vertical-align: top; width: 40px;">${filteredStartIdx + idx + 1}</td>
               <td style="padding: 0.75rem; vertical-align: top; width: 500px; min-width: 500px;">
                 <a href="${row.url}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: none; font-weight: 500; border-bottom: 1px solid transparent; transition: all 0.2s;" onmouseover="this.style.color='#1d4ed8'; this.style.borderBottomColor='#1d4ed8';" onmouseout="this.style.color='#2563eb'; this.style.borderBottomColor='transparent';" title="Open ${row.url} in new tab">
                   <div style="font-size: 0.85rem; color: #64748b; margin-bottom: 0.25rem; word-break: break-all;">${row.url}</div>
@@ -7505,18 +7618,18 @@ Final Score: ${score}/100`;
           </div>
         `;
         
-        // Pagination controls and total count
+        // Pagination controls and total count (using filtered data)
         tableHtml += `
           <div style="margin-top: 1rem; display: flex; justify-content: space-between; align-items: center; padding-top: 1rem; border-top: 1px solid #e2e8f0;">
             <div style="font-size: 0.85rem; color: #64748b;">
-              ${totalPages > 1 ? `Page ${currentPage} of ${totalPages} • ` : ''}Total URLs: ${sortedRows.length}
+              ${filteredTotalPages > 1 ? `Page ${currentPage} of ${filteredTotalPages} • ` : ''}Total URLs: ${filteredRows.length}${filteredRows.length !== sortedRows.length ? ` (filtered from ${sortedRows.length})` : ''}
             </div>
-            ${totalPages > 1 ? `
+            ${filteredTotalPages > 1 ? `
             <div style="display: flex; gap: 0.5rem;">
               <button id="money-pages-prev" type="button" ${currentPage === 1 ? 'disabled' : ''} style="font-size: 0.8rem; padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #cbd5e1; background: ${currentPage === 1 ? '#f1f5f9' : 'white'}; cursor: ${currentPage === 1 ? 'not-allowed' : 'pointer'}; color: ${currentPage === 1 ? '#94a3b8' : '#475569'}; font-weight: 600; transition: all 0.2s;" ${currentPage === 1 ? '' : 'onmouseover="this.style.background=\'#f8f9fa\'; this.style.borderColor=\'#94a3b8\';" onmouseout="this.style.background=\'white\'; this.style.borderColor=\'#cbd5e1\';"'}>
                 Previous
               </button>
-              <button id="money-pages-next" type="button" ${currentPage === totalPages ? 'disabled' : ''} style="font-size: 0.8rem; padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #cbd5e1; background: ${currentPage === totalPages ? '#f1f5f9' : 'white'}; cursor: ${currentPage === totalPages ? 'not-allowed' : 'pointer'}; color: ${currentPage === totalPages ? '#94a3b8' : '#475569'}; font-weight: 600; transition: all 0.2s;" ${currentPage === totalPages ? '' : 'onmouseover="this.style.background=\'#f8f9fa\'; this.style.borderColor=\'#94a3b8\';" onmouseout="this.style.background=\'white\'; this.style.borderColor=\'#cbd5e1\';"'}>
+              <button id="money-pages-next" type="button" ${currentPage === filteredTotalPages ? 'disabled' : ''} style="font-size: 0.8rem; padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #cbd5e1; background: ${currentPage === filteredTotalPages ? '#f1f5f9' : 'white'}; cursor: ${currentPage === filteredTotalPages ? 'not-allowed' : 'pointer'}; color: ${currentPage === filteredTotalPages ? '#94a3b8' : '#475569'}; font-weight: 600; transition: all 0.2s;" ${currentPage === filteredTotalPages ? '' : 'onmouseover="this.style.background=\'#f8f9fa\'; this.style.borderColor=\'#94a3b8\';" onmouseout="this.style.background=\'white\'; this.style.borderColor=\'#cbd5e1\';"'}>
                 Next
               </button>
             </div>
@@ -7650,7 +7763,30 @@ Final Score: ${score}/100`;
           window.moneyPagesCurrentPage = 1;
         }
         
-        // Render table with pagination
+        // Store full rows array for filtering
+        window.moneyPagesAllRows = rows;
+        
+        // Initialize filter state if not set
+        if (window.moneyPagesCategoryFilter === undefined) {
+          window.moneyPagesCategoryFilter = 'ALL';
+        }
+        if (window.moneyPagesMinImpressions === undefined) {
+          window.moneyPagesMinImpressions = 0;
+        }
+        
+        // Function to apply filters and re-render table
+        const applyFiltersAndRender = () => {
+          const currentPage = window.moneyPagesCurrentPage || 1;
+          tableContainer.innerHTML = renderMoneyPagesTable(rows, currentPage, 10);
+          
+          // Re-attach all handlers after re-render
+          attachMoneyPagesSortHandlers();
+          attachMoneyPagesPaginationHandlers(rows);
+          attachMoneyPagesCopyHandler(rows);
+          attachMoneyPagesFilterHandlers(rows);
+        };
+        
+        // Initial render
         const currentPage = window.moneyPagesCurrentPage || 1;
         tableContainer.innerHTML = renderMoneyPagesTable(rows, currentPage, 10);
         
@@ -7662,6 +7798,9 @@ Final Score: ${score}/100`;
         
         // Attach copy button handler
         attachMoneyPagesCopyHandler(rows);
+        
+        // Attach filter handlers (Phase 2)
+        attachMoneyPagesFilterHandlers(rows, applyFiltersAndRender);
         
         // Show section
         section.style.display = 'block';
@@ -7785,6 +7924,196 @@ Final Score: ${score}/100`;
           }
         }, 50);
       }
+      
+      // Attach filter handlers for Money Pages table (Phase 2)
+      function attachMoneyPagesFilterHandlers(allRows, onFilterChange) {
+        setTimeout(() => {
+          const categoryFilterEl = document.getElementById('money-pages-filter-category');
+          const minImpressionsEl = document.getElementById('money-pages-min-impressions');
+          const copyBtn = document.getElementById('money-pages-copy-urls');
+          const tableContainer = document.getElementById('money-pages-table-container');
+          
+          if (!categoryFilterEl || !minImpressionsEl || !tableContainer) return;
+          
+          // Function to apply filters and re-render
+          const applyFilters = () => {
+            const filterCat = categoryFilterEl.value || 'ALL';
+            const minImp = parseInt(minImpressionsEl.value, 10) || 0;
+            
+            // Store filter state globally
+            window.moneyPagesCategoryFilter = filterCat;
+            window.moneyPagesMinImpressions = minImp;
+            
+            // Reset to page 1 when filters change
+            window.moneyPagesCurrentPage = 1;
+            
+            // Re-render table with filters
+            if (onFilterChange) {
+              onFilterChange();
+            } else {
+              // Fallback: re-render directly
+              const currentPage = 1;
+              tableContainer.innerHTML = renderMoneyPagesTable(allRows, currentPage, 10);
+              attachMoneyPagesSortHandlers();
+              attachMoneyPagesPaginationHandlers(allRows);
+              attachMoneyPagesCopyHandler(allRows);
+              attachMoneyPagesFilterHandlers(allRows, onFilterChange);
+            }
+          };
+          
+          // Attach filter change handlers
+          categoryFilterEl.addEventListener('change', applyFilters);
+          minImpressionsEl.addEventListener('change', applyFilters);
+          
+          // Update copy button to use filtered data
+          if (copyBtn) {
+            const newCopyBtn = copyBtn.cloneNode(true);
+            copyBtn.parentNode.replaceChild(newCopyBtn, copyBtn);
+            newCopyBtn.addEventListener('click', async () => {
+              const filterCat = categoryFilterEl.value || 'ALL';
+              const minImp = parseInt(minImpressionsEl.value, 10) || 0;
+              
+              const filtered = (allRows || []).filter(row => {
+                const matchCat = filterCat === 'ALL' || row.category === filterCat;
+                const matchImp = (row.impressions || 0) >= minImp;
+                return matchCat && matchImp;
+              });
+              
+              const urls = filtered.map(r => r.url).join('\n');
+              if (urls) {
+                try {
+                  await navigator.clipboard.writeText(urls);
+                  newCopyBtn.textContent = 'Copied!';
+                  newCopyBtn.style.color = '#10b981';
+                  setTimeout(() => {
+                    newCopyBtn.textContent = 'Copy current URLs';
+                    newCopyBtn.style.color = 'white';
+                  }, 2000);
+                } catch (err) {
+                  newCopyBtn.textContent = 'Copy failed';
+                  newCopyBtn.style.color = '#ef4444';
+                  setTimeout(() => {
+                    newCopyBtn.textContent = 'Copy current URLs';
+                    newCopyBtn.style.color = 'white';
+                  }, 2000);
+                }
+              }
+            });
+          }
+        }, 50);
+      }
+      
+      // Render Money Pages category chart (Phase 2)
+      let moneyPagesCategoryChart = null;
+      
+      function renderMoneyPagesCategoryChart(moneyPagesMetrics) {
+        const canvas = document.getElementById('money-pages-category-chart');
+        if (!canvas || !moneyPagesMetrics || !moneyPagesMetrics.summaryByCategory) {
+          // Hide chart row if no data
+          const chartRow = document.getElementById('money-pages-chart-row');
+          if (chartRow) {
+            chartRow.style.display = 'none';
+          }
+          return;
+        }
+        
+        const { summaryByCategory } = moneyPagesMetrics;
+        
+        const labels = [
+          'High opportunity',
+          'Visibility fix',
+          'Maintain'
+        ];
+        const keys = ['HIGH_OPPORTUNITY', 'VISIBILITY_FIX', 'MAINTAIN'];
+        
+        const counts = keys.map(k => (summaryByCategory[k]?.count || 0));
+        const impressions = keys.map(k => (summaryByCategory[k]?.impressions || 0));
+        
+        // If no data, show a simple message and skip chart
+        const totalCount = counts.reduce((a, b) => a + b, 0);
+        if (totalCount === 0) {
+          const chartRow = document.getElementById('money-pages-chart-row');
+          if (chartRow) {
+            chartRow.innerHTML = `
+              <div class="chart-card" style="background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                <h3 style="margin: 0 0 0.5rem 0; font-size: 1rem; font-weight: 700; color: #1e293b;">Money Pages Opportunity Mix</h3>
+                <p class="chart-subtitle text-muted" style="margin: 0; font-size: 0.85rem; color: #94a3b8;">
+                  No money-page impressions found for this audit period.
+                </p>
+              </div>
+            `;
+          }
+          return;
+        }
+        
+        // Show chart row
+        const chartRow = document.getElementById('money-pages-chart-row');
+        if (chartRow) {
+          chartRow.style.display = 'block';
+        }
+        
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        
+        if (moneyPagesCategoryChart) {
+          moneyPagesCategoryChart.destroy();
+        }
+        
+        // Use impressions as weight for the chart slices
+        const dataValues = impressions;
+        
+        moneyPagesCategoryChart = new Chart(ctx, {
+          type: 'doughnut',
+          data: {
+            labels,
+            datasets: [
+              {
+                data: dataValues,
+                backgroundColor: [
+                  '#f59e0b', // Amber for High opportunity
+                  '#ef4444', // Red for Visibility fix
+                  '#10b981'  // Green for Maintain
+                ],
+                borderColor: [
+                  '#d97706',
+                  '#dc2626',
+                  '#059669'
+                ],
+                borderWidth: 2
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: {
+                position: 'bottom',
+                labels: {
+                  padding: 15,
+                  font: {
+                    size: 12
+                  }
+                }
+              },
+              tooltip: {
+                callbacks: {
+                  label: function (context) {
+                    const label = context.label || '';
+                    const value = context.raw || 0;
+                    const total = dataValues.reduce((a, b) => a + b, 0) || 1;
+                    const pct = (value / total) * 100;
+                    const count = counts[context.dataIndex] || 0;
+                    return `${label}: ${value.toLocaleString()} impressions, ` +
+                           `${count} pages (${pct.toFixed(1)}%)`;
+                  }
+                }
+              }
+            },
+            cutout: '60%'
+          }
+        });
+      }
 
       // Create Top Pages section (full width, below pillar cards)
       createTopPagesSection(scores, saved);
@@ -7816,6 +8145,17 @@ Final Score: ${score}/100`;
               <div class="metric-card" id="money-summary-ctr" style="flex: 1; min-width: 200px; padding: 1rem; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"></div>
               <div class="metric-card" id="money-summary-position" style="flex: 1; min-width: 200px; padding: 1rem; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"></div>
               <div class="metric-card" id="money-summary-coverage" style="flex: 1; min-width: 200px; padding: 1rem; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"></div>
+            </div>
+            
+            <!-- Chart row (Phase 2) -->
+            <div class="chart-row" id="money-pages-chart-row" style="margin-bottom: 1.5rem;">
+              <div class="chart-card" style="background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                <h3 style="margin: 0 0 0.5rem 0; font-size: 1rem; font-weight: 700; color: #1e293b;">Money Pages Opportunity Mix</h3>
+                <p class="chart-subtitle" style="margin: 0 0 1rem 0; font-size: 0.85rem; color: #64748b;">
+                  How your money pages are distributed across improvement categories in this audit window.
+                </p>
+                <canvas id="money-pages-category-chart" height="140"></canvas>
+              </div>
             </div>
             
             <!-- Table container (will be populated by renderMoneyPagesTable) -->
@@ -7860,6 +8200,9 @@ Final Score: ${score}/100`;
           debugLog('⚠ Money Pages: No metrics data, will show "No data" message', 'warn');
         }
         renderMoneyPagesSection(scores.moneyPagesMetrics || null);
+        if (scores.moneyPagesMetrics) {
+          renderMoneyPagesCategoryChart(scores.moneyPagesMetrics);
+        }
       }, 100);
       
       // Remove existing scorecard table if it exists
