@@ -8287,11 +8287,13 @@ Final Score: ${score}/100`;
           const currentPage = window.moneyPagesCurrentPage || 1;
           tableContainer.innerHTML = renderMoneyPagesTable(filteredRows, currentPage, 10);
           
-          // Re-attach all handlers after re-render (use filtered rows for pagination/copy)
+          // Re-attach all handlers after re-render
+          // Use filtered rows for pagination/copy, but use original rows for filter handlers
+          // (filter handlers need the full dataset to filter from)
           attachMoneyPagesSortHandlers();
           attachMoneyPagesPaginationHandlers(filteredRows);
           attachMoneyPagesCopyHandler(filteredRows);
-          attachMoneyPagesFilterHandlers(filteredRows, applyFiltersAndRender);
+          attachMoneyPagesFilterHandlers(rows, applyFiltersAndRender);
           
           // Update all other sections with filtered data
           setTimeout(() => {
@@ -8500,7 +8502,10 @@ Final Score: ${score}/100`;
               attachMoneyPagesSortHandlers();
               attachMoneyPagesPaginationHandlers(filteredRows);
               attachMoneyPagesCopyHandler(filteredRows);
-              attachMoneyPagesFilterHandlers(filteredRows, onFilterChange);
+              // Use original allRows for filter handlers (they need full dataset to filter from)
+              // Get original rows from moneyPagesMetrics
+              const originalRows = moneyPagesMetrics?.rows || allRows;
+              attachMoneyPagesFilterHandlers(originalRows, onFilterChange);
               
               // Re-render chart and KPIs with filters
               setTimeout(() => {
