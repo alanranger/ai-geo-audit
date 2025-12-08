@@ -133,7 +133,7 @@ export default async function handler(req, res) {
         const brandScore = scores.brandOverlay?.score || 0;
         if (snippetReadinessScore === 0 && brandScore === 0) return null;
         return Math.round(0.5 * snippetReadinessScore + 0.3 * visibilityScore + 0.2 * brandScore);
-      })()
+      })(),
       
       // Authority Component Scores (for historical tracking and debugging)
       authority_behaviour_score: scores?.authorityComponents?.behaviour || null,
