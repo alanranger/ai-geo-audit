@@ -8301,8 +8301,13 @@ Final Score: ${score}/100`;
             renderMoneyPagesCategoryChart(moneyPagesMetrics, 0);
             
             // Recalculate behaviour for filtered pages
+            debugLog(`🔄 Filter change: Recalculating behaviour for ${filteredRows.length} filtered rows`, 'info');
+            debugLog(`🔄 Filter change: queryPages available: ${!!queryPages}, length: ${queryPages?.length || 0}`, 'info');
+            
             const filteredBehaviour = window.computeMoneyPagesBehaviour ? 
               window.computeMoneyPagesBehaviour(queryPages, filteredRows) : null;
+            
+            debugLog(`🔄 Filter change: filteredBehaviour calculated: ${!!filteredBehaviour}, impressions: ${filteredBehaviour?.impressions || 0}`, 'info');
             
             // Update all sections
             renderMoneyPagesBehaviourKpis(filteredBehaviour, filteredMetrics, queryPages);
@@ -9046,21 +9051,35 @@ Final Score: ${score}/100`;
         const top10El = document.getElementById('money-top10-ctr-value');
         const cardEl = document.getElementById('money-behaviour-card');
 
+        debugLog(`🎯 renderMoneyPagesBehaviourKpis called: behaviour=${!!behaviour}, moneyPagesMetrics=${!!moneyPagesMetrics}, queryPages=${!!queryPages}`, 'info');
+        debugLog(`🎯 DOM elements found: scoreEl=${!!scoreEl}, statusEl=${!!statusEl}, ctrEl=${!!ctrEl}, top10El=${!!top10El}`, 'info');
+
         // Use the behaviour passed in (should already be filtered)
         // Only recalculate if behaviour is null and we have the data to calculate it
         let filteredBehaviour = behaviour;
         
         // Fallback: if no behaviour passed but we have metrics and queryPages, try to calculate
         if (!filteredBehaviour && moneyPagesMetrics && queryPages) {
+          debugLog(`🎯 No behaviour passed, attempting to calculate from filtered metrics`, 'info');
           // Get filtered metrics based on ALL current filters
           const filteredMetrics = getFilteredMoneyPagesMetrics(moneyPagesMetrics);
           if (filteredMetrics && filteredMetrics.rows && filteredMetrics.rows.length > 0) {
+            debugLog(`🎯 Calculating behaviour for ${filteredMetrics.rows.length} filtered rows`, 'info');
             filteredBehaviour = window.computeMoneyPagesBehaviour ? 
               window.computeMoneyPagesBehaviour(queryPages, filteredMetrics.rows) : null;
+            debugLog(`🎯 Calculated behaviour: ${!!filteredBehaviour}, impressions: ${filteredBehaviour?.impressions || 0}`, 'info');
+          } else {
+            debugLog(`🎯 No filtered metrics or rows available`, 'warn');
           }
         }
 
-        if (!scoreEl || !filteredBehaviour || !filteredBehaviour.impressions) {
+        if (!scoreEl) {
+          debugLog(`🎯 ⚠ scoreEl not found in DOM`, 'warn');
+          return;
+        }
+
+        if (!filteredBehaviour || !filteredBehaviour.impressions) {
+          debugLog(`🎯 ⚠ No valid behaviour data: filteredBehaviour=${!!filteredBehaviour}, impressions=${filteredBehaviour?.impressions || 0}`, 'warn');
           if (scoreEl) scoreEl.textContent = 'N/A';
           if (statusEl) statusEl.textContent = 'Not enough data for money pages in this window.';
           if (ctrEl) ctrEl.textContent = '—';
