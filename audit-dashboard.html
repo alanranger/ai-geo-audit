@@ -2719,15 +2719,19 @@
       if (SUPPORT_EXACT.has(path)) return PageSegment.SUPPORT;
       
       // Money pages = Events + Products + Landing pages (excluding blog posts)
-      // Events: URLs starting with specific paths
+      // Events: URLs starting with specific paths (check both with and without trailing slash)
       if (path.startsWith('/beginners-photography-lessons/') || 
-          path.startsWith('/photographic-workshops-near-me/')) {
+          path.startsWith('/beginners-photography-lessons') ||
+          path.startsWith('/photographic-workshops-near-me/') ||
+          path.startsWith('/photographic-workshops-near-me')) {
         return PageSegment.MONEY;
       }
       
-      // Products: URLs starting with specific paths
+      // Products: URLs starting with specific paths (check both with and without trailing slash)
       if (path.startsWith('/photo-workshops-uk/') || 
-          path.startsWith('/photography-services-near-me/')) {
+          path.startsWith('/photo-workshops-uk') ||
+          path.startsWith('/photography-services-near-me/') ||
+          path.startsWith('/photography-services-near-me')) {
         return PageSegment.MONEY;
       }
       
@@ -2750,26 +2754,14 @@
       // Landing pages: Everything else that's NOT blog posts, education, support, or system
       // Default to MONEY (landing page) if it's not a blog post and doesn't match other categories
       // This ensures all non-blog pages are treated as money pages (landing pages) by default
-      if (!path.startsWith('/blog-on-photography/')) {
-        // Additional money page keywords for landing pages (exclude fine-art print pages)
-        if (!isFineArtGalleryPage(path)) {
-          const MONEY_KEYWORDS = [
-            'workshop', 'workshops', 'lesson', 'lessons', 'course', 'courses', 'course-finder',
-            'class', 'classes', 'training', 'tuition', 'mentoring', 'academy',
-            'gift-voucher', 'gift-vouchers', 'presents-for-photographers', 'session-vouchers',
-            'photography-services-near-me', 'photography-services', 'photography-shop',
-            '1-2-1', 'hire-a-professional-photographer', 'prints',
-            'print-preparation-service', 'special-offers',
-          ];
-          if (MONEY_KEYWORDS.some((k) => path.includes(k))) return PageSegment.MONEY;
-          
-          // If no keywords match but it's not a blog post, treat as landing page (money page)
-          // This catches any other money pages that don't match the specific patterns above
-          return PageSegment.MONEY;
-        }
+      // Only exclude fine-art gallery pages from being money pages
+      if (!isFineArtGalleryPage(path)) {
+        // If we've gotten here, it's not education, support, system, or fine-art
+        // So it must be a money page (landing page)
+        return PageSegment.MONEY;
       }
       
-      // Everything else = system
+      // Everything else = system (only fine-art gallery pages should reach here)
       return PageSegment.SYSTEM;
     }
     
@@ -3984,15 +3976,19 @@
         if (!url) return 'LANDING';
         const path = normalisePath(url);
         
-        // Product Pages: URLs starting with specific paths
+        // Product Pages: URLs starting with specific paths (check both with and without trailing slash)
         if (path.startsWith('/photo-workshops-uk/') || 
-            path.startsWith('/photography-services-near-me/')) {
+            path.startsWith('/photo-workshops-uk') ||
+            path.startsWith('/photography-services-near-me/') ||
+            path.startsWith('/photography-services-near-me')) {
           return 'PRODUCT';
         }
         
-        // Event Pages: URLs starting with specific paths
+        // Event Pages: URLs starting with specific paths (check both with and without trailing slash)
         if (path.startsWith('/beginners-photography-lessons/') || 
-            path.startsWith('/photographic-workshops-near-me/')) {
+            path.startsWith('/beginners-photography-lessons') ||
+            path.startsWith('/photographic-workshops-near-me/') ||
+            path.startsWith('/photographic-workshops-near-me')) {
           return 'EVENT';
         }
         
