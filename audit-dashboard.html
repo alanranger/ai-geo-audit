@@ -2316,15 +2316,20 @@
           const result = await response.json();
           debugLog('✓ Audit results saved to Supabase', 'success');
         } else {
-          // Try to parse as JSON, but handle plain text errors too
+          // Read response body once as text, then try to parse as JSON to avoid "body stream already read" error
           let errorMessage = 'Unknown error';
           try {
-            const error = await response.json();
-            errorMessage = error.message || error.details || JSON.stringify(error);
-          } catch (jsonError) {
-            // If JSON parsing fails, read as text
-            const errorText = await response.text();
-            errorMessage = errorText || `HTTP ${response.status}: ${response.statusText}`;
+            const responseText = await response.text();
+            // Try to parse as JSON
+            try {
+              const error = JSON.parse(responseText);
+              errorMessage = error.message || error.details || responseText;
+            } catch (parseError) {
+              // Not JSON, use text as-is
+              errorMessage = responseText || `HTTP ${response.status}: ${response.statusText}`;
+            }
+          } catch (textError) {
+            errorMessage = `HTTP ${response.status}: ${response.statusText}`;
           }
           // Don't show error to user - Supabase is optional for now
           debugLog(`⚠ Could not save to Supabase: ${errorMessage}`, 'warn');
