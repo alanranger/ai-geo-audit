@@ -108,8 +108,8 @@ export default async function handler(req, res) {
         
         const composite = 0.5 * snippetReadinessScore + 0.3 * visibilityScore + 0.2 * brandScore;
         let label;
-        if (composite < 50) label = 'Low';
-        else if (composite < 75) label = 'Medium';
+        if (composite < 60) label = 'Low';
+        else if (composite < 80) label = 'Medium';
         else label = 'High';
         
         const reasons = [];

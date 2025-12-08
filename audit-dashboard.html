@@ -2354,8 +2354,18 @@
             return result.data;
           }
         } else {
-          const error = await response.json();
-          debugLog(`⚠ Could not fetch from Supabase: ${error.message || 'Unknown error'}`, 'warn');
+          // Read response body once as text, then try to parse as JSON to avoid "body stream already read" error
+          try {
+            const responseText = await response.text();
+            try {
+              const error = JSON.parse(responseText);
+              debugLog(`⚠ Could not fetch from Supabase: ${error.message || 'Unknown error'}`, 'warn');
+            } catch (parseError) {
+              debugLog(`⚠ Could not fetch from Supabase: ${responseText || 'Unknown error'}`, 'warn');
+            }
+          } catch (textError) {
+            debugLog(`⚠ Could not fetch from Supabase: HTTP ${response.status}`, 'warn');
+          }
         }
       } catch (error) {
         debugLog(`⚠ Supabase fetch error: ${error.message}`, 'warn');
