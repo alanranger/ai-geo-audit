@@ -26,6 +26,33 @@ export default async function handler(req, res) {
   }
 
   try {
+    // In Vercel serverless functions, req.body is automatically parsed for JSON
+    // But we need to ensure it exists and is an object
+    let bodyData = req.body;
+    
+    // If body is not already parsed (shouldn't happen in Vercel, but safety check)
+    if (!bodyData && req.body && typeof req.body === 'string') {
+      try {
+        bodyData = JSON.parse(req.body);
+      } catch (parseError) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Invalid JSON in request body',
+          details: parseError.message,
+          meta: { generatedAt: new Date().toISOString() }
+        });
+      }
+    }
+    
+    // Ensure bodyData is an object
+    if (!bodyData || typeof bodyData !== 'object') {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Request body must be a JSON object',
+        meta: { generatedAt: new Date().toISOString() }
+      });
+    }
+    
     const {
       propertyUrl,
       auditDate,
@@ -34,7 +61,7 @@ export default async function handler(req, res) {
       searchData,
       snippetReadiness,
       localSignals
-    } = req.body;
+    } = bodyData;
 
     if (!propertyUrl || !auditDate) {
       return res.status(400).json({

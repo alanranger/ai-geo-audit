@@ -8082,7 +8082,10 @@ Final Score: ${score}/100`;
             chartRow.innerHTML = `
               <div class="chart-card" style="background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                 <h3 style="margin: 0 0 0.5rem 0; font-size: 1rem; font-weight: 700; color: #1e293b;">Money Pages Opportunity Mix</h3>
-                <p class="chart-subtitle text-muted" style="margin: 0; font-size: 0.85rem; color: #94a3b8;">
+                <p class="chart-subtitle text-muted" style="margin: 0 0 1rem 0; font-size: 0.85rem; color: #64748b;">
+                  How your money pages are distributed across improvement categories in this audit window.
+                </p>
+                <p style="margin: 0; font-size: 0.85rem; color: #94a3b8; font-style: italic;">
                   No money-page impressions found for this audit period.
                 </p>
               </div>
@@ -8106,15 +8109,31 @@ Final Score: ${score}/100`;
           return;
         }
         
+        // Prevent multiple simultaneous renders
+        if (moneyPagesCategoryChart) {
+          debugLog('⚠ Chart already exists, skipping render to prevent loop', 'warn');
+          return;
+        }
+        
+        // Check if canvas is actually visible and has dimensions
+        const canvasRect = canvas.getBoundingClientRect();
+        if (canvasRect.width === 0 || canvasRect.height === 0) {
+          debugLog('⚠ Canvas has zero dimensions, retrying...', 'warn');
+          if (retryCount < 2) {
+            setTimeout(() => renderMoneyPagesCategoryChart(moneyPagesMetrics, retryCount + 1), 300);
+          }
+          return;
+        }
+        
         const ctx = canvas.getContext('2d');
         if (!ctx) {
           debugLog('⚠ Could not get canvas context', 'warn');
           return;
         }
         
-        if (moneyPagesCategoryChart) {
-          moneyPagesCategoryChart.destroy();
-        }
+        // Set explicit canvas dimensions to prevent resize loops
+        canvas.width = 500;
+        canvas.height = 300;
         
         // Use impressions as weight for the chart slices
         const dataValues = impressions;
@@ -8144,7 +8163,7 @@ Final Score: ${score}/100`;
             ]
           },
           options: {
-            responsive: true,
+            responsive: false,
             maintainAspectRatio: false,
             plugins: {
               legend: {
@@ -8219,7 +8238,9 @@ Final Score: ${score}/100`;
                 <p class="chart-subtitle" style="margin: 0 0 1rem 0; font-size: 0.85rem; color: #64748b;">
                   How your money pages are distributed across improvement categories in this audit window.
                 </p>
-                <canvas id="money-pages-category-chart" height="140"></canvas>
+                <div style="position: relative; width: 500px; height: 300px; margin: 0 auto; overflow: hidden;">
+                  <canvas id="money-pages-category-chart" width="500" height="300" style="display: block; max-width: 500px; max-height: 300px;"></canvas>
+                </div>
               </div>
             </div>
             
@@ -8266,20 +8287,14 @@ Final Score: ${score}/100`;
         }
         renderMoneyPagesSection(scores.moneyPagesMetrics || null);
         // Render chart after a delay to ensure DOM and Chart.js are ready
-        // Use multiple attempts to handle timing issues
-        if (scores.moneyPagesMetrics) {
-          // First attempt after short delay
+        // Only render once to prevent infinite loops
+        if (scores.moneyPagesMetrics && !moneyPagesCategoryChart) {
           setTimeout(() => {
-            renderMoneyPagesCategoryChart(scores.moneyPagesMetrics, 0);
-          }, 100);
-          // Backup attempt after longer delay
-          setTimeout(() => {
-            const canvas = document.getElementById('money-pages-category-chart');
-            if (canvas && !moneyPagesCategoryChart) {
-              debugLog('Retrying chart render (backup attempt)', 'info');
+            // Double-check chart doesn't exist before rendering
+            if (!moneyPagesCategoryChart) {
               renderMoneyPagesCategoryChart(scores.moneyPagesMetrics, 0);
             }
-          }, 1000);
+          }, 200);
         }
       }, 100);
       
