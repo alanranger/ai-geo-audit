@@ -3834,7 +3834,7 @@
        * @param {Object} siteAgg - { avgCtr, avgPosition }
        * @returns {Object} { category, categoryLabel, categoryColor, recommendation }
        */
-      function classifyMoneyPageOpportunity(metrics, siteAgg, hasSchema = null) {
+      function classifyMoneyPageOpportunity(metrics, siteAgg, hasSchema = null, schemaTypes = []) {
         const { ctr, avgPosition, impressions } = metrics;
         const siteCtr = siteAgg.avgCtr || 0;
         const sitePos = siteAgg.avgPosition || 0;
@@ -3858,11 +3858,30 @@
         let categoryColor = 'red';
         let recommendation = '';
         
-        // Check if schema is missing (only recommend adding if actually missing)
-        const schemaMissing = hasSchema === false;
-        const schemaRecommendation = schemaMissing 
-          ? 'ensure Product/Event/FAQ schema is present, and '
-          : '';
+        // Check which schema types are missing (for money pages, we typically want Product, Event, FAQPage)
+        const desiredSchemaTypes = ['Product', 'Event', 'FAQPage'];
+        const presentTypes = Array.isArray(schemaTypes) && schemaTypes.length > 0 
+          ? schemaTypes.map(t => String(t).trim()) 
+          : [];
+        const missingTypes = desiredSchemaTypes.filter(type => !presentTypes.includes(type));
+        
+        // Build schema recommendation based on what's actually missing
+        let schemaRecommendation = '';
+        if (hasSchema === false) {
+          // No schema at all - generic recommendation
+          schemaRecommendation = 'ensure Product/Event/FAQ schema is present, and ';
+        } else if (presentTypes.length > 0 && missingTypes.length > 0) {
+          // Has some schema but missing specific types - be specific
+          if (missingTypes.length === desiredSchemaTypes.length) {
+            // Has schema but none of the desired types - generic
+            schemaRecommendation = 'ensure Product/Event/FAQ schema is present, and ';
+          } else {
+            // Missing specific types - be specific
+            const missingTypesText = missingTypes.join('/');
+            schemaRecommendation = `add ${missingTypesText} schema, and `;
+          }
+        }
+        // If hasSchema === true and missingTypes.length === 0, no recommendation needed
         
         // 1) High opportunity: decent position, impressions, but weak CTR
         const hasDecentPosition = safePos >= 3 && safePos <= HIGH_OPP_MAX_POS;
@@ -3876,10 +3895,18 @@
           category = 'HIGH_OPPORTUNITY';
           categoryLabel = 'High opportunity (improve CTR)';
           categoryColor = 'amber';
+          // Add schema recommendation if missing (use same logic as visibility fix)
+          let schemaNote = '';
+          if (hasSchema === false) {
+            schemaNote = ' Add Product/Event/FAQ schema to improve rich result eligibility. ';
+          } else if (presentTypes.length > 0 && missingTypes.length > 0 && missingTypes.length < desiredSchemaTypes.length) {
+            schemaNote = ` Add ${missingTypes.join('/')} schema to improve rich result eligibility. `;
+          }
           recommendation =
             `Good visibility (avg position ${safePos.toFixed(1)}) and ` +
             `${imp.toLocaleString()} impressions, but low CTR (${(safeCtr * 100).toFixed(1)}%). ` +
             `Prioritise title/meta improvements, "best" phrasing for this offer, ` +
+            `${schemaNote}` +
             `and adding FAQs that address objections for this money page.`;
         }
         // 2) Maintain: strong position + CTR above target
@@ -4017,7 +4044,7 @@
           
           // Classify opportunity
           const { category, categoryLabel, categoryColor, recommendation } =
-            classifyMoneyPageOpportunity({ ctr, avgPosition, impressions }, siteAgg, hasSchema);
+            classifyMoneyPageOpportunity({ ctr, avgPosition, impressions }, siteAgg, hasSchema, schemaTypes);
           
           // Push row
           moneyRows.push({
