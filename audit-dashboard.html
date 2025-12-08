@@ -990,7 +990,7 @@
           <strong>Data Sources:</strong> Scores are calculated using data from Google Search Console API (impressions, clicks, position, queries), Google Business Profile API (ratings, reviews, locations, service areas), schema markup validation, backlink CSV upload, and Trustpilot reviews snapshot.
         </p>
         <p style="color: #555; line-height: 1.6; margin-bottom: 0;">
-          <strong>Score Calculation:</strong> The AI GEO score combines five weighted pillars: Authority (30%: Behaviour 40% + Ranking 20% + Backlinks 20% + Reviews 20%), Content/Schema (25%: Foundation schemas 30% + Rich Results 35% + Coverage 20% + Diversity 15%), Visibility (20%: average position mapping), Local Entity (15%: NAP consistency + knowledge panel + locations), and Service Area (10%: service areas count with NAP multiplier). Brand & Entity Overlay and AI Summary Likelihood are overlay metrics that do not affect the AI GEO score but provide additional insights. Scores are normalized to 0-100 scale with thresholds: Green (≥70), Amber (40-69), Red (&lt;40).
+          <strong>Score Calculation:</strong> The AI GEO score combines five weighted pillars: Authority (30%: Behaviour 40% + Ranking 20% + Backlinks 20% + Reviews 20%), Content/Schema (25%: Foundation schemas 30% + Rich Results 35% + Coverage 20% + Diversity 15%), Visibility (20%: average position mapping), Local Entity (15%: NAP consistency + knowledge panel + locations), and Service Area (10%: service areas count with NAP multiplier). Brand & Entity Overlay and AI Summary Likelihood are overlay metrics that do not affect the AI GEO score but provide additional insights. Scores are normalized to 0-100 scale with thresholds: Green (≥70), Amber (40-69), Red (&lt;40). Money pages behaviour is tracked separately and stored per audit, so you can see whether Authority improvements are coming from better CTR on commercial pages or from broader site-wide changes.
         </p>
       </div>
 
@@ -2502,6 +2502,12 @@
       try {
         const auditDate = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
         
+        // Build Money Pages summary for trend tracking (Phase 3)
+        const moneyPagesSummary = buildMoneyPagesSummary(
+          scores?.moneyPagesMetrics || null,
+          searchData?.overview || null
+        );
+        
         const response = await fetch('/api/supabase/save-audit', {
           method: 'POST',
           headers: {
@@ -2514,7 +2520,8 @@
             scores,
             searchData,
             snippetReadiness,
-            localSignals // Pass Business Profile data for storage
+            localSignals, // Pass Business Profile data for storage
+            moneyPagesSummary // Phase 3: Money Pages summary for trend tracking
           })
         });
         
@@ -4234,6 +4241,46 @@
         });
         
         return { overview, rows: moneyRows, summaryByCategory, summaryBySubSegment };
+      }
+      
+      // Build compact Money Pages summary for trend tracking (Phase 3)
+      function buildMoneyPagesSummary(moneyPagesMetrics, overview) {
+        if (!moneyPagesMetrics || !moneyPagesMetrics.rows || !moneyPagesMetrics.rows.length) {
+          return null;
+        }
+
+        const pages = moneyPagesMetrics.rows;
+        const impressions = pages.reduce((sum, p) => sum + (p.impressions || 0), 0);
+        const clicks = pages.reduce((sum, p) => sum + (p.clicks || 0), 0);
+        const avgPosWeightedSum = pages.reduce((sum, p) =>
+          sum + ((p.avgPosition || p.position || 0) * (p.impressions || 0)), 0
+        );
+
+        if (!impressions) return null;
+
+        const avgPosition = avgPosWeightedSum / impressions;
+        const ctr = clicks / impressions;
+
+        const shareOfImpressions = overview && overview.totalImpressions
+          ? impressions / overview.totalImpressions
+          : null;
+
+        const shareOfClicks = overview && overview.totalClicks
+          ? clicks / overview.totalClicks
+          : null;
+
+        return {
+          count: pages.length,
+          impressions,
+          clicks,
+          ctr,
+          avgPosition,
+          shareOfImpressions,
+          shareOfClicks,
+          behaviourScore: moneyPagesMetrics.behaviour
+            ? moneyPagesMetrics.behaviour.score
+            : null
+        };
       }
       
       // Compute money pages behaviour score (for Authority overlay)
@@ -9078,6 +9125,167 @@ Final Score: ${score}/100`;
         }
       }
       
+      // Phase 3: Render Money Pages Trend Chart
+      function renderMoneyPagesTrendChart(history) {
+        const ctx = document.getElementById('moneyPagesTrendChart');
+        if (!ctx) {
+          debugLog('⚠ Money Pages trend chart canvas not found', 'warn');
+          return;
+        }
+        
+        if (!history || !history.length) {
+          debugLog('⚠ No history data for Money Pages trend chart', 'warn');
+          // Show message in chart container
+          const cardBody = ctx.closest('.card-body');
+          if (cardBody) {
+            cardBody.innerHTML = '<div style="padding: 2rem; text-align: center; color: #64748b; font-size: 0.9rem;">No historical audit data available. Run multiple audits to see trends over time.</div>';
+          }
+          return;
+        }
+        
+        // Check if Chart.js is available
+        if (typeof Chart === 'undefined') {
+          debugLog('⚠ Chart.js not loaded, cannot render Money Pages trend chart', 'warn');
+          return;
+        }
+        
+        // Destroy existing chart if it exists
+        if (window.moneyPagesTrendChart) {
+          try {
+            window.moneyPagesTrendChart.destroy();
+            window.moneyPagesTrendChart = null;
+          } catch (e) {
+            debugLog('Error destroying existing trend chart: ' + e.message, 'warn');
+          }
+        }
+        
+        // Extract money pages history from audit history
+        const moneyHistory = history.map(row => ({
+          date: row.date,
+          dateLabel: row.date ? new Date(row.date).toLocaleDateString('en-GB', { month: 'short', day: 'numeric' }) : row.date,
+          behaviourScore: row.moneyPagesBehaviourScore ?? null,
+          shareOfImpressions: row.moneyPagesSummary?.shareOfImpressions ?? null,
+          shareOfClicks: row.moneyPagesSummary?.shareOfClicks ?? null,
+          ctr: row.moneyPagesSummary?.ctr ?? null
+        })).filter(h => h.date); // Filter out entries without dates
+        
+        if (moneyHistory.length === 0) {
+          debugLog('⚠ No money pages history data after filtering', 'warn');
+          const cardBody = ctx.closest('.card-body');
+          if (cardBody) {
+            cardBody.innerHTML = '<div style="padding: 2rem; text-align: center; color: #64748b; font-size: 0.9rem;">No money pages historical data available. Run audits to build trend data.</div>';
+          }
+          return;
+        }
+        
+        const labels = moneyHistory.map(p => p.dateLabel || p.date);
+        const behaviour = moneyHistory.map(p => p.behaviourScore ?? null);
+        const shareImps = moneyHistory.map(p =>
+          p.shareOfImpressions != null ? p.shareOfImpressions * 100 : null
+        );
+        const ctr = moneyHistory.map(p =>
+          p.ctr != null ? p.ctr * 100 : null
+        );
+        
+        try {
+          window.moneyPagesTrendChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+              labels,
+              datasets: [
+                {
+                  label: 'Behaviour score (money pages)',
+                  data: behaviour,
+                  yAxisID: 'yScore',
+                  borderColor: 'rgb(59, 130, 246)',
+                  backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                  borderWidth: 2,
+                  spanGaps: true,
+                  tension: 0.1
+                },
+                {
+                  label: 'Share of impressions (%)',
+                  data: shareImps,
+                  yAxisID: 'yPct',
+                  borderColor: 'rgb(16, 185, 129)',
+                  backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                  borderWidth: 2,
+                  borderDash: [4, 4],
+                  spanGaps: true,
+                  tension: 0.1
+                },
+                {
+                  label: 'CTR on money pages (%)',
+                  data: ctr,
+                  yAxisID: 'yPct',
+                  borderColor: 'rgb(245, 158, 11)',
+                  backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                  borderWidth: 2,
+                  borderDash: [2, 2],
+                  spanGaps: true,
+                  tension: 0.1
+                }
+              ]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: true,
+              aspectRatio: 2,
+              scales: {
+                yScore: {
+                  type: 'linear',
+                  position: 'left',
+                  min: 0,
+                  max: 100,
+                  title: { display: true, text: 'Behaviour score' },
+                  grid: {
+                    color: 'rgba(0, 0, 0, 0.05)'
+                  }
+                },
+                yPct: {
+                  type: 'linear',
+                  position: 'right',
+                  min: 0,
+                  max: 100,
+                  grid: { drawOnChartArea: false },
+                  title: { display: true, text: 'Percent' }
+                }
+              },
+              plugins: {
+                legend: { position: 'bottom' },
+                tooltip: { 
+                  mode: 'index', 
+                  intersect: false,
+                  callbacks: {
+                    label: function(context) {
+                      let label = context.dataset.label || '';
+                      if (label) {
+                        label += ': ';
+                      }
+                      const value = context.parsed.y;
+                      if (value === null || value === undefined) {
+                        label += 'N/A';
+                      } else {
+                        label += value.toFixed(2);
+                        if (context.dataset.yAxisID === 'yPct') {
+                          label += '%';
+                        }
+                      }
+                      return label;
+                    }
+                  }
+                }
+              }
+            }
+          });
+          
+          debugLog(`✓ Money Pages trend chart rendered with ${moneyHistory.length} data points`, 'success');
+        } catch (error) {
+          debugLog(`✗ Error creating Money Pages trend chart: ${error.message}`, 'error');
+          console.error('Error creating Money Pages trend chart:', error);
+        }
+      }
+      
       // Recalculate behaviour for filtered sub-segment
       function recalculateMoneyPagesBehaviour(moneyPagesMetrics, queryPages, subSegmentFilter) {
         if (!moneyPagesMetrics || !moneyPagesMetrics.rows || !queryPages || subSegmentFilter === 'ALL') {
@@ -9210,6 +9418,7 @@ Final Score: ${score}/100`;
             <p style="margin: 0 0 1.5rem 0; font-size: 0.9rem; color: #666; line-height: 1.6;">
               Focused view of your money pages: how much traffic they capture,
               how they convert clicks, and which URLs to improve first.
+              This section uses 30-day Google Search Console data and historical audits to show how your commercial pages perform over time and how much they contribute to your overall Authority behaviour score.
             </p>
             
             <!-- Summary strip -->
@@ -9296,6 +9505,22 @@ Final Score: ${score}/100`;
             <div id="money-pages-table-container">
               <!-- Table will be rendered here -->
             </div>
+            
+            <!-- Phase 3: Money Pages Trend Chart -->
+            <section id="money-pages-trend" class="card card--full" style="margin-top: 2rem; background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+              <div class="card-header" style="margin-bottom: 1rem;">
+                <h3 style="margin: 0 0 0.5rem 0; font-size: 1.1rem; font-weight: 700; color: #1e293b;">Money Pages Performance Trends</h3>
+                <p class="card-subtitle" style="margin: 0; font-size: 0.85rem; color: #64748b; line-height: 1.6;">
+                  Tracks how money pages contribute to overall clicks and impressions, and how their behaviour score changes over time.
+                </p>
+              </div>
+              <div class="card-body" style="min-height: 300px;">
+                <canvas id="moneyPagesTrendChart"></canvas>
+              </div>
+              <div class="card-footer small" style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #e2e8f0; font-size: 0.85rem; color: #64748b;">
+                Based on past audits stored in Supabase. Lines may be flat if only one audit has been completed.
+              </div>
+            </section>
             
             <p class="card-footnote" style="margin-top: 1rem; font-size: 0.85rem; color: #666;">
               Based on the current audit date range and money-page segment only.
@@ -11532,6 +11757,13 @@ Final Score: ${score}/100`;
                   debugLog(`Using ${contentSchemaHistory.length} historical audit records from Supabase`, 'info');
                 } else {
                   debugLog(`No historical data found. Will use current scores for all points.`, 'info');
+                }
+                
+                // Phase 3: Render Money Pages trend chart
+                if (typeof renderMoneyPagesTrendChart === 'function') {
+                  setTimeout(() => {
+                    renderMoneyPagesTrendChart(contentSchemaHistory);
+                  }, 500); // Delay to ensure DOM is ready
                 }
               } catch (error) {
                 debugLog(`⚠ Error fetching historical data: ${error.message}`, 'warn');

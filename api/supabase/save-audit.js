@@ -84,7 +84,8 @@ export default async function handler(req, res) {
       scores,
       searchData,
       snippetReadiness,
-      localSignals
+      localSignals,
+      moneyPagesSummary // Phase 3: Money Pages summary for trend tracking
     } = bodyData;
 
     if (!propertyUrl || !auditDate) {
@@ -178,6 +179,14 @@ export default async function handler(req, res) {
       
       // Money Pages Performance (Phase 1 - stored as JSON)
       money_pages_metrics: ensureJson(scores?.moneyPagesMetrics), // JSON object: {overview: {...}, rows: [...]}
+      
+      // Phase 3: Money Pages Summary (compact summary for trend tracking)
+      money_pages_summary: ensureJson(moneyPagesSummary), // JSON object: {count, impressions, clicks, ctr, avgPosition, shareOfImpressions, shareOfClicks, behaviourScore}
+      money_pages_behaviour_score: ensureNumber(
+        moneyPagesSummary && typeof moneyPagesSummary.behaviourScore === 'number'
+          ? moneyPagesSummary.behaviourScore
+          : null
+      ), // For trend charting
       
       // Calculate AI Summary Likelihood (Phase 1)
       // Uses snippetReadiness, visibility, and brand score

@@ -48,8 +48,9 @@ export default async function handler(req, res) {
       });
     }
 
-    // Build query URL
-    let queryUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.asc`;
+    // Build query URL with select fields
+    // Phase 3: Include money pages fields for trend tracking
+    let queryUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.asc&select=audit_date,content_schema_score,visibility_score,authority_score,local_entity_score,service_area_score,brand_score,ai_summary_score,money_pages_behaviour_score,money_pages_summary`;
     
     if (startDate) {
       queryUrl += `&audit_date=gte.${startDate}`;
@@ -108,7 +109,10 @@ export default async function handler(req, res) {
       // Segmented Authority scores (new: for building historical segmented data)
       authorityBySegment: record.authority_by_segment || null, // JSON object with {all, nonEducation, money}
       // Brand Overlay data (Phase 1: for trend charting)
-      brandScore: record.brand_score || null
+      brandScore: record.brand_score || null,
+      // Phase 3: Money Pages data (for trend tracking)
+      moneyPagesBehaviourScore: record.money_pages_behaviour_score || null,
+      moneyPagesSummary: record.money_pages_summary || null
     }));
 
     return res.status(200).json({
