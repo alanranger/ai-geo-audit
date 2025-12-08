@@ -6825,6 +6825,42 @@ Final Score: ${score}/100`;
               }, segmentLabel, dateRangeText)}
             </div>
             ` : ''}
+            
+            ${brandQueries.length > 0 ? `
+            <div style="margin-top: 2rem; padding: 1rem; background: #f8f9fa; border-radius: 6px; border-left: 3px solid #f59e0b;">
+              <h4 style="margin: 0 0 0.75rem 0; color: #92400e; font-size: 1rem; font-weight: 600;">Top Branded Queries</h4>
+              <p style="margin: 0 0 1rem 0; font-size: 0.85rem; color: #666; line-height: 1.5;">Branded search queries (e.g., "Alan Ranger Photography") with CTR and position metrics.</p>
+              <div style="overflow-x: auto;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+                  <thead>
+                    <tr style="background: #e5e7eb; border-bottom: 2px solid #d1d5db;">
+                      <th style="padding: 0.5rem; text-align: left; font-weight: 600; color: #374151;">Query</th>
+                      <th style="padding: 0.5rem; text-align: right; font-weight: 600; color: #374151;">Impressions</th>
+                      <th style="padding: 0.5rem; text-align: right; font-weight: 600; color: #374151;">Clicks</th>
+                      <th style="padding: 0.5rem; text-align: right; font-weight: 600; color: #374151;">CTR</th>
+                      <th style="padding: 0.5rem; text-align: right; font-weight: 600; color: #374151;">Position</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${brandQueries.map((q, idx) => {
+                      const ctr = q.impressions > 0 ? ((q.clicks || 0) / q.impressions * 100) : 0;
+                      const ctrColor = ctr >= 25 ? '#10b981' : ctr >= 10 ? '#f59e0b' : '#ef4444';
+                      const posColor = (q.position || 0) <= 3 ? '#10b981' : (q.position || 0) <= 5 ? '#f59e0b' : '#ef4444';
+                      return `
+                      <tr style="border-bottom: 1px solid #e5e7eb; ${idx % 2 === 0 ? 'background: #ffffff;' : 'background: #f9fafb;'}">
+                        <td style="padding: 0.5rem; color: #1f2937; font-weight: 500;">${(q.query || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td>
+                        <td style="padding: 0.5rem; text-align: right; color: #6b7280;">${(q.impressions || 0).toLocaleString()}</td>
+                        <td style="padding: 0.5rem; text-align: right; color: #6b7280;">${(q.clicks || 0).toLocaleString()}</td>
+                        <td style="padding: 0.5rem; text-align: right; color: ${ctrColor}; font-weight: 600;">${ctr.toFixed(2)}%</td>
+                        <td style="padding: 0.5rem; text-align: right; color: ${posColor}; font-weight: 600;">${(q.position || 0).toFixed(1)}</td>
+                      </tr>
+                    `;
+                    }).join('')}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            ` : ''}
           </div>
         `;
         
