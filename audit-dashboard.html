@@ -4034,6 +4034,10 @@
         }
         
         // Iterate over topPages
+        // Note: topPages is already aggregated by page from queryPages
+        // The Segment Overview uses query+page level data filtered to position 1-20
+        // For Money Pages, we want to show ALL money pages (not just position 1-20)
+        // to give a complete view of money page performance
         topPages.forEach(page => {
           const url = page.page || page.url || '';
           if (!url) return;
@@ -4124,6 +4128,81 @@
         return { overview, rows: moneyRows, summaryByCategory };
       }
       
+      // Compute money pages behaviour score (for Authority overlay)
+      function computeMoneyPagesBehaviour(gscQueries, moneyPages) {
+        if (!gscQueries || !gscQueries.length || !moneyPages || !moneyPages.length) {
+          return null;
+        }
+
+        const moneySet = new Set(
+          moneyPages.map(p => {
+            const url = (p.url || p.page || '').replace(/\/$/, '');
+            return url;
+          })
+        );
+
+        let clicks = 0;
+        let impressions = 0;
+        let top10Clicks = 0;
+        let top10Impressions = 0;
+        let weightedPosSum = 0;
+        let weightedPosImps = 0;
+
+        gscQueries.forEach(row => {
+          const url = (row.page || row.url || '').replace(/\/$/, '');
+          if (!moneySet.has(url)) return;
+
+          const pos = typeof row.position === 'number'
+            ? row.position
+            : (row.avgPosition || null);
+          const imps = row.impressions || 0;
+          const cls = row.clicks || 0;
+
+          // Only include ranking queries (position 1-20) to match Authority calculation
+          if (!imps || !pos || pos <= 0 || pos > 20) return;
+
+          clicks += cls;
+          impressions += imps;
+
+          weightedPosSum += pos * imps;
+          weightedPosImps += imps;
+          if (pos <= 10) {
+            top10Clicks += cls;
+            top10Impressions += imps;
+          }
+        });
+
+        if (!impressions || !weightedPosImps) {
+          return null;
+        }
+
+        const siteCtr = clicks / impressions;
+        const top10Ctr = top10Impressions > 0 ? (top10Clicks / top10Impressions) : 0;
+        const avgPos = weightedPosSum / weightedPosImps;
+        const top10Share = impressions > 0 ? (top10Impressions / impressions) : 0;
+
+        // Reuse existing Behaviour score calculation (same as Authority)
+        // Filter to ranking queries only (position 1-20)
+        const rankingQueries = gscQueries.filter(row => {
+          const url = (row.page || row.url || '').replace(/\/$/, '');
+          if (!moneySet.has(url)) return false;
+          const pos = typeof row.position === 'number' ? row.position : (row.avgPosition || null);
+          return pos > 0 && pos <= 20 && (row.impressions || 0) > 0;
+        });
+
+        const behaviourScore = computeBehaviourScoreRaw(rankingQueries);
+
+        return {
+          score: behaviourScore,
+          siteCtr,
+          top10Ctr,
+          avgPos,
+          top10Share,
+          clicks,
+          impressions
+        };
+      }
+      
       // Compute money pages metrics if we have queryPages data
       let moneyPagesMetrics = null;
       if (queryPages && queryPages.length > 0) {
@@ -4212,7 +4291,18 @@
           schemaAudit // Pass schema audit data to check for schema presence
         );
         
+        // Compute money pages behaviour score
+        const moneyPagesList = moneyPagesMetrics.rows || [];
+        const moneyBehaviour = computeMoneyPagesBehaviour(
+          queryPages,
+          moneyPagesList
+        );
+        moneyPagesMetrics.behaviour = moneyBehaviour;
+        
         debugLog(`Money Pages Metrics: ${moneyPagesMetrics.rows.length} money pages found, ${moneyPagesMetrics.overview.moneyClicks} clicks, ${moneyPagesMetrics.overview.moneyImpressions} impressions`, 'info');
+        if (moneyBehaviour) {
+          debugLog(`Money Pages Behaviour: score=${moneyBehaviour.score.toFixed(1)}, CTR=${(moneyBehaviour.siteCtr * 100).toFixed(2)}%, Top-10 CTR=${(moneyBehaviour.top10Ctr * 100).toFixed(2)}%`, 'info');
+        }
       } else {
         debugLog('⚠ Money Pages Metrics: No queryPages data available', 'warn');
       }
@@ -8073,23 +8163,28 @@ Final Score: ${score}/100`;
         
         debugLog(`Money pages chart data - counts: [${counts.join(', ')}], impressions: [${impressions.join(', ')}]`, 'info');
         
-        // If no data, show a simple message and skip chart
-        const totalCount = counts.reduce((a, b) => a + b, 0);
-        if (totalCount === 0) {
+        // Check for no data
+        const totalPages = counts.reduce((a, b) => a + b, 0);
+        const totalImpressions = impressions.reduce((a, b) => a + b, 0);
+        const summaryEl = document.getElementById('money-pages-category-summary');
+        const breakdownEl = document.getElementById('money-pages-category-breakdown');
+        
+        function setNoDataMessage() {
+          if (summaryEl) {
+            summaryEl.textContent = 'No meaningful money-page impressions found for this audit period.';
+          }
+          if (breakdownEl) {
+            breakdownEl.innerHTML = '';
+          }
+        }
+        
+        if (!totalPages || !totalImpressions) {
           debugLog('⚠ No money pages data for chart', 'warn');
           const chartRow = document.getElementById('money-pages-chart-row');
           if (chartRow) {
-            chartRow.innerHTML = `
-              <div class="chart-card" style="background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                <h3 style="margin: 0 0 0.5rem 0; font-size: 1rem; font-weight: 700; color: #1e293b;">Money Pages Opportunity Mix</h3>
-                <p class="chart-subtitle text-muted" style="margin: 0 0 1rem 0; font-size: 0.85rem; color: #64748b;">
-                  How your money pages are distributed across improvement categories in this audit window.
-                </p>
-                <p style="margin: 0; font-size: 0.85rem; color: #94a3b8; font-style: italic;">
-                  No money-page impressions found for this audit period.
-                </p>
-              </div>
-            `;
+            const canvas = chartRow.querySelector('#money-pages-category-chart');
+            if (canvas) canvas.remove();
+            setNoDataMessage();
           }
           return;
         }
@@ -8193,9 +8288,120 @@ Final Score: ${score}/100`;
           }
         });
         debugLog('✓ Money pages category chart created successfully', 'success');
+        
+        // Populate summary and breakdown after chart is created
+        const totalPages = counts.reduce((a, b) => a + b, 0);
+        const totalImpressions = impressions.reduce((a, b) => a + b, 0);
+        
+        const summaryEl = document.getElementById('money-pages-category-summary');
+        const breakdownEl = document.getElementById('money-pages-category-breakdown');
+        
+        // 1) Summary line
+        if (summaryEl && totalPages > 0 && totalImpressions > 0) {
+          const highImps = impressions[0] || 0;
+          const visImps = impressions[1] || 0;
+          const mainImps = impressions[2] || 0;
+          const mainBucket =
+            highImps >= visImps && highImps >= mainImps
+              ? 'high-opportunity'
+              : visImps >= mainImps
+                ? 'visibility-fix'
+                : 'maintain';
+          
+          const focusShare = (Math.max(highImps, visImps, mainImps) / totalImpressions) * 100;
+          
+          summaryEl.textContent =
+            `${totalPages} money pages, ${totalImpressions.toLocaleString()} impressions. ` +
+            `Largest share is ${mainBucket} pages ` +
+            `(${focusShare.toFixed(1)}% of impressions).`;
+        }
+        
+        // 2) Category pills row
+        if (breakdownEl && totalImpressions > 0) {
+          breakdownEl.innerHTML = ''; // clear
+          
+          const colors = ['pill-warning', 'pill-danger', 'pill-success']; // high, vis, maintain
+          
+          impressions.forEach((imps, idx) => {
+            if (!imps) return;
+            const count = counts[idx] || 0;
+            const pct = (imps / totalImpressions) * 100;
+            
+            const pill = document.createElement('span');
+            pill.className = `pill pill-small ${colors[idx]}`;
+            pill.style.cssText = 'display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.8rem; font-weight: 600; margin: 0.125rem;';
+            if (colors[idx] === 'pill-warning') {
+              pill.style.background = '#fef3c7'; pill.style.color = '#92400e';
+            } else if (colors[idx] === 'pill-danger') {
+              pill.style.background = '#fee2e2'; pill.style.color = '#991b1b';
+            } else {
+              pill.style.background = '#d1fae5'; pill.style.color = '#065f46';
+            }
+            pill.textContent =
+              `${labels[idx]}: ${count} pages, ` +
+              `${imps.toLocaleString()} imps (${pct.toFixed(1)}%)`;
+            
+            breakdownEl.appendChild(pill);
+          });
+        }
+        
         } catch (error) {
           debugLog(`✗ Error creating money pages chart: ${error.message}`, 'error');
           console.error('Error creating money pages category chart:', error);
+        }
+      }
+      
+      // Render Money Pages Behaviour KPIs
+      function renderMoneyPagesBehaviourKpis(behaviour) {
+        const scoreEl = document.getElementById('money-behaviour-score');
+        const statusEl = document.getElementById('money-behaviour-status');
+        const ctrEl = document.getElementById('money-ctr-value');
+        const top10El = document.getElementById('money-top10-ctr-value');
+        const cardEl = document.getElementById('money-behaviour-card');
+
+        if (!scoreEl || !behaviour || !behaviour.impressions) {
+          if (scoreEl) scoreEl.textContent = 'N/A';
+          if (statusEl) statusEl.textContent = 'Not enough data for money pages in this window.';
+          if (ctrEl) ctrEl.textContent = '—';
+          if (top10El) top10El.textContent = '—';
+          return;
+        }
+
+        const score = Math.round(behaviour.score);
+        const ctrPct = (behaviour.siteCtr * 100);
+        const top10Pct = (behaviour.top10Ctr * 100);
+
+        scoreEl.textContent = `${score}/100`;
+        ctrEl.textContent = `${ctrPct.toFixed(2)}%`;
+        top10El.textContent = `${top10Pct.toFixed(2)}%`;
+
+        let label, ragClass;
+        if (score >= 70) { 
+          label = 'Good – money pages aren\'t holding Authority back.'; 
+          ragClass = 'status-green'; 
+        } else if (score >= 40) { 
+          label = 'Amber – money pages behaviour is the main Authority constraint.'; 
+          ragClass = 'status-amber'; 
+        } else { 
+          label = 'Red – poor CTR on money pages is strongly dragging Authority down.'; 
+          ragClass = 'status-red'; 
+        }
+
+        if (statusEl) statusEl.textContent = label;
+        if (cardEl) {
+          cardEl.classList.remove('status-green', 'status-amber', 'status-red');
+          cardEl.classList.add(ragClass);
+          // Apply RAG colors
+          if (ragClass === 'status-green') {
+            cardEl.style.borderLeft = '3px solid #10b981';
+            cardEl.style.background = '#f0fdf4';
+          } else if (ragClass === 'status-amber') {
+            cardEl.style.borderLeft = '3px solid #f59e0b';
+            cardEl.style.background = '#fffbeb';
+          } else {
+            cardEl.style.borderLeft = '3px solid #ef4444';
+            cardEl.style.background = '#fef2f2';
+          }
         }
       }
 
@@ -8231,6 +8437,36 @@ Final Score: ${score}/100`;
               <div class="metric-card" id="money-summary-coverage" style="flex: 1; min-width: 200px; padding: 1rem; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"></div>
             </div>
             
+            <!-- Explanation text -->
+            <div style="margin-bottom: 1.5rem; padding: 1rem; background: #f8f9fa; border-radius: 6px; border-left: 3px solid #64748b; font-size: 0.85rem; line-height: 1.6; color: #475569;">
+              <p style="margin: 0 0 0.5rem 0;"><strong>Note:</strong> These metrics include <strong>all money pages</strong> regardless of ranking position (positions 1-20 and beyond). This provides a complete view of your money page performance, including pages that need improvement.</p>
+              <p style="margin: 0;"><strong>Difference from Segment Overview:</strong> The "Segment overview (CTR & ranking)" table above shows metrics for money pages ranking in <strong>positions 1-20 only</strong> (used for Authority scoring). The Money Pages Performance section shows <strong>all money pages</strong> to help identify opportunities across your entire money page portfolio.</p>
+            </div>
+            
+            <!-- Money Pages Behaviour KPIs -->
+            <div class="money-behaviour-kpis" id="money-behaviour-kpis" style="display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem;">
+              <div class="kpi-card" id="money-behaviour-card" style="flex: 1 1 180px; background: #fff; border-radius: 6px; padding: 8px 12px; box-shadow: 0 0 0 1px rgba(0,0,0,0.04);">
+                <div class="kpi-label" style="font-size: 0.75rem; color: #64748b; margin-bottom: 0.25rem;">Money pages behaviour</div>
+                <div class="kpi-value" id="money-behaviour-score" style="font-size: 1.5rem; font-weight: 700; color: #1e293b;">—</div>
+                <div class="kpi-sub" id="money-behaviour-status" style="font-size: 0.75rem; color: #94a3b8; margin-top: 0.25rem;">CTR and ranking for money pages only.</div>
+              </div>
+              <div class="kpi-card" style="flex: 1 1 180px; background: #fff; border-radius: 6px; padding: 8px 12px; box-shadow: 0 0 0 1px rgba(0,0,0,0.04);">
+                <div class="kpi-label" style="font-size: 0.75rem; color: #64748b; margin-bottom: 0.25rem;">CTR (ranking queries)</div>
+                <div class="kpi-value" id="money-ctr-value" style="font-size: 1.5rem; font-weight: 700; color: #1e293b;">—</div>
+                <div class="kpi-sub" style="font-size: 0.75rem; color: #94a3b8; margin-top: 0.25rem;">Target 2.5%</div>
+              </div>
+              <div class="kpi-card" style="flex: 1 1 180px; background: #fff; border-radius: 6px; padding: 8px 12px; box-shadow: 0 0 0 1px rgba(0,0,0,0.04);">
+                <div class="kpi-label" style="font-size: 0.75rem; color: #64748b; margin-bottom: 0.25rem;">Top-10 CTR</div>
+                <div class="kpi-value" id="money-top10-ctr-value" style="font-size: 1.5rem; font-weight: 700; color: #1e293b;">—</div>
+                <div class="kpi-sub" style="font-size: 0.75rem; color: #94a3b8; margin-top: 0.25rem;">Target 4.0%</div>
+              </div>
+            </div>
+            <p class="chart-subtitle" style="margin: 0 0 1.5rem 0; font-size: 0.85rem; color: #64748b; padding: 0 0.5rem;">
+              Behaviour score here is calculated the same way as <strong>Authority → Behaviour</strong>,
+              but only for money pages. Improvements you make on these URLs will move both this score
+              and the Authority pillar.
+            </p>
+            
             <!-- Chart row (Phase 2) -->
             <div class="chart-row" id="money-pages-chart-row" style="margin-bottom: 1.5rem; display: block; visibility: visible;">
               <div class="chart-card" style="background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
@@ -8241,6 +8477,8 @@ Final Score: ${score}/100`;
                 <div style="position: relative; width: 500px; height: 300px; margin: 0 auto; overflow: hidden;">
                   <canvas id="money-pages-category-chart" width="500" height="300" style="display: block; max-width: 500px; max-height: 300px;"></canvas>
                 </div>
+                <div id="money-pages-category-summary" class="chart-summary" style="margin-top: 8px; font-size: 0.9rem; color: #1e293b; font-weight: 500; text-align: center;"></div>
+                <div id="money-pages-category-breakdown" class="chart-breakdown-row" style="margin-top: 4px; display: flex; flex-wrap: wrap; gap: 0.5rem; font-size: 0.85rem; justify-content: center;"></div>
               </div>
             </div>
             
@@ -8286,10 +8524,12 @@ Final Score: ${score}/100`;
           debugLog('⚠ Money Pages: No metrics data, will show "No data" message', 'warn');
         }
         renderMoneyPagesSection(scores.moneyPagesMetrics || null);
-        // Render chart after a delay to ensure DOM and Chart.js are ready
+        // Render behaviour KPIs and chart after a delay to ensure DOM and Chart.js are ready
         // Only render once to prevent infinite loops
-        if (scores.moneyPagesMetrics && !moneyPagesCategoryChart) {
+        if (scores.moneyPagesMetrics) {
           setTimeout(() => {
+            // Render behaviour KPIs
+            renderMoneyPagesBehaviourKpis(scores.moneyPagesMetrics.behaviour);
             // Double-check chart doesn't exist before rendering
             if (!moneyPagesCategoryChart) {
               renderMoneyPagesCategoryChart(scores.moneyPagesMetrics, 0);
