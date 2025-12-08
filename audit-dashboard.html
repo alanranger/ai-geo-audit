@@ -3469,6 +3469,56 @@
         return topPages;
       }
       
+      // Compute all pages including zero impressions (for money pages segmentation validation)
+      function computeAllPagesForSegment(pageRows) {
+        if (!pageRows || !Array.isArray(pageRows) || pageRows.length === 0) {
+          return [];
+        }
+        
+        // Aggregate by page URL (sum clicks, impressions, weighted position)
+        const pageMap = new Map();
+        
+        pageRows.forEach(row => {
+          const url = row.page || row.url || '';
+          if (!url) return;
+          
+          if (!pageMap.has(url)) {
+            pageMap.set(url, {
+              url: url,
+              clicks: 0,
+              impressions: 0,
+              totalPositionWeight: 0,
+              count: 0
+            });
+          }
+          
+          const page = pageMap.get(url);
+          page.clicks += row.clicks || 0;
+          page.impressions += row.impressions || 0;
+          page.totalPositionWeight += (row.position || 0) * (row.impressions || 0);
+          page.count += 1;
+        });
+        
+        // Convert to pages format (include zero impressions)
+        const allPages = Array.from(pageMap.values())
+          .map(page => ({
+            url: page.url,
+            clicks: page.clicks,
+            impressions: page.impressions,
+            ctr: page.impressions > 0 ? (page.clicks / page.impressions) * 100 : 0,
+            avgPosition: page.impressions > 0 ? page.totalPositionWeight / page.impressions : null,
+            position: page.impressions > 0 ? page.totalPositionWeight / page.impressions : null
+          }))
+          .sort((a, b) => {
+            // Sort by impressions descending, but put zero impressions at the end
+            if (a.impressions === 0 && b.impressions > 0) return 1;
+            if (b.impressions === 0 && a.impressions > 0) return -1;
+            return b.impressions - a.impressions;
+          });
+        
+        return allPages;
+      }
+      
       let authorityBySegment = null;
       if (behaviourScoresSegmented && rankingScoresSegmented) {
         // Get page-level data for top pages computation
@@ -4343,9 +4393,9 @@
         
         // Compute money pages metrics
         // Use ALL pages from GSC data (not just position 1-20) to get complete money pages list
-        // Aggregate all pages by URL to get page-level metrics
+        // Include pages with zero impressions to validate segmentation
         const allGSCPages = data.queryPages || [];
-        const allPagesAggregated = computeTopPagesForSegment(allGSCPages, 10000); // Get all pages, not just top 10
+        const allPagesAggregated = computeAllPagesForSegment(allGSCPages); // Get all pages including zero impressions
         moneyPagesMetrics = computeMoneyPagesMetrics(
           allPagesAggregated,
           classifyPageSegment,
@@ -7633,12 +7683,16 @@ Final Score: ${score}/100`;
         const currentSubSegmentFilter = window.moneyPagesSubSegmentFilter || 'ALL';
         const currentMinImpressions = window.moneyPagesMinImpressions || 0;
         
+        // Get zero impressions filter (default to true - include zero impressions)
+        const includeZero = window.moneyPagesIncludeZero !== false;
+        
         // Apply filters before sorting/pagination
         let filteredRows = sortedRows.filter(row => {
           const matchCat = currentCategoryFilter === 'ALL' || row.category === currentCategoryFilter;
           const matchSubSeg = currentSubSegmentFilter === 'ALL' || row.subSegment === currentSubSegmentFilter;
           const matchImp = (row.impressions || 0) >= currentMinImpressions;
-          return matchCat && matchSubSeg && matchImp;
+          const matchZero = includeZero || (row.impressions || 0) > 0; // Include zero impressions if checkbox is checked
+          return matchCat && matchSubSeg && matchImp && matchZero;
         });
         
         // Update pagination based on filtered rows
@@ -7679,6 +7733,10 @@ Final Score: ${score}/100`;
                 <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #475569;">
                   Min impressions:
                   <input type="number" id="money-pages-min-impressions" min="0" step="50" value="${currentMinImpressions}" style="padding: 0.4rem 0.6rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.85rem; width: 100px;" />
+                </label>
+                <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #475569;">
+                  <input type="checkbox" id="money-pages-include-zero" ${window.moneyPagesIncludeZero !== false ? 'checked' : ''} style="cursor: pointer;" />
+                  Include zero impressions
                 </label>
                 <button id="money-pages-copy-urls" type="button" style="font-size: 0.8rem; padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #2563eb; background: #2563eb; cursor: pointer; color: white; font-weight: 600; transition: all 0.2s; box-shadow: 0 1px 2px rgba(0,0,0,0.1);" onmouseover="this.style.background='#1d4ed8'; this.style.borderColor='#1d4ed8';" onmouseout="this.style.background='#2563eb'; this.style.borderColor='#2563eb';">
                   Copy current URLs
@@ -8128,16 +8186,21 @@ Final Score: ${score}/100`;
           
           if (!categoryFilterEl || !subSegmentFilterEl || !minImpressionsEl || !tableContainer) return;
           
+          // Get zero impressions checkbox
+          const includeZeroEl = document.getElementById('money-pages-include-zero');
+          
           // Function to apply filters and re-render
           const applyFilters = () => {
             const filterCat = categoryFilterEl.value || 'ALL';
             const filterSubSeg = subSegmentFilterEl.value || 'ALL';
             const minImp = parseInt(minImpressionsEl.value, 10) || 0;
+            const includeZero = includeZeroEl ? includeZeroEl.checked : true;
             
             // Store filter state globally
             window.moneyPagesCategoryFilter = filterCat;
             window.moneyPagesSubSegmentFilter = filterSubSeg;
             window.moneyPagesMinImpressions = minImp;
+            window.moneyPagesIncludeZero = includeZero;
             
             // Reset to page 1 when filters change
             window.moneyPagesCurrentPage = 1;
@@ -8172,6 +8235,9 @@ Final Score: ${score}/100`;
           categoryFilterEl.addEventListener('change', applyFilters);
           subSegmentFilterEl.addEventListener('change', applyFilters);
           minImpressionsEl.addEventListener('change', applyFilters);
+          if (includeZeroEl) {
+            includeZeroEl.addEventListener('change', applyFilters);
+          }
           
           // Update copy button to use filtered data
           if (copyBtn) {
@@ -8181,12 +8247,14 @@ Final Score: ${score}/100`;
               const filterCat = categoryFilterEl.value || 'ALL';
               const filterSubSeg = subSegmentFilterEl.value || 'ALL';
               const minImp = parseInt(minImpressionsEl.value, 10) || 0;
+              const includeZero = includeZeroEl ? includeZeroEl.checked : true;
               
               const filtered = (allRows || []).filter(row => {
                 const matchCat = filterCat === 'ALL' || row.category === filterCat;
                 const matchSubSeg = filterSubSeg === 'ALL' || row.subSegment === filterSubSeg;
                 const matchImp = (row.impressions || 0) >= minImp;
-                return matchCat && matchSubSeg && matchImp;
+                const matchZero = includeZero || (row.impressions || 0) > 0;
+                return matchCat && matchSubSeg && matchImp && matchZero;
               });
               
               const urls = filtered.map(r => r.url).join('\n');
