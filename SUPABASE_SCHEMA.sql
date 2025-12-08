@@ -34,6 +34,12 @@ CREATE TABLE IF NOT EXISTS audit_results (
   content_schema_score INTEGER,
   snippet_readiness INTEGER,
   
+  -- Brand Overlay and AI Summary (Phase 1 - overlay metrics)
+  brand_overlay JSONB, -- JSON object: {score, label, brandQueryShare, brandCtr, brandAvgPosition, reviewScore, entityScore, notes}
+  brand_score INTEGER, -- Brand Overlay score (0-100) for trend charting
+  ai_summary JSONB, -- JSON object: {score, label, reasons}
+  ai_summary_score INTEGER, -- AI Summary Likelihood score (0-100) for trend charting
+  
   -- Local Signals (when GBP API integrated)
   local_business_schema_pages INTEGER,
   nap_consistency_score INTEGER,
