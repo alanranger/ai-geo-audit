@@ -4751,10 +4751,15 @@ Final Score: ${aiGeoHealth.aiGeoScore}/100`;
                       ${(() => {
                         // Phase 2: Use aiSummary.label if available, otherwise fallback to aiSummaryLikelihood
                         const aiSummary = aiGeoHealth.aiSummary || { label: aiGeoHealth.aiSummaryLikelihood || 'Low', score: 0 };
-                        const label = aiSummary.label || 'Low';
+                        // Ensure label is capitalized correctly
+                        let label = aiSummary.label || 'Low';
+                        if (typeof label === 'string') {
+                          label = label.charAt(0).toUpperCase() + label.slice(1).toLowerCase();
+                        }
                         const score = aiSummary.score || 0;
-                        const bgColor = label === 'High' ? '#d1fae5' : label === 'Medium' ? '#fef3c7' : '#fee2e2';
-                        const textColor = label === 'High' ? '#065f46' : label === 'Medium' ? '#92400e' : '#991b1b';
+                        // Use score-based color logic (same as Brand & entity) to ensure consistency
+                        const bgColor = score >= 80 ? '#d1fae5' : score >= 60 ? '#fef3c7' : '#fee2e2';
+                        const textColor = score >= 80 ? '#065f46' : score >= 60 ? '#92400e' : '#991b1b';
                         
                         // Build AI Summary breakdown
                         const snippetReadinessScore = snippetReadiness?.overallScore || 0;
@@ -4762,16 +4767,17 @@ Final Score: ${aiGeoHealth.aiGeoScore}/100`;
                         const brandScore = scores.brandOverlay?.score || 0;
                         
                         const aiSummaryBreakdown = `AI Summary Likelihood Breakdown:
-• Snippet Readiness: ${Math.round(snippetReadinessScore)} (50% weight)
-• Visibility: ${Math.round(visibilityScore)} (30% weight)
-• Brand & Entity: ${Math.round(brandScore)} (20% weight)
-Final Score: ${score}/100`;
+• Snippet Readiness: ${Math.round(snippetReadinessScore)}/100 (50% weight)
+• Visibility: ${Math.round(visibilityScore)}/100 (30% weight)
+• Brand & Entity: ${Math.round(brandScore)}/100 (20% weight)
+Final Score: ${score}/100
+
+Based on snippet-friendly content (FAQ / HowTo / Article / Event blocks), how often your content appears in rich results, and the strength of your brand & entity signals (branded searches, reviews, knowledge panel).`;
                         
-                        const infoTooltip = 'Based on snippet-friendly content (FAQ / HowTo / Article / Event blocks), how often your content appears in rich results, and the strength of your brand & entity signals (branded searches, reviews, knowledge panel).';
                         return `
                           <span style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; border-radius: 6px; font-size: 1rem; font-weight: 600; background: ${bgColor}; color: ${textColor}; cursor: help;" title="${aiSummaryBreakdown}">
                             ${label} (${score}/100)
-                            <span style="display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; background: #3b82f6; color: white; font-size: 0.75rem; font-weight: 700; cursor: help; flex-shrink: 0;" title="${infoTooltip}">i</span>
+                            <span style="display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; background: #3b82f6; color: white; font-size: 0.75rem; font-weight: 700; cursor: help; flex-shrink: 0;" title="${aiSummaryBreakdown}">i</span>
                           </span>
                         `;
                       })()}
