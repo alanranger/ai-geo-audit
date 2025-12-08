@@ -7177,9 +7177,30 @@ Final Score: ${score}/100`;
       // Function to render Money Pages Performance section
       function renderMoneyPagesSection(moneyPagesMetrics) {
         const section = document.getElementById('money-pages-section');
-        if (!section || !moneyPagesMetrics) {
-          // Hide section if no data
-          if (section) section.style.display = 'none';
+        if (!section) {
+          debugLog('⚠ Money Pages section element not found', 'warn');
+          return;
+        }
+        
+        // Always show section, even if no data (will show "No data" message)
+        section.style.display = 'block';
+        
+        if (!moneyPagesMetrics) {
+          debugLog('⚠ Money Pages Metrics: No data provided', 'warn');
+          // Show "No data" message in table and summary cards
+          const tbody = document.getElementById('money-pages-table-body');
+          if (tbody) {
+            tbody.innerHTML = `<tr><td colspan="7" class="text-muted" style="padding: 2rem; text-align: center;">No money-page data available. Run an audit with GSC data to see money pages performance.</td></tr>`;
+          }
+          // Populate summary cards with "—"
+          const summaryClickEl = document.getElementById('money-summary-click-share');
+          const summaryCtrEl = document.getElementById('money-summary-ctr');
+          const summaryPosEl = document.getElementById('money-summary-position');
+          const summaryCovEl = document.getElementById('money-summary-coverage');
+          if (summaryClickEl) summaryClickEl.innerHTML = `<div class="metric-label">Share of site clicks</div><div class="metric-value">—</div><div class="metric-sub">No data</div>`;
+          if (summaryCtrEl) summaryCtrEl.innerHTML = `<div class="metric-label">CTR vs site</div><div class="metric-value">—</div><div class="metric-sub">No data</div>`;
+          if (summaryPosEl) summaryPosEl.innerHTML = `<div class="metric-label">Average position</div><div class="metric-value">—</div><div class="metric-sub">No data</div>`;
+          if (summaryCovEl) summaryCovEl.innerHTML = `<div class="metric-label">Money pages with impressions</div><div class="metric-value">0</div><div class="metric-sub">No data</div>`;
           return;
         }
         
@@ -7338,84 +7359,99 @@ Final Score: ${score}/100`;
       createTopPagesSection(scores, saved);
       
       // Create Money Pages Performance section (right after Top Pages section)
-      const existingMoneyPages = document.getElementById('money-pages-section');
-      if (existingMoneyPages) {
-        existingMoneyPages.remove();
-      }
-      
-      const moneyPagesSection = document.createElement('div');
-      moneyPagesSection.id = 'money-pages-section';
-      moneyPagesSection.className = 'card';
-      moneyPagesSection.style.marginTop = '2rem';
-      moneyPagesSection.style.marginBottom = '2rem';
-      moneyPagesSection.innerHTML = `
-        <div class="card-header">
-          <h2>Money Pages Performance & Actions</h2>
-          <p class="card-subtitle">
-            Focused view of your money pages: how much traffic they capture,
-            how they convert clicks, and which URLs to improve first.
-          </p>
-        </div>
-        
-        <!-- Summary strip -->
-        <div id="money-pages-summary" class="metrics-row" style="display: flex; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap;">
-          <div class="metric-card" id="money-summary-click-share" style="flex: 1; min-width: 200px; padding: 1rem; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"></div>
-          <div class="metric-card" id="money-summary-ctr" style="flex: 1; min-width: 200px; padding: 1rem; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"></div>
-          <div class="metric-card" id="money-summary-position" style="flex: 1; min-width: 200px; padding: 1rem; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"></div>
-          <div class="metric-card" id="money-summary-coverage" style="flex: 1; min-width: 200px; padding: 1rem; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"></div>
-        </div>
-        
-        <!-- Table header + controls -->
-        <div class="table-header-row" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-          <h3 style="margin: 0;">Money Pages Opportunity Table</h3>
-          <button id="money-pages-copy-urls" class="btn btn-secondary" style="padding: 0.5rem 1rem; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer;">
-            Copy top money URLs
-          </button>
-        </div>
-        
-        <div class="table-wrapper" style="overflow-x: auto;">
-          <table id="money-pages-table" class="data-table" style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
-            <thead>
-              <tr style="background: #f5f5f5;">
-                <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600;">URL</th>
-                <th style="padding: 0.75rem; text-align: center; border-bottom: 2px solid #ddd; font-weight: 600;">Clicks</th>
-                <th style="padding: 0.75rem; text-align: center; border-bottom: 2px solid #ddd; font-weight: 600;">Impressions</th>
-                <th style="padding: 0.75rem; text-align: center; border-bottom: 2px solid #ddd; font-weight: 600;">CTR</th>
-                <th style="padding: 0.75rem; text-align: center; border-bottom: 2px solid #ddd; font-weight: 600;">Avg position</th>
-                <th style="padding: 0.75rem; text-align: center; border-bottom: 2px solid #ddd; font-weight: 600;">Opportunity</th>
-                <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600;">Recommended action</th>
-              </tr>
-            </thead>
-            <tbody id="money-pages-table-body">
-              <!-- JS will insert rows -->
-            </tbody>
-          </table>
-        </div>
-        
-        <p class="card-footnote" style="margin-top: 1rem; font-size: 0.85rem; color: #666;">
-          Based on the current audit date range and money-page segment only.
-          Categories and actions are data-driven and will update each time you run a new audit.
-        </p>
-      `;
-      
-      // Insert after Top Pages section
-      const topPagesSectionEl = document.getElementById('authority-top-pages-section');
-      if (topPagesSectionEl && topPagesSectionEl.parentNode) {
-        topPagesSectionEl.parentNode.insertBefore(moneyPagesSection, topPagesSectionEl.nextSibling);
-      } else {
-        // Fallback: insert after pillar cards
-        const pillarCards = document.getElementById('pillarCards');
-        if (pillarCards && pillarCards.parentNode) {
-          pillarCards.parentNode.insertBefore(moneyPagesSection, pillarCards.nextSibling);
+      // Use setTimeout to ensure Top Pages section is inserted first
+      setTimeout(() => {
+        const existingMoneyPages = document.getElementById('money-pages-section');
+        if (existingMoneyPages) {
+          existingMoneyPages.remove();
         }
-      }
-      
-      // Render money pages section if data is available
-      if (scores.moneyPagesMetrics) {
-        renderMoneyPagesSection(scores.moneyPagesMetrics);
-      } else {
-        moneyPagesSection.style.display = 'none';
-      }
+        
+        const moneyPagesSection = document.createElement('div');
+        moneyPagesSection.id = 'money-pages-section';
+        moneyPagesSection.className = 'card';
+        moneyPagesSection.style.marginTop = '2rem';
+        moneyPagesSection.style.marginBottom = '2rem';
+        moneyPagesSection.innerHTML = `
+          <div class="card-header">
+            <h2>Money Pages Performance & Actions</h2>
+            <p class="card-subtitle">
+              Focused view of your money pages: how much traffic they capture,
+              how they convert clicks, and which URLs to improve first.
+            </p>
+          </div>
+          
+          <!-- Summary strip -->
+          <div id="money-pages-summary" class="metrics-row" style="display: flex; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap;">
+            <div class="metric-card" id="money-summary-click-share" style="flex: 1; min-width: 200px; padding: 1rem; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"></div>
+            <div class="metric-card" id="money-summary-ctr" style="flex: 1; min-width: 200px; padding: 1rem; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"></div>
+            <div class="metric-card" id="money-summary-position" style="flex: 1; min-width: 200px; padding: 1rem; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"></div>
+            <div class="metric-card" id="money-summary-coverage" style="flex: 1; min-width: 200px; padding: 1rem; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"></div>
+          </div>
+          
+          <!-- Table header + controls -->
+          <div class="table-header-row" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+            <h3 style="margin: 0;">Money Pages Opportunity Table</h3>
+            <button id="money-pages-copy-urls" class="btn btn-secondary" style="padding: 0.5rem 1rem; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer;">
+              Copy top money URLs
+            </button>
+          </div>
+          
+          <div class="table-wrapper" style="overflow-x: auto;">
+            <table id="money-pages-table" class="data-table" style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+              <thead>
+                <tr style="background: #f5f5f5;">
+                  <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600;">URL</th>
+                  <th style="padding: 0.75rem; text-align: center; border-bottom: 2px solid #ddd; font-weight: 600;">Clicks</th>
+                  <th style="padding: 0.75rem; text-align: center; border-bottom: 2px solid #ddd; font-weight: 600;">Impressions</th>
+                  <th style="padding: 0.75rem; text-align: center; border-bottom: 2px solid #ddd; font-weight: 600;">CTR</th>
+                  <th style="padding: 0.75rem; text-align: center; border-bottom: 2px solid #ddd; font-weight: 600;">Avg position</th>
+                  <th style="padding: 0.75rem; text-align: center; border-bottom: 2px solid #ddd; font-weight: 600;">Opportunity</th>
+                  <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600;">Recommended action</th>
+                </tr>
+              </thead>
+              <tbody id="money-pages-table-body">
+                <!-- JS will insert rows -->
+              </tbody>
+            </table>
+          </div>
+          
+          <p class="card-footnote" style="margin-top: 1rem; font-size: 0.85rem; color: #666;">
+            Based on the current audit date range and money-page segment only.
+            Categories and actions are data-driven and will update each time you run a new audit.
+          </p>
+        `;
+        
+        // Insert after Top Pages section (try multiple insertion points)
+        let inserted = false;
+        const topPagesSectionEl = document.getElementById('authority-top-pages-section');
+        if (topPagesSectionEl && topPagesSectionEl.parentNode) {
+          topPagesSectionEl.parentNode.insertBefore(moneyPagesSection, topPagesSectionEl.nextSibling);
+          inserted = true;
+          debugLog('✓ Money Pages section inserted after authority-top-pages-section', 'success');
+        } else {
+          // Fallback: insert after pillar cards
+          const pillarCards = document.getElementById('pillarCards');
+          if (pillarCards && pillarCards.parentNode) {
+            pillarCards.parentNode.insertBefore(moneyPagesSection, pillarCards.nextSibling);
+            inserted = true;
+            debugLog('✓ Money Pages section inserted after pillar cards (fallback)', 'success');
+          }
+        }
+        
+        if (!inserted) {
+          debugLog('⚠ Money Pages section could not be inserted - no insertion point found', 'warn');
+          return;
+        }
+        
+        // Always render money pages section (will show "No data" if empty)
+        debugLog(`Money Pages Metrics available: ${scores.moneyPagesMetrics ? 'yes' : 'no'}`, 'info');
+        if (scores.moneyPagesMetrics) {
+          debugLog(`Money Pages: Rendering ${scores.moneyPagesMetrics.rows?.length || 0} money pages`, 'info');
+        } else {
+          debugLog('⚠ Money Pages: No metrics data, will show "No data" message', 'warn');
+        }
+        renderMoneyPagesSection(scores.moneyPagesMetrics || null);
+      }, 100);
       
       // Remove existing scorecard table if it exists
       const existingScorecard = pillarCards.parentNode.querySelector('.scorecard-section');
