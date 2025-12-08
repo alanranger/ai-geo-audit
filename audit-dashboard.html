@@ -897,15 +897,16 @@
           <p><strong>Measurement:</strong></p>
           <ul>
             <li>Primary: Average position from Google Search Console (1-40 mapped to 100-10)</li>
-            <li>Formula: <code>posScore = 100 - ((clampedPosition - 1) / 39) * 90</code></li>
+            <li>Formula: <code>posScore = 100 - ((clampedPosition - 1) / 39) * 90</code> where clampedPosition is constrained to 1-40</li>
+            <li>Visibility score = clamped posScore (0-100)</li>
             <li>Score range: 0-100</li>
           </ul>
           <p><strong>Data Sources:</strong></p>
           <ul>
             <li>Google Search Console API: impressions, clicks, average position, CTR</li>
-            <li>SERP feature tracking: featured snippets, AI Overviews, rich results</li>
+            <li>Real-time data from GSC API for the selected date range</li>
           </ul>
-          <p><strong>Data Checked:</strong> Search Console impressions/clicks, average position, CTR, featured snippet appearances, local pack visibility, SERP feature presence, ranking distribution.</p>
+          <p><strong>Data Checked:</strong> Search Console impressions/clicks, average position, CTR, ranking distribution.</p>
 
           <h5>2. Authority (E-E-A-T)</h5>
           <p><strong>What Authority Represents:</strong></p>
@@ -974,32 +975,48 @@
           <h5>3. Local Entity</h5>
           <p><strong>Measurement:</strong></p>
           <ul>
-            <li>Anchored around 60, adjusted by position and CTR</li>
-            <li>Formula: <code>localEntity = 60 + 0.3 * (posScore - 50) + 0.2 * (ctrScore - 50)</code></li>
+            <li><strong>Primary method (when Business Profile data available):</strong> Base score from NAP consistency (0-100), with bonuses:
+              <ul>
+                <li>Knowledge panel detected: +10 points</li>
+                <li>At least one location: +5 points</li>
+                <li>Final score capped at 100</li>
+              </ul>
+            </li>
+            <li><strong>Fallback method (no Business Profile data):</strong> Derived from search performance:
+              <ul>
+                <li>Formula: <code>localEntity = 60 + 0.3 * (posScore - 50) + 0.2 * (ctrScore - 50)</code></li>
+                <li>Uses position score and CTR score from GSC</li>
+              </ul>
+            </li>
             <li>Score range: 0-100</li>
           </ul>
           <p><strong>Data Sources:</strong></p>
           <ul>
-            <li>Google Search Console API: position, CTR</li>
-            <li>Schema markup validation (planned)</li>
-            <li>Knowledge panel tracking (planned)</li>
+            <li>✅ <strong>Primary:</strong> Google Business Profile API: NAP consistency score, knowledge panel detection, locations count</li>
+            <li>⚠️ <strong>Fallback:</strong> Google Search Console API: position, CTR (when Business Profile data unavailable)</li>
           </ul>
-          <p><strong>Data Checked:</strong> LocalBusiness schema presence, NAP consistency across site, entity mentions in content, knowledge panel presence, author markup, Organization schema.</p>
+          <p><strong>Data Checked:</strong> NAP consistency percentage, knowledge panel presence, locations count, LocalBusiness schema presence, entity recognition signals.</p>
 
           <h5>4. Service Area</h5>
           <p><strong>Measurement:</strong></p>
           <ul>
-            <li>Derived from Local Entity, slightly lower</li>
-            <li>Formula: <code>serviceArea = localEntity - 5</code></li>
+            <li><strong>Primary method (when Business Profile data available):</strong>
+              <ul>
+                <li>Base score from service areas count: 0 areas = 0, 1 area = 12.5, 2 areas = 25, ..., 8+ areas = 100</li>
+                <li>Formula: <code>baseScore = min(serviceAreasCount * 12.5, 100)</code></li>
+                <li>NAP consistency multiplier applied: <code>serviceArea = baseScore * (napConsistencyScore / 100)</code></li>
+                <li>If NAP consistency is low, service area score is reduced proportionally</li>
+              </ul>
+            </li>
+            <li><strong>Fallback method (no Business Profile data):</strong> Derived from Local Entity score (when Business Profile unavailable)</li>
             <li>Score range: 0-100</li>
           </ul>
           <p><strong>Data Sources:</strong></p>
           <ul>
-            <li>Google Search Console API (via Local Entity calculation)</li>
-            <li>Schema markup validation (planned)</li>
-            <li>Google Business Profile data (planned)</li>
+            <li>✅ <strong>Primary:</strong> Google Business Profile API: service areas count, NAP consistency score</li>
+            <li>⚠️ <strong>Fallback:</strong> Derived from Local Entity (when Business Profile data unavailable)</li>
           </ul>
-          <p><strong>Data Checked:</strong> ServiceArea schema markup, geographic keywords in content, location pages, Google Business Profile service areas, address/location schema.</p>
+          <p><strong>Data Checked:</strong> Service areas count from Business Profile, NAP consistency percentage, geographic coverage signals.</p>
 
           <h5>5. Content/Schema</h5>
           <p><strong>Measurement:</strong></p>
@@ -1022,6 +1039,54 @@
             <li>Rich result eligibility detection (Article, Event, Course, FAQ, HowTo, VideoObject, Product, LocalBusiness, Review, ImageObject, ItemList)</li>
           </ul>
           <p><strong>Data Checked:</strong> Total pages scanned, pages with schema, schema coverage percentage, schema types present (Organization, Person, LocalBusiness, Article, Course, Event, FAQ, HowTo, etc.), missing schema types, rich result eligibility (Article, Event, FAQ, Product, LocalBusiness, Course, Review, HowTo).</p>
+
+          <h5>6. Brand & Entity Overlay</h5>
+          <p><strong>What Brand Overlay Represents:</strong></p>
+          <p>Brand & Entity Overlay measures how strongly your brand is recognized in search and how well entity signals support AI understanding. It combines branded search performance, review signals, and entity recognition. <strong>Note:</strong> This is an overlay metric and does not directly affect the AI GEO score calculation.</p>
+          <p><strong>Measurement:</strong></p>
+          <ul>
+            <li><strong>Brand Search Component (40% of brand search score):</strong>
+              <ul>
+                <li>Brand Query Share: % of impressions that are branded queries (30%+ share = 100 points)</li>
+                <li>Brand CTR: Click-through rate on branded queries (40%+ CTR = 100 points)</li>
+                <li>Brand Avg Position: Average position for branded queries (normalized 1-10 → 100-0)</li>
+                <li>Formula: <code>brandSearchScore = 0.4 * shareScore + 0.3 * ctrScore + 0.3 * posScore</code></li>
+              </ul>
+            </li>
+            <li><strong>Combined Score:</strong>
+              <ul>
+                <li>Formula: <code>brandOverlay = 0.4 * brandSearchScore + 0.3 * reviewScore + 0.3 * entityScore</code></li>
+                <li>Label thresholds: &lt;40 = Weak, 40-69 = Developing, ≥70 = Strong</li>
+              </ul>
+            </li>
+            <li>Score range: 0-100</li>
+          </ul>
+          <p><strong>Data Sources:</strong></p>
+          <ul>
+            <li>Google Search Console API: Branded query identification, brand impressions, brand clicks, brand CTR, brand average position</li>
+            <li>Google Business Profile API: Review score (reused from Authority pillar)</li>
+            <li>Local Entity score: Entity recognition signals (reused from Local Entity pillar)</li>
+          </ul>
+          <p><strong>Data Checked:</strong> Brand query share (% of total impressions), branded CTR, average brand position, review signals, entity recognition strength.</p>
+
+          <h5>7. AI Summary Likelihood</h5>
+          <p><strong>What AI Summary Likelihood Represents:</strong></p>
+          <p>AI Summary Likelihood indicates how likely AI systems (like Google's AI Overviews) are to provide accurate, comprehensive summaries about your brand and content. It combines snippet readiness, visibility, and brand strength signals.</p>
+          <p><strong>Measurement:</strong></p>
+          <ul>
+            <li>Three-component model: Snippet Readiness (50%), Visibility (30%), Brand & Entity (20%)</li>
+            <li>Formula: <code>aiSummary = 0.5 * snippetReadinessScore + 0.3 * visibilityScore + 0.2 * brandScore</code></li>
+            <li>Label thresholds: &lt;50 = Low, 50-69 = Medium, ≥70 = High</li>
+            <li>Uses same RAG bands as AI GEO Score (≥70 green, ≥50 amber, &lt;50 red)</li>
+            <li>Score range: 0-100</li>
+          </ul>
+          <p><strong>Data Sources:</strong></p>
+          <ul>
+            <li>Snippet Readiness score: From snippet readiness gauge (FAQ/HowTo/Article blocks, schema, rich results)</li>
+            <li>Visibility score: Current Visibility pillar score (average position from GSC)</li>
+            <li>Brand score: Brand & Entity Overlay score</li>
+          </ul>
+          <p><strong>Data Checked:</strong> Snippet-friendly content blocks, schema markup for rich results, average search position, branded search performance, entity recognition.</p>
 
           <div class="note">
             <strong>Current Implementation Status:</strong><br>
