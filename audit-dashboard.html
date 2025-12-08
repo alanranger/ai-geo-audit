@@ -2464,12 +2464,14 @@
         } else {
           // Read response body once as text, then try to parse as JSON to avoid "body stream already read" error
           let errorMessage = 'Unknown error';
+          let errorDetails = null;
           try {
             const responseText = await response.text();
             // Try to parse as JSON
             try {
               const error = JSON.parse(responseText);
               errorMessage = error.message || error.details || responseText;
+              errorDetails = error;
             } catch (parseError) {
               // Not JSON, use text as-is
               errorMessage = responseText || `HTTP ${response.status}: ${response.statusText}`;
@@ -2477,9 +2479,15 @@
           } catch (textError) {
             errorMessage = `HTTP ${response.status}: ${response.statusText}`;
           }
+          // Log detailed error for debugging
+          console.error('[Supabase Save] Failed to save audit results to Supabase');
+          console.error('[Supabase Save] Status:', response.status, response.statusText);
+          console.error('[Supabase Save] Error message:', errorMessage);
+          if (errorDetails) {
+            console.error('[Supabase Save] Full error details:', JSON.stringify(errorDetails, null, 2));
+          }
           // Don't show error to user - Supabase is optional for now
           debugLog(`⚠ Could not save to Supabase: ${errorMessage}`, 'warn');
-          console.error('[Supabase Save] Full error details:', errorMessage);
         }
       } catch (error) {
         // Don't show error to user - Supabase is optional for now

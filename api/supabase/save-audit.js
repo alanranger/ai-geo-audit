@@ -67,40 +67,72 @@ export default async function handler(req, res) {
       foundationSchemas[type] = !schemaData.missingTypes?.includes(type);
     });
 
+    // Validate and prepare data for Supabase
+    // Ensure numeric fields are numbers, not strings
+    const ensureNumber = (val) => {
+      if (val === null || val === undefined) return null;
+      const num = typeof val === 'number' ? val : parseFloat(val);
+      return isNaN(num) ? null : num;
+    };
+    
+    // Ensure JSON fields are objects or null (not undefined)
+    const ensureJson = (val) => {
+      if (val === null || val === undefined) return null;
+      if (typeof val === 'object') return val;
+      try {
+        return typeof val === 'string' ? JSON.parse(val) : null;
+      } catch {
+        return null;
+      }
+    };
+    
     // Prepare data for Supabase
     const auditRecord = {
-      property_url: propertyUrl,
-      audit_date: auditDate, // Format: YYYY-MM-DD
+      property_url: String(propertyUrl).trim(),
+      audit_date: String(auditDate).trim(), // Format: YYYY-MM-DD
       
       // Schema Audit Data
-      schema_total_pages: schemaData.totalPages || 0,
-      schema_pages_with_schema: schemaData.pagesWithSchema || 0,
-      schema_coverage: schemaData.coverage || 0,
-      schema_types: schemaTypes.map(st => typeof st === 'string' ? st : st.type).filter(Boolean),
-      schema_foundation: foundationSchemas,
-      schema_rich_eligible: schemaData.richEligible || {},
-      schema_missing_pages: (schemaData.missingSchemaPages || []).map(p => p.url),
+      schema_total_pages: ensureNumber(schemaData.totalPages) ?? 0,
+      schema_pages_with_schema: ensureNumber(schemaData.pagesWithSchema) ?? 0,
+      schema_coverage: ensureNumber(schemaData.coverage) ?? 0,
+      schema_types: Array.isArray(schemaTypes) 
+        ? schemaTypes.map(st => typeof st === 'string' ? st : st.type).filter(Boolean)
+        : [],
+      schema_foundation: ensureJson(foundationSchemas) ?? {},
+      schema_rich_eligible: ensureJson(schemaData.richEligible) ?? {},
+      schema_missing_pages: Array.isArray(schemaData.missingSchemaPages)
+        ? schemaData.missingSchemaPages.map(p => (typeof p === 'string' ? p : p.url)).filter(Boolean)
+        : [],
       
       // Pillar Scores
-      visibility_score: scores?.visibility || null,
+      visibility_score: ensureNumber(scores?.visibility),
       // Authority score: extract numeric score from object structure if needed
-      authority_score: (typeof scores?.authority === 'object' && scores?.authority !== null) 
-        ? scores.authority.score 
-        : (scores?.authority || null),
-      local_entity_score: scores?.localEntity || null,
-      service_area_score: scores?.serviceArea || null,
-      content_schema_score: scores?.contentSchema || null,
-      snippet_readiness: snippetReadiness || null,
+      authority_score: ensureNumber(
+        (typeof scores?.authority === 'object' && scores?.authority !== null) 
+          ? scores.authority.score 
+          : scores?.authority
+      ),
+      local_entity_score: ensureNumber(scores?.localEntity),
+      service_area_score: ensureNumber(scores?.serviceArea),
+      content_schema_score: ensureNumber(scores?.contentSchema),
+      snippet_readiness: ensureNumber(
+        typeof snippetReadiness === 'number' 
+          ? snippetReadiness 
+          : (snippetReadiness?.overallScore || null)
+      ),
       
       // Phase 1: Brand Overlay and AI Summary (stored as JSON)
-      brand_overlay: scores?.brandOverlay || null, // JSON object with score, label, metrics, notes
-      brand_score: scores?.brandOverlay?.score || null, // For trend charting
+      brand_overlay: ensureJson(scores?.brandOverlay), // JSON object with score, label, metrics, notes
+      brand_score: ensureNumber(scores?.brandOverlay?.score), // For trend charting
       
       // Calculate AI Summary Likelihood (Phase 1)
       // Uses snippetReadiness, visibility, and brand score
       ai_summary: (() => {
         if (!snippetReadiness || !scores) return null;
-        const snippetReadinessScore = snippetReadiness.overallScore || 0;
+        // Handle both number and object formats for snippetReadiness
+        const snippetReadinessScore = typeof snippetReadiness === 'number' 
+          ? snippetReadiness 
+          : (snippetReadiness.overallScore || 0);
         const visibilityScore = scores.visibility || 0;
         const brandScore = scores.brandOverlay?.score || 0;
         
@@ -108,8 +140,9 @@ export default async function handler(req, res) {
         
         const composite = 0.5 * snippetReadinessScore + 0.3 * visibilityScore + 0.2 * brandScore;
         let label;
-        if (composite < 60) label = 'Low';
-        else if (composite < 80) label = 'Medium';
+        // Use same RAG bands as AI GEO: <50 red, 50-69 amber, >=70 green
+        if (composite < 50) label = 'Low';
+        else if (composite < 70) label = 'Medium';
         else label = 'High';
         
         const reasons = [];
@@ -128,7 +161,10 @@ export default async function handler(req, res) {
       })(),
       ai_summary_score: (() => {
         if (!snippetReadiness || !scores) return null;
-        const snippetReadinessScore = snippetReadiness.overallScore || 0;
+        // Handle both number and object formats for snippetReadiness
+        const snippetReadinessScore = typeof snippetReadiness === 'number' 
+          ? snippetReadiness 
+          : (snippetReadiness.overallScore || 0);
         const visibilityScore = scores.visibility || 0;
         const brandScore = scores.brandOverlay?.score || 0;
         if (snippetReadinessScore === 0 && brandScore === 0) return null;
@@ -136,28 +172,28 @@ export default async function handler(req, res) {
       })(),
       
       // Authority Component Scores (for historical tracking and debugging)
-      authority_behaviour_score: scores?.authorityComponents?.behaviour || null,
-      authority_ranking_score: scores?.authorityComponents?.ranking || null,
-      authority_backlink_score: scores?.authorityComponents?.backlinks || null,
-      authority_review_score: scores?.authorityComponents?.reviews || null,
+      authority_behaviour_score: ensureNumber(scores?.authorityComponents?.behaviour),
+      authority_ranking_score: ensureNumber(scores?.authorityComponents?.ranking),
+      authority_backlink_score: ensureNumber(scores?.authorityComponents?.backlinks),
+      authority_review_score: ensureNumber(scores?.authorityComponents?.reviews),
       
       // Segmented Authority Scores (for building historical segmented data)
-      authority_by_segment: scores?.authority?.bySegment || null, // JSON object with {all, nonEducation, money}
+      authority_by_segment: ensureJson(scores?.authority?.bySegment), // JSON object with {all, nonEducation, money}
       
       // Debug: Log authority_by_segment structure for verification
       // (This will be stored as JSON in Supabase)
       
       // GSC Data (for reference)
-      gsc_clicks: searchData?.totalClicks || null,
-      gsc_impressions: searchData?.totalImpressions || null,
-      gsc_avg_position: searchData?.averagePosition || null,
-      gsc_ctr: searchData?.ctr || null,
+      gsc_clicks: ensureNumber(searchData?.totalClicks),
+      gsc_impressions: ensureNumber(searchData?.totalImpressions),
+      gsc_avg_position: ensureNumber(searchData?.averagePosition),
+      gsc_ctr: ensureNumber(searchData?.ctr),
       
       // Business Profile Data (for historical tracking)
-      local_business_schema_pages: localSignals?.data?.localBusinessSchemaPages || null,
-      nap_consistency_score: localSignals?.data?.napConsistencyScore || null,
-      knowledge_panel_detected: localSignals?.data?.knowledgePanelDetected || null,
-      service_areas: localSignals?.data?.serviceAreas || null, // Array of service area objects
+      local_business_schema_pages: ensureNumber(localSignals?.data?.localBusinessSchemaPages),
+      nap_consistency_score: ensureNumber(localSignals?.data?.napConsistencyScore),
+      knowledge_panel_detected: localSignals?.data?.knowledgePanelDetected === true ? true : (localSignals?.data?.knowledgePanelDetected === false ? false : null),
+      service_areas: Array.isArray(localSignals?.data?.serviceAreas) ? localSignals.data.serviceAreas : null, // Array of service area objects
       
       updated_at: new Date().toISOString()
     };
@@ -242,12 +278,25 @@ export default async function handler(req, res) {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('[Supabase Save] Error response:', response.status, errorText);
-      console.error('[Supabase Save] Request data:', JSON.stringify(auditRecord, null, 2).substring(0, 500));
+      console.error('[Supabase Save] Error response status:', response.status);
+      console.error('[Supabase Save] Error response text:', errorText);
+      console.error('[Supabase Save] Request data (first 1000 chars):', JSON.stringify(auditRecord, null, 2).substring(0, 1000));
+      
+      // Try to parse error for better details
+      let errorDetails = errorText;
+      try {
+        const errorJson = JSON.parse(errorText);
+        errorDetails = JSON.stringify(errorJson, null, 2);
+        console.error('[Supabase Save] Parsed error:', errorDetails);
+      } catch (e) {
+        // Not JSON, use as-is
+      }
+      
       return res.status(response.status).json({
         status: 'error',
         message: 'Failed to save audit results to Supabase',
-        details: errorText,
+        details: errorDetails,
+        statusCode: response.status,
         meta: { generatedAt: new Date().toISOString() }
       });
     }
