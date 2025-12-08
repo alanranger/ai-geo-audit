@@ -2316,13 +2316,24 @@
           const result = await response.json();
           debugLog('✓ Audit results saved to Supabase', 'success');
         } else {
-          const error = await response.json();
+          // Try to parse as JSON, but handle plain text errors too
+          let errorMessage = 'Unknown error';
+          try {
+            const error = await response.json();
+            errorMessage = error.message || error.details || JSON.stringify(error);
+          } catch (jsonError) {
+            // If JSON parsing fails, read as text
+            const errorText = await response.text();
+            errorMessage = errorText || `HTTP ${response.status}: ${response.statusText}`;
+          }
           // Don't show error to user - Supabase is optional for now
-          debugLog(`⚠ Could not save to Supabase: ${error.message || 'Unknown error'}`, 'warn');
+          debugLog(`⚠ Could not save to Supabase: ${errorMessage}`, 'warn');
+          console.error('[Supabase Save] Full error details:', errorMessage);
         }
       } catch (error) {
         // Don't show error to user - Supabase is optional for now
         debugLog(`⚠ Supabase save error: ${error.message}`, 'warn');
+        console.error('[Supabase Save] Exception:', error);
       }
     }
     
