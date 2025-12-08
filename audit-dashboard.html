@@ -9254,15 +9254,35 @@ Final Score: ${score}/100`;
           window.currentQueryPages = saved.searchData.queryPages;
         }
         // Render behaviour KPIs and chart after a delay to ensure DOM and Chart.js are ready
-        // Only render once to prevent infinite loops
+        // Apply filters and update all sections with filtered data
         if (scores.moneyPagesMetrics) {
           setTimeout(() => {
             const queryPages = window.currentQueryPages || null;
-            // Render behaviour KPIs
-            renderMoneyPagesBehaviourKpis(scores.moneyPagesMetrics.behaviour, scores.moneyPagesMetrics, queryPages);
-            // Double-check chart doesn't exist before rendering
-            if (!moneyPagesCategoryChart) {
-              renderMoneyPagesCategoryChart(scores.moneyPagesMetrics, 0);
+            const moneyPagesMetrics = scores.moneyPagesMetrics;
+            
+            // Get filtered metrics based on current filters (defaults to 'ALL' on initial load)
+            const filteredMetrics = getFilteredMoneyPagesMetrics(moneyPagesMetrics);
+            if (filteredMetrics) {
+              // Recalculate behaviour for filtered pages
+              const filteredRows = filteredMetrics.rows || [];
+              const filteredBehaviour = window.computeMoneyPagesBehaviour ? 
+                window.computeMoneyPagesBehaviour(queryPages, filteredRows) : null;
+              
+              // Update all sections with filtered data
+              renderMoneyPagesBehaviourKpis(filteredBehaviour, filteredMetrics, queryPages);
+              updateMoneyPagesSummaryMetrics(filteredMetrics);
+              updateMoneyPagesChartSummary(filteredMetrics);
+              
+              // Render chart with filtered data
+              if (!moneyPagesCategoryChart) {
+                renderMoneyPagesCategoryChart(moneyPagesMetrics, 0);
+              }
+            } else {
+              // Fallback: render with unfiltered data if filtering fails
+              renderMoneyPagesBehaviourKpis(moneyPagesMetrics.behaviour, moneyPagesMetrics, queryPages);
+              if (!moneyPagesCategoryChart) {
+                renderMoneyPagesCategoryChart(moneyPagesMetrics, 0);
+              }
             }
           }, 200);
         }
