@@ -4398,9 +4398,25 @@
         const allPagesAggregated = computeAllPagesForSegment(allGSCPages); // Aggregate GSC data by page
         
         // Fetch CSV and segment all URLs
+        // First check for manually loaded URL list, then try GitHub/fallback
+        let csvUrls = [];
         try {
-          const csvUrls = await fetchAndParseSiteUrlsCsv();
-          debugLog(`✓ Fetched ${csvUrls.length} URLs from CSV`, 'info');
+          // Check for manually loaded URL list first
+          const manualUrlList = localStorage.getItem('manual_url_list');
+          if (manualUrlList) {
+            try {
+              csvUrls = JSON.parse(manualUrlList);
+              debugLog(`✓ Using manual URL list: ${csvUrls.length} URLs`, 'info');
+            } catch (parseErr) {
+              debugLog(`⚠ Failed to parse manual URL list: ${parseErr.message}`, 'warn');
+            }
+          }
+          
+          // If no manual list, try fetching from GitHub/fallback
+          if (csvUrls.length === 0) {
+            csvUrls = await fetchAndParseSiteUrlsCsv();
+            debugLog(`✓ Fetched ${csvUrls.length} URLs from CSV (GitHub/fallback)`, 'info');
+          }
           
           // Segment all CSV URLs
           const allCsvPages = csvUrls.map(url => {
@@ -5169,8 +5185,15 @@
           const columns = parseCsvLine(lines[i]);
           if (columns[urlColumnIndex]) {
             const url = columns[urlColumnIndex].trim();
-            if (url && url.startsWith('http')) {
-              urls.push(url);
+            if (url) {
+              // Accept URLs starting with http/https, or relative URLs starting with /
+              // Also accept full URLs without protocol (will be normalized)
+              if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/')) {
+                urls.push(url);
+              } else if (url.includes('.') && !url.includes(' ')) {
+                // Likely a URL without protocol - add https://
+                urls.push(url.startsWith('//') ? `https:${url}` : `https://${url}`);
+              }
             }
           }
         }
@@ -5226,8 +5249,15 @@
             const columns = parseCsvLine(lines[i]);
             if (columns[urlColumnIndex]) {
               const url = columns[urlColumnIndex].trim();
-              if (url && url.startsWith('http')) {
-                urls.push(url);
+              if (url) {
+                // Accept URLs starting with http/https, or relative URLs starting with /
+                // Also accept full URLs without protocol (will be normalized)
+                if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/')) {
+                  urls.push(url);
+                } else if (url.includes('.') && !url.includes(' ')) {
+                  // Likely a URL without protocol - add https://
+                  urls.push(url.startsWith('//') ? `https:${url}` : `https://${url}`);
+                }
               }
             }
           }
