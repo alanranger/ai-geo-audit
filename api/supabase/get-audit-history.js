@@ -106,7 +106,9 @@ export default async function handler(req, res) {
       authorityBacklinkScore: record.authority_backlink_score,
       authorityReviewScore: record.authority_review_score,
       // Segmented Authority scores (new: for building historical segmented data)
-      authorityBySegment: record.authority_by_segment || null // JSON object with {all, nonEducation, money}
+      authorityBySegment: record.authority_by_segment || null, // JSON object with {all, nonEducation, money}
+      // Brand Overlay data (Phase 1: for trend charting)
+      brandScore: record.brand_score || null
     }));
 
     return res.status(200).json({

@@ -2719,8 +2719,8 @@
         0.2 * brandScore;
       
       let label;
-      if (composite < 50) label = 'Low';
-      else if (composite < 75) label = 'Medium';
+      if (composite < 60) label = 'Low';
+      else if (composite < 80) label = 'Medium';
       else label = 'High';
       
       const reasons = [];
@@ -6310,6 +6310,13 @@ Final Score: ${score}/100`;
           debugLog(`📊 Top Pages: First page URL: ${topPages[0].url}, Impressions: ${topPages[0].impressions}`, 'info');
         }
         
+        // Get brand queries for mini-table
+        const topQueries = saved?.searchData?.topQueries || [];
+        const brandQueries = topQueries
+          .filter(q => isBrandQuery(q.query || ''))
+          .sort((a, b) => (b.impressions || 0) - (a.impressions || 0))
+          .slice(0, 10);
+        
         // Create section HTML
         topPagesSection.innerHTML = `
           <div style="background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
@@ -6336,6 +6343,42 @@ Final Score: ${score}/100`;
                 behaviourScore: authorityBySegment[currentMode].behaviour || 0,
                 rankingScore: authorityBySegment[currentMode].ranking || 0
               }, segmentLabel, dateRangeText)}
+            </div>
+            ` : ''}
+            
+            ${brandQueries.length > 0 ? `
+            <div style="margin-top: 2rem; padding: 1rem; background: #f8f9fa; border-radius: 6px; border-left: 3px solid #f59e0b;">
+              <h4 style="margin: 0 0 0.75rem 0; color: #92400e; font-size: 1rem; font-weight: 600;">Top Branded Queries</h4>
+              <p style="margin: 0 0 1rem 0; font-size: 0.85rem; color: #666; line-height: 1.5;">Branded search queries (e.g., "Alan Ranger Photography") with CTR and position metrics.</p>
+              <div style="overflow-x: auto;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+                  <thead>
+                    <tr style="background: #e5e7eb; border-bottom: 2px solid #d1d5db;">
+                      <th style="padding: 0.5rem; text-align: left; font-weight: 600; color: #374151;">Query</th>
+                      <th style="padding: 0.5rem; text-align: right; font-weight: 600; color: #374151;">Impressions</th>
+                      <th style="padding: 0.5rem; text-align: right; font-weight: 600; color: #374151;">Clicks</th>
+                      <th style="padding: 0.5rem; text-align: right; font-weight: 600; color: #374151;">CTR</th>
+                      <th style="padding: 0.5rem; text-align: right; font-weight: 600; color: #374151;">Position</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${brandQueries.map((q, idx) => {
+                      const ctr = q.impressions > 0 ? ((q.clicks || 0) / q.impressions * 100) : 0;
+                      const ctrColor = ctr >= 25 ? '#10b981' : ctr >= 10 ? '#f59e0b' : '#ef4444';
+                      const posColor = (q.position || 0) <= 3 ? '#10b981' : (q.position || 0) <= 5 ? '#f59e0b' : '#ef4444';
+                      return `
+                      <tr style="border-bottom: 1px solid #e5e7eb; ${idx % 2 === 0 ? 'background: #ffffff;' : 'background: #f9fafb;'}">
+                        <td style="padding: 0.5rem; color: #1f2937; font-weight: 500;">${(q.query || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td>
+                        <td style="padding: 0.5rem; text-align: right; color: #6b7280;">${(q.impressions || 0).toLocaleString()}</td>
+                        <td style="padding: 0.5rem; text-align: right; color: #6b7280;">${(q.clicks || 0).toLocaleString()}</td>
+                        <td style="padding: 0.5rem; text-align: right; color: ${ctrColor}; font-weight: 600;">${ctr.toFixed(2)}%</td>
+                        <td style="padding: 0.5rem; text-align: right; color: ${posColor}; font-weight: 600;">${(q.position || 0).toFixed(1)}</td>
+                      </tr>
+                    `;
+                    }).join('')}
+                  </tbody>
+                </table>
+              </div>
             </div>
             ` : ''}
           </div>
@@ -6698,6 +6741,13 @@ Final Score: ${score}/100`;
         // Get date range for display
         const dateRange = parseInt(localStorage.getItem('gsc_date_range') || '30', 10);
         const dateRangeText = dateRange === 30 ? '30 days' : dateRange === 60 ? '60 days' : dateRange === 90 ? '90 days' : dateRange === 120 ? '120 days' : dateRange === 180 ? '180 days' : dateRange === 365 ? '365 days' : dateRange === 540 ? '540 days' : `${dateRange} days`;
+        
+        // Get brand queries for mini-table
+        const topQueries = saved?.searchData?.topQueries || [];
+        const brandQueries = topQueries
+          .filter(q => isBrandQuery(q.query || ''))
+          .sort((a, b) => (b.impressions || 0) - (a.impressions || 0))
+          .slice(0, 10);
         
         // Create section HTML with improved styling and pastel background
         topPagesSection.innerHTML = `
@@ -8520,7 +8570,7 @@ Final Score: ${score}/100`;
           }
           
           // If we have timeseries data, use it; otherwise fall back to mock data
-          let localEntityData, serviceAreaData, authorityData, visibilityData, contentSchemaData;
+          let localEntityData, serviceAreaData, authorityData, visibilityData, contentSchemaData, brandOverlayData;
           let contentSchemaDataEstimated = []; // Declare in outer scope for use in chart creation
           let chartDates = dates;
           let chartDateObjects = []; // Store Date objects for period detection
@@ -8532,7 +8582,9 @@ Final Score: ${score}/100`;
           let serviceAreaMap = new Map();
           let authorityMap = new Map(); // Store historical Authority scores from Supabase (legacy: single value)
           let authorityBySegmentMap = new Map(); // Store historical segmented Authority scores from Supabase (new: {all, nonEducation, money})
+          let brandOverlayMap = new Map(); // Store historical Brand Overlay scores from Supabase
           const currentContentSchema = scores.contentSchema || 0;
+          const currentBrandOverlay = scores.brandOverlay?.score || null;
           
           if (timeseries.length > 0) {
             // Fetch historical Content/Schema data from Supabase (async operation)
@@ -8596,6 +8648,11 @@ Final Score: ${score}/100`;
                       // authorityBySegment is a JSON object: {all: {total, behaviour, ranking, backlinks, reviews}, nonEducation: {...}, money: {...}}
                       authorityBySegmentMap.set(normalizedDate, record.authorityBySegment);
                       debugLog(`Mapped Authority by Segment: ${normalizedDate} = ${JSON.stringify(record.authorityBySegment)}`, 'info');
+                    }
+                    // Brand Overlay data (Phase 1: stored as brand_score)
+                    if (record.brandScore !== null && record.brandScore !== undefined) {
+                      brandOverlayMap.set(normalizedDate, record.brandScore);
+                      debugLog(`Mapped Brand Overlay: ${normalizedDate} = ${record.brandScore}`, 'info');
                     }
                   }
                 });
@@ -8789,6 +8846,7 @@ Final Score: ${score}/100`;
             authorityData = [];
             visibilityData = [];
             contentSchemaData = [];
+            brandOverlayData = [];
             contentSchemaDataEstimated = []; // Reset array for timeseries data
             const allDateObjects = []; // Store Date objects for year detection
             const allDates = [];
@@ -9157,6 +9215,14 @@ Final Score: ${score}/100`;
                 contentSchemaDataEstimated.push(currentContentSchema);
                 debugLog(`Using current Content/Schema score (${currentContentSchema}) as estimate for today`, 'info');
               }
+              
+              // For Brand Overlay, use current score if available
+              if (currentBrandOverlay !== null) {
+                brandOverlayData.push(currentBrandOverlay);
+                debugLog(`✓ Added Brand Overlay score (${currentBrandOverlay}) for today from current audit`, 'info');
+              } else {
+                brandOverlayData.push(null);
+              }
             }
             
             // Apply label spacing to dates with year detection (show every labelStep-th label)
@@ -9190,6 +9256,7 @@ Final Score: ${score}/100`;
             visibilityData = new Array(numDataPoints).fill(null);
             contentSchemaData = new Array(numDataPoints).fill(null);
             contentSchemaDataEstimated = new Array(numDataPoints).fill(null);
+            brandOverlayData = new Array(numDataPoints).fill(null);
             
             // Generate dates for the date range
             const fallbackDates = [];
@@ -9211,7 +9278,7 @@ Final Score: ${score}/100`;
           }
           
           // Calculate min and max across all datasets (filter out null values)
-          const allData = [...localEntityData, ...serviceAreaData, ...authorityData, ...visibilityData, ...contentSchemaData].filter(v => v !== null && v !== undefined && !isNaN(v));
+          const allData = [...localEntityData, ...serviceAreaData, ...authorityData, ...visibilityData, ...contentSchemaData, ...brandOverlayData].filter(v => v !== null && v !== undefined && !isNaN(v));
           const dataMin = allData.length > 0 ? Math.min(...allData) : 0;
           const dataMax = allData.length > 0 ? Math.max(...allData) : 100;
           const dataRange = dataMax - dataMin;
@@ -9306,6 +9373,7 @@ Final Score: ${score}/100`;
           const authorityTrend = calculateTrend(authorityData);
           const visibilityTrend = calculateTrend(visibilityData);
           const contentSchemaTrend = calculateTrend(contentSchemaData);
+          const brandOverlayTrend = calculateTrend(brandOverlayData);
 
           // Update HTML trend summary row
           const trendSummaryRow = document.getElementById('trendSummaryRow');
@@ -9333,7 +9401,8 @@ Final Score: ${score}/100`;
               buildPill('Service Area', serviceAreaTrend),
               buildPill('Authority', authorityTrend),
               buildPill('Visibility', visibilityTrend),
-              buildPill('Content/Schema', contentSchemaTrend)
+              buildPill('Content/Schema', contentSchemaTrend),
+              buildPill('Brand & Entity', brandOverlayTrend)
             ].join('');
           }
           
@@ -9546,6 +9615,18 @@ Final Score: ${score}/100`;
                   pointBackgroundColor: 'rgba(107, 114, 128, 1)',
                   pointBorderColor: '#ffffff',
                   pointBorderWidth: 2
+                },
+                {
+                  label: 'Brand & Entity',
+                  data: brandOverlayData,
+                  borderColor: 'rgba(245, 158, 11, 1)', // Amber/Orange
+                  backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                  borderWidth: 2,
+                  borderDash: [5, 5], // Dashed line to indicate overlay
+                  tension: 0.4,
+                  pointRadius: 0,
+                  pointHoverRadius: 5,
+                  spanGaps: true
                 }
               ]
             },
