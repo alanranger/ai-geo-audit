@@ -92,7 +92,13 @@
        │   └─> Reviews (20%): Combined GBP and on-site ratings/counts
        ├─> Local Entity Score: NAP consistency + knowledge panel + locations (from GBP API)
        ├─> Service Area Score: Service areas count + NAP multiplier (from GBP API)
-       └─> Content/Schema Score: (Foundation × 30%) + (Rich Results × 35%) + (Coverage × 20%) + (Diversity × 15%)
+       ├─> Content/Schema Score: (Foundation × 30%) + (Rich Results × 35%) + (Coverage × 20%) + (Diversity × 15%)
+       ├─> Brand Overlay (overlay metric, does not affect AI GEO score):
+       │   ├─> Brand Query Classification: isBrandQuery() filters queries by brand terms
+       │   ├─> Brand Metrics: calculateBrandMetrics() computes share, CTR, avg position
+       │   └─> Brand Overlay Score: computeBrandOverlay() combines brand search (40%), reviews (30%), entity (30%)
+       └─> AI Summary Likelihood (overlay metric):
+           └─> computeAiSummaryLikelihood() combines snippet readiness (50%), visibility (30%), brand (20%)
 
 5. UI RENDERING
    └─> displayDashboard(scores, data, snippetReadiness, schemaAudit)
@@ -275,7 +281,7 @@
 ---
 
 #### 7. `/api/supabase/get-audit-history` (GET)
-**Purpose**: Fetch historical Content/Schema scores from Supabase
+**Purpose**: Fetch historical audit data for all pillars from Supabase
 
 **Parameters**:
 - `propertyUrl` (required)
@@ -296,7 +302,56 @@
 
 **Data Source**: ✅ **REAL** - Retrieves historical data from Supabase database
 
-**Note**: If Supabase is not configured, returns `status: "skipped"`. Trend chart will use current score for all historical points (dashed line).
+**Note**: Returns historical data for all pillars including Brand overlay and AI summary scores. If Supabase is not configured, returns `status: "skipped"`.
+
+---
+
+#### 8. `/api/supabase/create-shared-audit` (POST)
+**Purpose**: Create a shareable audit link for public viewing
+
+**Body**:
+```json
+{
+  "auditData": { /* Full audit JSON object */ }
+}
+```
+
+**Returns**:
+```json
+{
+  "status": "ok",
+  "shareId": "abc123xyz456",
+  "shareUrl": "https://ai-geo-audit.vercel.app/audit-dashboard.html?share=abc123xyz456",
+  "expiresAt": "2026-01-08T00:00:00Z"
+}
+```
+
+**Data Source**: ✅ **REAL** - Stores audit data in Supabase `shared_audits` table
+
+**Note**: Links expire after 30 days. Shareable links allow viewing complete audit results without running an audit.
+
+---
+
+#### 9. `/api/supabase/get-shared-audit` (GET)
+**Purpose**: Retrieve shared audit data by share ID
+
+**Parameters**:
+- `shareId` (required): 12-character shareable ID
+
+**Returns**:
+```json
+{
+  "status": "ok",
+  "data": { /* Full audit JSON object */ },
+  "shareId": "abc123xyz456",
+  "createdAt": "2025-12-08T00:00:00Z",
+  "expiresAt": "2026-01-08T00:00:00Z"
+}
+```
+
+**Data Source**: ✅ **REAL** - Retrieves from Supabase `shared_audits` table
+
+**Note**: Returns 404 if share ID not found or expired. Dashboard automatically loads shared audit when `?share=ID` parameter is present in URL.
 
 ---
 
@@ -698,14 +753,22 @@ Applied to all 5 pillar scores and snippet readiness.
 - [ ] **Historical Schema Coverage Tracking**: Implement Supabase database with cron job to track schema coverage changes over time. This will enable real Content/Schema trend lines showing actual historical schema changes (currently shows flat line because schema audit is only run once per audit, not historically).
 
 **Current State**: 
-- ✅ Supabase integration implemented for Content/Schema and Authority historical tracking
-- ✅ Audit results saved to Supabase after each scan (includes Authority component scores)
-- ✅ Historical Content/Schema data fetched from Supabase for trend chart
-- ✅ Historical Authority scores fetched from Supabase for trend chart
-- ✅ Authority component scores (behaviour, ranking, backlinks, reviews) stored in Supabase
-- ⚠️ If Supabase not configured, trend chart shows simplified calculation for historical Authority scores
-- ⚠️ Other pillars (Visibility) use GSC timeseries data (no storage needed)
-- ✅ Trend chart uses full Authority calculation for today's date, simplified calculation for historical dates
+- ✅ **Supabase integration**: Historical tracking for ALL pillars (not just Content/Schema)
+  - `audit_results` table stores: all pillar scores, Authority component scores, Brand overlay, AI summary
+  - Segmented Authority data (All pages, Exclude education, Money pages) stored as JSON
+  - Brand overlay and AI summary scores stored for trend tracking
+- ✅ **Historical data retrieval**: 
+  - All pillars fetch historical data from Supabase for trend charts
+  - Brand & Entity uses fallback calculation from GSC timeseries when stored data unavailable
+  - Trend charts show real historical data, not just current score
+- ✅ **Shareable audit links**: 
+  - `shared_audits` table stores full audit JSON with unique share_id
+  - 30-day expiration for shared links
+  - Public access via `?share=ID` URL parameter
+- ✅ **Data storage**: 
+  - Audit results saved after each scan with complete data
+  - Historical tracking enables trend analysis over time
+  - Fallback calculations ensure charts always show data
 
 ---
 
@@ -814,15 +877,19 @@ Applied to all 5 pillar scores and snippet readiness.
 #### Site AI Health Dashboard
 - **Location**: Top of dashboard, above pillar cards
 - **Components**:
-  - Speedometer-style circular gauge (SVG-based)
-  - Color-coded segments: Red (0-50%), Amber (50-70%), Green (70-100%)
-  - Visual needle indicator pointing to current score
-  - Tick marks for current score and AI summary likelihood threshold (55)
-  - Labels: 50%, 100%, current score with "Score" label, AI threshold with "AI Medium" label
-  - Status badge: "Excellent" (green), "Good" (amber), "Needs Work" (red)
-  - AI Summary Likelihood indicator: High/Medium/Low
-- **Score Calculation**: Weighted average of 5 pillar scores
-- **AI Summary Likelihood**: Based on AI GEO Score and component scores (Authority, Content, Coverage)
+  - Speedometer-style circular gauge (SVG-based, 30% larger)
+  - Color-coded segments: Red (0-49), Amber (50-69), Green (70-100)
+  - Multiple needle indicators: AI GEO Score (thick solid), AI Summary Likelihood (medium solid), Brand & Entity (medium dashed)
+  - Tick marks and labels for all three metrics
+  - RAG status pills with detailed breakdown boxes (not just tooltips)
+  - Standardized pill and box sizing for alignment
+  - Status badge: RAG-based (Green/Amber/Red)
+  - AI Summary Likelihood indicator: High (≥70), Medium (50-69), Low (<50)
+  - Brand & Entity chip: Strong (≥70), Developing (40-69), Weak (<40)
+- **Score Calculation**: 
+  - **AI GEO Score**: Weighted average of 5 core pillars (Authority 30%, Content/Schema 25%, Visibility 20%, Local Entity 15%, Service Area 10%)
+  - **AI Summary Likelihood**: Snippet Readiness (50%) + Visibility (30%) + Brand Score (20%)
+  - **Brand Overlay**: Brand Search (40%) + Reviews (30%) + Entity (30%) - overlay metric, does not affect AI GEO score
 
 ### Infrastructure
 - Vercel - Hosting and serverless functions
@@ -854,8 +921,10 @@ AI GEO Audit/
 │       ├── entity-extract.js       # STUB: Entity extraction
 │       └── utils.js                # Shared utilities
 │   └── supabase/
-│       ├── save-audit.js           # Save audit results to Supabase
-│       └── get-audit-history.js    # Fetch historical Content/Schema data
+│       ├── save-audit.js           # Save audit results to Supabase (includes brand_overlay, ai_summary)
+│       ├── get-audit-history.js    # Fetch historical audit data for all pillars
+│       ├── create-shared-audit.js  # Create shareable audit link
+│       └── get-shared-audit.js     # Retrieve shared audit by ID
 └── scripts/
     └── sync-site-urls.js          # CSV sync script
 ```
@@ -865,23 +934,43 @@ AI GEO Audit/
 ## Summary
 
 **Current State**: 
-- ✅ Core functionality working with real GSC and schema data
-- ✅ All 5 pillars use real data:
-  - Visibility: GSC position data
-  - Authority: 4-component model (Behaviour, Ranking, Backlinks, Reviews)
-  - Content/Schema: Schema audit (foundation/rich results/coverage/diversity)
-  - Local Entity: Google Business Profile API
-  - Service Area: Google Business Profile API
-- ✅ Backlink metrics: CSV upload with metrics computation
-- ✅ Review data: GBP API + site-reviews.json
-- ⚠️ 1 API endpoint is a stub (entity-extract)
-- ✅ Supabase integration for historical tracking (Content/Schema, Authority component scores)
-- ✅ Enhanced visualizations (radar chart with score labels, snippet readiness nested doughnut chart)
-- ✅ Dashboard persistence and retry failed URLs functionality
-- ✅ Authority component scores stored in Supabase for historical tracking
+- ✅ **Fully Implemented**: All core features production-ready
+- ✅ **5 Core Pillars** with real data sources:
+  - **Authority** (30%): 4-component model (Behaviour 40%, Ranking 20%, Backlinks 20%, Reviews 20%)
+  - **Content/Schema** (25%): Schema audit (Foundation 30%, Rich Results 35%, Coverage 20%, Diversity 15%)
+  - **Visibility** (20%): GSC position and CTR data
+  - **Local Entity** (15%): Google Business Profile API (NAP consistency, Knowledge Panel, locations)
+  - **Service Area** (10%): Google Business Profile API (service areas, NAP multiplier)
+- ✅ **Brand & Entity Overlay**: Brand query classification, metrics calculation, trend tracking
+  - Brand query share, branded CTR, brand average position
+  - Combined with review and entity scores
+  - Overlay metric (does not affect AI GEO score)
+- ✅ **AI Summary Likelihood**: Composite score for AI/Google answer accuracy
+  - Snippet Readiness (50%) + Visibility (30%) + Brand Score (20%)
+  - RAG thresholds: Low <50, Medium 50-69, High ≥70
+- ✅ **Backlink metrics**: CSV upload with domain rating and metrics computation
+- ✅ **Review data**: GBP API + Trustpilot snapshot integration
+- ✅ **Supabase integration**: Historical tracking for all pillars (not just Content/Schema)
+  - Brand overlay and AI summary scores stored
+  - Segmented Authority data (All pages, Exclude education, Money pages)
+  - Trend charts with fallback calculations
+- ✅ **Shareable Audit Links**: Public sharing with 30-day expiration
+  - `shared_audits` table in Supabase
+  - API endpoints for create/retrieve
+  - `?share=ID` URL parameter support
+- ✅ **Enhanced visualizations**: 
+  - Speedometer with multiple indicators (30% larger)
+  - Radar chart with RAG color-coded labels
+  - Trend charts for all 6 metrics (5 pillars + Brand & Entity)
+  - Snippet readiness nested doughnut chart
+  - Brand queries mini-table
+- ✅ **Dashboard features**: Persistence, retry failed URLs, page segmentation, collapsible sections
+- ⚠️ **1 API endpoint is a stub**: `entity-extract` (optional feature)
 
 **Next Priority**: 
-1. Add automated scheduling (cron jobs)
-2. Expand historical tracking to other pillars if needed
-3. Implement Entity Extraction API (optional)
+1. Real-time SERP feature monitoring and alerts
+2. Advanced backlink analysis with automated discovery
+3. Competitive analysis and benchmarking
+4. Automated action recommendations engine
+5. Export capabilities (PDF, CSV reports)
 

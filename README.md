@@ -27,28 +27,49 @@ Vercel will automatically rebuild and deploy (usually takes 1-2 minutes).
 
 ## Features
 
-- **Site AI Health Score**: Prominent speedometer-style gauge showing overall AI GEO Score
-  - Color-coded segments (Red/Amber/Green) with visual needle indicator
-  - Current score and AI summary likelihood threshold markers
-  - Status badge and AI summary likelihood indicator
-- **5 Pillar Score Tracking**: Local Entity, Service Area, Authority (4-component: Behaviour, Ranking, Backlinks, Reviews), Visibility, Content/Schema
-- **Real-time Data**: Google Search Console API integration
+- **Site AI Health Dashboard**: Comprehensive health score visualization
+  - Large speedometer gauge (30% larger) showing AI GEO Score (0-100)
+  - Color-coded segments: Red (0-49), Amber (50-69), Green (70-100)
+  - Visual needle indicators for AI GEO Score, AI Summary Likelihood, and Brand & Entity
+  - RAG status pills with detailed breakdown boxes showing calculation components
+  - AI Summary Likelihood indicator (High/Medium/Low) with breakdown
+  - Brand & Entity overlay chip showing score and status
+- **5 Core Pillars + Overlays**: 
+  - **Authority** (30% weight): 4-component model (Behaviour 40%, Ranking 20%, Backlinks 20%, Reviews 20%)
+  - **Content/Schema** (25% weight): Foundation schemas, Rich Results, Coverage, Type Diversity
+  - **Visibility** (20% weight): Average position and CTR from GSC
+  - **Local Entity** (15% weight): NAP consistency, Knowledge Panel, GBP signals
+  - **Service Area** (10% weight): Service area coverage and NAP multiplier
+  - **Brand & Entity Overlay**: Brand query performance, reviews, entity strength (does not affect AI GEO score)
+  - **AI Summary Likelihood**: Composite score for AI/Google answer accuracy (snippet readiness, visibility, brand)
+- **Real-time Data Sources**: 
+  - Google Search Console API (OAuth2) - clicks, impressions, position, queries, brand queries
+  - Google Business Profile API - ratings, reviews, locations, service areas, NAP data
+  - Schema Audit - Full site crawl for JSON-LD markup validation
+  - Backlink CSV Upload - Domain rating, referring domains, follow ratio
+  - Trustpilot Reviews - Snapshot integration for review aggregation
 - **Visual Dashboards**: 
-  - Site AI Health speedometer gauge
-  - Radar chart with RAG color-coded score labels at each data point
-  - Trend graphs showing historical performance
-  - Snippet Readiness nested doughnut chart with weighted segments and score indicators
-  - Metrics cards with real-time data
-- **Recommended Actions Table**: Data-driven recommendations based on segment metrics
-  - Priority highlighting for critical issues
-  - Segment-aware action suggestions
-  - Current vs target comparisons with gap analysis
-- **RAG Status**: Color-coded Red/Amber/Green indicators on all scores
-- **Historical Data**: Supabase integration for Content/Schema trend tracking
-- **Dashboard Persistence**: Automatically loads last audit results on page reload
-- **Retry Failed URLs**: Rescan failed/missing URLs without running full audit
-- **Configuration**: Save API keys and settings locally
-- **Page Segmentation**: Smart classification of pages into segments (All pages, Exclude education, Money pages only)
+  - Site AI Health speedometer with multiple score indicators
+  - Radar chart with RAG color-coded score labels
+  - Trend graphs showing historical performance for all 6 metrics (5 pillars + Brand & Entity)
+  - Snippet Readiness nested doughnut chart with weighted segments
+  - Pillar Scorecard table with detailed descriptions and improvement suggestions
+  - Brand queries mini-table showing top branded queries with CTR/position
+- **Historical Tracking**: 
+  - Supabase integration for all pillars (not just Content/Schema)
+  - Trend charts with segmented Authority data (All pages, Exclude education, Money pages only)
+  - Brand & Entity fallback calculation from GSC for historical dates
+- **Shareable Audit Links**: 
+  - Generate shareable URLs with 30-day expiration
+  - View complete audit results without running an audit
+  - Perfect for client demos and team sharing
+- **Dashboard Features**:
+  - Automatic persistence (localStorage) - loads last audit on page reload
+  - Retry failed URLs functionality
+  - Page segmentation with segment-aware metrics
+  - Collapsible CSV upload sections
+  - Detailed calculation explanations
+  - RAG status badges with tooltips
 
 ## Setup
 
@@ -65,36 +86,39 @@ Vercel will automatically rebuild and deploy (usually takes 1-2 minutes).
 
 ## Current Status
 
-- ✅ Dashboard UI complete with enhanced visualizations
-- ✅ **Site AI Health speedometer** with color-coded segments and needle indicator
-- ✅ Visual charts and graphs (radar, trend, snippet readiness)
-- ✅ Google Search Console API integration (OAuth2)
-- ✅ Schema audit and coverage scanning with retry mechanism
-- ✅ Entity metrics and SERP features tracking
-- ✅ Real-time data from GSC API
-- ✅ Supabase integration for historical Content/Schema tracking
-- ✅ Dashboard persistence (localStorage)
-- ✅ Retry failed URLs functionality
-- ✅ Configuration management
-- ✅ Tooltips on all interactive buttons
-- ✅ Recommended actions table with priority highlighting
-- ✅ Page segmentation with fine-art print page reclassification
+- ✅ **Fully Implemented**: All core features are production-ready
+- ✅ **Site AI Health Dashboard**: Speedometer with multiple score indicators, RAG pills with breakdown boxes
+- ✅ **5 Core Pillars**: All pillars fully implemented with real data sources
+- ✅ **Brand & Entity Overlay**: Brand query classification, metrics calculation, trend tracking
+- ✅ **AI Summary Likelihood**: Composite scoring with snippet readiness, visibility, and brand signals
+- ✅ **Google Search Console API**: Full OAuth2 integration with brand query detection
+- ✅ **Schema Audit**: Complete site crawl with coverage, diversity, and rich result eligibility
+- ✅ **Backlink Analysis**: CSV upload support with domain rating and metrics
+- ✅ **Review Aggregation**: Trustpilot snapshot + Google Business Profile reviews
+- ✅ **Local Entity Tracking**: Knowledge panel detection, NAP consistency, GBP integration
+- ✅ **Historical Tracking**: Supabase integration for all pillars with trend charts
+- ✅ **Shareable Links**: Public sharing with 30-day expiration
+- ✅ **Page Segmentation**: Segment-aware metrics (All pages, Exclude education, Money pages only)
+- ✅ **Dashboard Persistence**: Automatic localStorage saving and loading
+- ✅ **Retry Mechanism**: Rescan failed URLs without full audit
 
 ## API Endpoints
 
 The following serverless functions are available:
 
-- `/api/fetch-search-console` - Fetch GSC performance data
+- `/api/fetch-search-console` - Fetch GSC performance data (legacy)
 - `/api/schema-audit` - Scan URLs for JSON-LD schema coverage
-- `/api/aigeo/gsc-entity-metrics` - Comprehensive GSC entity metrics
+- `/api/aigeo/gsc-entity-metrics` - Comprehensive GSC entity metrics with brand query classification
 - `/api/aigeo/schema-coverage` - Schema coverage analysis
 - `/api/aigeo/serp-features` - SERP feature detection
 - `/api/aigeo/local-signals` - Google Business Profile data (GBP rating, reviews, NAP consistency, service areas)
 - `/api/aigeo/backlink-metrics` - Backlink metrics (referring domains, total backlinks, follow ratio)
 - `/api/reviews/site-reviews` - On-site/Trustpilot review data
 - `/api/aigeo/entity-extract` - Entity extraction (stub)
-- `/api/supabase/save-audit` - Save audit results to Supabase
-- `/api/supabase/get-audit-history` - Fetch historical Content/Schema data
+- `/api/supabase/save-audit` - Save audit results to Supabase (includes brand_overlay, ai_summary)
+- `/api/supabase/get-audit-history` - Fetch historical audit data for all pillars
+- `/api/supabase/create-shared-audit` - Create shareable audit link
+- `/api/supabase/get-shared-audit` - Retrieve shared audit by ID
 
 ## Next Steps
 
@@ -105,17 +129,25 @@ The following serverless functions are available:
 
 ## Notes
 
-- OAuth2 credentials are stored securely in Vercel environment variables
-- All API calls are handled server-side via Vercel serverless functions
-- Charts use Chart.js (loaded via CDN) with custom plugins for enhanced visualizations
-- Schema audit reads URLs from GitHub-hosted CSV file or accepts manual URL lists
-- Historical Content/Schema data is stored in Supabase (requires `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` environment variables)
-- Dashboard state persists in browser localStorage between sessions
-- Snippet Readiness score is calculated as weighted average: Content/Schema (40%), Visibility (35%), Authority (25%)
-- Content/Schema pillar uses weighted formula: Foundation (30%), Rich Results (35%), Coverage (20%), Diversity (15%)
-- Authority pillar uses 4-component model: Behaviour (40%), Ranking (20%), Backlinks (20%), Reviews (20%)
-  - Behaviour: CTR for ranking queries (position ≤ 20) + top-10 CTR
-  - Ranking: Impression-weighted average position + top-10 impression share
-  - Backlinks: Referring domains (100+ = max) + follow ratio (from CSV upload)
-  - Reviews: Combined GBP and on-site ratings/counts (60% GBP, 40% site)
+- **Authentication**: OAuth2 credentials stored securely in Vercel environment variables
+- **API Architecture**: All API calls handled server-side via Vercel serverless functions
+- **Visualizations**: Chart.js (CDN) with custom plugins for speedometer, radar, trend charts
+- **Data Sources**: 
+  - Schema audit reads from GitHub-hosted CSV or manual URL lists
+  - Historical data stored in Supabase (requires `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`)
+  - Brand queries classified using configurable brand terms list
+- **Scoring Formulas**:
+  - **AI GEO Score**: Weighted average of 5 pillars (Authority 30%, Content/Schema 25%, Visibility 20%, Local Entity 15%, Service Area 10%)
+  - **AI Summary Likelihood**: Snippet Readiness (50%), Visibility (30%), Brand Score (20%) - thresholds: Low <50, Medium 50-69, High ≥70
+  - **Brand Overlay**: Brand Search (40%) + Reviews (30%) + Entity (30%) - thresholds: Weak <40, Developing 40-69, Strong ≥70
+  - **Snippet Readiness**: Content/Schema (40%), Visibility (35%), Authority (25%)
+  - **Content/Schema**: Foundation (30%), Rich Results (35%), Coverage (20%), Diversity (15%)
+  - **Authority**: Behaviour (40%), Ranking (20%), Backlinks (20%), Reviews (20%)
+    - Behaviour: CTR for ranking queries (position ≤ 20) + top-10 CTR
+    - Ranking: Impression-weighted average position + top-10 impression share
+    - Backlinks: Referring domains (100+ = max) + follow ratio (from CSV upload)
+    - Reviews: Combined GBP and on-site ratings/counts (60% GBP, 40% site)
+- **RAG Thresholds**: Red (0-49), Amber (50-69), Green (70-100) - consistent across all scores
+- **Dashboard State**: Persists in browser localStorage between sessions
+- **Shareable Links**: Valid for 30 days, stored in Supabase `shared_audits` table
 
