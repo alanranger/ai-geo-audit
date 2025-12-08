@@ -49,6 +49,50 @@ function extractJsonLd(htmlString) {
 }
 
 /**
+ * Extract page title from HTML
+ */
+function extractTitle(htmlString) {
+  // Try <title> tag first
+  const titleMatch = htmlString.match(/<title[^>]*>(.*?)<\/title>/is);
+  if (titleMatch && titleMatch[1]) {
+    return titleMatch[1].trim().replace(/\s+/g, ' ');
+  }
+  
+  // Try og:title meta tag
+  const ogTitleMatch = htmlString.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/is);
+  if (ogTitleMatch && ogTitleMatch[1]) {
+    return ogTitleMatch[1].trim();
+  }
+  
+  // Try h1 as fallback
+  const h1Match = htmlString.match(/<h1[^>]*>(.*?)<\/h1>/is);
+  if (h1Match && h1Match[1]) {
+    return h1Match[1].trim().replace(/<[^>]+>/g, '').replace(/\s+/g, ' ');
+  }
+  
+  return null;
+}
+
+/**
+ * Extract meta description from HTML
+ */
+function extractMetaDescription(htmlString) {
+  // Try standard meta description tag
+  const metaDescMatch = htmlString.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/is);
+  if (metaDescMatch && metaDescMatch[1]) {
+    return metaDescMatch[1].trim();
+  }
+  
+  // Try og:description meta tag
+  const ogDescMatch = htmlString.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/is);
+  if (ogDescMatch && ogDescMatch[1]) {
+    return ogDescMatch[1].trim();
+  }
+  
+  return null;
+}
+
+/**
  * Normalize schema types from a schema object
  * Returns array of @type values
  * Walks @graph and common nested properties to detect all types
@@ -403,6 +447,8 @@ async function crawlUrl(url, semaphore, delayAfterMs = 0) {
     
     const html = await response.text();
     const schemas = extractJsonLd(html);
+    const title = extractTitle(html);
+    const metaDescription = extractMetaDescription(html);
     
     // Add delay after successful request to avoid rate limiting
     if (delayAfterMs > 0) {
@@ -412,7 +458,9 @@ async function crawlUrl(url, semaphore, delayAfterMs = 0) {
     return {
       url,
       success: true,
-      schemas
+      schemas,
+      title,
+      metaDescription
     };
   } catch (error) {
     // Categorize error types for better diagnostics
@@ -885,6 +933,16 @@ export default async function handler(req, res) {
     // Return ALL detected types as an array for accurate calculations
     const allTypesArray = Array.from(allTypes);
     
+    // Build pages array with metadata (title, metaDescription) for all crawled pages
+    const pages = results.map(result => ({
+      url: result.url,
+      title: result.title || null,
+      metaDescription: result.metaDescription || null,
+      hasSchema: result.success && result.schemas && result.schemas.length > 0,
+      hasInheritedSchema: result.success && !result.schemas?.length && inheritanceMap.get(result.url) === true,
+      error: result.success ? null : (result.error || null)
+    }));
+    
     return res.status(200).json({
       status: 'ok',
       source: 'schema-audit',
@@ -899,7 +957,8 @@ export default async function handler(req, res) {
         missingSchemaCount: missingSchemaPages.length,
         missingSchemaPages: missingSchemaPages.length > 0 ? missingSchemaPages : undefined,
         richEligible,
-        errors: errors.length > 0 ? errors : undefined
+        errors: errors.length > 0 ? errors : undefined,
+        pages // Array of all pages with metadata (title, metaDescription)
       },
       meta: {
         generatedAt: new Date().toISOString(),
