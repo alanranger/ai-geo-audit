@@ -4238,7 +4238,7 @@
       
       // Compute money pages behaviour score (for Authority overlay)
       // Define globally to ensure accessibility from event handlers
-      window.computeMoneyPagesBehaviour = function(gscQueries, moneyPages) {
+      window.computeMoneyPagesBehaviour = function(gscQueries, moneyPages, useAllPositions = false) {
         if (!gscQueries || !gscQueries.length || !moneyPages || !moneyPages.length) {
           debugLog(`🎯 computeMoneyPagesBehaviour: Missing data - gscQueries=${!!gscQueries}(${gscQueries?.length || 0}), moneyPages=${!!moneyPages}(${moneyPages?.length || 0})`, 'warn');
           return null;
@@ -4262,7 +4262,7 @@
           })
         );
 
-        debugLog(`🎯 computeMoneyPagesBehaviour: Created moneySet with ${moneySet.size} URLs. Sample URLs: ${Array.from(moneySet).slice(0, 3).join(', ')}`, 'info');
+        debugLog(`🎯 computeMoneyPagesBehaviour: Created moneySet with ${moneySet.size} URLs. useAllPositions=${useAllPositions}. Sample URLs: ${Array.from(moneySet).slice(0, 3).join(', ')}`, 'info');
 
         let clicks = 0;
         let impressions = 0;
@@ -4272,6 +4272,7 @@
         let weightedPosImps = 0;
         let matchedUrls = 0;
         let unmatchedUrls = 0;
+        let filteredOutByPosition = 0;
 
         gscQueries.forEach(row => {
           const url = normalizeUrl(row.page || row.url || '');
@@ -4287,8 +4288,12 @@
           const imps = row.impressions || 0;
           const cls = row.clicks || 0;
 
-          // Only include ranking queries (position 1-20) to match Authority calculation
-          if (!imps || !pos || pos <= 0 || pos > 20) return;
+          // For filtered calculations, include all positions; otherwise only 1-20 to match Authority
+          if (!imps || !pos || pos <= 0) return;
+          if (!useAllPositions && pos > 20) {
+            filteredOutByPosition++;
+            return;
+          }
 
           clicks += cls;
           impressions += imps;
@@ -4301,7 +4306,7 @@
           }
         });
 
-        debugLog(`🎯 computeMoneyPagesBehaviour: Matched ${matchedUrls} URLs, unmatched ${unmatchedUrls} URLs. Total impressions: ${impressions}, clicks: ${clicks}`, 'info');
+        debugLog(`🎯 computeMoneyPagesBehaviour: Matched ${matchedUrls} URLs, unmatched ${unmatchedUrls} URLs, filtered by position ${filteredOutByPosition}. Total impressions: ${impressions}, clicks: ${clicks}`, 'info');
 
         if (!impressions || !weightedPosImps) {
           debugLog(`🎯 computeMoneyPagesBehaviour: No valid impressions (${impressions}) or weighted positions (${weightedPosImps}), returning null`, 'warn');
@@ -4314,12 +4319,14 @@
         const top10Share = impressions > 0 ? (top10Impressions / impressions) : 0;
 
         // Reuse existing Behaviour score calculation (same as Authority)
-        // Filter to ranking queries only (position 1-20)
+        // For filtered calculations, include all positions; otherwise only 1-20
         const rankingQueries = gscQueries.filter(row => {
           const url = normalizeUrl(row.page || row.url || '');
           if (!moneySet.has(url)) return false;
           const pos = typeof row.position === 'number' ? row.position : (row.avgPosition || null);
-          return pos > 0 && pos <= 20 && (row.impressions || 0) > 0;
+          if (!pos || pos <= 0 || !(row.impressions || 0)) return false;
+          if (!useAllPositions && pos > 20) return false;
+          return true;
         });
 
         const behaviourScore = computeBehaviourScoreRaw(rankingQueries);
@@ -8335,7 +8342,7 @@ Final Score: ${score}/100`;
             debugLog(`🔄 Filter change: queryPages available: ${!!queryPages}, length: ${queryPages?.length || 0}`, 'info');
             
             const filteredBehaviour = window.computeMoneyPagesBehaviour ? 
-              window.computeMoneyPagesBehaviour(queryPages, filteredRows) : null;
+              window.computeMoneyPagesBehaviour(queryPages, filteredRows, true) : null;
             
             debugLog(`🔄 Filter change: filteredBehaviour calculated: ${!!filteredBehaviour}, impressions: ${filteredBehaviour?.impressions || 0}`, 'info');
             
@@ -8557,9 +8564,9 @@ Final Score: ${score}/100`;
                 // Update doughnut chart with filtered data
                 renderMoneyPagesCategoryChart(moneyPagesMetrics, 0);
                 
-                // Recalculate behaviour for filtered pages
+                // Recalculate behaviour for filtered pages (use all positions for filtered calculations)
                 const filteredBehaviour = window.computeMoneyPagesBehaviour ? 
-                  window.computeMoneyPagesBehaviour(queryPages, filteredRows) : null;
+                  window.computeMoneyPagesBehaviour(queryPages, filteredRows, true) : null;
                 
                 debugLog(`🔄 Fallback filter change: filteredBehaviour calculated: ${!!filteredBehaviour}, impressions: ${filteredBehaviour?.impressions || 0}`, 'info');
                 
@@ -8743,7 +8750,7 @@ Final Score: ${score}/100`;
         const queryPages = window.currentQueryPages || [];
         const filteredRows = filteredMetrics.rows || [];
         const filteredBehaviour = window.computeMoneyPagesBehaviour ? 
-          window.computeMoneyPagesBehaviour(queryPages, filteredRows) : null;
+          window.computeMoneyPagesBehaviour(queryPages, filteredRows, true) : null;
         
         // Update summary box
         const overview = filteredMetrics.overview || {};
@@ -9082,8 +9089,8 @@ Final Score: ${score}/100`;
         
         if (filteredRows.length === 0) return null;
         
-        // Recalculate behaviour for filtered URLs only
-        return window.computeMoneyPagesBehaviour(queryPages, filteredRows);
+        // Recalculate behaviour for filtered URLs only (use all positions for filtered calculations)
+        return window.computeMoneyPagesBehaviour(queryPages, filteredRows, true);
       }
       
       // Render Money Pages Behaviour KPIs
@@ -9112,7 +9119,7 @@ Final Score: ${score}/100`;
           if (filteredMetrics && filteredMetrics.rows && filteredMetrics.rows.length > 0) {
             debugLog(`🎯 Calculating behaviour for ${filteredMetrics.rows.length} filtered rows`, 'info');
             filteredBehaviour = window.computeMoneyPagesBehaviour ? 
-              window.computeMoneyPagesBehaviour(queryPages, filteredMetrics.rows) : null;
+              window.computeMoneyPagesBehaviour(queryPages, filteredMetrics.rows, true) : null;
             debugLog(`🎯 Calculated behaviour: ${!!filteredBehaviour}, impressions: ${filteredBehaviour?.impressions || 0}`, 'info');
           } else {
             debugLog(`🎯 No filtered metrics or rows available`, 'warn');
@@ -9356,10 +9363,10 @@ Final Score: ${score}/100`;
             // Get filtered metrics based on current filters (defaults to 'ALL' on initial load)
             const filteredMetrics = getFilteredMoneyPagesMetrics(moneyPagesMetrics);
             if (filteredMetrics) {
-              // Recalculate behaviour for filtered pages
+              // Recalculate behaviour for filtered pages (use all positions for filtered calculations)
               const filteredRows = filteredMetrics.rows || [];
               const filteredBehaviour = window.computeMoneyPagesBehaviour ? 
-                window.computeMoneyPagesBehaviour(queryPages, filteredRows) : null;
+                window.computeMoneyPagesBehaviour(queryPages, filteredRows, true) : null;
               
               // Update all sections with filtered data
               renderMoneyPagesBehaviourKpis(filteredBehaviour, filteredMetrics, queryPages);
