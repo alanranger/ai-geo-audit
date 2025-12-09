@@ -121,16 +121,35 @@ export default async function handler(req, res) {
         ? task.result.flatMap(r => r.items || [])
         : [];
 
+      // Debug: log item types found
+      const itemTypes = [...new Set(allItems.map(i => i.type).filter(Boolean))];
+      console.log(`[DEBUG] Keyword: ${keyword}, Total items: ${allItems.length}, Item types: ${itemTypes.join(', ')}`);
+
       // Filter organic items (broadened to include any type containing "organic")
       const organicItems = allItems.filter(i =>
         i.type && i.type.toLowerCase().includes("organic")
       );
+
+      // Debug: log organic items found
+      console.log(`[DEBUG] Organic items found: ${organicItems.length}`);
+      if (organicItems.length > 0) {
+        const sampleDomains = organicItems.slice(0, 5).map(i => i.domain || i.url || 'no domain/url').join(', ');
+        console.log(`[DEBUG] Sample organic domains/URLs: ${sampleDomains}`);
+      }
 
       // Find alanranger.com items (check both domain and url)
       const arItems = organicItems.filter(i =>
         (i.domain && i.domain.toLowerCase().includes("alanranger")) ||
         (i.url && i.url.toLowerCase().includes("alanranger"))
       );
+
+      // Debug: log alanranger items found
+      console.log(`[DEBUG] Alanranger items found: ${arItems.length}`);
+      if (arItems.length > 0) {
+        arItems.forEach(item => {
+          console.log(`[DEBUG] Found: domain=${item.domain}, url=${item.url}, rank_group=${item.rank_group}, rank_absolute=${item.rank_absolute}`);
+        });
+      }
 
       let bestRankGroup = null;
       let bestRankAbsolute = null;
