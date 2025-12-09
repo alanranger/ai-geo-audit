@@ -3004,7 +3004,22 @@
       }
       
       // If localStorage is empty or missing critical data, try fetching from Supabase
-      const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url');
+      // Try multiple sources for property URL
+      let propertyUrl = localStorage.getItem('gsc_property_url') || 
+                        localStorage.getItem('last_property_url') ||
+                        (localStorageData && localStorageData.searchData && localStorageData.searchData.propertyUrl) ||
+                        (localStorageData && localStorageData.propertyUrl);
+      
+      // If still no property URL, try to extract from saved audit data structure
+      if (!propertyUrl && localStorageData) {
+        // Check if there's a property URL embedded in the saved data
+        if (localStorageData.searchData && typeof localStorageData.searchData === 'object') {
+          propertyUrl = localStorageData.searchData.propertyUrl || localStorageData.searchData.property_url;
+        }
+      }
+      
+      debugLog(`Property URL for Supabase fetch: ${propertyUrl || 'NOT SET'}`, propertyUrl ? 'info' : 'warn');
+      
       if (propertyUrl) {
         debugLog('⚠ Fetching from Supabase (localStorage empty or incomplete)...', 'info');
         const supabaseData = await fetchLatestAuditFromSupabase(propertyUrl);
