@@ -2721,32 +2721,63 @@
           
           // Populate overview with siteTotalImpressions and siteTotalClicks
           // Priority: searchData.overview.siteTotalImpressions > searchData.totalImpressions > searchData.overview.totalImpressions
-          if (!searchData.overview.siteTotalImpressions) {
+          if (!searchData.overview.siteTotalImpressions || searchData.overview.siteTotalImpressions === 0) {
             if (searchData.totalImpressions != null && searchData.totalImpressions > 0) {
               searchData.overview.siteTotalImpressions = searchData.totalImpressions;
             } else if (searchData.overview.totalImpressions != null && searchData.overview.totalImpressions > 0) {
               searchData.overview.siteTotalImpressions = searchData.overview.totalImpressions;
+            } else {
+              // Fallback: set to 0 if all else fails
+              searchData.overview.siteTotalImpressions = 0;
             }
           }
           
-          if (!searchData.overview.siteTotalClicks) {
+          if (!searchData.overview.siteTotalClicks || searchData.overview.siteTotalClicks === 0) {
             if (searchData.totalClicks != null && searchData.totalClicks > 0) {
               searchData.overview.siteTotalClicks = searchData.totalClicks;
             } else if (searchData.overview.totalClicks != null && searchData.overview.totalClicks > 0) {
               searchData.overview.siteTotalClicks = searchData.overview.totalClicks;
+            } else {
+              // Fallback: set to 0 if all else fails
+              searchData.overview.siteTotalClicks = 0;
             }
+          }
+          
+          // Also ensure totalImpressions and totalClicks are set in overview for compatibility
+          if (!searchData.overview.totalImpressions) {
+            searchData.overview.totalImpressions = searchData.overview.siteTotalImpressions;
+          }
+          if (!searchData.overview.totalClicks) {
+            searchData.overview.totalClicks = searchData.overview.siteTotalClicks;
           }
           
           overview = searchData.overview;
           
           // Debug logging
-          debugLog(`saveAuditToSupabase: searchData.totalImpressions=${searchData.totalImpressions}, overview.siteTotalImpressions=${overview.siteTotalImpressions || 'missing'}`, 'info');
+          debugLog(`saveAuditToSupabase: searchData.totalImpressions=${searchData.totalImpressions}, overview.siteTotalImpressions=${overview.siteTotalImpressions || 'missing'}, overview.totalImpressions=${overview.totalImpressions || 'missing'}`, 'info');
         } else {
           debugLog(`⚠ saveAuditToSupabase: searchData is null or undefined`, 'warn');
+          // Create empty overview as fallback
+          overview = { siteTotalImpressions: 0, siteTotalClicks: 0, totalImpressions: 0, totalClicks: 0 };
         }
         
         // Build Money Pages summary for trend tracking (Phase 3)
-        debugLog(`saveAuditToSupabase: About to call buildMoneyPagesSummary - overview exists=${!!overview}, overview.siteTotalImpressions=${overview?.siteTotalImpressions || 'missing'}, searchData.totalImpressions=${searchData?.totalImpressions || 'missing'}`, 'info');
+        // Ensure moneyPagesMetrics exists in scores
+        if (!scores.moneyPagesMetrics) {
+          debugLog(`⚠ saveAuditToSupabase: scores.moneyPagesMetrics is missing, checking window.moneyPagesMetrics`, 'warn');
+          // Try to get from global state if available
+          if (window.moneyPagesMetrics) {
+            scores.moneyPagesMetrics = window.moneyPagesMetrics;
+            debugLog(`✓ saveAuditToSupabase: Using moneyPagesMetrics from window (${window.moneyPagesMetrics.rows?.length || 0} rows)`, 'info');
+          } else {
+            debugLog(`⚠ saveAuditToSupabase: No moneyPagesMetrics available anywhere - this means money pages data was not generated during audit`, 'warn');
+            debugLog(`⚠ saveAuditToSupabase: This could be because: 1) No queryPages data from GSC, 2) CSV fetch failed, 3) No money pages found in CSV`, 'warn');
+          }
+        } else {
+          debugLog(`✓ saveAuditToSupabase: moneyPagesMetrics found in scores (${scores.moneyPagesMetrics.rows?.length || 0} rows)`, 'info');
+        }
+        
+        debugLog(`saveAuditToSupabase: About to call buildMoneyPagesSummary - overview exists=${!!overview}, overview.siteTotalImpressions=${overview?.siteTotalImpressions || 'missing'}, searchData.totalImpressions=${searchData?.totalImpressions || 'missing'}, moneyPagesMetrics=${!!scores?.moneyPagesMetrics}`, 'info');
         const moneyPagesSummary = window.buildMoneyPagesSummary ? window.buildMoneyPagesSummary(
           scores?.moneyPagesMetrics || null,
           overview
@@ -2764,7 +2795,14 @@
           debugLog(`⚠ saveAuditToSupabase: moneySegmentMetrics is null, building empty structure`, 'warn');
           // Build empty structure to ensure it's always saved (even if empty)
           if (typeof buildMoneySegmentSummary === 'function') {
-            moneySegmentMetrics = buildMoneySegmentSummary([], {});
+            // Try to rebuild from moneyPagePriorityData if available
+            const priorityData = window.moneyPagePriorityData || [];
+            if (priorityData.length > 0) {
+              debugLog(`✓ saveAuditToSupabase: Rebuilding moneySegmentMetrics from priority data (${priorityData.length} pages)`, 'info');
+              moneySegmentMetrics = buildMoneySegmentSummary(priorityData, {});
+            } else {
+              moneySegmentMetrics = buildMoneySegmentSummary([], {});
+            }
           } else {
             // Fallback structure if function not available
             moneySegmentMetrics = {
@@ -2773,6 +2811,27 @@
               eventPages: { clicks: 0, impressions: 0, ctr: 0, avgPosition: 0, behaviourScore: 0 },
               productPages: { clicks: 0, impressions: 0, ctr: 0, avgPosition: 0, behaviourScore: 0 }
             };
+          }
+        }
+        
+        // Also ensure moneyPagePriorityData is available for saving
+        if (!window.moneyPagePriorityData || window.moneyPagePriorityData.length === 0) {
+          debugLog(`⚠ saveAuditToSupabase: moneyPagePriorityData is missing or empty`, 'warn');
+          // Try to rebuild from moneyPagesMetrics if available
+          if (scores?.moneyPagesMetrics?.rows && scores.moneyPagesMetrics.rows.length > 0) {
+            debugLog(`✓ saveAuditToSupabase: Rebuilding moneyPagePriorityData from moneyPagesMetrics (${scores.moneyPagesMetrics.rows.length} rows)`, 'info');
+            const topPagesForPriority = scores.moneyPagesMetrics.rows.map(row => ({
+              page: row.url,
+              url: row.url,
+              clicks: row.clicks || 0,
+              impressions: row.impressions || 0,
+              ctr: (row.ctr || 0) * 100,
+              position: row.avgPosition || 0,
+              avgPosition: row.avgPosition || 0,
+              title: row.title || row.url
+            }));
+            window.moneyPagePriorityData = buildMoneyPageMetrics(topPagesForPriority, schemaAudit);
+            debugLog(`✓ saveAuditToSupabase: Rebuilt ${window.moneyPagePriorityData.length} priority entries`, 'info');
           }
         }
         debugLog(`saveAuditToSupabase: moneySegmentMetrics ready with ${Object.keys(moneySegmentMetrics).length} segments`, 'info');
@@ -5280,8 +5339,17 @@
         // Phase 1: Brand overlay (overlay only, not weighted in AI GEO score)
         brandOverlay: brandOverlay,
         // Money Pages Performance metrics (overlay only, not weighted in AI GEO score)
-        moneyPagesMetrics: moneyPagesMetrics
+        // Always include moneyPagesMetrics, even if null (ensures it's saved to Supabase)
+        moneyPagesMetrics: moneyPagesMetrics || null
       };
+      
+      // Store moneyPagesMetrics globally for saveAuditToSupabase to access
+      if (moneyPagesMetrics) {
+        window.moneyPagesMetrics = moneyPagesMetrics;
+        debugLog(`✓ Stored moneyPagesMetrics globally: ${moneyPagesMetrics.rows?.length || 0} rows`, 'info');
+      } else {
+        debugLog(`⚠ moneyPagesMetrics is null - will be saved as null to Supabase`, 'warn');
+      }
 
       debugLog(`Deterministic pillar scores: ${JSON.stringify(scores)}`, 'info');
       return scores;
@@ -9716,11 +9784,17 @@ Final Score: ${score}/100`;
         }
         
         // Check if canvas is actually visible and has dimensions
+        // Also check if the panel containing the canvas is visible
+        const moneyPanel = canvas.closest('.aigeo-panel[data-panel="money"]');
+        const isPanelVisible = !moneyPanel || moneyPanel.classList.contains('is-active') || moneyPanel.style.display !== 'none';
+        
         const canvasRect = canvas.getBoundingClientRect();
-        if (canvasRect.width === 0 || canvasRect.height === 0) {
-          debugLog('⚠ Canvas has zero dimensions, retrying...', 'warn');
-          if (retryCount < 3) {
-            setTimeout(() => renderMoneyPagesCategoryChart(moneyPagesMetrics, retryCount + 1), 300);
+        if (canvasRect.width === 0 || canvasRect.height === 0 || !isPanelVisible) {
+          debugLog(`⚠ Canvas has zero dimensions or panel is hidden (width=${canvasRect.width}, height=${canvasRect.height}, panelVisible=${isPanelVisible}), retrying...`, 'warn');
+          if (retryCount < 5) {
+            setTimeout(() => renderMoneyPagesCategoryChart(moneyPagesMetrics, retryCount + 1), 500);
+          } else {
+            debugLog('⚠ Canvas rendering failed after 5 retries - panel may be hidden', 'warn');
           }
           return;
         }
@@ -9988,6 +10062,17 @@ Final Score: ${score}/100`;
         );
         
         debugLog(`📊 Chart data: ${labels.length} labels, behaviour=${behaviour.filter(v => v != null).length} values, shareImps=${shareImps.filter(v => v != null).length} values, ctr=${ctr.filter(v => v != null).length} values`, 'info');
+        
+        // Check if canvas is visible and panel is active
+        const moneyPanel = ctx.closest('.aigeo-panel[data-panel="money"]');
+        const isPanelVisible = !moneyPanel || moneyPanel.classList.contains('is-active') || moneyPanel.style.display !== 'none';
+        const canvasRect = ctx.getBoundingClientRect();
+        
+        if (!isPanelVisible || canvasRect.width === 0 || canvasRect.height === 0) {
+          debugLog(`⚠ Money Pages trend chart: Panel hidden or canvas has zero dimensions (width=${canvasRect.width}, height=${canvasRect.height}, panelVisible=${isPanelVisible}). Chart will render when panel is shown.`, 'warn');
+          // Don't render if panel is hidden - will be rendered when panel becomes visible
+          return;
+        }
         
         try {
           window.moneyPagesTrendChart = new Chart(ctx, {
@@ -10672,6 +10757,17 @@ Final Score: ${score}/100`;
         if (!ctx) return;
 
         const { labels, segments } = historyData;
+        
+        // Check if panel is visible
+        const moneyPanel = ctx.closest('.aigeo-panel[data-panel="money"]');
+        const isPanelVisible = !moneyPanel || moneyPanel.classList.contains('is-active') || moneyPanel.style.display !== 'none';
+        const canvasRect = ctx.getBoundingClientRect();
+        
+        if (!isPanelVisible || canvasRect.width === 0 || canvasRect.height === 0) {
+          debugLog(`⚠ Money KPI sparkline: Panel hidden or canvas has zero dimensions (width=${canvasRect.width}, height=${canvasRect.height}, panelVisible=${isPanelVisible}). Chart will render when panel is shown.`, 'warn');
+          // Don't render if panel is hidden - will be rendered when panel becomes visible
+          return;
+        }
         
         // Check if we have data
         const hasData = labels.length > 0 && segments.allMoney.length > 0;
@@ -15863,7 +15959,54 @@ Final Score: ${score}/100`;
 
           navItems.forEach(b => b.classList.toggle("is-active", b === btn));
           panels.forEach(p => {
+            const wasActive = p.classList.contains("is-active");
             p.classList.toggle("is-active", p.getAttribute("data-panel") === target);
+            const isNowActive = p.classList.contains("is-active");
+            
+            // If money panel just became active, re-render charts that may have failed due to hidden panel
+            if (target === "money" && isNowActive && !wasActive) {
+              setTimeout(() => {
+                // Re-render money pages category chart if it exists
+                const categoryCanvas = document.getElementById('moneyPagesCategoryChart');
+                if (categoryCanvas && typeof renderMoneyPagesCategoryChart === 'function') {
+                  const saved = loadAuditResults();
+                  if (saved && saved.scores && saved.scores.moneyPagesMetrics) {
+                    renderMoneyPagesCategoryChart(saved.scores.moneyPagesMetrics, 0);
+                  }
+                }
+                
+                // Re-render money pages trend chart if it exists
+                const trendCanvas = document.getElementById('moneyPagesTrendChart');
+                if (trendCanvas && typeof renderMoneyPagesTrendChart === 'function') {
+                  const propertyUrl = document.getElementById('propertyUrl')?.value;
+                  if (propertyUrl) {
+                    const endDate = new Date();
+                    const startDate = new Date();
+                    startDate.setFullYear(startDate.getFullYear() - 1);
+                    const startDateStr = startDate.toISOString().split('T')[0];
+                    const endDateStr = endDate.toISOString().split('T')[0];
+                    
+                    fetch(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDateStr}`)
+                      .then(res => res.json())
+                      .then(json => {
+                        if (json.status === 'ok' && json.data) {
+                          renderMoneyPagesTrendChart(json.data);
+                        }
+                      })
+                      .catch(err => debugLog(`Error fetching history for trend chart: ${err.message}`, 'warn'));
+                  }
+                }
+                
+                // Re-render KPI sparkline if it exists
+                const sparklineCanvas = document.getElementById('money-kpi-sparkline');
+                if (sparklineCanvas && typeof loadAuditHistoryAndRenderKpis === 'function') {
+                  const propertyUrl = document.getElementById('propertyUrl')?.value;
+                  if (propertyUrl) {
+                    loadAuditHistoryAndRenderKpis(propertyUrl);
+                  }
+                }
+              }, 100); // Small delay to ensure panel is fully visible
+            }
           });
         });
       });
