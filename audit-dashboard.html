@@ -1819,6 +1819,95 @@
     console.log('Current time:', new Date().toISOString());
     console.log('Page URL:', window.location.href);
     
+    // ======================
+    // Ranking & AI module - DEFINE FIRST to ensure it's available
+    // ======================
+    console.log('[RankingAiModule] Starting module definition at top of script...');
+    window.RankingAiModule = (function () {
+      console.log('[RankingAiModule] IIFE executing...');
+      // Core tracked keywords. Real queries, no mock values.
+      // Include both Money and Education terms.
+      const TRACKED_KEYWORDS = [
+        "beginners photography classes",
+        "photography lessons online",
+        "camera courses for beginners",
+        "alan ranger",
+        "beginners photography course"
+      ];
+
+      // API endpoints – adjust if the deployed paths differ.
+      const SERP_RANK_ENDPOINT = "/api/aigeo/serp-rank-test";
+      const AI_MODE_ENDPOINT = "/api/aigeo/ai-mode-serp-batch-test"; // Using batch endpoint
+
+      let hasLoadedOnce = false;
+      let isLoading = false;
+      let combinedRows = [];
+      let summary = null;
+
+      function normaliseKeyword(k) {
+        return (k || "").trim().toLowerCase();
+      }
+
+      function classifyKeywordSegment(keyword, bestUrl) {
+        // Reuse existing segmentation rules consistent with Money/Education/General/Brand
+        const kw = normaliseKeyword(keyword);
+
+        if (kw.includes("alan ranger")) {
+          return "brand";
+        }
+
+        const url = (bestUrl || "").toLowerCase();
+
+        if (url.includes("/blog-on-photography/") || url.includes("/free-online-photography-course")) {
+          return "education";
+        }
+
+        // Money pages – mirror existing classification for landing / event / product
+        if (
+          url.includes("/photography-workshops") ||
+          url.includes("/course-finder") ||
+          url.includes("/photography-services-near-me") ||
+          url.includes("/photography-lessons") ||
+          url.includes("/photography-courses") ||
+          url.includes("/book-now") ||
+          url.includes("/product/")
+        ) {
+          return "money";
+        }
+
+        // Fine art / portfolio explicitly not counted as Money
+        if (url.includes("/fine-art") || url.includes("/portfolio") || url.includes("/gallery")) {
+          return "general";
+        }
+
+        return "general";
+      }
+
+      const module = {
+        TRACKED_KEYWORDS,
+        SERP_RANK_ENDPOINT,
+        AI_MODE_ENDPOINT,
+        normaliseKeyword,
+        classifyKeywordSegment,
+        state: () => ({ hasLoadedOnce, isLoading, combinedRows, summary }),
+        setLoadedOnce: (value) => { hasLoadedOnce = value; },
+        setLoading: (value) => { isLoading = value; },
+        setData: (rows, sum) => { combinedRows = rows; summary = sum; }
+      };
+      console.log('[RankingAiModule] Module object created:', Object.keys(module));
+      return module;
+    })();
+    
+    console.log('[RankingAiModule] Assignment complete. window.RankingAiModule exists:', typeof window.RankingAiModule !== 'undefined');
+    console.log('[RankingAiModule] window.RankingAiModule:', window.RankingAiModule);
+    
+    if (typeof window.RankingAiModule !== 'undefined') {
+      console.log('[RankingAiModule] ✓ Successfully assigned to window');
+      console.log('[RankingAiModule] TRACKED_KEYWORDS:', window.RankingAiModule.TRACKED_KEYWORDS);
+    } else {
+      console.error('[RankingAiModule] ✗ FAILED to assign to window');
+    }
+    
     // Debug logging system
     const debugLogEntries = [];
     let debugLogFilter = 'all'; // 'all', 'warnings-errors'
@@ -4941,106 +5030,7 @@
        * @param {Object} schemaAudit - Optional schema audit data with pages array
        * @returns {Object} { overview, rows }
        */
-      // ======================
-      // Ranking & AI module
-      // ======================
-      // Define and assign to window in one step to avoid scope issues
-      console.log('[RankingAiModule] Starting module definition...');
-      window.RankingAiModule = (function () {
-        console.log('[RankingAiModule] IIFE executing...');
-        // Core tracked keywords. Real queries, no mock values.
-        // Include both Money and Education terms.
-        const TRACKED_KEYWORDS = [
-          "beginners photography classes",
-          "photography lessons online",
-          "camera courses for beginners",
-          "alan ranger",
-          "beginners photography course"
-        ];
-
-        // API endpoints – adjust if the deployed paths differ.
-        const SERP_RANK_ENDPOINT = "/api/aigeo/serp-rank-test";
-        const AI_MODE_ENDPOINT = "/api/aigeo/ai-mode-serp-batch-test"; // Using batch endpoint
-
-        let hasLoadedOnce = false;
-        let isLoading = false;
-        let combinedRows = [];
-        let summary = null;
-
-        function normaliseKeyword(k) {
-          return (k || "").trim().toLowerCase();
-        }
-
-        function classifyKeywordSegment(keyword, bestUrl) {
-          // Reuse existing segmentation rules consistent with Money/Education/General/Brand
-          const kw = normaliseKeyword(keyword);
-
-          if (kw.includes("alan ranger")) {
-            return "brand";
-          }
-
-          const url = (bestUrl || "").toLowerCase();
-
-          if (url.includes("/blog-on-photography/") || url.includes("/free-online-photography-course")) {
-            return "education";
-          }
-
-          // Money pages – mirror existing classification for landing / event / product
-          if (
-            url.includes("/photography-workshops") ||
-            url.includes("/course-finder") ||
-            url.includes("/photography-services-near-me") ||
-            url.includes("/photography-lessons") ||
-            url.includes("/photography-courses") ||
-            url.includes("/book-now") ||
-            url.includes("/product/")
-          ) {
-            return "money";
-          }
-
-          // Fine art / portfolio explicitly not counted as Money
-          if (url.includes("/fine-art") || url.includes("/portfolio") || url.includes("/gallery")) {
-            return "general";
-          }
-
-          return "general";
-        }
-
-        const module = {
-          TRACKED_KEYWORDS,
-          SERP_RANK_ENDPOINT,
-          AI_MODE_ENDPOINT,
-          normaliseKeyword,
-          classifyKeywordSegment,
-          state: () => ({ hasLoadedOnce, isLoading, combinedRows, summary }),
-          setLoadedOnce: (value) => { hasLoadedOnce = value; },
-          setLoading: (value) => { isLoading = value; },
-          setData: (rows, sum) => { combinedRows = rows; summary = sum; }
-        };
-        console.log('[RankingAiModule] Module object created:', Object.keys(module));
-        return module;
-      })();
-      
-      console.log('[RankingAiModule] Assignment complete. window.RankingAiModule exists:', typeof window.RankingAiModule !== 'undefined');
-      console.log('[RankingAiModule] window.RankingAiModule:', window.RankingAiModule);
-      
-      // Also create local reference for backward compatibility
-      const RankingAiModule = window.RankingAiModule;
-      
-      // Verify assignment - use console.log in case debugLog isn't available yet
-      if (typeof window.RankingAiModule !== 'undefined') {
-        console.log('[RankingAiModule] ✓ Successfully assigned to window');
-        console.log('[RankingAiModule] TRACKED_KEYWORDS:', window.RankingAiModule.TRACKED_KEYWORDS);
-        if (typeof debugLog !== 'undefined') {
-          debugLog('✓ RankingAiModule defined and assigned to window', 'success');
-          debugLog('✓ RankingAiModule.TRACKED_KEYWORDS: ' + (window.RankingAiModule.TRACKED_KEYWORDS ? window.RankingAiModule.TRACKED_KEYWORDS.length + ' keywords' : 'missing'), 'success');
-        }
-      } else {
-        console.error('[RankingAiModule] ✗ FAILED to assign to window');
-        if (typeof debugLog !== 'undefined') {
-          debugLog('✗ Failed to assign RankingAiModule to window', 'error');
-        }
-      }
+      // Ranking & AI module - MOVED TO TOP OF SCRIPT (see line ~1820)
 
       // Classify money page sub-segment (Product, Event, Landing)
       function classifyMoneyPageSubSegment(url) {
