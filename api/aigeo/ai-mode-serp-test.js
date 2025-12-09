@@ -1,8 +1,15 @@
 /**
  * DataForSEO AI Mode SERP Test API
  * 
- * Test endpoint to call DataForSEO AI Mode Live Advanced API once and return raw result.
- * Useful for testing DataForSEO integration and inspecting response structure.
+ * Test endpoint to call DataForSEO AI Mode Live Advanced API and return a compact summary.
+ * Extracts AI Mode citations and checks if alanranger.com is cited.
+ * 
+ * Returns:
+ * - has_ai_overview: boolean indicating if AI Mode appeared
+ * - total_citations: count of unique citation URLs
+ * - alanranger_citations_count: count of alanranger.com citations
+ * - alanranger_citations: array of alanranger.com citations
+ * - sample_citations: first 10 citations for inspection
  */
 
 export default async function handler(req, res) {
