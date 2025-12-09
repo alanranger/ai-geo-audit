@@ -16996,18 +16996,28 @@ Final Score: ${score}/100`;
     // Ranking & AI: Fetch and combine data
     // ======================
     async function loadRankingAiData(force = false) {
+      debugLog('📊 loadRankingAiData called with force=' + force, 'info');
       const mod = RankingAiModule;
       const { hasLoadedOnce, isLoading } = mod.state();
 
-      if (isLoading || (hasLoadedOnce && !force)) {
+      debugLog(`📊 State check: hasLoadedOnce=${hasLoadedOnce}, isLoading=${isLoading}, force=${force}`, 'info');
+
+      if (isLoading) {
+        debugLog('⚠ Already loading, skipping', 'warn');
+        return;
+      }
+      
+      if (hasLoadedOnce && !force) {
+        debugLog('⚠ Already loaded once and force=false, skipping', 'warn');
         return;
       }
 
+      debugLog('📊 Starting data fetch...', 'info');
       mod.setLoading(true);
       const lastRunEl = document.getElementById("ranking-ai-last-run");
       const refreshBtn = document.getElementById("ranking-ai-refresh");
       if (lastRunEl) {
-        lastRunEl.textContent = "Loading… this uses live DataForSEO & AI endpoints.";
+        lastRunEl.textContent = "Step 1/3: Fetching SERP rankings...";
       }
       if (refreshBtn) {
         refreshBtn.disabled = true;
@@ -17018,30 +17028,52 @@ Final Score: ${score}/100`;
         const keywords = mod.TRACKED_KEYWORDS;
         const queryParam = encodeURIComponent(keywords.join(","));
 
-        debugLog(`Fetching ranking & AI data for ${keywords.length} keywords...`, 'info');
+        debugLog(`📊 Fetching ranking & AI data for ${keywords.length} keywords: ${keywords.join(', ')}`, 'info');
+        debugLog(`📊 SERP endpoint: ${mod.SERP_RANK_ENDPOINT}?keywords=${queryParam}`, 'info');
+        debugLog(`📊 AI endpoint: ${mod.AI_MODE_ENDPOINT}`, 'info');
 
-        const [serpRes, aiRes] = await Promise.all([
-          fetch(`${mod.SERP_RANK_ENDPOINT}?keywords=${queryParam}`),
-          fetch(mod.AI_MODE_ENDPOINT, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ queries: keywords })
-          })
-        ]);
+        if (lastRunEl) {
+          lastRunEl.textContent = `Step 1/3: Fetching SERP rankings for ${keywords.length} keywords...`;
+        }
+
+        debugLog('📊 Starting SERP fetch...', 'info');
+        const serpRes = await fetch(`${mod.SERP_RANK_ENDPOINT}?keywords=${queryParam}`);
+        debugLog(`📊 SERP response status: ${serpRes.status}`, 'info');
+        
+        if (lastRunEl) {
+          lastRunEl.textContent = `Step 2/3: Fetching AI Overview data...`;
+        }
+        
+        debugLog('📊 Starting AI fetch...', 'info');
+        const aiRes = await fetch(mod.AI_MODE_ENDPOINT, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ queries: keywords })
+        });
+        debugLog(`📊 AI response status: ${aiRes.status}`, 'info');
 
         if (!serpRes.ok) {
           const errorText = await serpRes.text();
+          debugLog(`✗ SERP request failed: ${serpRes.status} - ${errorText}`, 'error');
           throw new Error(`SERP rank request failed: ${serpRes.status} - ${errorText}`);
         }
         if (!aiRes.ok) {
           const errorText = await aiRes.text();
+          debugLog(`✗ AI request failed: ${aiRes.status} - ${errorText}`, 'error');
           throw new Error(`AI mode request failed: ${aiRes.status} - ${errorText}`);
         }
 
+        if (lastRunEl) {
+          lastRunEl.textContent = `Step 3/3: Processing results...`;
+        }
+        
+        debugLog('📊 Parsing JSON responses...', 'info');
         const serpJson = await serpRes.json();
         const aiJson = await aiRes.json();
+        debugLog(`📊 SERP JSON keys: ${Object.keys(serpJson).join(', ')}`, 'info');
+        debugLog(`📊 AI JSON keys: ${Object.keys(aiJson).join(', ')}`, 'info');
 
         const serpRows = serpJson.per_keyword || [];
         const aiRows = aiJson.per_query || [];
