@@ -11020,11 +11020,19 @@ Final Score: ${score}/100`;
               return filtered;
             };
             
-            // Helper function to update both matrix and table
+            // Helper function to update summary strip, matrix, and table
             const updateMatrixAndTable = () => {
               const filteredPages = getFilteredPages();
               const typeFilter = document.getElementById('money-pages-type-filter')?.value || 'all';
               const minImpr = Number(document.getElementById('money-pages-min-impr')?.value) || 0;
+              
+              debugLog(`Money Pages Update: Filtered to ${filteredPages.length} pages (type: ${typeFilter}, minImpr: ${minImpr})`, 'info');
+              
+              // Re-render summary strip with filtered pages
+              const summaryStrip = document.getElementById('money-pages-summary-strip');
+              if (summaryStrip && typeof renderMoneyPagesSummaryStrip === 'function') {
+                renderMoneyPagesSummaryStrip(filteredPages, data || {}, summaryStrip);
+              }
               
               // Re-render matrix with filtered pages
               const matrixEl = document.getElementById('money-pages-matrix');
@@ -11088,6 +11096,8 @@ Final Score: ${score}/100`;
             
             if (typeFilter) {
               typeFilter.addEventListener('change', () => {
+                const selectedType = typeFilter.value;
+                debugLog(`Money Pages Filter: Type changed to "${selectedType}"`, 'info');
                 // Clear matrix filter when type filter changes
                 window.moneyMatrixFilterState = { impact: null, diff: null };
                 updateMatrixAndTable();
@@ -11096,6 +11106,8 @@ Final Score: ${score}/100`;
             
             if (minImprFilter) {
               minImprFilter.addEventListener('change', () => {
+                const minImpr = minImprFilter.value;
+                debugLog(`Money Pages Filter: Min impressions changed to ${minImpr}`, 'info');
                 // Clear matrix filter when min impressions filter changes
                 window.moneyMatrixFilterState = { impact: null, diff: null };
                 updateMatrixAndTable();
