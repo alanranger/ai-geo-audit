@@ -4262,13 +4262,24 @@
         const avgPosition = avgPosWeightedSum / impressions;
         const ctr = clicks / impressions;
 
-        const shareOfImpressions = overview && overview.totalImpressions
-          ? impressions / overview.totalImpressions
+        // Use siteTotalImpressions and siteTotalClicks from overview
+        const totalImpressions = overview?.siteTotalImpressions || overview?.totalImpressions || null;
+        const totalClicks = overview?.siteTotalClicks || overview?.totalClicks || null;
+        
+        const shareOfImpressions = totalImpressions && totalImpressions > 0
+          ? impressions / totalImpressions
           : null;
 
-        const shareOfClicks = overview && overview.totalClicks
-          ? clicks / overview.totalClicks
+        const shareOfClicks = totalClicks && totalClicks > 0
+          ? clicks / totalClicks
           : null;
+
+        // Debug logging
+        if (shareOfImpressions == null) {
+          debugLog(`⚠ buildMoneyPagesSummary: shareOfImpressions is null - overview=${!!overview}, siteTotalImpressions=${overview?.siteTotalImpressions || 'missing'}, totalImpressions=${overview?.totalImpressions || 'missing'}`, 'warn');
+        } else {
+          debugLog(`✓ buildMoneyPagesSummary: shareOfImpressions=${shareOfImpressions} (${impressions}/${totalImpressions})`, 'info');
+        }
 
         return {
           count: pages.length,
@@ -9173,7 +9184,8 @@ Final Score: ${score}/100`;
         debugLog(`📊 Money Pages Trend: Extracted ${moneyHistory.length} history entries`, 'info');
         if (moneyHistory.length > 0) {
           const sample = moneyHistory[0];
-          debugLog(`📊 Sample entry: date=${sample.date}, behaviourScore=${sample.behaviourScore}, shareOfImpressions=${sample.shareOfImpressions}, ctr=${sample.ctr}`, 'info');
+          debugLog(`📊 Sample entry: date=${sample.date}, behaviourScore=${sample.behaviourScore}, shareOfImpressions=${sample.shareOfImpressions}, shareOfClicks=${sample.shareOfClicks}, ctr=${sample.ctr}`, 'info');
+          debugLog(`📊 Sample entry moneyPagesSummary: ${JSON.stringify(sample.moneyPagesSummary || 'missing')}`, 'info');
         }
         
         // Add current audit data if available
@@ -9187,7 +9199,8 @@ Final Score: ${score}/100`;
           // Check if today's data is already in history
           const todayInHistory = moneyHistory.find(h => h.date === today);
           if (!todayInHistory && currentSummary) {
-            debugLog(`📊 Adding current audit data to Money Pages trend: date=${today}, behaviourScore=${currentMoneyPagesMetrics.behaviour.score}`, 'info');
+            debugLog(`📊 Adding current audit data to Money Pages trend: date=${today}, behaviourScore=${currentMoneyPagesMetrics.behaviour.score}, shareOfImpressions=${currentSummary.shareOfImpressions}, ctr=${currentSummary.ctr}`, 'info');
+            debugLog(`📊 Current overview: ${JSON.stringify(currentSearchData?.overview || 'missing')}`, 'info');
             moneyHistory.push({
               date: today,
               dateLabel: new Date(today).toLocaleDateString('en-GB', { month: 'short', day: 'numeric' }),
