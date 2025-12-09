@@ -6188,8 +6188,14 @@
       // If not available, try to rebuild from saved data
       if (saved && saved.moneyPagePriorityData && Array.isArray(saved.moneyPagePriorityData) && saved.moneyPagePriorityData.length > 0) {
         window.moneyPagePriorityData = saved.moneyPagePriorityData;
-        window.moneySegmentMetrics = saved.moneySegmentMetrics || null;
-        debugLog(`✓ Restored Money Pages Priority data from localStorage: ${window.moneyPagePriorityData.length} pages`, 'success');
+        // Use saved moneySegmentMetrics if available, otherwise rebuild
+        if (saved.moneySegmentMetrics) {
+          window.moneySegmentMetrics = saved.moneySegmentMetrics;
+          debugLog(`✓ Restored Money Pages Priority data and segment metrics from localStorage: ${window.moneyPagePriorityData.length} pages`, 'success');
+        } else {
+          window.moneySegmentMetrics = null;
+          debugLog(`✓ Restored Money Pages Priority data from localStorage: ${window.moneyPagePriorityData.length} pages (no segment metrics)`, 'success');
+        }
       } else {
         // Try to rebuild from saved data - check multiple locations
         // IMPORTANT: Check for null/undefined explicitly, not just truthy (null is falsy but we need to distinguish it from missing)
@@ -6237,12 +6243,19 @@
             } else {
               window.moneyPagePriorityData = window.buildMoneyPageMetrics(topPagesForPriority, auditSchema);
               
-              // Rebuild segment metrics
-              const behaviourScoresBySegment = {};
-              if (savedMetrics.behaviour) {
-                behaviourScoresBySegment.allMoney = savedMetrics.behaviour.score || 0;
+              // Use saved moneySegmentMetrics if available (from Supabase), otherwise rebuild
+              if (saved && saved.moneySegmentMetrics) {
+                window.moneySegmentMetrics = saved.moneySegmentMetrics;
+                debugLog(`✓ Using moneySegmentMetrics from saved data (Supabase)`, 'success');
+              } else {
+                // Rebuild segment metrics
+                const behaviourScoresBySegment = {};
+                if (savedMetrics.behaviour) {
+                  behaviourScoresBySegment.allMoney = savedMetrics.behaviour.score || 0;
+                }
+                window.moneySegmentMetrics = buildMoneySegmentSummary(window.moneyPagePriorityData, behaviourScoresBySegment);
+                debugLog(`✓ Rebuilt moneySegmentMetrics from moneyPagePriorityData`, 'success');
               }
-              window.moneySegmentMetrics = buildMoneySegmentSummary(window.moneyPagePriorityData, behaviourScoresBySegment);
               
               debugLog(`✓ Rebuilt Money Pages Priority data from saved metrics: ${window.moneyPagePriorityData.length} pages`, 'success');
               
