@@ -13,6 +13,16 @@
  * - serp_features: object with local_pack, featured_snippet, people_also_ask flags
  */
 
+function normalizeDomain(value) {
+  if (!value) return null;
+  try {
+    if (value.includes("://")) {
+      return new URL(value).hostname.replace(/^www\./, "");
+    }
+  } catch {}
+  return value.replace(/^www\./, "");
+}
+
 export default async function handler(req, res) {
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -58,12 +68,17 @@ export default async function handler(req, res) {
 
   const auth = Buffer.from(`${login}:${password}`).toString("base64");
 
+  // Normalize target domain
+  const targetRoot = normalizeDomain(
+    process.env.AI_GEO_DOMAIN || "https://www.alanranger.com"
+  );
+
   try {
-    // Build tasks array for all keywords
+    // Build tasks array - body should be a JSON array directly, not { tasks: [...] }
     const tasks = keywords.map((keyword) => ({
       keyword,
-      location_name: "United Kingdom",
       language_code: "en",
+      location_code: 2826, // United Kingdom
       device: "desktop",
       os: "windows",
       depth: 50,
@@ -75,7 +90,7 @@ export default async function handler(req, res) {
         "Content-Type": "application/json",
         Authorization: `Basic ${auth}`,
       },
-      body: JSON.stringify({ tasks }),
+      body: JSON.stringify(tasks), // Array directly, not { tasks: tasks }
     });
 
     const data = await dfResponse.json();
@@ -98,117 +113,42 @@ export default async function handler(req, res) {
       const task = tasksData[i];
       const keyword = task.data && task.data.keyword ? task.data.keyword : keywords[i] || "unknown";
 
-      // Get all items from all result entries
-      // Handle both array and single object structures
-      let allItems = [];
-      
-      // Debug: log task.result structure first
-      console.log(`[DEBUG] Keyword: ${keyword}, task.result:`, JSON.stringify(task.result).substring(0, 200));
-      console.log(`[DEBUG] task.result type: ${typeof task.result}, isArray: ${Array.isArray(task.result)}, value: ${task.result}`);
-      
-      if (task.result !== null && task.result !== undefined) {
-        if (Array.isArray(task.result)) {
-          console.log(`[DEBUG] task.result is array with length: ${task.result.length}`);
-          // Array of result objects, each with items
-          allItems = task.result.flatMap(r => {
-            if (r && Array.isArray(r.items)) {
-              console.log(`[DEBUG] Found array of items, count: ${r.items.length}`);
-              return r.items;
-            }
-            if (r && r.items) {
-              console.log(`[DEBUG] Found single item in r.items`);
-              return [r.items];
-            }
-            // If r itself is an item (no .items property), include it
-            if (r && r.type) {
-              console.log(`[DEBUG] Found item directly in result array`);
-              return [r];
-            }
-            return [];
-          });
-        } else if (task.result.items) {
-          console.log(`[DEBUG] task.result has .items property`);
-          // Single result object with items array
-          allItems = Array.isArray(task.result.items) ? task.result.items : [];
-        } else if (task.result.type) {
-          console.log(`[DEBUG] task.result is an item itself`);
-          // Result itself is an item
-          allItems = [task.result];
-        } else {
-          console.log(`[DEBUG] task.result exists but structure unknown, keys: ${Object.keys(task.result).join(', ')}`);
-        }
-      } else {
-        console.log(`[DEBUG] task.result is null or undefined`);
-      }
-      
-      console.log(`[DEBUG] Final allItems count: ${allItems.length}`);
+      // Extract result structure: data.tasks[0].result[0]
+      const result = task?.result?.[0];
+      const items = result?.items ?? [];
 
-      // Debug: log item types found
-      const itemTypes = [...new Set(allItems.map(i => i.type).filter(Boolean))];
-      console.log(`[DEBUG] Keyword: ${keyword}, Total items: ${allItems.length}, Item types: ${itemTypes.join(', ')}`);
+      // Filter organic items - exact match on type
+      const ourOrganic = items.filter((item) => {
+        if (item.type !== "organic") return false;
+        const d = normalizeDomain(item.domain || item.url);
+        return d && d.endsWith(targetRoot);
+      });
 
-      // Filter organic items (broadened to include any type containing "organic")
-      const organicItems = allItems.filter(i =>
-        i.type && i.type.toLowerCase().includes("organic")
-      );
-
-      // Debug: log organic items found
-      console.log(`[DEBUG] Organic items found: ${organicItems.length}`);
-      if (organicItems.length > 0) {
-        const sampleDomains = organicItems.slice(0, 5).map(i => i.domain || i.url || 'no domain/url').join(', ');
-        console.log(`[DEBUG] Sample organic domains/URLs: ${sampleDomains}`);
-      }
-
-      // Find alanranger.com items (check both domain and url)
-      const arItems = organicItems.filter(i =>
-        (i.domain && i.domain.toLowerCase().includes("alanranger")) ||
-        (i.url && i.url.toLowerCase().includes("alanranger"))
-      );
-
-      // Debug: log alanranger items found
-      console.log(`[DEBUG] Alanranger items found: ${arItems.length}`);
-      if (arItems.length > 0) {
-        arItems.forEach(item => {
-          console.log(`[DEBUG] Found: domain=${item.domain}, url=${item.url}, rank_group=${item.rank_group}, rank_absolute=${item.rank_absolute}`);
-        });
-      }
-
+      // Find best rank
       let bestRankGroup = null;
       let bestRankAbsolute = null;
       let bestUrl = null;
       let bestTitle = null;
 
-      if (arItems.length > 0) {
-        // Find item with smallest rank_group (fallback to rank_absolute)
-        let bestItem = arItems[0];
-        let bestRank = bestItem.rank_group !== undefined 
-          ? bestItem.rank_group 
-          : (bestItem.rank_absolute !== undefined ? bestItem.rank_absolute : Infinity);
-
-        for (const item of arItems) {
-          const rank = item.rank_group !== undefined
-            ? item.rank_group
-            : (item.rank_absolute !== undefined ? item.rank_absolute : Infinity);
-          
-          if (rank < bestRank) {
-            bestRank = rank;
-            bestItem = item;
-          }
+      for (const item of ourOrganic) {
+        if (bestRankGroup === null || item.rank_group < bestRankGroup) {
+          bestRankGroup = item.rank_group;
+          bestRankAbsolute = item.rank_absolute;
+          bestUrl = item.url;
+          bestTitle = item.title;
         }
-
-        bestRankGroup = bestItem.rank_group !== undefined ? bestItem.rank_group : null;
-        bestRankAbsolute = bestItem.rank_absolute !== undefined ? bestItem.rank_absolute : null;
-        bestUrl = bestItem.url || null;
-        bestTitle = bestItem.title || null;
       }
 
-      // Derive SERP features
-      const has_ai_overview = allItems.some((i) => i.type === "ai_overview_element");
-      const has_local_pack = allItems.some((i) => i.type === "local_pack");
-      const has_featured_snippet = allItems.some(
-        (i) => i.type === "featured_snippet" || i.type === "answer_box"
-      );
-      const has_people_also_ask = allItems.some((i) => i.type === "people_also_ask");
+      // Derive SERP features from result.item_types
+      const itemTypes = result?.item_types || [];
+      
+      const serpFeatures = {
+        local_pack: itemTypes.includes("local_pack"),
+        featured_snippet: itemTypes.includes("featured_snippet"),
+        people_also_ask: itemTypes.includes("people_also_ask"),
+      };
+
+      const hasAiOverview = itemTypes.includes("ai_overview");
 
       perKeyword.push({
         keyword,
@@ -216,25 +156,8 @@ export default async function handler(req, res) {
         best_rank_absolute: bestRankAbsolute,
         best_url: bestUrl,
         best_title: bestTitle,
-        has_ai_overview,
-        serp_features: {
-          local_pack: has_local_pack,
-          featured_snippet: has_featured_snippet,
-          people_also_ask: has_people_also_ask,
-        },
-        // Diagnostic info (remove in production)
-        _debug: {
-          task_result_exists: task.result !== null && task.result !== undefined,
-          task_result_type: typeof task.result,
-          task_result_is_array: Array.isArray(task.result),
-          task_result_length: Array.isArray(task.result) ? task.result.length : (task.result ? 'not_array' : 'null/undefined'),
-          task_result_keys: task.result && typeof task.result === 'object' && !Array.isArray(task.result) ? Object.keys(task.result).slice(0, 10) : [],
-          total_items: allItems.length,
-          organic_items: organicItems.length,
-          alanranger_items: arItems.length,
-          item_types: [...new Set(allItems.map(i => i.type).filter(Boolean))].slice(0, 10),
-          sample_organic_domains: organicItems.slice(0, 3).map(i => i.domain || i.url || 'N/A'),
-        },
+        has_ai_overview: hasAiOverview,
+        serp_features: serpFeatures,
       });
     }
 
@@ -256,4 +179,3 @@ export default async function handler(req, res) {
     res.status(500).json({ error: "Unexpected server error" });
   }
 }
-
