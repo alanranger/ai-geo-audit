@@ -71,7 +71,6 @@ export default async function handler(req, res) {
         httpStatus: dfResponse.status,
         dfsStatus: data.status_code,
         dfsMessage: data.status_message,
-        raw: data,
       });
       return;
     }
@@ -145,7 +144,7 @@ export default async function handler(req, res) {
     });
   } catch (err) {
     console.error("DataForSEO error", err);
-    res.status(500).json({ error: "Unexpected server error", details: err.message });
+    res.status(500).json({ error: "Unexpected server error" });
   }
 }
 
