@@ -2594,6 +2594,43 @@
       return [];
     }
     
+    // Fetch the latest audit from Supabase
+    async function fetchLatestAuditFromSupabase(propertyUrl) {
+      try {
+        if (!propertyUrl) {
+          debugLog('⚠ Cannot fetch from Supabase: property URL not set', 'warn');
+          return null;
+        }
+        
+        debugLog(`Fetching latest audit from Supabase for ${propertyUrl}...`, 'info');
+        
+        const response = await fetch(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}`);
+        
+        if (response.ok) {
+          const result = await response.json();
+          if (result.status === 'ok' && result.data) {
+            debugLog(`✓ Found latest audit from Supabase: ${result.data.auditDate || 'unknown date'}`, 'success');
+            return result.data;
+          } else {
+            debugLog('⚠ No audit found in Supabase', 'warn');
+            return null;
+          }
+        } else {
+          const responseText = await response.text();
+          try {
+            const error = JSON.parse(responseText);
+            debugLog(`⚠ Could not fetch latest audit from Supabase: ${error.message || 'Unknown error'}`, 'warn');
+          } catch (parseError) {
+            debugLog(`⚠ Could not fetch latest audit from Supabase: ${responseText || 'Unknown error'}`, 'warn');
+          }
+          return null;
+        }
+      } catch (error) {
+        debugLog(`⚠ Supabase fetch error: ${error.message}`, 'warn');
+        return null;
+      }
+    }
+    
     // Update retry button visibility based on failed URLs
     function updateRetryButtonVisibility(schemaAudit) {
       const retryBtn = document.getElementById('retryFailedUrlsBtn');
@@ -13162,6 +13199,24 @@ Final Score: ${score}/100`;
         // If no shared audit or failed to load, try localStorage
         if (!auditToDisplay) {
           auditToDisplay = loadAuditResults();
+        }
+        
+        // If still no audit data, try fetching from Supabase
+        if (!auditToDisplay) {
+          const propertyUrl = localStorage.getItem('gsc_property_url');
+          if (propertyUrl) {
+            debugLog('No audit data in localStorage, fetching from Supabase...', 'info');
+            auditToDisplay = await fetchLatestAuditFromSupabase(propertyUrl);
+            if (auditToDisplay) {
+              // Save to localStorage for future use
+              localStorage.setItem('last_audit_results', JSON.stringify(auditToDisplay));
+              debugLog('✓ Latest audit loaded from Supabase and saved to localStorage', 'success');
+            } else {
+              debugLog('⚠ No audit data found in Supabase either', 'warn');
+            }
+          } else {
+            debugLog('⚠ Cannot fetch from Supabase: property URL not configured', 'warn');
+          }
         }
         
         const savedAudit = auditToDisplay;
