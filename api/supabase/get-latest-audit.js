@@ -50,6 +50,7 @@ export default async function handler(req, res) {
 
     // Fetch the most recent audit (order by audit_date desc, limit 1)
     // Include all fields needed to reconstruct the audit object
+    // Using select=* to get all columns including money_pages_metrics, money_pages_summary, money_pages_behaviour_score, money_segment_metrics
     const queryUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.desc&limit=1&select=*`;
     
     const response = await fetch(queryUrl, {
