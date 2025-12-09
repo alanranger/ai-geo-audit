@@ -2786,10 +2786,21 @@
           debugLog(`✓ saveAuditToSupabase: moneyPagesMetrics found in scores (${scores.moneyPagesMetrics.rows?.length || 0} rows)`, 'info');
         }
         
+        // Ensure overview is never null - create fallback if needed
+        if (!overview) {
+          debugLog(`⚠ saveAuditToSupabase: overview is null, creating fallback`, 'warn');
+          overview = { 
+            siteTotalImpressions: searchData?.totalImpressions || 0, 
+            siteTotalClicks: searchData?.totalClicks || 0,
+            totalImpressions: searchData?.totalImpressions || 0,
+            totalClicks: searchData?.totalClicks || 0
+          };
+        }
+        
         debugLog(`saveAuditToSupabase: About to call buildMoneyPagesSummary - overview exists=${!!overview}, overview.siteTotalImpressions=${overview?.siteTotalImpressions || 'missing'}, searchData.totalImpressions=${searchData?.totalImpressions || 'missing'}, moneyPagesMetrics=${!!scores?.moneyPagesMetrics}`, 'info');
         const moneyPagesSummary = window.buildMoneyPagesSummary ? window.buildMoneyPagesSummary(
           scores?.moneyPagesMetrics || null,
-          overview
+          overview || { siteTotalImpressions: 0, siteTotalClicks: 0, totalImpressions: 0, totalClicks: 0 }
         ) : null;
         if (moneyPagesSummary) {
           debugLog(`saveAuditToSupabase: moneyPagesSummary created - shareOfImpressions=${moneyPagesSummary.shareOfImpressions || 'null'}`, 'info');
@@ -9792,18 +9803,42 @@ Final Score: ${score}/100`;
           }
         }
         
-        // Check if canvas is actually visible and has dimensions
-        // Also check if the panel containing the canvas is visible
+        // Set explicit canvas dimensions FIRST to ensure it has size
+        // This must happen before checking dimensions
+        const parentContainer = canvas.parentElement;
+        if (parentContainer) {
+          const containerWidth = parentContainer.clientWidth || parentContainer.offsetWidth || 500;
+          const containerHeight = 300; // Fixed height for consistency
+          canvas.width = containerWidth;
+          canvas.height = containerHeight;
+        } else {
+          canvas.width = 500;
+          canvas.height = 300;
+        }
+        
+        // Check if canvas is actually visible and has dimensions AFTER setting them
         const moneyPanel = canvas.closest('.aigeo-panel[data-panel="money"]');
-        const isPanelVisible = !moneyPanel || moneyPanel.classList.contains('is-active') || moneyPanel.style.display !== 'none';
+        const isPanelVisible = !moneyPanel || (moneyPanel.classList.contains('is-active') && window.getComputedStyle(moneyPanel).display !== 'none');
         
         const canvasRect = canvas.getBoundingClientRect();
-        if (canvasRect.width === 0 || canvasRect.height === 0 || !isPanelVisible) {
-          debugLog(`⚠ Canvas has zero dimensions or panel is hidden (width=${canvasRect.width}, height=${canvasRect.height}, panelVisible=${isPanelVisible}), retrying...`, 'warn');
+        const hasDimensions = canvasRect.width > 0 && canvasRect.height > 0;
+        
+        if (!hasDimensions || !isPanelVisible) {
+          debugLog(`⚠ Canvas has zero dimensions or panel is hidden (width=${canvasRect.width}, height=${canvasRect.height}, panelVisible=${isPanelVisible}, computedDisplay=${moneyPanel ? window.getComputedStyle(moneyPanel).display : 'N/A'}), retrying...`, 'warn');
           if (retryCount < 5) {
             setTimeout(() => renderMoneyPagesCategoryChart(moneyPagesMetrics, retryCount + 1), 500);
           } else {
-            debugLog('⚠ Canvas rendering failed after 5 retries - panel may be hidden', 'warn');
+            debugLog('⚠ Canvas rendering failed after 5 retries - panel may be hidden or not yet rendered', 'warn');
+            // Don't give up - schedule a retry when panel becomes visible
+            if (moneyPanel && !moneyPanel.classList.contains('is-active')) {
+              const observer = new MutationObserver((mutations) => {
+                if (moneyPanel.classList.contains('is-active')) {
+                  observer.disconnect();
+                  setTimeout(() => renderMoneyPagesCategoryChart(moneyPagesMetrics, 0), 100);
+                }
+              });
+              observer.observe(moneyPanel, { attributes: true, attributeFilter: ['class'] });
+            }
           }
           return;
         }
@@ -9813,10 +9848,6 @@ Final Score: ${score}/100`;
           debugLog('⚠ Could not get canvas context', 'warn');
           return;
         }
-        
-        // Set explicit canvas dimensions to prevent resize loops
-        canvas.width = 500;
-        canvas.height = 300;
         
         // Use impressions as weight for the chart slices
         const dataValues = impressions;
@@ -10072,14 +10103,34 @@ Final Score: ${score}/100`;
         
         debugLog(`📊 Chart data: ${labels.length} labels, behaviour=${behaviour.filter(v => v != null).length} values, shareImps=${shareImps.filter(v => v != null).length} values, ctr=${ctr.filter(v => v != null).length} values`, 'info');
         
-        // Check if canvas is visible and panel is active
+        // Set canvas dimensions FIRST
+        const parentContainer = ctx.parentElement;
+        if (parentContainer) {
+          const containerWidth = parentContainer.clientWidth || parentContainer.offsetWidth || 500;
+          ctx.width = containerWidth;
+          ctx.height = 300;
+        } else {
+          ctx.width = 500;
+          ctx.height = 300;
+        }
+        
+        // Check if canvas is visible and panel is active AFTER setting dimensions
         const moneyPanel = ctx.closest('.aigeo-panel[data-panel="money"]');
-        const isPanelVisible = !moneyPanel || moneyPanel.classList.contains('is-active') || moneyPanel.style.display !== 'none';
+        const isPanelVisible = !moneyPanel || (moneyPanel.classList.contains('is-active') && window.getComputedStyle(moneyPanel).display !== 'none');
         const canvasRect = ctx.getBoundingClientRect();
         
         if (!isPanelVisible || canvasRect.width === 0 || canvasRect.height === 0) {
           debugLog(`⚠ Money Pages trend chart: Panel hidden or canvas has zero dimensions (width=${canvasRect.width}, height=${canvasRect.height}, panelVisible=${isPanelVisible}). Chart will render when panel is shown.`, 'warn');
-          // Don't render if panel is hidden - will be rendered when panel becomes visible
+          // Schedule retry when panel becomes visible
+          if (moneyPanel && !moneyPanel.classList.contains('is-active')) {
+            const observer = new MutationObserver((mutations) => {
+              if (moneyPanel.classList.contains('is-active')) {
+                observer.disconnect();
+                setTimeout(() => renderMoneyPagesTrendChart(history), 100);
+              }
+            });
+            observer.observe(moneyPanel, { attributes: true, attributeFilter: ['class'] });
+          }
           return;
         }
         
@@ -10767,14 +10818,34 @@ Final Score: ${score}/100`;
 
         const { labels, segments } = historyData;
         
-        // Check if panel is visible
+        // Set canvas dimensions FIRST
+        const parentContainer = ctx.parentElement;
+        if (parentContainer) {
+          const containerWidth = parentContainer.clientWidth || parentContainer.offsetWidth || 500;
+          ctx.width = containerWidth;
+          ctx.height = 200;
+        } else {
+          ctx.width = 500;
+          ctx.height = 200;
+        }
+        
+        // Check if panel is visible AFTER setting dimensions
         const moneyPanel = ctx.closest('.aigeo-panel[data-panel="money"]');
-        const isPanelVisible = !moneyPanel || moneyPanel.classList.contains('is-active') || moneyPanel.style.display !== 'none';
+        const isPanelVisible = !moneyPanel || (moneyPanel.classList.contains('is-active') && window.getComputedStyle(moneyPanel).display !== 'none');
         const canvasRect = ctx.getBoundingClientRect();
         
         if (!isPanelVisible || canvasRect.width === 0 || canvasRect.height === 0) {
           debugLog(`⚠ Money KPI sparkline: Panel hidden or canvas has zero dimensions (width=${canvasRect.width}, height=${canvasRect.height}, panelVisible=${isPanelVisible}). Chart will render when panel is shown.`, 'warn');
-          // Don't render if panel is hidden - will be rendered when panel becomes visible
+          // Schedule retry when panel becomes visible
+          if (moneyPanel && !moneyPanel.classList.contains('is-active')) {
+            const observer = new MutationObserver((mutations) => {
+              if (moneyPanel.classList.contains('is-active')) {
+                observer.disconnect();
+                setTimeout(() => renderMoneyKpiSparkline(historyData, metricKey), 100);
+              }
+            });
+            observer.observe(moneyPanel, { attributes: true, attributeFilter: ['class'] });
+          }
           return;
         }
         
