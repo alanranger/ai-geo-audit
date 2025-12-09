@@ -17611,12 +17611,48 @@ Final Score: ${score}/100`;
       });
 
       // Manual refresh button for Ranking & AI
-      const refreshBtn = document.getElementById("ranking-ai-refresh");
-      if (refreshBtn) {
-        refreshBtn.addEventListener("click", () => {
-          loadRankingAiData(true); // force re-run
-        });
+      function wireRankingAiButton() {
+        const refreshBtn = document.getElementById("ranking-ai-refresh");
+        if (refreshBtn) {
+          // Remove existing listener by cloning
+          const newBtn = refreshBtn.cloneNode(true);
+          refreshBtn.parentNode.replaceChild(newBtn, refreshBtn);
+          
+          newBtn.addEventListener("click", () => {
+            debugLog('🔄 Ranking & AI button clicked', 'info');
+            if (typeof loadRankingAiData === 'function') {
+              loadRankingAiData(true); // force re-run
+            } else if (typeof window.loadRankingAiData === 'function') {
+              window.loadRankingAiData(true); // force re-run
+            } else {
+              debugLog('✗ loadRankingAiData function not found', 'error');
+            }
+          });
+          debugLog('✓ Ranking & AI button wired up', 'success');
+        } else {
+          debugLog('⚠ Ranking & AI button not found', 'warn');
+        }
       }
+      
+      // Wire button immediately
+      wireRankingAiButton();
+      
+      // Also wire when Ranking panel becomes visible (in case button is re-rendered)
+      navItems.forEach(btn => {
+        const existingClickHandler = btn.onclick;
+        btn.addEventListener("click", () => {
+          const target = btn.getAttribute("data-panel");
+          if (target === "ranking") {
+            setTimeout(() => {
+              wireRankingAiButton();
+            }, 100);
+          }
+          // Call existing handler if it exists
+          if (existingClickHandler) {
+            existingClickHandler();
+          }
+        });
+      });
     })();
   </script>
 </body>
