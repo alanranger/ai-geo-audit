@@ -2978,40 +2978,53 @@
     
     // Load audit results from localStorage
     async function loadAuditResults() {
+      let auditData = null;
       try {
         const saved = localStorage.getItem('last_audit_results');
         if (saved) {
-          const auditData = JSON.parse(saved);
+          auditData = JSON.parse(saved);
           debugLog('✓ Audit results loaded from localStorage', 'success');
-          return auditData;
+          
+          // Check if localStorage data has critical Money Pages data
+          const hasMoneyPagesData = auditData?.scores?.moneyPagesMetrics || auditData?.moneyPagesMetrics;
+          if (!hasMoneyPagesData) {
+            debugLog('⚠ localStorage data missing moneyPagesMetrics, fetching from Supabase...', 'warn');
+            auditData = null; // Will fetch from Supabase below
+          } else {
+            debugLog(`✓ localStorage has moneyPagesMetrics: ${auditData?.scores?.moneyPagesMetrics?.rows?.length || auditData?.moneyPagesMetrics?.rows?.length || 0} rows`, 'success');
+            return auditData;
+          }
         }
       } catch (error) {
         debugLog(`✗ Error loading audit results from localStorage: ${error.message}`, 'error');
       }
       
-      // If localStorage is empty, fetch from Supabase
-      debugLog('⚠ localStorage empty, fetching from Supabase...', 'info');
-      const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url');
-      if (propertyUrl) {
-        const supabaseData = await fetchLatestAuditFromSupabase(propertyUrl);
-        if (supabaseData) {
-          debugLog('✓ Audit results loaded from Supabase', 'success');
-          // Store in localStorage for future use
-          try {
-            localStorage.setItem('last_audit_results', JSON.stringify(supabaseData));
-            debugLog('✓ Stored Supabase data in localStorage for future use', 'success');
-          } catch (storageError) {
-            debugLog(`⚠ Could not store Supabase data in localStorage: ${storageError.message}`, 'warn');
+      // If localStorage is empty or missing critical data, fetch from Supabase
+      if (!auditData) {
+        debugLog('⚠ Fetching from Supabase (localStorage empty or incomplete)...', 'info');
+        const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url');
+        if (propertyUrl) {
+          const supabaseData = await fetchLatestAuditFromSupabase(propertyUrl);
+          if (supabaseData) {
+            debugLog('✓ Audit results loaded from Supabase', 'success');
+            debugLog(`✓ Supabase data structure: scores.moneyPagesMetrics=${!!supabaseData?.scores?.moneyPagesMetrics}, moneyPagesMetrics=${!!supabaseData?.moneyPagesMetrics}`, 'info');
+            // Store in localStorage for future use
+            try {
+              localStorage.setItem('last_audit_results', JSON.stringify(supabaseData));
+              debugLog('✓ Stored Supabase data in localStorage for future use', 'success');
+            } catch (storageError) {
+              debugLog(`⚠ Could not store Supabase data in localStorage: ${storageError.message}`, 'warn');
+            }
+            return supabaseData;
+          } else {
+            debugLog('⚠ No audit data found in Supabase either', 'warn');
           }
-          return supabaseData;
         } else {
-          debugLog('⚠ No audit data found in Supabase either', 'warn');
+          debugLog('⚠ Cannot fetch from Supabase: property URL not set', 'warn');
         }
-      } else {
-        debugLog('⚠ Cannot fetch from Supabase: property URL not set', 'warn');
       }
       
-      return null;
+      return auditData;
     }
     
     // Synchronous version for callers that can't be async (returns localStorage only)
@@ -3361,6 +3374,15 @@
           const result = await response.json();
           if (result.status === 'ok' && result.data) {
             debugLog(`✓ Found latest audit from Supabase: ${result.data.auditDate || 'unknown date'}`, 'success');
+            // Debug: Check what moneyPagesMetrics structure we got
+            const hasMoneyPages = !!(result.data?.scores?.moneyPagesMetrics || result.data?.moneyPagesMetrics);
+            debugLog(`✓ Supabase data check: hasMoneyPagesMetrics=${hasMoneyPages}, structure=${result.data?.scores?.moneyPagesMetrics ? 'scores.moneyPagesMetrics' : result.data?.moneyPagesMetrics ? 'moneyPagesMetrics' : 'none'}`, 'info');
+            if (hasMoneyPages) {
+              const rows = result.data?.scores?.moneyPagesMetrics?.rows || result.data?.moneyPagesMetrics?.rows || [];
+              debugLog(`✓ Supabase moneyPagesMetrics has ${rows.length} rows`, 'success');
+            } else {
+              debugLog(`⚠ Supabase data missing moneyPagesMetrics!`, 'warn');
+            }
             return result.data;
           } else {
             debugLog('⚠ No audit found in Supabase', 'warn');
