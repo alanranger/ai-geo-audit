@@ -66,7 +66,7 @@ export default async function handler(req, res) {
       language_code: "en",
       device: "desktop",
       os: "windows",
-      depth: 10,
+      depth: 50,
     }));
 
     const dfResponse = await fetch(endpoint, {
