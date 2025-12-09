@@ -200,6 +200,14 @@ export default async function handler(req, res) {
           featured_snippet: has_featured_snippet,
           people_also_ask: has_people_also_ask,
         },
+        // Diagnostic info (remove in production)
+        _debug: {
+          total_items: allItems.length,
+          organic_items: organicItems.length,
+          alanranger_items: arItems.length,
+          item_types: [...new Set(allItems.map(i => i.type).filter(Boolean))].slice(0, 10),
+          sample_organic_domains: organicItems.slice(0, 3).map(i => i.domain || i.url || 'N/A'),
+        },
       });
     }
 
