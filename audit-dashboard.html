@@ -2125,7 +2125,7 @@
       debugLog(`Date range set to ${days} days`, 'info');
       
       // Check if saved audit exists and if its date range matches
-      const savedAudit = loadAuditResults();
+      const savedAudit = loadAuditResultsSync();
       if (savedAudit && savedAudit.scores) {
         const savedDateRange = savedAudit.dateRange || oldDateRange;
         if (savedDateRange !== days) {
@@ -2163,7 +2163,7 @@
         debugLog(`Custom date range set to ${customDays} days`, 'info');
         
         // Check if saved audit exists and if its date range matches
-        const savedAudit = loadAuditResults();
+        const savedAudit = loadAuditResultsSync();
         if (savedAudit && savedAudit.scores) {
           const savedDateRange = savedAudit.dateRange || oldDateRange;
           if (savedDateRange !== customDays) {
@@ -2773,8 +2773,8 @@
         debugLog(`✓ Retry completed: ${retrySuccessful} pages now have schema, ${retryStillFailed} still failed`, 'success');
         updateProgress(60, 'Merging retry results with original audit...');
         
-        // Load original audit results from localStorage
-        const savedAudit = loadAuditResults();
+        // Load original audit results from localStorage or Supabase
+        const savedAudit = await loadAuditResults();
         if (savedAudit && savedAudit.schemaAudit && savedAudit.schemaAudit.data) {
           // Merge retry results with original schema audit
           const originalData = savedAudit.schemaAudit.data;
@@ -2977,7 +2977,7 @@
     }
     
     // Load audit results from localStorage
-    function loadAuditResults() {
+    async function loadAuditResults() {
       try {
         const saved = localStorage.getItem('last_audit_results');
         if (saved) {
@@ -2986,7 +2986,43 @@
           return auditData;
         }
       } catch (error) {
-        debugLog(`✗ Error loading audit results: ${error.message}`, 'error');
+        debugLog(`✗ Error loading audit results from localStorage: ${error.message}`, 'error');
+      }
+      
+      // If localStorage is empty, fetch from Supabase
+      debugLog('⚠ localStorage empty, fetching from Supabase...', 'info');
+      const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url');
+      if (propertyUrl) {
+        const supabaseData = await fetchLatestAuditFromSupabase(propertyUrl);
+        if (supabaseData) {
+          debugLog('✓ Audit results loaded from Supabase', 'success');
+          // Store in localStorage for future use
+          try {
+            localStorage.setItem('last_audit_results', JSON.stringify(supabaseData));
+            debugLog('✓ Stored Supabase data in localStorage for future use', 'success');
+          } catch (storageError) {
+            debugLog(`⚠ Could not store Supabase data in localStorage: ${storageError.message}`, 'warn');
+          }
+          return supabaseData;
+        } else {
+          debugLog('⚠ No audit data found in Supabase either', 'warn');
+        }
+      } else {
+        debugLog('⚠ Cannot fetch from Supabase: property URL not set', 'warn');
+      }
+      
+      return null;
+    }
+    
+    // Synchronous version for callers that can't be async (returns localStorage only)
+    function loadAuditResultsSync() {
+      try {
+        const saved = localStorage.getItem('last_audit_results');
+        if (saved) {
+          return JSON.parse(saved);
+        }
+      } catch (error) {
+        // Silent fail for sync version
       }
       return null;
     }
@@ -6558,7 +6594,7 @@
     // Display dashboard
     async function displayDashboard(scores, data, snippetReadiness = 0, schemaAudit = null, localSignals = null) {
       // Update timestamp if this is a fresh display
-      const saved = loadAuditResults();
+      const saved = await loadAuditResults();
       if (saved && saved.timestamp) {
         updateAuditTimestamp(saved.timestamp);
       }
@@ -7630,7 +7666,7 @@ Final Score: ${score}/100`;
         // Note: hasLocalSignals and localSignalsData are already defined at function level (line 3688-3689), reuse them
         
         if (key === 'authority') {
-          const savedAudit = loadAuditResults();
+          const savedAudit = loadAuditResultsSync();
           const backlinkMetrics = savedAudit?.backlinkMetrics;
           const localSignals = savedAudit?.localSignals;
           // Always use correct Trustpilot snapshot (4.6, 610) - override any old cached values
@@ -15708,7 +15744,7 @@ Final Score: ${score}/100`;
 
     // Function to create shareable link (exposed globally for onclick)
     window.createShareableLink = async function() {
-      const savedAudit = loadAuditResults();
+      const savedAudit = await loadAuditResults();
       if (!savedAudit || !savedAudit.scores) {
         showStatus('No audit data available to share. Please run an audit first.', 'error');
         return;
@@ -15787,9 +15823,9 @@ Final Score: ${score}/100`;
           }
         }
         
-        // If no shared audit or failed to load, try localStorage
+        // If no shared audit or failed to load, try localStorage or Supabase
         if (!auditToDisplay) {
-          auditToDisplay = loadAuditResults();
+          auditToDisplay = await loadAuditResults();
         }
         
         // If still no audit data, try fetching from Supabase
@@ -15922,7 +15958,7 @@ Final Score: ${score}/100`;
 
       try {
         // Load saved audit data
-        const savedAudit = loadAuditResults();
+        const savedAudit = loadAuditResultsSync();
         if (!savedAudit || !savedAudit.scores) {
           throw new Error('No audit data available. Please run an audit first.');
         }
@@ -17244,7 +17280,7 @@ Final Score: ${score}/100`;
                 // Re-render money pages category chart if it exists
                 const categoryCanvas = document.getElementById('moneyPagesCategoryChart');
                 if (categoryCanvas && typeof renderMoneyPagesCategoryChart === 'function') {
-                  const saved = loadAuditResults();
+                  const saved = loadAuditResultsSync();
                   if (saved && saved.scores && saved.scores.moneyPagesMetrics) {
                     renderMoneyPagesCategoryChart(saved.scores.moneyPagesMetrics, 0);
                   }
