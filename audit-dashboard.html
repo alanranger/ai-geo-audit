@@ -2878,6 +2878,43 @@
         if (response.ok) {
           const result = await response.json();
           debugLog('✓ Audit results saved to Supabase', 'success');
+          
+          // After saving, refresh Money Pages charts with updated history
+          // This ensures the trend chart and KPI tracker show the new audit data
+          try {
+            debugLog('Refreshing Money Pages charts with updated history...', 'info');
+            
+            // Fetch updated history for Money Pages trend chart
+            const endDate = new Date().toISOString().split('T')[0];
+            const startDate = new Date();
+            startDate.setFullYear(startDate.getFullYear() - 1);
+            const startDateStr = startDate.toISOString().split('T')[0];
+            
+            const historyResponse = await fetch(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDate}`);
+            if (historyResponse.ok) {
+              const historyJson = await historyResponse.json();
+              if (historyJson.status === 'ok' && historyJson.data) {
+                // Render Money Pages trend chart with updated history
+                if (typeof renderMoneyPagesTrendChart === 'function') {
+                  setTimeout(() => {
+                    renderMoneyPagesTrendChart(historyJson.data);
+                    debugLog('✓ Money Pages trend chart refreshed', 'success');
+                  }, 500); // Small delay to ensure DOM is ready
+                }
+                
+                // Refresh KPI tracker
+                if (typeof loadAuditHistoryAndRenderKpis === 'function') {
+                  setTimeout(() => {
+                    loadAuditHistoryAndRenderKpis(propertyUrl);
+                    debugLog('✓ Money Pages KPI tracker refreshed', 'success');
+                  }, 500);
+                }
+              }
+            }
+          } catch (refreshError) {
+            debugLog(`⚠ Error refreshing Money Pages charts: ${refreshError.message}`, 'warn');
+            // Don't fail the save operation if refresh fails
+          }
         } else {
           // Read response body once as text, then try to parse as JSON to avoid "body stream already read" error
           let errorMessage = 'Unknown error';
