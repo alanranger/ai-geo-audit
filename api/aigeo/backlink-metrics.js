@@ -254,8 +254,8 @@ async function readBacklinkMetrics() {
       try {
         content = await fs.readFile(METRICS_FILE, 'utf8');
       } catch (fileError) {
-        // File doesn't exist or can't be read - return empty metrics
-        console.warn(`[Backlink Metrics] Could not read metrics file: ${fileError.message}`);
+        // File doesn't exist or can't be read - this is expected if no CSV uploaded yet
+        // Return null silently (no error log) - caller will handle with default values
         return null;
       }
     }

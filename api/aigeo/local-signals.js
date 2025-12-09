@@ -129,8 +129,9 @@ export default async function handler(req, res) {
       const locationDetails = [];
       for (const location of locations) {
         try {
-          // Get full location details with all fields
-          const locationDetailUrl = `https://mybusinessbusinessinformation.googleapis.com/v1/${location.name}?readMask=*`;
+          // Get full location details with specific fields (readMask=* is not valid, use specific field names)
+          // Request all commonly used fields explicitly
+          const locationDetailUrl = `https://mybusinessbusinessinformation.googleapis.com/v1/${location.name}?readMask=name,title,storefrontAddress,websiteUri,phoneNumbers,serviceArea,primaryPhone,primaryCategory,moreHours`;
           console.log('[Local Signals] Fetching location details:', locationDetailUrl);
           
           const detailResponse = await fetch(locationDetailUrl, {
@@ -146,7 +147,13 @@ export default async function handler(req, res) {
             console.log('[Local Signals] Location detail data:', JSON.stringify(detailData, null, 2));
             locationDetails.push(detailData);
           } else {
-            console.warn('[Local Signals] Failed to get location details:', await detailResponse.text());
+            const errorText = await detailResponse.text();
+            // Log error but don't crash - use basic location data instead
+            if (detailResponse.status === 400) {
+              console.warn(`[Local Signals] Invalid argument (400) for location ${location.name}. Using basic location data. Error: ${errorText.substring(0, 200)}`);
+            } else {
+              console.warn(`[Local Signals] Failed to get location details (${detailResponse.status}): ${errorText.substring(0, 200)}`);
+            }
             locationDetails.push(location); // Fall back to basic location data
           }
           
