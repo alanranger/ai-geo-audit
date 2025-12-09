@@ -41,3 +41,4 @@ ORDER BY column_name;
 --   "productPages": {clicks, impressions, ctr, avgPosition, behaviourScore}
 -- }
 
+

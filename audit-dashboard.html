@@ -1444,6 +1444,11 @@
       }
     });
 
+    // Initialize Money Pages Priority Matrix global state early
+    window.moneyPagePriorityData = window.moneyPagePriorityData || [];
+    window.moneySegmentMetrics = window.moneySegmentMetrics || null;
+    window.moneyMatrixFilterState = window.moneyMatrixFilterState || { impact: null, diff: null };
+    
     // Load saved configuration
     async function loadConfig() {
       debugLog('=== PAGE LOAD: Starting configuration load ===', 'info');
@@ -5805,8 +5810,9 @@
         window.moneyPagePriorityData = saved.moneyPagePriorityData;
         window.moneySegmentMetrics = saved.moneySegmentMetrics || null;
         debugLog(`✓ Restored Money Pages Priority data from localStorage: ${window.moneyPagePriorityData.length} pages`, 'success');
-      } else if (saved && saved.scores && saved.scores.moneyPagesMetrics && saved.scores.moneyPagesMetrics.rows && saved.searchData && schemaAudit) {
+      } else if (saved && saved.scores && saved.scores.moneyPagesMetrics && saved.scores.moneyPagesMetrics.rows && saved.searchData) {
         // Rebuild from saved data if priority data is missing but we have the source data
+        // schemaAudit is optional - buildMoneyPageMetrics can work without it
         try {
           const topPagesForPriority = saved.scores.moneyPagesMetrics.rows.map(row => ({
             page: row.url,
@@ -5819,7 +5825,9 @@
             title: row.title || row.url
           }));
           
-          window.moneyPagePriorityData = buildMoneyPageMetrics(topPagesForPriority, schemaAudit);
+          // Use schemaAudit if available, otherwise pass null (function handles it)
+          const auditSchema = schemaAudit || (saved.schemaAudit || null);
+          window.moneyPagePriorityData = buildMoneyPageMetrics(topPagesForPriority, auditSchema);
           
           // Rebuild segment metrics
           const behaviourScoresBySegment = {};
@@ -10460,8 +10468,34 @@ Final Score: ${score}/100`;
           if (history.length === 0) {
             const card = document.getElementById("money-pages-kpi-card");
             if (card) {
-              card.querySelector('.table-wrapper').innerHTML = '<div style="padding: 2rem; text-align: center; color: #64748b;">No audit history available. Run audits to build KPI data.</div>';
+              const tableWrapper = card.querySelector('.table-wrapper');
+              if (tableWrapper) {
+                tableWrapper.innerHTML = '<div style="padding: 2rem; text-align: center; color: #64748b;">No audit history available. Run audits to build KPI data.</div>';
+              }
+              const tbody = card.querySelector('#money-kpi-table tbody');
+              if (tbody) {
+                tbody.innerHTML = '<tr><td colspan="100%" style="padding: 2rem; text-align: center; color: #64748b;">No audit history available. Run audits to build KPI data.</td></tr>';
+              }
             }
+            debugLog('⚠ Money Pages KPI Tracker: No audit history available', 'warn');
+            return;
+          }
+          
+          // Check if any history records have money_segment_metrics
+          const hasMetrics = history.some(record => record.money_segment_metrics);
+          if (!hasMetrics) {
+            const card = document.getElementById("money-pages-kpi-card");
+            if (card) {
+              const tableWrapper = card.querySelector('.table-wrapper');
+              if (tableWrapper) {
+                tableWrapper.innerHTML = '<div style="padding: 2rem; text-align: center; color: #64748b;">No money segment metrics found in audit history. Run a new audit to generate KPI data.</div>';
+              }
+              const tbody = card.querySelector('#money-kpi-table tbody');
+              if (tbody) {
+                tbody.innerHTML = '<tr><td colspan="100%" style="padding: 2rem; text-align: center; color: #64748b;">No money segment metrics found. Run a new audit to generate KPI data.</td></tr>';
+              }
+            }
+            debugLog('⚠ Money Pages KPI Tracker: No money_segment_metrics in audit history', 'warn');
             return;
           }
 
@@ -10883,49 +10917,53 @@ Final Score: ${score}/100`;
         }
         
         // Phase: Render Money Pages Priority Matrix & Action List
-        if (window.moneyPagePriorityData && window.moneyPagePriorityData.length > 0) {
-          const priorityCard = document.getElementById('money-pages-priority-card');
-          if (priorityCard) {
+        const priorityCard = document.getElementById('money-pages-priority-card');
+        if (priorityCard) {
+          if (window.moneyPagePriorityData && Array.isArray(window.moneyPagePriorityData) && window.moneyPagePriorityData.length > 0) {
             priorityCard.style.display = 'block';
             
             // Initialize state for matrix filter
-            window.moneyMatrixFilterState = { impact: null, diff: null };
+            window.moneyMatrixFilterState = window.moneyMatrixFilterState || { impact: null, diff: null };
             
             // Render summary strip
             const summaryStrip = document.getElementById('money-pages-summary-strip');
             if (summaryStrip) {
-              renderMoneyPagesSummaryStrip(window.moneyPagePriorityData, { overview: data?.overview || {} }, summaryStrip);
+              renderMoneyPagesSummaryStrip(window.moneyPagePriorityData, data || {}, summaryStrip);
             }
             
             // Render matrix
             const matrixEl = document.getElementById('money-pages-matrix');
-            if (matrixEl) {
+            if (matrixEl && typeof renderMoneyPagesMatrix === 'function') {
               renderMoneyPagesMatrix(
                 window.moneyPagePriorityData,
                 matrixEl,
                 (impact, diff) => {
                   window.moneyMatrixFilterState = { impact, diff };
-                  renderMoneyPagesTable(window.moneyPagePriorityData, {
-                    typeFilter: document.getElementById('money-pages-type-filter')?.value || 'all',
-                    minImpr: Number(document.getElementById('money-pages-min-impr')?.value) || 0,
-                    matrixFilter: window.moneyMatrixFilterState
-                  });
+                  if (typeof renderMoneyPagesTable === 'function') {
+                    renderMoneyPagesTable(window.moneyPagePriorityData, {
+                      typeFilter: document.getElementById('money-pages-type-filter')?.value || 'all',
+                      minImpr: Number(document.getElementById('money-pages-min-impr')?.value) || 0,
+                      matrixFilter: window.moneyMatrixFilterState
+                    });
+                  }
                 }
               );
             }
             
             // Render initial table
-            renderMoneyPagesTable(window.moneyPagePriorityData, {
-              typeFilter: 'all',
-              minImpr: 1000,
-              matrixFilter: null
-            });
+            if (typeof renderMoneyPagesTable === 'function') {
+              renderMoneyPagesTable(window.moneyPagePriorityData, {
+                typeFilter: 'all',
+                minImpr: 1000,
+                matrixFilter: null
+              });
+            }
             
             // Wire up filter controls
             const typeFilter = document.getElementById('money-pages-type-filter');
             const minImprFilter = document.getElementById('money-pages-min-impr');
             
-            if (typeFilter) {
+            if (typeFilter && typeof renderMoneyPagesTable === 'function') {
               typeFilter.addEventListener('change', () => {
                 renderMoneyPagesTable(window.moneyPagePriorityData, {
                   typeFilter: typeFilter.value,
@@ -10935,7 +10973,7 @@ Final Score: ${score}/100`;
               });
             }
             
-            if (minImprFilter) {
+            if (minImprFilter && typeof renderMoneyPagesTable === 'function') {
               minImprFilter.addEventListener('change', () => {
                 renderMoneyPagesTable(window.moneyPagePriorityData, {
                   typeFilter: typeFilter?.value || 'all',
@@ -10944,16 +10982,27 @@ Final Score: ${score}/100`;
                 });
               });
             }
-          }
-        } else {
-          const priorityCard = document.getElementById('money-pages-priority-card');
-          if (priorityCard) {
-            priorityCard.style.display = 'none';
+          } else {
+            // Show card but with "no data" message
+            priorityCard.style.display = 'block';
+            const summaryStrip = document.getElementById('money-pages-summary-strip');
+            if (summaryStrip) {
+              summaryStrip.innerHTML = '<div style="padding: 1rem; text-align: center; color: #64748b;">No money pages data available. Run an audit to generate priority matrix data.</div>';
+            }
+            const matrixEl = document.getElementById('money-pages-matrix');
+            if (matrixEl) {
+              matrixEl.innerHTML = '<div style="padding: 2rem; text-align: center; color: #64748b;">No data available</div>';
+            }
+            const tbody = document.querySelector('#money-pages-priority-table tbody');
+            if (tbody) {
+              tbody.innerHTML = '<tr><td colspan="9" style="padding: 2rem; text-align: center; color: #64748b;">No money pages data available. Run an audit to generate priority matrix data.</td></tr>';
+            }
+            debugLog('⚠ Money Pages Priority Matrix: No data available', 'warn');
           }
         }
         
         // Phase: Load and render 12-month KPI Tracker
-        const propertyUrl = document.getElementById('property-url')?.value || localStorage.getItem('last_property_url');
+        const propertyUrl = document.getElementById('propertyUrl')?.value || localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url');
         if (propertyUrl) {
           loadAuditHistoryAndRenderKpis(propertyUrl);
           

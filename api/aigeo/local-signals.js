@@ -69,15 +69,15 @@ export default async function handler(req, res) {
     const accounts = accountsData.accounts || [];
     
     if (accounts.length === 0) {
-      return res.status(200).json({
-        status: 'ok',
-        source: 'local-signals',
-        params: { property },
-        data: {
-          localBusinessSchemaPages: 0,
+    return res.status(200).json({
+      status: 'ok',
+      source: 'local-signals',
+      params: { property },
+      data: {
+        localBusinessSchemaPages: 0,
           napConsistencyScore: null,
-          knowledgePanelDetected: false,
-          serviceAreas: [],
+        knowledgePanelDetected: false,
+        serviceAreas: [],
           locations: [],
           notes: 'No Business Profile accounts found. Please set up a Google Business Profile to get local signals data.'
         },
