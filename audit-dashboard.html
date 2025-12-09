@@ -6151,6 +6151,27 @@
         updateAuditTimestamp(saved.timestamp);
       }
       
+      // CRITICAL: Ensure Money Pages data is in scores object
+      // If scores.moneyPagesMetrics is missing, get it from saved data
+      if (!scores.moneyPagesMetrics) {
+        if (saved && saved.scores && saved.scores.moneyPagesMetrics) {
+          scores.moneyPagesMetrics = saved.scores.moneyPagesMetrics;
+          debugLog('✓ Restored moneyPagesMetrics from saved.scores', 'success');
+        } else if (saved && saved.moneyPagesMetrics) {
+          scores.moneyPagesMetrics = saved.moneyPagesMetrics;
+          debugLog('✓ Restored moneyPagesMetrics from saved.moneyPagesMetrics', 'success');
+        } else {
+          debugLog('⚠ No moneyPagesMetrics found in saved data', 'warn');
+        }
+      }
+      
+      // Store globally for Money Pages sections
+      if (scores.moneyPagesMetrics) {
+        window.currentMoneyPagesMetrics = scores.moneyPagesMetrics;
+        window.moneyPagesMetrics = scores.moneyPagesMetrics;
+        debugLog(`✓ Stored moneyPagesMetrics globally: ${scores.moneyPagesMetrics.rows?.length || 0} rows`, 'success');
+      }
+      
       // Use current audit data (passed as parameter) or fallback to saved data
       // This ensures we always use the most recent audit run data, not stale localStorage
       const currentLocalSignals = localSignals || (saved && saved.localSignals) || null;
@@ -6161,49 +6182,61 @@
         window.moneyPagePriorityData = saved.moneyPagePriorityData;
         window.moneySegmentMetrics = saved.moneySegmentMetrics || null;
         debugLog(`✓ Restored Money Pages Priority data from localStorage: ${window.moneyPagePriorityData.length} pages`, 'success');
-      } else if (saved && saved.scores && saved.scores.moneyPagesMetrics && saved.scores.moneyPagesMetrics.rows && saved.searchData) {
-        // Rebuild from saved data if priority data is missing but we have the source data
-        // schemaAudit is optional - buildMoneyPageMetrics can work without it
-        try {
-          const topPagesForPriority = saved.scores.moneyPagesMetrics.rows.map(row => ({
-            page: row.url,
-            url: row.url,
-            clicks: row.clicks || 0,
-            impressions: row.impressions || 0,
-            ctr: (row.ctr || 0) * 100, // Convert to percentage for buildMoneyPageMetrics
-            position: row.avgPosition || 0,
-            avgPosition: row.avgPosition || 0,
-            title: row.title || row.url
-          }));
-          
-          // Use schemaAudit if available, otherwise pass null (function handles it)
-          const auditSchema = schemaAudit || (saved.schemaAudit || null);
-          window.moneyPagePriorityData = buildMoneyPageMetrics(topPagesForPriority, auditSchema);
-          
-          // Rebuild segment metrics
-          const behaviourScoresBySegment = {};
-          if (saved.scores.moneyPagesMetrics && saved.scores.moneyPagesMetrics.behaviour) {
-            behaviourScoresBySegment.allMoney = saved.scores.moneyPagesMetrics.behaviour.score || 0;
-          }
-          window.moneySegmentMetrics = buildMoneySegmentSummary(window.moneyPagePriorityData, behaviourScoresBySegment);
-          
-          debugLog(`✓ Rebuilt Money Pages Priority data from saved metrics: ${window.moneyPagePriorityData.length} pages`, 'success');
-          
-          // Save the rebuilt data back to localStorage
-          if (window.moneyPagePriorityData && window.moneyPagePriorityData.length > 0) {
-            const updatedAudit = { ...saved, moneyPagePriorityData: window.moneyPagePriorityData, moneySegmentMetrics: window.moneySegmentMetrics };
-            localStorage.setItem('last_audit_results', JSON.stringify(updatedAudit));
-          }
-        } catch (error) {
-          debugLog(`⚠ Failed to rebuild Money Pages Priority data: ${error.message}`, 'warn');
-          window.moneyPagePriorityData = [];
-          window.moneySegmentMetrics = null;
-        }
       } else {
-        // No saved data available
-        window.moneyPagePriorityData = window.moneyPagePriorityData || [];
-        window.moneySegmentMetrics = window.moneySegmentMetrics || null;
-        debugLog('⚠ No Money Pages Priority data available (will be empty until next audit)', 'warn');
+        // Try to rebuild from saved data - check multiple locations
+        const savedMetrics = (saved && saved.scores && saved.scores.moneyPagesMetrics) || 
+                             (saved && saved.moneyPagesMetrics) ||
+                             (scores && scores.moneyPagesMetrics);
+        
+        const savedSearchData = data || (saved && saved.searchData);
+        
+        if (savedMetrics && savedMetrics.rows && savedMetrics.rows.length > 0 && savedSearchData) {
+          // Rebuild from saved data if priority data is missing but we have the source data
+          // schemaAudit is optional - buildMoneyPageMetrics can work without it
+          try {
+            debugLog(`Rebuilding Money Pages Priority data from ${savedMetrics.rows.length} rows`, 'info');
+            const topPagesForPriority = savedMetrics.rows.map(row => ({
+              page: row.url,
+              url: row.url,
+              clicks: row.clicks || 0,
+              impressions: row.impressions || 0,
+              ctr: (row.ctr || 0) * 100, // Convert to percentage for buildMoneyPageMetrics
+              position: row.avgPosition || 0,
+              avgPosition: row.avgPosition || 0,
+              title: row.title || row.url
+            }));
+            
+            // Use schemaAudit if available, otherwise pass null (function handles it)
+            const auditSchema = schemaAudit || (saved && saved.schemaAudit) || null;
+            window.moneyPagePriorityData = buildMoneyPageMetrics(topPagesForPriority, auditSchema);
+            
+            // Rebuild segment metrics
+            const behaviourScoresBySegment = {};
+            if (savedMetrics.behaviour) {
+              behaviourScoresBySegment.allMoney = savedMetrics.behaviour.score || 0;
+            }
+            window.moneySegmentMetrics = buildMoneySegmentSummary(window.moneyPagePriorityData, behaviourScoresBySegment);
+            
+            debugLog(`✓ Rebuilt Money Pages Priority data from saved metrics: ${window.moneyPagePriorityData.length} pages`, 'success');
+            
+            // Save the rebuilt data back to localStorage
+            if (window.moneyPagePriorityData && window.moneyPagePriorityData.length > 0) {
+              const updatedAudit = { ...saved, moneyPagePriorityData: window.moneyPagePriorityData, moneySegmentMetrics: window.moneySegmentMetrics };
+              localStorage.setItem('last_audit_results', JSON.stringify(updatedAudit));
+            }
+          } catch (error) {
+            debugLog(`⚠ Failed to rebuild Money Pages Priority data: ${error.message}`, 'warn');
+            debugLog(`Error stack: ${error.stack}`, 'error');
+            window.moneyPagePriorityData = [];
+            window.moneySegmentMetrics = null;
+          }
+        } else {
+          // No saved data available
+          window.moneyPagePriorityData = window.moneyPagePriorityData || [];
+          window.moneySegmentMetrics = window.moneySegmentMetrics || null;
+          debugLog('⚠ No Money Pages Priority data available (will be empty until next audit)', 'warn');
+          debugLog(`Debug: saved=${!!saved}, savedMetrics=${!!savedMetrics}, savedMetrics.rows=${savedMetrics?.rows?.length || 0}, searchData=${!!(saved && saved.searchData || data)}`, 'warn');
+        }
       }
       
       // Update retry button visibility
