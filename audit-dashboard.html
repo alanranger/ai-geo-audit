@@ -11543,20 +11543,27 @@ Final Score: ${score}/100`;
         }
         
         // Always render money pages section (will show "No data" if empty)
-        // Fallback: if moneyPagesMetrics is missing from scores, try to get it from saved data
-        let moneyPagesMetricsToRender = scores.moneyPagesMetrics;
-        if (!moneyPagesMetricsToRender && saved && saved.scores && saved.scores.moneyPagesMetrics) {
-          debugLog('⚠ Money Pages: Not in current scores, loading from saved audit data', 'warn');
-          moneyPagesMetricsToRender = saved.scores.moneyPagesMetrics;
-          // Also update scores object for consistency
-          scores.moneyPagesMetrics = moneyPagesMetricsToRender;
+        // Get Money Pages metrics - prioritize passed scores, then saved data, then global
+        let moneyPagesMetricsToRender = scores.moneyPagesMetrics || window.currentMoneyPagesMetrics || window.moneyPagesMetrics;
+        
+        if (!moneyPagesMetricsToRender && saved) {
+          // Try multiple locations in saved data
+          if (saved.scores && saved.scores.moneyPagesMetrics) {
+            debugLog('Money Pages: Loading from saved.scores.moneyPagesMetrics', 'info');
+            moneyPagesMetricsToRender = saved.scores.moneyPagesMetrics;
+            scores.moneyPagesMetrics = moneyPagesMetricsToRender;
+          } else if (saved.moneyPagesMetrics) {
+            debugLog('Money Pages: Loading from saved.moneyPagesMetrics', 'info');
+            moneyPagesMetricsToRender = saved.moneyPagesMetrics;
+            scores.moneyPagesMetrics = moneyPagesMetricsToRender;
+          }
         }
         
-        // Additional check: if still null, check if it's in the saved audit object directly
-        if (!moneyPagesMetricsToRender && saved && saved.moneyPagesMetrics) {
-          debugLog('⚠ Money Pages: Found in saved.moneyPagesMetrics, using it', 'warn');
-          moneyPagesMetricsToRender = saved.moneyPagesMetrics;
-          scores.moneyPagesMetrics = moneyPagesMetricsToRender;
+        // Store globally for other functions
+        if (moneyPagesMetricsToRender) {
+          window.currentMoneyPagesMetrics = moneyPagesMetricsToRender;
+          window.moneyPagesMetrics = moneyPagesMetricsToRender;
+          debugLog(`✓ Money Pages metrics stored globally: ${moneyPagesMetricsToRender.rows?.length || 0} rows`, 'success');
         }
         
         debugLog(`Money Pages Metrics available: ${moneyPagesMetricsToRender ? 'yes' : 'no'}`, 'info');
