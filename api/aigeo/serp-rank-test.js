@@ -98,43 +98,36 @@ export default async function handler(req, res) {
       const task = tasksData[i];
       const keyword = task.data && task.data.keyword ? task.data.keyword : keywords[i] || "unknown";
 
-      // Guard for missing result
-      if (!task.result) {
-        perKeyword.push({
-          keyword,
-          best_rank_group: null,
-          best_rank_absolute: null,
-          best_url: null,
-          best_title: null,
-          has_ai_overview: false,
-          serp_features: {
-            local_pack: false,
-            featured_snippet: false,
-            people_also_ask: false,
-          },
-          _debug: {
-            error: "No task.result found",
-            task_keys: task ? Object.keys(task) : [],
-          },
-        });
-        continue;
-      }
-
       // Get all items from all result entries
       // Handle both array and single object structures
       let allItems = [];
-      if (Array.isArray(task.result)) {
-        allItems = task.result.flatMap(r => {
-          if (r && Array.isArray(r.items)) return r.items;
-          if (r && r.items) return [r.items];
-          return [];
-        });
-      } else if (task.result.items) {
-        // Single result object with items array
-        allItems = Array.isArray(task.result.items) ? task.result.items : [];
-      } else if (Array.isArray(task.result)) {
-        // Result might be an array of items directly
-        allItems = task.result;
+      
+      if (task.result) {
+        if (Array.isArray(task.result)) {
+          // Array of result objects, each with items
+          allItems = task.result.flatMap(r => {
+            if (r && Array.isArray(r.items)) return r.items;
+            if (r && r.items) return [r.items];
+            // If r itself is an item (no .items property), include it
+            if (r && r.type) return [r];
+            return [];
+          });
+        } else if (task.result.items) {
+          // Single result object with items array
+          allItems = Array.isArray(task.result.items) ? task.result.items : [];
+        } else if (task.result.type) {
+          // Result itself is an item
+          allItems = [task.result];
+        }
+      }
+      
+      // Debug: log what we found
+      console.log(`[DEBUG] Keyword: ${keyword}, task.result type: ${typeof task.result}, isArray: ${Array.isArray(task.result)}, allItems count: ${allItems.length}`);
+      if (task.result) {
+        console.log(`[DEBUG] task.result keys: ${Object.keys(task.result).join(', ')}`);
+        if (Array.isArray(task.result) && task.result.length > 0) {
+          console.log(`[DEBUG] First result entry keys: ${Object.keys(task.result[0]).join(', ')}`);
+        }
       }
 
       // Debug: log item types found
