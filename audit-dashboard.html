@@ -4978,6 +4978,11 @@
         return result;
       }
       
+      // Make function globally accessible immediately after definition
+      if (typeof window !== 'undefined') {
+        window.buildMoneyPageMetrics = buildMoneyPageMetrics;
+      }
+      
       /**
        * Build per-segment summaries for Money Pages (for 12-month KPI tracking)
        * @param {Array<MoneyPageMetrics>} moneyPages
@@ -6208,7 +6213,13 @@
             
             // Use schemaAudit if available, otherwise pass null (function handles it)
             const auditSchema = schemaAudit || (saved && saved.schemaAudit) || null;
-            window.moneyPagePriorityData = buildMoneyPageMetrics(topPagesForPriority, auditSchema);
+            // Use global function - it should be available after the function is defined
+            if (typeof window.buildMoneyPageMetrics !== 'function') {
+              debugLog('⚠ buildMoneyPageMetrics not available, waiting for function definition...', 'warn');
+              // Function should be defined earlier in the script, but if not, we can't rebuild
+              throw new Error('buildMoneyPageMetrics function is not available. Please run a new audit.');
+            }
+            window.moneyPagePriorityData = window.buildMoneyPageMetrics(topPagesForPriority, auditSchema);
             
             // Rebuild segment metrics
             const behaviourScoresBySegment = {};
