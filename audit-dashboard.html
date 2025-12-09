@@ -5009,8 +5009,9 @@
         };
       })();
       
-      // Make RankingAiModule globally available
+      // Make RankingAiModule globally available immediately
       window.RankingAiModule = RankingAiModule;
+      debugLog('✓ RankingAiModule defined and made globally available', 'success');
 
       // Classify money page sub-segment (Product, Event, Landing)
       function classifyMoneyPageSubSegment(url) {
@@ -17001,14 +17002,16 @@ Final Score: ${score}/100`;
     async function loadRankingAiData(force = false) {
       debugLog('📊 loadRankingAiData called with force=' + force, 'info');
       
-      // Get RankingAiModule from window if not in scope
-      const mod = window.RankingAiModule || RankingAiModule;
+      // Get RankingAiModule from window (it should always be there)
+      const mod = window.RankingAiModule;
       if (!mod) {
-        debugLog('✗ RankingAiModule is not defined', 'error');
-        throw new Error('RankingAiModule is not defined');
+        debugLog('✗ RankingAiModule is not defined in window', 'error');
+        debugLog('✗ Available window properties: ' + Object.keys(window).filter(k => k.includes('Ranking') || k.includes('AI')).join(', '), 'error');
+        throw new Error('RankingAiModule is not defined. Please refresh the page.');
       }
       
       debugLog('✓ RankingAiModule found', 'success');
+      debugLog('✓ RankingAiModule has TRACKED_KEYWORDS: ' + (mod.TRACKED_KEYWORDS ? mod.TRACKED_KEYWORDS.length + ' keywords' : 'missing'), 'success');
       const { hasLoadedOnce, isLoading } = mod.state();
 
       debugLog(`📊 State check: hasLoadedOnce=${hasLoadedOnce}, isLoading=${isLoading}, force=${force}`, 'info');
