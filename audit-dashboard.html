@@ -2850,6 +2850,13 @@
     function saveAuditResults(scores, searchData, snippetReadiness, schemaAudit, localSignals = null, siteReviews = null, backlinkMetrics = null) {
       try {
         const dateRange = parseInt(document.getElementById('dateRange')?.value) || 30;
+        // Get property URL from input field or from searchData
+        const propertyUrl = document.getElementById('propertyUrl')?.value || 
+                           searchData?.propertyUrl || 
+                           searchData?.property_url ||
+                           localStorage.getItem('gsc_property_url') ||
+                           'https://www.alanranger.com'; // Fallback default
+        
         const auditData = {
           scores,
           searchData,
@@ -2859,13 +2866,18 @@
           siteReviews, // Store site reviews data for future use (preserve on retry)
           backlinkMetrics, // Store backlink metrics data
           dateRange, // Store the date range used for this audit
+          propertyUrl, // CRITICAL: Save property URL so we can fetch from Supabase later
           timestamp: new Date().toISOString(),
           // Save Money Pages Priority Matrix data for persistence
           moneyPagePriorityData: window.moneyPagePriorityData || null,
           moneySegmentMetrics: window.moneySegmentMetrics || null
         };
         localStorage.setItem('last_audit_results', JSON.stringify(auditData));
-        debugLog('✓ Audit results saved to localStorage', 'success');
+        // Also save property URL separately for easy access
+        if (propertyUrl) {
+          localStorage.setItem('gsc_property_url', propertyUrl);
+        }
+        debugLog(`✓ Audit results saved to localStorage (propertyUrl: ${propertyUrl})`, 'success');
         
         // Update timestamp display
         updateAuditTimestamp(auditData.timestamp);
@@ -3004,17 +3016,26 @@
       }
       
       // If localStorage is empty or missing critical data, try fetching from Supabase
-      // Try multiple sources for property URL
-      let propertyUrl = localStorage.getItem('gsc_property_url') || 
+      // Try multiple sources for property URL - prioritize saved audit data
+      let propertyUrl = (localStorageData && localStorageData.propertyUrl) || // First check: saved in auditData
+                        localStorage.getItem('gsc_property_url') || 
                         localStorage.getItem('last_property_url') ||
                         (localStorageData && localStorageData.searchData && localStorageData.searchData.propertyUrl) ||
-                        (localStorageData && localStorageData.propertyUrl);
+                        (localStorageData && localStorageData.searchData && localStorageData.searchData.property_url);
       
       // If still no property URL, try to extract from saved audit data structure
       if (!propertyUrl && localStorageData) {
         // Check if there's a property URL embedded in the saved data
         if (localStorageData.searchData && typeof localStorageData.searchData === 'object') {
           propertyUrl = localStorageData.searchData.propertyUrl || localStorageData.searchData.property_url;
+        }
+      }
+      
+      // Last resort: try to get from input field
+      if (!propertyUrl) {
+        const propertyUrlInput = document.getElementById('propertyUrl');
+        if (propertyUrlInput && propertyUrlInput.value) {
+          propertyUrl = propertyUrlInput.value;
         }
       }
       
