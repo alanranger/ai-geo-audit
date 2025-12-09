@@ -116,16 +116,20 @@ export default async function handler(req, res) {
         continue;
       }
 
-      // Use first result entry
-      const result = task.result[0];
-      const items = result.items || [];
+      // Get all items from all result entries
+      const allItems = Array.isArray(task.result)
+        ? task.result.flatMap(r => r.items || [])
+        : [];
 
-      // Filter organic items
-      const organicItems = items.filter((i) => i.type === "organic");
+      // Filter organic items (broadened to include any type containing "organic")
+      const organicItems = allItems.filter(i =>
+        i.type && i.type.toLowerCase().includes("organic")
+      );
 
-      // Find alanranger.com items
-      const arItems = organicItems.filter((i) =>
-        (i.domain || "").includes("alanranger.com")
+      // Find alanranger.com items (check both domain and url)
+      const arItems = organicItems.filter(i =>
+        (i.domain && i.domain.toLowerCase().includes("alanranger")) ||
+        (i.url && i.url.toLowerCase().includes("alanranger"))
       );
 
       let bestRankGroup = null;
@@ -158,12 +162,12 @@ export default async function handler(req, res) {
       }
 
       // Derive SERP features
-      const has_ai_overview = items.some((i) => i.type === "ai_overview_element");
-      const has_local_pack = items.some((i) => i.type === "local_pack");
-      const has_featured_snippet = items.some(
+      const has_ai_overview = allItems.some((i) => i.type === "ai_overview_element");
+      const has_local_pack = allItems.some((i) => i.type === "local_pack");
+      const has_featured_snippet = allItems.some(
         (i) => i.type === "featured_snippet" || i.type === "answer_box"
       );
-      const has_people_also_ask = items.some((i) => i.type === "people_also_ask");
+      const has_people_also_ask = allItems.some((i) => i.type === "people_also_ask");
 
       perKeyword.push({
         keyword,
