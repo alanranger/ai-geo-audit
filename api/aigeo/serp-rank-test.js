@@ -102,33 +102,46 @@ export default async function handler(req, res) {
       // Handle both array and single object structures
       let allItems = [];
       
-      if (task.result) {
+      // Debug: log task.result structure first
+      console.log(`[DEBUG] Keyword: ${keyword}, task.result:`, JSON.stringify(task.result).substring(0, 200));
+      console.log(`[DEBUG] task.result type: ${typeof task.result}, isArray: ${Array.isArray(task.result)}, value: ${task.result}`);
+      
+      if (task.result !== null && task.result !== undefined) {
         if (Array.isArray(task.result)) {
+          console.log(`[DEBUG] task.result is array with length: ${task.result.length}`);
           // Array of result objects, each with items
           allItems = task.result.flatMap(r => {
-            if (r && Array.isArray(r.items)) return r.items;
-            if (r && r.items) return [r.items];
+            if (r && Array.isArray(r.items)) {
+              console.log(`[DEBUG] Found array of items, count: ${r.items.length}`);
+              return r.items;
+            }
+            if (r && r.items) {
+              console.log(`[DEBUG] Found single item in r.items`);
+              return [r.items];
+            }
             // If r itself is an item (no .items property), include it
-            if (r && r.type) return [r];
+            if (r && r.type) {
+              console.log(`[DEBUG] Found item directly in result array`);
+              return [r];
+            }
             return [];
           });
         } else if (task.result.items) {
+          console.log(`[DEBUG] task.result has .items property`);
           // Single result object with items array
           allItems = Array.isArray(task.result.items) ? task.result.items : [];
         } else if (task.result.type) {
+          console.log(`[DEBUG] task.result is an item itself`);
           // Result itself is an item
           allItems = [task.result];
+        } else {
+          console.log(`[DEBUG] task.result exists but structure unknown, keys: ${Object.keys(task.result).join(', ')}`);
         }
+      } else {
+        console.log(`[DEBUG] task.result is null or undefined`);
       }
       
-      // Debug: log what we found
-      console.log(`[DEBUG] Keyword: ${keyword}, task.result type: ${typeof task.result}, isArray: ${Array.isArray(task.result)}, allItems count: ${allItems.length}`);
-      if (task.result) {
-        console.log(`[DEBUG] task.result keys: ${Object.keys(task.result).join(', ')}`);
-        if (Array.isArray(task.result) && task.result.length > 0) {
-          console.log(`[DEBUG] First result entry keys: ${Object.keys(task.result[0]).join(', ')}`);
-        }
-      }
+      console.log(`[DEBUG] Final allItems count: ${allItems.length}`);
 
       // Debug: log item types found
       const itemTypes = [...new Set(allItems.map(i => i.type).filter(Boolean))];
