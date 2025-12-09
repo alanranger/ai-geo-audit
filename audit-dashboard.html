@@ -2502,6 +2502,28 @@
       try {
         const auditDate = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
         
+        // Ensure searchData has overview object with siteTotalImpressions and siteTotalClicks
+        // These are needed for calculating shareOfImpressions in buildMoneyPagesSummary
+        if (searchData && !searchData.overview) {
+          searchData.overview = {};
+        }
+        if (searchData && searchData.overview) {
+          // Use top-level values if overview doesn't have them
+          if (!searchData.overview.siteTotalImpressions && searchData.totalImpressions != null) {
+            searchData.overview.siteTotalImpressions = searchData.totalImpressions;
+          }
+          if (!searchData.overview.siteTotalClicks && searchData.totalClicks != null) {
+            searchData.overview.siteTotalClicks = searchData.totalClicks;
+          }
+          // Also support totalImpressions/totalClicks as fallback
+          if (!searchData.overview.siteTotalImpressions && searchData.overview.totalImpressions != null) {
+            searchData.overview.siteTotalImpressions = searchData.overview.totalImpressions;
+          }
+          if (!searchData.overview.siteTotalClicks && searchData.overview.totalClicks != null) {
+            searchData.overview.siteTotalClicks = searchData.overview.totalClicks;
+          }
+        }
+        
         // Build Money Pages summary for trend tracking (Phase 3)
         const moneyPagesSummary = window.buildMoneyPagesSummary ? window.buildMoneyPagesSummary(
           scores?.moneyPagesMetrics || null,
@@ -4825,7 +4847,7 @@
         }
         
         // Return data in format expected by existing code
-        return {
+        const searchData = {
           totalClicks: gsc.data.overview.totalClicks || 0,
           totalImpressions: gsc.data.overview.totalImpressions || 0,
           averagePosition: gsc.data.overview.avgPosition || 0,
@@ -4835,8 +4857,16 @@
           timeseries: gsc.data.timeseries || [], // For trend chart
           dateRange: days,
           // Store full GSC response for trend chart access
-          _gscResponse: gsc
+          _gscResponse: gsc,
+          // Create overview object with siteTotalImpressions and siteTotalClicks for buildMoneyPagesSummary
+          overview: {
+            siteTotalImpressions: gsc.data.overview.totalImpressions || 0,
+            siteTotalClicks: gsc.data.overview.totalClicks || 0,
+            totalImpressions: gsc.data.overview.totalImpressions || 0,
+            totalClicks: gsc.data.overview.totalClicks || 0
+          }
         };
+        return searchData;
       } catch (error) {
         debugLog(`✗ Error fetching GSC data: ${error.message}`, 'error');
         throw error;
