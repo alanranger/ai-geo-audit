@@ -6215,11 +6215,13 @@
             const auditSchema = schemaAudit || (saved && saved.schemaAudit) || null;
             // Use global function - it should be available after the function is defined
             if (typeof window.buildMoneyPageMetrics !== 'function') {
-              debugLog('⚠ buildMoneyPageMetrics not available, waiting for function definition...', 'warn');
+              debugLog('⚠ buildMoneyPageMetrics not available, cannot rebuild Priority data', 'warn');
               // Function should be defined earlier in the script, but if not, we can't rebuild
-              throw new Error('buildMoneyPageMetrics function is not available. Please run a new audit.');
-            }
-            window.moneyPagePriorityData = window.buildMoneyPageMetrics(topPagesForPriority, auditSchema);
+              // Don't throw - just skip rebuilding and show empty state
+              window.moneyPagePriorityData = [];
+              window.moneySegmentMetrics = null;
+            } else {
+              window.moneyPagePriorityData = window.buildMoneyPageMetrics(topPagesForPriority, auditSchema);
             
             // Rebuild segment metrics
             const behaviourScoresBySegment = {};
@@ -6228,12 +6230,13 @@
             }
             window.moneySegmentMetrics = buildMoneySegmentSummary(window.moneyPagePriorityData, behaviourScoresBySegment);
             
-            debugLog(`✓ Rebuilt Money Pages Priority data from saved metrics: ${window.moneyPagePriorityData.length} pages`, 'success');
-            
-            // Save the rebuilt data back to localStorage
-            if (window.moneyPagePriorityData && window.moneyPagePriorityData.length > 0) {
-              const updatedAudit = { ...saved, moneyPagePriorityData: window.moneyPagePriorityData, moneySegmentMetrics: window.moneySegmentMetrics };
-              localStorage.setItem('last_audit_results', JSON.stringify(updatedAudit));
+              debugLog(`✓ Rebuilt Money Pages Priority data from saved metrics: ${window.moneyPagePriorityData.length} pages`, 'success');
+              
+              // Save the rebuilt data back to localStorage
+              if (window.moneyPagePriorityData && window.moneyPagePriorityData.length > 0) {
+                const updatedAudit = { ...saved, moneyPagePriorityData: window.moneyPagePriorityData, moneySegmentMetrics: window.moneySegmentMetrics };
+                localStorage.setItem('last_audit_results', JSON.stringify(updatedAudit));
+              }
             }
           } catch (error) {
             debugLog(`⚠ Failed to rebuild Money Pages Priority data: ${error.message}`, 'warn');
@@ -15324,6 +15327,12 @@ Final Score: ${score}/100`;
         
         const savedAudit = auditToDisplay;
         if (savedAudit && savedAudit.scores && savedAudit.searchData) {
+          // Ensure moneyPagesMetrics is in scores if it exists in the audit data
+          if (!savedAudit.scores.moneyPagesMetrics && savedAudit.moneyPagesMetrics) {
+            savedAudit.scores.moneyPagesMetrics = savedAudit.moneyPagesMetrics;
+            debugLog('✓ Moved moneyPagesMetrics from audit root to scores', 'success');
+          }
+          
           // If saved audit has a date range, use it to set the input field and button
           // This ensures the UI matches the saved audit's date range
           if (savedAudit.dateRange) {
