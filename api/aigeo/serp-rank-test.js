@@ -99,7 +99,7 @@ export default async function handler(req, res) {
       const keyword = task.data && task.data.keyword ? task.data.keyword : keywords[i] || "unknown";
 
       // Guard for missing result
-      if (!task.result || !Array.isArray(task.result) || task.result.length === 0) {
+      if (!task.result) {
         perKeyword.push({
           keyword,
           best_rank_group: null,
@@ -112,14 +112,30 @@ export default async function handler(req, res) {
             featured_snippet: false,
             people_also_ask: false,
           },
+          _debug: {
+            error: "No task.result found",
+            task_keys: task ? Object.keys(task) : [],
+          },
         });
         continue;
       }
 
       // Get all items from all result entries
-      const allItems = Array.isArray(task.result)
-        ? task.result.flatMap(r => r.items || [])
-        : [];
+      // Handle both array and single object structures
+      let allItems = [];
+      if (Array.isArray(task.result)) {
+        allItems = task.result.flatMap(r => {
+          if (r && Array.isArray(r.items)) return r.items;
+          if (r && r.items) return [r.items];
+          return [];
+        });
+      } else if (task.result.items) {
+        // Single result object with items array
+        allItems = Array.isArray(task.result.items) ? task.result.items : [];
+      } else if (Array.isArray(task.result)) {
+        // Result might be an array of items directly
+        allItems = task.result;
+      }
 
       // Debug: log item types found
       const itemTypes = [...new Set(allItems.map(i => i.type).filter(Boolean))];
