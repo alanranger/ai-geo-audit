@@ -144,7 +144,7 @@ export default async function handler(req, res) {
     "beginners photography classes",
     "photography lessons online",
     "camera courses for beginners",
-    "landscape photography workshops",
+    "alan ranger",
     "beginners photography course",
   ];
 
