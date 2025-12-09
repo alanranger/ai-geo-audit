@@ -4944,7 +4944,8 @@
       // ======================
       // Ranking & AI module
       // ======================
-      const RankingAiModule = (function () {
+      // Define and assign to window in one step to avoid scope issues
+      window.RankingAiModule = (function () {
         // Core tracked keywords. Real queries, no mock values.
         // Include both Money and Education terms.
         const TRACKED_KEYWORDS = [
@@ -5016,27 +5017,17 @@
         };
       })();
       
-      // Make RankingAiModule globally available immediately - MUST be at top level
-      (function() {
-        try {
-          if (typeof RankingAiModule !== 'undefined') {
-            window.RankingAiModule = RankingAiModule;
-            if (typeof window.RankingAiModule === 'undefined') {
-              console.error('Failed to assign RankingAiModule to window');
-              debugLog('✗ Failed to assign RankingAiModule to window', 'error');
-            } else {
-              debugLog('✓ RankingAiModule defined and made globally available', 'success');
-              debugLog('✓ RankingAiModule.TRACKED_KEYWORDS: ' + (window.RankingAiModule.TRACKED_KEYWORDS ? window.RankingAiModule.TRACKED_KEYWORDS.length + ' keywords' : 'missing'), 'success');
-            }
-          } else {
-            console.error('RankingAiModule is undefined when trying to assign to window');
-            debugLog('✗ RankingAiModule is undefined when trying to assign to window', 'error');
-          }
-        } catch (err) {
-          console.error('Error assigning RankingAiModule to window:', err);
-          debugLog('✗ Error assigning RankingAiModule to window: ' + err.message, 'error');
-        }
-      })();
+      // Also create local reference for backward compatibility
+      const RankingAiModule = window.RankingAiModule;
+      
+      // Verify assignment
+      if (typeof window.RankingAiModule !== 'undefined') {
+        debugLog('✓ RankingAiModule defined and assigned to window', 'success');
+        debugLog('✓ RankingAiModule.TRACKED_KEYWORDS: ' + (window.RankingAiModule.TRACKED_KEYWORDS ? window.RankingAiModule.TRACKED_KEYWORDS.length + ' keywords' : 'missing'), 'success');
+      } else {
+        console.error('Failed to assign RankingAiModule to window');
+        debugLog('✗ Failed to assign RankingAiModule to window', 'error');
+      }
 
       // Classify money page sub-segment (Product, Event, Landing)
       function classifyMoneyPageSubSegment(url) {
