@@ -9492,6 +9492,49 @@ Final Score: ${score}/100`;
             includeZeroEl.addEventListener('change', applyFilters);
           }
           
+          // Sync chart and behaviour filters with table filter
+          const chartFilterEl = document.getElementById('money-pages-chart-filter-subsegment');
+          const behaviourFilterEl = document.getElementById('money-behaviour-filter-subsegment');
+          
+          // Update chart/behaviour filters when table filter changes
+          subSegmentFilterEl.addEventListener('change', () => {
+            const value = subSegmentFilterEl.value;
+            if (chartFilterEl && chartFilterEl.value !== value) {
+              chartFilterEl.value = value;
+            }
+            if (behaviourFilterEl && behaviourFilterEl.value !== value) {
+              behaviourFilterEl.value = value;
+            }
+          });
+          
+          // Update table filter when chart/behaviour filters change
+          if (chartFilterEl) {
+            chartFilterEl.addEventListener('change', () => {
+              if (subSegmentFilterEl.value !== chartFilterEl.value) {
+                subSegmentFilterEl.value = chartFilterEl.value;
+                applyFilters();
+              }
+            });
+          }
+          
+          if (behaviourFilterEl) {
+            behaviourFilterEl.addEventListener('change', () => {
+              if (subSegmentFilterEl.value !== behaviourFilterEl.value) {
+                subSegmentFilterEl.value = behaviourFilterEl.value;
+                applyFilters();
+              }
+            });
+          }
+          
+          // Initialize chart and behaviour filters to match table filter
+          const currentSubSeg = window.moneyPagesSubSegmentFilter || 'ALL';
+          if (chartFilterEl) {
+            chartFilterEl.value = currentSubSeg;
+          }
+          if (behaviourFilterEl) {
+            behaviourFilterEl.value = currentSubSeg;
+          }
+          
           // Update copy button to use filtered data
           if (copyBtn) {
             const newCopyBtn = copyBtn.cloneNode(true);
@@ -11219,6 +11262,18 @@ Final Score: ${score}/100`;
             </div>
             
             <!-- Money Pages Behaviour KPIs -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+              <h3 style="margin: 0; font-size: 1rem; font-weight: 700; color: #1e293b;">Money Pages Behaviour</h3>
+              <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #475569;" title="Filter by sub-segment type">
+                Sub-segment:
+                <select id="money-behaviour-filter-subsegment" style="padding: 0.4rem 0.6rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.85rem; background: white; cursor: pointer;" title="Filter money pages by sub-segment type. Landing pages are collection/category pages, Event pages are workshop/event listings, Product pages are service/product offerings.">
+                  <option value="ALL">All</option>
+                  <option value="PRODUCT">Product</option>
+                  <option value="EVENT">Event</option>
+                  <option value="LANDING">Landing</option>
+                </select>
+              </label>
+            </div>
             <div class="money-behaviour-kpis" id="money-behaviour-kpis" style="display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem;">
               <div class="kpi-card" id="money-behaviour-card" style="flex: 1 1 180px; background: #fff; border-radius: 6px; padding: 8px 12px; box-shadow: 0 0 0 1px rgba(0,0,0,0.04);">
                 <div class="kpi-label" style="font-size: 0.75rem; color: #64748b; margin-bottom: 0.25rem;">Money pages behaviour</div>
@@ -11246,10 +11301,25 @@ Final Score: ${score}/100`;
             <div class="chart-row" id="money-pages-chart-row" style="margin-bottom: 1.5rem; display: block; visibility: visible;">
               <div class="chart-card" style="background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: flex; gap: 1.5rem; align-items: flex-start;">
                 <div style="flex: 1;">
-                  <h3 id="money-pages-chart-title" style="margin: 0 0 0.5rem 0; font-size: 1rem; font-weight: 700; color: #1e293b;">Money Pages Opportunity Mix</h3>
-                  <p class="chart-subtitle" style="margin: 0 0 1rem 0; font-size: 0.85rem; color: #64748b;">
-                    How your money pages are distributed across improvement categories in this audit window.
-                  </p>
+                  <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem;">
+                    <div>
+                      <h3 id="money-pages-chart-title" style="margin: 0 0 0.5rem 0; font-size: 1rem; font-weight: 700; color: #1e293b;">Money Pages Opportunity Mix</h3>
+                      <p class="chart-subtitle" style="margin: 0 0 1rem 0; font-size: 0.85rem; color: #64748b;">
+                        How your money pages are distributed across improvement categories in this audit window.
+                      </p>
+                    </div>
+                    <div style="display: flex; gap: 0.75rem; align-items: center; flex-shrink: 0;">
+                      <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #475569;" title="Filter by sub-segment type">
+                        Sub-segment:
+                        <select id="money-pages-chart-filter-subsegment" style="padding: 0.4rem 0.6rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.85rem; background: white; cursor: pointer;" title="Filter money pages by sub-segment type. Landing pages are collection/category pages, Event pages are workshop/event listings, Product pages are service/product offerings.">
+                          <option value="ALL">All</option>
+                          <option value="PRODUCT">Product</option>
+                          <option value="EVENT">Event</option>
+                          <option value="LANDING">Landing</option>
+                        </select>
+                      </label>
+                    </div>
+                  </div>
                   <div style="position: relative; width: 500px; height: 300px; margin: 0 auto; overflow: hidden;">
                     <canvas id="money-pages-category-chart" width="500" height="300" style="display: block; max-width: 500px; max-height: 300px;"></canvas>
                   </div>
@@ -11672,9 +11742,8 @@ Final Score: ${score}/100`;
               updateMoneyPagesChartSummary(filteredMetrics);
               
               // Render chart with filtered data
-              if (!moneyPagesCategoryChart) {
-                renderMoneyPagesCategoryChart(moneyPagesMetrics, 0);
-              }
+              // Always re-render chart to ensure it uses current filters
+              renderMoneyPagesCategoryChart(moneyPagesMetrics, 0);
             } else {
               // Fallback: render with unfiltered data if filtering fails
               renderMoneyPagesBehaviourKpis(moneyPagesMetrics.behaviour, moneyPagesMetrics, queryPages);
