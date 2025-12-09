@@ -11877,7 +11877,9 @@ Final Score: ${score}/100`;
                 if (typeof renderMoneyPagesTrendChart === 'function') {
                   setTimeout(() => {
                     renderMoneyPagesTrendChart(contentSchemaHistory);
-                  }, 500); // Delay to ensure DOM is ready
+                  }, 1000); // Delay to ensure DOM is ready and chart container exists
+                } else {
+                  debugLog('⚠ renderMoneyPagesTrendChart function not found', 'warn');
                 }
               } catch (error) {
                 debugLog(`⚠ Error fetching historical data: ${error.message}`, 'warn');
@@ -11886,8 +11888,43 @@ Final Score: ${score}/100`;
             } else {
               debugLog(`No property URL found. Cannot fetch historical data.`, 'info');
             }
-            
-            // Get current Business Profile data for Local Entity and Service Area (fallback if no historical data)
+          } else {
+            // No timeseries data - still fetch historical data for Money Pages trend chart
+            const propertyUrl = document.getElementById('propertyUrl')?.value || '';
+            if (propertyUrl) {
+              try {
+                // Calculate date range from saved audit or use default
+                const dateRange = parseInt(document.getElementById('dateRange')?.value || '30', 10);
+                const endDate = new Date().toISOString().split('T')[0];
+                const startDate = new Date();
+                startDate.setDate(startDate.getDate() - dateRange);
+                const startDateStr = startDate.toISOString().split('T')[0];
+                
+                debugLog(`Fetching historical data for Money Pages trend (no timeseries): ${startDateStr} to ${endDate}`, 'info');
+                contentSchemaHistory = await fetchContentSchemaHistory(propertyUrl, startDateStr, endDate);
+                
+                // Phase 3: Render Money Pages trend chart
+                if (typeof renderMoneyPagesTrendChart === 'function') {
+                  setTimeout(() => {
+                    renderMoneyPagesTrendChart(contentSchemaHistory);
+                  }, 1000); // Delay to ensure DOM is ready and chart container exists
+                } else {
+                  debugLog('⚠ renderMoneyPagesTrendChart function not found', 'warn');
+                }
+              } catch (error) {
+                debugLog(`⚠ Error fetching historical data for Money Pages: ${error.message}`, 'warn');
+                contentSchemaHistory = [];
+                // Still try to render with empty history (will show current audit data if available)
+                if (typeof renderMoneyPagesTrendChart === 'function') {
+                  setTimeout(() => {
+                    renderMoneyPagesTrendChart([]);
+                  }, 1000);
+                }
+              }
+            }
+          }
+          
+          // Get current Business Profile data for Local Entity and Service Area (fallback if no historical data)
             const hasLocalSignals = saved && saved.localSignals && saved.localSignals.status === 'ok' && saved.localSignals.data;
             const localSignalsData = hasLocalSignals ? saved.localSignals.data : null;
             
