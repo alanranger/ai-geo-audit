@@ -6189,13 +6189,24 @@
         debugLog(`✓ Restored Money Pages Priority data from localStorage: ${window.moneyPagePriorityData.length} pages`, 'success');
       } else {
         // Try to rebuild from saved data - check multiple locations
-        const savedMetrics = (saved && saved.scores && saved.scores.moneyPagesMetrics) || 
-                             (saved && saved.moneyPagesMetrics) ||
-                             (scores && scores.moneyPagesMetrics);
+        // IMPORTANT: Check for null/undefined explicitly, not just truthy (null is falsy but we need to distinguish it from missing)
+        let savedMetrics = null;
+        if (saved && saved.scores && saved.scores.moneyPagesMetrics !== null && saved.scores.moneyPagesMetrics !== undefined && saved.scores.moneyPagesMetrics !== false) {
+          savedMetrics = saved.scores.moneyPagesMetrics;
+          debugLog(`✓ Found moneyPagesMetrics in saved.scores.moneyPagesMetrics`, 'success');
+        } else if (saved && saved.moneyPagesMetrics !== null && saved.moneyPagesMetrics !== undefined && saved.moneyPagesMetrics !== false) {
+          savedMetrics = saved.moneyPagesMetrics;
+          debugLog(`✓ Found moneyPagesMetrics in saved.moneyPagesMetrics`, 'success');
+        } else if (scores && scores.moneyPagesMetrics !== null && scores.moneyPagesMetrics !== undefined && scores.moneyPagesMetrics !== false) {
+          savedMetrics = scores.moneyPagesMetrics;
+          debugLog(`✓ Found moneyPagesMetrics in scores.moneyPagesMetrics`, 'success');
+        } else {
+          debugLog(`⚠ moneyPagesMetrics not found in any location: saved.scores.moneyPagesMetrics=${saved?.scores?.moneyPagesMetrics}, saved.moneyPagesMetrics=${saved?.moneyPagesMetrics}, scores.moneyPagesMetrics=${scores?.moneyPagesMetrics}`, 'warn');
+        }
         
         const savedSearchData = data || (saved && saved.searchData);
         
-        if (savedMetrics && savedMetrics.rows && savedMetrics.rows.length > 0 && savedSearchData) {
+        if (savedMetrics && savedMetrics.rows && Array.isArray(savedMetrics.rows) && savedMetrics.rows.length > 0 && savedSearchData) {
           // Rebuild from saved data if priority data is missing but we have the source data
           // schemaAudit is optional - buildMoneyPageMetrics can work without it
           try {
