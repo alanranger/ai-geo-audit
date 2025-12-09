@@ -69,8 +69,48 @@ export default async function handler(req, res) {
       return;
     }
 
-    // For now just return the full response so we can inspect it
-    res.status(200).json(data);
+    // ---- Extract AI Mode citations ----
+    const task = data.tasks && data.tasks[0];
+    const result = task && task.result && task.result[0];
+    const items = (result && result.items) || [];
+
+    // Find the ai_overview block
+    const aiOverview = items.find((item) => item.type === "ai_overview");
+
+    let citations = [];
+    if (aiOverview && Array.isArray(aiOverview.items)) {
+      for (const el of aiOverview.items) {
+        if (!el.links) continue;
+        for (const link of el.links) {
+          if (!link.url) continue;
+          citations.push({
+            title: link.title || null,
+            url: link.url,
+            domain: link.domain || null,
+          });
+        }
+      }
+    }
+
+    // Deduplicate by URL
+    const byUrl = {};
+    for (const c of citations) {
+      if (!byUrl[c.url]) byUrl[c.url] = c;
+    }
+    const uniqueCitations = Object.values(byUrl);
+
+    const alanCitations = uniqueCitations.filter(
+      (c) => c.domain && c.domain.includes("alanranger.com")
+    );
+
+    res.status(200).json({
+      query: keyword,
+      has_ai_overview: !!aiOverview,
+      total_citations: uniqueCitations.length,
+      alanranger_citations_count: alanCitations.length,
+      alanranger_citations: alanCitations,
+      sample_citations: uniqueCitations.slice(0, 10),
+    });
   } catch (err) {
     console.error("DataForSEO error", err);
     res.status(500).json({ error: "Unexpected server error", details: err.message });
