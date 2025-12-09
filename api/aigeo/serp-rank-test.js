@@ -23,6 +23,113 @@ function normalizeDomain(value) {
   return value.replace(/^www\./, "");
 }
 
+async function fetchSerpForKeyword(keyword, auth, targetRoot) {
+  const endpoint =
+    "https://api.dataforseo.com/v3/serp/google/organic/live/advanced";
+
+  try {
+    const dfResponse = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Basic ${auth}`,
+      },
+      body: JSON.stringify([
+        {
+          keyword,
+          language_code: "en",
+          location_code: 2826, // United Kingdom
+          device: "desktop",
+          os: "windows",
+          depth: 50,
+        },
+      ]),
+    });
+
+    const data = await dfResponse.json();
+
+    if (!dfResponse.ok || !String(data.status_code).startsWith("200")) {
+      return {
+        keyword,
+        best_rank_group: null,
+        best_rank_absolute: null,
+        best_url: null,
+        best_title: null,
+        has_ai_overview: false,
+        serp_features: {
+          local_pack: false,
+          featured_snippet: false,
+          people_also_ask: false,
+        },
+        error: data.status_message || "DataForSEO request failed",
+      };
+    }
+
+    const task = data.tasks?.[0];
+    const result = task?.result?.[0];
+    const items = result?.items ?? [];
+
+    // Filter organic items - exact match on type
+    const ourOrganic = items.filter((item) => {
+      if (item.type !== "organic") return false;
+      const d = normalizeDomain(item.domain || item.url);
+      return d && d.endsWith(targetRoot);
+    });
+
+    // Find best rank
+    let bestRankGroup = null;
+    let bestRankAbsolute = null;
+    let bestUrl = null;
+    let bestTitle = null;
+
+    for (const item of ourOrganic) {
+      if (bestRankGroup === null || item.rank_group < bestRankGroup) {
+        bestRankGroup = item.rank_group;
+        bestRankAbsolute = item.rank_absolute;
+        bestUrl = item.url;
+        bestTitle = item.title;
+      }
+    }
+
+    // Derive SERP features from result.item_types
+    const itemTypes = result?.item_types || [];
+    
+    const serpFeatures = {
+      local_pack: itemTypes.includes("local_pack"),
+      featured_snippet: itemTypes.includes("featured_snippet"),
+      people_also_ask: itemTypes.includes("people_also_ask"),
+    };
+
+    const hasAiOverview = itemTypes.includes("ai_overview");
+
+    return {
+      keyword,
+      best_rank_group: bestRankGroup,
+      best_rank_absolute: bestRankAbsolute,
+      best_url: bestUrl,
+      best_title: bestTitle,
+      has_ai_overview: hasAiOverview,
+      serp_features: serpFeatures,
+    };
+  } catch (err) {
+    console.error(`Error fetching SERP for keyword "${keyword}":`, err);
+    return {
+      keyword,
+      best_rank_group: null,
+      best_rank_absolute: null,
+      best_url: null,
+      best_title: null,
+      has_ai_overview: false,
+      serp_features: {
+        local_pack: false,
+        featured_snippet: false,
+        people_also_ask: false,
+      },
+      error: "Unexpected server error",
+    };
+  }
+}
+
 export default async function handler(req, res) {
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -63,9 +170,6 @@ export default async function handler(req, res) {
     return;
   }
 
-  const endpoint =
-    "https://api.dataforseo.com/v3/serp/google/organic/live/advanced";
-
   const auth = Buffer.from(`${login}:${password}`).toString("base64");
 
   // Normalize target domain
@@ -74,91 +178,11 @@ export default async function handler(req, res) {
   );
 
   try {
-    // Build tasks array - body should be a JSON array directly, not { tasks: [...] }
-    const tasks = keywords.map((keyword) => ({
-      keyword,
-      language_code: "en",
-      location_code: 2826, // United Kingdom
-      device: "desktop",
-      os: "windows",
-      depth: 50,
-    }));
-
-    const dfResponse = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Basic ${auth}`,
-      },
-      body: JSON.stringify(tasks), // Array directly, not { tasks: tasks }
-    });
-
-    const data = await dfResponse.json();
-
-    if (!dfResponse.ok || !String(data.status_code).startsWith("200")) {
-      res.status(502).json({
-        error: "DataForSEO request failed",
-        httpStatus: dfResponse.status,
-        dfsStatus: data.status_code,
-        dfsMessage: data.status_message || "Unknown error",
-      });
-      return;
-    }
-
+    // Call DataForSEO once per keyword (required by Live API)
     const perKeyword = [];
-
-    // Process each task result
-    const tasksData = data.tasks || [];
-    for (let i = 0; i < tasksData.length; i++) {
-      const task = tasksData[i];
-      const keyword = task.data && task.data.keyword ? task.data.keyword : keywords[i] || "unknown";
-
-      // Extract result structure: data.tasks[0].result[0]
-      const result = task?.result?.[0];
-      const items = result?.items ?? [];
-
-      // Filter organic items - exact match on type
-      const ourOrganic = items.filter((item) => {
-        if (item.type !== "organic") return false;
-        const d = normalizeDomain(item.domain || item.url);
-        return d && d.endsWith(targetRoot);
-      });
-
-      // Find best rank
-      let bestRankGroup = null;
-      let bestRankAbsolute = null;
-      let bestUrl = null;
-      let bestTitle = null;
-
-      for (const item of ourOrganic) {
-        if (bestRankGroup === null || item.rank_group < bestRankGroup) {
-          bestRankGroup = item.rank_group;
-          bestRankAbsolute = item.rank_absolute;
-          bestUrl = item.url;
-          bestTitle = item.title;
-        }
-      }
-
-      // Derive SERP features from result.item_types
-      const itemTypes = result?.item_types || [];
-      
-      const serpFeatures = {
-        local_pack: itemTypes.includes("local_pack"),
-        featured_snippet: itemTypes.includes("featured_snippet"),
-        people_also_ask: itemTypes.includes("people_also_ask"),
-      };
-
-      const hasAiOverview = itemTypes.includes("ai_overview");
-
-      perKeyword.push({
-        keyword,
-        best_rank_group: bestRankGroup,
-        best_rank_absolute: bestRankAbsolute,
-        best_url: bestUrl,
-        best_title: bestTitle,
-        has_ai_overview: hasAiOverview,
-        serp_features: serpFeatures,
-      });
+    for (const keyword of keywords) {
+      const result = await fetchSerpForKeyword(keyword, auth, targetRoot);
+      perKeyword.push(result);
     }
 
     // Build summary
