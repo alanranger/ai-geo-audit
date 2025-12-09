@@ -10338,6 +10338,12 @@ Final Score: ${score}/100`;
         if (!tableHead || !tbody) return;
 
         const { labels, segments } = historyData;
+        
+        // Show message if no data
+        if (!labels || labels.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="100%" style="padding: 2rem; text-align: center; color: #64748b;">No data available. Run audits to build KPI history.</td></tr>';
+          return;
+        }
 
         const segmentLabels = {
           allMoney: "All money pages",
@@ -10404,9 +10410,9 @@ Final Score: ${score}/100`;
 
         // Header with sortable columns
         tableHead.innerHTML = `
-          <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none;" data-sort="segment">Segment${sortArrow('segment')}</th>
-          ${labels.map((label, idx) => `<th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none;" data-sort="month_${idx}">${label}${sortArrow(`month_${idx}`)}</th>`).join("")}
-          <th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none;" data-sort="trend">Trend${sortArrow('trend')}</th>
+          <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none;" data-sort="segment" title="Money page segment type: All money pages, Landing pages (collection/category), Event pages (workshops/events), or Product pages (services/products). Click to sort.">Segment${sortArrow('segment')}</th>
+          ${labels.map((label, idx) => `<th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none;" data-sort="month_${idx}" title="Value for ${label}. Click to sort by this month.">${label}${sortArrow(`month_${idx}`)}</th>`).join("")}
+          <th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none;" data-sort="trend" title="Overall trend from first to last data point. ↑ = improving, ↓ = declining, → = stable. For Avg Position, lower is better so trend is inverted. Click to sort.">Trend${sortArrow('trend')}</th>
         `;
         
         // Add click handlers to header cells
@@ -10503,6 +10509,41 @@ Final Score: ${score}/100`;
         if (!ctx) return;
 
         const { labels, segments } = historyData;
+        
+        // Check if we have data
+        const hasData = labels.length > 0 && segments.allMoney.length > 0;
+        
+        if (!hasData || labels.length === 0) {
+          // Show message if no data
+          const wrapper = ctx.closest('.sparkline-wrapper');
+          if (wrapper) {
+            wrapper.innerHTML = '<div style="padding: 2rem; text-align: center; color: #64748b;">No data available. Run audits to build KPI history.</div>';
+          }
+          if (moneyKpiChart) {
+            moneyKpiChart.destroy();
+            moneyKpiChart = null;
+          }
+          return;
+        }
+        
+        // Show info message if only 1 data point
+        if (labels.length === 1) {
+          const wrapper = ctx.closest('.sparkline-wrapper');
+          if (wrapper && !wrapper.querySelector('.single-point-message')) {
+            const message = document.createElement('div');
+            message.className = 'single-point-message';
+            message.style.cssText = 'padding: 0.5rem; margin-bottom: 0.5rem; background: #fef3c7; border-left: 3px solid #f59e0b; border-radius: 4px; font-size: 0.85rem; color: #92400e;';
+            message.textContent = 'Only 1 audit available. Run more audits to see trends over time.';
+            wrapper.insertBefore(message, ctx);
+          }
+        } else {
+          // Remove message if we have multiple data points
+          const wrapper = ctx.closest('.sparkline-wrapper');
+          if (wrapper) {
+            const message = wrapper.querySelector('.single-point-message');
+            if (message) message.remove();
+          }
+        }
 
         const datasets = [
           { key: "allMoney", label: "All", values: segments.allMoney, color: "#3b82f6" },
@@ -10515,6 +10556,9 @@ Final Score: ${score}/100`;
           moneyKpiChart.destroy();
         }
 
+        // Ensure we have at least 2 points for line chart, or show points only
+        const minPoints = labels.length === 1 ? 1 : 2;
+        
         moneyKpiChart = new Chart(ctx, {
           type: "line",
           data: {
@@ -10523,8 +10567,9 @@ Final Score: ${score}/100`;
               label: d.label,
               data: d.values,
               fill: false,
-              tension: 0.3,
-              pointRadius: 2,
+              tension: labels.length > 1 ? 0.3 : 0, // No tension for single point
+              pointRadius: labels.length === 1 ? 5 : 3, // Larger point for single data point
+              pointHoverRadius: 6,
               borderWidth: 2,
               borderColor: d.color,
               backgroundColor: d.color
@@ -10533,15 +10578,47 @@ Final Score: ${score}/100`;
           options: {
             plugins: {
               legend: { display: true, position: 'top' },
-              tooltip: { enabled: true }
+              tooltip: { 
+                enabled: true,
+                callbacks: {
+                  label: function(context) {
+                    const label = context.dataset.label || '';
+                    const value = context.parsed.y;
+                    let formatted = '';
+                    if (metricKey === 'ctr') {
+                      formatted = `${(value * 100).toFixed(2)}%`;
+                    } else if (metricKey === 'avgPosition') {
+                      formatted = value.toFixed(1);
+                    } else {
+                      formatted = Math.round(value).toLocaleString();
+                    }
+                    return `${label}: ${formatted}`;
+                  }
+                }
+              }
             },
             scales: {
-              x: { display: true },
-              y: { display: true }
+              x: { 
+                display: true,
+                title: {
+                  display: true,
+                  text: 'Month'
+                }
+              },
+              y: { 
+                display: true,
+                title: {
+                  display: true,
+                  text: metricKey === 'ctr' ? 'CTR (%)' : 
+                        metricKey === 'avgPosition' ? 'Avg Position' :
+                        metricKey.charAt(0).toUpperCase() + metricKey.slice(1)
+                }
+              }
             },
             elements: {
-              point: { radius: 3 }
-            }
+              point: { radius: labels.length === 1 ? 5 : 3 }
+            },
+            maintainAspectRatio: false
           }
         });
       }
@@ -10868,18 +10945,18 @@ Final Score: ${score}/100`;
 
               <!-- Controls -->
               <div class="controls-row" style="display: flex; gap: 1.5rem; margin-bottom: 1.5rem; align-items: center;">
-                <label style="display: flex; align-items: center; gap: 0.5rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem;" title="Filter money pages by segment type. Landing pages are collection/category pages, Event pages are workshop/event listings, Product pages are service/product offerings.">
                   Page type:
-                  <select id="money-pages-type-filter" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 4px;">
+                  <select id="money-pages-type-filter" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 4px;" title="Filter money pages by segment type. Landing pages are collection/category pages, Event pages are workshop/event listings, Product pages are service/product offerings.">
                     <option value="all">All money pages</option>
                     <option value="landing">Landing pages</option>
                     <option value="event">Event pages</option>
                     <option value="product">Product pages</option>
                   </select>
                 </label>
-                <label style="display: flex; align-items: center; gap: 0.5rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem;" title="Filter out pages with fewer impressions than this threshold. Helps focus on pages with meaningful search visibility.">
                   Min impressions:
-                  <input type="number" id="money-pages-min-impr" value="1000" min="0" step="100" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 4px; width: 120px;">
+                  <input type="number" id="money-pages-min-impr" value="1000" min="0" step="100" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 4px; width: 120px;" title="Filter out pages with fewer impressions than this threshold. Helps focus on pages with meaningful search visibility.">
                 </label>
               </div>
 
@@ -10892,22 +10969,22 @@ Final Score: ${score}/100`;
                   <table id="money-pages-priority-table" style="width: 100%; border-collapse: collapse;">
                     <thead>
                       <tr style="background: #f1f5f9;">
-                        <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Page</th>
-                        <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Type</th>
-                        <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Priority</th>
-                        <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Impact</th>
-                        <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Difficulty</th>
-                        <th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0;">CTR</th>
-                        <th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0;">Impr.</th>
-                        <th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0;">Avg pos.</th>
-                        <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Action</th>
+                        <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;" title="The URL of the money page. Click to open in a new tab.">Page</th>
+                        <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;" title="Segment type: Landing (collection/category pages), Event (workshop/event listings), or Product (service/product offerings).">Type</th>
+                        <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;" title="Priority level (HIGH/MEDIUM/LOW) based on impact and difficulty. HIGH priority = high impact + low/medium difficulty. Click column header to sort.">Priority</th>
+                        <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;" title="Impact level based on lost clicks (expected CTR minus actual CTR). HIGH = significant opportunity to improve clicks. Click column header to sort.">Impact</th>
+                        <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;" title="Difficulty level based on current ranking position and schema effort required. LOW = easy to improve, HIGH = requires more work. Click column header to sort.">Difficulty</th>
+                        <th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0;" title="Click-through rate: percentage of impressions that resulted in clicks. Higher is better. Click column header to sort.">CTR</th>
+                        <th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0;" title="Total impressions: number of times this page appeared in search results. Click column header to sort.">Impr.</th>
+                        <th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0;" title="Average position: average ranking position in search results (1 = best, lower numbers are better). Click column header to sort.">Avg pos.</th>
+                        <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;" title="Recommended action based on priority level. HIGH = Fix CTR & strengthen content, MEDIUM = Improve SERP snippet & schema, LOW = Monitor & maintain.">Action</th>
                       </tr>
                     </thead>
                     <tbody>
                       <!-- JS rows -->
                     </tbody>
                   </table>
-                  <button id="money-pages-copy-urls-btn" type="button" class="btn btn-small" style="margin-top: 1rem;">Copy URLs</button>
+                  <button id="money-pages-copy-urls-btn" type="button" class="btn btn-small" style="margin-top: 1rem;" title="Copy all filtered page URLs to clipboard. URLs are copied one per line, ready to paste into spreadsheets or other tools.">Copy URLs</button>
                 </div>
               </div>
             </section>
@@ -10922,9 +10999,9 @@ Final Score: ${score}/100`;
               </div>
 
               <div class="controls-row" style="margin-bottom: 1.5rem;">
-                <label style="display: flex; align-items: center; gap: 0.5rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem;" title="Select which metric to display in the KPI tracker chart and table. CTR shows click-through rate, Impressions shows search visibility, Clicks shows actual traffic, and Avg position shows average ranking.">
                   Metric:
-                  <select id="money-kpi-metric-select" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 4px;">
+                  <select id="money-kpi-metric-select" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 4px;" title="Select which metric to display in the KPI tracker chart and table. CTR shows click-through rate, Impressions shows search visibility, Clicks shows actual traffic, and Avg position shows average ranking.">
                     <option value="ctr">CTR</option>
                     <option value="impressions">Impressions</option>
                     <option value="clicks">Clicks</option>
