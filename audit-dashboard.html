@@ -2321,7 +2321,10 @@
           siteReviews, // Store site reviews data for future use (preserve on retry)
           backlinkMetrics, // Store backlink metrics data
           dateRange, // Store the date range used for this audit
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          // Save Money Pages Priority Matrix data for persistence
+          moneyPagePriorityData: window.moneyPagePriorityData || null,
+          moneySegmentMetrics: window.moneySegmentMetrics || null
         };
         localStorage.setItem('last_audit_results', JSON.stringify(auditData));
         debugLog('✓ Audit results saved to localStorage', 'success');
@@ -2383,7 +2386,10 @@
           scores: scores,
           snippetReadiness: snippetReadiness,
           localSignals: localSignals, // Store local signals for future use
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          // Preserve Money Pages Priority Matrix data if it exists
+          moneyPagePriorityData: window.moneyPagePriorityData || savedAudit.moneyPagePriorityData || null,
+          moneySegmentMetrics: window.moneySegmentMetrics || savedAudit.moneySegmentMetrics || null
         };
         
         // Save updated audit
@@ -4448,7 +4454,7 @@
         const path = normalisePath(url);
         
         // Check if it's a money page using existing logic
-        const segment = classifySegment(url);
+        const segment = classifyPageSegment(url);
         const isMoney = segment === PageSegment.MONEY;
         
         if (!isMoney) {
@@ -5792,6 +5798,54 @@
       // Use current audit data (passed as parameter) or fallback to saved data
       // This ensures we always use the most recent audit run data, not stale localStorage
       const currentLocalSignals = localSignals || (saved && saved.localSignals) || null;
+      
+      // Restore Money Pages Priority Matrix data from localStorage
+      // If not available, try to rebuild from saved data
+      if (saved && saved.moneyPagePriorityData && Array.isArray(saved.moneyPagePriorityData) && saved.moneyPagePriorityData.length > 0) {
+        window.moneyPagePriorityData = saved.moneyPagePriorityData;
+        window.moneySegmentMetrics = saved.moneySegmentMetrics || null;
+        debugLog(`✓ Restored Money Pages Priority data from localStorage: ${window.moneyPagePriorityData.length} pages`, 'success');
+      } else if (saved && saved.scores && saved.scores.moneyPagesMetrics && saved.scores.moneyPagesMetrics.rows && saved.searchData && schemaAudit) {
+        // Rebuild from saved data if priority data is missing but we have the source data
+        try {
+          const topPagesForPriority = saved.scores.moneyPagesMetrics.rows.map(row => ({
+            page: row.url,
+            url: row.url,
+            clicks: row.clicks || 0,
+            impressions: row.impressions || 0,
+            ctr: (row.ctr || 0) * 100, // Convert to percentage for buildMoneyPageMetrics
+            position: row.avgPosition || 0,
+            avgPosition: row.avgPosition || 0,
+            title: row.title || row.url
+          }));
+          
+          window.moneyPagePriorityData = buildMoneyPageMetrics(topPagesForPriority, schemaAudit);
+          
+          // Rebuild segment metrics
+          const behaviourScoresBySegment = {};
+          if (saved.scores.moneyPagesMetrics && saved.scores.moneyPagesMetrics.behaviour) {
+            behaviourScoresBySegment.allMoney = saved.scores.moneyPagesMetrics.behaviour.score || 0;
+          }
+          window.moneySegmentMetrics = buildMoneySegmentSummary(window.moneyPagePriorityData, behaviourScoresBySegment);
+          
+          debugLog(`✓ Rebuilt Money Pages Priority data from saved metrics: ${window.moneyPagePriorityData.length} pages`, 'success');
+          
+          // Save the rebuilt data back to localStorage
+          if (window.moneyPagePriorityData && window.moneyPagePriorityData.length > 0) {
+            const updatedAudit = { ...saved, moneyPagePriorityData: window.moneyPagePriorityData, moneySegmentMetrics: window.moneySegmentMetrics };
+            localStorage.setItem('last_audit_results', JSON.stringify(updatedAudit));
+          }
+        } catch (error) {
+          debugLog(`⚠ Failed to rebuild Money Pages Priority data: ${error.message}`, 'warn');
+          window.moneyPagePriorityData = [];
+          window.moneySegmentMetrics = null;
+        }
+      } else {
+        // No saved data available
+        window.moneyPagePriorityData = window.moneyPagePriorityData || [];
+        window.moneySegmentMetrics = window.moneySegmentMetrics || null;
+        debugLog('⚠ No Money Pages Priority data available (will be empty until next audit)', 'warn');
+      }
       
       // Update retry button visibility
       updateRetryButtonVisibility(schemaAudit);
@@ -13098,8 +13152,8 @@ Final Score: ${score}/100`;
             } else {
               debugLog(`No property URL found. Cannot fetch historical data.`, 'info');
             }
-          
-          // Get current Business Profile data for Local Entity and Service Area (fallback if no historical data)
+            
+            // Get current Business Profile data for Local Entity and Service Area (fallback if no historical data)
             const hasLocalSignals = saved && saved.localSignals && saved.localSignals.status === 'ok' && saved.localSignals.data;
             const localSignalsData = hasLocalSignals ? saved.localSignals.data : null;
             
