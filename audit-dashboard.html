@@ -2550,6 +2550,12 @@
           debugLog(`saveAuditToSupabase: moneyPagesSummary is null`, 'warn');
         }
         
+        // Get money segment metrics for 12-month KPI tracking
+        const moneySegmentMetrics = window.moneySegmentMetrics || null;
+        if (moneySegmentMetrics) {
+          debugLog(`saveAuditToSupabase: moneySegmentMetrics created with ${Object.keys(moneySegmentMetrics).length} segments`, 'info');
+        }
+        
         const response = await fetch('/api/supabase/save-audit', {
           method: 'POST',
           headers: {
@@ -2563,7 +2569,8 @@
             searchData,
             snippetReadiness,
             localSignals, // Pass Business Profile data for storage
-            moneyPagesSummary // Phase 3: Money Pages summary for trend tracking
+            moneyPagesSummary, // Phase 3: Money Pages summary for trend tracking
+            moneySegmentMetrics // Phase: Money Pages Priority Matrix - segment metrics for KPI tracker
           })
         });
         
@@ -2888,6 +2895,56 @@
      * @property {number} score - 0-100 composite
      * @property {'Low'|'Medium'|'High'} label
      * @property {string[]} reasons - short bullets used in UI tooltip / priorities
+     */
+    
+    /**
+     * @typedef {"LOW" | "MEDIUM" | "HIGH"} PriorityLevel
+     */
+    
+    /**
+     * @typedef {"LOW" | "MEDIUM" | "HIGH"} ImpactLevel
+     */
+    
+    /**
+     * @typedef {"LOW" | "MEDIUM" | "HIGH"} DifficultyLevel
+     */
+    
+    /**
+     * @typedef {"all" | "landing" | "event" | "product"} MoneySegmentKey
+     */
+    
+    /**
+     * @typedef {Object} MoneyPageMetrics
+     * @property {string} url
+     * @property {string} title
+     * @property {MoneySegmentKey} segmentType       // landing / event / product / (fallback "all")
+     * @property {number} clicks
+     * @property {number} impressions
+     * @property {number} ctr                        // 0–1 decimal
+     * @property {number} avgPosition
+     * @property {ImpactLevel} impactLevel
+     * @property {DifficultyLevel} difficultyLevel
+     * @property {PriorityLevel} priorityLevel
+     * @property {number} [_lostClicks]              // Internal: calculated lost clicks
+     */
+    
+    /**
+     * Per audit, stored for history in Supabase.
+     *
+     * @typedef {Object} MoneySegmentSummary
+     * @property {number} clicks
+     * @property {number} impressions
+     * @property {number} ctr           // 0–1 decimal
+     * @property {number} avgPosition
+     * @property {number} behaviourScore
+     */
+    
+    /**
+     * @typedef {Object} MoneySegmentMetricsByAudit
+     * @property {MoneySegmentSummary} allMoney
+     * @property {MoneySegmentSummary} landingPages
+     * @property {MoneySegmentSummary} eventPages
+     * @property {MoneySegmentSummary} productPages
      */
     
     // Brand query classification
@@ -4376,6 +4433,253 @@
         };
       };
       
+      // ============================================================================
+      // PHASE: Money Pages Priority Matrix + 12-Month KPI Tracker
+      // ============================================================================
+      
+      /**
+       * Unified money page classification - returns both isMoney flag and segmentType
+       * @param {string} url
+       * @returns {{ isMoney: boolean, segmentType: MoneySegmentKey | null }}
+       */
+      function classifyMoneyPage(url) {
+        if (!url) return { isMoney: false, segmentType: null };
+        
+        const path = normalisePath(url);
+        
+        // Check if it's a money page using existing logic
+        const segment = classifySegment(url);
+        const isMoney = segment === PageSegment.MONEY;
+        
+        if (!isMoney) {
+          return { isMoney: false, segmentType: null };
+        }
+        
+        // Get sub-segment type (normalize to lowercase for consistency)
+        const subSegment = classifyMoneyPageSubSegment(url);
+        let segmentType = /** @type {MoneySegmentKey} */ ("all");
+        
+        if (subSegment === 'PRODUCT') {
+          segmentType = "product";
+        } else if (subSegment === 'EVENT') {
+          segmentType = "event";
+        } else if (subSegment === 'LANDING') {
+          segmentType = "landing";
+        }
+        
+        return { isMoney: true, segmentType };
+      }
+      
+      /**
+       * Naive expected CTR curve by average position.
+       * Returns decimal (0–1).
+       * @param {number} pos - Average position
+       * @returns {number}
+       */
+      function expectedCtrForPosition(pos) {
+        if (!isFinite(pos) || pos <= 0) return 0.10;     // fallback
+        if (pos <= 3) return 0.10;                       // 10% ideal for top 3
+        if (pos <= 6) return 0.07;                       // 7% for 4–6
+        if (pos <= 10) return 0.05;                      // 5% for 7–10
+        if (pos <= 20) return 0.03;                      // 3% for 11–20
+        return 0.02;                                     // long tail
+      }
+      
+      /**
+       * Compute impact levels based on lost clicks (expected CTR - actual CTR)
+       * @param {Array<MoneyPageMetrics>} pages
+       */
+      function computeImpactLevels(pages) {
+        // Step 1: compute lostClicks for each page
+        let maxLost = 0;
+        for (const p of pages) {
+          const expectedCtr = expectedCtrForPosition(p.avgPosition);
+          const gap = Math.max(0, expectedCtr - (p.ctr || 0));
+          const lostClicks = (p.impressions || 0) * gap;
+          p._lostClicks = lostClicks;
+          if (lostClicks > maxLost) maxLost = lostClicks;
+        }
+
+        if (maxLost <= 0) {
+          // All pages flat → mark all as LOW impact
+          for (const p of pages) {
+            p.impactLevel = "LOW";
+          }
+          return;
+        }
+
+        // Step 2: thresholds relative to max (no magic numbers baked into data)
+        const highThreshold = 0.75 * maxLost;
+        const medThreshold = 0.35 * maxLost;
+
+        for (const p of pages) {
+          const lost = p._lostClicks || 0;
+          if (lost >= highThreshold) p.impactLevel = "HIGH";
+          else if (lost >= medThreshold) p.impactLevel = "MEDIUM";
+          else p.impactLevel = "LOW";
+        }
+      }
+      
+      /**
+       * Check if a page has the "key schema" for its segment type
+       * @param {string} url
+       * @param {MoneySegmentKey} segmentType
+       * @param {Object} schemaAudit - Schema audit data with pages array
+       * @returns {boolean}
+       */
+      function pageHasKeySchema(url, segmentType, schemaAudit) {
+        if (!schemaAudit || !schemaAudit.data || !schemaAudit.data.pages) {
+          return false;
+        }
+        
+        const page = schemaAudit.data.pages.find(p => p.url === url);
+        if (!page) return false;
+        
+        const schemaTypes = page.schemaTypes || [];
+        const typesLower = schemaTypes.map(t => String(t).toLowerCase());
+        
+        if (segmentType === "event") {
+          return typesLower.includes("event") || typesLower.includes("course");
+        } else if (segmentType === "product") {
+          return typesLower.includes("product") || typesLower.includes("offer");
+        } else if (segmentType === "landing") {
+          return typesLower.includes("itemlist") || typesLower.includes("faqpage") || typesLower.includes("article");
+        }
+        
+        return false;
+      }
+      
+      /**
+       * Compute difficulty level based on position + schema effort
+       * @param {MoneyPageMetrics} p
+       * @param {boolean} hasKeySchema   // true if this page already has the main rich type it "should"
+       * @returns {DifficultyLevel}
+       */
+      function computeDifficultyLevel(p, hasKeySchema) {
+        const pos = p.avgPosition || 0;
+        let base;
+        if (pos > 0 && pos <= 5) base = "LOW";          // already ranking well → "easy" CTR fixes
+        else if (pos <= 10) base = "MEDIUM";
+        else base = "HIGH";
+
+        // If no key schema yet for an event/product, bump difficulty by one
+        if (!hasKeySchema && (p.segmentType === "event" || p.segmentType === "product")) {
+          if (base === "LOW") base = "MEDIUM";
+          else if (base === "MEDIUM") base = "HIGH";
+        }
+
+        return /** @type {DifficultyLevel} */ (base);
+      }
+      
+      /**
+       * Derive priority level from Impact + Difficulty
+       * @param {ImpactLevel} impact
+       * @param {DifficultyLevel} difficulty
+       * @returns {PriorityLevel}
+       */
+      function derivePriorityLevel(impact, difficulty) {
+        // High impact & easy/medium difficulty → HIGH priority
+        if (impact === "HIGH" && (difficulty === "LOW" || difficulty === "MEDIUM")) {
+          return "HIGH";
+        }
+
+        // Medium cases or high impact but high difficulty → MEDIUM
+        if (
+          impact === "HIGH" && difficulty === "HIGH" ||
+          impact === "MEDIUM" && (difficulty === "LOW" || difficulty === "MEDIUM")
+        ) {
+          return "MEDIUM";
+        }
+
+        // Everything else → LOW
+        return "LOW";
+      }
+      
+      /**
+       * Build MoneyPageMetrics array from topPages data
+       * @param {Array<{page: string, clicks: number, impressions: number, ctr: number, position: number, title?: string}>} topPages
+       * @param {Object} schemaAudit - Optional schema audit data
+       * @returns {Array<MoneyPageMetrics>}
+       */
+      function buildMoneyPageMetrics(topPages, schemaAudit = null) {
+        const result = [];
+
+        for (const row of topPages) {
+          const url = row.page || row.url;
+          const { isMoney, segmentType } = classifyMoneyPage(url);
+          if (!isMoney) continue;
+
+          // CTR might be percentage (0-100) or decimal (0-1), normalize to decimal
+          let ctr = row.ctr || 0;
+          if (ctr > 1) ctr = ctr / 100; // Convert percentage to decimal
+          
+          const m = /** @type {MoneyPageMetrics} */ ({
+            url,
+            title: row.title || url,
+            segmentType: segmentType || "all",
+            clicks: row.clicks || 0,
+            impressions: row.impressions || 0,
+            ctr: ctr,
+            avgPosition: row.position || row.avgPosition || 0,
+            impactLevel: "LOW",
+            difficultyLevel: "MEDIUM",
+            priorityLevel: "LOW"
+          });
+
+          const hasKeySchema = pageHasKeySchema(url, m.segmentType, schemaAudit);
+          m.difficultyLevel = computeDifficultyLevel(m, hasKeySchema);
+          result.push(m);
+        }
+
+        computeImpactLevels(result);
+
+        for (const p of result) {
+          p.priorityLevel = derivePriorityLevel(p.impactLevel, p.difficultyLevel);
+        }
+
+        return result;
+      }
+      
+      /**
+       * Build per-segment summaries for Money Pages (for 12-month KPI tracking)
+       * @param {Array<MoneyPageMetrics>} moneyPages
+       * @param {Object} behaviourScores - Optional behaviour scores by segment
+       * @returns {MoneySegmentMetricsByAudit}
+       */
+      function buildMoneySegmentSummary(moneyPages, behaviourScores = {}) {
+        const segments = {
+          allMoney: { clicks: 0, impressions: 0, ctr: 0, avgPosition: 0, behaviourScore: 0 },
+          landingPages: { clicks: 0, impressions: 0, ctr: 0, avgPosition: 0, behaviourScore: 0 },
+          eventPages: { clicks: 0, impressions: 0, ctr: 0, avgPosition: 0, behaviourScore: 0 },
+          productPages: { clicks: 0, impressions: 0, ctr: 0, avgPosition: 0, behaviourScore: 0 }
+        };
+
+        const groups = {
+          allMoney: moneyPages,
+          landingPages: moneyPages.filter(p => p.segmentType === "landing"),
+          eventPages: moneyPages.filter(p => p.segmentType === "event"),
+          productPages: moneyPages.filter(p => p.segmentType === "product")
+        };
+
+        for (const [key, pages] of Object.entries(groups)) {
+          if (!pages.length) continue;
+          const clicks = pages.reduce((s, p) => s + p.clicks, 0);
+          const impressions = pages.reduce((s, p) => s + p.impressions, 0);
+          const ctr = impressions > 0 ? clicks / impressions : 0;
+          const avgPosition =
+            pages.reduce((s, p) => s + (p.avgPosition || 0), 0) / pages.length;
+
+          segments[key].clicks = clicks;
+          segments[key].impressions = impressions;
+          segments[key].ctr = ctr;
+          segments[key].avgPosition = avgPosition;
+          // Use behaviour score from parameter if available, otherwise 0
+          segments[key].behaviourScore = behaviourScores[key] || behaviourScores[key.toLowerCase()] || 0;
+        }
+
+        return segments;
+      }
+      
       // Compute money pages behaviour score (for Authority overlay)
       // Define globally to ensure accessibility from event handlers
       window.computeMoneyPagesBehaviour = function(gscQueries, moneyPages, useAllPositions = false) {
@@ -4688,8 +4992,38 @@
         if (moneyBehaviour) {
           debugLog(`Money Pages Behaviour: score=${moneyBehaviour.score.toFixed(1)}, CTR=${(moneyBehaviour.siteCtr * 100).toFixed(2)}%, Top-10 CTR=${(moneyBehaviour.top10Ctr * 100).toFixed(2)}%`, 'info');
         }
+        
+        // Build Money Page Priority Matrix data
+        // Convert moneyPagesMetrics.rows to format expected by buildMoneyPageMetrics
+        const topPagesForPriority = moneyPagesMetrics.rows.map(row => ({
+          page: row.url,
+          url: row.url,
+          clicks: row.clicks || 0,
+          impressions: row.impressions || 0,
+          ctr: (row.ctr || 0) * 100, // Convert to percentage for buildMoneyPageMetrics
+          position: row.avgPosition || 0,
+          avgPosition: row.avgPosition || 0,
+          title: row.title || row.url
+        }));
+        
+        // Store priority matrix data globally
+        window.moneyPagePriorityData = buildMoneyPageMetrics(topPagesForPriority, schemaAudit);
+        debugLog(`Money Pages Priority: Built ${window.moneyPagePriorityData.length} priority entries`, 'info');
+        
+        // Build segment summary for Supabase storage
+        const behaviourScoresBySegment = {};
+        if (moneyBehaviour && moneyBehaviour.bySegment) {
+          behaviourScoresBySegment.allMoney = moneyBehaviour.bySegment.money?.behaviour?.score || 0;
+          behaviourScoresBySegment.landingPages = 0; // Will be calculated per segment if needed
+          behaviourScoresBySegment.eventPages = 0;
+          behaviourScoresBySegment.productPages = 0;
+        }
+        window.moneySegmentMetrics = buildMoneySegmentSummary(window.moneyPagePriorityData, behaviourScoresBySegment);
+        debugLog(`Money Pages Segments: Built segment summary for Supabase`, 'info');
       } else {
         debugLog('⚠ Money Pages Metrics: No queryPages data available', 'warn');
+        window.moneyPagePriorityData = [];
+        window.moneySegmentMetrics = null;
       }
 
       const scores = {
@@ -9452,6 +9786,448 @@ Final Score: ${score}/100`;
         }
       }
       
+      // ============================================================================
+      // Money Pages Priority Matrix Rendering Functions
+      // ============================================================================
+      
+      /**
+       * Render summary strip for Money Pages Priority section
+       * @param {Array<MoneyPageMetrics>} moneyPages
+       * @param {Object} summary - Overview data with totalClicks and totalImpressions
+       * @param {HTMLElement} container
+       */
+      function renderMoneyPagesSummaryStrip(moneyPages, summary, container) {
+        if (!moneyPages || !moneyPages.length) {
+          container.innerHTML = '<div style="padding: 1rem; text-align: center; color: #64748b;">No money pages data available.</div>';
+          return;
+        }
+        
+        const totalClicks = summary?.overview?.totalClicks || summary?.totalClicks || 0;
+        const totalImpressions = summary?.overview?.totalImpressions || summary?.totalImpressions || 0;
+
+        const mpClicks = moneyPages.reduce((sum, p) => sum + (p.clicks || 0), 0);
+        const mpImpr = moneyPages.reduce((sum, p) => sum + (p.impressions || 0), 0);
+
+        const shareClicks = totalClicks > 0 ? (mpClicks / totalClicks) * 100 : 0;
+        const ctr = mpImpr > 0 ? (mpClicks / mpImpr) * 100 : 0;
+        const avgPos = moneyPages.length
+          ? moneyPages.reduce((sum, p) => sum + (p.avgPosition || 0), 0) / moneyPages.length
+          : 0;
+
+        container.innerHTML = `
+          <div class="summary-item" style="flex: 1;">
+            <span class="label" style="display: block; font-size: 0.85rem; color: #64748b; margin-bottom: 0.25rem;">Money pages share of clicks</span>
+            <span class="value" style="display: block; font-size: 1.5rem; font-weight: 700; color: #1e293b;">${shareClicks.toFixed(1)}%</span>
+          </div>
+          <div class="summary-item" style="flex: 1;">
+            <span class="label" style="display: block; font-size: 0.85rem; color: #64748b; margin-bottom: 0.25rem;">Money pages CTR</span>
+            <span class="value" style="display: block; font-size: 1.5rem; font-weight: 700; color: #1e293b;">${ctr.toFixed(2)}%</span>
+          </div>
+          <div class="summary-item" style="flex: 1;">
+            <span class="label" style="display: block; font-size: 0.85rem; color: #64748b; margin-bottom: 0.25rem;">Avg position (money pages)</span>
+            <span class="value" style="display: block; font-size: 1.5rem; font-weight: 700; color: #1e293b;">${avgPos ? avgPos.toFixed(1) : "—"}</span>
+          </div>
+        `;
+      }
+      
+      /**
+       * Render Priority Matrix (3x3 grid: Impact × Difficulty)
+       * @param {Array<MoneyPageMetrics>} moneyPages
+       * @param {HTMLElement} container
+       * @param {Function} onCellClick - Callback(impact, difficulty)
+       */
+      function renderMoneyPagesMatrix(moneyPages, container, onCellClick) {
+        if (!moneyPages || !moneyPages.length) {
+          container.innerHTML = '<div style="padding: 2rem; text-align: center; color: #64748b;">No money pages data available.</div>';
+          return;
+        }
+        
+        const impacts = ["HIGH", "MEDIUM", "LOW"];
+        const diffs = ["LOW", "MEDIUM", "HIGH"];
+
+        const totalClicks = moneyPages.reduce((sum, p) => sum + (p.clicks || 0), 0) || 1;
+
+        let html = `
+          <div class="matrix-header" style="margin-bottom: 1rem;">
+            <div class="axis-label impact" style="text-align: center; font-weight: 600; margin-bottom: 0.5rem;">Impact ↑</div>
+            <div class="matrix-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem;">
+        `;
+
+        for (const impact of impacts) {
+          for (const diff of diffs) {
+            const cellPages = moneyPages.filter(
+              p => p.impactLevel === impact && p.difficultyLevel === diff
+            );
+            const count = cellPages.length;
+            const clickShare = cellPages.reduce((s, p) => s + (p.clicks || 0), 0) / totalClicks * 100;
+
+            const ragClass =
+              impact === "HIGH" && (diff === "LOW" || diff === "MEDIUM") ? "rag-high" :
+              impact === "HIGH" && diff === "HIGH" ? "rag-medium" :
+              "rag-low";
+
+            html += `
+              <button
+                class="matrix-cell ${ragClass}"
+                data-impact="${impact}"
+                data-diff="${diff}"
+                type="button"
+                style="padding: 1rem; border: 2px solid ${ragClass === 'rag-high' ? '#10b981' : ragClass === 'rag-medium' ? '#f59e0b' : '#e5e7eb'}; border-radius: 8px; background: ${ragClass === 'rag-high' ? '#ecfdf5' : ragClass === 'rag-medium' ? '#fffbeb' : '#f9fafb'}; cursor: pointer; text-align: center; transition: all 0.2s;"
+                onmouseover="this.style.transform='scale(1.05)'"
+                onmouseout="this.style.transform='scale(1)'"
+              >
+                <div class="cell-title" style="font-weight: 600; font-size: 0.75rem; margin-bottom: 0.5rem; color: #1e293b;">${impact} / ${diff}</div>
+                <div class="cell-count" style="font-size: 1.25rem; font-weight: 700; color: #1e293b; margin-bottom: 0.25rem;">${count}</div>
+                <div class="cell-share" style="font-size: 0.75rem; color: #64748b;">${clickShare.toFixed(1)}% of clicks</div>
+              </button>
+            `;
+          }
+        }
+
+        html += `
+            </div>
+            <div class="axis-label difficulty" style="text-align: center; font-weight: 600; margin-top: 0.5rem;">Difficulty →</div>
+          </div>
+          <p class="matrix-legend" style="font-size: 0.75rem; color: #64748b; margin-top: 1rem; line-height: 1.5;">
+            Click a cell to filter the money page action list.
+            Impact is based on lost clicks (expected CTR – actual). Difficulty is based on rank and schema effort.
+          </p>
+        `;
+
+        container.innerHTML = html;
+
+        container.querySelectorAll(".matrix-cell").forEach(btn => {
+          btn.addEventListener("click", () => {
+            const impact = /** @type {ImpactLevel} */ (btn.getAttribute("data-impact"));
+            const diff = /** @type {DifficultyLevel} */ (btn.getAttribute("data-diff"));
+            if (onCellClick) onCellClick(impact, diff);
+          });
+        });
+      }
+      
+      /**
+       * Render Money Pages Priority Table
+       * @param {Array<MoneyPageMetrics>} moneyPages
+       * @param {Object} filters - { typeFilter, minImpr, matrixFilter: {impact, diff} }
+       */
+      function renderMoneyPagesTable(moneyPages, filters = {}) {
+        const tbody = document.querySelector("#money-pages-priority-table tbody");
+        if (!tbody) return;
+
+        const typeFilter = filters.typeFilter || "all";
+        const minImpr = filters.minImpr || 0;
+        const matrixFilter = filters.matrixFilter || null;
+
+        let rows = (moneyPages || []).slice();
+
+        rows = rows.filter(p => (p.impressions || 0) >= minImpr);
+
+        if (typeFilter !== "all") {
+          rows = rows.filter(p => p.segmentType === typeFilter);
+        }
+
+        if (matrixFilter) {
+          rows = rows.filter(
+            p =>
+              p.impactLevel === matrixFilter.impact &&
+              p.difficultyLevel === matrixFilter.diff
+          );
+        }
+
+        // Sort: HIGH → MED → LOW priority, then by lostClicks desc if available
+        const priorityRank = { HIGH: 0, MEDIUM: 1, LOW: 2 };
+        rows.sort((a, b) => {
+          const pa = priorityRank[a.priorityLevel] ?? 99;
+          const pb = priorityRank[b.priorityLevel] ?? 99;
+          if (pa !== pb) return pa - pb;
+          const la = a._lostClicks || 0;
+          const lb = b._lostClicks || 0;
+          return lb - la;
+        });
+
+        tbody.innerHTML = rows
+          .map(p => {
+            const typeLabel =
+              p.segmentType === "landing" ? "Landing" :
+              p.segmentType === "event" ? "Event" :
+              p.segmentType === "product" ? "Product" :
+              "Money";
+
+            const action =
+              p.priorityLevel === "HIGH"
+                ? "Fix CTR & strengthen content"
+                : p.priorityLevel === "MEDIUM"
+                ? "Improve SERP snippet & schema"
+                : "Monitor & maintain";
+            
+            const priorityColor = p.priorityLevel === "HIGH" ? "#ef4444" : p.priorityLevel === "MEDIUM" ? "#f59e0b" : "#64748b";
+
+            return `
+              <tr style="border-bottom: 1px solid #e2e8f0;">
+                <td style="padding: 0.75rem;"><a href="${p.url}" target="_blank" rel="noopener" style="color: #2563eb; text-decoration: none;">${p.title}</a></td>
+                <td style="padding: 0.75rem;">${typeLabel}</td>
+                <td style="padding: 0.75rem;"><span class="badge badge-priority-${p.priorityLevel.toLowerCase()}" style="padding: 0.25rem 0.5rem; border-radius: 4px; background: ${priorityColor}20; color: ${priorityColor}; font-weight: 600; font-size: 0.75rem;">${p.priorityLevel}</span></td>
+                <td style="padding: 0.75rem;">${p.impactLevel}</td>
+                <td style="padding: 0.75rem;">${p.difficultyLevel}</td>
+                <td style="padding: 0.75rem; text-align: right;">${(p.ctr * 100).toFixed(2)}%</td>
+                <td style="padding: 0.75rem; text-align: right;">${(p.impressions || 0).toLocaleString()}</td>
+                <td style="padding: 0.75rem; text-align: right;">${p.avgPosition ? p.avgPosition.toFixed(1) : "—"}</td>
+                <td style="padding: 0.75rem;">${action}</td>
+              </tr>
+            `;
+          })
+          .join("");
+
+        // Copy URLs button
+        const copyBtn = document.getElementById("money-pages-copy-urls-btn");
+        if (copyBtn) {
+          copyBtn.onclick = () => {
+            const urls = rows.map(p => p.url).join("\n");
+            navigator.clipboard.writeText(urls).then(() => {
+              copyBtn.textContent = "Copied!";
+              setTimeout(() => { copyBtn.textContent = "Copy URLs"; }, 2000);
+            }).catch(() => {
+              copyBtn.textContent = "Copy failed";
+            });
+          };
+        }
+      }
+      
+      // ============================================================================
+      // 12-Month KPI Tracker Functions
+      // ============================================================================
+      
+      let moneyKpiChart = null;
+      let cachedAuditHistory = null;
+      
+      /**
+       * Build KPI history structure from audit history
+       * @param {Array<{audit_date: string, money_segment_metrics: MoneySegmentMetricsByAudit | null}>} history
+       * @param {string} metricKey - 'ctr', 'impressions', 'clicks', or 'avgPosition'
+       * @returns {{ labels: string[], segments: Record<string, number[]> }}
+       */
+      function buildMoneyKpiHistory(history, metricKey) {
+        // Take last 12 audits, grouped by audit_date month (YYYY-MM).
+        const byMonth = new Map();
+
+        for (const row of history) {
+          const date = new Date(row.audit_date);
+          if (Number.isNaN(date.getTime())) continue;
+          const ym = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+          if (!row.money_segment_metrics) continue;
+
+          // Keep the latest audit per month
+          const existing = byMonth.get(ym);
+          if (!existing || date > existing._date) {
+            byMonth.set(ym, { _date: date, metrics: row.money_segment_metrics });
+          }
+        }
+
+        const sortedMonths = Array.from(byMonth.entries())
+          .sort((a, b) => a[0].localeCompare(b[0]))
+          .slice(-12); // last 12 months with data
+
+        const labels = sortedMonths.map(([ym]) => ym);
+        const segments = {
+          allMoney: [],
+          landingPages: [],
+          eventPages: [],
+          productPages: []
+        };
+
+        for (const [, value] of sortedMonths) {
+          const m = value.metrics;
+          for (const key of Object.keys(segments)) {
+            const seg = m[key] || null;
+            const v = seg ? seg[metricKey] : null;
+            segments[key].push(v);
+          }
+        }
+
+        return { labels, segments };
+      }
+      
+      /**
+       * Render KPI table with trend arrows
+       * @param {{ labels: string[], segments: Record<string, number[]> }} historyData
+       * @param {string} metricKey
+       */
+      function renderMoneyKpiTable(historyData, metricKey) {
+        const tableHead = document.getElementById("money-kpi-header-row");
+        const tbody = document.querySelector("#money-kpi-table tbody");
+        if (!tableHead || !tbody) return;
+
+        const { labels, segments } = historyData;
+
+        // Header
+        tableHead.innerHTML = `
+          <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Segment</th>
+          ${labels.map(label => `<th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0;">${label}</th>`).join("")}
+          <th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0;">Trend</th>
+        `;
+
+        const segmentLabels = {
+          allMoney: "All money pages",
+          landingPages: "Landing pages",
+          eventPages: "Event pages",
+          productPages: "Product pages"
+        };
+
+        tbody.innerHTML = Object.entries(segments)
+          .map(([key, values]) => {
+            if (!values.length) return "";
+
+            let trendArrow = "→";
+            let trendText = "";
+
+            const first = values.find(v => v != null);
+            const last = [...values].reverse().find(v => v != null);
+
+            if (first != null && last != null) {
+              let diff = last - first;
+              if (metricKey === "avgPosition") diff = -diff; // lower is better
+              if (diff > 0.02 * Math.abs(first || 1)) {
+                trendArrow = "↑";
+              } else if (diff < -0.02 * Math.abs(first || 1)) {
+                trendArrow = "↓";
+              }
+              trendText = (metricKey === "ctr" ? `${(diff * 100).toFixed(1)}pp` : diff.toFixed(1));
+            }
+
+            const cells = values
+              .map((v, idx) => {
+                if (v == null) return `<td style="padding: 0.75rem; text-align: right;">—</td>`;
+
+                // arrow vs previous non-null
+                let arrow = "→";
+                let prev = null;
+                for (let j = idx - 1; j >= 0; j--) {
+                  if (values[j] != null) {
+                    prev = values[j];
+                    break;
+                  }
+                }
+                if (prev != null) {
+                  let d = v - prev;
+                  if (metricKey === "avgPosition") d = -d;
+                  if (d > 0.02 * Math.abs(prev || 1)) arrow = "↑";
+                  else if (d < -0.02 * Math.abs(prev || 1)) arrow = "↓";
+                }
+
+                let formatted;
+                if (metricKey === "ctr") formatted = `${(v * 100).toFixed(2)}% ${arrow}`;
+                else if (metricKey === "avgPosition") formatted = `${v.toFixed(1)} ${arrow}`;
+                else formatted = `${Math.round(v).toLocaleString()} ${arrow}`;
+
+                return `<td style="padding: 0.75rem; text-align: right;">${formatted}</td>`;
+              })
+              .join("");
+
+            return `
+              <tr style="border-bottom: 1px solid #e2e8f0;">
+                <td style="padding: 0.75rem; font-weight: 600;">${segmentLabels[key]}</td>
+                ${cells}
+                <td style="padding: 0.75rem; text-align: right; font-weight: 600;">${trendArrow} ${trendText}</td>
+              </tr>
+            `;
+          })
+          .join("");
+      }
+      
+      /**
+       * Render sparkline chart for KPI tracker
+       * @param {{ labels: string[], segments: Record<string, number[]> }} historyData
+       * @param {string} metricKey
+       */
+      function renderMoneyKpiSparkline(historyData, metricKey) {
+        const ctx = document.getElementById("money-kpi-sparkline");
+        if (!ctx) return;
+
+        const { labels, segments } = historyData;
+
+        const datasets = [
+          { key: "allMoney", label: "All", values: segments.allMoney, color: "#3b82f6" },
+          { key: "landingPages", label: "Landing", values: segments.landingPages, color: "#10b981" },
+          { key: "eventPages", label: "Event", values: segments.eventPages, color: "#f59e0b" },
+          { key: "productPages", label: "Product", values: segments.productPages, color: "#ef4444" }
+        ];
+
+        if (moneyKpiChart) {
+          moneyKpiChart.destroy();
+        }
+
+        moneyKpiChart = new Chart(ctx, {
+          type: "line",
+          data: {
+            labels,
+            datasets: datasets.map(d => ({
+              label: d.label,
+              data: d.values,
+              fill: false,
+              tension: 0.3,
+              pointRadius: 2,
+              borderWidth: 2,
+              borderColor: d.color,
+              backgroundColor: d.color
+            }))
+          },
+          options: {
+            plugins: {
+              legend: { display: true, position: 'top' },
+              tooltip: { enabled: true }
+            },
+            scales: {
+              x: { display: true },
+              y: { display: true }
+            },
+            elements: {
+              point: { radius: 3 }
+            }
+          }
+        });
+      }
+      
+      /**
+       * Load audit history and render KPI tracker
+       * @param {string} propertyUrl
+       */
+      async function loadAuditHistoryAndRenderKpis(propertyUrl) {
+        if (!propertyUrl) return;
+        
+        const endDate = new Date().toISOString().split('T')[0];
+        const startDate = new Date();
+        startDate.setFullYear(startDate.getFullYear() - 1);
+        const startDateStr = startDate.toISOString().split('T')[0];
+        
+        try {
+          const res = await fetch(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDate}`);
+          const json = await res.json();
+          if (json.status !== "ok") {
+            debugLog('⚠ Could not load audit history for KPI tracker', 'warn');
+            return;
+          }
+
+          const history = json.data || [];
+          cachedAuditHistory = history;
+          
+          if (history.length === 0) {
+            const card = document.getElementById("money-pages-kpi-card");
+            if (card) {
+              card.querySelector('.table-wrapper').innerHTML = '<div style="padding: 2rem; text-align: center; color: #64748b;">No audit history available. Run audits to build KPI data.</div>';
+            }
+            return;
+          }
+
+          const metricKey = document.getElementById("money-kpi-metric-select")?.value || "ctr";
+          const historyData = buildMoneyKpiHistory(history, metricKey);
+          
+          renderMoneyKpiTable(historyData, metricKey);
+          renderMoneyKpiSparkline(historyData, metricKey);
+        } catch (error) {
+          debugLog(`⚠ Error loading KPI history: ${error.message}`, 'warn');
+        }
+      }
+      
       // Recalculate behaviour for filtered sub-segment
       function recalculateMoneyPagesBehaviour(moneyPagesMetrics, queryPages, subSegmentFilter) {
         if (!moneyPagesMetrics || !moneyPagesMetrics.rows || !queryPages || subSegmentFilter === 'ALL') {
@@ -9688,6 +10464,105 @@ Final Score: ${score}/100`;
               </div>
             </section>
             
+            <!-- Phase: Money Pages Priority Matrix + Action List -->
+            <section id="money-pages-priority-card" class="card card--full" style="margin-top: 2rem; background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+              <div class="card-header" style="margin-bottom: 1rem;">
+                <h3 style="margin: 0 0 0.5rem 0; font-size: 1.1rem; font-weight: 700; color: #1e293b;">Money Pages – Priority & Actions</h3>
+                <p class="card-subtitle" style="margin: 0; font-size: 0.85rem; color: #64748b; line-height: 1.6;">
+                  Landing, event and product pages that drive revenue. Triaged by impact, difficulty and priority.
+                </p>
+              </div>
+
+              <!-- Summary strip -->
+              <div class="summary-strip" id="money-pages-summary-strip" style="display: flex; gap: 2rem; padding: 1rem; background: #f8fafc; border-radius: 4px; margin-bottom: 1.5rem;">
+                <!-- Filled by JS -->
+              </div>
+
+              <!-- Controls -->
+              <div class="controls-row" style="display: flex; gap: 1.5rem; margin-bottom: 1.5rem; align-items: center;">
+                <label style="display: flex; align-items: center; gap: 0.5rem;">
+                  Page type:
+                  <select id="money-pages-type-filter" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 4px;">
+                    <option value="all">All money pages</option>
+                    <option value="landing">Landing pages</option>
+                    <option value="event">Event pages</option>
+                    <option value="product">Product pages</option>
+                  </select>
+                </label>
+                <label style="display: flex; align-items: center; gap: 0.5rem;">
+                  Min impressions:
+                  <input type="number" id="money-pages-min-impr" value="1000" min="0" step="100" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 4px; width: 120px;">
+                </label>
+              </div>
+
+              <div class="matrix-and-table" style="display: grid; grid-template-columns: 1fr 2fr; gap: 2rem;">
+                <div class="priority-matrix" id="money-pages-matrix" style="background: #f8fafc; padding: 1rem; border-radius: 8px;">
+                  <!-- 3x3 grid rendered by JS -->
+                </div>
+
+                <div class="priority-table-wrapper" style="overflow-x: auto;">
+                  <table id="money-pages-priority-table" style="width: 100%; border-collapse: collapse;">
+                    <thead>
+                      <tr style="background: #f1f5f9;">
+                        <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Page</th>
+                        <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Type</th>
+                        <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Priority</th>
+                        <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Impact</th>
+                        <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Difficulty</th>
+                        <th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0;">CTR</th>
+                        <th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0;">Impr.</th>
+                        <th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0;">Avg pos.</th>
+                        <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <!-- JS rows -->
+                    </tbody>
+                  </table>
+                  <button id="money-pages-copy-urls-btn" type="button" class="btn btn-small" style="margin-top: 1rem;">Copy URLs</button>
+                </div>
+              </div>
+            </section>
+            
+            <!-- Phase: 12-Month KPI Tracker -->
+            <section id="money-pages-kpi-card" class="card card--full" style="margin-top: 2rem; background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+              <div class="card-header" style="margin-bottom: 1rem;">
+                <h3 style="margin: 0 0 0.5rem 0; font-size: 1.1rem; font-weight: 700; color: #1e293b;">Money Pages KPI Tracker (last 12 audits)</h3>
+                <p class="card-subtitle" style="margin: 0; font-size: 0.85rem; color: #64748b; line-height: 1.6;">
+                  CTR, impressions, clicks and position trends by money-page segment.
+                </p>
+              </div>
+
+              <div class="controls-row" style="margin-bottom: 1.5rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem;">
+                  Metric:
+                  <select id="money-kpi-metric-select" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 4px;">
+                    <option value="ctr">CTR</option>
+                    <option value="impressions">Impressions</option>
+                    <option value="clicks">Clicks</option>
+                    <option value="avgPosition">Avg position</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="sparkline-wrapper" style="margin-bottom: 2rem; height: 200px;">
+                <canvas id="money-kpi-sparkline"></canvas>
+              </div>
+
+              <div class="table-wrapper" style="overflow-x: auto;">
+                <table id="money-kpi-table" style="width: 100%; border-collapse: collapse;">
+                  <thead>
+                    <tr id="money-kpi-header-row" style="background: #f1f5f9;">
+                      <!-- Filled by JS -->
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <!-- JS rows -->
+                  </tbody>
+                </table>
+              </div>
+            </section>
+            
             <p class="card-footnote" style="margin-top: 1rem; font-size: 0.85rem; color: #666;">
               Based on the current audit date range and money-page segment only.
               Categories and actions are data-driven and will update each time you run a new audit.
@@ -9759,6 +10634,96 @@ Final Score: ${score}/100`;
         } else {
           renderMoneyPagesSection(moneyPagesMetricsToRender || null);
         }
+        
+        // Phase: Render Money Pages Priority Matrix & Action List
+        if (window.moneyPagePriorityData && window.moneyPagePriorityData.length > 0) {
+          const priorityCard = document.getElementById('money-pages-priority-card');
+          if (priorityCard) {
+            priorityCard.style.display = 'block';
+            
+            // Initialize state for matrix filter
+            window.moneyMatrixFilterState = { impact: null, diff: null };
+            
+            // Render summary strip
+            const summaryStrip = document.getElementById('money-pages-summary-strip');
+            if (summaryStrip) {
+              renderMoneyPagesSummaryStrip(window.moneyPagePriorityData, { overview: data?.overview || {} }, summaryStrip);
+            }
+            
+            // Render matrix
+            const matrixEl = document.getElementById('money-pages-matrix');
+            if (matrixEl) {
+              renderMoneyPagesMatrix(
+                window.moneyPagePriorityData,
+                matrixEl,
+                (impact, diff) => {
+                  window.moneyMatrixFilterState = { impact, diff };
+                  renderMoneyPagesTable(window.moneyPagePriorityData, {
+                    typeFilter: document.getElementById('money-pages-type-filter')?.value || 'all',
+                    minImpr: Number(document.getElementById('money-pages-min-impr')?.value) || 0,
+                    matrixFilter: window.moneyMatrixFilterState
+                  });
+                }
+              );
+            }
+            
+            // Render initial table
+            renderMoneyPagesTable(window.moneyPagePriorityData, {
+              typeFilter: 'all',
+              minImpr: 1000,
+              matrixFilter: null
+            });
+            
+            // Wire up filter controls
+            const typeFilter = document.getElementById('money-pages-type-filter');
+            const minImprFilter = document.getElementById('money-pages-min-impr');
+            
+            if (typeFilter) {
+              typeFilter.addEventListener('change', () => {
+                renderMoneyPagesTable(window.moneyPagePriorityData, {
+                  typeFilter: typeFilter.value,
+                  minImpr: Number(minImprFilter?.value) || 0,
+                  matrixFilter: window.moneyMatrixFilterState
+                });
+              });
+            }
+            
+            if (minImprFilter) {
+              minImprFilter.addEventListener('change', () => {
+                renderMoneyPagesTable(window.moneyPagePriorityData, {
+                  typeFilter: typeFilter?.value || 'all',
+                  minImpr: Number(minImprFilter.value) || 0,
+                  matrixFilter: window.moneyMatrixFilterState
+                });
+              });
+            }
+          }
+        } else {
+          const priorityCard = document.getElementById('money-pages-priority-card');
+          if (priorityCard) {
+            priorityCard.style.display = 'none';
+          }
+        }
+        
+        // Phase: Load and render 12-month KPI Tracker
+        const propertyUrl = document.getElementById('property-url')?.value || localStorage.getItem('last_property_url');
+        if (propertyUrl) {
+          loadAuditHistoryAndRenderKpis(propertyUrl);
+          
+          // Wire up metric selector
+          const metricSelect = document.getElementById('money-kpi-metric-select');
+          if (metricSelect) {
+            metricSelect.addEventListener('change', (e) => {
+              const metricKey = e.target.value;
+              if (cachedAuditHistory) {
+                const historyData = buildMoneyKpiHistory(cachedAuditHistory, metricKey);
+                renderMoneyKpiTable(historyData, metricKey);
+                renderMoneyKpiSparkline(historyData, metricKey);
+              }
+            });
+          }
+        }
+        
         // Store queryPages globally for filtering
         // Use data parameter (searchData) first, then fallback to saved data
         if (data && data.queryPages) {

@@ -85,7 +85,8 @@ export default async function handler(req, res) {
       searchData,
       snippetReadiness,
       localSignals,
-      moneyPagesSummary // Phase 3: Money Pages summary for trend tracking
+      moneyPagesSummary, // Phase 3: Money Pages summary for trend tracking
+      moneySegmentMetrics // Phase: Money Pages Priority Matrix - segment metrics for KPI tracker
     } = bodyData;
 
     if (!propertyUrl || !auditDate) {
@@ -187,6 +188,9 @@ export default async function handler(req, res) {
           ? moneyPagesSummary.behaviourScore
           : null
       ), // For trend charting
+      
+      // Phase: Money Pages Priority Matrix - segment metrics for 12-month KPI tracker
+      money_segment_metrics: ensureJson(moneySegmentMetrics), // JSON object: {allMoney, landingPages, eventPages, productPages} each with {clicks, impressions, ctr, avgPosition, behaviourScore}
       
       // Calculate AI Summary Likelihood (Phase 1)
       // Uses snippetReadiness, visibility, and brand score

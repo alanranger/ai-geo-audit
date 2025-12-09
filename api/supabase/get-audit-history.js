@@ -50,7 +50,8 @@ export default async function handler(req, res) {
 
     // Build query URL with select fields
     // Phase 3: Include money pages fields for trend tracking
-    let queryUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.asc&select=audit_date,content_schema_score,visibility_score,authority_score,local_entity_score,service_area_score,brand_score,ai_summary_score,money_pages_behaviour_score,money_pages_summary`;
+    // Phase: Money Pages Priority Matrix - include segment metrics for KPI tracker
+    let queryUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.asc&select=audit_date,content_schema_score,visibility_score,authority_score,local_entity_score,service_area_score,brand_score,ai_summary_score,money_pages_behaviour_score,money_pages_summary,money_segment_metrics`;
     
     if (startDate) {
       queryUrl += `&audit_date=gte.${startDate}`;
@@ -112,7 +113,9 @@ export default async function handler(req, res) {
       brandScore: record.brand_score || null,
       // Phase 3: Money Pages data (for trend tracking)
       moneyPagesBehaviourScore: record.money_pages_behaviour_score || null,
-      moneyPagesSummary: record.money_pages_summary || null
+      moneyPagesSummary: record.money_pages_summary || null,
+      // Phase: Money Pages Priority Matrix - segment metrics for KPI tracker
+      moneySegmentMetrics: record.money_segment_metrics || null
     }));
 
     return res.status(200).json({
