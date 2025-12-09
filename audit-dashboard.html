@@ -9958,8 +9958,8 @@ Final Score: ${score}/100`;
               comparison = (a.avgPosition || 999) - (b.avgPosition || 999);
               break;
             case 'action':
-              const actionA = a.priorityLevel === "HIGH" ? "Fix CTR & strengthen content" : a.priorityLevel === "MEDIUM" ? "Improve SERP snippet & schema" : "Monitor & maintain";
-              const actionB = b.priorityLevel === "HIGH" ? "Fix CTR & strengthen content" : b.priorityLevel === "MEDIUM" ? "Improve SERP snippet & schema" : "Monitor & maintain";
+              const actionA = (a.priorityLevel || "LOW") === "HIGH" ? "Fix CTR & strengthen content" : (a.priorityLevel || "LOW") === "MEDIUM" ? "Improve SERP snippet & schema" : "Monitor & maintain";
+              const actionB = (b.priorityLevel || "LOW") === "HIGH" ? "Fix CTR & strengthen content" : (b.priorityLevel || "LOW") === "MEDIUM" ? "Improve SERP snippet & schema" : "Monitor & maintain";
               comparison = actionA.localeCompare(actionB);
               break;
             default:
@@ -10052,6 +10052,11 @@ Final Score: ${score}/100`;
 
         tbody.innerHTML = rows
           .map(p => {
+            // Safety checks for undefined values
+            const priorityLevel = p.priorityLevel || "LOW";
+            const impactLevel = p.impactLevel || "LOW";
+            const difficultyLevel = p.difficultyLevel || "MEDIUM";
+            
             const typeLabel =
               p.segmentType === "landing" ? "Landing" :
               p.segmentType === "event" ? "Event" :
@@ -10059,22 +10064,22 @@ Final Score: ${score}/100`;
               "Money";
 
             const action =
-              p.priorityLevel === "HIGH"
+              priorityLevel === "HIGH"
                 ? "Fix CTR & strengthen content"
-                : p.priorityLevel === "MEDIUM"
+                : priorityLevel === "MEDIUM"
                 ? "Improve SERP snippet & schema"
                 : "Monitor & maintain";
             
-            const priorityColor = p.priorityLevel === "HIGH" ? "#ef4444" : p.priorityLevel === "MEDIUM" ? "#f59e0b" : "#64748b";
+            const priorityColor = priorityLevel === "HIGH" ? "#ef4444" : priorityLevel === "MEDIUM" ? "#f59e0b" : "#64748b";
 
             return `
               <tr style="border-bottom: 1px solid #e2e8f0;">
-                <td style="padding: 0.75rem;"><a href="${p.url}" target="_blank" rel="noopener" style="color: #2563eb; text-decoration: none;">${p.title}</a></td>
+                <td style="padding: 0.75rem;"><a href="${p.url || '#'}" target="_blank" rel="noopener" style="color: #2563eb; text-decoration: none;">${p.title || p.url || 'Untitled'}</a></td>
                 <td style="padding: 0.75rem;">${typeLabel}</td>
-                <td style="padding: 0.75rem;"><span class="badge badge-priority-${p.priorityLevel.toLowerCase()}" style="padding: 0.25rem 0.5rem; border-radius: 4px; background: ${priorityColor}20; color: ${priorityColor}; font-weight: 600; font-size: 0.75rem;">${p.priorityLevel}</span></td>
-                <td style="padding: 0.75rem;">${p.impactLevel}</td>
-                <td style="padding: 0.75rem;">${p.difficultyLevel}</td>
-                <td style="padding: 0.75rem; text-align: right;">${(p.ctr * 100).toFixed(2)}%</td>
+                <td style="padding: 0.75rem;"><span class="badge badge-priority-${priorityLevel.toLowerCase()}" style="padding: 0.25rem 0.5rem; border-radius: 4px; background: ${priorityColor}20; color: ${priorityColor}; font-weight: 600; font-size: 0.75rem;">${priorityLevel}</span></td>
+                <td style="padding: 0.75rem;">${impactLevel}</td>
+                <td style="padding: 0.75rem;">${difficultyLevel}</td>
+                <td style="padding: 0.75rem; text-align: right;">${((p.ctr || 0) * 100).toFixed(2)}%</td>
                 <td style="padding: 0.75rem; text-align: right;">${(p.impressions || 0).toLocaleString()}</td>
                 <td style="padding: 0.75rem; text-align: right;">${p.avgPosition ? p.avgPosition.toFixed(1) : "—"}</td>
                 <td style="padding: 0.75rem;">${action}</td>
