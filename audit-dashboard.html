@@ -9723,7 +9723,10 @@ Final Score: ${score}/100`;
         // Destroy existing chart if it exists
         if (window.moneyPagesTrendChart) {
           try {
-            window.moneyPagesTrendChart.destroy();
+            // Check if it's a Chart.js instance before calling destroy
+            if (window.moneyPagesTrendChart && typeof window.moneyPagesTrendChart.destroy === 'function') {
+              window.moneyPagesTrendChart.destroy();
+            }
             window.moneyPagesTrendChart = null;
           } catch (e) {
             debugLog('Error destroying existing trend chart: ' + e.message, 'warn');
@@ -10275,7 +10278,7 @@ Final Score: ${score}/100`;
       
       /**
        * Build KPI history structure from audit history
-       * @param {Array<{audit_date: string, money_segment_metrics: MoneySegmentMetricsByAudit | null}>} history
+       * @param {Array<{date: string, moneySegmentMetrics: MoneySegmentMetricsByAudit | null}>} history
        * @param {string} metricKey - 'ctr', 'impressions', 'clicks', or 'avgPosition'
        * @returns {{ labels: string[], segments: Record<string, number[]> }}
        */
@@ -10284,15 +10287,19 @@ Final Score: ${score}/100`;
         const byMonth = new Map();
 
         for (const row of history) {
-          const date = new Date(row.audit_date);
+          // API returns 'date' field (not 'audit_date')
+          const dateStr = row.date || row.audit_date;
+          if (!dateStr) continue;
+          const date = new Date(dateStr);
           if (Number.isNaN(date.getTime())) continue;
           const ym = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-          if (!row.money_segment_metrics) continue;
+          // API returns camelCase: moneySegmentMetrics (not snake_case)
+          if (!row.moneySegmentMetrics) continue;
 
           // Keep the latest audit per month
           const existing = byMonth.get(ym);
           if (!existing || date > existing._date) {
-            byMonth.set(ym, { _date: date, metrics: row.money_segment_metrics });
+            byMonth.set(ym, { _date: date, metrics: row.moneySegmentMetrics });
           }
         }
 
@@ -10578,9 +10585,11 @@ Final Score: ${score}/100`;
             return;
           }
           
-          // Check if any history records have money_segment_metrics
-          const hasMetrics = history.some(record => record.money_segment_metrics);
+          // Check if any history records have moneySegmentMetrics (API returns camelCase)
+          const hasMetrics = history.some(record => record.moneySegmentMetrics);
           if (!hasMetrics) {
+            debugLog(`⚠ Money Pages KPI Tracker: No moneySegmentMetrics in audit history. History length: ${history.length}`, 'warn');
+            debugLog(`⚠ Sample record keys: ${history.length > 0 ? Object.keys(history[0]).join(', ') : 'no records'}`, 'warn');
             const card = document.getElementById("money-pages-kpi-card");
             if (card) {
               const tableWrapper = card.querySelector('.table-wrapper');
@@ -10592,9 +10601,10 @@ Final Score: ${score}/100`;
                 tbody.innerHTML = '<tr><td colspan="100%" style="padding: 2rem; text-align: center; color: #64748b;">No money segment metrics found. Run a new audit to generate KPI data.</td></tr>';
               }
             }
-            debugLog('⚠ Money Pages KPI Tracker: No money_segment_metrics in audit history', 'warn');
             return;
           }
+          
+          debugLog(`✓ Money Pages KPI Tracker: Found ${history.filter(r => r.moneySegmentMetrics).length} records with moneySegmentMetrics`, 'success');
 
           const metricKey = document.getElementById("money-kpi-metric-select")?.value || "ctr";
           const historyData = buildMoneyKpiHistory(history, metricKey);
