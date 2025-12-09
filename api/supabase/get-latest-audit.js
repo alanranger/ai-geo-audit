@@ -153,7 +153,8 @@ export default async function handler(req, res) {
       // Money Pages Priority Matrix data - needs to be rebuilt from money_pages_metrics
       // Store the raw data so frontend can rebuild moneyPagePriorityData
       moneyPagePriorityData: null, // Will be rebuilt on frontend from moneyPagesMetrics
-      moneySegmentMetrics: record.money_segment_metrics || null
+      moneySegmentMetrics: record.money_segment_metrics || null,
+      rankingAiData: record.ranking_ai_data || null // Ranking & AI data (SERP rankings + AI Overview citations)
     };
 
     return res.status(200).json({
