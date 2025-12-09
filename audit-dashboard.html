@@ -6158,15 +6158,18 @@
       
       // CRITICAL: Ensure Money Pages data is in scores object
       // If scores.moneyPagesMetrics is missing, get it from saved data
-      if (!scores.moneyPagesMetrics) {
-        if (saved && saved.scores && saved.scores.moneyPagesMetrics) {
+      // Check explicitly for null/undefined/false (not just falsy)
+      debugLog(`DEBUG: Checking moneyPagesMetrics - scores.moneyPagesMetrics=${scores?.moneyPagesMetrics}, type=${typeof scores?.moneyPagesMetrics}, saved.scores.moneyPagesMetrics=${saved?.scores?.moneyPagesMetrics}, type=${typeof saved?.scores?.moneyPagesMetrics}, saved.moneyPagesMetrics=${saved?.moneyPagesMetrics}, type=${typeof saved?.moneyPagesMetrics}`, 'info');
+      
+      if (!scores.moneyPagesMetrics || scores.moneyPagesMetrics === null || scores.moneyPagesMetrics === false) {
+        if (saved && saved.scores && saved.scores.moneyPagesMetrics !== null && saved.scores.moneyPagesMetrics !== undefined && saved.scores.moneyPagesMetrics !== false) {
           scores.moneyPagesMetrics = saved.scores.moneyPagesMetrics;
-          debugLog('✓ Restored moneyPagesMetrics from saved.scores', 'success');
-        } else if (saved && saved.moneyPagesMetrics) {
+          debugLog(`✓ Restored moneyPagesMetrics from saved.scores (${saved.scores.moneyPagesMetrics.rows?.length || 0} rows)`, 'success');
+        } else if (saved && saved.moneyPagesMetrics !== null && saved.moneyPagesMetrics !== undefined && saved.moneyPagesMetrics !== false) {
           scores.moneyPagesMetrics = saved.moneyPagesMetrics;
-          debugLog('✓ Restored moneyPagesMetrics from saved.moneyPagesMetrics', 'success');
+          debugLog(`✓ Restored moneyPagesMetrics from saved.moneyPagesMetrics (${saved.moneyPagesMetrics.rows?.length || 0} rows)`, 'success');
         } else {
-          debugLog('⚠ No moneyPagesMetrics found in saved data', 'warn');
+          debugLog(`⚠ No moneyPagesMetrics found in saved data: saved.scores.moneyPagesMetrics=${saved?.scores?.moneyPagesMetrics} (type: ${typeof saved?.scores?.moneyPagesMetrics}), saved.moneyPagesMetrics=${saved?.moneyPagesMetrics} (type: ${typeof saved?.moneyPagesMetrics})`, 'warn');
         }
       }
       
