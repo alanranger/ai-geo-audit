@@ -11172,15 +11172,24 @@ Final Score: ${score}/100`;
           scores.moneyPagesMetrics = moneyPagesMetricsToRender;
         }
         
+        // Additional check: if still null, check if it's in the saved audit object directly
+        if (!moneyPagesMetricsToRender && saved && saved.moneyPagesMetrics) {
+          debugLog('⚠ Money Pages: Found in saved.moneyPagesMetrics, using it', 'warn');
+          moneyPagesMetricsToRender = saved.moneyPagesMetrics;
+          scores.moneyPagesMetrics = moneyPagesMetricsToRender;
+        }
+        
         debugLog(`Money Pages Metrics available: ${moneyPagesMetricsToRender ? 'yes' : 'no'}`, 'info');
         if (moneyPagesMetricsToRender) {
           debugLog(`Money Pages: Rendering ${moneyPagesMetricsToRender.rows?.length || 0} money pages`, 'info');
           if (moneyPagesMetricsToRender.rows && moneyPagesMetricsToRender.rows.length > 0) {
             debugLog(`Money Pages: First row sample: ${JSON.stringify(moneyPagesMetricsToRender.rows[0]).substring(0, 100)}...`, 'info');
+          } else {
+            debugLog('⚠ Money Pages: moneyPagesMetrics exists but has no rows', 'warn');
           }
         } else {
           debugLog('⚠ Money Pages: No metrics data available, will show "No data" message', 'warn');
-          debugLog(`Money Pages: scores.moneyPagesMetrics=${!!scores.moneyPagesMetrics}, saved.scores.moneyPagesMetrics=${!!(saved && saved.scores && saved.scores.moneyPagesMetrics)}`, 'warn');
+          debugLog(`Money Pages: scores.moneyPagesMetrics=${!!scores.moneyPagesMetrics}, saved.scores.moneyPagesMetrics=${!!(saved && saved.scores && saved.scores.moneyPagesMetrics)}, saved.moneyPagesMetrics=${!!(saved && saved.moneyPagesMetrics)}`, 'warn');
         }
         
         // Ensure section exists before rendering (retry if needed)
