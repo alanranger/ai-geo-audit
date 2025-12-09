@@ -36,7 +36,7 @@ export default async function handler(req, res) {
   // Allow GET for easy testing
   const keyword =
     (req.query.keyword && String(req.query.keyword)) ||
-    "photography workshops Coventry";
+    "photography courses coventry";
 
   // DataForSEO AI Mode Live Advanced endpoint
   const endpoint =
@@ -76,47 +76,72 @@ export default async function handler(req, res) {
       return;
     }
 
-    // ---- Extract AI Mode citations ----
+    // ---- Extract AI Mode citations from ai_overview.references ----
     const task = data.tasks && data.tasks[0];
     const result = task && task.result && task.result[0];
     const items = (result && result.items) || [];
 
-    // Find the ai_overview block
+    // Find the ai_overview item
     const aiOverview = items.find((item) => item.type === "ai_overview");
 
-    let citations = [];
-    if (aiOverview && Array.isArray(aiOverview.items)) {
+    let rawRefs = [];
+    if (aiOverview && Array.isArray(aiOverview.references)) {
+      rawRefs = aiOverview.references;
+    }
+
+    // Fallback: also look through ai_overview elements for links, just in case
+    if ((!rawRefs || rawRefs.length === 0) && aiOverview && Array.isArray(aiOverview.items)) {
       for (const el of aiOverview.items) {
         if (!el.links) continue;
         for (const link of el.links) {
-          if (!link.url) continue;
-          citations.push({
-            title: link.title || null,
-            url: link.url,
+          rawRefs.push({
+            source: link.title || null,
             domain: link.domain || null,
+            url: link.url || null,
+            title: link.title || null,
+            text: null,
           });
         }
       }
     }
 
-    // Deduplicate by URL
+    // Normalise + dedupe by URL
     const byUrl = {};
-    for (const c of citations) {
-      if (!byUrl[c.url]) byUrl[c.url] = c;
-    }
-    const uniqueCitations = Object.values(byUrl);
+    for (const ref of rawRefs) {
+      if (!ref || !ref.url) continue;
+      const url = ref.url;
+      const domain =
+        ref.domain ||
+        (() => {
+          try {
+            return new URL(url).hostname;
+          } catch {
+            return null;
+          }
+        })();
 
-    const alanCitations = uniqueCitations.filter(
-      (c) => c.domain && c.domain.includes("alanranger.com")
+      if (!byUrl[url]) {
+        byUrl[url] = {
+          source: ref.source || null,
+          title: ref.title || null,
+          url,
+          domain,
+        };
+      }
+    }
+
+    const citations = Object.values(byUrl);
+    const alanCitations = citations.filter((c) =>
+      c.domain ? c.domain.includes("alanranger.com") : c.url.includes("alanranger.com")
     );
 
     res.status(200).json({
       query: keyword,
       has_ai_overview: !!aiOverview,
-      total_citations: uniqueCitations.length,
+      total_citations: citations.length,
       alanranger_citations_count: alanCitations.length,
       alanranger_citations: alanCitations,
-      sample_citations: uniqueCitations.slice(0, 10),
+      sample_citations: citations.slice(0, 10),
     });
   } catch (err) {
     console.error("DataForSEO error", err);
