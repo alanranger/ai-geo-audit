@@ -86,11 +86,11 @@ export default async function handler(req, res) {
 
   // For now use a small default set of queries if none are posted
   const defaultQueries = [
-    "beginners photography course",
-    "landscape photography workshops",
-    "camera courses for beginners",
+    "beginners photography classes",
     "photography lessons online",
-    "beginners photography classes"
+    "camera courses for beginners",
+    "landscape photography workshops",
+    "beginners photography course"
   ];
 
   let queries = defaultQueries;
