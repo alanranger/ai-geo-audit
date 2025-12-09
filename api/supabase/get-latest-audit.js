@@ -148,7 +148,11 @@ export default async function handler(req, res) {
       } : null,
       dateRange: 30, // Default - this isn't stored in Supabase
       timestamp: new Date(record.audit_date + 'T00:00:00').getTime(),
-      auditDate: record.audit_date
+      auditDate: record.audit_date,
+      // Money Pages Priority Matrix data - needs to be rebuilt from money_pages_metrics
+      // Store the raw data so frontend can rebuild moneyPagePriorityData
+      moneyPagePriorityData: null, // Will be rebuilt on frontend from moneyPagesMetrics
+      moneySegmentMetrics: record.money_segment_metrics || null
     };
 
     return res.status(200).json({
