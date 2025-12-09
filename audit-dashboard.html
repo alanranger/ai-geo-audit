@@ -2504,31 +2504,51 @@
         
         // Ensure searchData has overview object with siteTotalImpressions and siteTotalClicks
         // These are needed for calculating shareOfImpressions in buildMoneyPagesSummary
-        if (searchData && !searchData.overview) {
-          searchData.overview = {};
-        }
-        if (searchData && searchData.overview) {
-          // Use top-level values if overview doesn't have them
-          if (!searchData.overview.siteTotalImpressions && searchData.totalImpressions != null) {
-            searchData.overview.siteTotalImpressions = searchData.totalImpressions;
+        let overview = null;
+        
+        if (searchData) {
+          // Create overview object if it doesn't exist
+          if (!searchData.overview) {
+            searchData.overview = {};
           }
-          if (!searchData.overview.siteTotalClicks && searchData.totalClicks != null) {
-            searchData.overview.siteTotalClicks = searchData.totalClicks;
+          
+          // Populate overview with siteTotalImpressions and siteTotalClicks
+          // Priority: searchData.overview.siteTotalImpressions > searchData.totalImpressions > searchData.overview.totalImpressions
+          if (!searchData.overview.siteTotalImpressions) {
+            if (searchData.totalImpressions != null && searchData.totalImpressions > 0) {
+              searchData.overview.siteTotalImpressions = searchData.totalImpressions;
+            } else if (searchData.overview.totalImpressions != null && searchData.overview.totalImpressions > 0) {
+              searchData.overview.siteTotalImpressions = searchData.overview.totalImpressions;
+            }
           }
-          // Also support totalImpressions/totalClicks as fallback
-          if (!searchData.overview.siteTotalImpressions && searchData.overview.totalImpressions != null) {
-            searchData.overview.siteTotalImpressions = searchData.overview.totalImpressions;
+          
+          if (!searchData.overview.siteTotalClicks) {
+            if (searchData.totalClicks != null && searchData.totalClicks > 0) {
+              searchData.overview.siteTotalClicks = searchData.totalClicks;
+            } else if (searchData.overview.totalClicks != null && searchData.overview.totalClicks > 0) {
+              searchData.overview.siteTotalClicks = searchData.overview.totalClicks;
+            }
           }
-          if (!searchData.overview.siteTotalClicks && searchData.overview.totalClicks != null) {
-            searchData.overview.siteTotalClicks = searchData.overview.totalClicks;
-          }
+          
+          overview = searchData.overview;
+          
+          // Debug logging
+          debugLog(`saveAuditToSupabase: searchData.totalImpressions=${searchData.totalImpressions}, overview.siteTotalImpressions=${overview.siteTotalImpressions || 'missing'}`, 'info');
+        } else {
+          debugLog(`⚠ saveAuditToSupabase: searchData is null or undefined`, 'warn');
         }
         
         // Build Money Pages summary for trend tracking (Phase 3)
+        debugLog(`saveAuditToSupabase: About to call buildMoneyPagesSummary - overview exists=${!!overview}, overview.siteTotalImpressions=${overview?.siteTotalImpressions || 'missing'}, searchData.totalImpressions=${searchData?.totalImpressions || 'missing'}`, 'info');
         const moneyPagesSummary = window.buildMoneyPagesSummary ? window.buildMoneyPagesSummary(
           scores?.moneyPagesMetrics || null,
-          searchData?.overview || null
+          overview
         ) : null;
+        if (moneyPagesSummary) {
+          debugLog(`saveAuditToSupabase: moneyPagesSummary created - shareOfImpressions=${moneyPagesSummary.shareOfImpressions || 'null'}`, 'info');
+        } else {
+          debugLog(`saveAuditToSupabase: moneyPagesSummary is null`, 'warn');
+        }
         
         const response = await fetch('/api/supabase/save-audit', {
           method: 'POST',
@@ -4335,7 +4355,9 @@
 
         // Debug logging
         if (shareOfImpressions == null) {
-          debugLog(`⚠ buildMoneyPagesSummary: shareOfImpressions is null - overview=${!!overview}, siteTotalImpressions=${overview?.siteTotalImpressions || 'missing'}, totalImpressions=${overview?.totalImpressions || 'missing'}`, 'warn');
+          const overviewType = overview === null ? 'null' : overview === undefined ? 'undefined' : typeof overview;
+          const overviewStr = typeof overview === 'object' ? JSON.stringify(overview) : String(overview);
+          debugLog(`⚠ buildMoneyPagesSummary: shareOfImpressions is null - overview type=${overviewType}, overview=${overviewStr.substring(0, 200)}, siteTotalImpressions=${overview?.siteTotalImpressions || 'missing'}, totalImpressions=${overview?.totalImpressions || 'missing'}, impressions=${impressions}`, 'warn');
         } else {
           debugLog(`✓ buildMoneyPagesSummary: shareOfImpressions=${shareOfImpressions} (${impressions}/${totalImpressions})`, 'info');
         }
