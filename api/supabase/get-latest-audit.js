@@ -114,7 +114,12 @@ export default async function handler(req, res) {
           clicks: record.gsc_clicks || 0,
           impressions: record.gsc_impressions || 0,
           ctr: record.gsc_ctr || 0,
-          position: record.gsc_avg_position || null
+          position: record.gsc_avg_position || null,
+          // Add siteTotalImpressions and siteTotalClicks for buildMoneyPagesSummary
+          siteTotalImpressions: record.gsc_impressions || 0,
+          siteTotalClicks: record.gsc_clicks || 0,
+          totalImpressions: record.gsc_impressions || 0,
+          totalClicks: record.gsc_clicks || 0
         }
       },
       snippetReadiness: record.snippet_readiness || 0,
