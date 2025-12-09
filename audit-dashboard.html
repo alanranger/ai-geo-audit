@@ -2606,13 +2606,25 @@
         }
         
         // Get money segment metrics for 12-month KPI tracking
-        const moneySegmentMetrics = window.moneySegmentMetrics || null;
-        if (moneySegmentMetrics) {
-          debugLog(`saveAuditToSupabase: moneySegmentMetrics created with ${Object.keys(moneySegmentMetrics).length} segments`, 'info');
-          debugLog(`saveAuditToSupabase: moneySegmentMetrics.allMoney clicks=${moneySegmentMetrics.allMoney?.clicks || 0}, impressions=${moneySegmentMetrics.allMoney?.impressions || 0}`, 'info');
-        } else {
-          debugLog(`⚠ saveAuditToSupabase: moneySegmentMetrics is null - window.moneySegmentMetrics=${window.moneySegmentMetrics}`, 'warn');
+        // Ensure it's never null - build empty structure if missing
+        let moneySegmentMetrics = window.moneySegmentMetrics;
+        if (!moneySegmentMetrics) {
+          debugLog(`⚠ saveAuditToSupabase: moneySegmentMetrics is null, building empty structure`, 'warn');
+          // Build empty structure to ensure it's always saved (even if empty)
+          if (typeof buildMoneySegmentSummary === 'function') {
+            moneySegmentMetrics = buildMoneySegmentSummary([], {});
+          } else {
+            // Fallback structure if function not available
+            moneySegmentMetrics = {
+              allMoney: { clicks: 0, impressions: 0, ctr: 0, avgPosition: 0, behaviourScore: 0 },
+              landingPages: { clicks: 0, impressions: 0, ctr: 0, avgPosition: 0, behaviourScore: 0 },
+              eventPages: { clicks: 0, impressions: 0, ctr: 0, avgPosition: 0, behaviourScore: 0 },
+              productPages: { clicks: 0, impressions: 0, ctr: 0, avgPosition: 0, behaviourScore: 0 }
+            };
+          }
         }
+        debugLog(`saveAuditToSupabase: moneySegmentMetrics ready with ${Object.keys(moneySegmentMetrics).length} segments`, 'info');
+        debugLog(`saveAuditToSupabase: moneySegmentMetrics.allMoney clicks=${moneySegmentMetrics.allMoney?.clicks || 0}, impressions=${moneySegmentMetrics.allMoney?.impressions || 0}`, 'info');
         
         const response = await fetch('/api/supabase/save-audit', {
           method: 'POST',
@@ -5086,9 +5098,17 @@
         debugLog(`Money Pages Segments: Built segment summary for Supabase with ${Object.keys(window.moneySegmentMetrics).length} segments`, 'info');
         debugLog(`Money Pages Segments: allMoney clicks=${window.moneySegmentMetrics.allMoney.clicks}, impressions=${window.moneySegmentMetrics.allMoney.impressions}`, 'info');
       } else {
-        debugLog('⚠ Money Pages Metrics: No queryPages data available', 'warn');
+        debugLog('⚠ Money Pages Metrics: No queryPages data available - building empty structure', 'warn');
         window.moneyPagePriorityData = [];
-        window.moneySegmentMetrics = null;
+        // Always build empty segment metrics structure (never null) so it can be saved to Supabase
+        window.moneySegmentMetrics = buildMoneySegmentSummary([], {});
+        debugLog(`Money Pages Segments: Built empty segment summary (no data available) - allMoney clicks=${window.moneySegmentMetrics.allMoney.clicks}, impressions=${window.moneySegmentMetrics.allMoney.impressions}`, 'info');
+      }
+      
+      // Ensure moneySegmentMetrics is never null (always a valid structure)
+      if (!window.moneySegmentMetrics) {
+        debugLog('⚠ Money Pages Segments: moneySegmentMetrics was null, building empty structure', 'warn');
+        window.moneySegmentMetrics = buildMoneySegmentSummary([], {});
       }
 
       const scores = {
