@@ -17622,14 +17622,40 @@ Final Score: ${score}/100`;
           const newBtn = refreshBtn.cloneNode(true);
           refreshBtn.parentNode.replaceChild(newBtn, refreshBtn);
           
-          newBtn.addEventListener("click", () => {
+          newBtn.addEventListener("click", async () => {
             debugLog('🔄 Ranking & AI button clicked', 'info');
-            if (typeof loadRankingAiData === 'function') {
-              loadRankingAiData(true); // force re-run
-            } else if (typeof window.loadRankingAiData === 'function') {
-              window.loadRankingAiData(true); // force re-run
-            } else {
-              debugLog('✗ loadRankingAiData function not found', 'error');
+            
+            // Update UI immediately to show progress
+            const lastRunEl = document.getElementById("ranking-ai-last-run");
+            if (lastRunEl) {
+              lastRunEl.textContent = "Starting...";
+            }
+            newBtn.disabled = true;
+            newBtn.textContent = "Loading…";
+            
+            try {
+              if (typeof loadRankingAiData === 'function') {
+                debugLog('✓ Calling loadRankingAiData (local)', 'info');
+                await loadRankingAiData(true); // force re-run
+              } else if (typeof window.loadRankingAiData === 'function') {
+                debugLog('✓ Calling loadRankingAiData (window)', 'info');
+                await window.loadRankingAiData(true); // force re-run
+              } else {
+                debugLog('✗ loadRankingAiData function not found', 'error');
+                if (lastRunEl) {
+                  lastRunEl.textContent = "Error: loadRankingAiData function not found";
+                }
+                newBtn.disabled = false;
+                newBtn.textContent = "Run ranking & AI check";
+              }
+            } catch (err) {
+              debugLog(`✗ Error calling loadRankingAiData: ${err.message}`, 'error');
+              console.error('Ranking & AI button error:', err);
+              if (lastRunEl) {
+                lastRunEl.textContent = `Error: ${err.message}`;
+              }
+              newBtn.disabled = false;
+              newBtn.textContent = "Run ranking & AI check";
             }
           });
           debugLog('✓ Ranking & AI button wired up', 'success');
