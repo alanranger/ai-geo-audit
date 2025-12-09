@@ -10087,31 +10087,49 @@ Final Score: ${score}/100`;
             // When top-level filter changes, update table filter and refresh all sections
             topLevelFilterEl.addEventListener('change', () => {
               const value = topLevelFilterEl.value;
+              debugLog(`🔄 Top-level filter changed to: ${value}`, 'info');
+              
               // Update global filter state
               window.moneyPagesSubSegmentFilter = value;
               
               // Update table filter to match
-              if (subSegmentFilterEl.value !== value) {
+              if (subSegmentFilterEl && subSegmentFilterEl.value !== value) {
                 subSegmentFilterEl.value = value;
               }
               
               // Apply filters to table
-              applyFilters();
-              
-              // Update summary metrics (Performance Metrics section)
-              updateMoneyPagesSummaryMetrics(moneyPagesMetrics);
-              
-              // Update behaviour section (will be recalculated with filtered data)
-              const filteredMetrics = getFilteredMoneyPagesMetrics(moneyPagesMetrics);
-              if (filteredMetrics && queryPages) {
-                const filteredRows = filteredMetrics.rows || [];
-                const filteredBehaviour = window.computeMoneyPagesBehaviour ? 
-                  window.computeMoneyPagesBehaviour(queryPages, filteredRows, true) : null;
-                renderMoneyPagesBehaviourKpis(filteredBehaviour, filteredMetrics, queryPages);
+              if (typeof applyFilters === 'function') {
+                applyFilters();
               }
               
-              // Update Opportunity Mix chart (will use filtered data)
-              renderMoneyPagesCategoryChart(moneyPagesMetrics, 0);
+              // Update summary metrics (Performance Metrics section) - uses getFilteredMoneyPagesMetrics internally
+              if (typeof updateMoneyPagesSummaryMetrics === 'function' && moneyPagesMetrics) {
+                debugLog(`🔄 Updating Performance Metrics with filter: ${value}`, 'info');
+                updateMoneyPagesSummaryMetrics(moneyPagesMetrics);
+              }
+              
+              // Update behaviour section (will be recalculated with filtered data)
+              if (typeof getFilteredMoneyPagesMetrics === 'function' && moneyPagesMetrics) {
+                const filteredMetrics = getFilteredMoneyPagesMetrics(moneyPagesMetrics);
+                debugLog(`🔄 Filtered metrics: ${filteredMetrics?.rows?.length || 0} rows`, 'info');
+                
+                if (filteredMetrics && queryPages) {
+                  const filteredRows = filteredMetrics.rows || [];
+                  const filteredBehaviour = window.computeMoneyPagesBehaviour ? 
+                    window.computeMoneyPagesBehaviour(queryPages, filteredRows, true) : null;
+                  
+                  if (typeof renderMoneyPagesBehaviourKpis === 'function') {
+                    debugLog(`🔄 Updating Behaviour KPIs with filter: ${value}`, 'info');
+                    renderMoneyPagesBehaviourKpis(filteredBehaviour, filteredMetrics, queryPages);
+                  }
+                }
+              }
+              
+              // Update Opportunity Mix chart (will use filtered data via getFilteredMoneyPagesMetrics)
+              if (typeof renderMoneyPagesCategoryChart === 'function' && moneyPagesMetrics) {
+                debugLog(`🔄 Updating Opportunity Mix chart with filter: ${value}`, 'info');
+                renderMoneyPagesCategoryChart(moneyPagesMetrics, 0);
+              }
             });
           }
           
@@ -11212,12 +11230,14 @@ Final Score: ${score}/100`;
                 : "Monitor & maintain";
             
             const priorityColor = priorityLevel === "HIGH" ? "#ef4444" : priorityLevel === "MEDIUM" ? "#f59e0b" : "#64748b";
+            const priorityBg = priorityLevel === "HIGH" ? "#fee2e2" : priorityLevel === "MEDIUM" ? "#fef3c7" : "#f1f5f9";
+            const priorityBorder = priorityLevel === "HIGH" ? "#ef4444" : priorityLevel === "MEDIUM" ? "#f59e0b" : "#94a3b8";
 
             return `
               <tr style="border-bottom: 1px solid #e2e8f0;">
                 <td style="padding: 0.75rem;"><a href="${p.url || '#'}" target="_blank" rel="noopener" style="color: #2563eb; text-decoration: none;">${p.title || p.url || 'Untitled'}</a></td>
                 <td style="padding: 0.75rem;">${typeLabel}</td>
-                <td style="padding: 0.75rem;"><span class="badge badge-priority-${priorityLevel.toLowerCase()}" style="padding: 0.25rem 0.5rem; border-radius: 4px; background: ${priorityColor}20; color: ${priorityColor}; font-weight: 600; font-size: 0.75rem;">${priorityLevel}</span></td>
+                <td style="padding: 0.75rem;"><span class="badge badge-priority-${priorityLevel.toLowerCase()}" style="display: inline-block; padding: 0.35rem 0.75rem; border-radius: 6px; background: ${priorityBg}; color: ${priorityColor}; border: 1.5px solid ${priorityBorder}; font-weight: 700; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">${priorityLevel}</span></td>
                 <td style="padding: 0.75rem;">${impactLevel}</td>
                 <td style="padding: 0.75rem;">${difficultyLevel}</td>
                 <td style="padding: 0.75rem; text-align: right;">${((p.ctr || 0) * 100).toFixed(2)}%</td>
@@ -11839,10 +11859,10 @@ Final Score: ${score}/100`;
             </p>
             
             <!-- Top-level filter for Performance Metrics, Behaviour, and Opportunity Mix -->
-            <div style="display: flex; justify-content: flex-end; align-items: center; margin-bottom: 1.5rem; padding: 0.75rem; background: #f8fafc; border-radius: 6px; border: 1px solid #e2e8f0;">
-              <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; color: #475569; font-weight: 600;" title="Filter Performance Metrics, Behaviour, and Opportunity Mix by sub-segment type">
-                Sub-segment:
-                <select id="money-top-level-filter-subsegment" style="padding: 0.5rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.9rem; background: white; cursor: pointer; font-weight: 500;" title="Filter money pages by sub-segment type. Landing pages are collection/category pages, Event pages are workshop/event listings, Product pages are service/product offerings. This filter controls Performance Metrics, Behaviour, and Opportunity Mix sections.">
+            <div style="display: flex; justify-content: flex-start; align-items: center; margin-bottom: 1.5rem; padding: 1rem 1.25rem; background: linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%); border-radius: 8px; border: 2px solid #0ea5e9; box-shadow: 0 2px 4px rgba(14, 165, 233, 0.2);">
+              <label style="display: flex; align-items: center; gap: 0.75rem; font-size: 0.95rem; color: #0c4a6e; font-weight: 700;" title="Filter Performance Metrics, Behaviour, and Opportunity Mix by sub-segment type">
+                <span style="font-weight: 700;">Sub-segment Filter:</span>
+                <select id="money-top-level-filter-subsegment" style="padding: 0.6rem 1rem; border: 2px solid #0ea5e9; border-radius: 6px; font-size: 0.95rem; background: white; cursor: pointer; font-weight: 600; color: #0c4a6e; min-width: 150px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);" title="Filter money pages by sub-segment type. Landing pages are collection/category pages, Event pages are workshop/event listings, Product pages are service/product offerings. This filter controls Performance Metrics, Behaviour, and Opportunity Mix sections.">
                   <option value="ALL">All</option>
                   <option value="PRODUCT">Product</option>
                   <option value="EVENT">Event</option>
