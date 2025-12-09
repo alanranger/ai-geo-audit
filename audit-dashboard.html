@@ -1411,13 +1411,18 @@
     });
 
     function copyDebugLog() {
-      const logText = debugLogEntries.map(entry => 
+      // Filter entries based on current filter state
+      const filteredEntries = debugLogEntries.filter(entry => {
+        return debugLogFilter === 'all' || (debugLogFilter === 'warnings-errors' && (entry.type === 'warn' || entry.type === 'error'));
+      });
+      
+      const logText = filteredEntries.map(entry => 
         `[${entry.timestamp}] [${entry.type.toUpperCase()}] ${entry.message}`
       ).join('\n');
       
       navigator.clipboard.writeText(logText).then(() => {
-        debugLog('Debug log copied to clipboard', 'success');
-        showStatus('Debug log copied to clipboard!', 'success');
+        debugLog(`Debug log copied to clipboard (${filteredEntries.length} ${debugLogFilter === 'all' ? 'entries' : 'warnings/errors'})`, 'success');
+        showStatus(`Debug log copied! (${filteredEntries.length} ${debugLogFilter === 'all' ? 'entries' : 'warnings/errors'})`, 'success');
       }).catch(err => {
         debugLog('Failed to copy log: ' + err.message, 'error');
         showStatus('Failed to copy log', 'error');
@@ -2604,6 +2609,9 @@
         const moneySegmentMetrics = window.moneySegmentMetrics || null;
         if (moneySegmentMetrics) {
           debugLog(`saveAuditToSupabase: moneySegmentMetrics created with ${Object.keys(moneySegmentMetrics).length} segments`, 'info');
+          debugLog(`saveAuditToSupabase: moneySegmentMetrics.allMoney clicks=${moneySegmentMetrics.allMoney?.clicks || 0}, impressions=${moneySegmentMetrics.allMoney?.impressions || 0}`, 'info');
+        } else {
+          debugLog(`⚠ saveAuditToSupabase: moneySegmentMetrics is null - window.moneySegmentMetrics=${window.moneySegmentMetrics}`, 'warn');
         }
         
         const response = await fetch('/api/supabase/save-audit', {
@@ -9944,7 +9952,7 @@ Final Score: ${score}/100`;
        * @param {HTMLElement} container
        * @param {Function} onCellClick - Callback(impact, difficulty)
        */
-      function renderMoneyPagesMatrix(moneyPages, container, onCellClick) {
+      function renderMoneyPagesMatrix(moneyPages, container, onCellClick, activeFilter = null) {
         if (!moneyPages || !moneyPages.length) {
           container.innerHTML = '<div style="padding: 2rem; text-align: center; color: #64748b;">No money pages data available.</div>';
           return;
@@ -9973,14 +9981,26 @@ Final Score: ${score}/100`;
               impact === "HIGH" && (diff === "LOW" || diff === "MEDIUM") ? "rag-high" :
               impact === "HIGH" && diff === "HIGH" ? "rag-medium" :
               "rag-low";
+            
+            // Check if this cell is active
+            const isActive = activeFilter && activeFilter.impact === impact && activeFilter.diff === diff;
+            
+            // Active state styling: thicker border, darker background
+            const borderColor = isActive 
+              ? '#2563eb' 
+              : (ragClass === 'rag-high' ? '#10b981' : ragClass === 'rag-medium' ? '#f59e0b' : '#e5e7eb');
+            const borderWidth = isActive ? '4px' : '2px';
+            const backgroundColor = isActive
+              ? '#dbeafe'
+              : (ragClass === 'rag-high' ? '#ecfdf5' : ragClass === 'rag-medium' ? '#fffbeb' : '#f9fafb');
 
             html += `
               <button
-                class="matrix-cell ${ragClass}"
+                class="matrix-cell ${ragClass} ${isActive ? 'active' : ''}"
                 data-impact="${impact}"
                 data-diff="${diff}"
                 type="button"
-                style="padding: 1rem; border: 2px solid ${ragClass === 'rag-high' ? '#10b981' : ragClass === 'rag-medium' ? '#f59e0b' : '#e5e7eb'}; border-radius: 8px; background: ${ragClass === 'rag-high' ? '#ecfdf5' : ragClass === 'rag-medium' ? '#fffbeb' : '#f9fafb'}; cursor: pointer; text-align: center; transition: all 0.2s;"
+                style="padding: 1rem; border: ${borderWidth} solid ${borderColor}; border-radius: 8px; background: ${backgroundColor}; cursor: pointer; text-align: center; transition: all 0.2s; box-shadow: ${isActive ? '0 4px 8px rgba(37, 99, 235, 0.3)' : 'none'};"
                 onmouseover="this.style.transform='scale(1.05)'"
                 onmouseout="this.style.transform='scale(1)'"
               >
@@ -10982,13 +11002,63 @@ Final Score: ${score}/100`;
             // Initialize state for matrix filter
             window.moneyMatrixFilterState = window.moneyMatrixFilterState || { impact: null, diff: null };
             
+            // Helper function to get filtered pages based on current filters (defined before use)
+            const getFilteredPages = () => {
+              const typeFilter = document.getElementById('money-pages-type-filter')?.value || 'all';
+              const minImpr = Number(document.getElementById('money-pages-min-impr')?.value) || 0;
+              
+              let filtered = window.moneyPagePriorityData.slice();
+              
+              // Apply type filter
+              if (typeFilter !== 'all') {
+                filtered = filtered.filter(p => p.segmentType === typeFilter);
+              }
+              
+              // Apply min impressions filter
+              filtered = filtered.filter(p => (p.impressions || 0) >= minImpr);
+              
+              return filtered;
+            };
+            
+            // Helper function to update both matrix and table
+            const updateMatrixAndTable = () => {
+              const filteredPages = getFilteredPages();
+              const typeFilter = document.getElementById('money-pages-type-filter')?.value || 'all';
+              const minImpr = Number(document.getElementById('money-pages-min-impr')?.value) || 0;
+              
+              // Re-render matrix with filtered pages
+              const matrixEl = document.getElementById('money-pages-matrix');
+              if (matrixEl && typeof renderMoneyPagesMatrix === 'function') {
+                renderMoneyPagesMatrix(
+                  filteredPages,
+                  matrixEl,
+                  (impact, diff) => {
+                    window.moneyMatrixFilterState = { impact, diff };
+                    debugLog(`Money Pages Matrix: Cell clicked - Impact: ${impact}, Difficulty: ${diff}`, 'info');
+                    // Re-render matrix to show active state
+                    updateMatrixAndTable();
+                  },
+                  window.moneyMatrixFilterState
+                );
+              }
+              
+              // Re-render table with filters
+              if (typeof renderMoneyPagesTable === 'function') {
+                renderMoneyPagesTable(filteredPages, {
+                  typeFilter: typeFilter,
+                  minImpr: minImpr,
+                  matrixFilter: window.moneyMatrixFilterState
+                });
+              }
+            };
+            
             // Render summary strip
             const summaryStrip = document.getElementById('money-pages-summary-strip');
             if (summaryStrip) {
               renderMoneyPagesSummaryStrip(window.moneyPagePriorityData, data || {}, summaryStrip);
             }
             
-            // Render matrix
+            // Render matrix initially
             const matrixEl = document.getElementById('money-pages-matrix');
             if (matrixEl && typeof renderMoneyPagesMatrix === 'function') {
               renderMoneyPagesMatrix(
@@ -10997,18 +11067,9 @@ Final Score: ${score}/100`;
                 (impact, diff) => {
                   window.moneyMatrixFilterState = { impact, diff };
                   debugLog(`Money Pages Matrix: Cell clicked - Impact: ${impact}, Difficulty: ${diff}`, 'info');
-                  if (typeof renderMoneyPagesTable === 'function') {
-                    const filters = {
-                      typeFilter: document.getElementById('money-pages-type-filter')?.value || 'all',
-                      minImpr: Number(document.getElementById('money-pages-min-impr')?.value) || 0,
-                      matrixFilter: window.moneyMatrixFilterState
-                    };
-                    debugLog(`Money Pages Matrix: Rendering table with filters: ${JSON.stringify(filters)}`, 'info');
-                    renderMoneyPagesTable(window.moneyPagePriorityData, filters);
-                  } else {
-                    debugLog('⚠ renderMoneyPagesTable function not available', 'warn');
-                  }
-                }
+                  updateMatrixAndTable();
+                },
+                null // No active filter initially
               );
             }
             
@@ -11021,27 +11082,23 @@ Final Score: ${score}/100`;
               });
             }
             
-            // Wire up filter controls
+            // Wire up filter controls (functions already defined above)
             const typeFilter = document.getElementById('money-pages-type-filter');
             const minImprFilter = document.getElementById('money-pages-min-impr');
             
-            if (typeFilter && typeof renderMoneyPagesTable === 'function') {
+            if (typeFilter) {
               typeFilter.addEventListener('change', () => {
-                renderMoneyPagesTable(window.moneyPagePriorityData, {
-                  typeFilter: typeFilter.value,
-                  minImpr: Number(minImprFilter?.value) || 0,
-                  matrixFilter: window.moneyMatrixFilterState
-                });
+                // Clear matrix filter when type filter changes
+                window.moneyMatrixFilterState = { impact: null, diff: null };
+                updateMatrixAndTable();
               });
             }
             
-            if (minImprFilter && typeof renderMoneyPagesTable === 'function') {
+            if (minImprFilter) {
               minImprFilter.addEventListener('change', () => {
-                renderMoneyPagesTable(window.moneyPagePriorityData, {
-                  typeFilter: typeFilter?.value || 'all',
-                  minImpr: Number(minImprFilter.value) || 0,
-                  matrixFilter: window.moneyMatrixFilterState
-                });
+                // Clear matrix filter when min impressions filter changes
+                window.moneyMatrixFilterState = { impact: null, diff: null };
+                updateMatrixAndTable();
               });
             }
           } else {
