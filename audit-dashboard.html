@@ -9910,9 +9910,79 @@ Final Score: ${score}/100`;
        * @param {Array<MoneyPageMetrics>} moneyPages
        * @param {Object} filters - { typeFilter, minImpr, matrixFilter: {impact, diff} }
        */
+      /**
+       * Sort money pages table rows
+       * @param {Array<MoneyPageMetrics>} rows
+       * @param {string} column - Column to sort by
+       * @param {string} direction - 'asc' or 'desc'
+       */
+      function sortMoneyPagesRows(rows, column, direction) {
+        const priorityRank = { HIGH: 0, MEDIUM: 1, LOW: 2 };
+        const impactRank = { HIGH: 0, MEDIUM: 1, LOW: 2 };
+        const difficultyRank = { HIGH: 0, MEDIUM: 1, LOW: 2 };
+        
+        const sorted = rows.slice().sort((a, b) => {
+          let comparison = 0;
+          
+          switch (column) {
+            case 'page':
+              comparison = (a.title || a.url || '').localeCompare(b.title || b.url || '');
+              break;
+            case 'type':
+              const typeA = a.segmentType === "landing" ? "Landing" : a.segmentType === "event" ? "Event" : a.segmentType === "product" ? "Product" : "Money";
+              const typeB = b.segmentType === "landing" ? "Landing" : b.segmentType === "event" ? "Event" : b.segmentType === "product" ? "Product" : "Money";
+              comparison = typeA.localeCompare(typeB);
+              break;
+            case 'priority':
+              const pa = priorityRank[a.priorityLevel] ?? 99;
+              const pb = priorityRank[b.priorityLevel] ?? 99;
+              comparison = pa - pb;
+              break;
+            case 'impact':
+              const ia = impactRank[a.impactLevel] ?? 99;
+              const ib = impactRank[b.impactLevel] ?? 99;
+              comparison = ia - ib;
+              break;
+            case 'difficulty':
+              const da = difficultyRank[a.difficultyLevel] ?? 99;
+              const db = difficultyRank[b.difficultyLevel] ?? 99;
+              comparison = da - db;
+              break;
+            case 'ctr':
+              comparison = (a.ctr || 0) - (b.ctr || 0);
+              break;
+            case 'impressions':
+              comparison = (a.impressions || 0) - (b.impressions || 0);
+              break;
+            case 'avgPosition':
+              comparison = (a.avgPosition || 999) - (b.avgPosition || 999);
+              break;
+            case 'action':
+              const actionA = a.priorityLevel === "HIGH" ? "Fix CTR & strengthen content" : a.priorityLevel === "MEDIUM" ? "Improve SERP snippet & schema" : "Monitor & maintain";
+              const actionB = b.priorityLevel === "HIGH" ? "Fix CTR & strengthen content" : b.priorityLevel === "MEDIUM" ? "Improve SERP snippet & schema" : "Monitor & maintain";
+              comparison = actionA.localeCompare(actionB);
+              break;
+            default:
+              // Default: priority then lost clicks
+              const paDefault = priorityRank[a.priorityLevel] ?? 99;
+              const pbDefault = priorityRank[b.priorityLevel] ?? 99;
+              if (paDefault !== pbDefault) {
+                comparison = paDefault - pbDefault;
+              } else {
+                comparison = (b._lostClicks || 0) - (a._lostClicks || 0);
+              }
+          }
+          
+          return direction === 'asc' ? comparison : -comparison;
+        });
+        
+        return sorted;
+      }
+      
       function renderMoneyPagesTable(moneyPages, filters = {}) {
         const tbody = document.querySelector("#money-pages-priority-table tbody");
-        if (!tbody) return;
+        const thead = document.querySelector("#money-pages-priority-table thead");
+        if (!tbody || !thead) return;
 
         const typeFilter = filters.typeFilter || "all";
         const minImpr = filters.minImpr || 0;
@@ -9934,15 +10004,50 @@ Final Score: ${score}/100`;
           );
         }
 
-        // Sort: HIGH → MED → LOW priority, then by lostClicks desc if available
-        const priorityRank = { HIGH: 0, MEDIUM: 1, LOW: 2 };
-        rows.sort((a, b) => {
-          const pa = priorityRank[a.priorityLevel] ?? 99;
-          const pb = priorityRank[b.priorityLevel] ?? 99;
-          if (pa !== pb) return pa - pb;
-          const la = a._lostClicks || 0;
-          const lb = b._lostClicks || 0;
-          return lb - la;
+        // Apply sorting
+        rows = sortMoneyPagesRows(rows, moneyPagesTableSort.column, moneyPagesTableSort.direction);
+        
+        // Render sortable header
+        const sortArrow = (col) => {
+          if (moneyPagesTableSort.column === col) {
+            return moneyPagesTableSort.direction === 'asc' ? ' ↑' : ' ↓';
+          }
+          return '';
+        };
+        
+        thead.innerHTML = `
+          <tr style="background: #f1f5f9;">
+            <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none;" data-sort="page">Page${sortArrow('page')}</th>
+            <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none;" data-sort="type">Type${sortArrow('type')}</th>
+            <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none;" data-sort="priority">Priority${sortArrow('priority')}</th>
+            <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none;" data-sort="impact">Impact${sortArrow('impact')}</th>
+            <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none;" data-sort="difficulty">Difficulty${sortArrow('difficulty')}</th>
+            <th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none;" data-sort="ctr">CTR${sortArrow('ctr')}</th>
+            <th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none;" data-sort="impressions">Impr.${sortArrow('impressions')}</th>
+            <th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none;" data-sort="avgPosition">Avg pos.${sortArrow('avgPosition')}</th>
+            <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none;" data-sort="action">Action${sortArrow('action')}</th>
+          </tr>
+        `;
+        
+        // Add click handlers to header cells
+        thead.querySelectorAll('th[data-sort]').forEach(th => {
+          th.addEventListener('click', () => {
+            const col = th.getAttribute('data-sort');
+            if (moneyPagesTableSort.column === col) {
+              moneyPagesTableSort.direction = moneyPagesTableSort.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+              moneyPagesTableSort.column = col;
+              moneyPagesTableSort.direction = 'asc';
+            }
+            renderMoneyPagesTable(moneyPages, filters);
+          });
+          
+          th.addEventListener('mouseenter', () => {
+            th.style.backgroundColor = '#e2e8f0';
+          });
+          th.addEventListener('mouseleave', () => {
+            th.style.backgroundColor = '';
+          });
         });
 
         tbody.innerHTML = rows
@@ -9999,6 +10104,10 @@ Final Score: ${score}/100`;
       
       let moneyKpiChart = null;
       let cachedAuditHistory = null;
+      
+      // Sort state for tables
+      let moneyPagesTableSort = { column: 'priority', direction: 'asc' }; // 'asc' or 'desc'
+      let moneyKpiTableSort = { column: 'segment', direction: 'asc' }; // 'asc' or 'desc'
       
       /**
        * Build KPI history structure from audit history
@@ -10059,22 +10168,99 @@ Final Score: ${score}/100`;
 
         const { labels, segments } = historyData;
 
-        // Header
-        tableHead.innerHTML = `
-          <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Segment</th>
-          ${labels.map(label => `<th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0;">${label}</th>`).join("")}
-          <th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0;">Trend</th>
-        `;
-
         const segmentLabels = {
           allMoney: "All money pages",
           landingPages: "Landing pages",
           eventPages: "Event pages",
           productPages: "Product pages"
         };
+        
+        // Convert segments to array for sorting
+        let segmentEntries = Object.entries(segments).map(([key, values]) => {
+          // Calculate trend value for sorting
+          const first = values.find(v => v != null);
+          const last = [...values].reverse().find(v => v != null);
+          let trendValue = 0;
+          if (first != null && last != null) {
+            let diff = last - first;
+            if (metricKey === "avgPosition") diff = -diff; // lower is better
+            trendValue = diff;
+          }
+          
+          return {
+            key,
+            label: segmentLabels[key],
+            values,
+            trendValue,
+            latestValue: last
+          };
+        });
+        
+        // Apply sorting
+        const sortArrow = (col) => {
+          if (moneyKpiTableSort.column === col) {
+            return moneyKpiTableSort.direction === 'asc' ? ' ↑' : ' ↓';
+          }
+          return '';
+        };
+        
+        if (moneyKpiTableSort.column === 'segment') {
+          segmentEntries.sort((a, b) => {
+            const comparison = a.label.localeCompare(b.label);
+            return moneyKpiTableSort.direction === 'asc' ? comparison : -comparison;
+          });
+        } else if (moneyKpiTableSort.column === 'trend') {
+          segmentEntries.sort((a, b) => {
+            const comparison = a.trendValue - b.trendValue;
+            return moneyKpiTableSort.direction === 'asc' ? comparison : -comparison;
+          });
+        } else if (moneyKpiTableSort.column.startsWith('month_')) {
+          const monthIndex = parseInt(moneyKpiTableSort.column.replace('month_', ''));
+          segmentEntries.sort((a, b) => {
+            const aVal = a.values[monthIndex] ?? (metricKey === 'avgPosition' ? 999 : -1);
+            const bVal = b.values[monthIndex] ?? (metricKey === 'avgPosition' ? 999 : -1);
+            const comparison = aVal - bVal;
+            return moneyKpiTableSort.direction === 'asc' ? comparison : -comparison;
+          });
+        } else if (moneyKpiTableSort.column === 'latest') {
+          segmentEntries.sort((a, b) => {
+            const aVal = a.latestValue ?? (metricKey === 'avgPosition' ? 999 : -1);
+            const bVal = b.latestValue ?? (metricKey === 'avgPosition' ? 999 : -1);
+            const comparison = aVal - bVal;
+            return moneyKpiTableSort.direction === 'asc' ? comparison : -comparison;
+          });
+        }
 
-        tbody.innerHTML = Object.entries(segments)
-          .map(([key, values]) => {
+        // Header with sortable columns
+        tableHead.innerHTML = `
+          <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none;" data-sort="segment">Segment${sortArrow('segment')}</th>
+          ${labels.map((label, idx) => `<th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none;" data-sort="month_${idx}">${label}${sortArrow(`month_${idx}`)}</th>`).join("")}
+          <th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none;" data-sort="trend">Trend${sortArrow('trend')}</th>
+        `;
+        
+        // Add click handlers to header cells
+        tableHead.querySelectorAll('th[data-sort]').forEach(th => {
+          th.addEventListener('click', () => {
+            const col = th.getAttribute('data-sort');
+            if (moneyKpiTableSort.column === col) {
+              moneyKpiTableSort.direction = moneyKpiTableSort.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+              moneyKpiTableSort.column = col;
+              moneyKpiTableSort.direction = 'asc';
+            }
+            renderMoneyKpiTable(historyData, metricKey);
+          });
+          
+          th.addEventListener('mouseenter', () => {
+            th.style.backgroundColor = '#e2e8f0';
+          });
+          th.addEventListener('mouseleave', () => {
+            th.style.backgroundColor = '';
+          });
+        });
+
+        tbody.innerHTML = segmentEntries
+          .map(({ key, label, values, trendValue }) => {
             if (!values.length) return "";
 
             let trendArrow = "→";
@@ -10092,6 +10278,8 @@ Final Score: ${score}/100`;
                 trendArrow = "↓";
               }
               trendText = (metricKey === "ctr" ? `${(diff * 100).toFixed(1)}pp` : diff.toFixed(1));
+            } else {
+              trendText = "";
             }
 
             const cells = values
@@ -10125,7 +10313,7 @@ Final Score: ${score}/100`;
 
             return `
               <tr style="border-bottom: 1px solid #e2e8f0;">
-                <td style="padding: 0.75rem; font-weight: 600;">${segmentLabels[key]}</td>
+                <td style="padding: 0.75rem; font-weight: 600;">${label}</td>
                 ${cells}
                 <td style="padding: 0.75rem; text-align: right; font-weight: 600;">${trendArrow} ${trendText}</td>
               </tr>
