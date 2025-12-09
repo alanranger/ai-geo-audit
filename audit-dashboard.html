@@ -820,6 +820,66 @@
       color: #aaa;
       margin-right: 0.5rem;
     }
+
+    /* Sidebar Layout */
+    .aigeo-layout {
+      display: flex;
+      min-height: calc(100vh - 120px); /* Account for header */
+    }
+
+    .aigeo-sidebar {
+      width: 220px;
+      background: white;
+      border-right: 1px solid #e2e8f0;
+      padding: 1rem 0;
+      position: sticky;
+      top: 0;
+      height: calc(100vh - 120px);
+      overflow-y: auto;
+      flex-shrink: 0;
+    }
+
+    .aigeo-nav-item {
+      display: block;
+      width: 100%;
+      padding: 0.75rem 1.5rem;
+      background: none;
+      border: none;
+      text-align: left;
+      font-size: 0.95rem;
+      font-weight: 500;
+      color: var(--brand-grey);
+      cursor: pointer;
+      transition: all 0.2s;
+      border-left: 3px solid transparent;
+    }
+
+    .aigeo-nav-item:hover {
+      background: #f8f9fa;
+      color: var(--brand-dark);
+    }
+
+    .aigeo-nav-item.is-active {
+      background: #fff5f0;
+      color: var(--brand-orange);
+      border-left-color: var(--brand-orange);
+      font-weight: 600;
+    }
+
+    .aigeo-main {
+      flex: 1;
+      overflow-y: auto;
+      padding: 2rem;
+      padding-bottom: 60px; /* Space for debug panel */
+    }
+
+    .aigeo-panel {
+      display: none;
+    }
+
+    .aigeo-panel.is-active {
+      display: block;
+    }
   </style>
 </head>
 <body>
@@ -840,7 +900,16 @@
     </script>
   </div>
 
-  <div class="container">
+  <div class="aigeo-layout">
+    <aside class="aigeo-sidebar">
+      <button class="aigeo-nav-item is-active" data-panel="overview">Overview</button>
+      <button class="aigeo-nav-item" data-panel="money">Money pages</button>
+      <button class="aigeo-nav-item" data-panel="ranking">Ranking & AI</button>
+      <button class="aigeo-nav-item" data-panel="local">Local & Reviews</button>
+      <button class="aigeo-nav-item" data-panel="history">History</button>
+    </aside>
+    <main class="aigeo-main">
+      <div class="container">
     <div class="config-panel">
       <h2>Configuration</h2>
       <div class="info-box" style="background: #e8f4f8; border-left: 4px solid #2196F3; padding: 1rem; margin-bottom: 1rem; border-radius: 4px;">
@@ -981,6 +1050,9 @@
       <div id="auditTimestamp" style="background: #e8f5e9; padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 1rem; border-left: 4px solid #10b981; font-size: 0.9rem; color: #555;">
         <strong>Last Audit:</strong> <span id="lastAuditTime">Not yet run</span>
       </div>
+
+      <!-- Overview Panel -->
+      <section class="aigeo-panel is-active" data-panel="overview">
       <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; margin-bottom: 3rem; border-left: 4px solid var(--brand-orange);">
         <h3 style="margin-top: 0; color: var(--brand-orange);">Five-Pillar Framework</h3>
         <p style="color: #555; line-height: 1.6; margin-bottom: 1rem;">
@@ -1306,8 +1378,35 @@
         <div id="trendSummaryRow" class="trend-summary-row"></div>
         <canvas id="trendChart"></canvas>
       </div>
+      </section>
+
+      <!-- Money Pages Panel -->
+      <section class="aigeo-panel" data-panel="money">
+        <!-- Money Pages content will be inserted here by JS -->
+      </section>
+
+      <!-- Ranking & AI Panel -->
+      <section class="aigeo-panel" data-panel="ranking">
+        <div class="card">
+          <h2>Ranking & AI Citations</h2>
+          <p>Classic keyword rankings and AI Overview coverage will appear here once wired.</p>
+        </div>
+      </section>
+
+      <!-- Local & Reviews Panel -->
+      <section class="aigeo-panel" data-panel="local">
+        <!-- Local entity, GBP, reviews content will be inserted here by JS -->
+      </section>
+
+      <!-- History Panel -->
+      <section class="aigeo-panel" data-panel="history">
+        <!-- Supabase history charts / trend lines / previous audits will be inserted here by JS -->
+      </section>
 
     </div>
+      </div>
+    </main>
+  </div>
 
     <!-- Debug Panel - Fixed at bottom, collapsible -->
     <div class="debug-panel-bottom" id="debugPanel">
@@ -11039,13 +11138,14 @@ Final Score: ${score}/100`;
         if (!moneyPagesSection.parentNode) {
           // Insert after Top Pages section (try multiple insertion points)
           let inserted = false;
-          const topPagesSectionEl = document.getElementById('authority-top-pages-section');
-          if (topPagesSectionEl && topPagesSectionEl.parentNode) {
-            topPagesSectionEl.parentNode.insertBefore(moneyPagesSection, topPagesSectionEl.nextSibling);
+          // Insert into money panel
+          const moneyPanel = document.querySelector('.aigeo-panel[data-panel="money"]');
+          if (moneyPanel) {
+            moneyPanel.appendChild(moneyPagesSection);
             inserted = true;
-            debugLog('✓ Money Pages section inserted after authority-top-pages-section', 'success');
+            debugLog('✓ Money Pages section inserted into money panel', 'success');
           } else {
-            // Fallback: insert after pillar cards
+            // Fallback: insert after pillar cards (old behavior)
             const pillarCards = document.getElementById('pillarCards');
             if (pillarCards && pillarCards.parentNode) {
               pillarCards.parentNode.insertBefore(moneyPagesSection, pillarCards.nextSibling);
@@ -15668,6 +15768,22 @@ Final Score: ${score}/100`;
         </html>
       `;
     }
+    // Tab switching for sidebar navigation
+    (function() {
+      const navItems = document.querySelectorAll(".aigeo-nav-item");
+      const panels = document.querySelectorAll(".aigeo-panel");
+
+      navItems.forEach(btn => {
+        btn.addEventListener("click", () => {
+          const target = btn.getAttribute("data-panel");
+
+          navItems.forEach(b => b.classList.toggle("is-active", b === btn));
+          panels.forEach(p => {
+            p.classList.toggle("is-active", p.getAttribute("data-panel") === target);
+          });
+        });
+      });
+    })();
   </script>
 </body>
 </html>
