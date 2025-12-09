@@ -1316,6 +1316,7 @@
         <div class="debug-actions">
           <button class="btn btn-small" onclick="event.stopPropagation(); clearDebugLog();" title="Clear all debug log entries. Useful for starting fresh during troubleshooting.">Clear</button>
           <button class="btn btn-small" onclick="event.stopPropagation(); copyDebugLog();" title="Copy the entire debug log to your clipboard. Useful for sharing logs or troubleshooting issues.">Copy Log</button>
+          <button class="btn btn-small" id="debugFilterBtn" onclick="event.stopPropagation(); toggleDebugLogFilter();" title="Filter to show only warnings and errors">Filter: All</button>
           <span id="debugToggleIcon" style="color: #fff; font-size: 1.2rem;">▼</span>
         </div>
       </div>
@@ -1336,6 +1337,7 @@
     
     // Debug logging system
     const debugLogEntries = [];
+    let debugLogFilter = 'all'; // 'all', 'warnings-errors'
     
     function debugLog(message, type = 'info') {
       const timestamp = new Date().toISOString();
@@ -1348,17 +1350,46 @@
       
       const logElement = document.getElementById('debugLog');
       if (logElement) {
-        const entryDiv = document.createElement('div');
-        entryDiv.className = `debug-log-entry ${type}`;
-        entryDiv.innerHTML = `<span class="debug-timestamp">[${new Date(timestamp).toLocaleTimeString()}]</span>${message}`;
-        logElement.appendChild(entryDiv);
-        logElement.scrollTop = logElement.scrollHeight;
+        // Check if entry should be displayed based on filter
+        const shouldShow = debugLogFilter === 'all' || (debugLogFilter === 'warnings-errors' && (type === 'warn' || type === 'error'));
+        
+        if (shouldShow) {
+          const entryDiv = document.createElement('div');
+          entryDiv.className = `debug-log-entry ${type}`;
+          entryDiv.innerHTML = `<span class="debug-timestamp">[${new Date(timestamp).toLocaleTimeString()}]</span>${message}`;
+          logElement.appendChild(entryDiv);
+          logElement.scrollTop = logElement.scrollHeight;
+        }
       }
       
       // Only log critical errors to browser console (for debugging production issues)
       // All other logs go to UI debug console only
       if (type === 'error') {
         console.error(`[DEBUG ERROR]`, message);
+      }
+    }
+    
+    function toggleDebugLogFilter() {
+      debugLogFilter = debugLogFilter === 'all' ? 'warnings-errors' : 'all';
+      const filterBtn = document.getElementById('debugFilterBtn');
+      if (filterBtn) {
+        filterBtn.textContent = `Filter: ${debugLogFilter === 'all' ? 'All' : 'Warnings/Errors'}`;
+      }
+      
+      // Re-render all log entries with current filter
+      const logElement = document.getElementById('debugLog');
+      if (logElement) {
+        logElement.innerHTML = '';
+        debugLogEntries.forEach(entry => {
+          const shouldShow = debugLogFilter === 'all' || (debugLogFilter === 'warnings-errors' && (entry.type === 'warn' || entry.type === 'error'));
+          if (shouldShow) {
+            const entryDiv = document.createElement('div');
+            entryDiv.className = `debug-log-entry ${entry.type}`;
+            entryDiv.innerHTML = `<span class="debug-timestamp">[${new Date(entry.timestamp).toLocaleTimeString()}]</span>${entry.message}`;
+            logElement.appendChild(entryDiv);
+          }
+        });
+        logElement.scrollTop = logElement.scrollHeight;
       }
     }
 
@@ -1370,6 +1401,14 @@
       }
       debugLog('Debug log cleared', 'info');
     }
+    
+    // Initialize filter button text on page load
+    window.addEventListener('DOMContentLoaded', () => {
+      const filterBtn = document.getElementById('debugFilterBtn');
+      if (filterBtn) {
+        filterBtn.textContent = `Filter: ${debugLogFilter === 'all' ? 'All' : 'Warnings/Errors'}`;
+      }
+    });
 
     function copyDebugLog() {
       const logText = debugLogEntries.map(entry => 
@@ -4658,6 +4697,9 @@
        * @returns {MoneySegmentMetricsByAudit}
        */
       function buildMoneySegmentSummary(moneyPages, behaviourScores = {}) {
+        // Ensure moneyPages is an array (default to empty array)
+        const pages = Array.isArray(moneyPages) ? moneyPages : [];
+        
         const segments = {
           allMoney: { clicks: 0, impressions: 0, ctr: 0, avgPosition: 0, behaviourScore: 0 },
           landingPages: { clicks: 0, impressions: 0, ctr: 0, avgPosition: 0, behaviourScore: 0 },
@@ -4666,19 +4708,20 @@
         };
 
         const groups = {
-          allMoney: moneyPages,
-          landingPages: moneyPages.filter(p => p.segmentType === "landing"),
-          eventPages: moneyPages.filter(p => p.segmentType === "event"),
-          productPages: moneyPages.filter(p => p.segmentType === "product")
+          allMoney: pages,
+          landingPages: pages.filter(p => p.segmentType === "landing"),
+          eventPages: pages.filter(p => p.segmentType === "event"),
+          productPages: pages.filter(p => p.segmentType === "product")
         };
 
-        for (const [key, pages] of Object.entries(groups)) {
-          if (!pages.length) continue;
-          const clicks = pages.reduce((s, p) => s + p.clicks, 0);
-          const impressions = pages.reduce((s, p) => s + p.impressions, 0);
+        for (const [key, groupPages] of Object.entries(groups)) {
+          if (!groupPages || !groupPages.length) continue;
+          const clicks = groupPages.reduce((s, p) => s + (p.clicks || 0), 0);
+          const impressions = groupPages.reduce((s, p) => s + (p.impressions || 0), 0);
           const ctr = impressions > 0 ? clicks / impressions : 0;
-          const avgPosition =
-            pages.reduce((s, p) => s + (p.avgPosition || 0), 0) / pages.length;
+          const avgPosition = groupPages.length > 0
+            ? groupPages.reduce((s, p) => s + (p.avgPosition || 0), 0) / groupPages.length
+            : 0;
 
           segments[key].clicks = clicks;
           segments[key].impressions = impressions;
@@ -4688,6 +4731,7 @@
           segments[key].behaviourScore = behaviourScores[key] || behaviourScores[key.toLowerCase()] || 0;
         }
 
+        // Always return a valid structure (never null)
         return segments;
       }
       
@@ -5029,8 +5073,10 @@
           behaviourScoresBySegment.eventPages = 0;
           behaviourScoresBySegment.productPages = 0;
         }
-        window.moneySegmentMetrics = buildMoneySegmentSummary(window.moneyPagePriorityData, behaviourScoresBySegment);
-        debugLog(`Money Pages Segments: Built segment summary for Supabase`, 'info');
+        // Always build segment metrics, even if empty (ensures consistent data structure)
+        window.moneySegmentMetrics = buildMoneySegmentSummary(window.moneyPagePriorityData || [], behaviourScoresBySegment);
+        debugLog(`Money Pages Segments: Built segment summary for Supabase with ${Object.keys(window.moneySegmentMetrics).length} segments`, 'info');
+        debugLog(`Money Pages Segments: allMoney clicks=${window.moneySegmentMetrics.allMoney.clicks}, impressions=${window.moneySegmentMetrics.allMoney.impressions}`, 'info');
       } else {
         debugLog('⚠ Money Pages Metrics: No queryPages data available', 'warn');
         window.moneyPagePriorityData = [];
@@ -10044,13 +10090,24 @@ Final Score: ${score}/100`;
       function renderMoneyPagesTable(moneyPages, filters = {}) {
         const tbody = document.querySelector("#money-pages-priority-table tbody");
         const thead = document.querySelector("#money-pages-priority-table thead");
-        if (!tbody || !thead) return;
+        if (!tbody || !thead) {
+          debugLog('⚠ renderMoneyPagesTable: Table elements not found', 'warn');
+          return;
+        }
+
+        // Use window.moneyPagePriorityData if moneyPages is not provided or empty
+        const sourcePages = (moneyPages && moneyPages.length > 0) ? moneyPages : (window.moneyPagePriorityData || []);
+        if (!sourcePages || sourcePages.length === 0) {
+          debugLog('⚠ renderMoneyPagesTable: No money pages data available', 'warn');
+          tbody.innerHTML = '<tr><td colspan="9" style="padding: 2rem; text-align: center; color: #64748b;">No money pages data available. Run an audit to generate priority matrix data.</td></tr>';
+          return;
+        }
 
         const typeFilter = filters.typeFilter || "all";
         const minImpr = filters.minImpr || 0;
         const matrixFilter = filters.matrixFilter || null;
 
-        let rows = (moneyPages || []).slice();
+        let rows = sourcePages.slice();
 
         rows = rows.filter(p => (p.impressions || 0) >= minImpr);
 
@@ -10939,12 +10996,17 @@ Final Score: ${score}/100`;
                 matrixEl,
                 (impact, diff) => {
                   window.moneyMatrixFilterState = { impact, diff };
+                  debugLog(`Money Pages Matrix: Cell clicked - Impact: ${impact}, Difficulty: ${diff}`, 'info');
                   if (typeof renderMoneyPagesTable === 'function') {
-                    renderMoneyPagesTable(window.moneyPagePriorityData, {
+                    const filters = {
                       typeFilter: document.getElementById('money-pages-type-filter')?.value || 'all',
                       minImpr: Number(document.getElementById('money-pages-min-impr')?.value) || 0,
                       matrixFilter: window.moneyMatrixFilterState
-                    });
+                    };
+                    debugLog(`Money Pages Matrix: Rendering table with filters: ${JSON.stringify(filters)}`, 'info');
+                    renderMoneyPagesTable(window.moneyPagePriorityData, filters);
+                  } else {
+                    debugLog('⚠ renderMoneyPagesTable function not available', 'warn');
                   }
                 }
               );
