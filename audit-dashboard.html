@@ -2979,52 +2979,61 @@
     // Load audit results from localStorage
     async function loadAuditResults() {
       let auditData = null;
+      let localStorageData = null;
+      
+      // First, try localStorage
       try {
         const saved = localStorage.getItem('last_audit_results');
         if (saved) {
-          auditData = JSON.parse(saved);
+          localStorageData = JSON.parse(saved);
           debugLog('✓ Audit results loaded from localStorage', 'success');
           
           // Check if localStorage data has critical Money Pages data
-          const hasMoneyPagesData = auditData?.scores?.moneyPagesMetrics || auditData?.moneyPagesMetrics;
-          if (!hasMoneyPagesData) {
-            debugLog('⚠ localStorage data missing moneyPagesMetrics, fetching from Supabase...', 'warn');
-            auditData = null; // Will fetch from Supabase below
+          const hasMoneyPagesData = localStorageData?.scores?.moneyPagesMetrics || localStorageData?.moneyPagesMetrics;
+          if (hasMoneyPagesData) {
+            debugLog(`✓ localStorage has moneyPagesMetrics: ${localStorageData?.scores?.moneyPagesMetrics?.rows?.length || localStorageData?.moneyPagesMetrics?.rows?.length || 0} rows`, 'success');
+            return localStorageData;
           } else {
-            debugLog(`✓ localStorage has moneyPagesMetrics: ${auditData?.scores?.moneyPagesMetrics?.rows?.length || auditData?.moneyPagesMetrics?.rows?.length || 0} rows`, 'success');
-            return auditData;
+            debugLog('⚠ localStorage data missing moneyPagesMetrics, will try Supabase...', 'warn');
+            // Keep localStorageData as fallback
+            auditData = localStorageData;
           }
         }
       } catch (error) {
         debugLog(`✗ Error loading audit results from localStorage: ${error.message}`, 'error');
       }
       
-      // If localStorage is empty or missing critical data, fetch from Supabase
-      if (!auditData) {
+      // If localStorage is empty or missing critical data, try fetching from Supabase
+      const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url');
+      if (propertyUrl) {
         debugLog('⚠ Fetching from Supabase (localStorage empty or incomplete)...', 'info');
-        const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url');
-        if (propertyUrl) {
-          const supabaseData = await fetchLatestAuditFromSupabase(propertyUrl);
-          if (supabaseData) {
-            debugLog('✓ Audit results loaded from Supabase', 'success');
-            debugLog(`✓ Supabase data structure: scores.moneyPagesMetrics=${!!supabaseData?.scores?.moneyPagesMetrics}, moneyPagesMetrics=${!!supabaseData?.moneyPagesMetrics}`, 'info');
-            // Store in localStorage for future use
-            try {
-              localStorage.setItem('last_audit_results', JSON.stringify(supabaseData));
-              debugLog('✓ Stored Supabase data in localStorage for future use', 'success');
-            } catch (storageError) {
-              debugLog(`⚠ Could not store Supabase data in localStorage: ${storageError.message}`, 'warn');
-            }
-            return supabaseData;
-          } else {
-            debugLog('⚠ No audit data found in Supabase either', 'warn');
+        const supabaseData = await fetchLatestAuditFromSupabase(propertyUrl);
+        if (supabaseData) {
+          debugLog('✓ Audit results loaded from Supabase', 'success');
+          debugLog(`✓ Supabase data structure: scores.moneyPagesMetrics=${!!supabaseData?.scores?.moneyPagesMetrics}, moneyPagesMetrics=${!!supabaseData?.moneyPagesMetrics}`, 'info');
+          // Store in localStorage for future use
+          try {
+            localStorage.setItem('last_audit_results', JSON.stringify(supabaseData));
+            debugLog('✓ Stored Supabase data in localStorage for future use', 'success');
+          } catch (storageError) {
+            debugLog(`⚠ Could not store Supabase data in localStorage: ${storageError.message}`, 'warn');
           }
+          return supabaseData;
         } else {
-          debugLog('⚠ Cannot fetch from Supabase: property URL not set', 'warn');
+          debugLog('⚠ No audit data found in Supabase, using localStorage data as fallback', 'warn');
         }
+      } else {
+        debugLog('⚠ Cannot fetch from Supabase: property URL not set, using localStorage data as fallback', 'warn');
       }
       
-      return auditData;
+      // Return localStorage data as fallback (even if incomplete) rather than null
+      // This ensures the page still loads with whatever data we have
+      if (localStorageData) {
+        debugLog('✓ Returning localStorage data as fallback (may be incomplete)', 'info');
+        return localStorageData;
+      }
+      
+      return null;
     }
     
     // Synchronous version for callers that can't be async (returns localStorage only)
