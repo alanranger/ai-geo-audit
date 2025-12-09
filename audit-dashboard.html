@@ -4244,7 +4244,8 @@
       }
       
       // Build compact Money Pages summary for trend tracking (Phase 3)
-      function buildMoneyPagesSummary(moneyPagesMetrics, overview) {
+      // Make buildMoneyPagesSummary globally accessible
+      window.buildMoneyPagesSummary = function buildMoneyPagesSummary(moneyPagesMetrics, overview) {
         if (!moneyPagesMetrics || !moneyPagesMetrics.rows || !moneyPagesMetrics.rows.length) {
           return null;
         }
@@ -4281,7 +4282,7 @@
             ? moneyPagesMetrics.behaviour.score
             : null
         };
-      }
+      };
       
       // Compute money pages behaviour score (for Authority overlay)
       // Define globally to ensure accessibility from event handlers
@@ -9169,6 +9170,49 @@ Final Score: ${score}/100`;
           ctr: row.moneyPagesSummary?.ctr ?? null
         })).filter(h => h.date); // Filter out entries without dates
         
+        debugLog(`📊 Money Pages Trend: Extracted ${moneyHistory.length} history entries`, 'info');
+        if (moneyHistory.length > 0) {
+          const sample = moneyHistory[0];
+          debugLog(`📊 Sample entry: date=${sample.date}, behaviourScore=${sample.behaviourScore}, shareOfImpressions=${sample.shareOfImpressions}, ctr=${sample.ctr}`, 'info');
+        }
+        
+        // Add current audit data if available
+        const currentMoneyPagesMetrics = window.currentMoneyPagesMetrics || (window.saved && window.saved.scores && window.saved.scores.moneyPagesMetrics);
+        const currentSearchData = window.currentSearchData || (window.saved && window.saved.searchData);
+        
+        if (currentMoneyPagesMetrics && currentMoneyPagesMetrics.behaviour && currentMoneyPagesMetrics.behaviour.score != null) {
+          const today = new Date().toISOString().split('T')[0];
+          const currentSummary = buildMoneyPagesSummary(currentMoneyPagesMetrics, currentSearchData?.overview || null);
+          
+          // Check if today's data is already in history
+          const todayInHistory = moneyHistory.find(h => h.date === today);
+          if (!todayInHistory && currentSummary) {
+            debugLog(`📊 Adding current audit data to Money Pages trend: date=${today}, behaviourScore=${currentMoneyPagesMetrics.behaviour.score}`, 'info');
+            moneyHistory.push({
+              date: today,
+              dateLabel: new Date(today).toLocaleDateString('en-GB', { month: 'short', day: 'numeric' }),
+              behaviourScore: currentMoneyPagesMetrics.behaviour.score,
+              shareOfImpressions: currentSummary.shareOfImpressions,
+              shareOfClicks: currentSummary.shareOfClicks,
+              ctr: currentSummary.ctr
+            });
+          } else if (todayInHistory && currentMoneyPagesMetrics.behaviour.score != null) {
+            // Update today's entry with current data if it exists but is missing behaviour score
+            if (todayInHistory.behaviourScore == null) {
+              debugLog(`📊 Updating today's entry with current behaviour score: ${currentMoneyPagesMetrics.behaviour.score}`, 'info');
+              todayInHistory.behaviourScore = currentMoneyPagesMetrics.behaviour.score;
+              if (currentSummary) {
+                todayInHistory.shareOfImpressions = currentSummary.shareOfImpressions;
+                todayInHistory.shareOfClicks = currentSummary.shareOfClicks;
+                todayInHistory.ctr = currentSummary.ctr;
+              }
+            }
+          }
+        }
+        
+        // Sort by date
+        moneyHistory.sort((a, b) => new Date(a.date) - new Date(b.date));
+        
         if (moneyHistory.length === 0) {
           debugLog('⚠ No money pages history data after filtering', 'warn');
           const cardBody = ctx.closest('.card-body');
@@ -9178,14 +9222,34 @@ Final Score: ${score}/100`;
           return;
         }
         
-        const labels = moneyHistory.map(p => p.dateLabel || p.date);
-        const behaviour = moneyHistory.map(p => p.behaviourScore ?? null);
-        const shareImps = moneyHistory.map(p =>
+        // Filter to only entries with at least one non-null value
+        const validHistory = moneyHistory.filter(h => 
+          h.behaviourScore != null || 
+          h.shareOfImpressions != null || 
+          h.ctr != null
+        );
+        
+        if (validHistory.length === 0) {
+          debugLog('⚠ No money pages history data with valid values', 'warn');
+          const cardBody = ctx.closest('.card-body');
+          if (cardBody) {
+            cardBody.innerHTML = '<div style="padding: 2rem; text-align: center; color: #64748b; font-size: 0.9rem;">No money pages historical data available. Run audits to build trend data.</div>';
+          }
+          return;
+        }
+        
+        debugLog(`📊 Money Pages Trend: Using ${validHistory.length} entries with valid data`, 'info');
+        
+        const labels = validHistory.map(p => p.dateLabel || p.date);
+        const behaviour = validHistory.map(p => p.behaviourScore ?? null);
+        const shareImps = validHistory.map(p =>
           p.shareOfImpressions != null ? p.shareOfImpressions * 100 : null
         );
-        const ctr = moneyHistory.map(p =>
+        const ctr = validHistory.map(p =>
           p.ctr != null ? p.ctr * 100 : null
         );
+        
+        debugLog(`📊 Chart data: ${labels.length} labels, behaviour=${behaviour.filter(v => v != null).length} values, shareImps=${shareImps.filter(v => v != null).length} values, ctr=${ctr.filter(v => v != null).length} values`, 'info');
         
         try {
           window.moneyPagesTrendChart = new Chart(ctx, {
