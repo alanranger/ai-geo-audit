@@ -224,6 +224,11 @@ export default async function handler(req, res) {
         },
         // Diagnostic info (remove in production)
         _debug: {
+          task_result_exists: task.result !== null && task.result !== undefined,
+          task_result_type: typeof task.result,
+          task_result_is_array: Array.isArray(task.result),
+          task_result_length: Array.isArray(task.result) ? task.result.length : (task.result ? 'not_array' : 'null/undefined'),
+          task_result_keys: task.result && typeof task.result === 'object' && !Array.isArray(task.result) ? Object.keys(task.result).slice(0, 10) : [],
           total_items: allItems.length,
           organic_items: organicItems.length,
           alanranger_items: arItems.length,
