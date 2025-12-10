@@ -2310,9 +2310,9 @@
           <div class="ranking-details-left">
             <div class="card" id="ranking-ai-detail-card">
               <div class="card-header">
-                <h3>AI answer detail</h3>
+                <h3>Keyword Scorecard</h3>
                 <p class="card-subtitle ranking-subtitle-tight">
-                  Shows how <strong>Content/Schema</strong> and <strong>Authority</strong> influence AI Overviews for the selected keyword.
+                  Detailed analysis of the selected keyword's impact, difficulty, and recommended actions. Shows demand, ranking strength, AI usage, and priority.
                 </p>
               </div>
               <div class="ranking-ai-detail-body">
@@ -18494,6 +18494,7 @@ Final Score: ${score}/100`;
       rowsPerPage: 25
     };
     let rankingPriorityFilter = null; // { impact: 'high'|'medium'|'low', difficulty: 'high'|'medium'|'low' } | null
+    let selectedKeywordId = null; // Store selected keyword identifier (keyword + url combination)
 
     // Impact and Difficulty bucket thresholds (constants for tuning)
     const IMPACT_THRESHOLDS = {
@@ -18543,6 +18544,158 @@ Final Score: ${score}/100`;
       
       // High difficulty: rank > 30 or null (no rank)
       return 'high';
+    }
+
+    /**
+     * Build comprehensive scorecard data for a keyword row
+     * @param {Object} row - Keyword row from combinedRows
+     * @returns {Object} Enriched scorecard data
+     */
+    function buildKeywordScorecardData(row) {
+      if (!row) return null;
+
+      // Demand level from search_volume
+      const searchVolume = row.search_volume;
+      let demandLevel = 'Low';
+      if (searchVolume != null && searchVolume >= 500) {
+        demandLevel = 'High';
+      } else if (searchVolume != null && searchVolume >= 200) {
+        demandLevel = 'Medium';
+      }
+
+      // Rank bucket
+      const rank = row.best_rank_group;
+      let rankBucket = 'page2plus';
+      let rankBucketLabel = 'Page 2+ / Not ranked';
+      let positionStrength = 'Weak';
+      if (rank != null) {
+        if (rank >= 1 && rank <= 3) {
+          rankBucket = 'top3';
+          rankBucketLabel = 'Top 3';
+          positionStrength = 'Strong';
+        } else if (rank >= 4 && rank <= 10) {
+          rankBucket = 'top10';
+          rankBucketLabel = 'Top 10';
+          positionStrength = 'OK';
+        } else if (rank >= 11 && rank <= 20) {
+          rankBucket = 'page1';
+          rankBucketLabel = 'Page 1 (11-20)';
+          positionStrength = 'Weak';
+        }
+      }
+
+      // AI status bucket
+      const hasAiOverview = row.has_ai_overview || false;
+      const aiCitationsOurs = row.ai_alan_citations_count || 0;
+      const aiCitationsTotal = row.ai_total_citations || 0;
+      let aiStatus = 'no_ai';
+      let aiStatusLabel = 'No AI Overview';
+      if (hasAiOverview) {
+        if (aiCitationsOurs === 0) {
+          aiStatus = 'ai_no_citation';
+          aiStatusLabel = 'AI Overview present, not cited';
+        } else {
+          const ourShare = aiCitationsTotal > 0 ? (aiCitationsOurs / aiCitationsTotal) : 0;
+          if (ourShare >= 0.25) {
+            aiStatus = 'ai_cited_strong';
+            aiStatusLabel = `AI Overview present, cited in ${aiCitationsOurs}/${aiCitationsTotal} citations (strong)`;
+          } else {
+            aiStatus = 'ai_cited_light';
+            aiStatusLabel = `AI Overview present, cited in ${aiCitationsOurs}/${aiCitationsTotal} citations (light)`;
+          }
+        }
+      }
+
+      // Impact and Difficulty buckets (reuse existing functions)
+      const impact = calculateImpactBucket(row.demand_share || 0);
+      const difficulty = calculateDifficultyBucket(rank);
+
+      // Priority level from Impact + Difficulty
+      let priorityLevel = 'Low';
+      if (impact === 'high' && (difficulty === 'low' || difficulty === 'medium')) {
+        priorityLevel = 'High';
+      } else if (impact === 'high' && difficulty === 'high' || 
+                 impact === 'medium' && (difficulty === 'low' || difficulty === 'medium')) {
+        priorityLevel = 'Medium';
+      }
+
+      return {
+        // Raw data
+        keyword: row.keyword,
+        segment: row.segment,
+        best_rank_group: rank,
+        search_volume: searchVolume,
+        demand_share: row.demand_share || 0,
+        has_ai_overview: hasAiOverview,
+        ai_citations_total: aiCitationsTotal,
+        ai_citations_ours: aiCitationsOurs,
+        ai_alan_citations: row.ai_alan_citations || [], // Store citations for display
+        serp_features: row.serp_features || {},
+        ranking_url: row.best_url || '',
+        page_type: row.pageType || 'Landing',
+        
+        // Derived fields
+        demand_level: demandLevel,
+        rank_bucket: rankBucket,
+        rank_bucket_label: rankBucketLabel,
+        position_strength: positionStrength,
+        ai_status: aiStatus,
+        ai_status_label: aiStatusLabel,
+        impact_bucket: impact,
+        difficulty_bucket: difficulty,
+        priority_level: priorityLevel
+      };
+    }
+
+    /**
+     * Generate action bullets based on scorecard data
+     * @param {Object} scorecardData - Data from buildKeywordScorecardData
+     * @returns {Array<string>} Array of action bullet strings
+     */
+    function generateActionBullets(scorecardData) {
+      const actions = [];
+      const { demand_level, rank_bucket, ai_status, segment, page_type, position_strength, ai_citations_ours, ai_citations_total } = scorecardData;
+
+      // Rule 1: High demand + not in top 3
+      if (demand_level === 'High' && rank_bucket !== 'top3') {
+        actions.push('Improve title and meta description for this page to win more clicks for this high-demand term.');
+      }
+
+      // Rule 2: AI Overview exists but not cited
+      if (ai_status === 'ai_no_citation') {
+        actions.push('Strengthen on-page answer content and schema so AI can confidently cite this page in AI Overviews.');
+      }
+
+      // Rule 3: AI Overview exists and cited but rank is weak
+      if ((ai_status === 'ai_cited_strong' || ai_status === 'ai_cited_light') && 
+          (rank_bucket === 'page1' || rank_bucket === 'page2plus')) {
+        actions.push('You\'re already cited in AI Overviews – improve classic ranking (links and snippet) to capture more traffic.');
+      }
+
+      // Rule 4: Education segment + Landing page
+      if (segment && segment.toLowerCase() === 'education' && page_type === 'Landing') {
+        actions.push('Consider adding stronger calls-to-action and internal links from money pages to capture more commercial value from this educational query.');
+      }
+
+      // Rule 5: Money segment + poor rank + medium/high demand
+      if (segment && segment.toLowerCase() === 'money' && 
+          (demand_level === 'High' || demand_level === 'Medium') && 
+          (rank_bucket === 'page1' || rank_bucket === 'page2plus')) {
+        actions.push('This is a high-impact commercial keyword – treat this landing page as a priority for on-page SEO and schema improvements.');
+      }
+
+      // Rule 6: Weak position strength
+      if (position_strength === 'Weak' && rank_bucket !== 'page2plus') {
+        actions.push('Optimize on-page content and internal linking to push this page into top 10 for better visibility.');
+      }
+
+      // Rule 7: Medium/Low demand but good rank - opportunity to grow
+      if ((demand_level === 'Medium' || demand_level === 'Low') && rank_bucket === 'top3') {
+        actions.push('You rank well for this term – consider expanding content to capture related higher-volume queries.');
+      }
+
+      // Limit to max 3 bullets, ordered by impact
+      return actions.slice(0, 3);
     }
 
     /**
@@ -18648,11 +18801,39 @@ Final Score: ${score}/100`;
               rankingPriorityFilter.impact === impact && 
               rankingPriorityFilter.difficulty === difficulty) {
             rankingPriorityFilter = null;
+            selectedKeywordId = null; // Clear selection when clearing filter
           } else {
             rankingPriorityFilter = { impact, difficulty };
           }
           
+          debugLog(`[RankingAI Scorecard] Priority grid cell clicked - impact: ${impact}, difficulty: ${difficulty}`, 'info');
+          
           if (onCellClick) onCellClick(rankingPriorityFilter);
+          
+          // After filter is applied, check if exactly one row matches and auto-select it
+          setTimeout(() => {
+            const { combinedRows } = RankingAiModule.state();
+            const filteredAfterClick = applyRankingFilters(combinedRows);
+            if (filteredAfterClick.length === 1) {
+              const singleRow = filteredAfterClick[0];
+              selectedKeywordId = `${singleRow.keyword}|${singleRow.best_url || ''}`;
+              debugLog(`[RankingAI Scorecard] Auto-selecting single matching keyword: "${singleRow.keyword}"`, 'info');
+              renderKeywordScorecard(singleRow);
+              // Also update table row selection
+              const tbody = document.getElementById("ranking-ai-table-body");
+              if (tbody) {
+                tbody.querySelectorAll("tr").forEach(tr => {
+                  tr.classList.remove("ranking-table-row--selected");
+                  const idx = Number(tr.dataset.index || "-1");
+                  if (!Number.isNaN(idx) && combinedRows[idx] === singleRow) {
+                    tr.classList.add("ranking-table-row--selected");
+                  }
+                });
+              }
+            } else {
+              selectedKeywordId = null; // Clear selection if multiple or no rows
+            }
+          }, 100); // Small delay to ensure renderRankingAiTab has completed
         });
       });
 
@@ -19162,14 +19343,18 @@ Final Score: ${score}/100`;
       // Re-wire sorting after render completes
       wireRankingSorting();
 
-      // Row click → detail panel
+      // Row click → scorecard panel
       tbody.querySelectorAll("tr").forEach(tr => {
         tr.addEventListener("click", () => {
           tbody.querySelectorAll("tr").forEach(r => r.classList.remove("ranking-table-row--selected"));
           tr.classList.add("ranking-table-row--selected");
           const idx = Number(tr.dataset.index || "-1");
           if (!Number.isNaN(idx) && combinedRows[idx]) {
-            renderRankingAiDetail(combinedRows[idx]);
+            const row = combinedRows[idx];
+            // Create unique identifier for selected keyword
+            selectedKeywordId = `${row.keyword}|${row.best_url || ''}`;
+            debugLog(`[RankingAI Scorecard] Row clicked - keyword: "${row.keyword}", selectedKeywordId: "${selectedKeywordId}"`, 'info');
+            renderKeywordScorecard(row);
           }
         });
       });
@@ -19225,20 +19410,127 @@ Final Score: ${score}/100`;
       }
     }
 
-    function renderRankingAiDetail(row) {
+    /**
+     * Render Keyword Scorecard Panel
+     * @param {Object} row - Keyword row from combinedRows
+     */
+    function renderKeywordScorecard(row) {
       const emptyEl = document.getElementById("ranking-ai-detail-empty");
       const contentEl = document.getElementById("ranking-ai-detail-content");
       if (!emptyEl || !contentEl) return;
 
+      if (!row) {
+        emptyEl.hidden = false;
+        contentEl.hidden = true;
+        emptyEl.textContent = "Select a keyword in the table or a cell in the priority grid to see a detailed scorecard.";
+        return;
+      }
+
+      const scorecardData = buildKeywordScorecardData(row);
+      if (!scorecardData) {
+        emptyEl.hidden = false;
+        contentEl.hidden = true;
+        return;
+      }
+
+      debugLog(`[RankingAI Scorecard] Rendering scorecard for keyword: "${scorecardData.keyword}"`, 'info');
+      debugLog(`[RankingAI Scorecard] Demand: ${scorecardData.demand_level}, Rank: ${scorecardData.rank_bucket_label}, AI: ${scorecardData.ai_status}, Priority: ${scorecardData.priority_level}`, 'info');
+
       emptyEl.hidden = true;
       contentEl.hidden = false;
 
+      // Build HTML for scorecard
+      let html = '';
+
+      // Keyword & URL header
+      html += `<div style="margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 2px solid #e5e7eb;">`;
+      html += `<h4 style="font-size: 1.25rem; font-weight: 700; color: #1e293b; margin-bottom: 0.5rem;">${scorecardData.keyword}</h4>`;
+      if (scorecardData.ranking_url) {
+        html += `<p style="margin: 0.25rem 0; font-size: 0.9rem;"><a href="${scorecardData.ranking_url}" target="_blank" rel="noopener noreferrer" style="color: #0284c7; text-decoration: none;">${scorecardData.ranking_url}</a></p>`;
+      }
+      html += `<div style="display: flex; gap: 1rem; margin-top: 0.5rem; flex-wrap: wrap;">`;
+      html += `<span class="ranking-badge ${scorecardData.segment === 'money' ? 'ranking-badge--segment-money' : scorecardData.segment === 'education' ? 'ranking-badge--segment-education' : scorecardData.segment === 'brand' ? 'ranking-badge--segment-brand' : 'ranking-badge--segment-general'}" style="font-size: 0.85rem;">${scorecardData.segment || 'Other'}</span>`;
+      html += `<span style="font-size: 0.85rem; color: #64748b;">${scorecardData.page_type}</span>`;
+      html += `</div></div>`;
+
+      // 1. Demand
+      html += `<div style="margin-bottom: 1.5rem;">`;
+      html += `<h5 style="font-size: 1rem; font-weight: 600; color: #1e293b; margin-bottom: 0.75rem;">1. Demand</h5>`;
+      const volumeFormatted = scorecardData.search_volume != null ? scorecardData.search_volume.toLocaleString() : '—';
+      const volumeClass = scorecardData.demand_level === 'High' ? 'ranking-badge-volume--high' : 
+                         scorecardData.demand_level === 'Medium' ? 'ranking-badge-volume--med' : 
+                         'ranking-badge-volume--low';
+      html += `<div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.5rem;">`;
+      html += `<span>Search volume:</span> <span class="ranking-badge-volume ${volumeClass}">${volumeFormatted} ${scorecardData.demand_level}</span>`;
+      html += `</div>`;
+      html += `<div style="display: flex; gap: 1rem; align-items: center;">`;
+      html += `<span>Demand share:</span> <strong style="color: #0284c7;">${(scorecardData.demand_share * 100).toFixed(1)}%</strong>`;
+      html += `</div></div>`;
+
+      // 2. Classic ranking
+      html += `<div style="margin-bottom: 1.5rem;">`;
+      html += `<h5 style="font-size: 1rem; font-weight: 600; color: #1e293b; margin-bottom: 0.75rem;">2. Classic ranking</h5>`;
+      const rankText = scorecardData.best_rank_group != null 
+        ? `Currently ranking #${scorecardData.best_rank_group} (${scorecardData.rank_bucket_label})`
+        : 'Not currently ranked';
+      html += `<p style="margin-bottom: 0.5rem;">${rankText}</p>`;
+      const strengthClass = scorecardData.position_strength === 'Strong' ? 'status-green' : 
+                           scorecardData.position_strength === 'OK' ? 'status-amber' : 'status-red';
+      html += `<p>Position strength: <span class="${strengthClass}" style="padding: 0.25rem 0.5rem; border-radius: 4px; font-weight: 600;">${scorecardData.position_strength}</span></p>`;
+      html += `</div>`;
+
+      // 3. CTR & snippet
+      html += `<div style="margin-bottom: 1.5rem;">`;
+      html += `<h5 style="font-size: 1rem; font-weight: 600; color: #1e293b; margin-bottom: 0.75rem;">3. CTR & snippet</h5>`;
+      html += `<p style="color: #64748b; font-size: 0.9rem;">CTR data currently not wired in; using rank as proxy. ${scorecardData.best_rank_group != null ? `At #${scorecardData.best_rank_group} you should be capturing a higher share of clicks than you are.` : 'Improve ranking to capture clicks.'}</p>`;
+      html += `</div>`;
+
+      // 4. Schema & rich results
+      html += `<div style="margin-bottom: 1.5rem;">`;
+      html += `<h5 style="font-size: 1rem; font-weight: 600; color: #1e293b; margin-bottom: 0.75rem;">4. Schema & rich results</h5>`;
+      html += `<p style="color: #64748b; font-size: 0.9rem;">Schema: coverage assessment not wired into this module yet.</p>`;
+      html += `</div>`;
+
+      // 5. AI usage
+      html += `<div style="margin-bottom: 1.5rem;">`;
+      html += `<h5 style="font-size: 1rem; font-weight: 600; color: #1e293b; margin-bottom: 0.75rem;">5. AI usage</h5>`;
+      html += `<p>${scorecardData.ai_status_label}</p>`;
+      if (scorecardData.ai_citations_ours > 0 && scorecardData.ai_alan_citations && scorecardData.ai_alan_citations.length > 0) {
+        html += `<ul style="margin-top: 0.5rem; padding-left: 1.5rem;">`;
+        scorecardData.ai_alan_citations.forEach(c => {
+          html += `<li><a href="${c.url}" target="_blank" rel="noopener noreferrer" style="color: #0284c7;">${c.title || c.url}</a></li>`;
+        });
+        html += `</ul>`;
+      }
+      html += `</div>`;
+
+      // 6. Priority & next actions
+      html += `<div style="margin-bottom: 1rem;">`;
+      html += `<h5 style="font-size: 1rem; font-weight: 600; color: #1e293b; margin-bottom: 0.75rem;">6. Priority & next actions</h5>`;
+      const priorityClass = scorecardData.priority_level === 'High' ? 'status-red' : 
+                           scorecardData.priority_level === 'Medium' ? 'status-amber' : 'status-green';
+      html += `<p style="margin-bottom: 0.75rem;">Overall priority: <span class="${priorityClass}" style="padding: 0.25rem 0.5rem; border-radius: 4px; font-weight: 600;">${scorecardData.priority_level}</span></p>`;
+      
+      const actions = generateActionBullets(scorecardData);
+      if (actions.length > 0) {
+        html += `<ul style="margin: 0; padding-left: 1.5rem; list-style-type: disc;">`;
+        actions.forEach(action => {
+          html += `<li style="margin-bottom: 0.5rem; color: #1e293b;">${action}</li>`;
+        });
+        html += `</ul>`;
+      } else {
+        html += `<p style="color: #64748b; font-size: 0.9rem;">No specific actions identified. Continue monitoring this keyword.</p>`;
+      }
+      html += `</div>`;
+
+      // Update the content element
       const kwEl = document.getElementById("ranking-ai-detail-keyword");
-      const sumEl = document.getElementById("ranking-ai-detail-summary");
+      if (kwEl) kwEl.innerHTML = html;
+
+      // Keep existing AI citations lists for backward compatibility
       const ourList = document.getElementById("ranking-ai-detail-our-pages");
       const compList = document.getElementById("ranking-ai-detail-competitors");
-
-      if (kwEl) kwEl.textContent = row.keyword;
+      const sumEl = document.getElementById("ranking-ai-detail-summary");
 
       if (sumEl) {
         const parts = [];
@@ -19247,7 +19539,6 @@ Final Score: ${score}/100`;
         } else {
           parts.push("Classic rank: not in top 50");
         }
-
         if (row.has_ai_overview) {
           const total = row.ai_total_citations || 0;
           const ours = row.ai_alan_citations_count || 0;
@@ -19255,14 +19546,10 @@ Final Score: ${score}/100`;
         } else {
           parts.push("AI Overview: not present");
         }
-
-        const segLabel =
-          row.segment === "money" ? "Money page (commercial intent)" :
-          row.segment === "education" ? "Education content" :
-          row.segment === "brand" ? "Brand query" : "General / other";
-
+        const segLabel = row.segment === "money" ? "Money page (commercial intent)" :
+                        row.segment === "education" ? "Education content" :
+                        row.segment === "brand" ? "Brand query" : "General / other";
         parts.push(`Segment: ${segLabel}.`);
-
         sumEl.textContent = parts.join(" • ");
       }
 
@@ -19289,7 +19576,6 @@ Final Score: ${score}/100`;
       if (compList) {
         compList.innerHTML = "";
         const entries = Object.entries(row.competitor_counts || {}).sort((a, b) => b[1] - a[1]);
-
         if (!entries.length) {
           const li = document.createElement("li");
           li.textContent = "No competing domains recorded from AI citations for this keyword.";
@@ -19302,6 +19588,11 @@ Final Score: ${score}/100`;
           });
         }
       }
+    }
+
+    // Keep renderRankingAiDetail as alias for backward compatibility
+    function renderRankingAiDetail(row) {
+      renderKeywordScorecard(row);
     }
 
     function renderRankingAiCompetitors(rows) {
@@ -19658,6 +19949,7 @@ Final Score: ${score}/100`;
               keyword: ''
             };
             rankingPriorityFilter = null; // Clear priority matrix filter
+            selectedKeywordId = null; // Clear selected keyword
             if (segmentFilter) segmentFilter.value = 'all';
             if (rankFilter) rankFilter.value = 'all';
             if (aiOverviewFilter) aiOverviewFilter.value = 'all';
