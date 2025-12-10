@@ -263,6 +263,9 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot) {
 }
 
 export default async function handler(req, res) {
+  // Log handler entry immediately
+  console.log(`[SERP-RANK-TEST] Handler called - Method: ${req.method}, Query:`, req.query);
+  
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -270,6 +273,7 @@ export default async function handler(req, res) {
   
   // Handle preflight
   if (req.method === 'OPTIONS') {
+    console.log(`[SERP-RANK-TEST] OPTIONS preflight request`);
     return res.status(200).end();
   }
 
@@ -295,7 +299,10 @@ export default async function handler(req, res) {
       .filter(k => k.length > 0);
   }
 
+  console.log(`[SERP-RANK-TEST] Parsed keywords:`, keywords);
+  
   if (keywords.length === 0) {
+    console.log(`[SERP-RANK-TEST] ERROR: No keywords provided`);
     res.status(400).json({
       error: "keyword or keywords is required",
     });
@@ -310,9 +317,15 @@ export default async function handler(req, res) {
   );
 
   try {
+    // Log handler entry with keywords
+    console.log(`[Handler] === START === Processing ${keywords.length} keywords`);
+    console.log(`[Handler] Keywords received:`, keywords);
+    
     // Fetch keyword search volume (best-effort, non-blocking)
+    console.log(`[Handler] Calling fetchKeywordOverview...`);
     const volumeByKeyword = await fetchKeywordOverview(keywords, auth);
     console.log(`[Handler] Volume map keys: ${Object.keys(volumeByKeyword).join(', ')}`);
+    console.log(`[Handler] Volume map size: ${Object.keys(volumeByKeyword).length}`);
 
     // Call DataForSEO once per keyword (required by Live API)
     // IMPORTANT: Process ALL keywords, including Brand segment - do not filter
