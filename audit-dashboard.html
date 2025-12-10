@@ -2160,9 +2160,10 @@
               <label>Segment:</label>
               <select id="ranking-filter-segment" class="filter-control">
                 <option value="all">All</option>
-                <option value="money">Money pages only</option>
-                <option value="education">Education only</option>
-                <option value="brand">Brand only</option>
+                <option value="brand">Brand</option>
+                <option value="money">Money</option>
+                <option value="education">Education</option>
+                <option value="other">Other</option>
               </select>
             </div>
 
@@ -2201,6 +2202,19 @@
             </div>
 
             <button id="ranking-filter-clear" class="btn btn-small">Clear filters</button>
+          </div>
+        </div>
+
+        <!-- Keyword Priority Matrix (Impact × Difficulty) -->
+        <div class="ranking-priority-matrix-section" id="ranking-priority-matrix-section" style="display: none; margin-top: 1.5rem; margin-bottom: 1.5rem;">
+          <div class="card" style="background: rgba(204, 255, 255, 0.15); border-left: 4px solid #CCFFFF; padding: 1.5rem;">
+            <h3 style="margin: 0 0 0.5rem 0; font-size: 1.1rem; font-weight: 700; color: #1e293b;">Keyword Priority – Impact & Difficulty</h3>
+            <p style="margin: 0 0 1rem 0; font-size: 0.85rem; color: #64748b; line-height: 1.6;">
+              Uses demand and current rank to surface the highest-impact keywords to work on. Click a cell to filter the table below.
+            </p>
+            <div id="ranking-keyword-priority-matrix" style="background: #f8fafc; padding: 1rem; border-radius: 8px;">
+              <!-- 3x3 grid rendered by JS -->
+            </div>
           </div>
         </div>
 
@@ -4347,7 +4361,8 @@
     
     /**
      * Shared classification function for Ranking & AI tab
-     * Returns both segment (Brand/Education/Money) and pageType (Landing/Blog/Event/Product/GBP)
+     * Returns both segment (Brand/Education/Money/Other) and pageType (Landing/Blog/Event/Product/GBP)
+     * Uses canonical classification from Money Pages logic
      * @param {string} rawUrlOrPath - URL or path to classify
      * @param {string} keyword - Optional keyword for brand detection
      * @returns {{segment: string, pageType: string}}
@@ -4359,55 +4374,57 @@
       if (keyword) {
         const kw = (keyword || "").toLowerCase();
         if (kw.includes("alan ranger") || kw.includes("alanranger")) {
-          return { segment: "brand", pageType: "GBP" };
+          return { segment: "Brand", pageType: "GBP" };
         }
       }
       
-      // Get segment using existing logic
-      const segment = classifyPageSegment(rawUrlOrPath);
+      // Use canonical page classification (same as Money Pages)
+      const { isMoney, segmentType } = classifyMoneyPage(rawUrlOrPath);
       
-      // Determine pageType based on URL path
+      // Determine pageType from canonical segmentType
       let pageType = "Landing"; // Default
+      if (segmentType === "event") {
+        pageType = "Event";
+      } else if (segmentType === "product") {
+        pageType = "Product";
+      } else if (segmentType === "landing" || segmentType === "all") {
+        pageType = "Landing";
+      }
       
-      // Blog pages
+      // Check for Blog pages (Education segment)
       if (path.startsWith('/blog-on-photography/') || path.startsWith('/blogs/')) {
         pageType = "Blog";
       }
-      // Event pages
-      else if (path.startsWith('/beginners-photography-lessons/') || 
-               path.startsWith('/beginners-photography-lessons') ||
-               path.startsWith('/photographic-workshops-near-me/') ||
-               path.startsWith('/photographic-workshops-near-me')) {
-        pageType = "Event";
-      }
-      // Product pages
-      else if (path.startsWith('/photo-workshops-uk/') || 
-               path.startsWith('/photo-workshops-uk') ||
-               path.startsWith('/photography-services-near-me/') ||
-               path.startsWith('/photography-services-near-me')) {
-        pageType = "Product";
-      }
-      // GBP/Home/About pages
-      else if (path === '/' || 
-               path === '/about-alan-ranger' || 
-               path.includes('/contact') ||
-               path.includes('/reviews')) {
+      
+      // Check for GBP/Home/About pages (Brand segment)
+      if (path === '/' || 
+          path === '/about-alan-ranger' || 
+          path.includes('/contact') ||
+          path.includes('/reviews')) {
         pageType = "GBP";
       }
-      // Everything else is Landing (default)
       
-      // Map segment to canonical values
-      let canonicalSegment = "Education"; // Default
-      if (segment === PageSegment.MONEY) {
-        canonicalSegment = "Money";
-      } else if (segment === PageSegment.EDUCATION) {
-        canonicalSegment = "Education";
-      } else if (segment === PageSegment.SUPPORT || segment === PageSegment.SYSTEM) {
-        // Support/System pages are treated as Brand for Ranking & AI
-        canonicalSegment = "Brand";
+      // Determine segment from pageType and canonical classification
+      let segment = "Other"; // Default
+      
+      // Brand: home page, about, contact, reviews, or brand keywords
+      if (pageType === "GBP" || path === '/' || path === '/about-alan-ranger') {
+        segment = "Brand";
       }
+      // Money: Landing, Event, or Product page types
+      else if (pageType === "Landing" || pageType === "Event" || pageType === "Product") {
+        segment = "Money";
+      }
+      // Education: Blog pages or free course/educational content
+      else if (pageType === "Blog" || 
+               path === '/free-online-photography-course' ||
+               path === '/outdoor-photography-exposure-calculator' ||
+               path === '/free-photography-tips') {
+        segment = "Education";
+      }
+      // Everything else is Other
       
-      return { segment: canonicalSegment, pageType };
+      return { segment, pageType };
     }
     
     // Make available globally for RankingAiModule
@@ -18331,7 +18348,7 @@ Final Score: ${score}/100`;
 
           return {
             keyword: row.keyword,
-            segment: segment.toLowerCase(), // Normalize to lowercase for consistency
+            segment: segment, // Keep capitalized: Brand/Money/Education/Other
             pageType,
             best_rank_group: row.best_rank_group,
             best_rank_absolute: row.best_rank_absolute,
@@ -18479,6 +18496,57 @@ Final Score: ${score}/100`;
       currentPage: 1,
       rowsPerPage: 25
     };
+    let rankingPriorityFilter = null; // { impact: 'high'|'medium'|'low', difficulty: 'high'|'medium'|'low' } | null
+
+    // Impact and Difficulty bucket thresholds (constants for tuning)
+    const IMPACT_THRESHOLDS = {
+      HIGH: 0.20,   // >= 20% of tracked demand
+      MEDIUM: 0.10  // 10-19.99% of tracked demand
+    };
+    const DIFFICULTY_THRESHOLDS = {
+      LOW: { min: 4, max: 15 },      // Easy win: rank 4-15
+      MEDIUM: { min: 16, max: 30 }   // Medium: rank 16-30
+    };
+
+    /**
+     * Calculate impact bucket for a keyword based on demand_share
+     * @param {number} demandShare - Fraction (0-1) of total demand
+     * @returns {'high'|'medium'|'low'}
+     */
+    function calculateImpactBucket(demandShare) {
+      if (demandShare >= IMPACT_THRESHOLDS.HIGH) return 'high';
+      if (demandShare >= IMPACT_THRESHOLDS.MEDIUM) return 'medium';
+      return 'low';
+    }
+
+    /**
+     * Calculate difficulty bucket for a keyword based on best_rank_group
+     * @param {number|null} bestRankGroup - Best rank group (position)
+     * @returns {'low'|'medium'|'high'}
+     */
+    function calculateDifficultyBucket(bestRankGroup) {
+      // If already ranking in top 3, treat as low difficulty (already winning)
+      if (bestRankGroup != null && bestRankGroup >= 1 && bestRankGroup <= 3) {
+        return 'low';
+      }
+      
+      // Low difficulty: rank 4-15 (easy win)
+      if (bestRankGroup != null && 
+          bestRankGroup >= DIFFICULTY_THRESHOLDS.LOW.min && 
+          bestRankGroup <= DIFFICULTY_THRESHOLDS.LOW.max) {
+        return 'low';
+      }
+      
+      // Medium difficulty: rank 16-30
+      if (bestRankGroup != null && 
+          bestRankGroup >= DIFFICULTY_THRESHOLDS.MEDIUM.min && 
+          bestRankGroup <= DIFFICULTY_THRESHOLDS.MEDIUM.max) {
+        return 'medium';
+      }
+      
+      // High difficulty: rank > 30 or null (no rank)
+      return 'high';
+    }
 
     // Apply filters to rows
     function applyRankingFilters(rows) {
@@ -18526,6 +18594,15 @@ Final Score: ${score}/100`;
         if (rankingFilterState.keyword) {
           const kw = rankingFilterState.keyword.toLowerCase();
           if (!row.keyword.toLowerCase().includes(kw)) return false;
+        }
+
+        // Priority matrix filter (Impact × Difficulty)
+        if (rankingPriorityFilter) {
+          const impact = calculateImpactBucket(row.demand_share || 0);
+          const difficulty = calculateDifficultyBucket(row.best_rank_group);
+          if (impact !== rankingPriorityFilter.impact || difficulty !== rankingPriorityFilter.difficulty) {
+            return false;
+          }
         }
 
         return true;
@@ -18738,6 +18815,19 @@ Final Score: ${score}/100`;
       // Update metric pills from filtered data
       updateMetricPills(filteredRows, combinedRows);
 
+      // Render Keyword Priority Matrix
+      const matrixContainer = document.getElementById('ranking-keyword-priority-matrix');
+      const matrixSection = document.getElementById('ranking-priority-matrix-section');
+      if (matrixContainer && filteredRows.length > 0) {
+        if (matrixSection) matrixSection.style.display = 'block';
+        renderKeywordPriorityMatrix(filteredRows, matrixContainer, (filter) => {
+          // Filter changed - re-render table
+          renderRankingAiTab();
+        });
+      } else if (matrixSection) {
+        matrixSection.style.display = 'none';
+      }
+
       // Sort filtered rows
       const sortedRows = sortRankingRows(filteredRows);
       
@@ -18793,16 +18883,14 @@ Final Score: ${score}/100`;
         // Segment
         const tdSegment = document.createElement("td");
         const segBadge = document.createElement("span");
+        const segLower = (row.segment || "").toLowerCase();
         segBadge.className = "ranking-badge " + (
-          row.segment === "money" ? "ranking-badge--segment-money" :
-          row.segment === "education" ? "ranking-badge--segment-education" :
-          row.segment === "brand" ? "ranking-badge--segment-brand" :
+          segLower === "money" ? "ranking-badge--segment-money" :
+          segLower === "education" ? "ranking-badge--segment-education" :
+          segLower === "brand" ? "ranking-badge--segment-brand" :
           "ranking-badge--segment-general"
         );
-        segBadge.textContent =
-          row.segment === "money" ? "Money" :
-          row.segment === "education" ? "Education" :
-          row.segment === "brand" ? "Brand" : "General";
+        segBadge.textContent = row.segment || "Other";
         tdSegment.appendChild(segBadge);
         tr.appendChild(tdSegment);
 
@@ -19444,6 +19532,7 @@ Final Score: ${score}/100`;
               aiCitation: 'all',
               keyword: ''
             };
+            rankingPriorityFilter = null; // Clear priority matrix filter
             if (segmentFilter) segmentFilter.value = 'all';
             if (rankFilter) rankFilter.value = 'all';
             if (aiOverviewFilter) aiOverviewFilter.value = 'all';
