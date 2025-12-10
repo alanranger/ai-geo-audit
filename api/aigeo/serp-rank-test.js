@@ -105,6 +105,17 @@ async function fetchKeywordOverview(keywords, auth) {
       const kw = item.keyword || item.keyword_info?.keyword || (typeof item.keyword_info === 'string' ? item.keyword_info : null);
       const searchVolume = item.keyword_info?.search_volume ?? item.search_volume ?? null;
       console.log(`[VOL] Raw result: keyword="${kw ?? 'MISSING'}", search_volume=${searchVolume ?? 'null'}`);
+      
+      // If this is "alan ranger", log the FULL item structure
+      if (kw && normalizeKeyword(kw) === 'alan ranger') {
+        console.log(`[VOL] FULL ITEM STRUCTURE for "alan ranger":`);
+        console.log(JSON.stringify(item, null, 2));
+        console.log(`[VOL] item.keyword: ${item.keyword}`);
+        console.log(`[VOL] item.keyword_info: ${JSON.stringify(item.keyword_info)}`);
+        console.log(`[VOL] item.search_volume: ${item.search_volume}`);
+        console.log(`[VOL] item.keyword_info?.search_volume: ${item.keyword_info?.search_volume}`);
+        console.log(`[VOL] All item keys: ${Object.keys(item).join(', ')}`);
+      }
     }
 
     const volumeByKeyword = {};
