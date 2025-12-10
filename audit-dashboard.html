@@ -15780,8 +15780,14 @@ Final Score: ${score}/100`;
                 // Calculate fallback brand overlay using GSC position/CTR as proxy
                 // Since we don't have brand-specific queries for historical dates,
                 // we'll estimate brand performance from overall GSC metrics
-                const position = point.position || 40;
-                const ctr = point.ctr || 0;
+                // BUT only if we have valid GSC data (position > 0)
+                const hasValidGscData = point.position && point.position > 0 && point.ctr !== null && point.ctr >= 0;
+                if (!hasValidGscData) {
+                  brandOverlayData.push(null);
+                  debugLog(`No valid GSC data for Brand Overlay on ${pointDate} (position=${point.position}, ctr=${point.ctr}) - using null`, 'warn');
+                } else {
+                  const position = point.position || 40;
+                  const ctr = point.ctr || 0;
                 
                 // Estimate brand metrics from overall performance
                 // Brand queries typically have better CTR and position, so we'll use a multiplier
