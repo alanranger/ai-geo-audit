@@ -171,6 +171,13 @@ async function fetchKeywordOverview(keywords, auth) {
       if (!taskSuccess) {
         console.error(`[VOL] Task failed: status_code=${task.status_code}, message=${task.status_message}`);
         console.error(`[VOL] Task error (if any):`, task.error || 'none');
+        
+        // If payment required, log a helpful message
+        if (task.status_code === 40200 || task.status_message === 'Payment Required.') {
+          console.error(`[VOL] ⚠️  PAYMENT REQUIRED: DataForSEO account needs credits for keywords_data/google_ads/search_volume/live endpoint`);
+          console.error(`[VOL] Search volume data will be unavailable until credits are added to your DataForSEO account`);
+        }
+        
         console.error(`[VOL] Full task data:`, JSON.stringify(task, null, 2));
         return {};
       }
