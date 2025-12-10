@@ -7292,13 +7292,47 @@
             // Use schemaAudit if available, otherwise pass null (function handles it)
             const auditSchema = schemaAudit || (saved && saved.schemaAudit) || null;
             // Use global function - it should be available after the function is defined
+            // If not available, try to wait a bit for it to load
             if (typeof window.buildMoneyPageMetrics !== 'function') {
-              debugLog('⚠ buildMoneyPageMetrics not available, cannot rebuild Priority data', 'warn');
-              // Function should be defined earlier in the script, but if not, we can't rebuild
-              // Don't throw - just skip rebuilding and show empty state
-              window.moneyPagePriorityData = [];
-              window.moneySegmentMetrics = null;
+              debugLog('⚠ buildMoneyPageMetrics not available, waiting 100ms...', 'warn');
+              // Wait a bit for function to be defined (in case script hasn't finished loading)
+              await new Promise(resolve => setTimeout(resolve, 100));
+              
+              if (typeof window.buildMoneyPageMetrics !== 'function') {
+                debugLog('⚠ buildMoneyPageMetrics still not available after wait, cannot rebuild Priority data', 'warn');
+                // Function should be defined earlier in the script, but if not, we can't rebuild
+                // Don't throw - just skip rebuilding and show empty state
+                window.moneyPagePriorityData = [];
+                window.moneySegmentMetrics = null;
+              } else {
+                debugLog('✓ buildMoneyPageMetrics now available after wait', 'success');
+                // Function is now available, proceed with rebuild
+                window.moneyPagePriorityData = window.buildMoneyPageMetrics(topPagesForPriority, auditSchema);
+                
+                // Use saved moneySegmentMetrics if available (from Supabase), otherwise rebuild
+                if (saved && saved.moneySegmentMetrics) {
+                  window.moneySegmentMetrics = saved.moneySegmentMetrics;
+                  debugLog(`✓ Using moneySegmentMetrics from saved data (Supabase)`, 'success');
+                } else {
+                  // Rebuild segment metrics
+                  const behaviourScoresBySegment = {};
+                  if (savedMetrics.behaviour) {
+                    behaviourScoresBySegment.allMoney = savedMetrics.behaviour.score || 0;
+                  }
+                  window.moneySegmentMetrics = buildMoneySegmentSummary(window.moneyPagePriorityData, behaviourScoresBySegment);
+                  debugLog(`✓ Rebuilt moneySegmentMetrics from moneyPagePriorityData`, 'success');
+                }
+                
+                debugLog(`✓ Rebuilt Money Pages Priority data from saved metrics: ${window.moneyPagePriorityData.length} pages`, 'success');
+                
+                // Save the rebuilt data back to localStorage
+                if (window.moneyPagePriorityData && window.moneyPagePriorityData.length > 0) {
+                  const updatedAudit = { ...saved, moneyPagePriorityData: window.moneyPagePriorityData, moneySegmentMetrics: window.moneySegmentMetrics };
+                  localStorage.setItem('last_audit_results', JSON.stringify(updatedAudit));
+                }
+              }
             } else {
+              // Function is available, proceed with rebuild
               window.moneyPagePriorityData = window.buildMoneyPageMetrics(topPagesForPriority, auditSchema);
               
               // Use saved moneySegmentMetrics if available (from Supabase), otherwise rebuild
