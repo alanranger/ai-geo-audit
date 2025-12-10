@@ -3911,7 +3911,15 @@
               avgPosition: row.avgPosition || 0,
               title: row.title || row.url
             }));
-            window.moneyPagePriorityData = buildMoneyPageMetrics(topPagesForPriority, schemaAudit);
+            // Use window.buildMoneyPageMetrics if available, otherwise use local function
+            if (typeof window.buildMoneyPageMetrics === 'function') {
+              window.moneyPagePriorityData = window.buildMoneyPageMetrics(topPagesForPriority, schemaAudit);
+            } else if (typeof buildMoneyPageMetrics === 'function') {
+              window.moneyPagePriorityData = buildMoneyPageMetrics(topPagesForPriority, schemaAudit);
+            } else {
+              debugLog(`✗ buildMoneyPageMetrics not available in saveAuditToSupabase, cannot rebuild`, 'error');
+              window.moneyPagePriorityData = [];
+            }
             debugLog(`✓ saveAuditToSupabase: Rebuilt ${window.moneyPagePriorityData.length} priority entries`, 'info');
           }
         }
