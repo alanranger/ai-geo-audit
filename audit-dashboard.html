@@ -19668,31 +19668,40 @@ Final Score: ${score}/100`;
       }
       html += `</div>`;
 
-      // Update the content element
+      // Build summary line and include it in the main HTML
+      const parts = [];
+      if (row.best_rank_group != null) {
+        parts.push(`Classic rank: #${row.best_rank_group}`);
+      } else {
+        parts.push("Classic rank: not in top 50");
+      }
+      if (row.has_ai_overview) {
+        const total = row.ai_total_citations || 0;
+        const ours = row.ai_alan_citations_count || 0;
+        parts.push(`AI Overview: present (${ours}/${total || "?"} citations from alanranger.com)`);
+      } else {
+        parts.push("AI Overview: not present");
+      }
+      const segLabel = row.segment === "money" ? "Money page (commercial intent)" :
+                      row.segment === "education" ? "Education content" :
+                      row.segment === "brand" ? "Brand query" : "General / other";
+      parts.push(`Segment: ${segLabel}.`);
+      
+      // Insert summary line after Impact/Difficulty line, before keyword header
+      const summaryHtml = `<p style="margin: 0 0 1rem 0; font-size: 0.9rem; color: #64748b; padding-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb;">${parts.join(" • ")}</p>`;
+      // Find the end of the Impact/Difficulty div and insert summary before keyword header
+      const impactDivEnd = html.indexOf('</div>');
+      if (impactDivEnd !== -1) {
+        html = html.slice(0, impactDivEnd + 6) + summaryHtml + html.slice(impactDivEnd + 6);
+      }
+
+      // Update the content element - everything is now in one container
       const kwEl = document.getElementById("ranking-ai-detail-keyword");
       if (kwEl) kwEl.innerHTML = html;
-
-      // Update summary line
-      if (sumEl) {
-        const parts = [];
-        if (row.best_rank_group != null) {
-          parts.push(`Classic rank: #${row.best_rank_group}`);
-        } else {
-          parts.push("Classic rank: not in top 50");
-        }
-        if (row.has_ai_overview) {
-          const total = row.ai_total_citations || 0;
-          const ours = row.ai_alan_citations_count || 0;
-          parts.push(`AI Overview: present (${ours}/${total || "?"} citations from alanranger.com)`);
-        } else {
-          parts.push("AI Overview: not present");
-        }
-        const segLabel = row.segment === "money" ? "Money page (commercial intent)" :
-                        row.segment === "education" ? "Education content" :
-                        row.segment === "brand" ? "Brand query" : "General / other";
-        parts.push(`Segment: ${segLabel}.`);
-        sumEl.textContent = parts.join(" • ");
-      }
+      
+      // Hide the separate summary element since it's now included in the main HTML
+      const sumEl = document.getElementById("ranking-ai-detail-summary");
+      if (sumEl) sumEl.style.display = 'none';
 
       // Update AI citations section in right panel
       const citationsEmpty = document.getElementById("ranking-ai-citations-empty");
