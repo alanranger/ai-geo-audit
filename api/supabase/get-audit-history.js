@@ -59,6 +59,41 @@ export default async function handler(req, res) {
     if (endDate) {
       queryUrl += `&audit_date=lte.${endDate}`;
     }
+    
+    // CRITICAL: Also fetch timeseries data from gsc_timeseries table for Score Trends chart
+    let timeseries = [];
+    try {
+      let timeseriesQuery = `${supabaseUrl}/rest/v1/gsc_timeseries?property_url=eq.${encodeURIComponent(propertyUrl)}&order=date.asc`;
+      if (startDate) {
+        timeseriesQuery += `&date=gte.${startDate}`;
+      }
+      if (endDate) {
+        timeseriesQuery += `&date=lte.${endDate}`;
+      }
+      
+      const timeseriesResponse = await fetch(timeseriesQuery, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`
+        }
+      });
+      
+      if (timeseriesResponse.ok) {
+        const timeseriesData = await timeseriesResponse.json();
+        timeseries = timeseriesData.map(record => ({
+          date: record.date,
+          clicks: record.clicks || 0,
+          impressions: record.impressions || 0,
+          ctr: parseFloat(record.ctr) || 0,
+          position: parseFloat(record.position) || 0
+        }));
+      }
+    } catch (error) {
+      console.error('Error fetching timeseries data:', error);
+      // Continue without timeseries data
+    }
 
     // Fetch from Supabase
     const response = await fetch(queryUrl, {
@@ -122,6 +157,7 @@ export default async function handler(req, res) {
       status: 'ok',
       data: history,
       count: history.length,
+      timeseries: timeseries, // CRITICAL: Include timeseries data for Score Trends chart
       meta: { generatedAt: new Date().toISOString() }
     });
 

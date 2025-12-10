@@ -16864,9 +16864,35 @@ Final Score: ${score}/100`;
             document.getElementById('loading').classList.remove('show');
             // Ensure searchData has timeseries if available
             const searchDataWithTimeseries = savedAudit.searchData || {};
-            if (!searchDataWithTimeseries.timeseries && savedAudit.timeseries) {
-              searchDataWithTimeseries.timeseries = savedAudit.timeseries;
-              debugLog(`✓ Restored timeseries data: ${savedAudit.timeseries.length} data points`, 'success');
+            if (!searchDataWithTimeseries.timeseries) {
+              // Try to load timeseries from saved audit
+              if (savedAudit.timeseries) {
+                searchDataWithTimeseries.timeseries = savedAudit.timeseries;
+                debugLog(`✓ Restored timeseries data from saved audit: ${savedAudit.timeseries.length} data points`, 'success');
+              } else {
+                // Try to fetch timeseries from Supabase gsc_timeseries table
+                debugLog('Fetching timeseries data from Supabase for Score Trends chart...', 'info');
+                try {
+                  const propertyUrl = savedAudit.searchData?.propertyUrl || localStorage.getItem('gsc_property_url');
+                  if (propertyUrl) {
+                    const endDate = new Date().toISOString().split('T')[0];
+                    const startDate = new Date();
+                    startDate.setDate(startDate.getDate() - 30); // Last 30 days
+                    const startDateStr = startDate.toISOString().split('T')[0];
+                    
+                    const timeseriesResponse = await fetch(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDate}`);
+                    if (timeseriesResponse.ok) {
+                      const timeseriesData = await timeseriesResponse.json();
+                      if (timeseriesData.status === 'ok' && timeseriesData.timeseries && Array.isArray(timeseriesData.timeseries)) {
+                        searchDataWithTimeseries.timeseries = timeseriesData.timeseries;
+                        debugLog(`✓ Loaded timeseries data from Supabase: ${timeseriesData.timeseries.length} data points`, 'success');
+                      }
+                    }
+                  }
+                } catch (error) {
+                  debugLog(`⚠ Failed to load timeseries data: ${error.message}`, 'warn');
+                }
+              }
             }
             
             displayDashboard(

@@ -121,7 +121,9 @@ export default async function handler(req, res) {
           siteTotalClicks: record.gsc_clicks || 0,
           totalImpressions: record.gsc_impressions || 0,
           totalClicks: record.gsc_clicks || 0
-        }
+        },
+        // CRITICAL: Load timeseries data from gsc_timeseries table for Score Trends chart
+        timeseries: null // Will be loaded separately via get-audit-history endpoint
       },
       snippetReadiness: record.snippet_readiness || 0,
       schemaAudit: record.content_schema_score !== null ? {
