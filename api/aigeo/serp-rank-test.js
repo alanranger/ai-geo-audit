@@ -35,6 +35,8 @@ async function fetchKeywordOverview(keywords, auth) {
   const endpoint = "https://api.dataforseo.com/v3/dataforseo_labs/google/keyword_overview/live";
   
   try {
+    console.log(`[Keyword Overview] Fetching volume for ${keywords.length} keywords: ${keywords.slice(0, 3).join(', ')}...`);
+    
     const dfResponse = await fetch(endpoint, {
       method: "POST",
       headers: {
@@ -52,22 +54,65 @@ async function fetchKeywordOverview(keywords, auth) {
 
     const data = await dfResponse.json();
 
+    console.log(`[Keyword Overview] Response status: ${dfResponse.status}, API status_code: ${data.status_code}`);
+    
     if (!dfResponse.ok || !String(data.status_code).startsWith("200")) {
-      console.error("Keyword Overview API error:", data.status_message || "Request failed");
+      console.error("[Keyword Overview] API error:", {
+        status_code: data.status_code,
+        status_message: data.status_message,
+        full_response: JSON.stringify(data).substring(0, 500)
+      });
       return {};
     }
 
+    // Handle DataForSEO response structure
+    // Structure can be: data.tasks[0].result[0].items[] OR data.tasks[0].result.items[]
     const task = data.tasks?.[0];
-    const items = task?.result?.[0]?.items || [];
+    if (!task) {
+      console.error("[Keyword Overview] No task found in response:", JSON.stringify(data).substring(0, 500));
+      return {};
+    }
+
+    // Try both possible structures
+    let items = [];
+    if (Array.isArray(task.result) && task.result.length > 0) {
+      // Structure: tasks[0].result[0].items[]
+      items = task.result[0]?.items || [];
+    } else if (task.result && Array.isArray(task.result.items)) {
+      // Structure: tasks[0].result.items[]
+      items = task.result.items;
+    } else if (task.result && !Array.isArray(task.result)) {
+      // Structure: tasks[0].result.items[] (result is object, not array)
+      items = task.result.items || [];
+    }
+    
+    console.log(`[Keyword Overview] Found ${items.length} items in response`);
 
     const volumeByKeyword = {};
     for (const item of items) {
-      const kw = item.keyword || item.keyword_info?.keyword;
-      if (!kw) continue;
+      // DataForSEO Labs API structure can vary:
+      // - item.keyword (direct)
+      // - item.keyword_info.keyword
+      // - item.keyword_info might be an object with keyword property
+      const kw = item.keyword || item.keyword_info?.keyword || (typeof item.keyword_info === 'string' ? item.keyword_info : null);
+      
+      if (!kw) {
+        console.warn("[Keyword Overview] Item missing keyword. Item keys:", Object.keys(item));
+        console.warn("[Keyword Overview] Item sample:", JSON.stringify(item).substring(0, 300));
+        continue;
+      }
       
       const normalizedKw = normalizeKeyword(kw);
-      const searchVolume = item.keyword_info?.search_volume ?? null;
-      const monthlySearches = item.keyword_info?.monthly_searches || undefined;
+      
+      // Search volume can be at: item.keyword_info.search_volume OR item.search_volume
+      const searchVolume = item.keyword_info?.search_volume ?? item.search_volume ?? null;
+      const monthlySearches = item.keyword_info?.monthly_searches || item.monthly_searches || undefined;
+
+      if (searchVolume !== null) {
+        console.log(`[Keyword Overview] Keyword "${kw}" (normalized: "${normalizedKw}") has volume: ${searchVolume}`);
+      } else {
+        console.log(`[Keyword Overview] Keyword "${kw}" (normalized: "${normalizedKw}") has volume: null`);
+      }
 
       volumeByKeyword[normalizedKw] = {
         search_volume: searchVolume,
@@ -75,9 +120,10 @@ async function fetchKeywordOverview(keywords, auth) {
       };
     }
 
+    console.log(`[Keyword Overview] Built volume map with ${Object.keys(volumeByKeyword).length} entries`);
     return volumeByKeyword;
   } catch (err) {
-    console.error("Error fetching Keyword Overview:", err);
+    console.error("[Keyword Overview] Error fetching Keyword Overview:", err.message, err.stack);
     return {}; // Return empty map on error, don't block ranking results
   }
 }
@@ -239,6 +285,7 @@ export default async function handler(req, res) {
   try {
     // Fetch keyword search volume (best-effort, non-blocking)
     const volumeByKeyword = await fetchKeywordOverview(keywords, auth);
+    console.log(`[Handler] Volume map keys: ${Object.keys(volumeByKeyword).join(', ')}`);
 
     // Call DataForSEO once per keyword (required by Live API)
     const perKeyword = [];
@@ -249,11 +296,19 @@ export default async function handler(req, res) {
       const normalizedKw = normalizeKeyword(keyword);
       const volumeData = volumeByKeyword[normalizedKw] || {};
       
-      perKeyword.push({
+      const mergedResult = {
         ...result,
         search_volume: volumeData.search_volume ?? null,
         search_volume_trend: volumeData.monthly_searches || undefined,
-      });
+      };
+      
+      if (mergedResult.search_volume !== null) {
+        console.log(`[Handler] Merged "${keyword}" with volume: ${mergedResult.search_volume}`);
+      } else {
+        console.log(`[Handler] Merged "${keyword}" with volume: null (not found in volume map)`);
+      }
+      
+      perKeyword.push(mergedResult);
     }
 
     // Build summary

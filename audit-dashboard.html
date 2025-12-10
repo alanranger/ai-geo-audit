@@ -717,6 +717,65 @@
         opacity: 1;
       }
     }
+    .ranking-ai-step-item {
+      display: flex;
+      align-items: center;
+      padding: 0.75rem;
+      border-radius: 6px;
+      background-color: #f9fafb;
+      transition: all 0.2s ease;
+    }
+    .ranking-ai-step-item.active {
+      background-color: #fef3c7;
+      border-left: 4px solid var(--brand-orange);
+    }
+    .ranking-ai-step-item.completed {
+      background-color: #d1fae5;
+      border-left: 4px solid #10b981;
+    }
+    .ranking-ai-step-item.pending {
+      opacity: 0.5;
+    }
+    .ranking-ai-step-icon {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-right: 0.75rem;
+      font-weight: bold;
+      font-size: 0.85rem;
+    }
+    .ranking-ai-step-item.pending .ranking-ai-step-icon {
+      background-color: #e5e7eb;
+      color: #9ca3af;
+    }
+    .ranking-ai-step-item.active .ranking-ai-step-icon {
+      background-color: var(--brand-orange);
+      color: white;
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+    .ranking-ai-step-item.completed .ranking-ai-step-icon {
+      background-color: #10b981;
+      color: white;
+    }
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.1); }
+    }
+    .ranking-ai-step-label {
+      flex: 1;
+      font-size: 0.9rem;
+      color: #374151;
+    }
+    .ranking-ai-step-item.completed .ranking-ai-step-label {
+      color: #059669;
+    }
+    .ranking-ai-step-item.active .ranking-ai-step-label {
+      color: #92400e;
+      font-weight: 600;
+    }
     .help-text {
       font-size: 0.875rem;
       color: var(--brand-grey);
@@ -1522,6 +1581,45 @@
         <div id="completionSummaryContent"></div>
         <div style="margin-top: 1.5rem; text-align: right;">
           <button class="btn" onclick="closeCompletionModal()" style="background: var(--brand-orange); color: white; border-color: var(--brand-orange);" title="Close the audit completion summary modal and return to the dashboard">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Ranking & AI Progress Modal -->
+    <div id="rankingAiProgressModal" class="modal" style="display: none;">
+      <div class="modal-content" style="max-width: 700px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+          <h2 style="margin: 0; color: var(--brand-orange);">Running Ranking & AI Check</h2>
+          <button id="rankingAiProgressClose" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #666; opacity: 0.5;" disabled title="Cannot close during processing">&times;</button>
+        </div>
+        
+        <!-- Progress Bar -->
+        <div style="margin-bottom: 2rem;">
+          <div id="rankingAiProgressBar" style="width: 100%; height: 24px; background-color: #e5e7eb; border-radius: 12px; overflow: hidden; position: relative;">
+            <div id="rankingAiProgressFill" style="width: 0%; height: 100%; background: linear-gradient(90deg, var(--brand-orange), #ff8c42); transition: width 0.3s ease; border-radius: 12px;"></div>
+          </div>
+          <div id="rankingAiProgressText" style="margin-top: 0.5rem; text-align: center; font-size: 0.9rem; color: #6b7280; font-weight: 500;">0%</div>
+        </div>
+
+        <!-- Step Details -->
+        <div id="rankingAiStepDetails" style="margin-bottom: 1.5rem;">
+          <div id="rankingAiCurrentStep" style="font-size: 1.1rem; font-weight: 600; color: #1f2937; margin-bottom: 0.75rem;">
+            Initializing...
+          </div>
+          <div id="rankingAiStepNarrative" style="font-size: 0.95rem; color: #6b7280; line-height: 1.6; margin-bottom: 1rem;">
+            Preparing to fetch ranking and AI data...
+          </div>
+          <div id="rankingAiStepCounts" style="font-size: 0.9rem; color: #9ca3af; font-style: italic;">
+            <!-- Counts will be populated here -->
+          </div>
+        </div>
+
+        <!-- Step List -->
+        <div style="border-top: 1px solid #e5e7eb; padding-top: 1rem;">
+          <div style="font-size: 0.85rem; font-weight: 600; color: #6b7280; margin-bottom: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;">Progress Steps</div>
+          <div id="rankingAiStepsList" style="display: flex; flex-direction: column; gap: 0.5rem;">
+            <!-- Steps will be populated here -->
+          </div>
         </div>
       </div>
     </div>
@@ -17442,6 +17540,101 @@ Final Score: ${score}/100`;
       `;
     }
     // ======================
+    // Ranking & AI: Progress Modal Functions
+    // ======================
+    const RankingAiProgressModal = {
+      steps: [
+        { id: 'init', label: 'Initializing', narrative: 'Preparing to fetch ranking and AI data...' },
+        { id: 'serp', label: 'Fetching SERP Rankings', narrative: 'Retrieving search engine rankings and search volume data...' },
+        { id: 'ai', label: 'Fetching AI Overview Data', narrative: 'Checking AI Overview presence and citations...' },
+        { id: 'process', label: 'Processing Results', narrative: 'Combining data and calculating metrics...' },
+        { id: 'save', label: 'Saving Data', narrative: 'Storing results to database...' },
+        { id: 'complete', label: 'Complete', narrative: 'Ranking & AI check completed successfully!' }
+      ],
+      
+      show() {
+        const modal = document.getElementById('rankingAiProgressModal');
+        if (modal) {
+          modal.style.display = 'block';
+          this.updateProgress(0);
+          this.renderSteps();
+          
+          // Disable close button during processing
+          const closeBtn = document.getElementById('rankingAiProgressClose');
+          if (closeBtn) {
+            closeBtn.disabled = true;
+            closeBtn.style.opacity = '0.5';
+            closeBtn.onclick = null;
+          }
+        }
+      },
+      
+      hide() {
+        const modal = document.getElementById('rankingAiProgressModal');
+        if (modal) {
+          modal.style.display = 'none';
+        }
+      },
+      
+      updateProgress(percent, stepIndex = null) {
+        const fill = document.getElementById('rankingAiProgressFill');
+        const text = document.getElementById('rankingAiProgressText');
+        if (fill) fill.style.width = `${Math.min(100, Math.max(0, percent))}%`;
+        if (text) text.textContent = `${Math.round(percent)}%`;
+        
+        if (stepIndex !== null) {
+          this.setActiveStep(stepIndex);
+        }
+      },
+      
+      setActiveStep(stepIndex) {
+        const steps = document.querySelectorAll('.ranking-ai-step-item');
+        steps.forEach((step, idx) => {
+          step.classList.remove('active', 'completed', 'pending');
+          const icon = step.querySelector('.ranking-ai-step-icon');
+          if (idx < stepIndex) {
+            step.classList.add('completed');
+            if (icon) icon.textContent = '✓';
+          } else if (idx === stepIndex) {
+            step.classList.add('active');
+            if (icon) icon.textContent = idx + 1;
+          } else {
+            step.classList.add('pending');
+            if (icon) icon.textContent = idx + 1;
+          }
+        });
+        
+        const step = this.steps[stepIndex];
+        if (step) {
+          const currentStepEl = document.getElementById('rankingAiCurrentStep');
+          const narrativeEl = document.getElementById('rankingAiStepNarrative');
+          if (currentStepEl) currentStepEl.textContent = step.label;
+          if (narrativeEl) narrativeEl.textContent = step.narrative;
+        }
+      },
+      
+      updateCounts(text) {
+        const countsEl = document.getElementById('rankingAiStepCounts');
+        if (countsEl) countsEl.textContent = text;
+      },
+      
+      renderSteps() {
+        const listEl = document.getElementById('rankingAiStepsList');
+        if (!listEl) return;
+        
+        listEl.innerHTML = this.steps.map((step, idx) => `
+          <div class="ranking-ai-step-item pending">
+            <div class="ranking-ai-step-icon">${idx + 1}</div>
+            <div class="ranking-ai-step-label">${step.label}</div>
+          </div>
+        `).join('');
+      }
+    };
+    
+    // Make progress modal globally available
+    window.RankingAiProgressModal = RankingAiProgressModal;
+
+    // ======================
     // Ranking & AI: Save data to Supabase and localStorage
     // ======================
     async function saveRankingAiData(combinedRows, summary) {
@@ -17580,15 +17773,16 @@ Final Score: ${score}/100`;
 
       debugLog('📊 Starting data fetch from APIs...', 'info');
       mod.setLoading(true);
-      const lastRunEl = document.getElementById("ranking-ai-last-run");
       const refreshBtn = document.getElementById("ranking-ai-refresh");
-      if (lastRunEl) {
-        lastRunEl.textContent = "Step 1/3: Fetching SERP rankings...";
-      }
       if (refreshBtn) {
         refreshBtn.disabled = true;
         refreshBtn.textContent = "Loading…";
       }
+
+      // Show progress modal
+      RankingAiProgressModal.show();
+      RankingAiProgressModal.updateProgress(5, 0); // Initialize step
+      RankingAiProgressModal.updateCounts('');
 
       try {
         const keywords = mod.TRACKED_KEYWORDS;
@@ -17598,17 +17792,29 @@ Final Score: ${score}/100`;
         debugLog(`📊 SERP endpoint: ${mod.SERP_RANK_ENDPOINT}?keywords=${queryParam}`, 'info');
         debugLog(`📊 AI endpoint: ${mod.AI_MODE_ENDPOINT}`, 'info');
 
-        if (lastRunEl) {
-          lastRunEl.textContent = `Step 1/3: Fetching SERP rankings for ${keywords.length} keywords...`;
-        }
-
+        // Step 1: Fetch SERP Rankings
+        RankingAiProgressModal.updateProgress(15, 1);
+        RankingAiProgressModal.updateCounts(`Processing ${keywords.length} keywords...`);
+        RankingAiProgressModal.setActiveStep(1);
+        
         debugLog('📊 Starting SERP fetch...', 'info');
         const serpRes = await fetch(`${mod.SERP_RANK_ENDPOINT}?keywords=${queryParam}`);
         debugLog(`📊 SERP response status: ${serpRes.status}`, 'info');
         
-        if (lastRunEl) {
-          lastRunEl.textContent = `Step 2/3: Fetching AI Overview data...`;
+        if (!serpRes.ok) {
+          const errorText = await serpRes.text();
+          debugLog(`✗ SERP request failed: ${serpRes.status} - ${errorText}`, 'error');
+          RankingAiProgressModal.updateCounts(`Error: ${serpRes.status}`);
+          throw new Error(`SERP rank request failed: ${serpRes.status} - ${errorText}`);
         }
+        
+        RankingAiProgressModal.updateProgress(50, 1);
+        RankingAiProgressModal.updateCounts(`✓ Retrieved SERP data for ${keywords.length} keywords`);
+        
+        // Step 2: Fetch AI Overview Data
+        RankingAiProgressModal.updateProgress(55, 2);
+        RankingAiProgressModal.setActiveStep(2);
+        RankingAiProgressModal.updateCounts(`Checking AI Overview presence and citations...`);
         
         debugLog('📊 Starting AI fetch...', 'info');
         const aiRes = await fetch(mod.AI_MODE_ENDPOINT, {
@@ -17620,20 +17826,20 @@ Final Score: ${score}/100`;
         });
         debugLog(`📊 AI response status: ${aiRes.status}`, 'info');
 
-        if (!serpRes.ok) {
-          const errorText = await serpRes.text();
-          debugLog(`✗ SERP request failed: ${serpRes.status} - ${errorText}`, 'error');
-          throw new Error(`SERP rank request failed: ${serpRes.status} - ${errorText}`);
-        }
         if (!aiRes.ok) {
           const errorText = await aiRes.text();
           debugLog(`✗ AI request failed: ${aiRes.status} - ${errorText}`, 'error');
+          RankingAiProgressModal.updateCounts(`Error: ${aiRes.status}`);
           throw new Error(`AI mode request failed: ${aiRes.status} - ${errorText}`);
         }
-
-        if (lastRunEl) {
-          lastRunEl.textContent = `Step 3/3: Processing results...`;
-        }
+        
+        RankingAiProgressModal.updateProgress(75, 2);
+        RankingAiProgressModal.updateCounts(`✓ Retrieved AI Overview data`);
+        
+        // Step 3: Process Results
+        RankingAiProgressModal.updateProgress(80, 3);
+        RankingAiProgressModal.setActiveStep(3);
+        RankingAiProgressModal.updateCounts(`Combining SERP and AI data...`);
         
         debugLog('📊 Parsing JSON responses...', 'info');
         const serpJson = await serpRes.json();
@@ -17645,6 +17851,7 @@ Final Score: ${score}/100`;
         const aiRows = aiJson.per_query || [];
 
         debugLog(`Received ${serpRows.length} SERP results and ${aiRows.length} AI results`, 'info');
+        RankingAiProgressModal.updateCounts(`Processing ${serpRows.length} SERP results and ${aiRows.length} AI results...`);
 
         // Map AI rows by normalised query
         const aiByKeyword = {};
@@ -17673,6 +17880,12 @@ Final Score: ${score}/100`;
             if (!d) return;
             competitorCounts[d] = (competitorCounts[d] || 0) + 1;
           });
+
+          // Debug: Log search volume for first few keywords
+          if (serpRows.indexOf(row) < 3) {
+            debugLog(`[DEBUG] Keyword "${row.keyword}": search_volume=${row.search_volume}, search_volume_trend=${row.search_volume_trend ? 'present' : 'missing'}`, 'info');
+            debugLog(`[DEBUG] Row keys: ${Object.keys(row).join(', ')}`, 'info');
+          }
 
           return {
             keyword: row.keyword,
@@ -17705,6 +17918,11 @@ Final Score: ${score}/100`;
         const withAiCitation = combined.filter(r => r.ai_alan_citations_count > 0).length;
         const top10 = combined.filter(r => r.best_rank_group != null && r.best_rank_group <= 10).length;
         const top3 = combined.filter(r => r.best_rank_group != null && r.best_rank_group <= 3).length;
+        const withSearchVolume = combined.filter(r => r.search_volume != null && r.search_volume > 0).length;
+        
+        debugLog(`[DEBUG] Search volume summary: ${withSearchVolume}/${totalKeywords} keywords have search volume data`, 'info');
+        RankingAiProgressModal.updateProgress(90, 3);
+        RankingAiProgressModal.updateCounts(`✓ Processed ${totalKeywords} keywords (${withRank} ranked, ${withAiOverview} with AI Overview, ${withSearchVolume} with search volume)`);
 
         const summary = {
           totalKeywords,
@@ -17718,29 +17936,63 @@ Final Score: ${score}/100`;
         mod.setData(combined, summary);
         mod.setLoadedOnce(true);
         
+        // Step 4: Save Data
+        RankingAiProgressModal.updateProgress(95, 4);
+        RankingAiProgressModal.setActiveStep(4);
+        RankingAiProgressModal.updateCounts(`Saving to database...`);
+        
         // Save to Supabase and localStorage
         await saveRankingAiData(combined, summary);
         
+        RankingAiProgressModal.updateProgress(98, 4);
+        RankingAiProgressModal.updateCounts(`✓ Data saved successfully`);
+        
+        // Step 5: Complete
+        RankingAiProgressModal.updateProgress(100, 5);
+        RankingAiProgressModal.setActiveStep(5);
+        RankingAiProgressModal.updateCounts(`Complete! ${totalKeywords} keywords processed`);
+        
         renderRankingAiTab();
 
+        const lastRunEl = document.getElementById("ranking-ai-last-run");
         if (lastRunEl) {
           const now = new Date();
           lastRunEl.textContent = `Last run: ${now.toLocaleString()}`;
         }
         debugLog(`✓ Ranking & AI data loaded: ${totalKeywords} keywords, ${withRank} with ranks, ${withAiOverview} with AI Overview`, 'success');
+        
+        // Hide modal after a brief delay
+        setTimeout(() => {
+          RankingAiProgressModal.hide();
+        }, 1500);
       } catch (err) {
         console.error("Ranking & AI load error", err);
         debugLog(`✗ Ranking & AI load error: ${err.message}`, 'error');
+        RankingAiProgressModal.updateCounts(`Error: ${err.message}`);
+        
         const lastRunEl = document.getElementById("ranking-ai-last-run");
         if (lastRunEl) {
           lastRunEl.textContent = "Error loading ranking & AI data. See console for details.";
         }
+        
+        // Show error in modal for a moment, then hide
+        setTimeout(() => {
+          RankingAiProgressModal.hide();
+        }, 3000);
       } finally {
         RankingAiModule.setLoading(false);
         const refreshBtn = document.getElementById("ranking-ai-refresh");
         if (refreshBtn) {
           refreshBtn.disabled = false;
           refreshBtn.textContent = "Run ranking & AI check";
+        }
+        
+        // Enable close button
+        const closeBtn = document.getElementById('rankingAiProgressClose');
+        if (closeBtn) {
+          closeBtn.disabled = false;
+          closeBtn.style.opacity = '1';
+          closeBtn.onclick = () => RankingAiProgressModal.hide();
         }
       }
     }
@@ -18578,22 +18830,42 @@ Final Score: ${score}/100`;
         }
       }
 
+      // Store the handler function reference for cleanup
+      let rankingSortHandler = null;
+      
       function wireRankingSorting() {
-        document.querySelectorAll('.ranking-table th.sortable').forEach(th => {
-          th.addEventListener('click', () => {
-            const column = th.dataset.sort;
-            if (!column) return;
-            
-            if (rankingSortState.column === column) {
-              rankingSortState.direction = rankingSortState.direction === 'asc' ? 'desc' : 'asc';
-            } else {
-              rankingSortState.column = column;
-              rankingSortState.direction = 'asc';
-            }
-            rankingPaginationState.currentPage = 1; // Reset to first page on sort change
-            renderRankingAiTab();
-          });
-        });
+        // Use event delegation on the table header to avoid duplicate listeners
+        const table = document.querySelector('.ranking-table thead');
+        if (!table) return;
+        
+        // Remove existing listener if already wired
+        if (rankingSortHandler) {
+          table.removeEventListener('click', rankingSortHandler);
+          rankingSortHandler = null;
+        }
+        
+        // Create handler function
+        rankingSortHandler = (e) => {
+          const th = e.target.closest('th.sortable');
+          if (!th) return;
+          
+          const column = th.dataset.sort;
+          if (!column) return;
+          
+          if (rankingSortState.column === column) {
+            // Toggle direction if clicking the same column
+            rankingSortState.direction = rankingSortState.direction === 'asc' ? 'desc' : 'asc';
+          } else {
+            // New column, start with ascending
+            rankingSortState.column = column;
+            rankingSortState.direction = 'asc';
+          }
+          rankingPaginationState.currentPage = 1; // Reset to first page on sort change
+          renderRankingAiTab();
+        };
+        
+        // Add single event listener using delegation
+        table.addEventListener('click', rankingSortHandler);
       }
       
       function wireRankingPagination() {
