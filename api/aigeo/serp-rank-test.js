@@ -58,16 +58,34 @@ async function fetchKeywordOverview(keywords, auth) {
     };
     console.log(`[VOL] Request body to DataForSEO:`, JSON.stringify(requestBody));
     
-    const dfResponse = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Basic ${auth}`,
-      },
-      body: JSON.stringify([requestBody]),
-    });
+    console.log(`[VOL] Making fetch request to: ${endpoint}`);
+    let dfResponse;
+    try {
+      dfResponse = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Basic ${auth}`,
+        },
+        body: JSON.stringify([requestBody]),
+      });
+      console.log(`[VOL] Fetch completed, status: ${dfResponse.status}`);
+    } catch (fetchErr) {
+      console.error(`[VOL] Fetch failed:`, fetchErr.message);
+      console.error(`[VOL] Fetch error stack:`, fetchErr.stack);
+      throw fetchErr;
+    }
 
-    const data = await dfResponse.json();
+    let data;
+    try {
+      data = await dfResponse.json();
+      console.log(`[VOL] JSON parsed successfully`);
+    } catch (jsonErr) {
+      console.error(`[VOL] JSON parse failed:`, jsonErr.message);
+      const text = await dfResponse.text();
+      console.error(`[VOL] Response text (first 500 chars):`, text.substring(0, 500));
+      throw jsonErr;
+    }
 
     console.log(`[Keyword Overview] Response status: ${dfResponse.status}`);
     console.log(`[Keyword Overview] Response type: ${Array.isArray(data) ? 'Array' : typeof data}`);
