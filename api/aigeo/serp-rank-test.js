@@ -39,6 +39,8 @@ function normalizeKeyword(keyword) {
 async function fetchKeywordOverview(keywords, auth) {
   const endpoint = "https://api.dataforseo.com/v3/keywords_data/google_ads/search_volume/live";
   
+  console.log(`[VOL] fetchKeywordOverview called with ${keywords.length} keywords`);
+  
   try {
     // Log ALL keywords being sent to DataForSEO with [VOL] prefix
     console.log(`[VOL] Sending keywords to search_volume:`, keywords);
