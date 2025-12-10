@@ -15299,11 +15299,16 @@ Final Score: ${score}/100`;
             // Use today's date (declare as 'let' so it can be reused later)
             let today = new Date();
             let todayStr = today.toISOString().split('T')[0];
-            // Query from timeseries start to today (to catch any data beyond timeseries)
-            const startDate = timeseriesStartDate;
+            // CRITICAL: Query ALL historical audit data, not just timeseries range
+            // The user manually added 18 months of historical data, so we need to fetch all of it
+            // Query from 2 years ago to today to ensure we get all historical data
+            // Don't limit to timeseries range - fetch all available historical audit data
+            const historicalStartDate = new Date();
+            historicalStartDate.setFullYear(historicalStartDate.getFullYear() - 2);
+            const startDate = historicalStartDate.toISOString().split('T')[0]; // 2 years ago
             const endDate = todayStr; // Use today, not timeseries end date
             
-            debugLog(`Fetching Content/Schema history from Supabase: ${startDate} to ${endDate}`, 'info');
+            debugLog(`Fetching Content/Schema history from Supabase: ${startDate} to ${endDate} (ALL historical data)`, 'info');
             debugLog(`Timeseries date range: ${timeseriesStartDate} to ${timeseriesEndDate}`, 'info');
             
             // Fetch historical data asynchronously (includes Content/Schema AND Business Profile data)
