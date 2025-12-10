@@ -18607,20 +18607,20 @@ Final Score: ${score}/100`;
       // Rank bucket
       const rank = row.best_rank_group;
       let rankBucket = 'page2plus';
-      let rankBucketLabel = 'Page 2+ / Not ranked';
+      let rankBucketLabel = 'beyond page 2';
       let positionStrength = 'Weak';
       if (rank != null) {
         if (rank >= 1 && rank <= 3) {
           rankBucket = 'top3';
-          rankBucketLabel = 'Top 3';
+          rankBucketLabel = 'page 1';
           positionStrength = 'Strong';
         } else if (rank >= 4 && rank <= 10) {
           rankBucket = 'top10';
-          rankBucketLabel = 'Top 10';
+          rankBucketLabel = 'page 1';
           positionStrength = 'OK';
-        } else if (rank >= 11 && rank <= 20) {
-          rankBucket = 'page1';
-          rankBucketLabel = 'Page 1 (11-20)';
+        } else if (rank > 10) {
+          rankBucket = 'page2plus';
+          rankBucketLabel = 'beyond page 2';
           positionStrength = 'Weak';
         }
       }
@@ -19493,11 +19493,19 @@ Final Score: ${score}/100`;
       // Build HTML for scorecard
       let html = '';
 
+      // Impact & Difficulty summary line (under card header)
+      const impactLabel = scorecardData.impact_bucket.charAt(0).toUpperCase() + scorecardData.impact_bucket.slice(1);
+      const difficultyLabel = scorecardData.difficulty_bucket.charAt(0).toUpperCase() + scorecardData.difficulty_bucket.slice(1);
+      const priorityLabel = scorecardData.priority_level;
+      html += `<div style="margin-bottom: 1.25rem; padding-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb;">`;
+      html += `<p style="margin: 0; font-size: 0.95rem; color: #475569; font-weight: 500;">Impact: ${impactLabel} • Difficulty: ${difficultyLabel} • Priority: ${priorityLabel}</p>`;
+      html += `</div>`;
+
       // Keyword & URL header
       html += `<div style="margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 2px solid #e5e7eb;">`;
-      html += `<h4 style="font-size: 1.25rem; font-weight: 700; color: #1e293b; margin-bottom: 0.5rem;">${scorecardData.keyword}</h4>`;
+      html += `<h4 style="font-size: 1.35rem; font-weight: 700; color: #1e293b; margin-bottom: 0.5rem;">${scorecardData.keyword}</h4>`;
       if (scorecardData.ranking_url) {
-        html += `<p style="margin: 0.25rem 0; font-size: 0.9rem;"><a href="${scorecardData.ranking_url}" target="_blank" rel="noopener noreferrer" style="color: #0284c7; text-decoration: none;">${scorecardData.ranking_url}</a></p>`;
+        html += `<p style="margin: 0.25rem 0; font-size: 0.85rem;"><a href="${scorecardData.ranking_url}" target="_blank" rel="noopener noreferrer" style="color: #0284c7; text-decoration: none;">${scorecardData.ranking_url}</a></p>`;
       }
       html += `<div style="display: flex; gap: 1rem; margin-top: 0.5rem; flex-wrap: wrap;">`;
       html += `<span class="ranking-badge ${scorecardData.segment === 'money' ? 'ranking-badge--segment-money' : scorecardData.segment === 'education' ? 'ranking-badge--segment-education' : scorecardData.segment === 'brand' ? 'ranking-badge--segment-brand' : 'ranking-badge--segment-general'}" style="font-size: 0.85rem;">${scorecardData.segment || 'Other'}</span>`;
@@ -19523,7 +19531,7 @@ Final Score: ${score}/100`;
       html += `<h5 style="font-size: 1rem; font-weight: 600; color: #1e293b; margin-bottom: 0.75rem;">2. Classic ranking</h5>`;
       const rankText = scorecardData.best_rank_group != null 
         ? `Currently ranking #${scorecardData.best_rank_group} (${scorecardData.rank_bucket_label})`
-        : 'Not currently ranked';
+        : 'Currently ranking (beyond page 2)';
       html += `<p style="margin-bottom: 0.5rem;">${rankText}</p>`;
       const strengthClass = scorecardData.position_strength === 'Strong' ? 'status-green' : 
                            scorecardData.position_strength === 'OK' ? 'status-amber' : 'status-red';
@@ -19537,13 +19545,13 @@ Final Score: ${score}/100`;
       // 3. CTR & snippet
       html += `<div class="scorecard-section">`;
       html += `<h5 style="font-size: 1rem; font-weight: 600; color: #1e293b; margin-bottom: 0.75rem;">3. CTR & snippet</h5>`;
-      html += `<p style="color: #64748b; font-size: 0.9rem;">CTR data currently not wired in; using rank as proxy. ${scorecardData.best_rank_group != null ? `At #${scorecardData.best_rank_group} you should be capturing a higher share of clicks than you are.` : 'Improve ranking to capture clicks.'}</p>`;
+      html += `<p style="color: #64748b; font-size: 0.9rem;">CTR data isn't wired into this module yet – using rank as a proxy. ${scorecardData.best_rank_group != null ? `At #${scorecardData.best_rank_group} you should be capturing a higher share of clicks than you are.` : 'Improve ranking to capture clicks.'}</p>`;
       html += `</div>`;
 
       // 4. Schema & rich results
       html += `<div class="scorecard-section">`;
       html += `<h5 style="font-size: 1rem; font-weight: 600; color: #1e293b; margin-bottom: 0.75rem;">4. Schema & rich results</h5>`;
-      html += `<p style="color: #64748b; font-size: 0.9rem;">Schema: coverage assessment not wired into this module yet.</p>`;
+      html += `<p style="color: #64748b; font-size: 0.9rem;">Schema: this module doesn't yet assess schema coverage – check the Content/Schema pillar for a full view.</p>`;
       html += `</div>`;
 
       // 5. AI usage
