@@ -3832,7 +3832,9 @@
         }
         
         // Build Money Pages summary for trend tracking (Phase 3)
-        // Ensure moneyPagesMetrics exists in scores
+        // CRITICAL: Ensure moneyPagesMetrics exists in scores - check multiple sources
+        debugLog(`saveAuditToSupabase: Checking for moneyPagesMetrics - scores.moneyPagesMetrics=${!!scores?.moneyPagesMetrics}, window.moneyPagesMetrics=${!!window.moneyPagesMetrics}`, 'info');
+        
         if (!scores.moneyPagesMetrics) {
           debugLog(`⚠ saveAuditToSupabase: scores.moneyPagesMetrics is missing, checking window.moneyPagesMetrics`, 'warn');
           // Try to get from global state if available
@@ -3842,10 +3844,15 @@
           } else {
             debugLog(`⚠ saveAuditToSupabase: No moneyPagesMetrics available anywhere - this means money pages data was not generated during audit`, 'warn');
             debugLog(`⚠ saveAuditToSupabase: This could be because: 1) No queryPages data from GSC, 2) CSV fetch failed, 3) No money pages found in CSV`, 'warn');
+            // Set to null explicitly so it's saved (even if empty)
+            scores.moneyPagesMetrics = null;
           }
         } else {
           debugLog(`✓ saveAuditToSupabase: moneyPagesMetrics found in scores (${scores.moneyPagesMetrics.rows?.length || 0} rows)`, 'info');
         }
+        
+        // CRITICAL: Log what we're about to save
+        debugLog(`saveAuditToSupabase: Final moneyPagesMetrics to save: ${scores.moneyPagesMetrics ? (scores.moneyPagesMetrics.rows?.length || 0) + ' rows' : 'NULL'}`, 'info');
         
         // Ensure overview is never null - create fallback if needed
         if (!overview) {
