@@ -23,6 +23,65 @@ function normalizeDomain(value) {
   return value.replace(/^www\./, "");
 }
 
+function normalizeKeyword(keyword) {
+  return String(keyword).toLowerCase().trim();
+}
+
+/**
+ * Fetch keyword search volume from DataForSEO Labs Keyword Overview
+ * Returns a map: keyword (normalized) -> { search_volume, monthly_searches }
+ */
+async function fetchKeywordOverview(keywords, auth) {
+  const endpoint = "https://api.dataforseo.com/v3/dataforseo_labs/google/keyword_overview/live";
+  
+  try {
+    const dfResponse = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Basic ${auth}`,
+      },
+      body: JSON.stringify([
+        {
+          keywords: keywords,
+          language_code: "en",
+          location_code: 2826, // United Kingdom
+        },
+      ]),
+    });
+
+    const data = await dfResponse.json();
+
+    if (!dfResponse.ok || !String(data.status_code).startsWith("200")) {
+      console.error("Keyword Overview API error:", data.status_message || "Request failed");
+      return {};
+    }
+
+    const task = data.tasks?.[0];
+    const items = task?.result?.[0]?.items || [];
+
+    const volumeByKeyword = {};
+    for (const item of items) {
+      const kw = item.keyword || item.keyword_info?.keyword;
+      if (!kw) continue;
+      
+      const normalizedKw = normalizeKeyword(kw);
+      const searchVolume = item.keyword_info?.search_volume ?? null;
+      const monthlySearches = item.keyword_info?.monthly_searches || undefined;
+
+      volumeByKeyword[normalizedKw] = {
+        search_volume: searchVolume,
+        monthly_searches: monthlySearches,
+      };
+    }
+
+    return volumeByKeyword;
+  } catch (err) {
+    console.error("Error fetching Keyword Overview:", err);
+    return {}; // Return empty map on error, don't block ranking results
+  }
+}
+
 async function fetchSerpForKeyword(keyword, auth, targetRoot) {
   const endpoint =
     "https://api.dataforseo.com/v3/serp/google/organic/live/advanced";
@@ -178,11 +237,23 @@ export default async function handler(req, res) {
   );
 
   try {
+    // Fetch keyword search volume (best-effort, non-blocking)
+    const volumeByKeyword = await fetchKeywordOverview(keywords, auth);
+
     // Call DataForSEO once per keyword (required by Live API)
     const perKeyword = [];
     for (const keyword of keywords) {
       const result = await fetchSerpForKeyword(keyword, auth, targetRoot);
-      perKeyword.push(result);
+      
+      // Merge search volume data
+      const normalizedKw = normalizeKeyword(keyword);
+      const volumeData = volumeByKeyword[normalizedKw] || {};
+      
+      perKeyword.push({
+        ...result,
+        search_volume: volumeData.search_volume ?? null,
+        search_volume_trend: volumeData.monthly_searches || undefined,
+      });
     }
 
     // Build summary

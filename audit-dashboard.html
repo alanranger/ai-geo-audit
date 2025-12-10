@@ -1176,12 +1176,12 @@
       background: #ffffff;
     }
 
-    /* Section D: Details grid */
+    /* Section D: Details grid - stack below table on desktop */
     .ranking-details-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 1.25rem;
-      margin-top: 1.5rem;
+      margin-top: 2rem;
       background: rgba(204, 255, 255, 0.15) !important;
       border-left: 4px solid #CCFFFF !important;
       border-radius: 8px;
@@ -1199,7 +1199,7 @@
       padding: 0;
     }
 
-    @media (max-width: 768px) {
+    @media (max-width: 1200px) {
       .ranking-details-grid {
         grid-template-columns: 1fr;
       }
@@ -1330,6 +1330,35 @@
     .ranking-badge-rank--weak {
       background: #fee2e2;
       color: #b91c1c;
+    }
+
+    .ranking-badge-volume {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.3rem 0.6rem;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    
+    .ranking-badge-volume--high {
+      background: #dcfce7;
+      color: #166534;
+    }
+    
+    .ranking-badge-volume--med {
+      background: #fef3c7;
+      color: #92400e;
+    }
+    
+    .ranking-badge-volume--low {
+      background: #fee2e2;
+      color: #b91c1c;
+    }
+    
+    .ranking-badge-volume--none {
+      background: #f3f4f6;
+      color: #6b7280;
     }
 
     .ranking-badge-citation {
@@ -2064,6 +2093,7 @@
               <p class="card-subtitle ranking-subtitle-tight">
                 Keyword-level inputs to <strong>Visibility</strong> and the
                 <strong>Authority → Behaviour / Ranking</strong> components.
+                Search volume shows demand for each tracked keyword (Visibility pillar). Combined with AI citations, it also highlights topics where you have strong or weak Authority.
                 AI columns show where <strong>Content/Schema</strong> helps make you a source.
               </p>
             </div>
@@ -2074,6 +2104,7 @@
                     <th data-sort="keyword" class="sortable">Keyword <span class="sort-indicator"></span></th>
                     <th data-sort="segment" class="sortable">Segment <span class="sort-indicator"></span></th>
                     <th data-sort="rank" class="sortable">Best rank <span class="sort-indicator"></span></th>
+                    <th data-sort="volume" class="sortable">Search volume <span class="sort-indicator"></span><span title="Average monthly Google search volume for this keyword in the UK. Source: DataForSEO Labs – Keyword Overview." style="margin-left: 0.25rem; opacity: 0.6; cursor: help;">ℹ</span></th>
                     <th>AI Overview</th>
                     <th data-sort="citations" class="sortable">AI citations <span class="sort-indicator"></span></th>
                     <th>Ranking URL</th>
@@ -2082,7 +2113,7 @@
                   </tr>
                 </thead>
                 <tbody id="ranking-ai-table-body">
-                  <tr><td colspan="8" class="ranking-table-empty">Click "Run ranking &amp; AI check" to load data.</td></tr>
+                  <tr><td colspan="9" class="ranking-table-empty">Click "Run ranking &amp; AI check" to load data.</td></tr>
                 </tbody>
               </table>
             </div>
@@ -17661,7 +17692,9 @@ Final Score: ${score}/100`;
               has_featured_snippet: false,
               has_people_also_ask: false
             },
-            competitor_counts: competitorCounts
+            competitor_counts: competitorCounts,
+            search_volume: row.search_volume ?? null,
+            search_volume_trend: row.search_volume_trend || undefined
           };
         });
 
@@ -17797,6 +17830,10 @@ Final Score: ${score}/100`;
             aVal = a.ai_alan_citations_count ?? 0;
             bVal = b.ai_alan_citations_count ?? 0;
             break;
+          case 'volume':
+            aVal = a.search_volume ?? 0;
+            bVal = b.search_volume ?? 0;
+            break;
           default:
             return 0;
         }
@@ -17917,7 +17954,7 @@ Final Score: ${score}/100`;
       if (!sortedRows.length) {
         const tr = document.createElement("tr");
         const td = document.createElement("td");
-        td.colSpan = 8;
+        td.colSpan = 9;
         td.className = "ranking-table-empty";
         td.textContent = filteredRows.length === 0 && combinedRows.length > 0
           ? "No rows match the current filters."
@@ -17980,6 +18017,30 @@ Final Score: ${score}/100`;
           tdRank.appendChild(badge);
         }
         tr.appendChild(tdRank);
+
+        // Search volume with RAG badge
+        const tdVolume = document.createElement("td");
+        const volumeBadge = document.createElement("span");
+        const searchVolume = row.search_volume;
+        if (searchVolume == null || searchVolume === 0) {
+          volumeBadge.className = "ranking-badge-volume ranking-badge-volume--none";
+          volumeBadge.textContent = "—";
+        } else {
+          const formatted = searchVolume.toLocaleString();
+          let ragClass = "ranking-badge-volume--low";
+          let label = "Low";
+          if (searchVolume > 200) {
+            ragClass = "ranking-badge-volume--high";
+            label = "High";
+          } else if (searchVolume > 50) {
+            ragClass = "ranking-badge-volume--med";
+            label = "Med";
+          }
+          volumeBadge.className = `ranking-badge-volume ${ragClass}`;
+          volumeBadge.textContent = `${formatted} ${label}`;
+        }
+        tdVolume.appendChild(volumeBadge);
+        tr.appendChild(tdVolume);
 
         // AI Overview
         const tdAi = document.createElement("td");
