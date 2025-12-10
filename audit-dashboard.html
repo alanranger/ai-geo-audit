@@ -15682,7 +15682,20 @@ Final Score: ${score}/100`;
                 debugLog(`Using calculated Authority (${authScore}) for ${pointDate}`, 'info');
               }
               
-              visibilityData.push(pillarScores.visibility);
+              // Visibility data (check historical data from Supabase, then use current score)
+              const historicalVisibility = visibilityMap.get(pointDate);
+              if (historicalVisibility !== undefined && historicalVisibility !== null) {
+                visibilityData.push(historicalVisibility);
+                debugLog(`Using historical Visibility (${historicalVisibility}) for ${pointDate}`, 'info');
+              } else if (isToday) {
+                // For today, use current Visibility score
+                visibilityData.push(pillarScores.visibility);
+                debugLog(`Using current Visibility (${pillarScores.visibility}) for ${pointDate}`, 'info');
+              } else {
+                // For past dates without historical data, use null (don't show line)
+                visibilityData.push(null);
+                debugLog(`No Visibility data for ${pointDate}, using null`, 'info');
+              }
               
               // Check if we have real historical data for this date
               const realScore = contentSchemaMap.get(pointDate);
