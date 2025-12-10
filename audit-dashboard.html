@@ -2184,6 +2184,30 @@
           </div>
         </div>
 
+        <!-- Tracked keyword visibility metrics (DataForSEO only - not part of AI GEO pillars) -->
+        <div class="ranking-visibility-metrics-section" id="ranking-visibility-metrics" style="display: none;">
+          <div class="card" style="background: rgba(204, 255, 255, 0.15); border-left: 4px solid #CCFFFF;">
+            <div class="card-header">
+              <h4 style="font-size: 14pt !important; margin-bottom: 0.5rem;">Tracked keyword visibility (DataForSEO)</h4>
+              <p style="font-size: 12pt !important; color: #666; margin-bottom: 0.75rem;">
+                These metrics use DataForSEO rankings and search volume for your tracked keyword set only. The main Visibility and Authority pillars are still based on full GSC data.
+              </p>
+              <div style="display: flex; gap: 2rem; flex-wrap: wrap; font-size: 14pt !important;">
+                <div>
+                  <strong>Demand-weighted avg position:</strong>
+                  <span id="ranking-avg-position-weighted" style="font-weight: bold; color: #0284c7;">—</span>
+                  <span title="Average Google rank for your tracked keywords, weighted by search volume. Big generic terms pull this more than tiny or brand terms." style="margin-left: 0.25rem; opacity: 0.6; cursor: help; font-size: 12pt !important;">ℹ</span>
+                </div>
+                <div style="font-size: 12pt !important; color: #666;">
+                  <strong>Unweighted avg position:</strong>
+                  <span id="ranking-avg-position-unweighted" style="font-weight: normal;">—</span>
+                  <span title="Simple average rank across tracked keywords. Diagnostic only – does not affect main AI GEO pillars." style="margin-left: 0.25rem; opacity: 0.6; cursor: help;">ℹ</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="ranking-table-section">
           <div class="card">
             <div class="card-header">
@@ -18189,13 +18213,20 @@ Final Score: ${score}/100`;
         RankingAiProgressModal.updateProgress(90, 3);
         RankingAiProgressModal.updateCounts(`✓ Processed ${totalKeywords} keywords (${withRank} ranked, ${withAiOverview} with AI Overview, ${withSearchVolume} with search volume)`);
 
+        // Merge SERP API summary (includes visibility metrics) with frontend-calculated summary
+        const serpSummary = serpJson.summary || {};
         const summary = {
-          totalKeywords,
-          withRank,
-          withAiOverview,
-          withAiCitation,
+          total_keywords: totalKeywords,
+          keywords_with_rank: withRank,
+          keywords_with_ai_overview: withAiOverview,
+          keywords_with_ai_citations: withAiCitation,
           top10,
-          top3
+          top3,
+          // Include visibility metrics from SERP API (Ranking API only - not part of AI GEO pillars)
+          avg_position_unweighted: serpSummary.avg_position_unweighted ?? null,
+          avg_position_volume_weighted: serpSummary.avg_position_volume_weighted ?? null,
+          keywords_used_for_avg: serpSummary.keywords_used_for_avg ?? null,
+          keywords_with_volume: serpSummary.keywords_with_volume ?? null
         };
 
         mod.setData(combined, summary);
@@ -18442,6 +18473,37 @@ Final Score: ${score}/100`;
       const { combinedRows, summary } = RankingAiModule.state();
 
       if (!summary || !Array.isArray(combinedRows)) return;
+
+      // Display tracked keyword visibility metrics (DataForSEO only - not part of AI GEO pillars)
+      const visibilityMetricsSection = document.getElementById('ranking-visibility-metrics');
+      const avgPositionWeightedEl = document.getElementById('ranking-avg-position-weighted');
+      const avgPositionUnweightedEl = document.getElementById('ranking-avg-position-unweighted');
+      
+      if (visibilityMetricsSection && summary) {
+        if (summary.avg_position_volume_weighted !== null && summary.avg_position_volume_weighted !== undefined) {
+          visibilityMetricsSection.style.display = 'block';
+          if (avgPositionWeightedEl) {
+            avgPositionWeightedEl.textContent = summary.avg_position_volume_weighted.toFixed(2);
+          }
+          if (avgPositionUnweightedEl && summary.avg_position_unweighted !== null && summary.avg_position_unweighted !== undefined) {
+            avgPositionUnweightedEl.textContent = summary.avg_position_unweighted.toFixed(2);
+          } else if (avgPositionUnweightedEl) {
+            avgPositionUnweightedEl.textContent = '—';
+          }
+        } else {
+          visibilityMetricsSection.style.display = 'block';
+          if (avgPositionWeightedEl) {
+            avgPositionWeightedEl.textContent = '—';
+            avgPositionWeightedEl.title = 'Not enough valid keywords to calculate.';
+          }
+          if (avgPositionUnweightedEl) {
+            avgPositionUnweightedEl.textContent = '—';
+            avgPositionUnweightedEl.title = 'Not enough valid keywords to calculate.';
+          }
+        }
+      } else if (visibilityMetricsSection) {
+        visibilityMetricsSection.style.display = 'none';
+      }
 
       // Apply filters
       const filteredRows = applyRankingFilters(combinedRows);

@@ -505,11 +505,53 @@ export default async function handler(req, res) {
     const keywordsWithRank = perKeyword.filter(
       (k) => k.best_rank_group !== null
     ).length;
+    
+    // Calculate tracked keyword visibility metrics (Ranking API only - not used in AI GEO pillars)
+    // Filter to valid ranking rows (best_rank_group is a number, not null)
+    const validRankingRows = perKeyword.filter(
+      (k) => k.best_rank_group !== null && typeof k.best_rank_group === 'number'
+    );
+    
+    let avgPositionUnweighted = null;
+    let avgPositionVolumeWeighted = null;
+    const keywordsUsedForAvg = validRankingRows.length;
+    const keywordsWithVolume = perKeyword.filter(
+      (k) => k.search_volume !== null && k.search_volume !== undefined && k.search_volume > 0
+    ).length;
+    
+    if (validRankingRows.length >= 1) {
+      // Unweighted average position (diagnostic only)
+      const sumRanks = validRankingRows.reduce((sum, k) => sum + k.best_rank_group, 0);
+      avgPositionUnweighted = sumRanks / validRankingRows.length;
+      
+      // Demand-weighted average position
+      let sumWeightedRanks = 0;
+      let sumVolumes = 0;
+      
+      for (const row of validRankingRows) {
+        // Use search_volume if available; if missing or 0, use fallback of 10
+        const vol = (row.search_volume !== null && row.search_volume !== undefined && row.search_volume > 0)
+          ? row.search_volume
+          : 10;
+        
+        sumWeightedRanks += row.best_rank_group * vol;
+        sumVolumes += vol;
+      }
+      
+      // Only set if sum of volumes > 0 (shouldn't happen with fallback, but guard anyway)
+      if (sumVolumes > 0) {
+        avgPositionVolumeWeighted = sumWeightedRanks / sumVolumes;
+      }
+    }
 
     res.status(200).json({
       summary: {
         total_keywords: totalKeywords,
         keywords_with_rank: keywordsWithRank,
+        avg_position_unweighted: avgPositionUnweighted !== null ? Math.round(avgPositionUnweighted * 100) / 100 : null,
+        avg_position_volume_weighted: avgPositionVolumeWeighted !== null ? Math.round(avgPositionVolumeWeighted * 100) / 100 : null,
+        keywords_used_for_avg: keywordsUsedForAvg,
+        keywords_with_volume: keywordsWithVolume,
       },
       per_keyword: perKeyword,
     });
