@@ -39,7 +39,11 @@ async function fetchKeywordOverview(keywords, auth) {
   const endpoint = "https://api.dataforseo.com/v3/dataforseo_labs/google/keyword_overview/live";
   
   try {
-    console.log(`[Keyword Overview] Fetching volume for ${keywords.length} keywords: ${keywords.slice(0, 3).join(', ')}...`);
+    // Log ALL keywords being sent to DataForSEO
+    console.log(`[Keyword Overview] Sending ${keywords.length} keywords to DataForSEO:`);
+    keywords.forEach((kw, idx) => {
+      console.log(`  ${idx + 1}. "${kw}" (normalized: "${normalizeKeyword(kw)}")`);
+    });
     
     const dfResponse = await fetch(endpoint, {
       method: "POST",
@@ -93,6 +97,8 @@ async function fetchKeywordOverview(keywords, auth) {
     console.log(`[Keyword Overview] Found ${items.length} items in response`);
 
     const volumeByKeyword = {};
+    console.log(`[Keyword Overview] Processing ${items.length} items from DataForSEO response`);
+    
     for (const item of items) {
       // DataForSEO Labs API structure can vary:
       // - item.keyword (direct)
@@ -112,11 +118,7 @@ async function fetchKeywordOverview(keywords, auth) {
       const searchVolume = item.keyword_info?.search_volume ?? item.search_volume ?? null;
       const monthlySearches = item.keyword_info?.monthly_searches || item.monthly_searches || undefined;
 
-      if (searchVolume !== null) {
-        console.log(`[Keyword Overview] Keyword "${kw}" (normalized: "${normalizedKw}") has volume: ${searchVolume}`);
-      } else {
-        console.log(`[Keyword Overview] Keyword "${kw}" (normalized: "${normalizedKw}") has volume: null`);
-      }
+      console.log(`[Keyword Overview] Processing item: original="${kw}", normalized="${normalizedKw}", volume=${searchVolume ?? 'null'}`);
 
       volumeByKeyword[normalizedKw] = {
         search_volume: searchVolume,
@@ -127,10 +129,10 @@ async function fetchKeywordOverview(keywords, auth) {
     console.log(`[Keyword Overview] Built volume map with ${Object.keys(volumeByKeyword).length} entries`);
     
     // Log the volume map summary for debugging
-    const volumeMapSummary = Object.entries(volumeByKeyword)
-      .map(([kw, data]) => `${kw} → ${data.search_volume ?? 'null'}`)
-      .join(', ');
-    console.log(`[Keyword Overview] Volume map summary: ${volumeMapSummary}`);
+    console.log(`[Keyword Overview] Volume map entries:`);
+    Object.entries(volumeByKeyword).forEach(([kw, data]) => {
+      console.log(`  "${kw}" → ${data.search_volume ?? 'null'}`);
+    });
     
     return volumeByKeyword;
   } catch (err) {
@@ -315,10 +317,10 @@ export default async function handler(req, res) {
       };
       
       if (mergedResult.search_volume !== null) {
-        console.log(`[Handler] Merged "${keyword}" (normalized: "${normalizedKw}") with volume: ${mergedResult.search_volume}`);
+        console.log(`[Handler] ✓ Merged "${keyword}" (normalized: "${normalizedKw}") with volume: ${mergedResult.search_volume}`);
       } else {
-        console.log(`[Handler] Merged "${keyword}" (normalized: "${normalizedKw}") with volume: null (not found in volume map)`);
-        console.log(`[Handler] Available keys in volume map: ${Object.keys(volumeByKeyword).join(', ')}`);
+        console.log(`[Handler] ✗ No search_volume found for keyword "${keyword}" (normalized: "${normalizedKw}")`);
+        console.log(`[Handler] Available keys in volume map: ${Object.keys(volumeByKeyword).map(k => `"${k}"`).join(', ')}`);
       }
       
       perKeyword.push(mergedResult);
