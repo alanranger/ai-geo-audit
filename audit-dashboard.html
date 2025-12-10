@@ -2363,12 +2363,6 @@
                 <div id="ranking-ai-detail-content" class="ranking-ai-detail-content" hidden>
                   <h4 id="ranking-ai-detail-keyword"></h4>
                   <p id="ranking-ai-detail-summary"></p>
-
-                  <h5>Your cited pages</h5>
-                  <ul id="ranking-ai-detail-our-pages" class="ranking-ai-detail-list"></ul>
-
-                  <h5>Other cited domains</h5>
-                  <ul id="ranking-ai-detail-competitors" class="ranking-ai-detail-list"></ul>
                 </div>
               </div>
             </div>
@@ -2383,6 +2377,27 @@
                 </p>
               </div>
               <ul id="ranking-ai-competitors-list" class="ranking-ai-detail-list"></ul>
+            </div>
+
+            <div class="card" id="ranking-ai-citations-card">
+              <div class="card-header">
+                <h3>AI Citations for Selected Keyword</h3>
+                <p class="card-subtitle ranking-subtitle-tight">
+                  Pages from alanranger.com and other domains cited in AI Overviews for the selected keyword.
+                </p>
+              </div>
+              <div class="ranking-ai-detail-body">
+                <p id="ranking-ai-citations-empty">
+                  Select a keyword in the table to see AI citations.
+                </p>
+                <div id="ranking-ai-citations-content" hidden>
+                  <h5>Your cited pages</h5>
+                  <ul id="ranking-ai-detail-our-pages" class="ranking-ai-detail-list"></ul>
+
+                  <h5>Other cited domains</h5>
+                  <ul id="ranking-ai-detail-competitors" class="ranking-ai-detail-list"></ul>
+                </div>
+              </div>
             </div>
 
             <div class="card" id="ranking-ai-features-card">
@@ -19522,6 +19537,13 @@ Final Score: ${score}/100`;
         emptyEl.hidden = false;
         contentEl.hidden = true;
         emptyEl.textContent = "Select a keyword in the table or a cell in the priority grid to see a detailed scorecard.";
+        
+        // Hide citations section
+        const citationsEmpty = document.getElementById("ranking-ai-citations-empty");
+        const citationsContent = document.getElementById("ranking-ai-citations-content");
+        if (citationsEmpty) citationsEmpty.hidden = false;
+        if (citationsContent) citationsContent.hidden = true;
+        
         return;
       }
 
@@ -19650,11 +19672,7 @@ Final Score: ${score}/100`;
       const kwEl = document.getElementById("ranking-ai-detail-keyword");
       if (kwEl) kwEl.innerHTML = html;
 
-      // Keep existing AI citations lists for backward compatibility
-      const ourList = document.getElementById("ranking-ai-detail-our-pages");
-      const compList = document.getElementById("ranking-ai-detail-competitors");
-      const sumEl = document.getElementById("ranking-ai-detail-summary");
-
+      // Update summary line
       if (sumEl) {
         const parts = [];
         if (row.best_rank_group != null) {
@@ -19676,40 +19694,53 @@ Final Score: ${score}/100`;
         sumEl.textContent = parts.join(" • ");
       }
 
-      if (ourList) {
-        ourList.innerHTML = "";
-        if (!row.ai_alan_citations || !row.ai_alan_citations.length) {
-          const li = document.createElement("li");
-          li.textContent = "No alanranger.com citations found for this AI Overview.";
-          ourList.appendChild(li);
-        } else {
-          row.ai_alan_citations.forEach(c => {
-            const li = document.createElement("li");
-            const a = document.createElement("a");
-            a.href = c.url;
-            a.target = "_blank";
-            a.rel = "noopener noreferrer";
-            a.textContent = c.title || c.url;
-            li.appendChild(a);
-            ourList.appendChild(li);
-          });
-        }
-      }
+      // Update AI citations section in right panel
+      const citationsEmpty = document.getElementById("ranking-ai-citations-empty");
+      const citationsContent = document.getElementById("ranking-ai-citations-content");
+      const ourList = document.getElementById("ranking-ai-detail-our-pages");
+      const compList = document.getElementById("ranking-ai-detail-competitors");
 
-      if (compList) {
-        compList.innerHTML = "";
-        const entries = Object.entries(row.competitor_counts || {}).sort((a, b) => b[1] - a[1]);
-        if (!entries.length) {
-          const li = document.createElement("li");
-          li.textContent = "No competing domains recorded from AI citations for this keyword.";
-          compList.appendChild(li);
-        } else {
-          entries.forEach(([domain, count]) => {
+      if (citationsEmpty && citationsContent) {
+        citationsEmpty.hidden = true;
+        citationsContent.hidden = false;
+
+        if (ourList) {
+          ourList.innerHTML = "";
+          if (!row.ai_alan_citations || !row.ai_alan_citations.length) {
             const li = document.createElement("li");
-            li.textContent = `${domain} – ${count} citation${count === 1 ? "" : "s"}`;
-            compList.appendChild(li);
-          });
+            li.textContent = "No alanranger.com citations found for this AI Overview.";
+            ourList.appendChild(li);
+          } else {
+            row.ai_alan_citations.forEach(c => {
+              const li = document.createElement("li");
+              const a = document.createElement("a");
+              a.href = c.url;
+              a.target = "_blank";
+              a.rel = "noopener noreferrer";
+              a.textContent = c.title || c.url;
+              li.appendChild(a);
+              ourList.appendChild(li);
+            });
+          }
         }
+
+        if (compList) {
+          compList.innerHTML = "";
+          const entries = Object.entries(row.competitor_counts || {}).sort((a, b) => b[1] - a[1]);
+          if (!entries.length) {
+            const li = document.createElement("li");
+            li.textContent = "No competing domains recorded from AI citations for this keyword.";
+            compList.appendChild(li);
+          } else {
+            entries.forEach(([domain, count]) => {
+              const li = document.createElement("li");
+              li.textContent = `${domain} – ${count} citation${count === 1 ? "" : "s"}`;
+              compList.appendChild(li);
+            });
+          }
+        }
+      } else if (citationsEmpty) {
+        citationsEmpty.hidden = false;
       }
     }
 
