@@ -150,7 +150,7 @@ export default async function handler(req, res) {
         }
       } : null,
       dateRange: 30, // Default - this isn't stored in Supabase
-      timestamp: new Date(record.audit_date + 'T00:00:00').getTime(),
+      timestamp: record.updated_at ? new Date(record.updated_at).getTime() : new Date(record.audit_date + 'T00:00:00').getTime(),
       auditDate: record.audit_date,
       // Money Pages Priority Matrix data - restore from Supabase if available
       moneyPagePriorityData: record.money_page_priority_data || null, // Restore from Supabase, or rebuild if missing
