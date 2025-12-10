@@ -95,12 +95,25 @@ async function fetchKeywordOverview(keywords, auth) {
     console.log(`[Keyword Overview] API success - status_code: ${data.status_code}, message: ${data.status_message}`);
 
     // Handle DataForSEO keywords_data/google_ads/search_volume/live response structure
-    // According to playground: data.result[] (direct array)
-    // But also check for tasks structure as fallback
+    // According to playground: response is wrapped in array, first element has result[]
+    // Structure: [{ status_code: 20000, result: [...] }]
     let items = [];
     
-    if (Array.isArray(data.result)) {
-      // Direct result array (keywords_data endpoint)
+    // Check if response is an array (wrapped)
+    if (Array.isArray(data) && data.length > 0) {
+      const firstItem = data[0];
+      if (Array.isArray(firstItem.result)) {
+        items = firstItem.result;
+        console.log(`[VOL] Using wrapped array structure data[0].result[], found ${items.length} items`);
+      } else if (firstItem.tasks && Array.isArray(firstItem.tasks) && firstItem.tasks.length > 0) {
+        const task = firstItem.tasks[0];
+        if (Array.isArray(task.result)) {
+          items = task.result;
+          console.log(`[VOL] Using wrapped array with tasks structure, found ${items.length} items`);
+        }
+      }
+    } else if (Array.isArray(data.result)) {
+      // Direct result array (if not wrapped)
       items = data.result;
       console.log(`[VOL] Using data.result[] (direct array), found ${items.length} items`);
     } else if (data.tasks && Array.isArray(data.tasks) && data.tasks.length > 0) {
@@ -122,7 +135,10 @@ async function fetchKeywordOverview(keywords, auth) {
     // If still no items, log full response structure for debugging
     if (items.length === 0) {
       console.error(`[VOL] No items found! Full response structure:`);
-      console.error(JSON.stringify(data, null, 2).substring(0, 2000));
+      console.error(`[VOL] Response is array: ${Array.isArray(data)}`);
+      console.error(`[VOL] Response keys: ${Array.isArray(data) ? 'array' : Object.keys(data).join(', ')}`);
+      console.error(`[VOL] Full response (first 3000 chars):`);
+      console.error(JSON.stringify(data, null, 2).substring(0, 3000));
     }
     
     console.log(`[VOL] Result count: ${items.length}`);
