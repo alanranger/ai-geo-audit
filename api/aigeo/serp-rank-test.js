@@ -67,32 +67,53 @@ async function fetchKeywordOverview(keywords, auth) {
 
     const data = await dfResponse.json();
 
-    console.log(`[Keyword Overview] Response status: ${dfResponse.status}, API status_code: ${data.status_code}`);
+    console.log(`[Keyword Overview] Response status: ${dfResponse.status}`);
+    console.log(`[Keyword Overview] Response structure check:`);
+    console.log(`  - data.status_code: ${data.status_code}`);
+    console.log(`  - data.status_message: ${data.status_message}`);
+    console.log(`  - data.result type: ${Array.isArray(data.result) ? 'array' : typeof data.result}`);
+    console.log(`  - data.result length: ${Array.isArray(data.result) ? data.result.length : 'N/A'}`);
+    console.log(`  - data.tasks type: ${Array.isArray(data.tasks) ? 'array' : typeof data.tasks}`);
+    console.log(`  - data.tasks length: ${Array.isArray(data.tasks) ? data.tasks.length : 'N/A'}`);
     
     if (!dfResponse.ok || !String(data.status_code).startsWith("200")) {
       console.error("[Keyword Overview] API error:", {
         status_code: data.status_code,
         status_message: data.status_message,
-        full_response: JSON.stringify(data).substring(0, 500)
+        full_response: JSON.stringify(data).substring(0, 1000)
       });
       return {};
     }
 
     // Handle DataForSEO keywords_data/google_ads/search_volume/live response structure
-    // Structure: data.result[] (direct array, not nested in tasks)
+    // According to playground: data.result[] (direct array)
+    // But also check for tasks structure as fallback
     let items = [];
+    
     if (Array.isArray(data.result)) {
+      // Direct result array (keywords_data endpoint)
       items = data.result;
+      console.log(`[VOL] Using data.result[] (direct array), found ${items.length} items`);
     } else if (data.tasks && Array.isArray(data.tasks) && data.tasks.length > 0) {
       // Fallback: try tasks structure (for keyword_overview endpoint)
       const task = data.tasks[0];
+      console.log(`[VOL] Trying tasks structure, task.result type: ${Array.isArray(task.result) ? 'array' : typeof task.result}`);
+      
       if (Array.isArray(task.result) && task.result.length > 0) {
         items = task.result[0]?.items || [];
       } else if (task.result && Array.isArray(task.result.items)) {
         items = task.result.items;
       } else if (task.result && !Array.isArray(task.result)) {
         items = task.result.items || [];
+      } else if (Array.isArray(task.result)) {
+        items = task.result;
       }
+    }
+    
+    // If still no items, log full response structure for debugging
+    if (items.length === 0) {
+      console.error(`[VOL] No items found! Full response structure:`);
+      console.error(JSON.stringify(data, null, 2).substring(0, 2000));
     }
     
     console.log(`[VOL] Result count: ${items.length}`);
