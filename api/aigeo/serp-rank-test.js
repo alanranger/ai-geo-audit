@@ -68,57 +68,55 @@ async function fetchKeywordOverview(keywords, auth) {
     const data = await dfResponse.json();
 
     console.log(`[Keyword Overview] Response status: ${dfResponse.status}`);
+    console.log(`[Keyword Overview] Response type: ${Array.isArray(data) ? 'Array' : typeof data}`);
+    
+    // DataForSEO keywords_data endpoint wraps response in array: [{ status_code, result: [...] }]
+    let responseData = data;
+    if (Array.isArray(data) && data.length > 0) {
+      responseData = data[0];
+      console.log(`[Keyword Overview] Response is array, using first element`);
+    }
+    
     console.log(`[Keyword Overview] Response structure check:`);
-    console.log(`  - data.status_code: ${data.status_code}`);
-    console.log(`  - data.status_message: ${data.status_message}`);
-    console.log(`  - data.result type: ${Array.isArray(data.result) ? 'array' : typeof data.result}`);
-    console.log(`  - data.result length: ${Array.isArray(data.result) ? data.result.length : 'N/A'}`);
-    console.log(`  - data.tasks type: ${Array.isArray(data.tasks) ? 'array' : typeof data.tasks}`);
-    console.log(`  - data.tasks length: ${Array.isArray(data.tasks) ? data.tasks.length : 'N/A'}`);
+    console.log(`  - status_code: ${responseData.status_code}`);
+    console.log(`  - status_message: ${responseData.status_message}`);
+    console.log(`  - result type: ${Array.isArray(responseData.result) ? 'array' : typeof responseData.result}`);
+    console.log(`  - result length: ${Array.isArray(responseData.result) ? responseData.result.length : 'N/A'}`);
+    console.log(`  - tasks type: ${Array.isArray(responseData.tasks) ? 'array' : typeof responseData.tasks}`);
+    console.log(`  - tasks length: ${Array.isArray(responseData.tasks) ? responseData.tasks.length : 'N/A'}`);
     
     // DataForSEO uses status_code 20000 for success (not 200)
+    const statusCode = responseData.status_code;
+    const statusMessage = responseData.status_message;
     const isSuccess = dfResponse.ok && (
-      String(data.status_code).startsWith("200") || 
-      data.status_code === 20000 ||
-      data.status_message === "Ok."
+      String(statusCode).startsWith("200") || 
+      statusCode === 20000 ||
+      statusMessage === "Ok."
     );
     
     if (!isSuccess) {
       console.error("[Keyword Overview] API error:", {
-        status_code: data.status_code,
-        status_message: data.status_message,
+        status_code: statusCode,
+        status_message: statusMessage,
         full_response: JSON.stringify(data).substring(0, 1000)
       });
       return {};
     }
     
-    console.log(`[Keyword Overview] API success - status_code: ${data.status_code}, message: ${data.status_message}`);
+    console.log(`[Keyword Overview] API success - status_code: ${statusCode}, message: ${statusMessage}`);
 
     // Handle DataForSEO keywords_data/google_ads/search_volume/live response structure
-    // According to playground: response is wrapped in array, first element has result[]
-    // Structure: [{ status_code: 20000, result: [...] }]
+    // Structure: [{ status_code: 20000, result: [...] }] OR { status_code: 20000, result: [...] }
+    // responseData already extracted above (first element if array, or data itself)
     let items = [];
     
-    // Check if response is an array (wrapped)
-    if (Array.isArray(data) && data.length > 0) {
-      const firstItem = data[0];
-      if (Array.isArray(firstItem.result)) {
-        items = firstItem.result;
-        console.log(`[VOL] Using wrapped array structure data[0].result[], found ${items.length} items`);
-      } else if (firstItem.tasks && Array.isArray(firstItem.tasks) && firstItem.tasks.length > 0) {
-        const task = firstItem.tasks[0];
-        if (Array.isArray(task.result)) {
-          items = task.result;
-          console.log(`[VOL] Using wrapped array with tasks structure, found ${items.length} items`);
-        }
-      }
-    } else if (Array.isArray(data.result)) {
-      // Direct result array (if not wrapped)
-      items = data.result;
-      console.log(`[VOL] Using data.result[] (direct array), found ${items.length} items`);
-    } else if (data.tasks && Array.isArray(data.tasks) && data.tasks.length > 0) {
+    if (Array.isArray(responseData.result)) {
+      // Direct result array (keywords_data endpoint)
+      items = responseData.result;
+      console.log(`[VOL] Using responseData.result[] (direct array), found ${items.length} items`);
+    } else if (responseData.tasks && Array.isArray(responseData.tasks) && responseData.tasks.length > 0) {
       // Fallback: try tasks structure (for keyword_overview endpoint)
-      const task = data.tasks[0];
+      const task = responseData.tasks[0];
       console.log(`[VOL] Trying tasks structure, task.result type: ${Array.isArray(task.result) ? 'array' : typeof task.result}`);
       
       if (Array.isArray(task.result) && task.result.length > 0) {
@@ -135,10 +133,9 @@ async function fetchKeywordOverview(keywords, auth) {
     // If still no items, log full response structure for debugging
     if (items.length === 0) {
       console.error(`[VOL] No items found! Full response structure:`);
-      console.error(`[VOL] Response is array: ${Array.isArray(data)}`);
-      console.error(`[VOL] Response keys: ${Array.isArray(data) ? 'array' : Object.keys(data).join(', ')}`);
-      console.error(`[VOL] Full response (first 3000 chars):`);
-      console.error(JSON.stringify(data, null, 2).substring(0, 3000));
+      console.error(`[VOL] responseData keys: ${Object.keys(responseData).join(', ')}`);
+      console.error(`[VOL] Full responseData (first 2000 chars):`);
+      console.error(JSON.stringify(responseData, null, 2).substring(0, 2000));
     }
     
     console.log(`[VOL] Result count: ${items.length}`);
