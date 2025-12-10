@@ -1092,14 +1092,15 @@
       min-width: 200px;
     }
 
-    /* Section C: Table section */
+    /* Section C: Table section - separate card */
     .ranking-table-section {
-      margin-bottom: 1.5rem;
-      background: rgba(204, 255, 255, 0.15) !important;
+      margin: 2rem 0;
+      background: rgba(204, 255, 255, 0.2) !important;
       border-left: 4px solid #CCFFFF !important;
       border-radius: 8px;
       padding: 1.5rem;
       font-size: 14pt !important;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     }
 
     .ranking-table-section .card {
@@ -1110,6 +1111,69 @@
     
     .ranking-table-section * {
       font-size: 14pt !important;
+    }
+    
+    /* Pagination controls */
+    .ranking-pagination-controls {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 1rem;
+      padding-top: 1rem;
+      border-top: 1px solid #e5e7eb;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+    
+    .ranking-pagination-info {
+      font-size: 14pt !important;
+      color: #374151;
+    }
+    
+    .ranking-pagination-buttons {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+    }
+    
+    .ranking-pagination-buttons button {
+      padding: 0.5rem 1rem;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      background: #ffffff;
+      font-size: 14pt !important;
+      cursor: pointer;
+      color: #374151;
+    }
+    
+    .ranking-pagination-buttons button:hover:not(:disabled) {
+      background: #f3f4f6;
+      border-color: #9ca3af;
+    }
+    
+    .ranking-pagination-buttons button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    .ranking-rows-per-page {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    
+    .ranking-rows-per-page label {
+      font-size: 14pt !important;
+      color: #374151;
+      white-space: nowrap;
+    }
+    
+    .ranking-rows-per-page select {
+      padding: 0.5rem 0.75rem;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 14pt !important;
+      background: #ffffff;
     }
 
     /* Section D: Details grid */
@@ -2021,6 +2085,28 @@
                   <tr><td colspan="8" class="ranking-table-empty">Click "Run ranking &amp; AI check" to load data.</td></tr>
                 </tbody>
               </table>
+            </div>
+            <div class="ranking-pagination-controls" id="ranking-pagination-controls" style="display: none;">
+              <div class="ranking-pagination-info" id="ranking-pagination-info">
+                Showing 0-0 of 0
+              </div>
+              <div class="ranking-pagination-buttons">
+                <button id="ranking-pagination-first" type="button">First</button>
+                <button id="ranking-pagination-prev" type="button">Previous</button>
+                <span id="ranking-pagination-page-info" style="padding: 0 0.5rem; font-size: 14pt;">Page 1 of 1</span>
+                <button id="ranking-pagination-next" type="button">Next</button>
+                <button id="ranking-pagination-last" type="button">Last</button>
+              </div>
+              <div class="ranking-rows-per-page">
+                <label>Rows per page:</label>
+                <select id="ranking-rows-per-page">
+                  <option value="10">10</option>
+                  <option value="25" selected>25</option>
+                  <option value="50">50</option>
+                  <option value="100">100</option>
+                  <option value="all">All</option>
+                </select>
+              </div>
             </div>
           </div>
         </div>
@@ -17644,6 +17730,10 @@ Final Score: ${score}/100`;
       column: 'rank',
       direction: 'asc'
     };
+    let rankingPaginationState = {
+      currentPage: 1,
+      rowsPerPage: 25
+    };
 
     // Apply filters to rows
     function applyRankingFilters(rows) {
@@ -17807,6 +17897,17 @@ Final Score: ${score}/100`;
 
       // Sort filtered rows
       const sortedRows = sortRankingRows(filteredRows);
+      
+      // Calculate pagination
+      const totalRows = sortedRows.length;
+      const rowsPerPage = rankingPaginationState.rowsPerPage === 'all' ? totalRows : rankingPaginationState.rowsPerPage;
+      const totalPages = rowsPerPage > 0 ? Math.ceil(totalRows / rowsPerPage) : 1;
+      const currentPage = Math.min(Math.max(1, rankingPaginationState.currentPage), totalPages);
+      rankingPaginationState.currentPage = currentPage;
+      
+      const startIdx = rowsPerPage === 'all' ? 0 : (currentPage - 1) * rowsPerPage;
+      const endIdx = rowsPerPage === 'all' ? totalRows : Math.min(startIdx + rowsPerPage, totalRows);
+      const paginatedRows = sortedRows.slice(startIdx, endIdx);
 
       // -------- Keyword table --------
       const tbody = document.getElementById("ranking-ai-table-body");
@@ -17823,17 +17924,21 @@ Final Score: ${score}/100`;
           : "No data returned from ranking / AI endpoints.";
         tr.appendChild(td);
         tbody.appendChild(tr);
+        
+        // Hide pagination when no data
+        const paginationControls = document.getElementById("ranking-pagination-controls");
+        if (paginationControls) paginationControls.style.display = "none";
         return;
       }
 
       // Store original index mapping for detail panel
       const originalIndexMap = new Map();
-      sortedRows.forEach((row, idx) => {
+      paginatedRows.forEach((row, idx) => {
         const origIdx = combinedRows.indexOf(row);
         originalIndexMap.set(idx, origIdx >= 0 ? origIdx : idx);
       });
 
-      sortedRows.forEach((row, index) => {
+      paginatedRows.forEach((row, index) => {
         const tr = document.createElement("tr");
         tr.dataset.index = String(originalIndexMap.get(index));
 
@@ -17944,6 +18049,9 @@ Final Score: ${score}/100`;
         }
       });
 
+      // Update pagination controls
+      updatePaginationControls(totalRows, currentPage, totalPages, startIdx, endIdx);
+
       // Row click → detail panel
       tbody.querySelectorAll("tr").forEach(tr => {
         tr.addEventListener("click", () => {
@@ -17960,6 +18068,51 @@ Final Score: ${score}/100`;
       renderRankingAiCompetitors(filteredRows);
       renderRankingAiFeatureSummary(filteredRows);
       renderRankingAiInsights(filteredRows, summary);
+    }
+    
+    function updatePaginationControls(totalRows, currentPage, totalPages, startIdx, endIdx) {
+      const paginationControls = document.getElementById("ranking-pagination-controls");
+      const paginationInfo = document.getElementById("ranking-pagination-info");
+      const pageInfo = document.getElementById("ranking-pagination-page-info");
+      const firstBtn = document.getElementById("ranking-pagination-first");
+      const prevBtn = document.getElementById("ranking-pagination-prev");
+      const nextBtn = document.getElementById("ranking-pagination-next");
+      const lastBtn = document.getElementById("ranking-pagination-last");
+      const rowsPerPageSelect = document.getElementById("ranking-rows-per-page");
+      
+      if (!paginationControls) return;
+      
+      if (totalRows === 0) {
+        paginationControls.style.display = "none";
+        return;
+      }
+      
+      paginationControls.style.display = "flex";
+      
+      if (paginationInfo) {
+        paginationInfo.textContent = `Showing ${startIdx + 1}-${endIdx} of ${totalRows}`;
+      }
+      
+      if (pageInfo) {
+        pageInfo.textContent = `Page ${currentPage} of ${totalPages}`;
+      }
+      
+      if (firstBtn) {
+        firstBtn.disabled = currentPage === 1;
+      }
+      if (prevBtn) {
+        prevBtn.disabled = currentPage === 1;
+      }
+      if (nextBtn) {
+        nextBtn.disabled = currentPage === totalPages;
+      }
+      if (lastBtn) {
+        lastBtn.disabled = currentPage === totalPages;
+      }
+      
+      if (rowsPerPageSelect) {
+        rowsPerPageSelect.value = rankingPaginationState.rowsPerPage;
+      }
     }
 
     function renderRankingAiDetail(row) {
@@ -18197,6 +18350,7 @@ Final Score: ${score}/100`;
                 if (typeof wireRankingAiButton === 'function') wireRankingAiButton();
                 if (typeof wireRankingFilters === 'function') wireRankingFilters();
                 if (typeof wireRankingSorting === 'function') wireRankingSorting();
+                if (typeof wireRankingPagination === 'function') wireRankingPagination();
               }, 100);
               // Load from localStorage/Supabase, don't fetch from APIs
               loadRankingAiData(false); // This will check storage first
@@ -18312,6 +18466,7 @@ Final Score: ${score}/100`;
       wireRankingAiButton();
       wireRankingFilters();
       wireRankingSorting();
+      wireRankingPagination();
       
       // Make functions globally available for panel switching
       window.wireRankingAiButton = wireRankingAiButton;
@@ -18332,6 +18487,7 @@ Final Score: ${score}/100`;
           if (aiOverviewFilter) rankingFilterState.aiOverview = aiOverviewFilter.value;
           if (aiCitationFilter) rankingFilterState.aiCitation = aiCitationFilter.value;
           if (keywordFilter) rankingFilterState.keyword = keywordFilter.value.trim();
+          rankingPaginationState.currentPage = 1; // Reset to first page on filter change
           renderRankingAiTab();
         };
 
@@ -18355,6 +18511,7 @@ Final Score: ${score}/100`;
             if (aiOverviewFilter) aiOverviewFilter.value = 'all';
             if (aiCitationFilter) aiCitationFilter.value = 'all';
             if (keywordFilter) keywordFilter.value = '';
+            rankingPaginationState.currentPage = 1; // Reset to first page on clear
             renderRankingAiTab();
           });
         }
@@ -18372,9 +18529,64 @@ Final Score: ${score}/100`;
               rankingSortState.column = column;
               rankingSortState.direction = 'asc';
             }
+            rankingPaginationState.currentPage = 1; // Reset to first page on sort change
             renderRankingAiTab();
           });
         });
+      }
+      
+      function wireRankingPagination() {
+        const firstBtn = document.getElementById("ranking-pagination-first");
+        const prevBtn = document.getElementById("ranking-pagination-prev");
+        const nextBtn = document.getElementById("ranking-pagination-next");
+        const lastBtn = document.getElementById("ranking-pagination-last");
+        const rowsPerPageSelect = document.getElementById("ranking-rows-per-page");
+        
+        if (firstBtn) {
+          firstBtn.addEventListener("click", () => {
+            rankingPaginationState.currentPage = 1;
+            renderRankingAiTab();
+          });
+        }
+        
+        if (prevBtn) {
+          prevBtn.addEventListener("click", () => {
+            if (rankingPaginationState.currentPage > 1) {
+              rankingPaginationState.currentPage--;
+              renderRankingAiTab();
+            }
+          });
+        }
+        
+        if (nextBtn) {
+          nextBtn.addEventListener("click", () => {
+            rankingPaginationState.currentPage++;
+            renderRankingAiTab();
+          });
+        }
+        
+        if (lastBtn) {
+          lastBtn.addEventListener("click", () => {
+            // Calculate total pages from current data
+            const { combinedRows } = RankingAiModule.state();
+            if (!combinedRows || !Array.isArray(combinedRows)) return;
+            const filteredRows = applyRankingFilters(combinedRows);
+            const totalRows = filteredRows.length;
+            const rowsPerPage = rankingPaginationState.rowsPerPage === 'all' ? totalRows : rankingPaginationState.rowsPerPage;
+            const totalPages = rowsPerPage > 0 ? Math.ceil(totalRows / rowsPerPage) : 1;
+            rankingPaginationState.currentPage = totalPages;
+            renderRankingAiTab();
+          });
+        }
+        
+        if (rowsPerPageSelect) {
+          rowsPerPageSelect.addEventListener("change", () => {
+            const value = rowsPerPageSelect.value;
+            rankingPaginationState.rowsPerPage = value === 'all' ? 'all' : parseInt(value, 10);
+            rankingPaginationState.currentPage = 1; // Reset to first page
+            renderRankingAiTab();
+          });
+        }
       }
     })();
   </script>
