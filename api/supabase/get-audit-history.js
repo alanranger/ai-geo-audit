@@ -138,6 +138,8 @@ export default async function handler(req, res) {
       locationsCount: record.service_areas ? (record.service_areas.length > 0 ? 1 : 0) : null, // Infer from service_areas data
       // Authority component scores (for historical Authority tracking)
       authorityScore: record.authority_score,
+      // Visibility score (for historical Visibility tracking)
+      visibilityScore: record.visibility_score,
       authorityBehaviourScore: record.authority_behaviour_score,
       authorityRankingScore: record.authority_ranking_score,
       authorityBacklinkScore: record.authority_backlink_score,
