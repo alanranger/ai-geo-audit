@@ -32,11 +32,12 @@ function normalizeKeyword(keyword) {
 }
 
 /**
- * Fetch keyword search volume from DataForSEO Labs Keyword Overview
+ * Fetch keyword search volume from DataForSEO Keywords Data API
+ * Uses: keywords_data/google_ads/search_volume/live (not keyword_overview)
  * Returns a map: keyword (normalized) -> { search_volume, monthly_searches }
  */
 async function fetchKeywordOverview(keywords, auth) {
-  const endpoint = "https://api.dataforseo.com/v3/dataforseo_labs/google/keyword_overview/live";
+  const endpoint = "https://api.dataforseo.com/v3/keywords_data/google_ads/search_volume/live";
   
   try {
     // Log ALL keywords being sent to DataForSEO with [VOL] prefix
@@ -47,10 +48,11 @@ async function fetchKeywordOverview(keywords, auth) {
     });
     
     // Log request body to verify no filtering/deduplication issues
+    // Note: keywords_data/google_ads/search_volume/live uses different structure
     const requestBody = {
       keywords: keywords,
-      language_code: "en",
       location_code: 2826, // United Kingdom
+      sort_by: "relevance"
     };
     console.log(`[VOL] Request body to DataForSEO:`, JSON.stringify(requestBody));
     
@@ -76,25 +78,21 @@ async function fetchKeywordOverview(keywords, auth) {
       return {};
     }
 
-    // Handle DataForSEO response structure
-    // Structure can be: data.tasks[0].result[0].items[] OR data.tasks[0].result.items[]
-    const task = data.tasks?.[0];
-    if (!task) {
-      console.error("[Keyword Overview] No task found in response:", JSON.stringify(data).substring(0, 500));
-      return {};
-    }
-
-    // Try both possible structures
+    // Handle DataForSEO keywords_data/google_ads/search_volume/live response structure
+    // Structure: data.result[] (direct array, not nested in tasks)
     let items = [];
-    if (Array.isArray(task.result) && task.result.length > 0) {
-      // Structure: tasks[0].result[0].items[]
-      items = task.result[0]?.items || [];
-    } else if (task.result && Array.isArray(task.result.items)) {
-      // Structure: tasks[0].result.items[]
-      items = task.result.items;
-    } else if (task.result && !Array.isArray(task.result)) {
-      // Structure: tasks[0].result.items[] (result is object, not array)
-      items = task.result.items || [];
+    if (Array.isArray(data.result)) {
+      items = data.result;
+    } else if (data.tasks && Array.isArray(data.tasks) && data.tasks.length > 0) {
+      // Fallback: try tasks structure (for keyword_overview endpoint)
+      const task = data.tasks[0];
+      if (Array.isArray(task.result) && task.result.length > 0) {
+        items = task.result[0]?.items || [];
+      } else if (task.result && Array.isArray(task.result.items)) {
+        items = task.result.items;
+      } else if (task.result && !Array.isArray(task.result)) {
+        items = task.result.items || [];
+      }
     }
     
     console.log(`[VOL] Result count: ${items.length}`);
@@ -122,10 +120,10 @@ async function fetchKeywordOverview(keywords, auth) {
     console.log(`[Keyword Overview] Processing ${items.length} items from DataForSEO response`);
     
     for (const item of items) {
-      // DataForSEO Labs API structure can vary:
+      // DataForSEO keywords_data/google_ads/search_volume/live structure:
       // - item.keyword (direct)
+      // Fallback for keyword_overview endpoint:
       // - item.keyword_info.keyword
-      // - item.keyword_info might be an object with keyword property
       const kw = item.keyword || item.keyword_info?.keyword || (typeof item.keyword_info === 'string' ? item.keyword_info : null);
       
       if (!kw) {
@@ -136,12 +134,19 @@ async function fetchKeywordOverview(keywords, auth) {
       
       const normalizedKw = normalizeKeyword(kw);
       
-      // Search volume can be at: item.keyword_info.search_volume OR item.search_volume
+      // Search volume structure for keywords_data/google_ads/search_volume/live:
+      // - item.search_volume (direct)
+      // Fallback for keyword_overview:
+      // - item.keyword_info.search_volume
       // IMPORTANT: Treat 0 as a valid value, only use null if truly missing
-      const searchVolume = item.keyword_info?.search_volume !== undefined 
-        ? item.keyword_info.search_volume 
-        : (item.search_volume !== undefined ? item.search_volume : null);
-      const monthlySearches = item.keyword_info?.monthly_searches || item.monthly_searches || undefined;
+      const searchVolume = item.search_volume !== undefined 
+        ? item.search_volume 
+        : (item.keyword_info?.search_volume !== undefined ? item.keyword_info.search_volume : null);
+      
+      // Monthly searches structure:
+      // - item.monthly_searches (direct array)
+      // Fallback: item.keyword_info.monthly_searches
+      const monthlySearches = item.monthly_searches || item.keyword_info?.monthly_searches || undefined;
 
       console.log(`[Keyword Overview] Processing item: original="${kw}", normalized="${normalizedKw}", volume=${searchVolume ?? 'null'}`);
 
