@@ -1505,6 +1505,26 @@
     .ranking-badge--rank-good { background: #dcfce7; color: #166534; }
     .ranking-badge--rank-mid { background: #fef3c7; color: #92400e; }
     .ranking-badge--rank-weak { background: #fee2e2; color: #b91c1c; }
+    
+    /* Demand share styling */
+    .ranking-badge-demand-share--high { color: #059669; font-weight: 600; }
+    .ranking-badge-demand-share--med { color: #d97706; font-weight: 500; }
+    .ranking-badge-demand-share--low { color: #6b7280; font-weight: 400; }
+    .ranking-badge-demand-share--none { color: #9ca3af; }
+    
+    /* Page type badge styling (matching Money Pages matrix) */
+    .ranking-badge-page-type {
+      display: inline-block;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      font-weight: 500;
+    }
+    .ranking-badge-page-type--landing { background: #fef3c7; color: #92400e; }
+    .ranking-badge-page-type--event { background: #dbeafe; color: #1e40af; }
+    .ranking-badge-page-type--product { background: #fce7f3; color: #9f1239; }
+    .ranking-badge-page-type--blog { background: #e0f2fe; color: #075985; }
+    .ranking-badge-page-type--gbp { background: #f5f3ff; color: #6d28d9; }
   </style>
 </head>
 <body>
@@ -2236,10 +2256,11 @@
                     <th data-sort="segment" class="sortable">Segment <span class="sort-indicator"></span></th>
                     <th data-sort="rank" class="sortable">Best rank <span class="sort-indicator"></span></th>
                     <th data-sort="volume" class="sortable">Search volume <span class="sort-indicator"></span><span title="Average monthly Google search volume for this keyword in the UK. Source: DataForSEO Labs – Keyword Overview." style="margin-left: 0.25rem; opacity: 0.6; cursor: help;">ℹ</span></th>
+                    <th data-sort="demand_share" class="sortable">Demand share <span class="sort-indicator"></span><span title="Percentage of total search volume across all tracked keywords. High values indicate keywords with the most search demand." style="margin-left: 0.25rem; opacity: 0.6; cursor: help;">ℹ</span></th>
                     <th>AI Overview</th>
                     <th data-sort="citations" class="sortable">AI citations <span class="sort-indicator"></span></th>
                     <th>Ranking URL</th>
-                    <th>Page type</th>
+                    <th data-sort="pageType" class="sortable">Page type <span class="sort-indicator"></span></th>
                     <th>SERP features</th>
                   </tr>
                 </thead>
@@ -2425,20 +2446,21 @@
       }
 
       function classifyKeywordSegment(keyword, bestUrl) {
-        // Reuse existing segmentation rules consistent with Money/Education/General/Brand
+        // Use shared classification function
+        if (typeof window.classifyUrlForRankingAi === 'function') {
+          const classification = window.classifyUrlForRankingAi(bestUrl || '', keyword);
+          return classification.segment.toLowerCase();
+        }
+        
+        // Fallback to old logic if shared function not available
         const kw = normaliseKeyword(keyword);
-
         if (kw.includes("alan ranger")) {
           return "brand";
         }
-
         const url = (bestUrl || "").toLowerCase();
-
         if (url.includes("/blog-on-photography/") || url.includes("/free-online-photography-course")) {
           return "education";
         }
-
-        // Money pages – mirror existing classification for landing / event / product
         if (
           url.includes("/photography-workshops") ||
           url.includes("/course-finder") ||
@@ -2450,21 +2472,28 @@
         ) {
           return "money";
         }
-
-        // Fine art / portfolio explicitly not counted as Money
         if (url.includes("/fine-art") || url.includes("/portfolio") || url.includes("/gallery")) {
           return "general";
         }
-
         return "general";
       }
+      
+      function classifyPageTypeForKeyword(bestUrl) {
+        // Use shared classification function
+        if (typeof window.classifyUrlForRankingAi === 'function') {
+          const classification = window.classifyUrlForRankingAi(bestUrl || '');
+          return classification.pageType;
+        }
+        return "Landing"; // Default fallback
+      }
 
-      const module = {
+        const module = {
         TRACKED_KEYWORDS,
         SERP_RANK_ENDPOINT,
         AI_MODE_ENDPOINT,
         normaliseKeyword,
         classifyKeywordSegment,
+        classifyPageTypeForKeyword,
         state: () => ({ hasLoadedOnce, isLoading, combinedRows, summary }),
         setLoadedOnce: (value) => { hasLoadedOnce = value; },
         setLoading: (value) => { isLoading = value; },
@@ -4314,6 +4343,76 @@
       
       // Everything else = system (only fine-art gallery pages should reach here)
       return PageSegment.SYSTEM;
+    }
+    
+    /**
+     * Shared classification function for Ranking & AI tab
+     * Returns both segment (Brand/Education/Money) and pageType (Landing/Blog/Event/Product/GBP)
+     * @param {string} rawUrlOrPath - URL or path to classify
+     * @param {string} keyword - Optional keyword for brand detection
+     * @returns {{segment: string, pageType: string}}
+     */
+    function classifyUrlForRankingAi(rawUrlOrPath, keyword = null) {
+      const path = normalisePath(rawUrlOrPath);
+      
+      // Brand detection: check keyword first
+      if (keyword) {
+        const kw = (keyword || "").toLowerCase();
+        if (kw.includes("alan ranger") || kw.includes("alanranger")) {
+          return { segment: "brand", pageType: "GBP" };
+        }
+      }
+      
+      // Get segment using existing logic
+      const segment = classifyPageSegment(rawUrlOrPath);
+      
+      // Determine pageType based on URL path
+      let pageType = "Landing"; // Default
+      
+      // Blog pages
+      if (path.startsWith('/blog-on-photography/') || path.startsWith('/blogs/')) {
+        pageType = "Blog";
+      }
+      // Event pages
+      else if (path.startsWith('/beginners-photography-lessons/') || 
+               path.startsWith('/beginners-photography-lessons') ||
+               path.startsWith('/photographic-workshops-near-me/') ||
+               path.startsWith('/photographic-workshops-near-me')) {
+        pageType = "Event";
+      }
+      // Product pages
+      else if (path.startsWith('/photo-workshops-uk/') || 
+               path.startsWith('/photo-workshops-uk') ||
+               path.startsWith('/photography-services-near-me/') ||
+               path.startsWith('/photography-services-near-me')) {
+        pageType = "Product";
+      }
+      // GBP/Home/About pages
+      else if (path === '/' || 
+               path === '/about-alan-ranger' || 
+               path.includes('/contact') ||
+               path.includes('/reviews')) {
+        pageType = "GBP";
+      }
+      // Everything else is Landing (default)
+      
+      // Map segment to canonical values
+      let canonicalSegment = "Education"; // Default
+      if (segment === PageSegment.MONEY) {
+        canonicalSegment = "Money";
+      } else if (segment === PageSegment.EDUCATION) {
+        canonicalSegment = "Education";
+      } else if (segment === PageSegment.SUPPORT || segment === PageSegment.SYSTEM) {
+        // Support/System pages are treated as Brand for Ranking & AI
+        canonicalSegment = "Brand";
+      }
+      
+      return { segment: canonicalSegment, pageType };
+    }
+    
+    // Make available globally for RankingAiModule
+    if (typeof window !== 'undefined') {
+      window.classifyUrlForRankingAi = classifyUrlForRankingAi;
     }
     
     // Helper functions for Authority score calculation
@@ -18149,12 +18248,44 @@ Final Score: ${score}/100`;
           aiByKeyword[key] = row;
         });
 
-        const combined = serpRows.map(row => {
+        // First pass: classify all rows and collect search volumes for demand_share calculation
+        const rowsWithClassification = serpRows.map(row => {
           const key = RankingAiModule.normaliseKeyword(row.keyword);
           const aiRow = aiByKeyword[key] || null;
-
           const bestUrl = row.best_url || null;
-          const segment = RankingAiModule.classifyKeywordSegment(row.keyword, bestUrl);
+          
+          // Use shared classification function
+          let classification = { segment: "Education", pageType: "Landing" };
+          if (typeof window.classifyUrlForRankingAi === 'function') {
+            classification = window.classifyUrlForRankingAi(bestUrl || '', row.keyword);
+          } else {
+            // Fallback
+            const segment = RankingAiModule.classifyKeywordSegment(row.keyword, bestUrl);
+            const pageType = RankingAiModule.classifyPageTypeForKeyword ? 
+              RankingAiModule.classifyPageTypeForKeyword(bestUrl) : "Landing";
+            classification = { segment, pageType };
+          }
+          
+          return {
+            ...row,
+            aiRow,
+            classification,
+            search_volume: row.search_volume ?? null
+          };
+        });
+        
+        // Calculate total demand for demand_share
+        const totalDemand = rowsWithClassification.reduce((sum, r) => {
+          const vol = r.search_volume;
+          return sum + (vol && vol > 0 ? vol : 0);
+        }, 0);
+        
+        // Second pass: build combined rows with demand_share
+        const combined = rowsWithClassification.map(row => {
+          const key = RankingAiModule.normaliseKeyword(row.keyword);
+          const aiRow = row.aiRow || null;
+          const bestUrl = row.best_url || null;
+          const { segment, pageType } = row.classification;
 
           const aiCitations = aiRow?.alanranger_citations || [];
           const aiOtherCitations = (aiRow?.sample_citations || []).filter(c => {
@@ -18170,15 +18301,21 @@ Final Score: ${score}/100`;
             competitorCounts[d] = (competitorCounts[d] || 0) + 1;
           });
 
+          // Calculate demand_share
+          const searchVolume = row.search_volume;
+          const demandShare = (searchVolume && searchVolume > 0 && totalDemand > 0) 
+            ? searchVolume / totalDemand 
+            : 0;
+
           // Debug: Log search volume for first few keywords
           if (serpRows.indexOf(row) < 3) {
-            debugLog(`[DEBUG] Keyword "${row.keyword}": search_volume=${row.search_volume}, search_volume_trend=${row.search_volume_trend ? 'present' : 'missing'}`, 'info');
-            debugLog(`[DEBUG] Row keys: ${Object.keys(row).join(', ')}`, 'info');
+            debugLog(`[DEBUG] Keyword "${row.keyword}": search_volume=${searchVolume}, demand_share=${(demandShare * 100).toFixed(1)}%, segment=${segment}, pageType=${pageType}`, 'info');
           }
 
           return {
             keyword: row.keyword,
-            segment,
+            segment: segment.toLowerCase(), // Normalize to lowercase for consistency
+            pageType,
             best_rank_group: row.best_rank_group,
             best_rank_absolute: row.best_rank_absolute,
             best_url: bestUrl,
@@ -18195,8 +18332,9 @@ Final Score: ${score}/100`;
               has_people_also_ask: false
             },
             competitor_counts: competitorCounts,
-            search_volume: row.search_volume ?? null,
-            search_volume_trend: row.search_volume_trend || undefined
+            search_volume: searchVolume,
+            search_volume_trend: row.search_volume_trend || undefined,
+            demand_share: demandShare
           };
         });
 
@@ -18328,9 +18466,21 @@ Final Score: ${score}/100`;
     // Apply filters to rows
     function applyRankingFilters(rows) {
       return rows.filter(row => {
-        // Segment filter
-        if (rankingFilterState.segment !== 'all' && row.segment !== rankingFilterState.segment) {
-          return false;
+        // Segment filter (normalize to lowercase for comparison)
+        if (rankingFilterState.segment !== 'all') {
+          const rowSegment = (row.segment || '').toLowerCase();
+          const filterSegment = rankingFilterState.segment.toLowerCase();
+          if (rowSegment !== filterSegment) {
+            return false;
+          }
+        }
+        
+        // Page type filter (if added to UI)
+        if (rankingFilterState.pageType && rankingFilterState.pageType !== 'all') {
+          const rowPageType = row.pageType || 'Landing';
+          if (rowPageType !== rankingFilterState.pageType) {
+            return false;
+          }
         }
 
         // Rank bucket filter
@@ -18390,6 +18540,14 @@ Final Score: ${score}/100`;
           case 'volume':
             aVal = a.search_volume ?? 0;
             bVal = b.search_volume ?? 0;
+            break;
+          case 'demand_share':
+            aVal = a.demand_share ?? 0;
+            bVal = b.demand_share ?? 0;
+            break;
+          case 'pageType':
+            aVal = a.pageType || 'Landing';
+            bVal = b.pageType || 'Landing';
             break;
           default:
             return 0;
@@ -18483,19 +18641,67 @@ Final Score: ${score}/100`;
 
       if (!summary || !Array.isArray(combinedRows)) return;
 
+      // Apply filters first
+      const filteredRows = applyRankingFilters(combinedRows);
+      
+      // Recalculate demand_share for filtered subset (so percentages add up to 100% for visible keywords)
+      const filteredTotalDemand = filteredRows.reduce((sum, r) => {
+        const vol = r.search_volume;
+        return sum + (vol && vol > 0 ? vol : 0);
+      }, 0);
+      
+      // Update demand_share for filtered rows
+      filteredRows.forEach(row => {
+        const searchVolume = row.search_volume;
+        row.demand_share = (searchVolume && searchVolume > 0 && filteredTotalDemand > 0) 
+          ? searchVolume / filteredTotalDemand 
+          : 0;
+      });
+      
+      // Calculate visibility metrics from filtered subset
+      const validRankingRows = filteredRows.filter(
+        r => r.best_rank_group !== null && typeof r.best_rank_group === 'number'
+      );
+      
+      let avgPositionUnweighted = null;
+      let avgPositionVolumeWeighted = null;
+      
+      if (validRankingRows.length >= 1) {
+        // Unweighted average position
+        const sumRanks = validRankingRows.reduce((sum, r) => sum + r.best_rank_group, 0);
+        avgPositionUnweighted = sumRanks / validRankingRows.length;
+        
+        // Demand-weighted average position
+        let sumWeightedRanks = 0;
+        let sumVolumes = 0;
+        
+        for (const row of validRankingRows) {
+          const vol = (row.search_volume !== null && row.search_volume !== undefined && row.search_volume > 0)
+            ? row.search_volume
+            : 10; // Fallback
+          
+          sumWeightedRanks += row.best_rank_group * vol;
+          sumVolumes += vol;
+        }
+        
+        if (sumVolumes > 0) {
+          avgPositionVolumeWeighted = sumWeightedRanks / sumVolumes;
+        }
+      }
+      
       // Display tracked keyword visibility metrics (DataForSEO only - not part of AI GEO pillars)
       const visibilityMetricsSection = document.getElementById('ranking-visibility-metrics');
       const avgPositionWeightedEl = document.getElementById('ranking-avg-position-weighted');
       const avgPositionUnweightedEl = document.getElementById('ranking-avg-position-unweighted');
       
-      if (visibilityMetricsSection && summary) {
-        if (summary.avg_position_volume_weighted !== null && summary.avg_position_volume_weighted !== undefined) {
+      if (visibilityMetricsSection) {
+        if (avgPositionVolumeWeighted !== null && avgPositionVolumeWeighted !== undefined) {
           visibilityMetricsSection.style.display = 'block';
           if (avgPositionWeightedEl) {
-            avgPositionWeightedEl.textContent = summary.avg_position_volume_weighted.toFixed(2);
+            avgPositionWeightedEl.textContent = avgPositionVolumeWeighted.toFixed(2);
           }
-          if (avgPositionUnweightedEl && summary.avg_position_unweighted !== null && summary.avg_position_unweighted !== undefined) {
-            avgPositionUnweightedEl.textContent = summary.avg_position_unweighted.toFixed(2);
+          if (avgPositionUnweightedEl && avgPositionUnweighted !== null && avgPositionUnweighted !== undefined) {
+            avgPositionUnweightedEl.textContent = avgPositionUnweighted.toFixed(2);
           } else if (avgPositionUnweightedEl) {
             avgPositionUnweightedEl.textContent = '—';
           }
@@ -18510,12 +18716,7 @@ Final Score: ${score}/100`;
             avgPositionUnweightedEl.title = 'Not enough valid keywords to calculate.';
           }
         }
-      } else if (visibilityMetricsSection) {
-        visibilityMetricsSection.style.display = 'none';
       }
-
-      // Apply filters
-      const filteredRows = applyRankingFilters(combinedRows);
       
       // Update metric pills from filtered data
       updateMetricPills(filteredRows, combinedRows);
@@ -18542,7 +18743,7 @@ Final Score: ${score}/100`;
       if (!sortedRows.length) {
         const tr = document.createElement("tr");
         const td = document.createElement("td");
-        td.colSpan = 9;
+        td.colSpan = 10; // Updated: now 10 columns (added Demand share)
         td.className = "ranking-table-empty";
         td.textContent = filteredRows.length === 0 && combinedRows.length > 0
           ? "No rows match the current filters."
@@ -18631,6 +18832,25 @@ Final Score: ${score}/100`;
         tdVolume.appendChild(volumeBadge);
         tr.appendChild(tdVolume);
 
+        // Demand share
+        const tdDemandShare = document.createElement("td");
+        const demandShare = row.demand_share || 0;
+        if (demandShare > 0) {
+          const percentage = (demandShare * 100).toFixed(1);
+          let shareClass = "ranking-badge-demand-share--low";
+          if (demandShare > 0.3) {
+            shareClass = "ranking-badge-demand-share--high";
+          } else if (demandShare > 0.1) {
+            shareClass = "ranking-badge-demand-share--med";
+          }
+          tdDemandShare.className = shareClass;
+          tdDemandShare.textContent = `${percentage}%`;
+        } else {
+          tdDemandShare.className = "ranking-badge-demand-share--none";
+          tdDemandShare.textContent = "—";
+        }
+        tr.appendChild(tdDemandShare);
+
         // AI Overview
         const tdAi = document.createElement("td");
         const aiBadge = document.createElement("span");
@@ -18671,11 +18891,18 @@ Final Score: ${score}/100`;
 
         // Page type
         const tdType = document.createElement("td");
-        let typeLabel = "General";
-        if (row.segment === "money") typeLabel = "Money";
-        else if (row.segment === "education") typeLabel = "Education";
-        else if (row.segment === "brand") typeLabel = "Brand";
-        tdType.textContent = typeLabel;
+        const pageType = row.pageType || "Landing";
+        const typeBadge = document.createElement("span");
+        // Use similar styling to Money Pages matrix
+        let typeClass = "ranking-badge-page-type";
+        if (pageType === "Event") typeClass += " ranking-badge-page-type--event";
+        else if (pageType === "Product") typeClass += " ranking-badge-page-type--product";
+        else if (pageType === "Blog") typeClass += " ranking-badge-page-type--blog";
+        else if (pageType === "GBP") typeClass += " ranking-badge-page-type--gbp";
+        else typeClass += " ranking-badge-page-type--landing";
+        typeBadge.className = typeClass;
+        typeBadge.textContent = pageType;
+        tdType.appendChild(typeBadge);
         tr.appendChild(tdType);
 
         // SERP features
