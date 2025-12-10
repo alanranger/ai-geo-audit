@@ -18245,6 +18245,11 @@ Final Score: ${score}/100`;
         // Build summary HTML
         const summaryItems = [];
         
+        // Handle error case
+        if (summary.error) {
+          summaryItems.push(`<div style="padding: 1rem; background: #fef2f2; border-radius: 6px; border-left: 3px solid #ef4444; margin-bottom: 1rem;"><strong style="color: #ef4444;">Error:</strong><br><span style="font-size: 1rem;">${summary.errorMessage || 'Unknown error occurred'}</span></div>`);
+        }
+        
         if (summary.totalKeywords !== undefined) {
           summaryItems.push(`<div style="padding: 0.75rem; background: #f0f9ff; border-radius: 6px; border-left: 3px solid #0284c7;"><strong style="color: #0284c7;">Total Keywords:</strong><br><span style="font-size: 1.1rem; font-weight: 600;">${summary.totalKeywords}</span></div>`);
         }
@@ -18292,6 +18297,64 @@ Final Score: ${score}/100`;
     // ======================
     // Ranking & AI: Save data to Supabase and localStorage
     // ======================
+    /**
+     * Save a single batch of keywords incrementally to Supabase keyword_rankings table
+     * This allows partial results to be saved even if later batches fail
+     */
+    async function saveRankingAiDataIncremental(batchRows, auditDate, propertyUrl) {
+      try {
+        if (!batchRows || batchRows.length === 0) {
+          return { success: true, saved: 0 };
+        }
+
+        // Prepare keyword rows for insertion
+        const keywordRows = batchRows.map(row => ({
+          audit_date: auditDate,
+          property_url: String(propertyUrl).trim(),
+          keyword: String(row.keyword || '').trim(),
+          best_rank_group: row.best_rank_group !== null && row.best_rank_group !== undefined ? parseInt(row.best_rank_group) : null,
+          best_rank_absolute: row.best_rank_absolute !== null && row.best_rank_absolute !== undefined ? parseInt(row.best_rank_absolute) : null,
+          best_url: row.best_url ? String(row.best_url).trim() : null,
+          best_title: row.best_title ? String(row.best_title).trim() : null,
+          search_volume: row.search_volume !== null && row.search_volume !== undefined ? parseInt(row.search_volume) : null,
+          has_ai_overview: row.has_ai_overview === true,
+          ai_total_citations: row.ai_total_citations !== null && row.ai_total_citations !== undefined ? parseInt(row.ai_total_citations) : null,
+          ai_alan_citations_count: row.ai_alan_citations_count !== null && row.ai_alan_citations_count !== undefined ? parseInt(row.ai_alan_citations_count) : null,
+          ai_alan_citations: row.ai_alan_citations ? (Array.isArray(row.ai_alan_citations) ? row.ai_alan_citations : []) : null,
+          competitor_counts: row.competitor_counts ? (typeof row.competitor_counts === 'object' ? row.competitor_counts : {}) : null,
+          serp_features: row.serp_features ? (typeof row.serp_features === 'object' ? row.serp_features : {}) : null,
+          segment: row.segment ? String(row.segment).trim() : null,
+          page_type: row.pageType ? String(row.pageType).trim() : null,
+          demand_share: row.demand_share !== null && row.demand_share !== undefined ? parseFloat(row.demand_share) : null,
+          updated_at: new Date().toISOString()
+        }));
+
+        // Use upsert endpoint to save batch (will merge duplicates based on unique constraint)
+        const response = await fetch('/api/supabase/save-keyword-batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            keywordRows,
+            auditDate,
+            propertyUrl
+          })
+        });
+
+        if (response.ok) {
+          const responseData = await response.json();
+          debugLog(`✓ Incremental save: ${batchRows.length} keywords saved to keyword_rankings`, 'success');
+          return { success: true, saved: batchRows.length };
+        } else {
+          const errorText = await response.text();
+          debugLog(`⚠ Incremental save failed: ${response.status} - ${errorText}`, 'warn');
+          return { success: false, saved: 0, error: errorText };
+        }
+      } catch (err) {
+        debugLog(`✗ Error in incremental save: ${err.message}`, 'error');
+        return { success: false, saved: 0, error: err.message };
+      }
+    }
+
     async function saveRankingAiData(combinedRows, summary) {
       try {
         const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
@@ -18322,10 +18385,15 @@ Final Score: ${score}/100`;
         });
 
         if (response.ok) {
-          debugLog('✓ Ranking & AI data saved to Supabase', 'success');
+          const responseData = await response.json();
+          debugLog(`✓ Ranking & AI data saved to Supabase (${combinedRows.length} keywords)`, 'success');
+          if (responseData.data) {
+            debugLog(`✓ Supabase confirmed save: ${JSON.stringify(responseData.data).substring(0, 200)}...`, 'info');
+          }
         } else {
           const errorText = await response.text();
           debugLog(`⚠ Failed to save Ranking & AI data to Supabase: ${response.status} - ${errorText}`, 'warn');
+          console.error('[Save Ranking & AI] Full error response:', errorText);
         }
       } catch (err) {
         debugLog(`✗ Error saving Ranking & AI data: ${err.message}`, 'error');
@@ -18353,18 +18421,25 @@ Final Score: ${score}/100`;
               const parsed = JSON.parse(localData);
               if (parsed.combinedRows && parsed.summary) {
                 debugLog('✓ Ranking & AI data loaded from localStorage', 'success');
-                // Check if data is recent (within last 24 hours) - if older, check Supabase
-                if (parsed.timestamp) {
-                  const localTime = new Date(parsed.timestamp);
-                  const now = new Date();
-                  const hoursDiff = (now - localTime) / (1000 * 60 * 60);
-                  if (hoursDiff < 24) {
-                    return parsed;
-                  } else {
-                    debugLog(`⚠ LocalStorage data is ${Math.round(hoursDiff)} hours old, checking Supabase for newer data...`, 'info');
-                  }
+                debugLog(`  Found ${parsed.combinedRows.length} keywords in localStorage`, 'info');
+                // Always check Supabase if localStorage has fewer than 10 keywords (likely stale data)
+                if (parsed.combinedRows.length < 10) {
+                  debugLog(`⚠ LocalStorage has only ${parsed.combinedRows.length} keywords, checking Supabase for more...`, 'info');
+                  // Continue to Supabase check below
                 } else {
-                  return parsed;
+                  // Check if data is recent (within last 24 hours) - if older, check Supabase
+                  if (parsed.timestamp) {
+                    const localTime = new Date(parsed.timestamp);
+                    const now = new Date();
+                    const hoursDiff = (now - localTime) / (1000 * 60 * 60);
+                    if (hoursDiff < 24) {
+                      return parsed;
+                    } else {
+                      debugLog(`⚠ LocalStorage data is ${Math.round(hoursDiff)} hours old, checking Supabase for newer data...`, 'info');
+                    }
+                  } else {
+                    return parsed;
+                  }
                 }
               }
             } catch (e) {
@@ -18461,32 +18536,166 @@ Final Score: ${score}/100`;
       RankingAiProgressModal.updateProgress(5, 0); // Initialize step
       RankingAiProgressModal.updateCounts('');
 
-      try {
-        const keywords = mod.TRACKED_KEYWORDS;
-        const queryParam = encodeURIComponent(keywords.join(","));
+      // Declare variables outside try block for catch block access
+      let allSerpResults = [];
+      let keywords = [];
 
-        debugLog(`📊 Fetching ranking & AI data for ${keywords.length} keywords: ${keywords.join(', ')}`, 'info');
-        debugLog(`📊 SERP endpoint: ${mod.SERP_RANK_ENDPOINT}?keywords=${queryParam}`, 'info');
+      try {
+        keywords = mod.TRACKED_KEYWORDS;
+        const BATCH_SIZE = 20; // Match API limit
+
+        debugLog(`📊 Fetching ranking & AI data for ${keywords.length} keywords`, 'info');
+        debugLog(`📊 Keywords: ${keywords.slice(0, 5).join(', ')}${keywords.length > 5 ? '... (+' + (keywords.length - 5) + ' more)' : ''}`, 'info');
+        debugLog(`📊 SERP endpoint: ${mod.SERP_RANK_ENDPOINT}`, 'info');
         debugLog(`📊 AI endpoint: ${mod.AI_MODE_ENDPOINT}`, 'info');
 
-        // Step 1: Fetch SERP Rankings
+        // Step 1: Fetch SERP Rankings (batched if needed) with incremental saving
         RankingAiProgressModal.updateProgress(15, 1);
         RankingAiProgressModal.updateCounts(`Processing ${keywords.length} keywords...`);
         RankingAiProgressModal.setActiveStep(1);
         
-        debugLog('📊 Starting SERP fetch...', 'info');
-        const serpRes = await fetch(`${mod.SERP_RANK_ENDPOINT}?keywords=${queryParam}`);
-        debugLog(`📊 SERP response status: ${serpRes.status}`, 'info');
+        debugLog('📊 Starting SERP fetch with incremental saving...', 'info');
         
-        if (!serpRes.ok) {
-          const errorText = await serpRes.text();
-          debugLog(`✗ SERP request failed: ${serpRes.status} - ${errorText}`, 'error');
-          RankingAiProgressModal.updateCounts(`Error: ${serpRes.status}`);
-          throw new Error(`SERP rank request failed: ${serpRes.status} - ${errorText}`);
+        const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+        const auditDate = new Date().toISOString().split('T')[0];
+        
+        // Batch keywords if needed
+        allSerpResults = [];
+        const batches = [];
+        for (let i = 0; i < keywords.length; i += BATCH_SIZE) {
+          batches.push(keywords.slice(i, i + BATCH_SIZE));
+        }
+        
+        debugLog(`📊 Processing ${batches.length} batch(es) of keywords`, 'info');
+        
+        // Accumulate combined rows for final summary calculation
+        let allCombinedRows = [];
+        
+        for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+          const batch = batches[batchIdx];
+          const queryParam = encodeURIComponent(batch.join(","));
+          const progressPercent = 15 + Math.floor((batchIdx / batches.length) * 35);
+          
+          RankingAiProgressModal.updateProgress(progressPercent, 1);
+          RankingAiProgressModal.updateCounts(`Processing batch ${batchIdx + 1}/${batches.length} (${batch.length} keywords)...`);
+          
+          debugLog(`📊 Fetching batch ${batchIdx + 1}/${batches.length} (${batch.length} keywords)`, 'info');
+          
+          try {
+            const serpRes = await fetch(`${mod.SERP_RANK_ENDPOINT}?keywords=${queryParam}`);
+            debugLog(`📊 SERP response status for batch ${batchIdx + 1}: ${serpRes.status}`, 'info');
+            
+            if (!serpRes.ok) {
+              const errorText = await serpRes.text();
+              debugLog(`✗ SERP request failed for batch ${batchIdx + 1}: ${serpRes.status} - ${errorText}`, 'error');
+              
+              // If it's a timeout or server error, show warning but continue with partial results
+              if (serpRes.status === 504 || serpRes.status === 500) {
+                debugLog(`⚠️ Batch ${batchIdx + 1} timed out or errored, continuing with remaining batches...`, 'warn');
+                RankingAiProgressModal.updateCounts(`⚠️ Batch ${batchIdx + 1} failed (${serpRes.status}), continuing...`);
+                // Add error results for this batch
+                batch.forEach(kw => {
+                  allSerpResults.push({
+                    keyword: kw,
+                    best_rank_group: null,
+                    best_rank_absolute: null,
+                    best_url: null,
+                    best_title: null,
+                    has_ai_overview: false,
+                    serp_features: { local_pack: false, featured_snippet: false, people_also_ask: false },
+                    search_volume: null,
+                    error: `Batch request failed: ${serpRes.status}`
+                  });
+                });
+                continue;
+              } else {
+                RankingAiProgressModal.updateCounts(`Error: ${serpRes.status}`);
+                throw new Error(`SERP rank request failed: ${serpRes.status} - ${errorText}`);
+              }
+            }
+            
+            const serpJson = await serpRes.json();
+            const batchResults = serpJson.per_keyword || [];
+            allSerpResults.push(...batchResults);
+            
+            debugLog(`✓ Batch ${batchIdx + 1} completed: ${batchResults.length} results`, 'success');
+            
+            // Save this batch incrementally (without AI data for now - will update later)
+            // Create minimal combined rows for this batch
+            const batchCombinedRows = batchResults.map(row => {
+              const bestUrl = row.best_url || null;
+              let classification = { segment: "Education", pageType: "Landing" };
+              if (typeof window.classifyUrlForRankingAi === 'function') {
+                classification = window.classifyUrlForRankingAi(bestUrl || '', row.keyword);
+              }
+              
+              return {
+                keyword: row.keyword,
+                segment: classification.segment,
+                pageType: classification.pageType,
+                best_rank_group: row.best_rank_group,
+                best_rank_absolute: row.best_rank_absolute,
+                best_url: bestUrl,
+                best_title: row.best_title || "",
+                has_ai_overview: false, // Will be updated after AI fetch
+                ai_total_citations: 0,
+                ai_alan_citations_count: 0,
+                ai_alan_citations: [],
+                ai_sample_citations: [],
+                serp_features: row.serp_features || {
+                  has_ai_overview: false,
+                  has_local_pack: false,
+                  has_featured_snippet: false,
+                  has_people_also_ask: false
+                },
+                competitor_counts: {},
+                search_volume: row.search_volume ?? null,
+                demand_share: 0 // Will be recalculated after all batches
+              };
+            });
+            
+            // Save batch incrementally
+            if (propertyUrl) {
+              const saveResult = await saveRankingAiDataIncremental(batchCombinedRows, auditDate, propertyUrl);
+              if (saveResult.success) {
+                debugLog(`✓ Batch ${batchIdx + 1} saved incrementally: ${saveResult.saved} keywords`, 'success');
+                RankingAiProgressModal.updateCounts(`✓ Batch ${batchIdx + 1} saved (${saveResult.saved} keywords)`);
+              } else {
+                debugLog(`⚠ Batch ${batchIdx + 1} incremental save failed: ${saveResult.error}`, 'warn');
+              }
+            }
+            
+            allCombinedRows.push(...batchCombinedRows);
+          } catch (batchErr) {
+            debugLog(`✗ Error processing batch ${batchIdx + 1}: ${batchErr.message}`, 'error');
+            
+            // If it's a timeout, continue with remaining batches
+            if (batchErr.message.includes('timeout') || batchErr.message.includes('504')) {
+              debugLog(`⚠️ Batch ${batchIdx + 1} timed out, continuing with remaining batches...`, 'warn');
+              RankingAiProgressModal.updateCounts(`⚠️ Batch ${batchIdx + 1} timed out, continuing...`);
+              // Add error results for this batch
+              batch.forEach(kw => {
+                allSerpResults.push({
+                  keyword: kw,
+                  best_rank_group: null,
+                  best_rank_absolute: null,
+                  best_url: null,
+                  best_title: null,
+                  has_ai_overview: false,
+                  serp_features: { local_pack: false, featured_snippet: false, people_also_ask: false },
+                  search_volume: null,
+                  error: `Batch request timed out`
+                });
+              });
+              continue;
+            } else {
+              throw batchErr;
+            }
+          }
         }
         
         RankingAiProgressModal.updateProgress(50, 1);
-        RankingAiProgressModal.updateCounts(`✓ Retrieved SERP data for ${keywords.length} keywords`);
+        RankingAiProgressModal.updateCounts(`✓ Retrieved SERP data for ${allSerpResults.length}/${keywords.length} keywords (saved incrementally)`);
         
         // Step 2: Fetch AI Overview Data
         RankingAiProgressModal.updateProgress(55, 2);
@@ -18513,18 +18722,17 @@ Final Score: ${score}/100`;
         RankingAiProgressModal.updateProgress(75, 2);
         RankingAiProgressModal.updateCounts(`✓ Retrieved AI Overview data`);
         
-        // Step 3: Process Results
+        // Step 3: Process Results and merge AI data
         RankingAiProgressModal.updateProgress(80, 3);
         RankingAiProgressModal.setActiveStep(3);
         RankingAiProgressModal.updateCounts(`Combining SERP and AI data...`);
         
         debugLog('📊 Parsing JSON responses...', 'info');
-        const serpJson = await serpRes.json();
         const aiJson = await aiRes.json();
-        debugLog(`📊 SERP JSON keys: ${Object.keys(serpJson).join(', ')}`, 'info');
         debugLog(`📊 AI JSON keys: ${Object.keys(aiJson).join(', ')}`, 'info');
+        debugLog(`📊 SERP results: ${allSerpResults.length} keywords processed`, 'info');
 
-        const serpRows = serpJson.per_keyword || [];
+        const serpRows = allSerpResults; // Use batched results
         const aiRows = aiJson.per_query || [];
 
         debugLog(`Received ${serpRows.length} SERP results and ${aiRows.length} AI results`, 'info');
@@ -18537,7 +18745,15 @@ Final Score: ${score}/100`;
           aiByKeyword[key] = row;
         });
 
-        // First pass: classify all rows and collect search volumes for demand_share calculation
+        // Update existing combined rows with AI data, or create new ones if needed
+        // First, create a map of existing combined rows by keyword
+        const combinedByKeyword = {};
+        allCombinedRows.forEach(row => {
+          const key = RankingAiModule.normaliseKeyword(row.keyword);
+          combinedByKeyword[key] = row;
+        });
+
+        // First pass: classify all SERP rows and collect search volumes for demand_share calculation
         const rowsWithClassification = serpRows.map(row => {
           const key = RankingAiModule.normaliseKeyword(row.keyword);
           const aiRow = aiByKeyword[key] || null;
@@ -18569,7 +18785,7 @@ Final Score: ${score}/100`;
           return sum + (vol && vol > 0 ? vol : 0);
         }, 0);
         
-        // Second pass: build combined rows with demand_share
+        // Second pass: build combined rows with demand_share and AI data
         const combined = rowsWithClassification.map(row => {
           const key = RankingAiModule.normaliseKeyword(row.keyword);
           const aiRow = row.aiRow || null;
@@ -18649,8 +18865,33 @@ Final Score: ${score}/100`;
         RankingAiProgressModal.updateProgress(90, 3);
         RankingAiProgressModal.updateCounts(`✓ Processed ${totalKeywords} keywords (${withRank} ranked, ${withAiOverview} with AI Overview, ${withSearchVolume} with search volume)`);
 
-        // Merge SERP API summary (includes visibility metrics) with frontend-calculated summary
-        const serpSummary = serpJson.summary || {};
+        // Calculate visibility metrics from combined results (Ranking API only - not part of AI GEO pillars)
+        const validRankingRows = combined.filter(r => r.best_rank_group != null && typeof r.best_rank_group === 'number');
+        let avgPositionUnweighted = null;
+        let avgPositionVolumeWeighted = null;
+        
+        if (validRankingRows.length >= 1) {
+          // Unweighted average position
+          const sumRanks = validRankingRows.reduce((sum, k) => sum + k.best_rank_group, 0);
+          avgPositionUnweighted = Math.round((sumRanks / validRankingRows.length) * 100) / 100;
+          
+          // Demand-weighted average position
+          let sumWeightedRanks = 0;
+          let sumVolumes = 0;
+          
+          for (const row of validRankingRows) {
+            const vol = (row.search_volume !== null && row.search_volume !== undefined && row.search_volume > 0)
+              ? row.search_volume
+              : 10; // Fallback
+            sumWeightedRanks += row.best_rank_group * vol;
+            sumVolumes += vol;
+          }
+          
+          if (sumVolumes > 0) {
+            avgPositionVolumeWeighted = Math.round((sumWeightedRanks / sumVolumes) * 100) / 100;
+          }
+        }
+        
         const summary = {
           total_keywords: totalKeywords,
           keywords_with_rank: withRank,
@@ -18658,11 +18899,11 @@ Final Score: ${score}/100`;
           keywords_with_ai_citations: withAiCitation,
           top10,
           top3,
-          // Include visibility metrics from SERP API (Ranking API only - not part of AI GEO pillars)
-          avg_position_unweighted: serpSummary.avg_position_unweighted ?? null,
-          avg_position_volume_weighted: serpSummary.avg_position_volume_weighted ?? null,
-          keywords_used_for_avg: serpSummary.keywords_used_for_avg ?? null,
-          keywords_with_volume: serpSummary.keywords_with_volume ?? null
+          // Include visibility metrics (Ranking API only - not part of AI GEO pillars)
+          avg_position_unweighted: avgPositionUnweighted,
+          avg_position_volume_weighted: avgPositionVolumeWeighted,
+          keywords_used_for_avg: validRankingRows.length,
+          keywords_with_volume: withSearchVolume
         };
 
         mod.setData(combined, summary);
@@ -18711,17 +18952,22 @@ Final Score: ${score}/100`;
       } catch (err) {
         console.error("Ranking & AI load error", err);
         debugLog(`✗ Ranking & AI load error: ${err.message}`, 'error');
-        RankingAiProgressModal.updateCounts(`Error: ${err.message}`);
         
         const lastRunEl = document.getElementById("ranking-ai-last-run");
         if (lastRunEl) {
           lastRunEl.textContent = "Error loading ranking & AI data. See console for details.";
         }
         
-        // Show error in modal for a moment, then hide
-        setTimeout(() => {
-          RankingAiProgressModal.hide();
-        }, 3000);
+        // Show error summary in modal instead of hiding
+        RankingAiProgressModal.updateProgress(100, 5);
+        RankingAiProgressModal.setActiveStep(5);
+        RankingAiProgressModal.showSummary({
+          error: true,
+          errorMessage: err.message,
+          totalKeywords: keywords?.length || 0,
+          keywordsWithRank: allSerpResults?.filter(r => r.best_rank_group != null).length || 0
+        });
+        RankingAiProgressModal.updateCounts(`✗ Error: ${err.message}`);
       } finally {
         RankingAiModule.setLoading(false);
         const refreshBtn = document.getElementById("ranking-ai-refresh");
