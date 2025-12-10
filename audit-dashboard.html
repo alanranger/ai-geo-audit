@@ -18274,34 +18274,51 @@ Final Score: ${score}/100`;
     // ======================
     // Ranking & AI: Load data from localStorage or Supabase
     // ======================
-    async function loadRankingAiDataFromStorage() {
+    async function loadRankingAiDataFromStorage(forceCheckSupabase = false) {
       try {
-        // Try localStorage first
-        const localData = localStorage.getItem('rankingAiData');
-        if (localData) {
-          try {
-            const parsed = JSON.parse(localData);
-            if (parsed.combinedRows && parsed.summary) {
-              debugLog('✓ Ranking & AI data loaded from localStorage', 'success');
-              return parsed;
-            }
-          } catch (e) {
-            debugLog('⚠ Invalid Ranking & AI data in localStorage', 'warn');
-          }
-        }
-
-        // Try Supabase
         const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
         if (!propertyUrl) {
-          debugLog('⚠ Cannot load Ranking & AI data from Supabase: property URL not set', 'warn');
+          debugLog('⚠ Cannot load Ranking & AI data: property URL not set', 'warn');
           return null;
         }
 
+        // If forcing Supabase check, skip localStorage
+        if (!forceCheckSupabase) {
+          // Try localStorage first
+          const localData = localStorage.getItem('rankingAiData');
+          if (localData) {
+            try {
+              const parsed = JSON.parse(localData);
+              if (parsed.combinedRows && parsed.summary) {
+                debugLog('✓ Ranking & AI data loaded from localStorage', 'success');
+                // Check if data is recent (within last 24 hours) - if older, check Supabase
+                if (parsed.timestamp) {
+                  const localTime = new Date(parsed.timestamp);
+                  const now = new Date();
+                  const hoursDiff = (now - localTime) / (1000 * 60 * 60);
+                  if (hoursDiff < 24) {
+                    return parsed;
+                  } else {
+                    debugLog(`⚠ LocalStorage data is ${Math.round(hoursDiff)} hours old, checking Supabase for newer data...`, 'info');
+                  }
+                } else {
+                  return parsed;
+                }
+              }
+            } catch (e) {
+              debugLog('⚠ Invalid Ranking & AI data in localStorage', 'warn');
+            }
+          }
+        }
+
+        // Try Supabase (either forced or as fallback)
+        debugLog('📊 Loading Ranking & AI data from Supabase...', 'info');
         const response = await fetch(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}`);
         if (response.ok) {
           const json = await response.json();
           if (json.status === 'ok' && json.data && json.data.rankingAiData) {
             debugLog('✓ Ranking & AI data loaded from Supabase', 'success');
+            debugLog(`  Found ${json.data.rankingAiData.combinedRows?.length || 0} keywords in Supabase`, 'info');
             // Also save to localStorage for faster access next time
             localStorage.setItem('rankingAiData', JSON.stringify({
               combinedRows: json.data.rankingAiData.combinedRows,
@@ -18309,7 +18326,11 @@ Final Score: ${score}/100`;
               timestamp: new Date().toISOString()
             }));
             return json.data.rankingAiData;
+          } else {
+            debugLog('⚠ No Ranking & AI data found in Supabase', 'warn');
           }
+        } else {
+          debugLog(`⚠ Failed to load from Supabase: ${response.status}`, 'warn');
         }
       } catch (err) {
         debugLog(`✗ Error loading Ranking & AI data from storage: ${err.message}`, 'error');
@@ -18343,8 +18364,9 @@ Final Score: ${score}/100`;
       }
 
       // If not forcing, try to load from storage first
+      // But if force=false and hasLoadedOnce=true, still check Supabase for newer data
       if (!force) {
-        const storedData = await loadRankingAiDataFromStorage();
+        const storedData = await loadRankingAiDataFromStorage(hasLoadedOnce);
         if (storedData && storedData.combinedRows && storedData.summary) {
           mod.setData(storedData.combinedRows, storedData.summary);
           mod.setLoadedOnce(true);
@@ -18354,7 +18376,7 @@ Final Score: ${score}/100`;
             const date = new Date(storedData.timestamp);
             lastRunEl.textContent = `Last run: ${date.toLocaleString()}`;
           }
-          debugLog('✓ Ranking & AI data loaded from storage (no API call)', 'success');
+          debugLog(`✓ Ranking & AI data loaded from storage (${storedData.combinedRows.length} keywords)`, 'success');
           return;
         }
       }
@@ -18905,6 +18927,136 @@ Final Score: ${score}/100`;
       }
       
       return standardActions;
+    }
+
+    /**
+     * Get CTR metrics for a keyword from GSC audit data
+     * @param {Object} key - Object with keyword and url
+     * @returns {Object|null} CTR metrics or null if not found
+     */
+    function getCtrMetricsForKeyword(key) {
+      try {
+        // Try to get from audit data stored in window or localStorage
+        const auditData = window.auditData || (() => {
+          try {
+            const stored = localStorage.getItem('auditData');
+            return stored ? JSON.parse(stored) : null;
+          } catch (e) {
+            return null;
+          }
+        })();
+
+        if (!auditData || !auditData.searchData || !auditData.searchData.perKeyword) {
+          return null;
+        }
+
+        // Look for matching keyword+URL in perKeyword data
+        const perKeyword = auditData.searchData.perKeyword || [];
+        const match = perKeyword.find(p => 
+          p.keyword && key.keyword && 
+          p.keyword.toLowerCase().trim() === key.keyword.toLowerCase().trim() &&
+          p.url && key.url &&
+          (p.url === key.url || p.url.includes(key.url) || key.url.includes(p.url))
+        );
+
+        if (match && match.ctr != null && match.impressions != null) {
+          return {
+            ctr: match.ctr,
+            impressions: match.impressions,
+            clicks: match.clicks || 0
+          };
+        }
+
+        // Fallback: try to find by URL only (page-level data)
+        const urlMatch = perKeyword.find(p => 
+          p.url && key.url &&
+          (p.url === key.url || p.url.includes(key.url) || key.url.includes(p.url))
+        );
+
+        if (urlMatch && urlMatch.ctr != null && urlMatch.impressions != null) {
+          return {
+            ctr: urlMatch.ctr,
+            impressions: urlMatch.impressions,
+            clicks: urlMatch.clicks || 0
+          };
+        }
+
+        return null;
+      } catch (err) {
+        console.error('Error getting CTR metrics:', err);
+        return null;
+      }
+    }
+
+    /**
+     * Get position bucket from rank
+     * @param {number|null} rank - Ranking position
+     * @returns {string} Position bucket: 'top3', '4-10', '11-20', or '20+'
+     */
+    function getPositionBucket(rank) {
+      if (rank == null) return '20+';
+      if (rank <= 3) return 'top3';
+      if (rank <= 10) return '4-10';
+      if (rank <= 20) return '11-20';
+      return '20+';
+    }
+
+    /**
+     * Get expected CTR benchmark for a position bucket
+     * @param {string} positionBucket - Position bucket: 'top3', '4-10', '11-20', or '20+'
+     * @returns {number} Expected CTR as decimal (e.g., 0.15 for 15%)
+     */
+    function getCtrBenchmarkForPosition(positionBucket) {
+      // Industry benchmarks for CTR by position
+      const benchmarks = {
+        'top3': 0.15,    // ~15% CTR for positions 1-3
+        '4-10': 0.05,   // ~5% CTR for positions 4-10
+        '11-20': 0.02,  // ~2% CTR for positions 11-20
+        '20+': 0.01     // ~1% CTR for positions 21+
+      };
+      return benchmarks[positionBucket] || 0.01;
+    }
+
+    /**
+     * Get schema coverage for a URL
+     * @param {string} url - URL to check
+     * @returns {Object|null} Schema coverage data or null if not found
+     */
+    function getSchemaCoverageForUrl(url) {
+      try {
+        // Try to get from audit data stored in window or localStorage
+        const auditData = window.auditData || (() => {
+          try {
+            const stored = localStorage.getItem('auditData');
+            return stored ? JSON.parse(stored) : null;
+          } catch (e) {
+            return null;
+          }
+        })();
+
+        if (!auditData || !auditData.schemaAudit || !auditData.schemaAudit.data) {
+          return null;
+        }
+
+        const schemaData = auditData.schemaAudit.data;
+        const pagesWithSchema = schemaData.pagesWithSchema || [];
+        const pageData = pagesWithSchema.find(p => 
+          p.url && url && (p.url === url || p.url.includes(url) || url.includes(p.url))
+        );
+
+        if (pageData && pageData.schemaTypes) {
+          return {
+            hasSchema: true,
+            schemaTypes: Array.isArray(pageData.schemaTypes) ? pageData.schemaTypes : [],
+            url: pageData.url
+          };
+        }
+
+        return null;
+      } catch (err) {
+        console.error('Error getting schema coverage:', err);
+        return null;
+      }
     }
 
     /**
