@@ -87,6 +87,7 @@ export default async function handler(req, res) {
       localSignals,
       moneyPagesSummary, // Phase 3: Money Pages summary for trend tracking
       moneySegmentMetrics, // Phase: Money Pages Priority Matrix - segment metrics for KPI tracker
+      moneyPagePriorityData, // CRITICAL: Money Pages Priority Matrix data for Priority & Actions table
       rankingAiData // Ranking & AI data (SERP rankings + AI Overview citations)
     } = bodyData;
 
@@ -192,6 +193,9 @@ export default async function handler(req, res) {
       
       // Phase: Money Pages Priority Matrix - segment metrics for 12-month KPI tracker
       money_segment_metrics: ensureJson(moneySegmentMetrics), // JSON object: {allMoney, landingPages, eventPages, productPages} each with {clicks, impressions, ctr, avgPosition, behaviourScore}
+      
+      // CRITICAL: Money Pages Priority Matrix data for Priority & Actions table
+      money_page_priority_data: ensureJson(moneyPagePriorityData), // JSON array: [{url, title, segmentType, clicks, impressions, ctr, avgPosition, impactLevel, difficultyLevel, priorityLevel}, ...]
       
       // Ranking & AI data (SERP rankings + AI Overview citations)
       ranking_ai_data: ensureJson(rankingAiData), // JSON object: {combinedRows: [...], summary: {...}}

@@ -150,9 +150,8 @@ export default async function handler(req, res) {
       dateRange: 30, // Default - this isn't stored in Supabase
       timestamp: new Date(record.audit_date + 'T00:00:00').getTime(),
       auditDate: record.audit_date,
-      // Money Pages Priority Matrix data - needs to be rebuilt from money_pages_metrics
-      // Store the raw data so frontend can rebuild moneyPagePriorityData
-      moneyPagePriorityData: null, // Will be rebuilt on frontend from moneyPagesMetrics
+      // Money Pages Priority Matrix data - restore from Supabase if available
+      moneyPagePriorityData: record.money_page_priority_data || null, // Restore from Supabase, or rebuild if missing
       moneySegmentMetrics: record.money_segment_metrics || null,
       rankingAiData: record.ranking_ai_data || null // Ranking & AI data (SERP rankings + AI Overview citations)
     };

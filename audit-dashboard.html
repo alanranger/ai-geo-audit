@@ -3913,7 +3913,8 @@
             snippetReadiness,
             localSignals, // Pass Business Profile data for storage
             moneyPagesSummary, // Phase 3: Money Pages summary for trend tracking
-            moneySegmentMetrics // Phase: Money Pages Priority Matrix - segment metrics for KPI tracker
+            moneySegmentMetrics, // Phase: Money Pages Priority Matrix - segment metrics for KPI tracker
+            moneyPagePriorityData: window.moneyPagePriorityData || null // CRITICAL: Save Priority Matrix data to Supabase
           })
         });
         
@@ -16676,13 +16677,20 @@ Final Score: ${score}/100`;
         const savedAudit = auditToDisplay;
         if (savedAudit && savedAudit.scores && savedAudit.searchData) {
           // CRITICAL: Restore Money Pages Priority data FIRST before any rendering
+          debugLog(`Checking saved audit for moneyPagePriorityData: ${!!savedAudit.moneyPagePriorityData}, type: ${Array.isArray(savedAudit.moneyPagePriorityData) ? 'array' : typeof savedAudit.moneyPagePriorityData}, length: ${Array.isArray(savedAudit.moneyPagePriorityData) ? savedAudit.moneyPagePriorityData.length : 'N/A'}`, 'info');
+          
           if (savedAudit.moneyPagePriorityData && Array.isArray(savedAudit.moneyPagePriorityData) && savedAudit.moneyPagePriorityData.length > 0) {
             window.moneyPagePriorityData = savedAudit.moneyPagePriorityData;
             debugLog(`✓ Restored moneyPagePriorityData from saved audit: ${savedAudit.moneyPagePriorityData.length} pages`, 'success');
+          } else {
+            debugLog(`⚠ moneyPagePriorityData NOT found in saved audit or empty. Keys in savedAudit: ${Object.keys(savedAudit).join(', ')}`, 'warn');
           }
+          
           if (savedAudit.moneySegmentMetrics) {
             window.moneySegmentMetrics = savedAudit.moneySegmentMetrics;
             debugLog(`✓ Restored moneySegmentMetrics from saved audit`, 'success');
+          } else {
+            debugLog(`⚠ moneySegmentMetrics NOT found in saved audit`, 'warn');
           }
           
           // Ensure moneyPagesMetrics is in scores if it exists in the audit data
