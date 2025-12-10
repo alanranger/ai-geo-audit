@@ -17918,11 +17918,12 @@ Final Score: ${score}/100`;
         const withAiCitation = combined.filter(r => r.ai_alan_citations_count > 0).length;
         const top10 = combined.filter(r => r.best_rank_group != null && r.best_rank_group <= 10).length;
         const top3 = combined.filter(r => r.best_rank_group != null && r.best_rank_group <= 3).length;
-        const withSearchVolume = combined.filter(r => r.search_volume != null && r.search_volume > 0).length;
+        // Count keywords with search volume (including 0, but not null/undefined)
+        const withSearchVolume = combined.filter(r => r.search_volume != null && r.search_volume !== undefined).length;
         
         // Log search volume for each keyword
         combined.forEach(row => {
-          const volume = row.search_volume != null && row.search_volume > 0 
+          const volume = row.search_volume != null && row.search_volume !== undefined
             ? row.search_volume.toLocaleString() 
             : 'none';
           debugLog(`Search volume for "${row.keyword}": ${volume}`, 'info');
@@ -18282,7 +18283,8 @@ Final Score: ${score}/100`;
         const tdVolume = document.createElement("td");
         const volumeBadge = document.createElement("span");
         const searchVolume = row.search_volume;
-        if (searchVolume == null || searchVolume === 0) {
+        // IMPORTANT: Only treat as missing if null/undefined, not if 0 (0 is a valid value)
+        if (searchVolume == null || searchVolume === undefined) {
           volumeBadge.className = "ranking-badge-volume ranking-badge-volume--none";
           volumeBadge.textContent = "—";
         } else {
