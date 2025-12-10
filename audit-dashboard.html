@@ -18364,6 +18364,11 @@ Final Score: ${score}/100`;
 
       // Update pagination controls
       updatePaginationControls(totalRows, currentPage, totalPages, startIdx, endIdx);
+      
+      // Re-wire sorting after render completes (use setTimeout to ensure DOM is ready)
+      setTimeout(() => {
+        wireRankingSorting();
+      }, 0);
 
       // Row click → detail panel
       tbody.querySelectorAll("tr").forEach(tr => {
@@ -18830,24 +18835,26 @@ Final Score: ${score}/100`;
         }
       }
 
-      // Store the handler function reference for cleanup
+      // Store handler reference for cleanup
       let rankingSortHandler = null;
       
       function wireRankingSorting() {
-        // Use event delegation on the table header to avoid duplicate listeners
-        const table = document.querySelector('.ranking-table thead');
+        // Use event delegation on the table itself (more reliable than thead)
+        const table = document.querySelector('.ranking-table');
         if (!table) return;
         
-        // Remove existing listener if already wired
+        // Remove existing listener if present
         if (rankingSortHandler) {
           table.removeEventListener('click', rankingSortHandler);
-          rankingSortHandler = null;
         }
         
-        // Create handler function
+        // Create and attach delegated listener
         rankingSortHandler = (e) => {
           const th = e.target.closest('th.sortable');
           if (!th) return;
+          
+          e.preventDefault();
+          e.stopPropagation();
           
           const column = th.dataset.sort;
           if (!column) return;
@@ -18864,7 +18871,6 @@ Final Score: ${score}/100`;
           renderRankingAiTab();
         };
         
-        // Add single event listener using delegation
         table.addEventListener('click', rankingSortHandler);
       }
       
