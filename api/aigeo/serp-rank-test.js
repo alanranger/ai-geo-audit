@@ -76,7 +76,14 @@ async function fetchKeywordOverview(keywords, auth) {
     console.log(`  - data.tasks type: ${Array.isArray(data.tasks) ? 'array' : typeof data.tasks}`);
     console.log(`  - data.tasks length: ${Array.isArray(data.tasks) ? data.tasks.length : 'N/A'}`);
     
-    if (!dfResponse.ok || !String(data.status_code).startsWith("200")) {
+    // DataForSEO uses status_code 20000 for success (not 200)
+    const isSuccess = dfResponse.ok && (
+      String(data.status_code).startsWith("200") || 
+      data.status_code === 20000 ||
+      data.status_message === "Ok."
+    );
+    
+    if (!isSuccess) {
       console.error("[Keyword Overview] API error:", {
         status_code: data.status_code,
         status_message: data.status_message,
@@ -84,6 +91,8 @@ async function fetchKeywordOverview(keywords, auth) {
       });
       return {};
     }
+    
+    console.log(`[Keyword Overview] API success - status_code: ${data.status_code}, message: ${data.status_message}`);
 
     // Handle DataForSEO keywords_data/google_ads/search_volume/live response structure
     // According to playground: data.result[] (direct array)
