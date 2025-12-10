@@ -18822,54 +18822,89 @@ Final Score: ${score}/100`;
     }
 
     /**
-     * Generate action bullets based on scorecard data
+     * Generate summary sentence for keyword based on demand, rank, and AI status
      * @param {Object} scorecardData - Data from buildKeywordScorecardData
-     * @returns {Array<string>} Array of action bullet strings
+     * @returns {string} Summary sentence
+     */
+    function generateKeywordSummary(scorecardData) {
+      const { demand_level, best_rank_group, has_ai_overview, ai_citations_ours, segment } = scorecardData;
+      const parts = [];
+      
+      // Demand + rank description
+      if (demand_level === 'High' && best_rank_group != null && best_rank_group <= 10) {
+        parts.push('High-demand keyword currently on page 1.');
+      } else if (demand_level === 'High' && (best_rank_group == null || best_rank_group > 10)) {
+        parts.push('High-demand keyword currently on page 2+; big upside if you move into page 1.');
+      } else if (demand_level === 'Medium' && best_rank_group != null && best_rank_group <= 10) {
+        parts.push('Medium-demand keyword currently on page 1.');
+      } else if (demand_level === 'Medium' && (best_rank_group == null || best_rank_group > 10)) {
+        parts.push('Medium-demand keyword currently on page 2+; opportunity to move into page 1.');
+      } else if (best_rank_group != null && best_rank_group <= 10) {
+        parts.push('Keyword currently on page 1.');
+      } else {
+        parts.push('Keyword currently on page 2+; opportunity to improve ranking.');
+      }
+      
+      // AI Overview status
+      if (has_ai_overview) {
+        if (ai_citations_ours > 0) {
+          parts.push('Cited in AI Overviews.');
+        } else {
+          parts.push('AI Overview present but not cited.');
+        }
+      }
+      
+      // Segment context
+      if (segment && segment.toLowerCase() === 'education') {
+        parts.push('Education content.');
+      } else if (segment && segment.toLowerCase() === 'money') {
+        parts.push('Commercial intent.');
+      }
+      
+      return parts.join(' ');
+    }
+
+    /**
+     * Generate action bullets based on scorecard data (always returns 3 bullets)
+     * @param {Object} scorecardData - Data from buildKeywordScorecardData
+     * @returns {Array<string>} Array of exactly 3 action bullet strings
      */
     function generateActionBullets(scorecardData) {
-      const actions = [];
-      const { demand_level, rank_bucket, ai_status, segment, page_type, position_strength, ai_citations_ours, ai_citations_total } = scorecardData;
-
-      // Rule 1: High demand + not in top 3
+      const { demand_level, rank_bucket, ai_status, segment, page_type, position_strength } = scorecardData;
+      const standardActions = [];
+      
+      // Bullet 1: Classic ranking & CTR
       if (demand_level === 'High' && rank_bucket !== 'top3') {
-        actions.push('Improve title and meta description for this page to win more clicks for this high-demand term.');
+        standardActions.push('Improve title and meta description for this page to win more clicks for this high-demand term.');
+      } else if (position_strength === 'Weak') {
+        standardActions.push('Improve title and meta description to improve CTR and push this page into top 10.');
+      } else {
+        standardActions.push('Continue optimizing title and meta description to maintain strong CTR for this keyword.');
       }
-
-      // Rule 2: AI Overview exists but not cited
+      
+      // Bullet 2: AI usage / authority
       if (ai_status === 'ai_no_citation') {
-        actions.push('Strengthen on-page answer content and schema so AI can confidently cite this page in AI Overviews.');
+        standardActions.push('Strengthen on-page answer content and schema so AI can confidently cite this page in AI Overviews.');
+      } else if (ai_status === 'ai_cited_strong' || ai_status === 'ai_cited_light') {
+        if (rank_bucket === 'page1' || rank_bucket === 'page2plus') {
+          standardActions.push('You\'re already cited in AI Overviews – improve classic ranking (links and snippet) to capture more traffic.');
+        } else {
+          standardActions.push('You\'re already cited in AI Overviews – maintain strong ranking and authority signals.');
+        }
+      } else {
+        standardActions.push('No AI Overview yet – improve content depth and schema to increase chances of AI citation.');
       }
-
-      // Rule 3: AI Overview exists and cited but rank is weak
-      if ((ai_status === 'ai_cited_strong' || ai_status === 'ai_cited_light') && 
-          (rank_bucket === 'page1' || rank_bucket === 'page2plus')) {
-        actions.push('You\'re already cited in AI Overviews – improve classic ranking (links and snippet) to capture more traffic.');
-      }
-
-      // Rule 4: Education segment + Landing page
+      
+      // Bullet 3: Commercialisation / internal links
       if (segment && segment.toLowerCase() === 'education' && page_type === 'Landing') {
-        actions.push('Consider adding stronger calls-to-action and internal links from money pages to capture more commercial value from this educational query.');
+        standardActions.push('Consider adding stronger calls-to-action and internal links from money pages to capture more commercial value from this educational query.');
+      } else if (segment && segment.toLowerCase() === 'money') {
+        standardActions.push('Strengthen internal links from high-authority pages and optimize conversion elements on this money page.');
+      } else {
+        standardActions.push('Consider internal linking strategy to boost authority and capture related commercial queries.');
       }
-
-      // Rule 5: Money segment + poor rank + medium/high demand
-      if (segment && segment.toLowerCase() === 'money' && 
-          (demand_level === 'High' || demand_level === 'Medium') && 
-          (rank_bucket === 'page1' || rank_bucket === 'page2plus')) {
-        actions.push('This is a high-impact commercial keyword – treat this landing page as a priority for on-page SEO and schema improvements.');
-      }
-
-      // Rule 6: Weak position strength
-      if (position_strength === 'Weak' && rank_bucket !== 'page2plus') {
-        actions.push('Optimize on-page content and internal linking to push this page into top 10 for better visibility.');
-      }
-
-      // Rule 7: Medium/Low demand but good rank - opportunity to grow
-      if ((demand_level === 'Medium' || demand_level === 'Low') && rank_bucket === 'top3') {
-        actions.push('You rank well for this term – consider expanding content to capture related higher-volume queries.');
-      }
-
-      // Limit to max 3 bullets, ordered by impact
-      return actions.slice(0, 3);
+      
+      return standardActions;
     }
 
     /**
@@ -19655,7 +19690,12 @@ Final Score: ${score}/100`;
       html += `<span>Impact: <span style="color: ${impactColor};">${impactLabel}</span></span> • `;
       html += `<span>Difficulty: <span style="color: ${difficultyColor};">${difficultyLabel}</span></span> • `;
       html += `<span>Priority: <span style="color: ${priorityColor};">${priorityLabel}</span></span>`;
-      html += `</p></div>`;
+      html += `</p>`;
+      
+      // Add derived summary sentence
+      const summarySentence = generateKeywordSummary(scorecardData);
+      html += `<p style="margin: 0.5rem 0 0 0; font-size: 0.9rem; font-weight: 400; color: #64748b; line-height: 1.5;">${summarySentence}</p>`;
+      html += `</div>`;
 
       // Keyword & URL header
       html += `<div style="margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 2px solid #e5e7eb;">`;
@@ -19701,13 +19741,97 @@ Final Score: ${score}/100`;
       // 3. CTR & snippet
       html += `<div class="scorecard-section">`;
       html += `<h5 style="font-size: 1rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">3. CTR & snippet</h5>`;
-      html += `<p style="color: #64748b; font-size: 0.9rem; line-height: 1.5;">CTR data isn't wired into this module yet – using rank as a proxy. ${scorecardData.best_rank_group != null ? `At #${scorecardData.best_rank_group} you should be capturing a higher share of clicks than you are.` : 'Improve ranking to capture clicks.'}</p>`;
+      
+      // Get CTR metrics if available
+      const ctrMetrics = getCtrMetricsForKeyword({
+        keyword: scorecardData.keyword,
+        url: scorecardData.ranking_url
+      });
+      
+      if (ctrMetrics && ctrMetrics.ctr != null && ctrMetrics.impressions != null) {
+        // Real CTR data available
+        const ctrPercent = (ctrMetrics.ctr * 100).toFixed(2);
+        const impressionsFormatted = ctrMetrics.impressions.toLocaleString();
+        const positionBucket = getPositionBucket(scorecardData.best_rank_group);
+        const ctrBenchmark = getCtrBenchmarkForPosition(positionBucket);
+        const benchmarkPercent = (ctrBenchmark * 100).toFixed(2);
+        
+        // Determine CTR performance label
+        let ctrPerformance = 'OK';
+        let ctrPerformanceColor = '#f59e0b'; // Amber
+        let ctrPerformanceBg = '#fffbeb';
+        if (ctrMetrics.ctr >= ctrBenchmark * 1.1) {
+          ctrPerformance = 'Strong';
+          ctrPerformanceColor = '#10b981'; // Green
+          ctrPerformanceBg = '#f0fdf4';
+        } else if (ctrMetrics.ctr < ctrBenchmark * 0.8) {
+          ctrPerformance = 'Weak';
+          ctrPerformanceColor = '#ef4444'; // Red
+          ctrPerformanceBg = '#fef2f2';
+        }
+        
+        html += `<div style="margin-bottom: 0.75rem;">`;
+        html += `<div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.5rem; font-size: 0.95rem;">`;
+        html += `<span>CTR (last 30 days): <strong style="color: #1e293b;">${ctrPercent}%</strong></span>`;
+        html += `<span>·</span>`;
+        html += `<span>Impressions: <strong style="color: #1e293b;">${impressionsFormatted}</strong></span>`;
+        html += `</div>`;
+        html += `<div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.5rem; font-size: 0.95rem;">`;
+        html += `<span>Expected CTR at this position: <strong style="color: #64748b;">${benchmarkPercent}%</strong></span>`;
+        html += `</div>`;
+        html += `<div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.75rem;">`;
+        html += `<span>CTR performance: <span style="padding: 0.25rem 0.5rem; border-radius: 4px; font-weight: 600; background: ${ctrPerformanceBg}; border-left: 3px solid ${ctrPerformanceColor}; color: #1e293b;">${ctrPerformance}</span></span>`;
+        html += `</div>`;
+        html += `</div>`;
+        
+        // Explanatory text based on performance
+        if (ctrPerformance === 'Weak') {
+          html += `<p style="color: #64748b; font-size: 0.9rem; line-height: 1.5;">CTR is weak for this position. Improving the snippet (title, meta description and rich results) should unlock more clicks for this keyword.</p>`;
+        } else {
+          html += `<p style="color: #64748b; font-size: 0.9rem; line-height: 1.5;">CTR is in line with expectations for this position. Further gains are more likely to come from improving rank (links and authority) than snippet tweaks alone.</p>`;
+        }
+      } else {
+        // Fallback placeholder text
+        html += `<p style="color: #64748b; font-size: 0.9rem; line-height: 1.5;">CTR data is not yet wired into this module; using rank as a proxy. At this position you should be capturing a strong share of clicks. If CTR is low in the Behaviour panel, focus on improving the snippet (title, meta description, and rich results).</p>`;
+      }
       html += `</div>`;
 
       // 4. Schema & rich results
       html += `<div class="scorecard-section">`;
       html += `<h5 style="font-size: 1rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">4. Schema & rich results</h5>`;
-      html += `<p style="color: #64748b; font-size: 0.9rem; line-height: 1.5;">Schema: this module doesn't yet assess schema coverage – check the Content/Schema pillar for a full view.</p>`;
+      
+      // Get schema coverage if available
+      const schemaCoverage = getSchemaCoverageForUrl(scorecardData.ranking_url);
+      
+      if (schemaCoverage) {
+        // Show checklist
+        html += `<div style="margin-bottom: 0.75rem;">`;
+        html += `<div style="font-size: 0.9rem; color: #1e293b; margin-bottom: 0.5rem; font-weight: 500;">Schema coverage for this page:</div>`;
+        html += `<div style="display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.9rem; color: #1e293b;">`;
+        html += `<span>FAQ: ${schemaCoverage.hasFAQ ? '✅' : '❌'}</span>`;
+        html += `<span>HowTo: ${schemaCoverage.hasHowTo ? '✅' : '❌'}</span>`;
+        html += `<span>Event/Product: ${(schemaCoverage.hasEvent || schemaCoverage.hasProduct) ? '✅' : '❌'}</span>`;
+        html += `<span>Breadcrumb: ${schemaCoverage.hasBreadcrumb ? '✅' : '❌'}</span>`;
+        html += `<span>ImageObject: ${schemaCoverage.hasImageObject ? '✅' : '❌'}</span>`;
+        html += `</div>`;
+        html += `</div>`;
+        
+        // Interpretation based on schema coverage
+        let schemaInterpretation = '';
+        if (scorecardData.segment && scorecardData.segment.toLowerCase() === 'education' && !schemaCoverage.hasFAQ) {
+          schemaInterpretation = 'This education page has no FAQ schema. Adding an FAQ block could help snippet richness for this keyword.';
+        } else if ((scorecardData.page_type === 'Event' || scorecardData.page_type === 'Product') && !schemaCoverage.hasEvent && !schemaCoverage.hasProduct) {
+          schemaInterpretation = 'This looks like a money page but no Event/Product schema was detected. Adding Event or Product schema could improve visibility in commercial results.';
+        } else if (schemaCoverage.hasFAQ && (schemaCoverage.hasEvent || schemaCoverage.hasProduct) && schemaCoverage.hasBreadcrumb) {
+          schemaInterpretation = 'Core schema types are already present for this page. Further gains are more likely to come from authority/behaviour than new schema types.';
+        } else {
+          schemaInterpretation = 'Some schema types are present. Review the Content/Schema pillar for a complete assessment.';
+        }
+        html += `<p style="color: #64748b; font-size: 0.9rem; line-height: 1.5;">${schemaInterpretation}</p>`;
+      } else {
+        // Fallback placeholder text
+        html += `<p style="color: #64748b; font-size: 0.9rem; line-height: 1.5;">Schema coverage isn't evaluated here yet. Check the Content/Schema pillar for a full assessment of schema types (FAQ, HowTo, Event/Product, Breadcrumb, ImageObject) and rich results.</p>`;
+      }
       html += `</div>`;
 
       // 5. AI usage
@@ -19733,15 +19857,12 @@ Final Score: ${score}/100`;
       html += `<p style="margin-bottom: 0.75rem; font-size: 0.95rem; color: #1e293b; line-height: 1.6;">Overall priority: <span style="padding: 0.25rem 0.5rem; border-radius: 4px; font-weight: 600; background: ${priorityBg}; border-left: 3px solid ${priorityBorder}; color: #1e293b;">${scorecardData.priority_level}</span></p>`;
       
       const actions = generateActionBullets(scorecardData);
-      if (actions.length > 0) {
-        html += `<ul style="margin: 0; padding-left: 1.5rem; list-style-type: disc; font-size: 0.95rem; line-height: 1.6;">`;
-        actions.forEach(action => {
-          html += `<li style="margin-bottom: 0.5rem; color: #1e293b;">${action}</li>`;
-        });
-        html += `</ul>`;
-      } else {
-        html += `<p style="color: #64748b; font-size: 0.9rem; line-height: 1.5;">No specific actions identified. Continue monitoring this keyword.</p>`;
-      }
+      // Always show 3 bullets (function now guarantees 3)
+      html += `<ul style="margin: 0; padding-left: 1.5rem; list-style-type: disc; font-size: 0.95rem; line-height: 1.6;">`;
+      actions.forEach(action => {
+        html += `<li style="margin-bottom: 0.5rem; color: #1e293b;">${action}</li>`;
+      });
+      html += `</ul>`;
       html += `</div>`;
 
       // Build summary line and include it in the main HTML
