@@ -15651,19 +15651,33 @@ Final Score: ${score}/100`;
                 siteReviewsForDate
               );
               
-              // Use historical data from Supabase if available, otherwise use calculated scores
+              // Use historical data from Supabase if available, otherwise use calculated scores (only if valid GSC data)
               if (historicalLocalEntity !== undefined && historicalLocalEntity !== null) {
                 localEntityData.push(historicalLocalEntity);
                 debugLog(`Using historical Local Entity (${historicalLocalEntity}) for ${pointDate}`, 'info');
               } else {
-              localEntityData.push(pillarScores.localEntity);
+                // Check if GSC data is valid before calculating
+                const hasValidGscData = point.position && point.position > 0 && point.ctr !== null && point.ctr >= 0;
+                if (hasValidGscData) {
+                  localEntityData.push(pillarScores.localEntity);
+                } else {
+                  localEntityData.push(null);
+                  debugLog(`No valid GSC data for Local Entity on ${pointDate} - using null`, 'warn');
+                }
               }
               
               if (historicalServiceArea !== undefined && historicalServiceArea !== null) {
                 serviceAreaData.push(historicalServiceArea);
                 debugLog(`Using historical Service Area (${historicalServiceArea}) for ${pointDate}`, 'info');
               } else {
-              serviceAreaData.push(pillarScores.serviceArea);
+                // Check if GSC data is valid before calculating
+                const hasValidGscData = point.position && point.position > 0 && point.ctr !== null && point.ctr >= 0;
+                if (hasValidGscData) {
+                  serviceAreaData.push(pillarScores.serviceArea);
+                } else {
+                  serviceAreaData.push(null);
+                  debugLog(`No valid GSC data for Service Area on ${pointDate} - using null`, 'warn');
+                }
               }
               
               // Use Authority score based on selected mode, prioritizing segmented historical data when available
@@ -15700,7 +15714,7 @@ Final Score: ${score}/100`;
                 }
               }
               
-              // Visibility data (check historical data from Supabase FIRST, then calculate only if missing)
+              // Visibility data (check historical data from Supabase FIRST, then calculate only if missing and valid GSC data)
               const historicalVisibility = visibilityMap.get(pointDate);
               if (historicalVisibility !== undefined && historicalVisibility !== null) {
                 // Use stored score from database (fast - no calculation needed)
@@ -15711,10 +15725,15 @@ Final Score: ${score}/100`;
                 visibilityData.push(pillarScores.visibility);
                 debugLog(`Using current Visibility (${pillarScores.visibility}) for ${pointDate}`, 'info');
               } else {
-                // For past dates: calculate from GSC data as fallback (only if stored score missing)
-                // This ensures we show data even if backfill hasn't completed yet
-                visibilityData.push(pillarScores.visibility);
-                debugLog(`Calculated Visibility (${pillarScores.visibility}) for ${pointDate} - stored score missing, using GSC fallback`, 'info');
+                // For past dates: calculate from GSC data as fallback (only if stored score missing AND valid GSC data)
+                const hasValidGscData = point.position && point.position > 0 && point.ctr !== null && point.ctr >= 0;
+                if (hasValidGscData) {
+                  visibilityData.push(pillarScores.visibility);
+                  debugLog(`Calculated Visibility (${pillarScores.visibility}) for ${pointDate} - stored score missing, using GSC fallback`, 'info');
+                } else {
+                  visibilityData.push(null);
+                  debugLog(`No valid GSC data for Visibility on ${pointDate} (position=${point.position}, ctr=${point.ctr}) - using null`, 'warn');
+                }
               }
               
               // Check if we have real historical data for this date
