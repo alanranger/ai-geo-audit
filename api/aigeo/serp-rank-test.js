@@ -24,7 +24,11 @@ function normalizeDomain(value) {
 }
 
 function normalizeKeyword(keyword) {
-  return String(keyword).toLowerCase().trim();
+  if (!keyword) return '';
+  return String(keyword)
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ' '); // Collapse multiple spaces to single space
 }
 
 /**
@@ -121,6 +125,13 @@ async function fetchKeywordOverview(keywords, auth) {
     }
 
     console.log(`[Keyword Overview] Built volume map with ${Object.keys(volumeByKeyword).length} entries`);
+    
+    // Log the volume map summary for debugging
+    const volumeMapSummary = Object.entries(volumeByKeyword)
+      .map(([kw, data]) => `${kw} → ${data.search_volume ?? 'null'}`)
+      .join(', ');
+    console.log(`[Keyword Overview] Volume map summary: ${volumeMapSummary}`);
+    
     return volumeByKeyword;
   } catch (err) {
     console.error("[Keyword Overview] Error fetching Keyword Overview:", err.message, err.stack);
@@ -288,11 +299,12 @@ export default async function handler(req, res) {
     console.log(`[Handler] Volume map keys: ${Object.keys(volumeByKeyword).join(', ')}`);
 
     // Call DataForSEO once per keyword (required by Live API)
+    // IMPORTANT: Process ALL keywords, including Brand segment - do not filter
     const perKeyword = [];
     for (const keyword of keywords) {
       const result = await fetchSerpForKeyword(keyword, auth, targetRoot);
       
-      // Merge search volume data
+      // Merge search volume data using normalized keyword lookup
       const normalizedKw = normalizeKeyword(keyword);
       const volumeData = volumeByKeyword[normalizedKw] || {};
       
@@ -303,13 +315,20 @@ export default async function handler(req, res) {
       };
       
       if (mergedResult.search_volume !== null) {
-        console.log(`[Handler] Merged "${keyword}" with volume: ${mergedResult.search_volume}`);
+        console.log(`[Handler] Merged "${keyword}" (normalized: "${normalizedKw}") with volume: ${mergedResult.search_volume}`);
       } else {
-        console.log(`[Handler] Merged "${keyword}" with volume: null (not found in volume map)`);
+        console.log(`[Handler] Merged "${keyword}" (normalized: "${normalizedKw}") with volume: null (not found in volume map)`);
+        console.log(`[Handler] Available keys in volume map: ${Object.keys(volumeByKeyword).join(', ')}`);
       }
       
       perKeyword.push(mergedResult);
     }
+    
+    // Log final per-keyword payload summary
+    console.log(`[Handler] Final per-keyword payload summary:`);
+    perKeyword.forEach((item, idx) => {
+      console.log(`  ${idx + 1}. "${item.keyword}" → search_volume: ${item.search_volume ?? 'null'}`);
+    });
 
     // Build summary
     const totalKeywords = perKeyword.length;
