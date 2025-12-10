@@ -10757,6 +10757,9 @@ Final Score: ${score}/100`;
         }, 50);
       }
       
+      // Make renderMoneyPagesSection globally available
+      window.renderMoneyPagesSection = renderMoneyPagesSection;
+      
       // Helper function to filter money pages data by sub-segment
       // Apply all filters and calculate filtered metrics
       function getFilteredMoneyPagesMetrics(moneyPagesMetrics) {
@@ -18682,13 +18685,54 @@ Final Score: ${score}/100`;
               loadRankingAiData(false); // This will check storage first
             }
 
+            // Re-render Score Trends chart when Overview tab is shown
+            if (target === "overview" && isNowActive && !wasActive) {
+              setTimeout(async () => {
+                const saved = loadAuditResultsSync();
+                if (saved && saved.scores && saved.searchData) {
+                  // Re-render trend chart by calling displayDashboard
+                  const trendCanvas = document.getElementById('trendChart');
+                  if (trendCanvas && typeof displayDashboard === 'function') {
+                    debugLog('Re-rendering Score Trends chart for Overview tab', 'info');
+                    try {
+                      await displayDashboard(saved.scores, saved.searchData, saved.snippetReadiness || 0, saved.schemaAudit || null, saved.localSignals || null);
+                    } catch (err) {
+                      debugLog(`Error re-rendering trend chart: ${err.message}`, 'warn');
+                    }
+                  } else {
+                    debugLog('⚠ Trend chart canvas or displayDashboard function not found', 'warn');
+                  }
+                } else {
+                  debugLog('⚠ No saved audit data available for Score Trends', 'warn');
+                }
+              }, 200); // Slightly longer delay to ensure panel is visible
+            }
+
             // If money panel just became active, re-render charts that may have failed due to hidden panel
             if (target === "money" && isNowActive && !wasActive) {
               setTimeout(() => {
+                const saved = loadAuditResultsSync();
+                
+                // Re-render Money Pages Priority Matrix table
+                if (typeof renderMoneyPagesTable === 'function') {
+                  const priorityData = window.moneyPagePriorityData || (saved && saved.moneyPagePriorityData) || [];
+                  if (priorityData && priorityData.length > 0) {
+                    debugLog('Re-rendering Money Pages Priority Matrix table', 'info');
+                    renderMoneyPagesTable(priorityData);
+                  } else {
+                    debugLog('⚠ No moneyPagePriorityData available for table', 'warn');
+                  }
+                }
+                
+                // Re-render entire Money Pages section if function exists
+                if (typeof renderMoneyPagesSection === 'function' && saved && saved.scores && saved.scores.moneyPagesMetrics) {
+                  debugLog('Re-rendering Money Pages section', 'info');
+                  renderMoneyPagesSection(saved.scores.moneyPagesMetrics);
+                }
+                
                 // Re-render money pages category chart if it exists
                 const categoryCanvas = document.getElementById('moneyPagesCategoryChart');
                 if (categoryCanvas && typeof renderMoneyPagesCategoryChart === 'function') {
-                  const saved = loadAuditResultsSync();
                   if (saved && saved.scores && saved.scores.moneyPagesMetrics) {
                     renderMoneyPagesCategoryChart(saved.scores.moneyPagesMetrics, 0);
                   }
