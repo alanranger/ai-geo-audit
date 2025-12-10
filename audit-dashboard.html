@@ -6587,6 +6587,7 @@
         debugLog(`Money Pages Priority: Built ${window.moneyPagePriorityData.length} priority entries`, 'info');
         
         // Build segment summary for Supabase storage
+        // CRITICAL: Use moneyPagesMetrics.rows (has clicks/impressions/avgPosition/segmentType) not moneyPagePriorityData
         const behaviourScoresBySegment = {};
         if (moneyBehaviour && moneyBehaviour.bySegment) {
           behaviourScoresBySegment.allMoney = moneyBehaviour.bySegment.money?.behaviour?.score || 0;
@@ -6594,9 +6595,25 @@
           behaviourScoresBySegment.eventPages = 0;
           behaviourScoresBySegment.productPages = 0;
         }
-        // Always build segment metrics, even if empty (ensures consistent data structure)
-        window.moneySegmentMetrics = buildMoneySegmentSummary(window.moneyPagePriorityData || [], behaviourScoresBySegment);
-        debugLog(`Money Pages Segments: Built segment summary for Supabase with ${Object.keys(window.moneySegmentMetrics).length} segments`, 'info');
+        // Build segment metrics from moneyPagesMetrics.rows (has the actual GSC data)
+        // Map subSegment (PRODUCT/EVENT/LANDING) to segmentType (product/event/landing)
+        const moneyPagesForSegments = (moneyPagesMetrics?.rows || []).map(row => {
+          const subSegment = row.subSegment || 'LANDING';
+          let segmentType = 'landing'; // Default
+          if (subSegment === 'PRODUCT') segmentType = 'product';
+          else if (subSegment === 'EVENT') segmentType = 'event';
+          else if (subSegment === 'LANDING') segmentType = 'landing';
+          
+          return {
+            clicks: row.clicks || 0,
+            impressions: row.impressions || 0,
+            ctr: row.ctr || 0,
+            avgPosition: row.avgPosition || 0,
+            segmentType: segmentType
+          };
+        });
+        window.moneySegmentMetrics = buildMoneySegmentSummary(moneyPagesForSegments, behaviourScoresBySegment);
+        debugLog(`Money Pages Segments: Built segment summary from ${moneyPagesForSegments.length} pages`, 'info');
         debugLog(`Money Pages Segments: allMoney clicks=${window.moneySegmentMetrics.allMoney.clicks}, impressions=${window.moneySegmentMetrics.allMoney.impressions}`, 'info');
       } else {
         debugLog('⚠ Money Pages Metrics: No queryPages data available - building empty structure', 'warn');
