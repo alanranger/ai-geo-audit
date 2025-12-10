@@ -18548,6 +18548,134 @@ Final Score: ${score}/100`;
       return 'high';
     }
 
+    /**
+     * Render Keyword Priority Matrix (3x3 grid: Impact × Difficulty)
+     * @param {Array} filteredRows - Filtered keyword rows
+     * @param {HTMLElement} container - Container element
+     * @param {Function} onCellClick - Callback(filter)
+     */
+    function renderKeywordPriorityMatrix(filteredRows, container, onCellClick) {
+      if (!filteredRows || !filteredRows.length) {
+        container.innerHTML = '<div style="padding: 2rem; text-align: center; color: #64748b;">No keyword data available.</div>';
+        return;
+      }
+
+      // Calculate impact and difficulty for each row
+      const rowsWithBuckets = filteredRows.map(row => ({
+        ...row,
+        impact: calculateImpactBucket(row.demand_share || 0),
+        difficulty: calculateDifficultyBucket(row.best_rank_group)
+      }));
+
+      // Calculate total search volume for demand share percentages
+      const totalSearchVolume = filteredRows.reduce((sum, r) => {
+        const vol = r.search_volume;
+        return sum + (vol && vol > 0 ? vol : 0);
+      }, 0) || 1; // Avoid division by zero
+
+      const impacts = ['high', 'medium', 'low'];
+      const difficulties = ['low', 'medium', 'high'];
+
+      let html = `
+        <div class="matrix-header" style="margin-bottom: 1rem;">
+          <div class="axis-label impact" style="text-align: center; font-weight: 600; margin-bottom: 0.5rem;">Impact ↑</div>
+          <div class="matrix-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem;">
+      `;
+
+      for (const impact of impacts) {
+        for (const difficulty of difficulties) {
+          const cellRows = rowsWithBuckets.filter(
+            r => r.impact === impact && r.difficulty === difficulty
+          );
+          const count = cellRows.length;
+          const demandShareSum = cellRows.reduce((sum, r) => {
+            const vol = r.search_volume;
+            return sum + (vol && vol > 0 ? vol : 0);
+          }, 0);
+          const demandSharePct = totalSearchVolume > 0 ? (demandShareSum / totalSearchVolume) * 100 : 0;
+
+          // RAG styling: High impact + Low/Medium difficulty = high priority (green)
+          const ragClass =
+            impact === 'high' && (difficulty === 'low' || difficulty === 'medium') ? 'rag-high' :
+            impact === 'high' && difficulty === 'high' ? 'rag-medium' :
+            'rag-low';
+          
+          // Check if this cell is active
+          const isActive = rankingPriorityFilter && 
+            rankingPriorityFilter.impact === impact && 
+            rankingPriorityFilter.difficulty === difficulty;
+          
+          // Active state styling
+          const borderColor = isActive 
+            ? '#2563eb' 
+            : (ragClass === 'rag-high' ? '#10b981' : ragClass === 'rag-medium' ? '#f59e0b' : '#e5e7eb');
+          const borderWidth = isActive ? '4px' : '2px';
+          const backgroundColor = isActive
+            ? '#dbeafe'
+            : (ragClass === 'rag-high' ? '#ecfdf5' : ragClass === 'rag-medium' ? '#fffbeb' : '#f9fafb');
+
+          html += `
+            <button
+              class="matrix-cell ${ragClass} ${isActive ? 'active' : ''}"
+              data-impact="${impact}"
+              data-difficulty="${difficulty}"
+              type="button"
+              style="padding: 1rem; border: ${borderWidth} solid ${borderColor}; border-radius: 8px; background: ${backgroundColor}; cursor: pointer; text-align: center; transition: all 0.2s; box-shadow: ${isActive ? '0 4px 8px rgba(37, 99, 235, 0.3)' : 'none'};"
+              onmouseover="this.style.transform='scale(1.05)'"
+              onmouseout="this.style.transform='scale(1)'"
+            >
+              <div class="cell-title" style="font-weight: 600; font-size: 0.75rem; margin-bottom: 0.5rem; color: #1e293b;">${impact.toUpperCase()} / ${difficulty.toUpperCase()}</div>
+              <div class="cell-count" style="font-size: 1.25rem; font-weight: 700; color: #1e293b; margin-bottom: 0.25rem;">${count}</div>
+              <div class="cell-share" style="font-size: 0.75rem; color: #64748b;">${demandSharePct.toFixed(1)}% of demand</div>
+            </button>
+          `;
+        }
+      }
+
+      html += `
+          </div>
+          <div class="axis-label difficulty" style="text-align: center; font-weight: 600; margin-top: 0.5rem;">Difficulty →</div>
+        </div>
+      `;
+
+      container.innerHTML = html;
+
+      // Wire up click handlers
+      container.querySelectorAll('.matrix-cell').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const impact = btn.getAttribute('data-impact');
+          const difficulty = btn.getAttribute('data-difficulty');
+          
+          // Toggle: if clicking the same cell, clear filter; otherwise set it
+          if (rankingPriorityFilter && 
+              rankingPriorityFilter.impact === impact && 
+              rankingPriorityFilter.difficulty === difficulty) {
+            rankingPriorityFilter = null;
+          } else {
+            rankingPriorityFilter = { impact, difficulty };
+          }
+          
+          if (onCellClick) onCellClick(rankingPriorityFilter);
+        });
+      });
+
+      // Debug logging
+      debugLog(`[Keyword Priority Matrix] Rendered matrix with ${filteredRows.length} filtered rows`, 'info');
+      rowsWithBuckets.forEach(row => {
+        debugLog(`[Keyword Priority Matrix] "${row.keyword}": impact=${row.impact}, difficulty=${row.difficulty}, demand_share=${((row.demand_share || 0) * 100).toFixed(1)}%, rank=${row.best_rank_group ?? 'null'}`, 'info');
+      });
+      
+      // Log cell totals
+      for (const impact of impacts) {
+        for (const difficulty of difficulties) {
+          const cellRows = rowsWithBuckets.filter(r => r.impact === impact && r.difficulty === difficulty);
+          const demandShareSum = cellRows.reduce((sum, r) => sum + ((r.search_volume && r.search_volume > 0 ? r.search_volume : 0)), 0);
+          const demandSharePct = totalSearchVolume > 0 ? (demandShareSum / totalSearchVolume) * 100 : 0;
+          debugLog(`[Keyword Priority Matrix] Cell ${impact}/${difficulty}: count=${cellRows.length}, demand_share=${demandSharePct.toFixed(1)}%`, 'info');
+        }
+      }
+    }
+
     // Apply filters to rows
     function applyRankingFilters(rows) {
       return rows.filter(row => {
