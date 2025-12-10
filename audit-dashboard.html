@@ -16711,13 +16711,26 @@ Final Score: ${score}/100`;
         const savedAudit = auditToDisplay;
         if (savedAudit && savedAudit.scores && savedAudit.searchData) {
           // CRITICAL: Restore Money Pages Priority data FIRST before any rendering
-          debugLog(`Checking saved audit for moneyPagePriorityData: ${!!savedAudit.moneyPagePriorityData}, type: ${Array.isArray(savedAudit.moneyPagePriorityData) ? 'array' : typeof savedAudit.moneyPagePriorityData}, length: ${Array.isArray(savedAudit.moneyPagePriorityData) ? savedAudit.moneyPagePriorityData.length : 'N/A'}`, 'info');
+          debugLog(`Checking saved audit for moneyPagePriorityData: ${!!savedAudit.moneyPagePriorityData}, type: ${Array.isArray(savedAudit.moneyPagePriorityData) ? 'array' : typeof savedAudit.moneyPagePriorityData}, length: ${Array.isArray(savedAudit.moneyPagePriorityData) ? savedAudit.moneyPagePriorityData.length : 'N/A'}, value: ${JSON.stringify(savedAudit.moneyPagePriorityData ? (Array.isArray(savedAudit.moneyPagePriorityData) ? `[${savedAudit.moneyPagePriorityData.length} items]` : savedAudit.moneyPagePriorityData) : 'null').substring(0, 100)}`, 'info');
           
-          if (savedAudit.moneyPagePriorityData && Array.isArray(savedAudit.moneyPagePriorityData) && savedAudit.moneyPagePriorityData.length > 0) {
-            window.moneyPagePriorityData = savedAudit.moneyPagePriorityData;
-            debugLog(`✓ Restored moneyPagePriorityData from saved audit: ${savedAudit.moneyPagePriorityData.length} pages`, 'success');
+          // Check if moneyPagePriorityData exists but is null/empty
+          if (savedAudit.moneyPagePriorityData !== null && savedAudit.moneyPagePriorityData !== undefined) {
+            if (Array.isArray(savedAudit.moneyPagePriorityData) && savedAudit.moneyPagePriorityData.length > 0) {
+              window.moneyPagePriorityData = savedAudit.moneyPagePriorityData;
+              debugLog(`✓ Restored moneyPagePriorityData from saved audit: ${savedAudit.moneyPagePriorityData.length} pages`, 'success');
+            } else if (Array.isArray(savedAudit.moneyPagePriorityData) && savedAudit.moneyPagePriorityData.length === 0) {
+              debugLog(`⚠ moneyPagePriorityData exists but is empty array`, 'warn');
+              window.moneyPagePriorityData = [];
+            } else {
+              debugLog(`⚠ moneyPagePriorityData exists but is not an array: ${typeof savedAudit.moneyPagePriorityData}`, 'warn');
+              window.moneyPagePriorityData = [];
+            }
           } else {
-            debugLog(`⚠ moneyPagePriorityData NOT found in saved audit or empty. Keys in savedAudit: ${Object.keys(savedAudit).join(', ')}`, 'warn');
+            debugLog(`⚠ moneyPagePriorityData is null/undefined in saved audit. Keys in savedAudit: ${Object.keys(savedAudit).join(', ')}`, 'warn');
+            // Try to rebuild if we have moneyPagesMetrics
+            if (savedAudit.scores?.moneyPagesMetrics?.rows && savedAudit.scores.moneyPagesMetrics.rows.length > 0) {
+              debugLog(`⚠ Will try to rebuild moneyPagePriorityData from moneyPagesMetrics (${savedAudit.scores.moneyPagesMetrics.rows.length} rows)`, 'info');
+            }
           }
           
           if (savedAudit.moneySegmentMetrics) {
@@ -16767,8 +16780,49 @@ Final Score: ${score}/100`;
           if (savedDateRange === currentDateRange) {
             debugLog('Loading last audit results from localStorage...', 'info');
             
+            // CRITICAL: If moneyPagePriorityData is null but we have moneyPagesMetrics, try to rebuild it
+            // But only if buildMoneyPageMetrics is available
+            if ((!window.moneyPagePriorityData || window.moneyPagePriorityData.length === 0) && 
+                savedAudit.scores?.moneyPagesMetrics?.rows && 
+                savedAudit.scores.moneyPagesMetrics.rows.length > 0) {
+              debugLog(`Attempting to rebuild moneyPagePriorityData from moneyPagesMetrics (${savedAudit.scores.moneyPagesMetrics.rows.length} rows)...`, 'info');
+              
+              // Wait for buildMoneyPageMetrics to be available (with timeout)
+              let attempts = 0;
+              const maxAttempts = 10; // 1 second total wait
+              while (typeof window.buildMoneyPageMetrics !== 'function' && attempts < maxAttempts) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+                attempts++;
+              }
+              
+              if (typeof window.buildMoneyPageMetrics === 'function') {
+                try {
+                  const topPagesForPriority = savedAudit.scores.moneyPagesMetrics.rows.map(row => ({
+                    page: row.url,
+                    url: row.url,
+                    clicks: row.clicks || 0,
+                    impressions: row.impressions || 0,
+                    ctr: (row.ctr || 0) * 100,
+                    position: row.avgPosition || 0,
+                    avgPosition: row.avgPosition || 0,
+                    title: row.title || row.url
+                  }));
+                  
+                  window.moneyPagePriorityData = window.buildMoneyPageMetrics(topPagesForPriority, savedAudit.schemaAudit || null);
+                  debugLog(`✓ Rebuilt moneyPagePriorityData: ${window.moneyPagePriorityData.length} pages`, 'success');
+                  
+                  // Save rebuilt data back to localStorage
+                  savedAudit.moneyPagePriorityData = window.moneyPagePriorityData;
+                  localStorage.setItem('last_audit_results', JSON.stringify(savedAudit));
+                } catch (error) {
+                  debugLog(`⚠ Failed to rebuild moneyPagePriorityData: ${error.message}`, 'warn');
+                }
+              } else {
+                debugLog(`⚠ buildMoneyPageMetrics still not available after ${maxAttempts * 100}ms wait`, 'warn');
+              }
+            }
+            
             // Show dashboard immediately with saved results
-            // Note: moneyPagePriorityData was already restored above
             document.getElementById('dashboard').style.display = 'block';
             document.getElementById('loading').classList.remove('show');
             // Ensure searchData has timeseries if available
