@@ -15686,10 +15686,18 @@ Final Score: ${score}/100`;
                 authorityData.push(historicalAuthority);
                 debugLog(`Using legacy historical Authority (${historicalAuthority}) for ${pointDate}`, 'info');
               } else {
-                // Fallback: use calculated Authority score
-                const authScore = typeof pillarScores.authority === 'object' ? pillarScores.authority.score : pillarScores.authority;
-                authorityData.push(authScore);
-                debugLog(`Using calculated Authority (${authScore}) for ${pointDate}`, 'info');
+                // Fallback: use calculated Authority score, but only if we have valid GSC data
+                // Check if GSC data is valid (position > 0, ctr >= 0)
+                const hasValidGscData = point.position && point.position > 0 && point.ctr !== null && point.ctr >= 0;
+                if (hasValidGscData) {
+                  const authScore = typeof pillarScores.authority === 'object' ? pillarScores.authority.score : pillarScores.authority;
+                  authorityData.push(authScore);
+                  debugLog(`Using calculated Authority (${authScore}) for ${pointDate}`, 'info');
+                } else {
+                  // Invalid or missing GSC data - use null (chart will show gap)
+                  authorityData.push(null);
+                  debugLog(`No valid GSC data for Authority on ${pointDate} (position=${point.position}, ctr=${point.ctr}) - using null`, 'warn');
+                }
               }
               
               // Visibility data (check historical data from Supabase FIRST, then calculate only if missing)
