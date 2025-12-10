@@ -16675,10 +16675,27 @@ Final Score: ${score}/100`;
         
         const savedAudit = auditToDisplay;
         if (savedAudit && savedAudit.scores && savedAudit.searchData) {
+          // CRITICAL: Restore Money Pages Priority data FIRST before any rendering
+          if (savedAudit.moneyPagePriorityData && Array.isArray(savedAudit.moneyPagePriorityData) && savedAudit.moneyPagePriorityData.length > 0) {
+            window.moneyPagePriorityData = savedAudit.moneyPagePriorityData;
+            debugLog(`✓ Restored moneyPagePriorityData from saved audit: ${savedAudit.moneyPagePriorityData.length} pages`, 'success');
+          }
+          if (savedAudit.moneySegmentMetrics) {
+            window.moneySegmentMetrics = savedAudit.moneySegmentMetrics;
+            debugLog(`✓ Restored moneySegmentMetrics from saved audit`, 'success');
+          }
+          
           // Ensure moneyPagesMetrics is in scores if it exists in the audit data
           if (!savedAudit.scores.moneyPagesMetrics && savedAudit.moneyPagesMetrics) {
             savedAudit.scores.moneyPagesMetrics = savedAudit.moneyPagesMetrics;
             debugLog('✓ Moved moneyPagesMetrics from audit root to scores', 'success');
+          }
+          
+          // Store globally for Money Pages sections
+          if (savedAudit.scores.moneyPagesMetrics) {
+            window.currentMoneyPagesMetrics = savedAudit.scores.moneyPagesMetrics;
+            window.moneyPagesMetrics = savedAudit.scores.moneyPagesMetrics;
+            debugLog(`✓ Stored moneyPagesMetrics globally: ${savedAudit.scores.moneyPagesMetrics.rows?.length || 0} rows`, 'success');
           }
           
           // If saved audit has a date range, use it to set the input field and button
@@ -16707,12 +16724,21 @@ Final Score: ${score}/100`;
           
           if (savedDateRange === currentDateRange) {
             debugLog('Loading last audit results from localStorage...', 'info');
+            
             // Show dashboard immediately with saved results
+            // Note: moneyPagePriorityData was already restored above
             document.getElementById('dashboard').style.display = 'block';
             document.getElementById('loading').classList.remove('show');
+            // Ensure searchData has timeseries if available
+            const searchDataWithTimeseries = savedAudit.searchData || {};
+            if (!searchDataWithTimeseries.timeseries && savedAudit.timeseries) {
+              searchDataWithTimeseries.timeseries = savedAudit.timeseries;
+              debugLog(`✓ Restored timeseries data: ${savedAudit.timeseries.length} data points`, 'success');
+            }
+            
             displayDashboard(
               savedAudit.scores,
-              savedAudit.searchData,
+              searchDataWithTimeseries,
               savedAudit.snippetReadiness || 0,
               savedAudit.schemaAudit || null,
               savedAudit.localSignals || null
