@@ -448,6 +448,13 @@ export default async function handler(req, res) {
     process.env.AI_GEO_DOMAIN || "https://www.alanranger.com"
   );
 
+  // Limit batch size to prevent timeouts (Vercel has 10s free tier, 60s hobby tier)
+  const MAX_KEYWORDS_PER_REQUEST = 20;
+  if (keywords.length > MAX_KEYWORDS_PER_REQUEST) {
+    console.log(`[Handler] ⚠️ Too many keywords (${keywords.length}), limiting to ${MAX_KEYWORDS_PER_REQUEST}`);
+    keywords = keywords.slice(0, MAX_KEYWORDS_PER_REQUEST);
+  }
+
   try {
     // Log handler entry with keywords
     console.log(`[Handler] === START === Processing ${keywords.length} keywords`);
@@ -459,39 +466,71 @@ export default async function handler(req, res) {
     console.log(`[Handler] Volume map keys: ${Object.keys(volumeByKeyword).join(', ')}`);
     console.log(`[Handler] Volume map size: ${Object.keys(volumeByKeyword).length}`);
 
-    // Call DataForSEO once per keyword (required by Live API)
+    // Process keywords in parallel with concurrency limit to speed up processing
     // IMPORTANT: Process ALL keywords, including Brand segment - do not filter
+    const CONCURRENCY_LIMIT = 5; // Process 5 keywords at a time
     const perKeyword = [];
-    for (const keyword of keywords) {
-      const result = await fetchSerpForKeyword(keyword, auth, targetRoot);
+    
+    // Process keywords in batches to respect concurrency limit
+    for (let i = 0; i < keywords.length; i += CONCURRENCY_LIMIT) {
+      const batch = keywords.slice(i, i + CONCURRENCY_LIMIT);
+      console.log(`[Handler] Processing batch ${Math.floor(i / CONCURRENCY_LIMIT) + 1} (keywords ${i + 1}-${Math.min(i + CONCURRENCY_LIMIT, keywords.length)})`);
       
-      // Merge search volume data using normalized keyword lookup
-      const normalizedKw = normalizeKeyword(keyword);
-      const volumeData = volumeByKeyword[normalizedKw];
+      const batchPromises = batch.map(async (keyword) => {
+        try {
+          const result = await fetchSerpForKeyword(keyword, auth, targetRoot);
+          
+          // Merge search volume data using normalized keyword lookup
+          const normalizedKw = normalizeKeyword(keyword);
+          const volumeData = volumeByKeyword[normalizedKw];
+          
+          // IMPORTANT: Treat 0 as a valid value, only use null if key doesn't exist in map
+          const searchVolume = volumeData !== undefined 
+            ? (volumeData.search_volume !== undefined ? volumeData.search_volume : null)
+            : null;
+          const searchVolumeTrend = volumeData?.monthly_searches || undefined;
+          
+          // Log mapping for each row
+          console.log(`[VOL MAP] For row keyword "${keyword}" (normalized "${normalizedKw}") ⇒ search_volume=${searchVolume !== null && searchVolume !== undefined ? searchVolume : 'none'}`);
+          
+          const mergedResult = {
+            ...result,
+            search_volume: searchVolume, // Can be 0, null, or a number
+            search_volume_trend: searchVolumeTrend,
+          };
+          
+          if (mergedResult.search_volume !== null && mergedResult.search_volume !== undefined) {
+            console.log(`[Handler] ✓ Merged "${keyword}" (normalized: "${normalizedKw}") with volume: ${mergedResult.search_volume}`);
+          } else {
+            console.log(`[Handler] ✗ No search_volume found for keyword "${keyword}" (normalized: "${normalizedKw}")`);
+            console.log(`[Handler] Available keys in volume map: ${Object.keys(volumeByKeyword).map(k => `"${k}"`).join(', ')}`);
+          }
+          
+          return mergedResult;
+        } catch (err) {
+          console.error(`[Handler] Error processing keyword "${keyword}":`, err);
+          // Return error result instead of throwing
+          return {
+            keyword,
+            best_rank_group: null,
+            best_rank_absolute: null,
+            best_url: null,
+            best_title: null,
+            has_ai_overview: false,
+            serp_features: {
+              local_pack: false,
+              featured_snippet: false,
+              people_also_ask: false,
+            },
+            search_volume: null,
+            search_volume_trend: undefined,
+            error: err.message || "Error processing keyword",
+          };
+        }
+      });
       
-      // IMPORTANT: Treat 0 as a valid value, only use null if key doesn't exist in map
-      const searchVolume = volumeData !== undefined 
-        ? (volumeData.search_volume !== undefined ? volumeData.search_volume : null)
-        : null;
-      const searchVolumeTrend = volumeData?.monthly_searches || undefined;
-      
-      // Log mapping for each row
-      console.log(`[VOL MAP] For row keyword "${keyword}" (normalized "${normalizedKw}") ⇒ search_volume=${searchVolume !== null && searchVolume !== undefined ? searchVolume : 'none'}`);
-      
-      const mergedResult = {
-        ...result,
-        search_volume: searchVolume, // Can be 0, null, or a number
-        search_volume_trend: searchVolumeTrend,
-      };
-      
-      if (mergedResult.search_volume !== null && mergedResult.search_volume !== undefined) {
-        console.log(`[Handler] ✓ Merged "${keyword}" (normalized: "${normalizedKw}") with volume: ${mergedResult.search_volume}`);
-      } else {
-        console.log(`[Handler] ✗ No search_volume found for keyword "${keyword}" (normalized: "${normalizedKw}")`);
-        console.log(`[Handler] Available keys in volume map: ${Object.keys(volumeByKeyword).map(k => `"${k}"`).join(', ')}`);
-      }
-      
-      perKeyword.push(mergedResult);
+      const batchResults = await Promise.all(batchPromises);
+      perKeyword.push(...batchResults);
     }
     
     // Log final per-keyword payload summary

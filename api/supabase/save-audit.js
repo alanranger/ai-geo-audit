@@ -438,6 +438,7 @@ export default async function handler(req, res) {
     // Save individual keyword rows to keyword_rankings table if rankingAiData is provided
     if (rankingAiData && rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
       try {
+        console.log(`[Supabase Save] ✓ rankingAiData.combinedRows found: ${rankingAiData.combinedRows.length} rows`);
         console.log(`[Supabase Save] Saving ${rankingAiData.combinedRows.length} keyword rows to keyword_rankings table...`);
         
         // Prepare keyword rows for insertion
@@ -495,15 +496,22 @@ export default async function handler(req, res) {
           const insertedText = await insertResponse.text();
           const insertedResult = insertedText ? JSON.parse(insertedText) : [];
           console.log(`[Supabase Save] ✓ Successfully saved ${insertedResult.length} keyword rows to keyword_rankings table`);
+          if (insertedResult.length !== keywordRows.length) {
+            console.warn(`[Supabase Save] ⚠ WARNING: Attempted to save ${keywordRows.length} rows but only ${insertedResult.length} were inserted`);
+          }
         } else {
           const errorText = await insertResponse.text();
           console.error(`[Supabase Save] ⚠ Failed to save keyword rows: ${insertResponse.status} - ${errorText}`);
+          console.error(`[Supabase Save] ⚠ First 3 keyword rows for debugging:`, JSON.stringify(keywordRows.slice(0, 3), null, 2));
           // Don't fail the entire request if keyword rows fail to save
         }
       } catch (keywordErr) {
-        console.error('[Supabase Save] Error saving keyword rows:', keywordErr.message);
+        console.error('[Supabase Save] ✗ Error saving keyword rows:', keywordErr.message);
+        console.error('[Supabase Save] ✗ Stack trace:', keywordErr.stack);
         // Don't fail the entire request if keyword rows fail to save
       }
+    } else {
+      console.log(`[Supabase Save] ⚠ No rankingAiData.combinedRows found. rankingAiData exists: ${!!rankingAiData}, combinedRows exists: ${!!(rankingAiData && rankingAiData.combinedRows)}, isArray: ${Array.isArray(rankingAiData?.combinedRows)}`);
     }
 
     return res.status(200).json({
