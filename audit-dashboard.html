@@ -18365,10 +18365,8 @@ Final Score: ${score}/100`;
       // Update pagination controls
       updatePaginationControls(totalRows, currentPage, totalPages, startIdx, endIdx);
       
-      // Re-wire sorting after render completes (use setTimeout to ensure DOM is ready)
-      setTimeout(() => {
-        wireRankingSorting();
-      }, 0);
+      // Re-wire sorting after render completes
+      wireRankingSorting();
 
       // Row click → detail panel
       tbody.querySelectorAll("tr").forEach(tr => {
@@ -18835,43 +18833,59 @@ Final Score: ${score}/100`;
         }
       }
 
-      // Store handler reference for cleanup
-      let rankingSortHandler = null;
-      
       function wireRankingSorting() {
-        // Use event delegation on the table itself (more reliable than thead)
-        const table = document.querySelector('.ranking-table');
-        if (!table) return;
-        
-        // Remove existing listener if present
-        if (rankingSortHandler) {
-          table.removeEventListener('click', rankingSortHandler);
+        // Find all sortable headers
+        const sortableHeaders = document.querySelectorAll('.ranking-table th.sortable');
+        if (!sortableHeaders || sortableHeaders.length === 0) {
+          console.log('[Sort] No sortable headers found');
+          return;
         }
         
-        // Create and attach delegated listener
-        rankingSortHandler = (e) => {
-          const th = e.target.closest('th.sortable');
-          if (!th) return;
-          
-          e.preventDefault();
-          e.stopPropagation();
-          
-          const column = th.dataset.sort;
-          if (!column) return;
-          
-          if (rankingSortState.column === column) {
-            // Toggle direction if clicking the same column
-            rankingSortState.direction = rankingSortState.direction === 'asc' ? 'desc' : 'asc';
-          } else {
-            // New column, start with ascending
-            rankingSortState.column = column;
-            rankingSortState.direction = 'asc';
-          }
-          rankingPaginationState.currentPage = 1; // Reset to first page on sort change
-          renderRankingAiTab();
-        };
+        console.log('[Sort] Found', sortableHeaders.length, 'sortable headers');
         
-        table.addEventListener('click', rankingSortHandler);
+        // Remove any existing data attribute markers
+        sortableHeaders.forEach(th => {
+          if (th.dataset.sortWired === 'true') {
+            // Clone to remove all listeners
+            const newTh = th.cloneNode(true);
+            th.parentNode.replaceChild(newTh, th);
+          }
+        });
+        
+        // Re-query after cloning
+        const freshHeaders = document.querySelectorAll('.ranking-table th.sortable');
+        
+        // Attach listeners directly to each header
+        freshHeaders.forEach(th => {
+          th.dataset.sortWired = 'true'; // Mark as wired
+          
+          th.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const column = this.dataset.sort;
+            if (!column) {
+              console.log('[Sort] No sort column found');
+              return;
+            }
+            
+            console.log('[Sort] Clicked column:', column, 'Current:', rankingSortState.column, rankingSortState.direction);
+            
+            if (rankingSortState.column === column) {
+              // Toggle direction if clicking the same column
+              rankingSortState.direction = rankingSortState.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+              // New column, start with ascending
+              rankingSortState.column = column;
+              rankingSortState.direction = 'asc';
+            }
+            
+            console.log('[Sort] New state:', rankingSortState.column, rankingSortState.direction);
+            
+            rankingPaginationState.currentPage = 1;
+            renderRankingAiTab();
+          });
+        });
+        
+        console.log('[Sort] Wired', freshHeaders.length, 'headers');
       }
       
       function wireRankingPagination() {
