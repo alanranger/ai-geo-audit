@@ -1739,6 +1739,14 @@
             <!-- Steps will be populated here -->
           </div>
         </div>
+
+        <!-- Completion Summary (hidden by default) -->
+        <div id="rankingAiSummary" style="display: none; border-top: 2px solid #10b981; padding-top: 1.5rem; margin-top: 1.5rem;">
+          <h3 style="margin: 0 0 1rem 0; color: #10b981; font-size: 1.2rem; font-weight: 600;">✓ Scan Complete</h3>
+          <div id="rankingAiSummaryContent" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; font-size: 0.95rem;">
+            <!-- Summary content will be populated here -->
+          </div>
+        </div>
       </div>
     </div>
 
@@ -18152,6 +18160,12 @@ Final Score: ${score}/100`;
           this.updateProgress(0);
           this.renderSteps();
           
+          // Hide summary section when starting new scan
+          const summaryEl = document.getElementById('rankingAiSummary');
+          if (summaryEl) {
+            summaryEl.style.display = 'none';
+          }
+          
           // Disable close button during processing
           const closeBtn = document.getElementById('rankingAiProgressClose');
           if (closeBtn) {
@@ -18221,6 +18235,54 @@ Final Score: ${score}/100`;
             <div class="ranking-ai-step-label">${step.label}</div>
           </div>
         `).join('');
+      },
+
+      showSummary(summary) {
+        const summaryEl = document.getElementById('rankingAiSummary');
+        const summaryContentEl = document.getElementById('rankingAiSummaryContent');
+        if (!summaryEl || !summaryContentEl) return;
+
+        // Build summary HTML
+        const summaryItems = [];
+        
+        if (summary.totalKeywords !== undefined) {
+          summaryItems.push(`<div style="padding: 0.75rem; background: #f0f9ff; border-radius: 6px; border-left: 3px solid #0284c7;"><strong style="color: #0284c7;">Total Keywords:</strong><br><span style="font-size: 1.1rem; font-weight: 600;">${summary.totalKeywords}</span></div>`);
+        }
+        
+        if (summary.keywordsWithRank !== undefined) {
+          summaryItems.push(`<div style="padding: 0.75rem; background: #f0fdf4; border-radius: 6px; border-left: 3px solid #10b981;"><strong style="color: #10b981;">With Rankings:</strong><br><span style="font-size: 1.1rem; font-weight: 600;">${summary.keywordsWithRank}</span></div>`);
+        }
+        
+        if (summary.top10 !== undefined) {
+          summaryItems.push(`<div style="padding: 0.75rem; background: #fffbeb; border-radius: 6px; border-left: 3px solid #f59e0b;"><strong style="color: #f59e0b;">Top 10 Rankings:</strong><br><span style="font-size: 1.1rem; font-weight: 600;">${summary.top10}</span></div>`);
+        }
+        
+        if (summary.top3 !== undefined) {
+          summaryItems.push(`<div style="padding: 0.75rem; background: #fef3c7; border-radius: 6px; border-left: 3px solid #fbbf24;"><strong style="color: #fbbf24;">Top 3 Rankings:</strong><br><span style="font-size: 1.1rem; font-weight: 600;">${summary.top3}</span></div>`);
+        }
+        
+        if (summary.keywordsWithAiOverview !== undefined) {
+          summaryItems.push(`<div style="padding: 0.75rem; background: #f5f3ff; border-radius: 6px; border-left: 3px solid #8b5cf6;"><strong style="color: #8b5cf6;">AI Overview Present:</strong><br><span style="font-size: 1.1rem; font-weight: 600;">${summary.keywordsWithAiOverview}</span></div>`);
+        }
+        
+        if (summary.keywordsWithAiCitations !== undefined) {
+          summaryItems.push(`<div style="padding: 0.75rem; background: #ede9fe; border-radius: 6px; border-left: 3px solid #a78bfa;"><strong style="color: #a78bfa;">AI Citations:</strong><br><span style="font-size: 1.1rem; font-weight: 600;">${summary.keywordsWithAiCitations}</span></div>`);
+        }
+        
+        if (summary.avgPositionUnweighted !== null && summary.avgPositionUnweighted !== undefined) {
+          summaryItems.push(`<div style="padding: 0.75rem; background: #f0f9ff; border-radius: 6px; border-left: 3px solid #0284c7;"><strong style="color: #0284c7;">Avg Position (Unweighted):</strong><br><span style="font-size: 1.1rem; font-weight: 600;">${summary.avgPositionUnweighted.toFixed(1)}</span></div>`);
+        }
+        
+        if (summary.avgPositionVolumeWeighted !== null && summary.avgPositionVolumeWeighted !== undefined) {
+          summaryItems.push(`<div style="padding: 0.75rem; background: #f0f9ff; border-radius: 6px; border-left: 3px solid #0284c7;"><strong style="color: #0284c7;">Avg Position (Weighted):</strong><br><span style="font-size: 1.1rem; font-weight: 600;">${summary.avgPositionVolumeWeighted.toFixed(1)}</span></div>`);
+        }
+        
+        if (summary.keywordsWithVolume !== undefined) {
+          summaryItems.push(`<div style="padding: 0.75rem; background: #f0fdf4; border-radius: 6px; border-left: 3px solid #10b981;"><strong style="color: #10b981;">With Search Volume:</strong><br><span style="font-size: 1.1rem; font-weight: 600;">${summary.keywordsWithVolume}</span></div>`);
+        }
+
+        summaryContentEl.innerHTML = summaryItems.join('');
+        summaryEl.style.display = 'block';
       }
     };
     
@@ -18620,7 +18682,21 @@ Final Score: ${score}/100`;
         // Step 5: Complete
         RankingAiProgressModal.updateProgress(100, 5);
         RankingAiProgressModal.setActiveStep(5);
-        RankingAiProgressModal.updateCounts(`Complete! ${totalKeywords} keywords processed`);
+        
+        // Show completion summary
+        RankingAiProgressModal.showSummary({
+          totalKeywords,
+          keywordsWithRank: withRank,
+          top10,
+          top3,
+          keywordsWithAiOverview: withAiOverview,
+          keywordsWithAiCitations: withAiCitation,
+          avgPositionUnweighted: summary.avg_position_unweighted,
+          avgPositionVolumeWeighted: summary.avg_position_volume_weighted,
+          keywordsWithVolume: summary.keywords_with_volume
+        });
+        
+        RankingAiProgressModal.updateCounts(`✓ Scan completed successfully!`);
         
         renderRankingAiTab();
 
@@ -18631,10 +18707,7 @@ Final Score: ${score}/100`;
         }
         debugLog(`✓ Ranking & AI data loaded: ${totalKeywords} keywords, ${withRank} with ranks, ${withAiOverview} with AI Overview`, 'success');
         
-        // Hide modal after a brief delay
-        setTimeout(() => {
-          RankingAiProgressModal.hide();
-        }, 1500);
+        // Don't hide modal - keep it visible with summary
       } catch (err) {
         console.error("Ranking & AI load error", err);
         debugLog(`✗ Ranking & AI load error: ${err.message}`, 'error');
