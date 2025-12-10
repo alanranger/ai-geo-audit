@@ -100,6 +100,8 @@ async function fetchKeywordOverview(keywords, auth) {
     console.log(`[Keyword Overview] Response structure check:`);
     console.log(`  - status_code: ${responseData.status_code}`);
     console.log(`  - status_message: ${responseData.status_message}`);
+    console.log(`  - tasks_count: ${responseData.tasks_count ?? 'N/A'}`);
+    console.log(`  - tasks_error: ${responseData.tasks_error ?? 'N/A'}`);
     console.log(`  - result type: ${Array.isArray(responseData.result) ? 'array' : typeof responseData.result}`);
     console.log(`  - result length: ${Array.isArray(responseData.result) ? responseData.result.length : 'N/A'}`);
     console.log(`  - tasks type: ${Array.isArray(responseData.tasks) ? 'array' : typeof responseData.tasks}`);
@@ -108,6 +110,23 @@ async function fetchKeywordOverview(keywords, auth) {
     // DataForSEO uses status_code 20000 for success (not 200)
     const statusCode = responseData.status_code;
     const statusMessage = responseData.status_message;
+    const tasksError = responseData.tasks_error;
+    
+    // Check if there are task-level errors
+    if (tasksError && tasksError > 0 && Array.isArray(responseData.tasks)) {
+      console.log(`[Keyword Overview] Checking task-level errors (tasks_error: ${tasksError})...`);
+      responseData.tasks.forEach((task, idx) => {
+        console.log(`  Task ${idx}: status_code=${task.status_code}, status_message=${task.status_message}`);
+        if (task.status_code && !String(task.status_code).startsWith("200")) {
+          console.error(`  Task ${idx} ERROR:`, {
+            status_code: task.status_code,
+            status_message: task.status_message,
+            task_data: JSON.stringify(task).substring(0, 500)
+          });
+        }
+      });
+    }
+    
     const isSuccess = dfResponse.ok && (
       String(statusCode).startsWith("200") || 
       statusCode === 20000 ||
@@ -118,6 +137,7 @@ async function fetchKeywordOverview(keywords, auth) {
       console.error("[Keyword Overview] API error:", {
         status_code: statusCode,
         status_message: statusMessage,
+        tasks_error: tasksError,
         full_response: JSON.stringify(data).substring(0, 1000)
       });
       return {};
@@ -126,28 +146,43 @@ async function fetchKeywordOverview(keywords, auth) {
     console.log(`[Keyword Overview] API success - status_code: ${statusCode}, message: ${statusMessage}`);
 
     // Handle DataForSEO keywords_data/google_ads/search_volume/live response structure
-    // Structure: [{ status_code: 20000, result: [...] }] OR { status_code: 20000, result: [...] }
-    // responseData already extracted above (first element if array, or data itself)
+    // According to docs: response has tasks[] array, each task has result[] array
+    // Structure: { status_code: 20000, tasks: [{ status_code, result: [...] }] }
     let items = [];
     
-    if (Array.isArray(responseData.result)) {
-      // Direct result array (keywords_data endpoint)
+    if (responseData.tasks && Array.isArray(responseData.tasks) && responseData.tasks.length > 0) {
+      // keywords_data endpoint uses tasks structure
+      const task = responseData.tasks[0];
+      console.log(`[VOL] Using tasks structure`);
+      console.log(`  Task status_code: ${task.status_code}`);
+      console.log(`  Task status_message: ${task.status_message}`);
+      console.log(`  Task result type: ${Array.isArray(task.result) ? 'array' : typeof task.result}`);
+      
+      // Check task-level success
+      const taskSuccess = task.status_code && (
+        String(task.status_code).startsWith("200") || 
+        task.status_code === 20000 ||
+        task.status_message === "Ok."
+      );
+      
+      if (!taskSuccess) {
+        console.error(`[VOL] Task failed: status_code=${task.status_code}, message=${task.status_message}`);
+        console.error(`[VOL] Task data:`, JSON.stringify(task).substring(0, 500));
+        return {};
+      }
+      
+      if (Array.isArray(task.result)) {
+        // Direct result array in task
+        items = task.result;
+        console.log(`[VOL] Found ${items.length} items in task.result[]`);
+      } else {
+        console.error(`[VOL] Task result is not an array:`, typeof task.result);
+        console.error(`[VOL] Task keys:`, Object.keys(task));
+      }
+    } else if (Array.isArray(responseData.result)) {
+      // Fallback: direct result array (if not in tasks)
       items = responseData.result;
       console.log(`[VOL] Using responseData.result[] (direct array), found ${items.length} items`);
-    } else if (responseData.tasks && Array.isArray(responseData.tasks) && responseData.tasks.length > 0) {
-      // Fallback: try tasks structure (for keyword_overview endpoint)
-      const task = responseData.tasks[0];
-      console.log(`[VOL] Trying tasks structure, task.result type: ${Array.isArray(task.result) ? 'array' : typeof task.result}`);
-      
-      if (Array.isArray(task.result) && task.result.length > 0) {
-        items = task.result[0]?.items || [];
-      } else if (task.result && Array.isArray(task.result.items)) {
-        items = task.result.items;
-      } else if (task.result && !Array.isArray(task.result)) {
-        items = task.result.items || [];
-      } else if (Array.isArray(task.result)) {
-        items = task.result;
-      }
     }
     
     // If still no items, log full response structure for debugging
