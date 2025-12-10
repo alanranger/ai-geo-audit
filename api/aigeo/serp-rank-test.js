@@ -158,6 +158,9 @@ async function fetchKeywordOverview(keywords, auth) {
       console.log(`  Task status_message: ${task.status_message}`);
       console.log(`  Task result type: ${Array.isArray(task.result) ? 'array' : typeof task.result}`);
       
+      // Log full task structure for debugging
+      console.log(`[VOL] Full task structure:`, JSON.stringify(task, null, 2).substring(0, 1000));
+      
       // Check task-level success
       const taskSuccess = task.status_code && (
         String(task.status_code).startsWith("200") || 
@@ -167,7 +170,15 @@ async function fetchKeywordOverview(keywords, auth) {
       
       if (!taskSuccess) {
         console.error(`[VOL] Task failed: status_code=${task.status_code}, message=${task.status_message}`);
-        console.error(`[VOL] Task data:`, JSON.stringify(task).substring(0, 500));
+        console.error(`[VOL] Task error (if any):`, task.error || 'none');
+        console.error(`[VOL] Full task data:`, JSON.stringify(task, null, 2));
+        return {};
+      }
+      
+      // Check if task has error field
+      if (task.error) {
+        console.error(`[VOL] Task has error field:`, task.error);
+        console.error(`[VOL] Full task:`, JSON.stringify(task, null, 2));
         return {};
       }
       
