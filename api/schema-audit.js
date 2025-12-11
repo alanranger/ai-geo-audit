@@ -61,7 +61,8 @@ function extractJsonLd(htmlString) {
       const typeMatch = jsonText.match(/"@type"\s*:\s*"([^"]+)"/i);
       if (typeMatch) {
         const extractedType = typeMatch[1];
-        const importantTypes = ['BreadcrumbList', 'HowTo', 'BlogPosting', 'FAQPage'];
+        // Extended list of important types that we need to detect
+        const importantTypes = ['BreadcrumbList', 'HowTo', 'BlogPosting', 'FAQPage', 'WebPage', 'Article', 'ItemList', 'Product', 'Event'];
         if (importantTypes.includes(extractedType)) {
           console.log(`⚠️ Failed to parse JSON-LD block but detected @type="${extractedType}". Attempting recovery...`);
           // Create a minimal schema object with the detected type
@@ -76,7 +77,8 @@ function extractJsonLd(htmlString) {
       }
       
       // Log parse errors for important types
-      if (jsonText.includes('BreadcrumbList') || jsonText.includes('HowTo') || jsonText.includes('BlogPosting') || jsonText.includes('FAQPage')) {
+      const importantTypePattern = /(BreadcrumbList|HowTo|BlogPosting|FAQPage|WebPage|Article|ItemList|Product|Event)/i;
+      if (importantTypePattern.test(jsonText)) {
         failedBlocks.push({
           type: jsonText.match(/"@type"\s*:\s*"([^"]+)"/i)?.[1] || 'unknown',
           sample: jsonText.substring(0, 300)
@@ -104,72 +106,69 @@ function extractJsonLd(htmlString) {
     });
   }
   
-  // Fallback: Check if BreadcrumbList or HowTo are mentioned in HTML but not extracted
+  // Fallback: Check if important schema types are mentioned in HTML but not extracted
   // This catches cases where they're in script tags that didn't match our regex
-  const breadcrumbInHtml = /"@type"\s*:\s*"BreadcrumbList"/i.test(htmlString);
-  const howtoInHtml = /"@type"\s*:\s*"HowTo"/i.test(htmlString);
+  const importantTypes = ['BreadcrumbList', 'HowTo', 'BlogPosting', 'WebPage', 'FAQPage', 'Article', 'ItemList'];
   
-  // Quick check: look for @type strings in extracted blocks (faster than full normalization)
-  const hasBreadcrumb = jsonLdBlocks.some(block => {
-    const blockStr = JSON.stringify(block);
-    return /"@type"\s*:\s*"BreadcrumbList"/i.test(blockStr);
-  });
-  
-  const hasHowTo = jsonLdBlocks.some(block => {
-    const blockStr = JSON.stringify(block);
-    return /"@type"\s*:\s*"HowTo"/i.test(blockStr);
-  });
-  
-  // If mentioned in HTML but not detected, try to find the script tag manually
-  if (breadcrumbInHtml && !hasBreadcrumb) {
-    // Try a more aggressive regex to find BreadcrumbList script tags (even without type attribute)
-    const aggressiveRegex = /<script[^>]*>[\s\S]*?"@type"\s*:\s*"BreadcrumbList"[\s\S]*?<\/script>/gi;
-    const aggressiveMatches = [...htmlString.matchAll(aggressiveRegex)];
-    if (aggressiveMatches.length > 0) {
-      console.log(`🔍 Found BreadcrumbList in script tag that didn't match standard regex. Attempting extraction...`);
-      aggressiveMatches.forEach(match => {
-        const jsonText = match[0].replace(/<script[^>]*>/, '').replace(/<\/script>/, '').trim();
-        // Remove HTML comments
-        const cleaned = jsonText.replace(/<!--[\s\S]*?-->/g, '');
-        const parsed = safeJsonParse(cleaned);
-        if (parsed) {
-          if (Array.isArray(parsed)) {
-            jsonLdBlocks.push(...parsed);
-          } else {
-            jsonLdBlocks.push(parsed);
-          }
-          console.log(`✅ Successfully extracted BreadcrumbList from aggressive regex`);
-        } else {
-          console.log(`⚠️ Failed to parse BreadcrumbList even with aggressive regex. Sample: ${cleaned.substring(0, 200)}`);
-        }
+  // Check each important type
+  importantTypes.forEach(typeName => {
+    const typeInHtml = new RegExp(`"@type"\\s*:\\s*"${typeName}"`, 'i').test(htmlString);
+    
+    if (typeInHtml) {
+      // Quick check: look for @type strings in extracted blocks (faster than full normalization)
+      const hasType = jsonLdBlocks.some(block => {
+        const blockStr = JSON.stringify(block);
+        return new RegExp(`"@type"\\s*:\\s*"${typeName}"`, 'i').test(blockStr);
       });
-    }
-  }
-  
-  if (howtoInHtml && !hasHowTo) {
-    // Try a more aggressive regex to find HowTo script tags (even without type attribute)
-    const aggressiveRegex = /<script[^>]*>[\s\S]*?"@type"\s*:\s*"HowTo"[\s\S]*?<\/script>/gi;
-    const aggressiveMatches = [...htmlString.matchAll(aggressiveRegex)];
-    if (aggressiveMatches.length > 0) {
-      console.log(`🔍 Found HowTo in script tag that didn't match standard regex. Attempting extraction...`);
-      aggressiveMatches.forEach(match => {
-        const jsonText = match[0].replace(/<script[^>]*>/, '').replace(/<\/script>/, '').trim();
-        // Remove HTML comments
-        const cleaned = jsonText.replace(/<!--[\s\S]*?-->/g, '');
-        const parsed = safeJsonParse(cleaned);
-        if (parsed) {
-          if (Array.isArray(parsed)) {
-            jsonLdBlocks.push(...parsed);
+      
+      // If mentioned in HTML but not detected, try to find the script tag manually
+      if (!hasType) {
+        // Try a more aggressive regex to find script tags (even without type attribute)
+        const aggressiveRegex = new RegExp(`<script[^>]*>[\\s\\S]*?"@type"\\s*:\\s*"${typeName}"[\\s\\S]*?<\\/script>`, 'gi');
+        const aggressiveMatches = [...htmlString.matchAll(aggressiveRegex)];
+        
+        if (aggressiveMatches.length > 0) {
+          console.log(`🔍 Found ${typeName} in script tag that didn't match standard regex. Attempting extraction...`);
+          let extracted = false;
+          
+          aggressiveMatches.forEach(match => {
+            const jsonText = match[0].replace(/<script[^>]*>/, '').replace(/<\/script>/, '').trim();
+            // Remove HTML comments
+            const cleaned = jsonText.replace(/<!--[\s\S]*?-->/g, '');
+            const parsed = safeJsonParse(cleaned);
+            
+            if (parsed) {
+              if (Array.isArray(parsed)) {
+                jsonLdBlocks.push(...parsed);
+              } else {
+                jsonLdBlocks.push(parsed);
+              }
+              extracted = true;
+            } else {
+              // Even if parsing fails, try to extract just the @type and create minimal schema
+              const typeMatch = cleaned.match(new RegExp(`"@type"\\s*:\\s*"${typeName}"`, 'i'));
+              if (typeMatch) {
+                jsonLdBlocks.push({
+                  '@type': typeName,
+                  '@context': 'https://schema.org',
+                  _parseError: true,
+                  _extractedFrom: 'aggressive_regex_fallback'
+                });
+                extracted = true;
+                console.log(`✅ Created minimal ${typeName} schema from aggressive regex (parse failed)`);
+              }
+            }
+          });
+          
+          if (extracted) {
+            console.log(`✅ Successfully extracted ${typeName} from aggressive regex`);
           } else {
-            jsonLdBlocks.push(parsed);
+            console.log(`⚠️ Failed to parse ${typeName} even with aggressive regex. Sample: ${aggressiveMatches[0][0].substring(0, 300)}`);
           }
-          console.log(`✅ Successfully extracted HowTo from aggressive regex`);
-        } else {
-          console.log(`⚠️ Failed to parse HowTo even with aggressive regex. Sample: ${cleaned.substring(0, 200)}`);
         }
-      });
+      }
     }
-  }
+  });
   
   return jsonLdBlocks;
 }
@@ -710,13 +709,24 @@ async function crawlUrl(url, semaphore, delayAfterMs = 0) {
     const allDetectedTypes = new Set();
     schemas.forEach(s => normalizeSchemaTypes(s).forEach(t => allDetectedTypes.add(t)));
     
-    ['BreadcrumbList', 'HowTo', 'FAQPage', 'BlogPosting'].forEach(type => {
-      if (new RegExp(type, 'i').test(html) && !allDetectedTypes.has(type)) {
+    // Check all important schema types
+    const importantTypes = ['BreadcrumbList', 'HowTo', 'FAQPage', 'BlogPosting', 'WebPage', 'Article', 'ItemList'];
+    importantTypes.forEach(type => {
+      // Check if type is mentioned in HTML (either as @type or just the name)
+      const typeInHtml = new RegExp(`"@type"\\s*:\\s*"${type}"`, 'i').test(html) || 
+                         (type === 'BlogPosting' && /BlogPosting/i.test(html)) ||
+                         (type === 'WebPage' && /"@type"\\s*:\\s*"WebPage"/i.test(html));
+      
+      if (typeInHtml && !allDetectedTypes.has(type)) {
         console.log(`⚠️ ${type} mentioned in HTML but not detected in JSON-LD for ${url}`);
         // Try to find where it's mentioned
         const matches = html.match(new RegExp(`"@type"\\s*:\\s*"${type}"`, 'i'));
         if (matches) {
           console.log(`  Found @type reference in HTML at position ${matches.index}`);
+          // Show context around the match
+          const contextStart = Math.max(0, matches.index - 100);
+          const contextEnd = Math.min(html.length, matches.index + 200);
+          console.log(`  Context: ${html.substring(contextStart, contextEnd)}`);
         }
       }
     });
