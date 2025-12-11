@@ -193,6 +193,11 @@ export default async function handler(req, res) {
               ai_alan_citations: aiCitations,
               competitor_counts: competitorCounts,
               serp_features: serpFeatures,
+              // New boolean fields for SERP feature coverage
+              ai_overview_present_any: row.ai_overview_present_any === true,
+              local_pack_present_any: row.local_pack_present_any === true,
+              paa_present_any: row.paa_present_any === true,
+              featured_snippet_present_any: row.featured_snippet_present_any === true,
               segment: row.segment,
               pageType: row.page_type,
               demand_share: row.demand_share
