@@ -10612,12 +10612,26 @@ Final Score: ${score}/100`;
                   if (schemaTypes.length === 0) {
                     return '<span style="color: #94a3b8; font-style: italic; font-size: 0.8rem;">None</span>';
                   }
+                  // Ensure schemaTypes are strings (handle both string arrays and object arrays)
+                  const typeStrings = schemaTypes.map(t => {
+                    if (typeof t === 'string') return t;
+                    if (typeof t === 'object' && t !== null) {
+                      // Handle objects like {type: 'FAQPage', count: 5}
+                      return t.type || String(t);
+                    }
+                    return String(t);
+                  }).filter(Boolean);
+                  
+                  if (typeStrings.length === 0) {
+                    return '<span style="color: #94a3b8; font-style: italic; font-size: 0.8rem;">None</span>';
+                  }
+                  
                   // Show first 5 types, then "+X more" if there are more
-                  const displayTypes = schemaTypes.slice(0, 5);
-                  const remaining = schemaTypes.length - 5;
+                  const displayTypes = typeStrings.slice(0, 5);
+                  const remaining = typeStrings.length - 5;
                   const typesText = displayTypes.join(', ');
                   const moreText = remaining > 0 ? ` <span style="color: #64748b; font-size: 0.75rem;">+${remaining} more</span>` : '';
-                  return `<span style="color: #475569; font-size: 0.8rem; line-height: 1.4;" title="${schemaTypes.join(', ')}">${typesText}${moreText}</span>`;
+                  return `<span style="color: #475569; font-size: 0.8rem; line-height: 1.4;" title="${typeStrings.join(', ')}">${typesText}${moreText}</span>`;
                 })()}
               </td>
               <td style="padding: 0.75rem; color: #475569; font-size: 0.8rem; line-height: 1.5; vertical-align: top;">${row.recommendation}</td>
