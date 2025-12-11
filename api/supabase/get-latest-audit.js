@@ -298,7 +298,9 @@ export default async function handler(req, res) {
           totalClicks: record.gsc_clicks || 0
         },
         // CRITICAL: Load timeseries data from gsc_timeseries table for Score Trends chart
-        timeseries: null // Will be loaded separately via get-audit-history endpoint
+        timeseries: null, // Will be loaded separately via get-audit-history endpoint
+        // Query+page level data for CTR metrics in keyword scorecard
+        queryPages: Array.isArray(record.query_pages) ? record.query_pages : null
       },
       snippetReadiness: record.snippet_readiness || 0,
       schemaAudit: record.content_schema_score !== null ? {
@@ -306,7 +308,9 @@ export default async function handler(req, res) {
         data: {
           coverage: record.schema_coverage || record.content_schema_score,
           totalPages: record.schema_total_pages || 0,
-          pagesWithSchema: record.schema_pages_with_schema || 0,
+          pagesWithSchema: Array.isArray(record.schema_pages_detail) && record.schema_pages_detail.length > 0
+            ? record.schema_pages_detail
+            : record.schema_pages_with_schema || 0, // Fallback to count if detail not available
           schemaTypes: record.schema_types || [],
           foundation: record.schema_foundation || {},
           richEligible: record.schema_rich_eligible || {},

@@ -158,6 +158,25 @@ export default async function handler(req, res) {
       schema_missing_pages: Array.isArray(schemaData.missingSchemaPages)
         ? schemaData.missingSchemaPages.map(p => (typeof p === 'string' ? p : p.url)).filter(Boolean)
         : [],
+      // Detailed schema pages data (for scorecard)
+      schema_pages_detail: Array.isArray(schemaData.pagesWithSchema) && schemaData.pagesWithSchema.length > 0
+        ? schemaData.pagesWithSchema.map(p => ({
+            url: typeof p === 'string' ? p : (p.url || ''),
+            schemaTypes: Array.isArray(p.schemaTypes) ? p.schemaTypes : (p.schemaTypes ? [p.schemaTypes] : [])
+          })).filter(p => p.url)
+        : null,
+      
+      // GSC query+page level data (for CTR metrics in scorecard)
+      query_pages: Array.isArray(searchData?.queryPages) && searchData.queryPages.length > 0
+        ? searchData.queryPages.map(qp => ({
+            query: qp.query || '',
+            page: qp.page || qp.url || '',
+            clicks: qp.clicks || 0,
+            impressions: qp.impressions || 0,
+            ctr: qp.ctr || 0, // Store as percentage (0-100)
+            position: qp.position || qp.avg_position || null
+          })).filter(qp => qp.query || qp.page)
+        : null,
       
       // Pillar Scores
       visibility_score: ensureNumber(scores?.visibility),
