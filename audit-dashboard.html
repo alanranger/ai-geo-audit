@@ -20614,26 +20614,51 @@ Final Score: ${score}/100`;
         const savedAudit = loadAuditResultsSync();
         if (savedAudit && savedAudit.schemaAudit && savedAudit.schemaAudit.data) {
           const schemaData = savedAudit.schemaAudit.data;
-          const pagesWithSchema = schemaData.pagesWithSchema || [];
-          if (Array.isArray(pagesWithSchema) && pagesWithSchema.length > 0) {
+          
+          // Check schemaData.pages first (original array from schema audit API)
+          // Then check pagesWithSchema (might be array from Supabase or number count)
+          let pagesArray = null;
+          if (Array.isArray(schemaData.pages) && schemaData.pages.length > 0) {
+            pagesArray = schemaData.pages;
+            debugLog('[Schema Coverage] Using schemaData.pages array (' + pagesArray.length + ' pages)', 'info');
+          } else if (Array.isArray(schemaData.pagesWithSchema) && schemaData.pagesWithSchema.length > 0) {
+            pagesArray = schemaData.pagesWithSchema;
+            debugLog('[Schema Coverage] Using schemaData.pagesWithSchema array (' + pagesArray.length + ' pages)', 'info');
+          } else {
+            debugLog('[Schema Coverage] No pages array found. pages=' + typeof schemaData.pages + ', pagesWithSchema=' + typeof schemaData.pagesWithSchema, 'warn');
+          }
+          
+          if (pagesArray && pagesArray.length > 0) {
             const normalizedUrl = (scorecardData.ranking_url || '').toLowerCase().trim();
-            const pageData = pagesWithSchema.find(p => {
+            const pageData = pagesArray.find(p => {
               const pUrl = (p.url || '').toLowerCase().trim();
               return pUrl === normalizedUrl || pUrl.includes(normalizedUrl) || normalizedUrl.includes(pUrl);
             });
-            if (pageData && pageData.schemaTypes) {
-              const schemaTypes = Array.isArray(pageData.schemaTypes) ? pageData.schemaTypes : [];
-              const typeStrings = schemaTypes.map(t => String(t).toLowerCase());
-              schemaCoverage = {
-                hasFAQ: typeStrings.some(t => t.includes('faq') || t === 'faqpage'),
-                hasHowTo: typeStrings.some(t => t.includes('howto') || t === 'howto'),
-                hasEvent: typeStrings.some(t => t.includes('event') && !t.includes('product')),
-                hasProduct: typeStrings.some(t => t.includes('product')),
-                hasBreadcrumb: typeStrings.some(t => t.includes('breadcrumb') || t === 'breadcrumblist'),
-                hasImageObject: typeStrings.some(t => t.includes('image') || t === 'imageobject')
-              };
+            
+            if (pageData) {
+              debugLog('[Schema Coverage] Found page data for URL: ' + scorecardData.ranking_url, 'info');
+              if (pageData.schemaTypes) {
+                const schemaTypes = Array.isArray(pageData.schemaTypes) ? pageData.schemaTypes : [];
+                const typeStrings = schemaTypes.map(t => String(t).toLowerCase());
+                debugLog('[Schema Coverage] Schema types found: ' + schemaTypes.join(', '), 'info');
+                schemaCoverage = {
+                  hasFAQ: typeStrings.some(t => t.includes('faq') || t === 'faqpage'),
+                  hasHowTo: typeStrings.some(t => t.includes('howto') || t === 'howto'),
+                  hasEvent: typeStrings.some(t => t.includes('event') && !t.includes('product')),
+                  hasProduct: typeStrings.some(t => t.includes('product')),
+                  hasBreadcrumb: typeStrings.some(t => t.includes('breadcrumb') || t === 'breadcrumblist'),
+                  hasImageObject: typeStrings.some(t => t.includes('image') || t === 'imageobject')
+                };
+                debugLog('[Schema Coverage] Coverage result: ' + JSON.stringify(schemaCoverage), 'info');
+              } else {
+                debugLog('[Schema Coverage] Page data found but no schemaTypes', 'warn');
+              }
+            } else {
+              debugLog('[Schema Coverage] No page data found for URL: ' + scorecardData.ranking_url, 'warn');
             }
           }
+        } else {
+          debugLog('[Schema Coverage] No schemaAudit.data in saved audit', 'warn');
         }
       } catch (e) {
         debugLog('[Schema Coverage] Error in sync check: ' + e.message, 'warn');
