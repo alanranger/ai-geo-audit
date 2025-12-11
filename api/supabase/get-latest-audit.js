@@ -147,23 +147,57 @@ export default async function handler(req, res) {
         
         if (keywordRows && keywordRows.length > 0) {
           // Convert database rows to frontend format (combinedRows)
-          const combinedRows = keywordRows.map(row => ({
-            keyword: row.keyword,
-            best_rank_group: row.best_rank_group,
-            best_rank_absolute: row.best_rank_absolute,
-            best_url: row.best_url,
-            best_title: row.best_title,
-            search_volume: row.search_volume,
-            has_ai_overview: row.has_ai_overview || false,
-            ai_total_citations: row.ai_total_citations || 0,
-            ai_alan_citations_count: row.ai_alan_citations_count || 0,
-            ai_alan_citations: row.ai_alan_citations || [],
-            competitor_counts: row.competitor_counts || {},
-            serp_features: row.serp_features || {},
-            segment: row.segment,
-            pageType: row.page_type,
-            demand_share: row.demand_share
-          }));
+          const combinedRows = keywordRows.map(row => {
+            // Parse JSON fields if they're strings (Supabase may return JSON as strings)
+            let aiCitations = row.ai_alan_citations || [];
+            if (typeof aiCitations === 'string') {
+              try {
+                aiCitations = JSON.parse(aiCitations);
+              } catch (e) {
+                console.warn(`[get-latest-audit] Failed to parse ai_alan_citations for keyword "${row.keyword}":`, e.message);
+                aiCitations = [];
+              }
+            }
+            if (!Array.isArray(aiCitations)) aiCitations = [];
+
+            let competitorCounts = row.competitor_counts || {};
+            if (typeof competitorCounts === 'string') {
+              try {
+                competitorCounts = JSON.parse(competitorCounts);
+              } catch (e) {
+                competitorCounts = {};
+              }
+            }
+            if (typeof competitorCounts !== 'object' || competitorCounts === null) competitorCounts = {};
+
+            let serpFeatures = row.serp_features || {};
+            if (typeof serpFeatures === 'string') {
+              try {
+                serpFeatures = JSON.parse(serpFeatures);
+              } catch (e) {
+                serpFeatures = {};
+              }
+            }
+            if (typeof serpFeatures !== 'object' || serpFeatures === null) serpFeatures = {};
+
+            return {
+              keyword: row.keyword,
+              best_rank_group: row.best_rank_group,
+              best_rank_absolute: row.best_rank_absolute,
+              best_url: row.best_url,
+              best_title: row.best_title,
+              search_volume: row.search_volume,
+              has_ai_overview: row.has_ai_overview || false,
+              ai_total_citations: row.ai_total_citations || 0,
+              ai_alan_citations_count: row.ai_alan_citations_count || 0,
+              ai_alan_citations: aiCitations,
+              competitor_counts: competitorCounts,
+              serp_features: serpFeatures,
+              segment: row.segment,
+              pageType: row.page_type,
+              demand_share: row.demand_share
+            };
+          });
 
           // Calculate summary from combinedRows
           const totalKeywords = combinedRows.length;

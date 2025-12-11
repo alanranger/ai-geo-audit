@@ -54,41 +54,87 @@ export default async function handler(req, res) {
       });
     }
 
-    // Insert/update rows using upsert (merge duplicates based on unique constraint)
-    const insertResponse = await fetch(`${supabaseUrl}/rest/v1/keyword_rankings`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': supabaseKey,
-        'Authorization': `Bearer ${supabaseKey}`,
-        'Prefer': 'return=representation,resolution=merge-duplicates'
-      },
-      body: JSON.stringify(keywordRows)
-    });
+    // Process each row: try PATCH (update) first, then POST (insert) if it doesn't exist
+    let savedCount = 0;
+    let errors = [];
 
-    if (insertResponse.ok) {
-      const insertedText = await insertResponse.text();
-      const insertedResult = insertedText ? JSON.parse(insertedText) : [];
-      console.log(`[Save Keyword Batch] ✓ Successfully saved ${insertedResult.length} keyword rows to keyword_rankings table`);
+    for (const row of keywordRows) {
+      // Ensure required fields for unique constraint are present
+      if (!row.audit_date || !row.property_url || !row.keyword) {
+        errors.push(`Row missing required fields: ${JSON.stringify(row)}`);
+        continue;
+      }
+
+      // Try to update existing row first using PATCH
+      const filterParams = new URLSearchParams({
+        audit_date: `eq.${row.audit_date}`,
+        property_url: `eq.${encodeURIComponent(row.property_url)}`,
+        keyword: `eq.${encodeURIComponent(row.keyword)}`
+      });
+
+      const patchResponse = await fetch(`${supabaseUrl}/rest/v1/keyword_rankings?${filterParams}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`,
+          'Prefer': 'return=representation'
+        },
+        body: JSON.stringify(row)
+      });
+
+      if (patchResponse.ok) {
+        const patchText = await patchResponse.text();
+        const patchResult = patchText ? JSON.parse(patchText) : [];
+        if (patchResult.length > 0) {
+          savedCount++;
+          continue; // Successfully updated, move to next row
+        }
+      }
+
+      // If PATCH didn't update anything (row doesn't exist), try POST (insert)
+      const postResponse = await fetch(`${supabaseUrl}/rest/v1/keyword_rankings`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`,
+          'Prefer': 'return=representation'
+        },
+        body: JSON.stringify(row)
+      });
+
+      if (postResponse.ok) {
+        savedCount++;
+      } else {
+        const errorText = await postResponse.text();
+        // If it's a duplicate key error (409), that's okay - row already exists and was updated by PATCH
+        if (postResponse.status === 409) {
+          savedCount++; // Count as saved since it exists
+        } else {
+          errors.push(`Failed to save keyword "${row.keyword}": ${postResponse.status} - ${errorText}`);
+        }
+      }
+    }
+
+    if (savedCount > 0) {
+      console.log(`[Save Keyword Batch] ✓ Successfully saved ${savedCount}/${keywordRows.length} keyword rows`);
       
       return res.status(200).json({
         status: 'ok',
         message: 'Keyword batch saved successfully',
         data: {
-          saved: insertedResult.length,
-          attempted: keywordRows.length
+          saved: savedCount,
+          attempted: keywordRows.length,
+          errors: errors.length > 0 ? errors : undefined
         },
         meta: { generatedAt: new Date().toISOString() }
       });
     } else {
-      const errorText = await insertResponse.text();
-      console.error(`[Save Keyword Batch] ⚠ Failed to save keyword rows: ${insertResponse.status} - ${errorText}`);
-      
-      return res.status(insertResponse.status).json({
+      return res.status(500).json({
         status: 'error',
-        message: 'Failed to save keyword batch to Supabase',
-        details: errorText,
-        statusCode: insertResponse.status,
+        message: 'Failed to save any keyword rows',
+        details: errors.length > 0 ? errors.join('; ') : 'Unknown error',
         meta: { generatedAt: new Date().toISOString() }
       });
     }
@@ -103,4 +149,5 @@ export default async function handler(req, res) {
     });
   }
 }
+
 
