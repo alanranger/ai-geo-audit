@@ -29,15 +29,22 @@ const RICH_RESULT_TYPES = [
  */
 function extractJsonLd(htmlString) {
   const jsonLdBlocks = [];
-  const jsonLdRegex = /<script[^>]*type=["']application\/ld\+json["'][^>]*>(.*?)<\/script>/gis;
+  // More flexible regex: handles both single and double quotes, and various script tag formats
+  const jsonLdRegex = /<script[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>(.*?)<\/script>/gis;
   const matches = [...htmlString.matchAll(jsonLdRegex)];
   
   let parseErrors = 0;
   let totalBlocks = 0;
+  const failedBlocks = [];
   
   for (const match of matches) {
     totalBlocks++;
-    const jsonText = match[1].trim();
+    let jsonText = match[1].trim();
+    
+    // Try to clean up common JSON issues before parsing
+    // Remove HTML comments that might be inside script tags
+    jsonText = jsonText.replace(/<!--[\s\S]*?-->/g, '');
+    
     const parsed = safeJsonParse(jsonText);
     if (parsed) {
       // Handle both single objects and arrays
@@ -48,15 +55,41 @@ function extractJsonLd(htmlString) {
       }
     } else {
       parseErrors++;
+      
+      // Try to extract @type even from malformed JSON using regex
+      // This is a fallback for blocks that fail to parse but contain important types
+      const typeMatch = jsonText.match(/"@type"\s*:\s*"([^"]+)"/i);
+      if (typeMatch) {
+        const extractedType = typeMatch[1];
+        const importantTypes = ['BreadcrumbList', 'HowTo', 'BlogPosting', 'FAQPage'];
+        if (importantTypes.includes(extractedType)) {
+          console.log(`⚠️ Failed to parse JSON-LD block but detected @type="${extractedType}". Attempting recovery...`);
+          // Create a minimal schema object with the detected type
+          jsonLdBlocks.push({
+            '@type': extractedType,
+            '@context': 'https://schema.org',
+            _parseError: true,
+            _originalText: jsonText.substring(0, 500)
+          });
+          parseErrors--; // Don't count this as an error since we recovered it
+        }
+      }
+      
       // Log parse errors for important types
       if (jsonText.includes('BreadcrumbList') || jsonText.includes('HowTo') || jsonText.includes('BlogPosting') || jsonText.includes('FAQPage')) {
-        console.log(`⚠️ Failed to parse JSON-LD block containing important type. Sample: ${jsonText.substring(0, 200)}`);
+        failedBlocks.push({
+          type: jsonText.match(/"@type"\s*:\s*"([^"]+)"/i)?.[1] || 'unknown',
+          sample: jsonText.substring(0, 300)
+        });
       }
     }
   }
   
   if (parseErrors > 0) {
     console.log(`⚠️ JSON-LD extraction: ${parseErrors}/${totalBlocks} blocks failed to parse`);
+    if (failedBlocks.length > 0) {
+      console.log(`  Failed blocks with important types:`, failedBlocks.map(b => b.type).join(', '));
+    }
   }
   
   // Also check for microdata BreadcrumbList (itemscope/itemtype)
@@ -69,6 +102,73 @@ function extractJsonLd(htmlString) {
       '@context': 'https://schema.org',
       _detectedFrom: 'microdata'
     });
+  }
+  
+  // Fallback: Check if BreadcrumbList or HowTo are mentioned in HTML but not extracted
+  // This catches cases where they're in script tags that didn't match our regex
+  const breadcrumbInHtml = /"@type"\s*:\s*"BreadcrumbList"/i.test(htmlString);
+  const howtoInHtml = /"@type"\s*:\s*"HowTo"/i.test(htmlString);
+  
+  // Quick check: look for @type strings in extracted blocks (faster than full normalization)
+  const hasBreadcrumb = jsonLdBlocks.some(block => {
+    const blockStr = JSON.stringify(block);
+    return /"@type"\s*:\s*"BreadcrumbList"/i.test(blockStr);
+  });
+  
+  const hasHowTo = jsonLdBlocks.some(block => {
+    const blockStr = JSON.stringify(block);
+    return /"@type"\s*:\s*"HowTo"/i.test(blockStr);
+  });
+  
+  // If mentioned in HTML but not detected, try to find the script tag manually
+  if (breadcrumbInHtml && !hasBreadcrumb) {
+    // Try a more aggressive regex to find BreadcrumbList script tags (even without type attribute)
+    const aggressiveRegex = /<script[^>]*>[\s\S]*?"@type"\s*:\s*"BreadcrumbList"[\s\S]*?<\/script>/gi;
+    const aggressiveMatches = [...htmlString.matchAll(aggressiveRegex)];
+    if (aggressiveMatches.length > 0) {
+      console.log(`🔍 Found BreadcrumbList in script tag that didn't match standard regex. Attempting extraction...`);
+      aggressiveMatches.forEach(match => {
+        const jsonText = match[0].replace(/<script[^>]*>/, '').replace(/<\/script>/, '').trim();
+        // Remove HTML comments
+        const cleaned = jsonText.replace(/<!--[\s\S]*?-->/g, '');
+        const parsed = safeJsonParse(cleaned);
+        if (parsed) {
+          if (Array.isArray(parsed)) {
+            jsonLdBlocks.push(...parsed);
+          } else {
+            jsonLdBlocks.push(parsed);
+          }
+          console.log(`✅ Successfully extracted BreadcrumbList from aggressive regex`);
+        } else {
+          console.log(`⚠️ Failed to parse BreadcrumbList even with aggressive regex. Sample: ${cleaned.substring(0, 200)}`);
+        }
+      });
+    }
+  }
+  
+  if (howtoInHtml && !hasHowTo) {
+    // Try a more aggressive regex to find HowTo script tags (even without type attribute)
+    const aggressiveRegex = /<script[^>]*>[\s\S]*?"@type"\s*:\s*"HowTo"[\s\S]*?<\/script>/gi;
+    const aggressiveMatches = [...htmlString.matchAll(aggressiveRegex)];
+    if (aggressiveMatches.length > 0) {
+      console.log(`🔍 Found HowTo in script tag that didn't match standard regex. Attempting extraction...`);
+      aggressiveMatches.forEach(match => {
+        const jsonText = match[0].replace(/<script[^>]*>/, '').replace(/<\/script>/, '').trim();
+        // Remove HTML comments
+        const cleaned = jsonText.replace(/<!--[\s\S]*?-->/g, '');
+        const parsed = safeJsonParse(cleaned);
+        if (parsed) {
+          if (Array.isArray(parsed)) {
+            jsonLdBlocks.push(...parsed);
+          } else {
+            jsonLdBlocks.push(parsed);
+          }
+          console.log(`✅ Successfully extracted HowTo from aggressive regex`);
+        } else {
+          console.log(`⚠️ Failed to parse HowTo even with aggressive regex. Sample: ${cleaned.substring(0, 200)}`);
+        }
+      });
+    }
   }
   
   return jsonLdBlocks;
