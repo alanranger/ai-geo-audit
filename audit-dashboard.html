@@ -2398,6 +2398,16 @@
             </div>
 
             <div class="filter-group">
+              <label>Opportunity score:</label>
+              <select id="ranking-filter-opportunity" class="filter-control">
+                <option value="all">All</option>
+                <option value="high">High (70-100)</option>
+                <option value="medium">Medium (40-69)</option>
+                <option value="low">Low (0-39)</option>
+              </select>
+            </div>
+
+            <div class="filter-group">
               <label>Search:</label>
               <input type="text" id="ranking-filter-keyword" class="filter-control" placeholder="Filter by keyword...">
             </div>
@@ -19351,6 +19361,7 @@ Final Score: ${score}/100`;
       rank: 'all',
       aiOverview: 'all',
       aiCitation: 'all',
+      opportunity: 'all',
       keyword: ''
     };
     let rankingSortState = {
@@ -20192,6 +20203,14 @@ Final Score: ${score}/100`;
           const isCited = row.ai_alan_citations_count > 0;
           if (rankingFilterState.aiCitation === 'cited' && !isCited) return false;
           if (rankingFilterState.aiCitation === 'not-cited' && isCited) return false;
+        }
+
+        // Opportunity Score filter
+        if (rankingFilterState.opportunity !== 'all') {
+          const oppScore = row.opportunityScore ?? -1; // Treat null as -1 (below low threshold)
+          if (rankingFilterState.opportunity === 'high' && (oppScore < 70 || oppScore > 100)) return false;
+          if (rankingFilterState.opportunity === 'medium' && (oppScore < 40 || oppScore >= 70)) return false;
+          if (rankingFilterState.opportunity === 'low' && (oppScore >= 40 || oppScore < 0)) return false;
         }
 
         // Keyword search
@@ -21709,6 +21728,7 @@ Final Score: ${score}/100`;
         const rankFilter = document.getElementById("ranking-filter-rank");
         const aiOverviewFilter = document.getElementById("ranking-filter-ai-overview");
         const aiCitationFilter = document.getElementById("ranking-filter-ai-citation");
+        const opportunityFilter = document.getElementById("ranking-filter-opportunity");
         const keywordFilter = document.getElementById("ranking-filter-keyword");
         const clearBtn = document.getElementById("ranking-filter-clear");
 
@@ -21717,6 +21737,7 @@ Final Score: ${score}/100`;
           if (rankFilter) rankingFilterState.rank = rankFilter.value;
           if (aiOverviewFilter) rankingFilterState.aiOverview = aiOverviewFilter.value;
           if (aiCitationFilter) rankingFilterState.aiCitation = aiCitationFilter.value;
+          if (opportunityFilter) rankingFilterState.opportunity = opportunityFilter.value;
           if (keywordFilter) rankingFilterState.keyword = keywordFilter.value.trim();
           rankingPaginationState.currentPage = 1; // Reset to first page on filter change
           renderRankingAiTab();
@@ -21726,6 +21747,7 @@ Final Score: ${score}/100`;
         if (rankFilter) rankFilter.addEventListener("change", updateFilters);
         if (aiOverviewFilter) aiOverviewFilter.addEventListener("change", updateFilters);
         if (aiCitationFilter) aiCitationFilter.addEventListener("change", updateFilters);
+        if (opportunityFilter) opportunityFilter.addEventListener("change", updateFilters);
         if (keywordFilter) keywordFilter.addEventListener("input", updateFilters);
 
         if (clearBtn) {
@@ -21735,6 +21757,7 @@ Final Score: ${score}/100`;
               rank: 'all',
               aiOverview: 'all',
               aiCitation: 'all',
+              opportunity: 'all',
               keyword: ''
             };
             rankingPriorityFilter = null; // Clear priority matrix filter
@@ -21743,6 +21766,7 @@ Final Score: ${score}/100`;
             if (rankFilter) rankFilter.value = 'all';
             if (aiOverviewFilter) aiOverviewFilter.value = 'all';
             if (aiCitationFilter) aiCitationFilter.value = 'all';
+            if (opportunityFilter) opportunityFilter.value = 'all';
             if (keywordFilter) keywordFilter.value = '';
             rankingPaginationState.currentPage = 1; // Reset to first page on clear
             renderRankingAiTab();
