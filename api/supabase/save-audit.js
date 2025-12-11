@@ -159,12 +159,24 @@ export default async function handler(req, res) {
         ? schemaData.missingSchemaPages.map(p => (typeof p === 'string' ? p : p.url)).filter(Boolean)
         : [],
       // Detailed schema pages data (for scorecard)
-      schema_pages_detail: Array.isArray(schemaData.pagesWithSchema) && schemaData.pagesWithSchema.length > 0
-        ? schemaData.pagesWithSchema.map(p => ({
+      // Try schemaData.pages first (detailed array), then pagesWithSchema if it's an array
+      schema_pages_detail: (() => {
+        // First try: schemaData.pages (detailed array from schema audit)
+        if (Array.isArray(schemaData.pages) && schemaData.pages.length > 0) {
+          return schemaData.pages.map(p => ({
+            url: p.url || '',
+            schemaTypes: Array.isArray(p.schemaTypes) ? p.schemaTypes : (p.schemaTypes ? [p.schemaTypes] : [])
+          })).filter(p => p.url);
+        }
+        // Second try: pagesWithSchema if it's an array
+        if (Array.isArray(schemaData.pagesWithSchema) && schemaData.pagesWithSchema.length > 0) {
+          return schemaData.pagesWithSchema.map(p => ({
             url: typeof p === 'string' ? p : (p.url || ''),
             schemaTypes: Array.isArray(p.schemaTypes) ? p.schemaTypes : (p.schemaTypes ? [p.schemaTypes] : [])
-          })).filter(p => p.url)
-        : null,
+          })).filter(p => p.url);
+        }
+        return null;
+      })(),
       
       // GSC query+page level data (for CTR metrics in scorecard)
       query_pages: Array.isArray(searchData?.queryPages) && searchData.queryPages.length > 0
