@@ -115,6 +115,14 @@ export default async function handler(req, res) {
     const schemaData = schemaAudit?.data || {};
     const schemaTypes = schemaData.schemaTypes || [];
     
+    // Debug: Log schema data structure to understand what's available
+    console.log('[Save Audit] Schema data keys:', Object.keys(schemaData));
+    console.log('[Save Audit] schemaData.pages type:', Array.isArray(schemaData.pages) ? 'array' : typeof schemaData.pages);
+    console.log('[Save Audit] schemaData.pagesWithSchema type:', Array.isArray(schemaData.pagesWithSchema) ? 'array' : typeof schemaData.pagesWithSchema);
+    if (Array.isArray(schemaData.pages) && schemaData.pages.length > 0) {
+      console.log('[Save Audit] schemaData.pages sample:', JSON.stringify(schemaData.pages[0]));
+    }
+    
     // Extract foundation schemas
     const foundationTypes = ['Organization', 'Person', 'WebSite', 'BreadcrumbList'];
     const foundationSchemas = {};
