@@ -1643,6 +1643,18 @@
     .ranking-badge-demand-share--low { color: #6b7280; font-weight: 400; }
     .ranking-badge-demand-share--none { color: #9ca3af; }
     
+    /* Opportunity score styling (RAG colors matching Money Pages priority matrix) */
+    .ranking-badge-opportunity {
+      display: inline-block;
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+    .ranking-badge-opportunity--high { background: #dcfce7; color: #166534; } /* Green - High */
+    .ranking-badge-opportunity--medium { background: #fef3c7; color: #92400e; } /* Amber - Medium */
+    .ranking-badge-opportunity--low { background: #fee2e2; color: #b91c1c; } /* Red - Low */
+    
     /* Page type badge styling (matching Money Pages matrix) */
     .ranking-badge-page-type {
       display: inline-block;
@@ -2424,6 +2436,7 @@
                     <th data-sort="rank" class="sortable">Best rank <span class="sort-indicator"></span></th>
                     <th data-sort="volume" class="sortable">Search volume <span class="sort-indicator"></span><span title="Average monthly Google search volume for this keyword in the UK. Source: DataForSEO Labs – Keyword Overview." style="margin-left: 0.25rem; opacity: 0.6; cursor: help;">ℹ</span></th>
                     <th data-sort="demand_share" class="sortable">Demand share <span class="sort-indicator"></span><span title="Percentage of total search volume across all tracked keywords. High values indicate keywords with the most search demand." style="margin-left: 0.25rem; opacity: 0.6; cursor: help;">ℹ</span></th>
+                    <th data-sort="opportunityScore" class="sortable">Opportunity score <span class="sort-indicator"></span><span title="Keyword opportunity score (0-100) based on demand share, ranking improvement potential, and AI Overview leverage. Higher scores indicate better opportunities." style="margin-left: 0.25rem; opacity: 0.6; cursor: help;">ℹ</span></th>
                     <th>AI Overview</th>
                     <th data-sort="citations" class="sortable">AI citations <span class="sort-indicator"></span></th>
                     <th>Ranking URL</th>
@@ -2432,7 +2445,7 @@
                   </tr>
                 </thead>
                 <tbody id="ranking-ai-table-body">
-                  <tr><td colspan="9" class="ranking-table-empty">Click "Run ranking &amp; AI check" to load data.</td></tr>
+                  <tr><td colspan="10" class="ranking-table-empty">Click "Run ranking &amp; AI check" to load data.</td></tr>
                 </tbody>
               </table>
             </div>
@@ -18421,6 +18434,7 @@ Final Score: ${score}/100`;
           segment: row.segment ? String(row.segment).trim() : null,
           page_type: row.pageType ? String(row.pageType).trim() : null,
           demand_share: row.demand_share !== null && row.demand_share !== undefined ? parseFloat(row.demand_share) : null,
+          opportunity_score: row.opportunityScore !== null && row.opportunityScore !== undefined ? parseInt(row.opportunityScore) : null,
           updated_at: new Date().toISOString()
         }));
 
@@ -18563,14 +18577,34 @@ Final Score: ${score}/100`;
                 debugLog(`  Summary fields: ${summaryKeys}`, 'info');
                 debugLog(`  First keyword sample: ${json.data.rankingAiData.combinedRows[0]?.keyword || 'none'}`, 'info');
                 
+                // Compute opportunity scores if missing (for older data)
+                const combinedRows = json.data.rankingAiData.combinedRows;
+                const needsOpportunityScore = combinedRows.some(r => r.opportunityScore == null);
+                if (needsOpportunityScore) {
+                  debugLog(`⚠ Computing opportunity scores for ${keywordCount} keywords (missing from Supabase)`, 'info');
+                  const maxDemandShare = combinedRows.reduce((max, r) => {
+                    const ds = r.demand_share ?? 0;
+                    return ds > max ? ds : max;
+                  }, 0);
+                  combinedRows.forEach(row => {
+                    if (row.opportunityScore == null) {
+                      const oppResult = computeKeywordOpportunityScore(row, maxDemandShare);
+                      row.opportunityScore = oppResult.score;
+                      row.oppDemandComponent = oppResult.demandComponent;
+                      row.oppRankComponent = oppResult.rankComponent;
+                      row.oppAiComponent = oppResult.aiComponent;
+                    }
+                  });
+                }
+                
                 // Also save to localStorage for faster access next time
                 localStorage.setItem('rankingAiData', JSON.stringify({
-                  combinedRows: json.data.rankingAiData.combinedRows,
+                  combinedRows: combinedRows,
                   summary: json.data.rankingAiData.summary,
                   timestamp: new Date().toISOString()
                 }));
                 debugLog(`✓ Saved ${keywordCount} keywords to localStorage`, 'success');
-                return json.data.rankingAiData;
+                return { combinedRows, summary: json.data.rankingAiData.summary };
               } else {
                 debugLog('⚠ rankingAiData exists but missing combinedRows array', 'warn');
                 debugLog(`  rankingAiData keys: ${Object.keys(json.data.rankingAiData || {}).join(', ')}`, 'warn');
@@ -19078,8 +19112,32 @@ Final Score: ${score}/100`;
             search_volume: searchVolume,
             search_volume_trend: row.search_volume_trend || undefined,
             demand_share: demandShare
+            // opportunityScore will be added after all rows are created (see below)
           };
         });
+        
+        // Compute maxDemandShare for opportunity score calculation
+        const maxDemandShare = combined.reduce((max, r) => {
+          const ds = r.demand_share ?? 0;
+          return ds > max ? ds : max;
+        }, 0);
+        
+        // Add opportunity score to each row
+        combined.forEach(row => {
+          const oppResult = computeKeywordOpportunityScore(row, maxDemandShare);
+          row.opportunityScore = oppResult.score;
+          row.oppDemandComponent = oppResult.demandComponent;
+          row.oppRankComponent = oppResult.rankComponent;
+          row.oppAiComponent = oppResult.aiComponent;
+        });
+        
+        // Debug: Log opportunity scores for first few keywords
+        if (combined.length > 0) {
+          const sampleRows = combined.slice(0, 3);
+          sampleRows.forEach(r => {
+            console.debug(`[Opportunity Score] "${r.keyword}": score=${r.opportunityScore}, D=${(r.oppDemandComponent * 100).toFixed(0)}%, R=${(r.oppRankComponent * 100).toFixed(0)}%, A=${(r.oppAiComponent * 100).toFixed(0)}%`);
+          });
+        }
 
         // Summary metrics
         const totalKeywords = combined.length;
@@ -19296,8 +19354,8 @@ Final Score: ${score}/100`;
       keyword: ''
     };
     let rankingSortState = {
-      column: 'rank',
-      direction: 'asc'
+      column: 'opportunityScore', // Default sort by opportunity score (descending)
+      direction: 'desc'
     };
     let rankingPaginationState = {
       currentPage: 1,
@@ -19321,6 +19379,80 @@ Final Score: ${score}/100`;
      * @param {number} demandShare - Fraction (0-1) of total demand
      * @returns {'high'|'medium'|'low'}
      */
+    /**
+     * Compute Keyword Opportunity Score (0-100) with component breakdown
+     * @param {Object} row - Keyword row with demand_share, best_rank_group, has_ai_overview, etc.
+     * @param {number} maxDemandShare - Maximum demand_share across all keywords (0-1)
+     * @returns {Object} { score: 0-100, demandComponent: 0-1, rankComponent: 0-1, aiComponent: 0-1 }
+     */
+    function computeKeywordOpportunityScore(row, maxDemandShare) {
+      // 2.1 Demand component D (0-1)
+      const demandShare = (row.demand_share ?? 0) * 100; // Convert to 0-100 if stored as 0-1
+      const maxShare = (maxDemandShare ?? 0) * 100; // Convert to 0-100 if stored as 0-1
+      
+      let D = 0;
+      if (maxShare > 0) {
+        D = demandShare / maxShare; // relative to biggest keyword
+      }
+      D = Math.min(Math.max(D, 0), 1);
+
+      // 2.2 Rank component R (0-1)
+      const rank = row.best_rank_group ?? row.best_rank_absolute ?? null;
+      let R;
+      
+      if (rank == null) {
+        R = 0.2;          // effectively not ranked
+      } else if (rank <= 3) {
+        R = 0.2;          // already very strong; little upside
+      } else if (rank <= 10) {
+        R = 1.0;          // page 1 but not top 3: sweet spot
+      } else if (rank <= 20) {
+        R = 0.8;          // page 2
+      } else if (rank <= 50) {
+        R = 0.5;          // visible but weaker
+      } else {
+        R = 0.2;          // very weak
+      }
+
+      // 2.3 AI leverage component A (0-1)
+      const hasAi = row.has_ai_overview === true;
+      const total = row.ai_total_citations ?? row.ai_citations_total ?? 0;
+      const ours = row.ai_alan_citations_count ?? row.ai_citations_from_alan ?? 0;
+      
+      let A;
+      
+      if (!hasAi) {
+        A = 0.5; // neutral: AI not helping or hurting yet
+      } else if (!total) {
+        A = 0.5; // overview present, but no citation info
+      } else {
+        const share = ours / total; // 0-1
+        
+        if (share < 0.33) {
+          A = 1.0; // overview exists, you're under-represented
+        } else if (share <= 0.66) {
+          A = 0.7; // present but not owning it
+        } else {
+          A = 0.4; // you already dominate AI answers
+        }
+      }
+
+      // 2.4 Combined score S (0-100)
+      const opportunity0to1 =
+        0.5 * D +   // demand is main driver
+        0.3 * R +   // room to move in classic rank
+        0.2 * A;    // AI leverage
+
+      const keywordOpportunityScore = Math.round(opportunity0to1 * 100);
+
+      return {
+        score: keywordOpportunityScore,
+        demandComponent: D,
+        rankComponent: R,
+        aiComponent: A
+      };
+    }
+
     function calculateImpactBucket(demandShare) {
       if (demandShare >= IMPACT_THRESHOLDS.HIGH) return 'high';
       if (demandShare >= IMPACT_THRESHOLDS.MEDIUM) return 'medium';
@@ -19416,17 +19548,41 @@ Final Score: ${score}/100`;
         }
       }
 
-      // Impact and Difficulty buckets (reuse existing functions)
-      const impact = calculateImpactBucket(row.demand_share || 0);
-      const difficulty = calculateDifficultyBucket(rank);
-
-      // Priority level from Impact + Difficulty
-      let priorityLevel = 'Low';
-      if (impact === 'high' && (difficulty === 'low' || difficulty === 'medium')) {
-        priorityLevel = 'High';
-      } else if (impact === 'high' && difficulty === 'high' || 
-                 impact === 'medium' && (difficulty === 'low' || difficulty === 'medium')) {
-        priorityLevel = 'Medium';
+      // Impact, Difficulty, and Priority from opportunity score components
+      // Use opportunity score components if available, otherwise fall back to old logic
+      let impact, difficulty, priorityLevel;
+      
+      if (row.opportunityScore != null && row.oppDemandComponent != null && row.oppRankComponent != null && row.oppAiComponent != null) {
+        // Use opportunity score components (new logic)
+        // Impact raw: 0.7 * D + 0.3 * A
+        const impactRaw = 0.7 * row.oppDemandComponent + 0.3 * row.oppAiComponent;
+        if (impactRaw >= 0.66) impact = 'high';
+        else if (impactRaw >= 0.33) impact = 'medium';
+        else impact = 'low';
+        
+        // Difficulty raw: 1 - R (harder if there is less room to move)
+        const difficultyRaw = 1 - row.oppRankComponent;
+        if (difficultyRaw <= 0.33) difficulty = 'low';
+        else if (difficultyRaw <= 0.66) difficulty = 'medium';
+        else difficulty = 'high';
+        
+        // Priority from numeric opportunity score
+        if (row.opportunityScore >= 70) priorityLevel = 'High';
+        else if (row.opportunityScore >= 40) priorityLevel = 'Medium';
+        else priorityLevel = 'Low';
+      } else {
+        // Fallback to old logic if opportunity score not available
+        impact = calculateImpactBucket(row.demand_share || 0);
+        difficulty = calculateDifficultyBucket(rank);
+        
+        // Priority level from Impact + Difficulty
+        priorityLevel = 'Low';
+        if (impact === 'high' && (difficulty === 'low' || difficulty === 'medium')) {
+          priorityLevel = 'High';
+        } else if (impact === 'high' && difficulty === 'high' || 
+                   impact === 'medium' && (difficulty === 'low' || difficulty === 'medium')) {
+          priorityLevel = 'Medium';
+        }
       }
 
       return {
@@ -19458,7 +19614,12 @@ Final Score: ${score}/100`;
         ai_status_label: aiStatusLabel,
         impact_bucket: impact,
         difficulty_bucket: difficulty,
-        priority_level: priorityLevel
+        priority_level: priorityLevel,
+        // Opportunity score fields
+        opportunity_score: row.opportunityScore ?? null,
+        opp_demand_component: row.oppDemandComponent ?? null,
+        opp_rank_component: row.oppRankComponent ?? null,
+        opp_ai_component: row.oppAiComponent ?? null
       };
     }
 
@@ -19822,7 +19983,24 @@ Final Score: ${score}/100`;
             return sum + (vol && vol > 0 ? vol : 0);
           }, 0);
           const demandSharePct = totalSearchVolume > 0 ? (demandShareSum / totalSearchVolume) * 100 : 0;
+          
+          // Calculate average opportunity score for this cell
+          const totalOpportunityScore = cellRows.reduce((sum, r) => {
+            const score = r.opportunityScore ?? 0;
+            return sum + score;
+          }, 0);
+          const avgOpportunityScore = count > 0 ? totalOpportunityScore / count : 0;
 
+          // Background intensity based on avgOpportunityScore
+          let backgroundColor;
+          if (avgOpportunityScore >= 70) {
+            backgroundColor = '#dcfce7'; // Strong green highlight (High)
+          } else if (avgOpportunityScore >= 40) {
+            backgroundColor = '#fef3c7'; // Medium amber highlight (Medium)
+          } else {
+            backgroundColor = '#f9fafb'; // Light/neutral background (Low)
+          }
+          
           // RAG styling: High impact + Low/Medium difficulty = high priority (green)
           const ragClass =
             impact === 'high' && (difficulty === 'low' || difficulty === 'medium') ? 'rag-high' :
@@ -19839,9 +20017,11 @@ Final Score: ${score}/100`;
             ? '#2563eb' 
             : (ragClass === 'rag-high' ? '#10b981' : ragClass === 'rag-medium' ? '#f59e0b' : '#e5e7eb');
           const borderWidth = isActive ? '4px' : '2px';
-          const backgroundColor = isActive
-            ? '#dbeafe'
-            : (ragClass === 'rag-high' ? '#ecfdf5' : ragClass === 'rag-medium' ? '#fffbeb' : '#f9fafb');
+          
+          // Override background color if active
+          if (isActive) {
+            backgroundColor = '#dbeafe';
+          }
 
           html += `
             <button
@@ -20023,6 +20203,10 @@ Final Score: ${score}/100`;
           case 'demand_share':
             aVal = a.demand_share ?? 0;
             bVal = b.demand_share ?? 0;
+            break;
+          case 'opportunityScore':
+            aVal = a.opportunityScore ?? -1; // Put nulls at end
+            bVal = b.opportunityScore ?? -1;
             break;
           case 'pageType':
             aVal = a.pageType || 'Landing';
@@ -20365,7 +20549,7 @@ Final Score: ${score}/100`;
       if (!sortedRows.length) {
         const tr = document.createElement("tr");
         const td = document.createElement("td");
-        td.colSpan = 10; // Updated: now 10 columns (added Demand share)
+        td.colSpan = 10; // Updated: now 10 columns (added Opportunity score)
         td.className = "ranking-table-empty";
         td.textContent = filteredRows.length === 0 && combinedRows.length > 0
           ? "No rows match the current filters."
@@ -20470,6 +20654,25 @@ Final Score: ${score}/100`;
           tdDemandShare.textContent = "—";
         }
         tr.appendChild(tdDemandShare);
+
+        // Opportunity Score
+        const tdOpportunity = document.createElement("td");
+        const oppScore = row.opportunityScore ?? null;
+        if (oppScore != null) {
+          const oppBadge = document.createElement("span");
+          let oppClass = "ranking-badge-opportunity--low";
+          if (oppScore >= 70) {
+            oppClass = "ranking-badge-opportunity--high";
+          } else if (oppScore >= 40) {
+            oppClass = "ranking-badge-opportunity--medium";
+          }
+          oppBadge.className = `ranking-badge-opportunity ${oppClass}`;
+          oppBadge.textContent = `${oppScore}/100`;
+          tdOpportunity.appendChild(oppBadge);
+        } else {
+          tdOpportunity.textContent = "—";
+        }
+        tr.appendChild(tdOpportunity);
 
         // AI Overview
         const tdAi = document.createElement("td");
@@ -20667,6 +20870,26 @@ Final Score: ${score}/100`;
       // Build HTML for scorecard
       let html = '';
 
+      // Opportunity Score headline (above Impact/Difficulty/Priority)
+      const oppScore = scorecardData.opportunity_score ?? null;
+      if (oppScore != null) {
+        let oppColor = '#b91c1c'; // Red (Low)
+        let oppClass = 'low';
+        if (oppScore >= 70) {
+          oppColor = '#166534'; // Green (High)
+          oppClass = 'high';
+        } else if (oppScore >= 40) {
+          oppColor = '#92400e'; // Amber (Medium)
+          oppClass = 'medium';
+        }
+        
+        html += `<div style="margin-bottom: 1rem; padding-bottom: 0.75rem; border-bottom: 2px solid #e5e7eb;">`;
+        html += `<p style="margin: 0; font-size: 1.5rem; font-weight: 700; color: ${oppColor}; line-height: 1.4;">`;
+        html += `Keyword opportunity score: <span style="color: ${oppColor};">${oppScore}/100</span>`;
+        html += `</p>`;
+        html += `</div>`;
+      }
+      
       // Impact & Difficulty summary line (under card header) - RAG color-coded
       const impactLabel = scorecardData.impact_bucket.charAt(0).toUpperCase() + scorecardData.impact_bucket.slice(1);
       const difficultyLabel = scorecardData.difficulty_bucket.charAt(0).toUpperCase() + scorecardData.difficulty_bucket.slice(1);

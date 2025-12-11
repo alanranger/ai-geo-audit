@@ -200,7 +200,8 @@ export default async function handler(req, res) {
               featured_snippet_present_any: row.featured_snippet_present_any === true,
               segment: row.segment,
               pageType: row.page_type,
-              demand_share: row.demand_share
+              demand_share: row.demand_share,
+              opportunityScore: row.opportunity_score ?? null
             };
           });
 
