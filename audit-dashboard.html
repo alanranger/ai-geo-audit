@@ -19796,36 +19796,43 @@ Final Score: ${score}/100`;
     function updateMetricPills(filteredRows, allRows) {
       const totalKeywords = allRows.length;
       const filteredCount = filteredRows.length;
+      
+      // Check if filters are active (if filtered count differs from total, filters are active)
+      const filtersActive = filteredCount !== totalKeywords;
+      
+      // Use filtered rows if filters are active, otherwise use all rows
+      const rowsToUse = filtersActive ? filteredRows : allRows;
+      const countToUse = filtersActive ? filteredCount : totalKeywords;
 
       // Tracked keywords (always shows total, but can show filtered count)
       const trackedCard = document.getElementById("ranking-card-tracked");
       if (trackedCard) {
         const valueEl = trackedCard.querySelector(".metric-pill-value[data-field='value']");
         if (valueEl) {
-          valueEl.textContent = filteredCount === totalKeywords 
-            ? totalKeywords.toString() 
-            : `${filteredCount} of ${totalKeywords}`;
+          valueEl.textContent = filtersActive 
+            ? `${filteredCount} of ${totalKeywords}` 
+            : totalKeywords.toString();
         }
         trackedCard.className = "metric-pill metric-pill--neutral";
         const statusEl = trackedCard.querySelector(".metric-pill-status[data-field='status']");
         if (statusEl) statusEl.textContent = "Info only";
       }
 
-      // Calculate metrics from filtered rows
-      const withAiOverview = filteredRows.filter(r => r.has_ai_overview).length;
-      const withAiCitation = filteredRows.filter(r => r.ai_alan_citations_count > 0).length;
-      const top10 = filteredRows.filter(r => r.best_rank_group != null && r.best_rank_group <= 10).length;
+      // Calculate metrics from rowsToUse (filtered if filters active, all if not)
+      const withAiOverview = rowsToUse.filter(r => r.has_ai_overview).length;
+      const withAiCitation = rowsToUse.filter(r => r.ai_alan_citations_count > 0).length;
+      const top10 = rowsToUse.filter(r => r.best_rank_group != null && r.best_rank_group <= 10).length;
 
-      const aiCoveragePct = filteredCount > 0 ? Math.round((withAiOverview / filteredCount) * 100) : 0;
-      const aiCitationPct = filteredCount > 0 ? Math.round((withAiCitation / filteredCount) * 100) : 0;
-      const top10Pct = filteredCount > 0 ? Math.round((top10 / filteredCount) * 100) : 0;
+      const aiCoveragePct = countToUse > 0 ? Math.round((withAiOverview / countToUse) * 100) : 0;
+      const aiCitationPct = countToUse > 0 ? Math.round((withAiCitation / countToUse) * 100) : 0;
+      const top10Pct = countToUse > 0 ? Math.round((top10 / countToUse) * 100) : 0;
 
       // AI Overview coverage
       const coverageCard = document.getElementById("ranking-card-ai-coverage");
       if (coverageCard) {
         const valueEl = coverageCard.querySelector(".metric-pill-value[data-field='value']");
         const statusEl = coverageCard.querySelector(".metric-pill-status[data-field='status']");
-        if (valueEl) valueEl.textContent = `${withAiOverview}/${filteredCount} (${aiCoveragePct}%)`;
+        if (valueEl) valueEl.textContent = `${withAiOverview}/${countToUse} (${aiCoveragePct}%)`;
         
         let ragClass = 'red';
         let statusLabel = 'Low';
@@ -19841,7 +19848,7 @@ Final Score: ${score}/100`;
       if (citationsCard) {
         const valueEl = citationsCard.querySelector(".metric-pill-value[data-field='value']");
         const statusEl = citationsCard.querySelector(".metric-pill-status[data-field='status']");
-        if (valueEl) valueEl.textContent = `${withAiCitation}/${filteredCount} (${aiCitationPct}%)`;
+        if (valueEl) valueEl.textContent = `${withAiCitation}/${countToUse} (${aiCitationPct}%)`;
         
         let ragClass = 'red';
         let statusLabel = 'Not cited';
@@ -19857,7 +19864,7 @@ Final Score: ${score}/100`;
       if (top10Card) {
         const valueEl = top10Card.querySelector(".metric-pill-value[data-field='value']");
         const statusEl = top10Card.querySelector(".metric-pill-status[data-field='status']");
-        if (valueEl) valueEl.textContent = `${top10}/${filteredCount} (${top10Pct}%)`;
+        if (valueEl) valueEl.textContent = `${top10}/${countToUse} (${top10Pct}%)`;
         
         let ragClass = 'red';
         let statusLabel = 'Weak';
