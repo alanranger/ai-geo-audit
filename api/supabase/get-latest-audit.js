@@ -85,6 +85,105 @@ export default async function handler(req, res) {
     }
 
     const record = results[0];
+    const auditDate = record.audit_date;
+
+    // Fetch keyword rankings from keyword_rankings table for this audit_date and property_url
+    let rankingAiData = null;
+    try {
+      const keywordRankingsUrl = `${supabaseUrl}/rest/v1/keyword_rankings?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${encodeURIComponent(auditDate)}&select=*&order=keyword.asc`;
+      const keywordRankingsResponse = await fetch(keywordRankingsUrl, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`
+        }
+      });
+
+      if (keywordRankingsResponse.ok) {
+        const keywordRows = await keywordRankingsResponse.json();
+        
+        if (keywordRows && keywordRows.length > 0) {
+          // Convert database rows to frontend format (combinedRows)
+          const combinedRows = keywordRows.map(row => ({
+            keyword: row.keyword,
+            best_rank_group: row.best_rank_group,
+            best_rank_absolute: row.best_rank_absolute,
+            best_url: row.best_url,
+            best_title: row.best_title,
+            search_volume: row.search_volume,
+            has_ai_overview: row.has_ai_overview || false,
+            ai_total_citations: row.ai_total_citations || 0,
+            ai_alan_citations_count: row.ai_alan_citations_count || 0,
+            ai_alan_citations: row.ai_alan_citations || [],
+            competitor_counts: row.competitor_counts || {},
+            serp_features: row.serp_features || {},
+            segment: row.segment,
+            pageType: row.page_type,
+            demand_share: row.demand_share
+          }));
+
+          // Calculate summary from combinedRows
+          const totalKeywords = combinedRows.length;
+          const keywordsWithRank = combinedRows.filter(r => r.best_rank_group != null && r.best_rank_group > 0).length;
+          const top10 = combinedRows.filter(r => r.best_rank_group != null && r.best_rank_group <= 10).length;
+          const top3 = combinedRows.filter(r => r.best_rank_group != null && r.best_rank_group <= 3).length;
+          const keywordsWithAiOverview = combinedRows.filter(r => r.has_ai_overview === true).length;
+          const keywordsWithAiCitations = combinedRows.filter(r => r.ai_alan_citations_count > 0).length;
+          
+          // Calculate unweighted average position
+          const validRankingRows = combinedRows.filter(r => r.best_rank_group != null && r.best_rank_group > 0);
+          const avgPositionUnweighted = validRankingRows.length > 0
+            ? validRankingRows.reduce((sum, r) => sum + r.best_rank_group, 0) / validRankingRows.length
+            : null;
+
+          // Calculate volume-weighted average position
+          const keywordsWithVolume = combinedRows.filter(r => r.search_volume != null && r.search_volume > 0);
+          let avgPositionVolumeWeighted = null;
+          if (keywordsWithVolume.length > 0) {
+            let totalWeightedRank = 0;
+            let totalVolume = 0;
+            keywordsWithVolume.forEach(r => {
+              const vol = r.search_volume || 10; // Fallback to 10 if null
+              const rank = r.best_rank_group;
+              if (rank != null && rank > 0) {
+                totalWeightedRank += rank * vol;
+                totalVolume += vol;
+              }
+            });
+            if (totalVolume > 0) {
+              avgPositionVolumeWeighted = totalWeightedRank / totalVolume;
+            }
+          }
+
+          rankingAiData = {
+            combinedRows,
+            summary: {
+              total_keywords: totalKeywords,
+              keywords_with_rank: keywordsWithRank,
+              top10,
+              top3,
+              keywords_with_ai_overview: keywordsWithAiOverview,
+              keywords_with_ai_citations: keywordsWithAiCitations,
+              avg_position_unweighted: avgPositionUnweighted,
+              avg_position_volume_weighted: avgPositionVolumeWeighted,
+              keywords_used_for_avg: validRankingRows.length,
+              keywords_with_volume: keywordsWithVolume.length
+            }
+          };
+        } else {
+          // Fallback to ranking_ai_data JSON from audit_results if keyword_rankings is empty
+          rankingAiData = record.ranking_ai_data || null;
+        }
+      } else {
+        // Fallback to ranking_ai_data JSON from audit_results if keyword_rankings fetch fails
+        rankingAiData = record.ranking_ai_data || null;
+      }
+    } catch (keywordErr) {
+      console.error('Error fetching keyword rankings:', keywordErr);
+      // Fallback to ranking_ai_data JSON from audit_results if keyword_rankings fetch errors
+      rankingAiData = record.ranking_ai_data || null;
+    }
 
     // Reconstruct the full audit object from Supabase data
     const auditData = {
@@ -155,7 +254,7 @@ export default async function handler(req, res) {
       // Money Pages Priority Matrix data - restore from Supabase if available
       moneyPagePriorityData: record.money_page_priority_data || null, // Restore from Supabase, or rebuild if missing
       moneySegmentMetrics: record.money_segment_metrics || null,
-      rankingAiData: record.ranking_ai_data || null // Ranking & AI data (SERP rankings + AI Overview citations)
+      rankingAiData: rankingAiData // Ranking & AI data reconstructed from keyword_rankings table
     };
 
     return res.status(200).json({
