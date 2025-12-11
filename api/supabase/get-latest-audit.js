@@ -360,20 +360,64 @@ export default async function handler(req, res) {
       },
       snippetReadiness: record.snippet_readiness || 0,
       // Fix: Check for schema data existence, not just content_schema_score (which might be 0)
-      schemaAudit: (record.schema_total_pages != null || record.schema_coverage != null || record.content_schema_score != null || Array.isArray(record.schema_pages_detail)) ? {
+      // Also check if schema_pages_detail exists (even as a string that needs parsing)
+      schemaAudit: (record.schema_total_pages != null || record.schema_coverage != null || record.content_schema_score != null || record.schema_pages_detail != null) ? {
         status: 'ok',
         data: {
           coverage: record.schema_coverage != null ? record.schema_coverage : (record.content_schema_score != null ? record.content_schema_score : 0),
           totalPages: record.schema_total_pages || 0,
           // CRITICAL: Include pages array for scorecard schema detection
           // schema_pages_detail is the detailed array with url and schemaTypes per page
-          pages: Array.isArray(record.schema_pages_detail) && record.schema_pages_detail.length > 0
-            ? record.schema_pages_detail
-            : null,
-          pagesWithSchema: Array.isArray(record.schema_pages_detail) && record.schema_pages_detail.length > 0
-            ? record.schema_pages_detail
-            : (record.schema_pages_with_schema != null ? record.schema_pages_with_schema : 0), // Fallback to count if detail not available
-          schemaTypes: Array.isArray(record.schema_types) ? record.schema_types : [],
+          // Parse JSON if stored as string in Supabase
+          pages: (() => {
+            let pagesDetail = record.schema_pages_detail;
+            if (!pagesDetail) return null;
+            // Parse if stored as string
+            if (typeof pagesDetail === 'string') {
+              try {
+                pagesDetail = JSON.parse(pagesDetail);
+              } catch (e) {
+                console.warn('[get-latest-audit] Failed to parse schema_pages_detail JSON:', e.message);
+                return null;
+              }
+            }
+            // Return array if valid, otherwise null
+            return Array.isArray(pagesDetail) && pagesDetail.length > 0 ? pagesDetail : null;
+          })(),
+          pagesWithSchema: (() => {
+            let pagesDetail = record.schema_pages_detail;
+            if (!pagesDetail) {
+              // Fallback to count if detail not available
+              return record.schema_pages_with_schema != null ? record.schema_pages_with_schema : 0;
+            }
+            // Parse if stored as string
+            if (typeof pagesDetail === 'string') {
+              try {
+                pagesDetail = JSON.parse(pagesDetail);
+              } catch (e) {
+                console.warn('[get-latest-audit] Failed to parse schema_pages_detail JSON:', e.message);
+                return record.schema_pages_with_schema != null ? record.schema_pages_with_schema : 0;
+              }
+            }
+            // Return array if valid, otherwise fallback to count
+            return Array.isArray(pagesDetail) && pagesDetail.length > 0
+              ? pagesDetail
+              : (record.schema_pages_with_schema != null ? record.schema_pages_with_schema : 0);
+          })(),
+          schemaTypes: (() => {
+            let types = record.schema_types;
+            if (!types) return [];
+            // Parse if stored as string
+            if (typeof types === 'string') {
+              try {
+                types = JSON.parse(types);
+              } catch (e) {
+                console.warn('[get-latest-audit] Failed to parse schema_types JSON:', e.message);
+                return [];
+              }
+            }
+            return Array.isArray(types) ? types : [];
+          })(),
           foundation: (() => {
             const foundation = record.schema_foundation;
             if (!foundation) return {};
@@ -400,8 +444,33 @@ export default async function handler(req, res) {
             }
             return (typeof richEligible === 'object' && richEligible !== null) ? richEligible : {};
           })(),
-          missingTypes: Array.isArray(record.schema_types) && record.schema_types.length > 0 ? [] : ['Organization', 'Person', 'WebSite', 'BreadcrumbList'],
-          missingSchemaPages: Array.isArray(record.schema_missing_pages) ? record.schema_missing_pages : []
+          missingTypes: (() => {
+            let types = record.schema_types;
+            if (!types) return ['Organization', 'Person', 'WebSite', 'BreadcrumbList'];
+            // Parse if stored as string
+            if (typeof types === 'string') {
+              try {
+                types = JSON.parse(types);
+              } catch (e) {
+                return ['Organization', 'Person', 'WebSite', 'BreadcrumbList'];
+              }
+            }
+            return Array.isArray(types) && types.length > 0 ? [] : ['Organization', 'Person', 'WebSite', 'BreadcrumbList'];
+          })(),
+          missingSchemaPages: (() => {
+            let missing = record.schema_missing_pages;
+            if (!missing) return [];
+            // Parse if stored as string
+            if (typeof missing === 'string') {
+              try {
+                missing = JSON.parse(missing);
+              } catch (e) {
+                console.warn('[get-latest-audit] Failed to parse schema_missing_pages JSON:', e.message);
+                return [];
+              }
+            }
+            return Array.isArray(missing) ? missing : [];
+          })()
         }
       } : null,
       localSignals: (record.local_entity_score !== null || record.service_area_score !== null) ? {
