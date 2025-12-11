@@ -20842,7 +20842,47 @@ Final Score: ${score}/100`;
       }
       html += `</div>`;
 
-      // 6. Priority & next actions
+      // 6. SERP features
+      html += `<div class="scorecard-section">`;
+      html += `<h5 style="font-size: 1rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">6. SERP features</h5>`;
+      
+      // Get SERP feature presence from scorecardData
+      const hasAiOverview = scorecardData.ai_overview_present_any === true;
+      const hasLocalPack = scorecardData.local_pack_present_any === true;
+      const hasPaa = scorecardData.paa_present_any === true;
+      const hasFeaturedSnippet = scorecardData.featured_snippet_present_any === true;
+      
+      // Count features present
+      const featuresPresent = [hasAiOverview, hasLocalPack, hasPaa, hasFeaturedSnippet].filter(Boolean).length;
+      
+      html += `<div style="margin-bottom: 0.75rem;">`;
+      html += `<div style="font-size: 0.9rem; color: #1e293b; margin-bottom: 0.5rem; font-weight: 500;">SERP features present for this keyword:</div>`;
+      html += `<div style="display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.9rem; color: #1e293b;">`;
+      html += `<span>AI Overview: ${hasAiOverview ? '✅' : '❌'}</span>`;
+      html += `<span>Local pack: ${hasLocalPack ? '✅' : '❌'}</span>`;
+      html += `<span>People Also Ask: ${hasPaa ? '✅' : '❌'}</span>`;
+      html += `<span>Featured snippet: ${hasFeaturedSnippet ? '✅' : '❌'}</span>`;
+      html += `</div>`;
+      html += `<div style="margin-top: 0.5rem; font-size: 0.9rem; color: #64748b;">${featuresPresent}/4 features present</div>`;
+      html += `</div>`;
+      
+      // Interpretation based on SERP features
+      let serpInterpretation = '';
+      if (featuresPresent === 4) {
+        serpInterpretation = 'All major SERP features are present for this keyword. This indicates strong competition and multiple opportunities for visibility.';
+      } else if (featuresPresent >= 2) {
+        serpInterpretation = 'Multiple SERP features are present. Focus on optimizing for the features where you\'re not yet visible.';
+      } else if (hasAiOverview && !hasLocalPack && !hasPaa && !hasFeaturedSnippet) {
+        serpInterpretation = 'Only AI Overview is present. This keyword may benefit from local optimization (if applicable) or FAQ schema to trigger People Also Ask.';
+      } else if (hasLocalPack && !hasAiOverview) {
+        serpInterpretation = 'Local pack is present but no AI Overview. This suggests local intent; ensure your local entity is optimized.';
+      } else {
+        serpInterpretation = 'Few SERP features are present. This keyword may have lower competition or less rich result potential.';
+      }
+      html += `<p style="color: #64748b; font-size: 0.9rem; line-height: 1.5;">${serpInterpretation}</p>`;
+      html += `</div>`;
+
+      // 7. Priority & next actions
       html += `<div class="scorecard-section">`;
       html += `<h5 style="font-size: 1rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">6. Priority & next actions</h5>`;
       const priorityBg = scorecardData.priority_level === 'High' ? '#fef2f2' : 
