@@ -765,6 +765,17 @@ export default async function handler(req, res) {
         const pageTypesArray = Array.from(pageTypes);
         pageSchemaTypesMap.set(result.url, pageTypesArray);
         
+        // Debug logging for specific page to diagnose BreadcrumbList detection
+        if (result.url.includes('free-online-photography-course')) {
+          console.log(`🔍 DEBUG: Schema detection for ${result.url}:`);
+          console.log(`  Total schemas found: ${result.schemas.length}`);
+          console.log(`  Types detected: ${pageTypesArray.join(', ')}`);
+          console.log(`  BreadcrumbList detected: ${pageTypesArray.includes('BreadcrumbList') ? 'YES' : 'NO'}`);
+          if (result.schemas.length > 0) {
+            console.log(`  First schema sample:`, JSON.stringify(result.schemas[0]).substring(0, 500));
+          }
+        }
+        
         // Check rich result eligibility
         const pageEligible = detectRichResultEligibility(pageTypesArray);
         RICH_RESULT_TYPES.forEach(type => {
