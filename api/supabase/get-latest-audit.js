@@ -340,8 +340,21 @@ export default async function handler(req, res) {
           totalImpressions: record.gsc_impressions || 0,
           totalClicks: record.gsc_clicks || 0
         },
-        // CRITICAL: Load timeseries data from gsc_timeseries table for Score Trends chart
-        timeseries: null, // Will be loaded separately via get-audit-history endpoint
+        // CRITICAL: Load timeseries data from audit_results table (now stored directly)
+        timeseries: (() => {
+          const ts = record.gsc_timeseries;
+          if (!ts) return null;
+          if (typeof ts === 'string') {
+            try {
+              const parsed = JSON.parse(ts);
+              return Array.isArray(parsed) ? parsed : null;
+            } catch (e) {
+              console.warn('[get-latest-audit] Failed to parse gsc_timeseries JSON:', e.message);
+              return null;
+            }
+          }
+          return Array.isArray(ts) ? ts : null;
+        })(),
         // Query+page level data for CTR metrics in keyword scorecard
         // Fix: Parse JSON if query_pages is stored as string
         queryPages: (() => {
@@ -357,7 +370,26 @@ export default async function handler(req, res) {
             }
           }
           return Array.isArray(qp) ? qp : null;
-        })()
+        })(),
+        // Top queries from GSC
+        topQueries: (() => {
+          const tq = record.top_queries;
+          if (!tq) return null;
+          if (typeof tq === 'string') {
+            try {
+              const parsed = JSON.parse(tq);
+              return Array.isArray(parsed) ? parsed : null;
+            } catch (e) {
+              console.warn('[get-latest-audit] Failed to parse top_queries JSON:', e.message);
+              return null;
+            }
+          }
+          return Array.isArray(tq) ? tq : null;
+        })(),
+        // Date range used for this audit
+        dateRange: record.date_range || null,
+        // Property URL
+        propertyUrl: record.property_url || null
       },
       snippetReadiness: record.snippet_readiness || 0,
       // Fix: Check for schema data existence, not just content_schema_score (which might be 0)

@@ -166,7 +166,7 @@ export default async function handler(req, res) {
       schema_missing_pages: Array.isArray(schemaData.missingSchemaPages)
         ? schemaData.missingSchemaPages.map(p => (typeof p === 'string' ? p : p.url)).filter(Boolean)
         : [],
-      // Detailed schema pages data (for scorecard)
+      // Detailed schema pages data (for scorecard) - SAVE ALL FIELDS from schema audit
       // Try schemaData.pages first (detailed array), then pagesWithSchema if it's an array
       schema_pages_detail: (() => {
         // First try: schemaData.pages (detailed array from schema audit)
@@ -174,7 +174,12 @@ export default async function handler(req, res) {
           console.log('[Save Audit] Using schemaData.pages array:', schemaData.pages.length, 'pages');
           return schemaData.pages.map(p => ({
             url: p.url || '',
-            schemaTypes: Array.isArray(p.schemaTypes) ? p.schemaTypes : (p.schemaTypes ? [p.schemaTypes] : [])
+            title: p.title || null,
+            metaDescription: p.metaDescription || null,
+            hasSchema: p.hasSchema === true,
+            hasInheritedSchema: p.hasInheritedSchema === true,
+            schemaTypes: Array.isArray(p.schemaTypes) ? p.schemaTypes : (p.schemaTypes ? [p.schemaTypes] : []),
+            error: p.error || null
           })).filter(p => p.url);
         }
         // Second try: pagesWithSchema if it's an array
@@ -182,7 +187,12 @@ export default async function handler(req, res) {
           console.log('[Save Audit] Using schemaData.pagesWithSchema array:', schemaData.pagesWithSchema.length, 'pages');
           return schemaData.pagesWithSchema.map(p => ({
             url: typeof p === 'string' ? p : (p.url || ''),
-            schemaTypes: Array.isArray(p.schemaTypes) ? p.schemaTypes : (p.schemaTypes ? [p.schemaTypes] : [])
+            title: (typeof p === 'object' && p !== null) ? (p.title || null) : null,
+            metaDescription: (typeof p === 'object' && p !== null) ? (p.metaDescription || null) : null,
+            hasSchema: (typeof p === 'object' && p !== null) ? (p.hasSchema === true) : false,
+            hasInheritedSchema: (typeof p === 'object' && p !== null) ? (p.hasInheritedSchema === true) : false,
+            schemaTypes: Array.isArray(p.schemaTypes) ? p.schemaTypes : ((typeof p === 'object' && p !== null && p.schemaTypes) ? [p.schemaTypes] : []),
+            error: (typeof p === 'object' && p !== null) ? (p.error || null) : null
           })).filter(p => p.url);
         }
         console.warn('[Save Audit] schema_pages_detail is missing - schema coverage will not be available in scorecard');
@@ -212,6 +222,29 @@ export default async function handler(req, res) {
         console.warn('[Save Audit] queryPages is missing or empty - CTR metrics will not be available in scorecard');
         return null;
       })(),
+      
+      // GSC top queries (for top queries display)
+      top_queries: (() => {
+        const tq = searchData?.topQueries;
+        if (Array.isArray(tq) && tq.length > 0) {
+          console.log('[Save Audit] Saving topQueries:', tq.length, 'queries');
+          return tq;
+        }
+        return null;
+      })(),
+      
+      // GSC timeseries data (for trend charts) - store in audit_results for quick access
+      gsc_timeseries: (() => {
+        const ts = searchData?.timeseries;
+        if (Array.isArray(ts) && ts.length > 0) {
+          console.log('[Save Audit] Saving timeseries:', ts.length, 'data points');
+          return ts;
+        }
+        return null;
+      })(),
+      
+      // Date range used for this audit
+      date_range: ensureNumber(searchData?.dateRange) || null,
       
       // Pillar Scores
       visibility_score: ensureNumber(scores?.visibility),
