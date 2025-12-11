@@ -308,6 +308,11 @@ export default async function handler(req, res) {
         data: {
           coverage: record.schema_coverage || record.content_schema_score,
           totalPages: record.schema_total_pages || 0,
+          // CRITICAL: Include pages array for scorecard schema detection
+          // schema_pages_detail is the detailed array with url and schemaTypes per page
+          pages: Array.isArray(record.schema_pages_detail) && record.schema_pages_detail.length > 0
+            ? record.schema_pages_detail
+            : null,
           pagesWithSchema: Array.isArray(record.schema_pages_detail) && record.schema_pages_detail.length > 0
             ? record.schema_pages_detail
             : record.schema_pages_with_schema || 0, // Fallback to count if detail not available

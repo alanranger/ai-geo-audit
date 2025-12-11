@@ -20683,11 +20683,12 @@ Final Score: ${score}/100`;
             });
             
             if (pageData) {
-              debugLog('[Schema Coverage] Found page data for URL: ' + scorecardData.ranking_url, 'info');
+              debugLog('[Schema Coverage] ✅ Found page data for URL: ' + scorecardData.ranking_url, 'info');
+              debugLog('[Schema Coverage] Matched page URL: ' + (pageData.url || 'missing'), 'info');
               if (pageData.schemaTypes) {
                 const schemaTypes = Array.isArray(pageData.schemaTypes) ? pageData.schemaTypes : [];
                 const typeStrings = schemaTypes.map(t => String(t).toLowerCase());
-                debugLog('[Schema Coverage] Schema types found: ' + schemaTypes.join(', '), 'info');
+                debugLog('[Schema Coverage] Schema types found (' + schemaTypes.length + '): ' + schemaTypes.join(', '), 'info');
                 schemaCoverage = {
                   hasFAQ: typeStrings.some(t => t.includes('faq') || t === 'faqpage'),
                   hasHowTo: typeStrings.some(t => t.includes('howto') || t === 'howto'),
@@ -20698,10 +20699,25 @@ Final Score: ${score}/100`;
                 };
                 debugLog('[Schema Coverage] Coverage result: ' + JSON.stringify(schemaCoverage), 'info');
               } else {
-                debugLog('[Schema Coverage] Page data found but no schemaTypes', 'warn');
+                debugLog('[Schema Coverage] ⚠️ Page data found but no schemaTypes property', 'warn');
+                debugLog('[Schema Coverage] Page data keys: ' + Object.keys(pageData).join(', '), 'warn');
               }
             } else {
-              debugLog('[Schema Coverage] No page data found for URL: ' + scorecardData.ranking_url, 'warn');
+              debugLog('[Schema Coverage] ❌ No page data found for URL: ' + scorecardData.ranking_url, 'warn');
+              debugLog('[Schema Coverage] Normalized search URL: ' + normalizedUrl, 'warn');
+              if (pagesArray && pagesArray.length > 0) {
+                debugLog('[Schema Coverage] Sample URLs in pages array (first 3):', 'warn');
+                pagesArray.slice(0, 3).forEach((p, i) => {
+                  let pNorm = (p.url || '').toLowerCase().trim();
+                  try {
+                    const pUrlObj = p.url ? new URL(p.url) : null;
+                    if (pUrlObj) {
+                      pNorm = pUrlObj.pathname.toLowerCase().replace(/\/$/, '').trim();
+                    }
+                  } catch (e) {}
+                  debugLog(`  ${i + 1}. ${p.url} -> ${pNorm}`, 'warn');
+                });
+              }
             }
           }
         } else {
