@@ -219,12 +219,6 @@ export default async function handler(req, res) {
           console.log(`[get-latest-audit] No keyword rows found, falling back to ranking_ai_data from audit_results`);
           rankingAiData = record.ranking_ai_data || null;
         }
-      } else {
-        // Fallback to ranking_ai_data JSON from audit_results if keyword_rankings fetch fails
-        const errorText = await keywordRankingsResponse.text();
-        console.error(`[get-latest-audit] Failed to fetch keyword rankings: ${keywordRankingsResponse.status} - ${errorText}`);
-        rankingAiData = record.ranking_ai_data || null;
-      }
     } catch (keywordErr) {
       console.error('[get-latest-audit] Error fetching keyword rankings:', keywordErr);
       // Fallback to ranking_ai_data JSON from audit_results if keyword_rankings fetch errors
