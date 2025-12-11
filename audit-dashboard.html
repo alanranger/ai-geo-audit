@@ -4565,20 +4565,32 @@
       let isMoney = false;
       let segmentType = null;
       
+      // Try to use classifyMoneyPage if available (defined later in Money Pages section)
+      // Fallback to classifyPageSegment if not available yet
       const classifyMoneyPageFn = (typeof window !== 'undefined' && window.classifyMoneyPage) 
         ? window.classifyMoneyPage 
         : (typeof classifyMoneyPage !== 'undefined' ? classifyMoneyPage : null);
       
       if (classifyMoneyPageFn) {
-        const result = classifyMoneyPageFn(rawUrlOrPath);
-        isMoney = result.isMoney;
-        segmentType = result.segmentType;
+        try {
+          const result = classifyMoneyPageFn(rawUrlOrPath);
+          isMoney = result.isMoney;
+          segmentType = result.segmentType;
+        } catch (e) {
+          // If classifyMoneyPage fails, fall back to direct classification
+          const segment = classifyPageSegment(rawUrlOrPath);
+          isMoney = segment === PageSegment.MONEY;
+          segmentType = isMoney ? 'landing' : null;
+        }
       } else {
-        debugLog('⚠ classifyMoneyPage not available, using fallback classification', 'warn');
-        // Fallback: use classifyPageSegment directly
+        // Fallback: use classifyPageSegment directly (this is fine - same logic)
         const segment = classifyPageSegment(rawUrlOrPath);
         isMoney = segment === PageSegment.MONEY;
         segmentType = isMoney ? 'landing' : null;
+        // Only log warning in debug mode to reduce noise
+        if (window.DEBUG_MODE) {
+          debugLog('⚠ classifyMoneyPage not available, using fallback classification', 'warn');
+        }
       }
       
       // Determine pageType from canonical segmentType
@@ -18788,8 +18800,9 @@ Final Score: ${score}/100`;
             body: JSON.stringify({ queries: keywords })
           });
           
+          // Increase timeout to 360 seconds (6 minutes) to match Vercel serverless function timeout (300s) with buffer
           const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('AI fetch timeout after 60 seconds')), 60000)
+            setTimeout(() => reject(new Error('AI fetch timeout after 360 seconds')), 360000)
           );
           
           const aiRes = await Promise.race([aiFetchPromise, timeoutPromise]);
