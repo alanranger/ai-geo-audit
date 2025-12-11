@@ -20599,7 +20599,7 @@ Final Score: ${score}/100`;
             p.classList.toggle("is-active", p.getAttribute("data-panel") === target);
             const isNowActive = p.classList.contains("is-active");
             
-            // Lazy-load Ranking & AI data when tab is opened (from storage, not API)
+            // Lazy-load Ranking & AI data when tab is opened (from storage only, never trigger API scan)
             if (target === "ranking" && isNowActive && !wasActive) {
               // Wire button, filters, and sorting when panel becomes visible
               setTimeout(() => {
@@ -20608,8 +20608,33 @@ Final Score: ${score}/100`;
                 if (typeof wireRankingSorting === 'function') wireRankingSorting();
                 if (typeof wireRankingPagination === 'function') wireRankingPagination();
               }, 100);
-              // Load from localStorage/Supabase, don't fetch from APIs
-              loadRankingAiData(false); // This will check storage first
+              // Load from localStorage/Supabase ONLY - never trigger API scan from tab click
+              // Only load if data exists, otherwise show empty state
+              (async () => {
+                const storedData = await loadRankingAiDataFromStorage(false);
+                if (storedData && storedData.combinedRows && storedData.summary) {
+                  const mod = window.RankingAiModule;
+                  if (mod) {
+                    mod.setData(storedData.combinedRows, storedData.summary);
+                    mod.setLoadedOnce(true);
+                    renderRankingAiTab();
+                    const lastRunEl = document.getElementById("ranking-ai-last-run");
+                    if (lastRunEl && storedData.timestamp) {
+                      const date = new Date(storedData.timestamp);
+                      lastRunEl.textContent = `Last run: ${date.toLocaleString()}`;
+                    }
+                    debugLog(`✓ Ranking & AI data loaded from storage (${storedData.combinedRows.length} keywords)`, 'success');
+                  }
+                } else {
+                  // No data available - just render empty state, don't trigger scan
+                  debugLog('⚠ No Ranking & AI data available. Click "Run ranking & AI check" to fetch data.', 'info');
+                  const mod = window.RankingAiModule;
+                  if (mod) {
+                    mod.setData([], { total_keywords: 0, keywords_with_rank: 0, keywords_with_ai_overview: 0, keywords_with_ai_citations: 0, top10: 0, top3: 0 });
+                    renderRankingAiTab();
+                  }
+                }
+              })();
             }
 
             // Re-render Score Trends chart when Overview tab is shown
