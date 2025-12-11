@@ -32,7 +32,11 @@ function extractJsonLd(htmlString) {
   const jsonLdRegex = /<script[^>]*type=["']application\/ld\+json["'][^>]*>(.*?)<\/script>/gis;
   const matches = [...htmlString.matchAll(jsonLdRegex)];
   
+  let parseErrors = 0;
+  let totalBlocks = 0;
+  
   for (const match of matches) {
+    totalBlocks++;
     const jsonText = match[1].trim();
     const parsed = safeJsonParse(jsonText);
     if (parsed) {
@@ -42,7 +46,17 @@ function extractJsonLd(htmlString) {
       } else {
         jsonLdBlocks.push(parsed);
       }
+    } else {
+      parseErrors++;
+      // Log parse errors for important types
+      if (jsonText.includes('BreadcrumbList') || jsonText.includes('HowTo') || jsonText.includes('BlogPosting') || jsonText.includes('FAQPage')) {
+        console.log(`⚠️ Failed to parse JSON-LD block containing important type. Sample: ${jsonText.substring(0, 200)}`);
+      }
     }
+  }
+  
+  if (parseErrors > 0) {
+    console.log(`⚠️ JSON-LD extraction: ${parseErrors}/${totalBlocks} blocks failed to parse`);
   }
   
   // Also check for microdata BreadcrumbList (itemscope/itemtype)
@@ -261,6 +275,23 @@ function normalizeSchemaTypes(schemaObject) {
   }
 
   walk(schemaObject);
+  
+  // CRITICAL FIX: Ensure top-level @type is always captured
+  // This handles cases where the walk function might miss simple schemas
+  if (schemaObject && typeof schemaObject === 'object') {
+    const topLevelType = schemaObject['@type'];
+    if (topLevelType) {
+      if (Array.isArray(topLevelType)) {
+        topLevelType.forEach(t => {
+          if (t && typeof t === 'string') {
+            collected.add(t.trim());
+          }
+        });
+      } else if (typeof topLevelType === 'string' && topLevelType.trim()) {
+        collected.add(topLevelType.trim());
+      }
+    }
+  }
 
   return Array.from(collected);
 }
@@ -547,16 +578,30 @@ async function crawlUrl(url, semaphore, delayAfterMs = 0) {
     const title = extractTitle(html);
     const metaDescription = extractMetaDescription(html);
     
+    // Debug: Log ALL extracted schemas and their detection
+    if (schemas.length > 0) {
+      console.log(`📋 Extracted ${schemas.length} schema block(s) from ${url}`);
+    }
+    
     // Debug: Check ALL schemas for BreadcrumbList, HowTo, FAQPage, BlogPosting and log details
     schemas.forEach((schema, idx) => {
+      // First, check raw @type before normalization
+      const rawType = schema['@type'];
       const types = normalizeSchemaTypes(schema);
       const importantTypes = ['BreadcrumbList', 'HowTo', 'FAQPage', 'BlogPosting', 'Article'];
       const foundImportantTypes = types.filter(t => importantTypes.includes(t));
       
+      // Log if raw @type exists but wasn't detected
+      if (rawType && !types.includes(rawType)) {
+        console.log(`⚠️ SCHEMA DETECTION ISSUE: Raw @type="${rawType}" exists but normalizeSchemaTypes didn't detect it for ${url}`);
+        console.log(`  Detected types: ${types.join(', ') || 'NONE'}`);
+        console.log(`  Schema sample:`, JSON.stringify(schema).substring(0, 400));
+      }
+      
       if (foundImportantTypes.length > 0) {
         console.log(`✅ ${foundImportantTypes.join(', ')} detected in schema block ${idx} for ${url}`);
         console.log(`  All types in block: ${types.join(', ')}`);
-        console.log(`  Schema @type: ${schema['@type'] || 'missing'}`);
+        console.log(`  Schema @type: ${rawType || 'missing'}`);
         console.log(`  Schema structure sample:`, JSON.stringify(schema).substring(0, 300));
       }
     });
