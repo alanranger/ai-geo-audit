@@ -496,6 +496,11 @@ export default async function handler(req, res) {
           ai_alan_citations: row.ai_alan_citations ? (Array.isArray(row.ai_alan_citations) ? row.ai_alan_citations : []) : null,
           competitor_counts: row.competitor_counts ? (typeof row.competitor_counts === 'object' ? row.competitor_counts : {}) : null,
           serp_features: row.serp_features ? (typeof row.serp_features === 'object' ? row.serp_features : {}) : null,
+          // New boolean fields for SERP feature coverage
+          ai_overview_present_any: row.ai_overview_present_any === true || row.has_ai_overview === true,
+          local_pack_present_any: row.local_pack_present_any === true || (row.serp_features && row.serp_features.local_pack === true),
+          paa_present_any: row.paa_present_any === true || (row.serp_features && row.serp_features.people_also_ask === true),
+          featured_snippet_present_any: row.featured_snippet_present_any === true || (row.serp_features && row.serp_features.featured_snippet === true),
           segment: row.segment ? String(row.segment).trim() : null,
           page_type: row.pageType ? String(row.pageType).trim() : null,
           demand_share: row.demand_share !== null && row.demand_share !== undefined ? parseFloat(row.demand_share) : null,

@@ -358,13 +358,18 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot) {
     // Derive SERP features from result.item_types
     const itemTypes = result?.item_types || [];
     
+    // Extract individual boolean fields for Supabase storage
+    const ai_overview_present_any = itemTypes.includes("ai_overview");
+    const local_pack_present_any = itemTypes.includes("local_pack");
+    const paa_present_any = itemTypes.includes("people_also_ask");
+    const featured_snippet_present_any = itemTypes.includes("featured_snippet");
+    
+    // Keep serp_features object for backward compatibility
     const serpFeatures = {
-      local_pack: itemTypes.includes("local_pack"),
-      featured_snippet: itemTypes.includes("featured_snippet"),
-      people_also_ask: itemTypes.includes("people_also_ask"),
+      local_pack: local_pack_present_any,
+      featured_snippet: featured_snippet_present_any,
+      people_also_ask: paa_present_any,
     };
-
-    const hasAiOverview = itemTypes.includes("ai_overview");
 
     return {
       keyword,
@@ -372,8 +377,13 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot) {
       best_rank_absolute: bestRankAbsolute,
       best_url: bestUrl,
       best_title: bestTitle,
-      has_ai_overview: hasAiOverview,
+      has_ai_overview: ai_overview_present_any,
       serp_features: serpFeatures,
+      // New boolean fields for Supabase storage
+      ai_overview_present_any,
+      local_pack_present_any,
+      paa_present_any,
+      featured_snippet_present_any,
     };
   } catch (err) {
     console.error(`Error fetching SERP for keyword "${keyword}":`, err);
