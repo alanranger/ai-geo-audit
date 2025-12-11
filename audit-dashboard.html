@@ -19752,12 +19752,39 @@ Final Score: ${score}/100`;
 
         // Normalize keyword for matching
         const normalizedKeyword = (key.keyword || '').toLowerCase().trim();
-        const normalizedUrl = (key.url || '').toLowerCase().trim();
+        
+        // Normalize URL: remove query parameters and trailing slashes
+        let normalizedUrl = (key.url || '').toLowerCase().trim();
+        try {
+          if (normalizedUrl) {
+            const urlObj = new URL(normalizedUrl);
+            normalizedUrl = urlObj.pathname.toLowerCase().replace(/\/$/, '').trim();
+            // If pathname is empty or just '/', use hostname + pathname
+            if (!normalizedUrl || normalizedUrl === '/') {
+              normalizedUrl = (urlObj.hostname + urlObj.pathname).toLowerCase().replace(/\/$/, '').trim();
+            }
+          }
+        } catch (e) {
+          // If URL parsing fails, use original but remove query params manually
+          normalizedUrl = normalizedUrl.split('?')[0].split('#')[0].toLowerCase().replace(/\/$/, '').trim();
+        }
 
         // First try: exact match on keyword + URL
         const exactMatch = queryPages.find(p => {
           const pKeyword = (p.query || '').toLowerCase().trim();
-          const pPage = (p.page || p.url || '').toLowerCase().trim();
+          let pPage = (p.page || p.url || '').toLowerCase().trim();
+          // Normalize pPage the same way
+          try {
+            if (pPage) {
+              const pUrlObj = new URL(pPage);
+              pPage = pUrlObj.pathname.toLowerCase().replace(/\/$/, '').trim();
+              if (!pPage || pPage === '/') {
+                pPage = (pUrlObj.hostname + pUrlObj.pathname).toLowerCase().replace(/\/$/, '').trim();
+              }
+            }
+          } catch (e) {
+            pPage = pPage.split('?')[0].split('#')[0].toLowerCase().replace(/\/$/, '').trim();
+          }
           return pKeyword === normalizedKeyword && 
                  (pPage === normalizedUrl || pPage.includes(normalizedUrl) || normalizedUrl.includes(pPage));
         });
@@ -19797,7 +19824,19 @@ Final Score: ${score}/100`;
 
         // Third try: match by URL only (page-level data)
         const urlMatches = queryPages.filter(p => {
-          const pPage = (p.page || p.url || '').toLowerCase().trim();
+          let pPage = (p.page || p.url || '').toLowerCase().trim();
+          // Normalize pPage the same way
+          try {
+            if (pPage) {
+              const pUrlObj = new URL(pPage);
+              pPage = pUrlObj.pathname.toLowerCase().replace(/\/$/, '').trim();
+              if (!pPage || pPage === '/') {
+                pPage = (pUrlObj.hostname + pUrlObj.pathname).toLowerCase().replace(/\/$/, '').trim();
+              }
+            }
+          } catch (e) {
+            pPage = pPage.split('?')[0].split('#')[0].toLowerCase().replace(/\/$/, '').trim();
+          }
           return pPage === normalizedUrl || pPage.includes(normalizedUrl) || normalizedUrl.includes(pPage);
         });
 
@@ -21053,13 +21092,20 @@ Final Score: ${score}/100`;
             const rankingUrl = scorecardData.ranking_url || '';
             let normalizedUrl = rankingUrl.toLowerCase().trim();
             try {
-              const urlObj = rankingUrl ? new URL(rankingUrl) : null;
-              if (urlObj) {
+              if (rankingUrl) {
+                const urlObj = new URL(rankingUrl);
                 normalizedUrl = urlObj.pathname.toLowerCase().replace(/\/$/, '').trim();
+                // If pathname is empty or just '/', treat as homepage
+                if (!normalizedUrl || normalizedUrl === '/') {
+                  normalizedUrl = '/';
+                }
               }
             } catch (e) {
-              // If URL parsing fails, use original
-              normalizedUrl = rankingUrl.toLowerCase().trim();
+              // If URL parsing fails, remove query params manually
+              normalizedUrl = rankingUrl.split('?')[0].split('#')[0].toLowerCase().replace(/\/$/, '').trim();
+              if (!normalizedUrl || normalizedUrl === '/') {
+                normalizedUrl = '/';
+              }
             }
             
             debugLog('[Schema Coverage] Looking for URL: ' + normalizedUrl + ' (original: ' + rankingUrl + ')', 'info');
@@ -21068,20 +21114,29 @@ Final Score: ${score}/100`;
               if (!p || !p.url) return false;
               let pNormalized = (p.url || '').toLowerCase().trim();
               try {
-                const pUrlObj = p.url ? new URL(p.url) : null;
-                if (pUrlObj) {
+                if (p.url) {
+                  const pUrlObj = new URL(p.url);
                   pNormalized = pUrlObj.pathname.toLowerCase().replace(/\/$/, '').trim();
+                  // If pathname is empty or just '/', treat as homepage
+                  if (!pNormalized || pNormalized === '/') {
+                    pNormalized = '/';
+                  }
                 }
               } catch (e) {
-                // If URL parsing fails, use original
-                pNormalized = (p.url || '').toLowerCase().trim();
+                // If URL parsing fails, remove query params manually
+                pNormalized = (p.url || '').split('?')[0].split('#')[0].toLowerCase().replace(/\/$/, '').trim();
+                if (!pNormalized || pNormalized === '/') {
+                  pNormalized = '/';
+                }
               }
               
               const exactMatch = pNormalized === normalizedUrl;
-              const pathMatch = pNormalized.includes(normalizedUrl) || normalizedUrl.includes(pNormalized);
+              // For homepage, also check if both are '/' or empty
+              const homepageMatch = (normalizedUrl === '/' || normalizedUrl === '') && (pNormalized === '/' || pNormalized === '');
+              const pathMatch = !exactMatch && !homepageMatch && (pNormalized.includes(normalizedUrl) || normalizedUrl.includes(pNormalized));
               
-              if (exactMatch || pathMatch) {
-                debugLog('[Schema Coverage] URL match: ' + p.url + ' -> ' + pNormalized, 'info');
+              if (exactMatch || homepageMatch || pathMatch) {
+                debugLog('[Schema Coverage] URL match: ' + p.url + ' -> ' + pNormalized + ' (search: ' + normalizedUrl + ')', 'info');
                 return true;
               }
               return false;
