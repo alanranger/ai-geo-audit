@@ -19390,35 +19390,49 @@ Final Score: ${score}/100`;
       const { demand_level, best_rank_group, has_ai_overview, ai_citations_ours, segment } = scorecardData;
       const parts = [];
       
-      // Demand + rank description
-      if (demand_level === 'High' && best_rank_group != null && best_rank_group <= 10) {
-        parts.push('High-demand keyword currently on page 1.');
-      } else if (demand_level === 'High' && (best_rank_group == null || best_rank_group > 10)) {
-        parts.push('High-demand keyword currently on page 2+; big upside if you move into page 1.');
-      } else if (demand_level === 'Medium' && best_rank_group != null && best_rank_group <= 10) {
-        parts.push('Medium-demand keyword currently on page 1.');
-      } else if (demand_level === 'Medium' && (best_rank_group == null || best_rank_group > 10)) {
-        parts.push('Medium-demand keyword currently on page 2+; opportunity to move into page 1.');
-      } else if (best_rank_group != null && best_rank_group <= 10) {
-        parts.push('Keyword currently on page 1.');
-      } else {
-        parts.push('Keyword currently on page 2+; opportunity to improve ranking.');
-      }
+      // Build summary sentence based on demand, rank, and AI status
+      // Format: "[Demand level]-demand [segment] keyword currently ranking #[rank] and [AI status]. [Win assessment]."
       
-      // AI Overview status
-      if (has_ai_overview) {
-        if (ai_citations_ours > 0) {
-          parts.push('Cited in AI Overviews.');
-        } else {
-          parts.push('AI Overview present but not cited.');
-        }
-      }
+      // Demand level prefix
+      const demandPrefix = demand_level === 'High' ? 'High-demand' : 
+                          demand_level === 'Medium' ? 'Medium-demand' : 
+                          'Low-demand';
       
       // Segment context
-      if (segment && segment.toLowerCase() === 'education') {
-        parts.push('Education content.');
-      } else if (segment && segment.toLowerCase() === 'money') {
-        parts.push('Commercial intent.');
+      const segmentContext = segment && segment.toLowerCase() === 'education' ? 'education ' :
+                            segment && segment.toLowerCase() === 'money' ? 'commercial ' : '';
+      
+      // Rank description
+      if (best_rank_group != null && best_rank_group <= 10) {
+        parts.push(`${demandPrefix} ${segmentContext}keyword currently ranking #${best_rank_group}`);
+        
+        // AI Overview status
+        if (has_ai_overview && ai_citations_ours > 0) {
+          parts.push('and cited in AI Overviews.');
+        } else if (has_ai_overview) {
+          parts.push('with AI Overview present but not cited.');
+        } else {
+          parts.push('but not yet cited in AI Overviews.');
+        }
+        
+        // Win assessment for page 1 keywords
+        if (demand_level === 'High' && has_ai_overview && ai_citations_ours > 0) {
+          parts.push('Good win if you can improve CTR and schema.');
+        } else if (demand_level === 'High') {
+          parts.push('Good win potential if you can improve CTR, schema, and AI citations.');
+        }
+      } else {
+        // Page 2+ keywords
+        if (demand_level === 'High') {
+          parts.push(`${demandPrefix} ${segmentContext}keyword currently on page 2+; big upside if you move into page 1.`);
+        } else {
+          parts.push(`${demandPrefix} ${segmentContext}keyword currently on page 2+; opportunity to improve ranking.`);
+        }
+        
+        // Add AI status for page 2+ if present
+        if (has_ai_overview && ai_citations_ours > 0) {
+          parts.push('Cited in AI Overviews.');
+        }
       }
       
       return parts.join(' ');
@@ -19474,48 +19488,82 @@ Final Score: ${score}/100`;
      */
     function getCtrMetricsForKeyword(key) {
       try {
-        // Try to get from audit data stored in window or localStorage
-        const auditData = window.auditData || (() => {
-          try {
-            const stored = localStorage.getItem('auditData');
-            return stored ? JSON.parse(stored) : null;
-          } catch (e) {
-            return null;
-          }
-        })();
-
-        if (!auditData || !auditData.searchData || !auditData.searchData.perKeyword) {
+        // Get audit data from localStorage using loadAuditResultsSync
+        const savedAudit = loadAuditResultsSync();
+        if (!savedAudit || !savedAudit.searchData || !savedAudit.searchData.queryPages) {
           return null;
         }
 
-        // Look for matching keyword+URL in perKeyword data
-        const perKeyword = auditData.searchData.perKeyword || [];
-        const match = perKeyword.find(p => 
-          p.keyword && key.keyword && 
-          p.keyword.toLowerCase().trim() === key.keyword.toLowerCase().trim() &&
-          p.url && key.url &&
-          (p.url === key.url || p.url.includes(key.url) || key.url.includes(p.url))
-        );
+        const queryPages = savedAudit.searchData.queryPages || [];
+        if (!Array.isArray(queryPages) || queryPages.length === 0) {
+          return null;
+        }
 
-        if (match && match.ctr != null && match.impressions != null) {
+        // Normalize keyword for matching
+        const normalizedKeyword = (key.keyword || '').toLowerCase().trim();
+        const normalizedUrl = (key.url || '').toLowerCase().trim();
+
+        // First try: exact match on keyword + URL
+        const exactMatch = queryPages.find(p => {
+          const pKeyword = (p.query || '').toLowerCase().trim();
+          const pPage = (p.page || p.url || '').toLowerCase().trim();
+          return pKeyword === normalizedKeyword && 
+                 (pPage === normalizedUrl || pPage.includes(normalizedUrl) || normalizedUrl.includes(pPage));
+        });
+
+        if (exactMatch && exactMatch.ctr != null && exactMatch.impressions != null) {
+          // CTR is stored as percentage (0-100), convert to decimal for consistency
+          const ctrDecimal = typeof exactMatch.ctr === 'number' ? (exactMatch.ctr / 100) : parseFloat(exactMatch.ctr) / 100;
           return {
-            ctr: match.ctr,
-            impressions: match.impressions,
-            clicks: match.clicks || 0
+            ctr: ctrDecimal,
+            impressions: exactMatch.impressions || 0,
+            clicks: exactMatch.clicks || 0
           };
         }
 
-        // Fallback: try to find by URL only (page-level data)
-        const urlMatch = perKeyword.find(p => 
-          p.url && key.url &&
-          (p.url === key.url || p.url.includes(key.url) || key.url.includes(p.url))
-        );
+        // Second try: match by keyword only (aggregate all pages for this keyword)
+        const keywordMatches = queryPages.filter(p => {
+          const pKeyword = (p.query || '').toLowerCase().trim();
+          return pKeyword === normalizedKeyword;
+        });
 
-        if (urlMatch && urlMatch.ctr != null && urlMatch.impressions != null) {
+        if (keywordMatches.length > 0) {
+          // Aggregate impressions, clicks, and calculate weighted CTR
+          let totalImpressions = 0;
+          let totalClicks = 0;
+          keywordMatches.forEach(m => {
+            totalImpressions += (m.impressions || 0);
+            totalClicks += (m.clicks || 0);
+          });
+          const aggregatedCtr = totalImpressions > 0 ? (totalClicks / totalImpressions) : 0;
+          
           return {
-            ctr: urlMatch.ctr,
-            impressions: urlMatch.impressions,
-            clicks: urlMatch.clicks || 0
+            ctr: aggregatedCtr,
+            impressions: totalImpressions,
+            clicks: totalClicks
+          };
+        }
+
+        // Third try: match by URL only (page-level data)
+        const urlMatches = queryPages.filter(p => {
+          const pPage = (p.page || p.url || '').toLowerCase().trim();
+          return pPage === normalizedUrl || pPage.includes(normalizedUrl) || normalizedUrl.includes(pPage);
+        });
+
+        if (urlMatches.length > 0) {
+          // Aggregate for this URL
+          let totalImpressions = 0;
+          let totalClicks = 0;
+          urlMatches.forEach(m => {
+            totalImpressions += (m.impressions || 0);
+            totalClicks += (m.clicks || 0);
+          });
+          const aggregatedCtr = totalImpressions > 0 ? (totalClicks / totalImpressions) : 0;
+          
+          return {
+            ctr: aggregatedCtr,
+            impressions: totalImpressions,
+            clicks: totalClicks
           };
         }
 
@@ -19562,35 +19610,44 @@ Final Score: ${score}/100`;
      */
     function getSchemaCoverageForUrl(url) {
       try {
-        // Try to get from audit data stored in window or localStorage
-        const auditData = window.auditData || (() => {
-          try {
-            const stored = localStorage.getItem('auditData');
-            return stored ? JSON.parse(stored) : null;
-          } catch (e) {
-            return null;
-          }
-        })();
-
-        if (!auditData || !auditData.schemaAudit || !auditData.schemaAudit.data) {
+        // Get audit data from localStorage using loadAuditResultsSync
+        const savedAudit = loadAuditResultsSync();
+        if (!savedAudit || !savedAudit.schemaAudit || !savedAudit.schemaAudit.data) {
           return null;
         }
 
-        const schemaData = auditData.schemaAudit.data;
+        const schemaData = savedAudit.schemaAudit.data;
         const pagesWithSchema = schemaData.pagesWithSchema || [];
-        const pageData = pagesWithSchema.find(p => 
-          p.url && url && (p.url === url || p.url.includes(url) || url.includes(p.url))
-        );
-
-        if (pageData && pageData.schemaTypes) {
-          return {
-            hasSchema: true,
-            schemaTypes: Array.isArray(pageData.schemaTypes) ? pageData.schemaTypes : [],
-            url: pageData.url
-          };
+        if (!Array.isArray(pagesWithSchema) || pagesWithSchema.length === 0) {
+          return null;
         }
 
-        return null;
+        const normalizedUrl = (url || '').toLowerCase().trim();
+        const pageData = pagesWithSchema.find(p => {
+          const pUrl = (p.url || '').toLowerCase().trim();
+          return pUrl === normalizedUrl || pUrl.includes(normalizedUrl) || normalizedUrl.includes(pUrl);
+        });
+
+        if (!pageData || !pageData.schemaTypes) {
+          return null;
+        }
+
+        // Extract schema types from array
+        const schemaTypes = Array.isArray(pageData.schemaTypes) ? pageData.schemaTypes : [];
+        
+        // Check for specific schema types (case-insensitive)
+        const typeStrings = schemaTypes.map(t => String(t).toLowerCase());
+        
+        return {
+          hasFAQ: typeStrings.some(t => t.includes('faq') || t === 'faqpage'),
+          hasHowTo: typeStrings.some(t => t.includes('howto') || t === 'howto'),
+          hasEvent: typeStrings.some(t => t.includes('event') && !t.includes('product')),
+          hasProduct: typeStrings.some(t => t.includes('product')),
+          hasBreadcrumb: typeStrings.some(t => t.includes('breadcrumb') || t === 'breadcrumblist'),
+          hasImageObject: typeStrings.some(t => t.includes('image') || t === 'imageobject'),
+          schemaTypes: schemaTypes,
+          url: pageData.url
+        };
       } catch (err) {
         console.error('Error getting schema coverage:', err);
         return null;
@@ -20491,12 +20548,15 @@ Final Score: ${score}/100`;
         // Explanatory text based on performance
         if (ctrPerformance === 'Weak') {
           html += `<p style="color: #64748b; font-size: 0.9rem; line-height: 1.5;">CTR is weak for this position. Improving the snippet (title, meta description and rich results) should unlock more clicks for this keyword.</p>`;
+        } else if (ctrPerformance === 'Strong') {
+          html += `<p style="color: #64748b; font-size: 0.9rem; line-height: 1.5;">CTR is in line with expectations for this position. Further gains are more likely to come from improving rank (links and authority) than snippet tweaks alone.</p>`;
         } else {
+          // OK performance
           html += `<p style="color: #64748b; font-size: 0.9rem; line-height: 1.5;">CTR is in line with expectations for this position. Further gains are more likely to come from improving rank (links and authority) than snippet tweaks alone.</p>`;
         }
       } else {
-        // Fallback placeholder text
-        html += `<p style="color: #64748b; font-size: 0.9rem; line-height: 1.5;">CTR data is not yet wired into this module; using rank as a proxy. At this position you should be capturing a strong share of clicks. If CTR is low in the Behaviour panel, focus on improving the snippet (title, meta description, and rich results).</p>`;
+        // Fallback placeholder text when CTR data not available
+        html += `<p style="color: #64748b; font-size: 0.9rem; line-height: 1.5;">CTR data not available for this keyword/page; using rank as a proxy. Check the Behaviour panel for more detail.</p>`;
       }
       html += `</div>`;
 
@@ -20533,8 +20593,8 @@ Final Score: ${score}/100`;
         }
         html += `<p style="color: #64748b; font-size: 0.9rem; line-height: 1.5;">${schemaInterpretation}</p>`;
       } else {
-        // Fallback placeholder text
-        html += `<p style="color: #64748b; font-size: 0.9rem; line-height: 1.5;">Schema coverage isn't evaluated here yet. Check the Content/Schema pillar for a full assessment of schema types (FAQ, HowTo, Event/Product, Breadcrumb, ImageObject) and rich results.</p>`;
+        // Fallback placeholder text when schema data not available
+        html += `<p style="color: #64748b; font-size: 0.9rem; line-height: 1.5;">Schema coverage data is not available for this page in the current scan. Check the Content/Schema pillar for more detail.</p>`;
       }
       html += `</div>`;
 
