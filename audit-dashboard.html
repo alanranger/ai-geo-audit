@@ -20644,10 +20644,42 @@ Final Score: ${score}/100`;
           }
           
           if (pagesArray && pagesArray.length > 0) {
-            const normalizedUrl = (scorecardData.ranking_url || '').toLowerCase().trim();
+            // Normalize URL: remove query params and trailing slashes for matching
+            const rankingUrl = scorecardData.ranking_url || '';
+            let normalizedUrl = rankingUrl.toLowerCase().trim();
+            try {
+              const urlObj = rankingUrl ? new URL(rankingUrl) : null;
+              if (urlObj) {
+                normalizedUrl = urlObj.pathname.toLowerCase().replace(/\/$/, '').trim();
+              }
+            } catch (e) {
+              // If URL parsing fails, use original
+              normalizedUrl = rankingUrl.toLowerCase().trim();
+            }
+            
+            debugLog('[Schema Coverage] Looking for URL: ' + normalizedUrl + ' (original: ' + rankingUrl + ')', 'info');
+            
             const pageData = pagesArray.find(p => {
-              const pUrl = (p.url || '').toLowerCase().trim();
-              return pUrl === normalizedUrl || pUrl.includes(normalizedUrl) || normalizedUrl.includes(pUrl);
+              if (!p || !p.url) return false;
+              let pNormalized = (p.url || '').toLowerCase().trim();
+              try {
+                const pUrlObj = p.url ? new URL(p.url) : null;
+                if (pUrlObj) {
+                  pNormalized = pUrlObj.pathname.toLowerCase().replace(/\/$/, '').trim();
+                }
+              } catch (e) {
+                // If URL parsing fails, use original
+                pNormalized = (p.url || '').toLowerCase().trim();
+              }
+              
+              const exactMatch = pNormalized === normalizedUrl;
+              const pathMatch = pNormalized.includes(normalizedUrl) || normalizedUrl.includes(pNormalized);
+              
+              if (exactMatch || pathMatch) {
+                debugLog('[Schema Coverage] URL match: ' + p.url + ' -> ' + pNormalized, 'info');
+                return true;
+              }
+              return false;
             });
             
             if (pageData) {
