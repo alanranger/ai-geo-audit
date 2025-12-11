@@ -400,7 +400,7 @@ export default async function handler(req, res) {
           coverage: record.schema_coverage != null ? record.schema_coverage : (record.content_schema_score != null ? record.content_schema_score : 0),
           totalPages: record.schema_total_pages || 0,
           // CRITICAL: Include pages array for scorecard schema detection
-          // schema_pages_detail is the detailed array with url and schemaTypes per page
+          // schema_pages_detail is the detailed array with url, title, metaDescription, hasSchema, schemaTypes, error per page
           // Parse JSON if stored as string in Supabase
           pages: (() => {
             let pagesDetail = record.schema_pages_detail;
@@ -415,7 +415,19 @@ export default async function handler(req, res) {
               }
             }
             // Return array if valid, otherwise null
-            return Array.isArray(pagesDetail) && pagesDetail.length > 0 ? pagesDetail : null;
+            // Ensure all fields are present (backward compatibility for old records)
+            if (Array.isArray(pagesDetail) && pagesDetail.length > 0) {
+              return pagesDetail.map(p => ({
+                url: p.url || '',
+                title: p.title || null,
+                metaDescription: p.metaDescription || null,
+                hasSchema: p.hasSchema === true,
+                hasInheritedSchema: p.hasInheritedSchema === true,
+                schemaTypes: Array.isArray(p.schemaTypes) ? p.schemaTypes : (p.schemaTypes ? [p.schemaTypes] : []),
+                error: p.error || null
+              })).filter(p => p.url);
+            }
+            return null;
           })(),
           pagesWithSchema: (() => {
             let pagesDetail = record.schema_pages_detail;
