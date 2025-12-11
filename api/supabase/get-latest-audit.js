@@ -271,13 +271,37 @@ export default async function handler(req, res) {
       scores: {
         visibility: record.visibility_score || null,
         contentSchema: record.content_schema_score || null,
-        authority: record.authority_by_segment ? {
-          score: record.authority_score || null,
-          bySegment: record.authority_by_segment || null
-        } : (record.authority_score || null),
+        authority: (() => {
+          const bySegment = record.authority_by_segment;
+          let parsedBySegment = bySegment;
+          if (bySegment && typeof bySegment === 'string') {
+            try {
+              parsedBySegment = JSON.parse(bySegment);
+            } catch (e) {
+              console.warn('[get-latest-audit] Failed to parse authority_by_segment JSON:', e.message);
+              parsedBySegment = null;
+            }
+          }
+          return parsedBySegment ? {
+            score: record.authority_score || null,
+            bySegment: parsedBySegment
+          } : (record.authority_score || null);
+        })(),
         localEntity: record.local_entity_score || null,
         serviceArea: record.service_area_score || null,
-        brandOverlay: record.brand_overlay || null,
+        brandOverlay: (() => {
+          const overlay = record.brand_overlay;
+          if (!overlay) return null;
+          if (typeof overlay === 'string') {
+            try {
+              return JSON.parse(overlay);
+            } catch (e) {
+              console.warn('[get-latest-audit] Failed to parse brand_overlay JSON:', e.message);
+              return null;
+            }
+          }
+          return overlay;
+        })(),
         // Fix: Parse JSON if money_pages_metrics is stored as string
         moneyPagesMetrics: (() => {
           const metrics = record.money_pages_metrics;
@@ -350,8 +374,32 @@ export default async function handler(req, res) {
             ? record.schema_pages_detail
             : (record.schema_pages_with_schema != null ? record.schema_pages_with_schema : 0), // Fallback to count if detail not available
           schemaTypes: Array.isArray(record.schema_types) ? record.schema_types : [],
-          foundation: (typeof record.schema_foundation === 'object' && record.schema_foundation !== null) ? record.schema_foundation : {},
-          richEligible: (typeof record.schema_rich_eligible === 'object' && record.schema_rich_eligible !== null) ? record.schema_rich_eligible : {},
+          foundation: (() => {
+            const foundation = record.schema_foundation;
+            if (!foundation) return {};
+            if (typeof foundation === 'string') {
+              try {
+                return JSON.parse(foundation);
+              } catch (e) {
+                console.warn('[get-latest-audit] Failed to parse schema_foundation JSON:', e.message);
+                return {};
+              }
+            }
+            return (typeof foundation === 'object' && foundation !== null) ? foundation : {};
+          })(),
+          richEligible: (() => {
+            const richEligible = record.schema_rich_eligible;
+            if (!richEligible) return {};
+            if (typeof richEligible === 'string') {
+              try {
+                return JSON.parse(richEligible);
+              } catch (e) {
+                console.warn('[get-latest-audit] Failed to parse schema_rich_eligible JSON:', e.message);
+                return {};
+              }
+            }
+            return (typeof richEligible === 'object' && richEligible !== null) ? richEligible : {};
+          })(),
           missingTypes: Array.isArray(record.schema_types) && record.schema_types.length > 0 ? [] : ['Organization', 'Person', 'WebSite', 'BreadcrumbList'],
           missingSchemaPages: Array.isArray(record.schema_missing_pages) ? record.schema_missing_pages : []
         }
