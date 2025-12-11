@@ -56,45 +56,53 @@ function extractJsonLd(htmlString) {
     } else {
       parseErrors++;
       
-      // Try multiple strategies to extract @type from malformed JSON
-      // Strategy 1: Simple regex match
-      let typeMatch = jsonText.match(/"@type"\s*:\s*"([^"]+)"/i);
+      // CRITICAL: Try to extract @type from failed parse blocks
+      // This is essential because BlogPosting/BreadcrumbList blocks are failing to parse
+      const importantTypes = ['BreadcrumbList', 'HowTo', 'BlogPosting', 'FAQPage', 'WebPage', 'Article', 'ItemList', 'Product', 'Event'];
+      let extractedType = null;
       
-      // Strategy 2: If that fails, try to find @type even with escaped quotes or whitespace
-      if (!typeMatch) {
-        typeMatch = jsonText.match(/["']@type["']\s*:\s*["']([^"']+)["']/i);
-      }
+      // Try multiple regex patterns to extract @type
+      const patterns = [
+        /"@type"\s*:\s*"([^"]+)"/i,                    // Standard: "@type": "BlogPosting"
+        /["']@type["']\s*:\s*["']([^"']+)["']/i,      // Flexible quotes: '@type': 'BlogPosting'
+        /@type\s*:\s*["']([^"']+)["']/i,              // No quotes around @type: @type: "BlogPosting"
+        /"type"\s*:\s*"([^"]+)"/i                     // Just "type" (some malformed JSON)
+      ];
       
-      // Strategy 3: Try unescaped @type
-      if (!typeMatch) {
-        typeMatch = jsonText.match(/@type\s*:\s*["']([^"']+)["']/i);
-      }
-      
-      if (typeMatch) {
-        const extractedType = typeMatch[1];
-        // Extended list of important types that we need to detect
-        const importantTypes = ['BreadcrumbList', 'HowTo', 'BlogPosting', 'FAQPage', 'WebPage', 'Article', 'ItemList', 'Product', 'Event'];
-        if (importantTypes.includes(extractedType)) {
-          console.log(`⚠️ Failed to parse JSON-LD block but detected @type="${extractedType}". Attempting recovery...`);
-          console.log(`  Failed JSON sample: ${jsonText.substring(0, 400)}`);
-          // Create a minimal schema object with the detected type
-          jsonLdBlocks.push({
-            '@type': extractedType,
-            '@context': 'https://schema.org',
-            _parseError: true,
-            _recovered: true,
-            _originalText: jsonText.substring(0, 500)
-          });
-          parseErrors--; // Don't count this as an error since we recovered it
+      for (const pattern of patterns) {
+        const match = jsonText.match(pattern);
+        if (match && match[1]) {
+          extractedType = match[1].trim();
+          if (importantTypes.includes(extractedType)) {
+            break; // Found an important type, stop searching
+          }
         }
+      }
+      
+      if (extractedType && importantTypes.includes(extractedType)) {
+        console.log(`⚠️ Failed to parse JSON-LD block but detected @type="${extractedType}". Creating recovered schema...`);
+        console.log(`  Failed JSON sample: ${jsonText.substring(0, 500)}`);
+        // Create a minimal schema object with the detected type
+        jsonLdBlocks.push({
+          '@type': extractedType,
+          '@context': 'https://schema.org',
+          _parseError: true,
+          _recovered: true,
+          _originalText: jsonText.substring(0, 1000)
+        });
+        parseErrors--; // Don't count this as an error since we recovered it
+        console.log(`✅ Recovered ${extractedType} schema from parse error`);
       } else {
-        // Even if we can't extract @type, log important types mentioned in the text
-        const importantTypePattern = /(BreadcrumbList|HowTo|BlogPosting|FAQPage|WebPage|Article|ItemList|Product|Event)/i;
-        if (importantTypePattern.test(jsonText)) {
-          console.log(`⚠️ Failed to parse JSON-LD block containing important type. Sample: ${jsonText.substring(0, 400)}`);
+        // Log if important types are mentioned but we couldn't extract @type
+        const mentionedTypes = importantTypes.filter(type => 
+          new RegExp(type, 'i').test(jsonText)
+        );
+        if (mentionedTypes.length > 0) {
+          console.log(`⚠️ Failed to parse JSON-LD block containing: ${mentionedTypes.join(', ')}`);
+          console.log(`  JSON sample: ${jsonText.substring(0, 500)}`);
           failedBlocks.push({
-            type: 'unknown (parse failed)',
-            sample: jsonText.substring(0, 300)
+            type: mentionedTypes.join(', '),
+            sample: jsonText.substring(0, 500)
           });
         }
       }
@@ -261,14 +269,13 @@ function extractMetaDescription(htmlString) {
 /**
  * Normalize schema types from a schema object
  * Returns array of @type values
- * Walks @graph and common nested properties to detect all types
+ * Uses the proven Schema Tools extraction logic as base, then walks nested structures
  */
 function normalizeSchemaTypes(schemaObject) {
   const collected = new Set();
 
   function addType(value) {
     if (!value) return;
-
     if (Array.isArray(value)) {
       value.forEach(v => {
         if (typeof v === 'string' && v.trim()) {
@@ -280,158 +287,94 @@ function normalizeSchemaTypes(schemaObject) {
     }
   }
 
+  // STEP 1: Use Schema Tools proven logic (simple and works)
+  // Handle arrays
+  if (Array.isArray(schemaObject)) {
+    schemaObject.forEach(item => {
+      if (item && item['@type']) {
+        addType(item['@type']);
+      }
+    });
+  }
+  // Handle @graph structure (critical for BreadcrumbList detection)
+  else if (schemaObject['@graph'] && Array.isArray(schemaObject['@graph'])) {
+    schemaObject['@graph'].forEach(item => {
+      if (item && item['@type']) {
+        addType(item['@type']);
+      }
+    });
+  }
+  // Handle simple object with @type
+  else if (schemaObject['@type']) {
+    addType(schemaObject['@type']);
+  }
+
+  // STEP 2: Walk nested structures to catch all types (recursive)
   function walk(node, depth = 0) {
     if (!node || typeof node !== 'object') return;
-    
-    // Prevent infinite recursion (max depth 15, increased to catch deeply nested structures)
-    if (depth > 15) return;
+    if (depth > 15) return; // Prevent infinite recursion
 
-    // 1) Top-level @type for this node (CRITICAL - must always check this first)
-    // Handle both string and array formats for @type
+    // Check @type at this level
     const nodeType = node['@type'];
     if (nodeType) {
       if (Array.isArray(nodeType)) {
-        nodeType.forEach(t => {
-          if (t) addType(t);
-        });
+        nodeType.forEach(t => addType(t));
       } else {
         addType(nodeType);
       }
     }
-    
-    // Special case: If this is the root node and has @type, ensure it's captured
-    // This handles simple schemas like { "@type": "BreadcrumbList", ... }
-    if (depth === 0 && nodeType && !collected.has(nodeType)) {
-      // Double-check: if @type exists but wasn't added, add it now
-      if (typeof nodeType === 'string') {
-        addType(nodeType);
-      }
-    }
 
-    // 2) Any items in @graph (critical for BreadcrumbList, ItemList, etc.)
+    // Walk @graph
     if (Array.isArray(node['@graph'])) {
       node['@graph'].forEach(child => {
-        // Check @type in @graph items directly
-        const childType = child['@type'];
-        if (Array.isArray(childType)) {
-          childType.forEach(t => addType(t));
-        } else {
-          addType(childType);
+        if (child && child['@type']) {
+          addType(child['@type']);
         }
         walk(child, depth + 1);
       });
     }
-    
-    // Also check for @graph as an object (some schemas nest @graph differently)
-    if (node['@graph'] && typeof node['@graph'] === 'object' && !Array.isArray(node['@graph'])) {
-      const graphType = node['@graph']['@type'];
-      if (Array.isArray(graphType)) {
-        graphType.forEach(t => addType(t));
-      } else {
-        addType(graphType);
-      }
-      walk(node['@graph'], depth + 1);
-    }
 
-    // 3) Common nested properties that often contain Person/Organization
-    const nestedKeys = ['author', 'creator', 'publisher', 'provider', 'performer', 'brand'];
-
+    // Walk nested properties that often contain schema objects
+    const nestedKeys = ['author', 'creator', 'publisher', 'provider', 'performer', 'brand', 'mainEntityOfPage', 'itemListElement'];
     nestedKeys.forEach(key => {
       const value = node[key];
-
-      if (!value) return;
-
-      if (Array.isArray(value)) value.forEach(v => walk(v, depth + 1));
-      else walk(value, depth + 1);
-    });
-    
-    // 4) Special handling for list structures (BreadcrumbList, ItemList, etc.)
-    // These often have itemListElement arrays containing nested objects
-    if (Array.isArray(node.itemListElement)) {
-      node.itemListElement.forEach(item => {
-        if (item && typeof item === 'object') {
-          // Check if item itself has a @type (e.g., BreadcrumbListItem)
-          addType(item['@type']);
-          // Walk nested properties of the item
-          walk(item, depth + 1);
+      if (value && typeof value === 'object') {
+        if (Array.isArray(value)) {
+          value.forEach(v => {
+            if (v && v['@type']) addType(v['@type']);
+            walk(v, depth + 1);
+          });
+        } else {
+          if (value['@type']) addType(value['@type']);
+          walk(value, depth + 1);
         }
-      });
-    }
-    
-    // 5) Walk all object properties recursively to catch any nested schema types
-    // This ensures we catch BreadcrumbList, ItemList, and other types that might be nested
-    for (const key in node) {
-      if (key === '@type' || key === '@graph' || key === 'itemListElement' || nestedKeys.includes(key)) {
-        continue; // Already handled above
       }
-      
+    });
+
+    // Walk all other object properties recursively
+    for (const key in node) {
+      if (key === '@type' || key === '@graph' || nestedKeys.includes(key)) {
+        continue;
+      }
       const value = node[key];
       if (value && typeof value === 'object') {
         if (Array.isArray(value)) {
           value.forEach(item => {
             if (item && typeof item === 'object') {
-              // Check for @type in array items (handle both string and array)
-              const itemType = item['@type'];
-              if (itemType) {
-                if (Array.isArray(itemType)) {
-                  itemType.forEach(t => addType(t));
-                } else {
-                  addType(itemType);
-                }
-              }
-              // Walk the item to catch nested types
+              if (item['@type']) addType(item['@type']);
               walk(item, depth + 1);
             }
           });
-        } else if (value['@type']) {
-          // If it has a @type, it's likely a schema object - walk it
-          const valueType = value['@type'];
-          if (Array.isArray(valueType)) {
-            valueType.forEach(t => addType(t));
-          } else {
-            addType(valueType);
-          }
-          walk(value, depth + 1);
         } else {
-          // Even without @type, walk it to catch nested structures
-          // This is critical for catching BreadcrumbList that might be nested without explicit @type
+          if (value['@type']) addType(value['@type']);
           walk(value, depth + 1);
         }
       }
     }
-    
-    // 6) Special check: Look for BreadcrumbList by checking if node has itemListElement AND matches breadcrumb pattern
-    // Some implementations might not have explicit @type but have breadcrumb-like structure
-    if (node.itemListElement && Array.isArray(node.itemListElement) && node.itemListElement.length > 0) {
-      // Check if items have 'name' and 'item' properties (common in BreadcrumbList)
-      const hasBreadcrumbPattern = node.itemListElement.some(item => 
-        item && typeof item === 'object' && (item.name || item.item)
-      );
-      if (hasBreadcrumbPattern && !collected.has('BreadcrumbList')) {
-        // Likely a BreadcrumbList even if @type is missing - add it
-        addType('BreadcrumbList');
-      }
-    }
   }
 
+  // Walk the schema object to catch nested types
   walk(schemaObject);
-  
-  // CRITICAL FIX: Ensure top-level @type is always captured
-  // This handles cases where the walk function might miss simple schemas
-  if (schemaObject && typeof schemaObject === 'object') {
-    const topLevelType = schemaObject['@type'];
-    if (topLevelType) {
-      if (Array.isArray(topLevelType)) {
-        topLevelType.forEach(t => {
-          if (t && typeof t === 'string') {
-            collected.add(t.trim());
-          }
-        });
-      } else if (typeof topLevelType === 'string' && topLevelType.trim()) {
-        collected.add(topLevelType.trim());
-      }
-    }
-  }
 
   return Array.from(collected);
 }
