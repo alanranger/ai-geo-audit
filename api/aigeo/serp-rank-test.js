@@ -4,12 +4,16 @@
  * Test endpoint to fetch classic organic rankings and SERP features per keyword.
  * Uses DataForSEO Google Organic SERP Live Advanced API.
  * 
+ * Note: DataForSEO now captures asynchronous AI Overviews (AIOs) that load after initial
+ * page render, ensuring more accurate AI Overview detection. This improvement is automatic
+ * and requires no code changes.
+ * 
  * Returns:
  * - best_rank_group: best ranking group for alanranger.com (if found)
  * - best_rank_absolute: best absolute rank for alanranger.com (if found)
  * - best_url: URL of best ranking page
  * - best_title: title of best ranking page
- * - has_ai_overview: whether AI overview element appeared
+ * - has_ai_overview: whether AI overview element appeared (now includes async AIOs)
  * - serp_features: object with local_pack, featured_snippet, people_also_ask flags
  */
 

@@ -1,4 +1,8 @@
 // /api/aigeo/ai-mode-serp-batch-test.js
+//
+// Note: DataForSEO now captures asynchronous AI Overviews (AIOs) that load after initial
+// page render, ensuring more accurate AI Overview detection and citation data.
+// This improvement is automatic and requires no code changes.
 
 function extractCitationsFromTask(task) {
   const result = task && task.result && task.result[0];
