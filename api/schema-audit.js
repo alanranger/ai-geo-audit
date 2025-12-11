@@ -510,20 +510,18 @@ async function crawlUrl(url, semaphore, delayAfterMs = 0) {
     const title = extractTitle(html);
     const metaDescription = extractMetaDescription(html);
     
-    // Debug: Log if BreadcrumbList is found in schemas but not being detected
-    const hasBreadcrumbInRawSchemas = schemas.some(schema => {
+    // Debug: Check ALL schemas for BreadcrumbList and log details
+    schemas.forEach((schema, idx) => {
       const types = normalizeSchemaTypes(schema);
-      return types.includes('BreadcrumbList');
+      if (types.includes('BreadcrumbList')) {
+        console.log(`✅ BreadcrumbList detected in schema block ${idx} for ${url}`);
+        console.log(`  Schema structure:`, JSON.stringify(schema).substring(0, 400));
+      }
     });
-    if (hasBreadcrumbInRawSchemas && url.includes('free-online-photography-course')) {
-      console.log(`🔍 DEBUG: BreadcrumbList found in raw schemas for ${url}`);
-      console.log(`  Total schemas: ${schemas.length}`);
-      schemas.forEach((schema, idx) => {
-        const types = normalizeSchemaTypes(schema);
-        if (types.includes('BreadcrumbList')) {
-          console.log(`  Schema ${idx} contains BreadcrumbList:`, JSON.stringify(schema).substring(0, 300));
-        }
-      });
+    
+    // Also check if BreadcrumbList is mentioned anywhere in HTML but not detected
+    if (/BreadcrumbList/i.test(html) && !schemas.some(s => normalizeSchemaTypes(s).includes('BreadcrumbList'))) {
+      console.log(`⚠️ BreadcrumbList mentioned in HTML but not detected in JSON-LD for ${url}`);
     }
     
     // Add delay after successful request to avoid rate limiting
