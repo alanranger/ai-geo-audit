@@ -2528,15 +2528,6 @@
               </div>
             </div>
 
-            <div class="card" id="ranking-ai-features-card">
-              <div class="card-header">
-                <h3>SERP feature coverage</h3>
-                <p class="card-subtitle ranking-subtitle-tight">
-                  Frequency of AI Overviews, local packs, People Also Ask, and featured snippets across tracked queries. Relates to <strong>Content/Schema</strong> and <strong>Local Entity</strong>.
-                </p>
-              </div>
-              <ul id="ranking-ai-features-list" class="ranking-ai-detail-list"></ul>
-            </div>
           </div>
         </div>
       </section>
@@ -18900,8 +18891,9 @@ Final Score: ${score}/100`;
                 body: JSON.stringify({ queries: batch })
               });
               
+              // Increase timeout to 300 seconds (5 minutes) to match Vercel serverless function timeout
               const timeoutPromise = new Promise((_, reject) => 
-                setTimeout(() => reject(new Error(`AI batch ${batchIdx + 1} timeout after 90 seconds`)), 90000)
+                setTimeout(() => reject(new Error(`AI batch ${batchIdx + 1} timeout after 300 seconds`)), 300000)
               );
               
               const aiRes = await Promise.race([aiFetchPromise, timeoutPromise]);
@@ -20576,9 +20568,8 @@ Final Score: ${score}/100`;
         });
       });
 
-      // Competitors + SERP features + insights (use filtered rows)
+      // Competitors + insights (use filtered rows)
       renderRankingAiCompetitors(filteredRows);
-      renderRankingAiFeatureSummary(filteredRows);
       renderRankingAiInsights(filteredRows, summary);
     }
     
@@ -21139,42 +21130,6 @@ Final Score: ${score}/100`;
       });
     }
 
-    function renderRankingAiFeatureSummary(rows) {
-      const list = document.getElementById("ranking-ai-features-list");
-      if (!list) return;
-
-      list.innerHTML = "";
-      if (!rows.length) {
-        const li = document.createElement("li");
-        li.textContent = "No rows available.";
-        list.appendChild(li);
-        return;
-      }
-
-      let ai = 0, local = 0, paa = 0, snippet = 0;
-      rows.forEach(r => {
-        // Use new boolean fields if available, fallback to nested serp_features for backward compatibility
-        if (r.ai_overview_present_any === true || r.has_ai_overview === true) ai++;
-        if (r.local_pack_present_any === true || (r.serp_features && r.serp_features.local_pack === true)) local++;
-        if (r.paa_present_any === true || (r.serp_features && r.serp_features.people_also_ask === true)) paa++;
-        if (r.featured_snippet_present_any === true || (r.serp_features && r.serp_features.featured_snippet === true)) snippet++;
-      });
-      const total = rows.length;
-
-      const items = [
-        { label: "AI Overview present", value: ai },
-        { label: "Local pack present", value: local },
-        { label: "People Also Ask present", value: paa },
-        { label: "Featured snippet present", value: snippet }
-      ];
-
-      items.forEach(item => {
-        const li = document.createElement("li");
-        const pct = total ? Math.round((item.value / total) * 100) : 0;
-        li.textContent = `${item.label}: ${item.value}/${total} (${pct}%)`;
-        list.appendChild(li);
-      });
-    }
 
     function renderRankingAiInsights(rows, summary) {
       const list = document.getElementById("ranking-ai-insights-list");
