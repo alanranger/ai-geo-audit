@@ -19490,7 +19490,16 @@ Final Score: ${score}/100`;
       try {
         // Get audit data from localStorage using loadAuditResultsSync
         const savedAudit = loadAuditResultsSync();
-        if (!savedAudit || !savedAudit.searchData || !savedAudit.searchData.queryPages) {
+        if (!savedAudit) {
+          debugLog('[CTR Metrics] No saved audit found in localStorage', 'warn');
+          return null;
+        }
+        if (!savedAudit.searchData) {
+          debugLog('[CTR Metrics] No searchData in saved audit', 'warn');
+          return null;
+        }
+        if (!savedAudit.searchData.queryPages) {
+          debugLog('[CTR Metrics] No queryPages in searchData. Available keys: ' + Object.keys(savedAudit.searchData || {}).join(', '), 'warn');
           return null;
         }
 
@@ -19612,13 +19621,26 @@ Final Score: ${score}/100`;
       try {
         // Get audit data from localStorage using loadAuditResultsSync
         const savedAudit = loadAuditResultsSync();
-        if (!savedAudit || !savedAudit.schemaAudit || !savedAudit.schemaAudit.data) {
+        if (!savedAudit) {
+          debugLog('[Schema Coverage] No saved audit found in localStorage', 'warn');
+          return null;
+        }
+        if (!savedAudit.schemaAudit || !savedAudit.schemaAudit.data) {
+          debugLog('[Schema Coverage] No schemaAudit.data in saved audit', 'warn');
           return null;
         }
 
         const schemaData = savedAudit.schemaAudit.data;
         const pagesWithSchema = schemaData.pagesWithSchema || [];
+        
+        // Check if pagesWithSchema is an array of objects (detail) or just a number (count)
+        if (typeof pagesWithSchema === 'number') {
+          debugLog('[Schema Coverage] pagesWithSchema is a count, not detailed array. Need to run new audit to get detail.', 'warn');
+          return null;
+        }
+        
         if (!Array.isArray(pagesWithSchema) || pagesWithSchema.length === 0) {
+          debugLog('[Schema Coverage] pagesWithSchema is empty or not an array', 'warn');
           return null;
         }
 
