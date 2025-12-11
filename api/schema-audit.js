@@ -117,13 +117,13 @@ function normalizeSchemaTypes(schemaObject) {
   function walk(node, depth = 0) {
     if (!node || typeof node !== 'object') return;
     
-    // Prevent infinite recursion (max depth 10)
-    if (depth > 10) return;
+    // Prevent infinite recursion (max depth 15, increased to catch deeply nested structures)
+    if (depth > 15) return;
 
     // 1) Top-level @type for this node
     addType(node['@type']);
 
-    // 2) Any items in @graph
+    // 2) Any items in @graph (critical for BreadcrumbList, ItemList, etc.)
     if (Array.isArray(node['@graph'])) {
       node['@graph'].forEach(child => walk(child, depth + 1));
     }
@@ -140,10 +140,23 @@ function normalizeSchemaTypes(schemaObject) {
       else walk(value, depth + 1);
     });
     
-    // 4) Walk all object properties recursively to catch any nested schema types
+    // 4) Special handling for list structures (BreadcrumbList, ItemList, etc.)
+    // These often have itemListElement arrays containing nested objects
+    if (Array.isArray(node.itemListElement)) {
+      node.itemListElement.forEach(item => {
+        if (item && typeof item === 'object') {
+          // Check if item itself has a @type (e.g., BreadcrumbListItem)
+          addType(item['@type']);
+          // Walk nested properties of the item
+          walk(item, depth + 1);
+        }
+      });
+    }
+    
+    // 5) Walk all object properties recursively to catch any nested schema types
     // This ensures we catch BreadcrumbList, ItemList, and other types that might be nested
     for (const key in node) {
-      if (key === '@type' || key === '@graph' || nestedKeys.includes(key)) {
+      if (key === '@type' || key === '@graph' || key === 'itemListElement' || nestedKeys.includes(key)) {
         continue; // Already handled above
       }
       
@@ -151,12 +164,21 @@ function normalizeSchemaTypes(schemaObject) {
       if (value && typeof value === 'object') {
         if (Array.isArray(value)) {
           value.forEach(item => {
-            if (item && typeof item === 'object' && item['@type']) {
+            if (item && typeof item === 'object') {
+              // Check for @type in array items
+              if (item['@type']) {
+                addType(item['@type']);
+              }
+              // Walk the item to catch nested types
               walk(item, depth + 1);
             }
           });
         } else if (value['@type']) {
           // If it has a @type, it's likely a schema object - walk it
+          addType(value['@type']);
+          walk(value, depth + 1);
+        } else {
+          // Even without @type, walk it to catch nested structures
           walk(value, depth + 1);
         }
       }
