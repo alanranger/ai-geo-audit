@@ -203,9 +203,14 @@ function normalizeSchemaTypes(schemaObject) {
         if (Array.isArray(value)) {
           value.forEach(item => {
             if (item && typeof item === 'object') {
-              // Check for @type in array items
-              if (item['@type']) {
-                addType(item['@type']);
+              // Check for @type in array items (handle both string and array)
+              const itemType = item['@type'];
+              if (itemType) {
+                if (Array.isArray(itemType)) {
+                  itemType.forEach(t => addType(t));
+                } else {
+                  addType(itemType);
+                }
               }
               // Walk the item to catch nested types
               walk(item, depth + 1);
@@ -213,12 +218,31 @@ function normalizeSchemaTypes(schemaObject) {
           });
         } else if (value['@type']) {
           // If it has a @type, it's likely a schema object - walk it
-          addType(value['@type']);
+          const valueType = value['@type'];
+          if (Array.isArray(valueType)) {
+            valueType.forEach(t => addType(t));
+          } else {
+            addType(valueType);
+          }
           walk(value, depth + 1);
         } else {
           // Even without @type, walk it to catch nested structures
+          // This is critical for catching BreadcrumbList that might be nested without explicit @type
           walk(value, depth + 1);
         }
+      }
+    }
+    
+    // 6) Special check: Look for BreadcrumbList by checking if node has itemListElement AND matches breadcrumb pattern
+    // Some implementations might not have explicit @type but have breadcrumb-like structure
+    if (node.itemListElement && Array.isArray(node.itemListElement) && node.itemListElement.length > 0) {
+      // Check if items have 'name' and 'item' properties (common in BreadcrumbList)
+      const hasBreadcrumbPattern = node.itemListElement.some(item => 
+        item && typeof item === 'object' && (item.name || item.item)
+      );
+      if (hasBreadcrumbPattern && !collected.has('BreadcrumbList')) {
+        // Likely a BreadcrumbList even if @type is missing - add it
+        addType('BreadcrumbList');
       }
     }
   }
