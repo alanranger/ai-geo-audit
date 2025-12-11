@@ -154,16 +154,20 @@ function extractJsonLd(htmlString) {
     });
   }
   
-  // Fallback: Check if important schema types are mentioned in HTML but not extracted
+  // Fallback: Check if important schema types are mentioned in JSON-LD script tags but not extracted
   // This catches cases where they're in script tags that didn't match our regex OR failed to parse
   const importantTypes = ['BreadcrumbList', 'HowTo', 'BlogPosting', 'WebPage', 'FAQPage', 'Article', 'ItemList'];
   
+  // Extract all JSON-LD script tags first (to avoid matching regular JavaScript)
+  const jsonLdScriptRegex = /<script[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>[\s\S]*?<\/script>/gi;
+  const jsonLdScripts = htmlString.match(jsonLdScriptRegex) || [];
+  const jsonLdHtml = jsonLdScripts.join('\n'); // Only search within JSON-LD script tags
+  
   // Check each important type
   importantTypes.forEach(typeName => {
-    // More flexible check - look for the type name near @type in HTML
-    const typeInHtml = new RegExp(`"@type"\\s*:\\s*"${typeName}"`, 'i').test(htmlString) ||
-                       new RegExp(`@type["\s]*:["\s]*["']${typeName}["']`, 'i').test(htmlString) ||
-                       new RegExp(`type["\s]*:["\s]*["']${typeName}["']`, 'i').test(htmlString);
+    // Only check within JSON-LD script tags (not regular JavaScript)
+    const typeInJsonLd = new RegExp(`"@type"\\s*:\\s*"${typeName}"`, 'i').test(jsonLdHtml) ||
+                         new RegExp(`@type["\s]*:["\s]*["']${typeName}["']`, 'i').test(jsonLdHtml);
     
     if (typeInHtml) {
       // Check if we already have this type in extracted blocks (use normalizeSchemaTypes for accurate check)
