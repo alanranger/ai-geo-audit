@@ -1101,6 +1101,30 @@
       line-height: 1.4;
     }
 
+    .metric-pill-toggle {
+      font-size: 0.85rem;
+      color: #0284c7;
+      cursor: pointer;
+      margin-top: 0.5rem;
+      text-decoration: underline;
+      user-select: none;
+    }
+
+    .metric-pill-toggle:hover {
+      color: #0369a1;
+    }
+
+    .metric-pill-details {
+      display: none;
+      margin-top: 0.75rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid #e5e7eb;
+    }
+
+    .metric-pill-details.expanded {
+      display: block;
+    }
+
     /* Section C: Filters */
     .ranking-filters-section {
       margin-bottom: 1rem;
@@ -2277,6 +2301,8 @@
             <div class="metric-pill-label">Tracked keywords</div>
             <div class="metric-pill-status" data-field="status">Info only</div>
             <div class="metric-pill-footer">Used across Visibility &amp; Authority behaviour/ranking.</div>
+            <div class="metric-pill-toggle" onclick="toggleMetricPillDetails('ranking-card-tracked')">Show details</div>
+            <div class="metric-pill-details" id="ranking-card-tracked-details"></div>
           </div>
 
           <div class="metric-pill metric-pill--red" id="ranking-card-ai-coverage">
@@ -2284,6 +2310,8 @@
             <div class="metric-pill-label">AI Overview coverage</div>
             <div class="metric-pill-status" data-field="status">–</div>
             <div class="metric-pill-footer">Pillars: Visibility, Content/Schema</div>
+            <div class="metric-pill-toggle" onclick="toggleMetricPillDetails('ranking-card-ai-coverage')">Show details</div>
+            <div class="metric-pill-details" id="ranking-card-ai-coverage-details"></div>
           </div>
 
           <div class="metric-pill metric-pill--red" id="ranking-card-ai-citations">
@@ -2291,6 +2319,8 @@
             <div class="metric-pill-label">AI citations (alanranger.com)</div>
             <div class="metric-pill-status" data-field="status">–</div>
             <div class="metric-pill-footer">Pillars: Authority (Reviews), Content/Schema</div>
+            <div class="metric-pill-toggle" onclick="toggleMetricPillDetails('ranking-card-ai-citations')">Show details</div>
+            <div class="metric-pill-details" id="ranking-card-ai-citations-details"></div>
           </div>
 
           <div class="metric-pill metric-pill--red" id="ranking-card-top10">
@@ -2298,6 +2328,8 @@
             <div class="metric-pill-label">Top-10 rank coverage</div>
             <div class="metric-pill-status" data-field="status">–</div>
             <div class="metric-pill-footer">Pillars: Visibility, Authority (Ranking)</div>
+            <div class="metric-pill-toggle" onclick="toggleMetricPillDetails('ranking-card-top10')">Show details</div>
+            <div class="metric-pill-details" id="ranking-card-top10-details"></div>
           </div>
 
           <div class="metric-pill metric-pill--red" id="ranking-card-serp-features">
@@ -2305,6 +2337,8 @@
             <div class="metric-pill-label">SERP feature coverage</div>
             <div class="metric-pill-status" data-field="status">–</div>
             <div class="metric-pill-footer">Pillars: Content/Schema, Local Entity</div>
+            <div class="metric-pill-toggle" onclick="toggleMetricPillDetails('ranking-card-serp-features')">Show details</div>
+            <div class="metric-pill-details" id="ranking-card-serp-features-details"></div>
           </div>
         </div>
 
@@ -20052,6 +20086,7 @@ Final Score: ${score}/100`;
       if (coverageCard) {
         const valueEl = coverageCard.querySelector(".metric-pill-value[data-field='value']");
         const statusEl = coverageCard.querySelector(".metric-pill-status[data-field='status']");
+        const detailsEl = coverageCard.querySelector(".metric-pill-details");
         if (valueEl) valueEl.textContent = `${withAiOverview}/${countToUse} (${aiCoveragePct}%)`;
         
         let ragClass = 'red';
@@ -20061,6 +20096,16 @@ Final Score: ${score}/100`;
         
         coverageCard.className = `metric-pill metric-pill--${ragClass}`;
         if (statusEl) statusEl.textContent = statusLabel;
+        
+        // Update details
+        if (detailsEl) {
+          detailsEl.innerHTML = `
+            <div style="font-size: 0.9rem; color: #374151; line-height: 1.8;">
+              <div>Keywords with AI Overview: ${withAiOverview}/${countToUse} (${aiCoveragePct}%)</div>
+              <div>Keywords without AI Overview: ${countToUse - withAiOverview}/${countToUse} (${100 - aiCoveragePct}%)</div>
+            </div>
+          `;
+        }
       }
 
       // AI Citations
@@ -20068,6 +20113,7 @@ Final Score: ${score}/100`;
       if (citationsCard) {
         const valueEl = citationsCard.querySelector(".metric-pill-value[data-field='value']");
         const statusEl = citationsCard.querySelector(".metric-pill-status[data-field='status']");
+        const detailsEl = citationsCard.querySelector(".metric-pill-details");
         if (valueEl) valueEl.textContent = `${withAiCitation}/${countToUse} (${aiCitationPct}%)`;
         
         let ragClass = 'red';
@@ -20077,6 +20123,20 @@ Final Score: ${score}/100`;
         
         citationsCard.className = `metric-pill metric-pill--${ragClass}`;
         if (statusEl) statusEl.textContent = statusLabel;
+        
+        // Calculate total citations
+        const totalCitations = rowsToUse.reduce((sum, r) => sum + (r.ai_alan_citations_count || 0), 0);
+        
+        // Update details
+        if (detailsEl) {
+          detailsEl.innerHTML = `
+            <div style="font-size: 0.9rem; color: #374151; line-height: 1.8;">
+              <div>Keywords with citations: ${withAiCitation}/${countToUse} (${aiCitationPct}%)</div>
+              <div>Total citations: ${totalCitations}</div>
+              <div>Keywords without citations: ${countToUse - withAiCitation}/${countToUse} (${100 - aiCitationPct}%)</div>
+            </div>
+          `;
+        }
       }
 
       // Top-10 coverage
@@ -20084,7 +20144,16 @@ Final Score: ${score}/100`;
       if (top10Card) {
         const valueEl = top10Card.querySelector(".metric-pill-value[data-field='value']");
         const statusEl = top10Card.querySelector(".metric-pill-status[data-field='status']");
+        const detailsEl = top10Card.querySelector(".metric-pill-details");
         if (valueEl) valueEl.textContent = `${top10}/${countToUse} (${top10Pct}%)`;
+        
+        // Calculate rank buckets
+        const top3 = rowsToUse.filter(r => r.best_rank_group != null && r.best_rank_group <= 3).length;
+        const top3Pct = countToUse > 0 ? Math.round((top3 / countToUse) * 100) : 0;
+        const rank11to20 = rowsToUse.filter(r => r.best_rank_group != null && r.best_rank_group >= 11 && r.best_rank_group <= 20).length;
+        const rank11to20Pct = countToUse > 0 ? Math.round((rank11to20 / countToUse) * 100) : 0;
+        const notRanked = rowsToUse.filter(r => r.best_rank_group == null || r.best_rank_group > 20).length;
+        const notRankedPct = countToUse > 0 ? Math.round((notRanked / countToUse) * 100) : 0;
         
         let ragClass = 'red';
         let statusLabel = 'Weak';
@@ -20093,6 +20162,18 @@ Final Score: ${score}/100`;
         
         top10Card.className = `metric-pill metric-pill--${ragClass}`;
         if (statusEl) statusEl.textContent = statusLabel;
+        
+        // Update details
+        if (detailsEl) {
+          detailsEl.innerHTML = `
+            <div style="font-size: 0.9rem; color: #374151; line-height: 1.8;">
+              <div>Top 3: ${top3}/${countToUse} (${top3Pct}%)</div>
+              <div>Top 10: ${top10}/${countToUse} (${top10Pct}%)</div>
+              <div>Rank 11-20: ${rank11to20}/${countToUse} (${rank11to20Pct}%)</div>
+              <div>Not ranked (21+): ${notRanked}/${countToUse} (${notRankedPct}%)</div>
+            </div>
+          `;
+        }
       }
 
       // SERP feature coverage
@@ -20109,12 +20190,19 @@ Final Score: ${score}/100`;
           ? Math.round(((withAiOverview + withLocalPack + withPaa + withFeaturedSnippet) / (countToUse * 4)) * 100)
           : 0;
         
+        // Calculate individual percentages
+        const aiOverviewPct = countToUse > 0 ? Math.round((withAiOverview / countToUse) * 100) : 0;
+        const localPackPct = countToUse > 0 ? Math.round((withLocalPack / countToUse) * 100) : 0;
+        const paaPct = countToUse > 0 ? Math.round((withPaa / countToUse) * 100) : 0;
+        const featuredSnippetPct = countToUse > 0 ? Math.round((withFeaturedSnippet / countToUse) * 100) : 0;
+        
         const valueEl = serpFeaturesCard.querySelector(".metric-pill-value[data-field='value']");
         const statusEl = serpFeaturesCard.querySelector(".metric-pill-status[data-field='status']");
+        const detailsEl = serpFeaturesCard.querySelector(".metric-pill-details");
         
-        // Show as "X/4 features" format
+        // Show as "X/4 features (Y%)" format
         const featuresPresent = [withAiOverview, withLocalPack, withPaa, withFeaturedSnippet].filter(count => count > 0).length;
-        if (valueEl) valueEl.textContent = `${featuresPresent}/4 features`;
+        if (valueEl) valueEl.textContent = `${featuresPresent}/4 features (${avgFeaturePresence}%)`;
         
         let ragClass = 'red';
         let statusLabel = 'Low';
@@ -20123,6 +20211,18 @@ Final Score: ${score}/100`;
         
         serpFeaturesCard.className = `metric-pill metric-pill--${ragClass}`;
         if (statusEl) statusEl.textContent = statusLabel;
+        
+        // Update details content
+        if (detailsEl) {
+          detailsEl.innerHTML = `
+            <div style="font-size: 0.9rem; color: #374151; line-height: 1.8;">
+              <div>AI Overview present: ${withAiOverview}/${countToUse} (${aiOverviewPct}%)</div>
+              <div>Local pack present: ${withLocalPack}/${countToUse} (${localPackPct}%)</div>
+              <div>People Also Ask present: ${withPaa}/${countToUse} (${paaPct}%)</div>
+              <div>Featured snippet present: ${withFeaturedSnippet}/${countToUse} (${featuredSnippetPct}%)</div>
+            </div>
+          `;
+        }
       }
     }
 
