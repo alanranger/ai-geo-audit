@@ -794,27 +794,32 @@ export default async function handler(req, res) {
         
         // Collect all types from this page
         const pageTypes = new Set();
-        result.schemas.forEach(schema => {
+        result.schemas.forEach((schema, schemaIdx) => {
           const types = normalizeSchemaTypes(schema);
           types.forEach(type => {
             pageTypes.add(type);
             allTypes.add(type);
             schemaTypes[type] = (schemaTypes[type] || 0) + 1;
           });
+          
+          // Debug: Check each schema block for BreadcrumbList
+          if (types.includes('BreadcrumbList')) {
+            console.log(`✅ BreadcrumbList found in schema block ${schemaIdx} for ${result.url}`);
+          }
         });
         
         // Store schema types for this page
         const pageTypesArray = Array.from(pageTypes);
         pageSchemaTypesMap.set(result.url, pageTypesArray);
         
-        // Debug logging for specific page to diagnose BreadcrumbList detection
-        if (result.url.includes('free-online-photography-course')) {
-          console.log(`🔍 DEBUG: Schema detection for ${result.url}:`);
-          console.log(`  Total schemas found: ${result.schemas.length}`);
-          console.log(`  Types detected: ${pageTypesArray.join(', ')}`);
-          console.log(`  BreadcrumbList detected: ${pageTypesArray.includes('BreadcrumbList') ? 'YES' : 'NO'}`);
-          if (result.schemas.length > 0) {
-            console.log(`  First schema sample:`, JSON.stringify(result.schemas[0]).substring(0, 500));
+        // Debug logging for ALL pages to diagnose BreadcrumbList detection
+        if (pageTypesArray.length > 0) {
+          const hasBreadcrumb = pageTypesArray.includes('BreadcrumbList');
+          if (!hasBreadcrumb && result.schemas.length > 0) {
+            // Log pages that should have BreadcrumbList but don't
+            console.log(`⚠️ Page missing BreadcrumbList: ${result.url}`);
+            console.log(`  Total schemas: ${result.schemas.length}, Types found: ${pageTypesArray.length}`);
+            console.log(`  Types: ${pageTypesArray.slice(0, 10).join(', ')}${pageTypesArray.length > 10 ? '...' : ''}`);
           }
         }
         
