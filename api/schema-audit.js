@@ -99,7 +99,33 @@ function extractJsonLd(htmlString) {
         );
         if (mentionedTypes.length > 0) {
           console.log(`⚠️ Failed to parse JSON-LD block containing: ${mentionedTypes.join(', ')}`);
-          console.log(`  JSON sample: ${jsonText.substring(0, 500)}`);
+          console.log(`  JSON sample (first 800 chars): ${jsonText.substring(0, 800)}`);
+          console.log(`  JSON sample (last 200 chars): ${jsonText.substring(Math.max(0, jsonText.length - 200))}`);
+          
+          // Try harder to extract @type - maybe it's escaped or formatted differently
+          const harderPatterns = [
+            /@type["\s]*:["\s]*["']([^"']+)["']/i,
+            /type["\s]*:["\s]*["']([^"']+)["']/i,
+            new RegExp(`${mentionedTypes[0]}`, 'i') // If we found the type name, try to find it near @type
+          ];
+          
+          for (const pattern of harderPatterns) {
+            const hardMatch = jsonText.match(pattern);
+            if (hardMatch && hardMatch[1] && importantTypes.includes(hardMatch[1].trim())) {
+              const recoveredType = hardMatch[1].trim();
+              console.log(`✅ Hard recovery: Found @type="${recoveredType}" using harder pattern`);
+              jsonLdBlocks.push({
+                '@type': recoveredType,
+                '@context': 'https://schema.org',
+                _parseError: true,
+                _recovered: true,
+                _hardRecovery: true
+              });
+              parseErrors--;
+              break;
+            }
+          }
+          
           failedBlocks.push({
             type: mentionedTypes.join(', '),
             sample: jsonText.substring(0, 500)
