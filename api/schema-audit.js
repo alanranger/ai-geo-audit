@@ -56,33 +56,47 @@ function extractJsonLd(htmlString) {
     } else {
       parseErrors++;
       
-      // Try to extract @type even from malformed JSON using regex
-      // This is a fallback for blocks that fail to parse but contain important types
-      const typeMatch = jsonText.match(/"@type"\s*:\s*"([^"]+)"/i);
+      // Try multiple strategies to extract @type from malformed JSON
+      // Strategy 1: Simple regex match
+      let typeMatch = jsonText.match(/"@type"\s*:\s*"([^"]+)"/i);
+      
+      // Strategy 2: If that fails, try to find @type even with escaped quotes or whitespace
+      if (!typeMatch) {
+        typeMatch = jsonText.match(/["']@type["']\s*:\s*["']([^"']+)["']/i);
+      }
+      
+      // Strategy 3: Try unescaped @type
+      if (!typeMatch) {
+        typeMatch = jsonText.match(/@type\s*:\s*["']([^"']+)["']/i);
+      }
+      
       if (typeMatch) {
         const extractedType = typeMatch[1];
         // Extended list of important types that we need to detect
         const importantTypes = ['BreadcrumbList', 'HowTo', 'BlogPosting', 'FAQPage', 'WebPage', 'Article', 'ItemList', 'Product', 'Event'];
         if (importantTypes.includes(extractedType)) {
           console.log(`⚠️ Failed to parse JSON-LD block but detected @type="${extractedType}". Attempting recovery...`);
+          console.log(`  Failed JSON sample: ${jsonText.substring(0, 400)}`);
           // Create a minimal schema object with the detected type
           jsonLdBlocks.push({
             '@type': extractedType,
             '@context': 'https://schema.org',
             _parseError: true,
+            _recovered: true,
             _originalText: jsonText.substring(0, 500)
           });
           parseErrors--; // Don't count this as an error since we recovered it
         }
-      }
-      
-      // Log parse errors for important types
-      const importantTypePattern = /(BreadcrumbList|HowTo|BlogPosting|FAQPage|WebPage|Article|ItemList|Product|Event)/i;
-      if (importantTypePattern.test(jsonText)) {
-        failedBlocks.push({
-          type: jsonText.match(/"@type"\s*:\s*"([^"]+)"/i)?.[1] || 'unknown',
-          sample: jsonText.substring(0, 300)
-        });
+      } else {
+        // Even if we can't extract @type, log important types mentioned in the text
+        const importantTypePattern = /(BreadcrumbList|HowTo|BlogPosting|FAQPage|WebPage|Article|ItemList|Product|Event)/i;
+        if (importantTypePattern.test(jsonText)) {
+          console.log(`⚠️ Failed to parse JSON-LD block containing important type. Sample: ${jsonText.substring(0, 400)}`);
+          failedBlocks.push({
+            type: 'unknown (parse failed)',
+            sample: jsonText.substring(0, 300)
+          });
+        }
       }
     }
   }
@@ -123,18 +137,38 @@ function extractJsonLd(htmlString) {
       
       // If mentioned in HTML but not detected, try to find the script tag manually
       if (!hasType) {
-        // Try a more aggressive regex to find script tags (even without type attribute)
-        const aggressiveRegex = new RegExp(`<script[^>]*>[\\s\\S]*?"@type"\\s*:\\s*"${typeName}"[\\s\\S]*?<\\/script>`, 'gi');
-        const aggressiveMatches = [...htmlString.matchAll(aggressiveRegex)];
+        // Try multiple regex patterns to find script tags
+        const patterns = [
+          // Pattern 1: Standard script tag with type attribute
+          new RegExp(`<script[^>]*type\\s*=\\s*["']application/ld\\+json["'][^>]*>[\\s\\S]*?"@type"\\s*:\\s*"${typeName}"[\\s\\S]*?<\\/script>`, 'gi'),
+          // Pattern 2: Script tag without type attribute but with @type
+          new RegExp(`<script[^>]*>[\\s\\S]*?"@type"\\s*:\\s*"${typeName}"[\\s\\S]*?<\\/script>`, 'gi'),
+          // Pattern 3: More flexible - any script tag containing the type
+          new RegExp(`<script[^>]*>[\\s\\S]{0,5000}"@type"\\s*:\\s*"${typeName}"[\\s\\S]{0,5000}<\\/script>`, 'gi')
+        ];
+        
+        let aggressiveMatches = [];
+        for (const pattern of patterns) {
+          const matches = [...htmlString.matchAll(pattern)];
+          if (matches.length > 0) {
+            aggressiveMatches = matches;
+            console.log(`🔍 Found ${typeName} in script tag using pattern ${patterns.indexOf(pattern) + 1}. Attempting extraction...`);
+            break;
+          }
+        }
         
         if (aggressiveMatches.length > 0) {
-          console.log(`🔍 Found ${typeName} in script tag that didn't match standard regex. Attempting extraction...`);
           let extracted = false;
           
-          aggressiveMatches.forEach(match => {
-            const jsonText = match[0].replace(/<script[^>]*>/, '').replace(/<\/script>/, '').trim();
+          aggressiveMatches.forEach((match, idx) => {
+            let jsonText = match[0].replace(/<script[^>]*>/, '').replace(/<\/script>/, '').trim();
             // Remove HTML comments
-            const cleaned = jsonText.replace(/<!--[\s\S]*?-->/g, '');
+            let cleaned = jsonText.replace(/<!--[\s\S]*?-->/g, '');
+            
+            // Try to fix common JSON issues
+            // Remove trailing commas before closing braces/brackets
+            cleaned = cleaned.replace(/,(\s*[}\]])/g, '$1');
+            
             const parsed = safeJsonParse(cleaned);
             
             if (parsed) {
@@ -144,27 +178,34 @@ function extractJsonLd(htmlString) {
                 jsonLdBlocks.push(parsed);
               }
               extracted = true;
+              console.log(`✅ Successfully parsed ${typeName} from aggressive regex (match ${idx + 1})`);
             } else {
               // Even if parsing fails, try to extract just the @type and create minimal schema
-              const typeMatch = cleaned.match(new RegExp(`"@type"\\s*:\\s*"${typeName}"`, 'i'));
+              const typeMatch = cleaned.match(new RegExp(`"@type"\\s*:\\s*"${typeName}"`, 'i')) ||
+                               cleaned.match(new RegExp(`["']@type["']\\s*:\\s*["']${typeName}["']`, 'i')) ||
+                               cleaned.match(new RegExp(`@type\\s*:\\s*["']${typeName}["']`, 'i'));
+              
               if (typeMatch) {
                 jsonLdBlocks.push({
                   '@type': typeName,
                   '@context': 'https://schema.org',
                   _parseError: true,
-                  _extractedFrom: 'aggressive_regex_fallback'
+                  _extractedFrom: 'aggressive_regex_fallback',
+                  _matchIndex: idx
                 });
                 extracted = true;
-                console.log(`✅ Created minimal ${typeName} schema from aggressive regex (parse failed)`);
+                console.log(`✅ Created minimal ${typeName} schema from aggressive regex (parse failed, match ${idx + 1})`);
+                console.log(`  Failed JSON sample: ${cleaned.substring(0, 400)}`);
               }
             }
           });
           
-          if (extracted) {
-            console.log(`✅ Successfully extracted ${typeName} from aggressive regex`);
-          } else {
-            console.log(`⚠️ Failed to parse ${typeName} even with aggressive regex. Sample: ${aggressiveMatches[0][0].substring(0, 300)}`);
+          if (!extracted) {
+            console.log(`⚠️ Failed to parse ${typeName} even with aggressive regex. Sample: ${aggressiveMatches[0][0].substring(0, 500)}`);
           }
+        } else {
+          // Log that we looked but didn't find it
+          console.log(`⚠️ ${typeName} mentioned in HTML but no script tag found with aggressive regex`);
         }
       }
     }
