@@ -33,48 +33,68 @@ async function extractJsonLd(htmlString, pageUrl = null) {
   
   // FIRST: Check ALL script tags for dynamic loaders (before parsing JSON-LD)
   // This handles cases where JavaScript loaders are in script tags without type="application/ld+json"
-  let slug = null;
-  if (pageUrl) {
-    const slugMatch = pageUrl.match(/\/blog-on-photography\/([^\/]+)/) || 
-                     pageUrl.match(/\/([^\/]+)\/?$/);
-    if (slugMatch) slug = slugMatch[1];
-  }
+  const allScriptsRegex = /<script[^>]*>(.*?)<\/script>/gis;
+  const allScripts = [...htmlString.matchAll(allScriptsRegex)];
   
-  if (slug) {
-    const allScriptsRegex = /<script[^>]*>(.*?)<\/script>/gis;
-    const allScripts = [...htmlString.matchAll(allScriptsRegex)];
+  for (const scriptMatch of allScripts) {
+    const scriptContent = scriptMatch[1].trim();
+    const hasSchemaDomain = /schema\.alanranger\.com/i.test(scriptContent);
+    const isJavaScript = /function|var |const |let |window\.|document\.|fetch\(/i.test(scriptContent);
     
-    for (const scriptMatch of allScripts) {
-      const scriptContent = scriptMatch[1].trim();
-      const hasSchemaDomain = /schema\.alanranger\.com/i.test(scriptContent);
-      const isJavaScript = /function|var |const |let |window\.|document\.|fetch\(/i.test(scriptContent);
+    if (hasSchemaDomain && isJavaScript) {
+      const schemaFiles = [];
       
-      if (hasSchemaDomain && isJavaScript) {
-        const schemaFiles = [
-          `${slug}_schema.json`,
-          `${slug}_blogposting.json`,
-          `${slug}_breadcrumb.json`,
-          `${slug}_howto.json`,
-          `${slug}_faq.json`
-        ];
-        
-        for (const fileName of schemaFiles) {
-          try {
-            const schemaUrl = `https://schema.alanranger.com/${fileName}`;
-            const schemaResponse = await fetch(schemaUrl);
-            if (schemaResponse.ok) {
-              const schemaData = await schemaResponse.json();
-              if (Array.isArray(schemaData)) {
-                jsonLdBlocks.push(...schemaData);
-              } else {
-                jsonLdBlocks.push(schemaData);
-              }
-              console.log(`✅ Fetched schema from ${schemaUrl}: @type=${schemaData['@type'] || 'array'}`);
-            }
-          } catch (e) {
-            // File doesn't exist, skip
-          }
+      // Pattern 1: Blog posts - slug-based files
+      if (pageUrl && pageUrl.includes('/blog-on-photography/')) {
+        const slugMatch = pageUrl.match(/\/blog-on-photography\/([^\/]+)/);
+        if (slugMatch) {
+          const slug = slugMatch[1];
+          schemaFiles.push(
+            `${slug}_schema.json`,
+            `${slug}_blogposting.json`,
+            `${slug}_breadcrumb.json`,
+            `${slug}_howto.json`,
+            `${slug}_faq.json`
+          );
         }
+      }
+      
+      // Pattern 2: Path-based mapping (lessons, workshops, blog index)
+      if (pageUrl) {
+        const path = new URL(pageUrl).pathname.replace(/\/$/, '') || '/';
+        
+        // Check for path-based mappings mentioned in loader
+        if (/lessons-schema\.json/i.test(scriptContent) || path === '/beginners-photography-lessons') {
+          schemaFiles.push('lessons-schema.json');
+        }
+        if (/workshops-schema\.json/i.test(scriptContent) || path === '/photographic-workshops-near-me') {
+          schemaFiles.push('workshops-schema.json');
+        }
+        if (/blog-schema\.json/i.test(scriptContent) || path === '/blog-on-photography') {
+          schemaFiles.push('blog-schema.json');
+        }
+      }
+      
+      // Fetch all schema files
+      for (const fileName of schemaFiles) {
+        try {
+          const schemaUrl = `https://schema.alanranger.com/${fileName}`;
+          const schemaResponse = await fetch(schemaUrl);
+          if (schemaResponse.ok) {
+            const schemaData = await schemaResponse.json();
+            if (Array.isArray(schemaData)) {
+              jsonLdBlocks.push(...schemaData);
+            } else {
+              jsonLdBlocks.push(schemaData);
+            }
+            console.log(`✅ Fetched schema from ${schemaUrl}: @type=${schemaData['@type'] || 'array'}`);
+          }
+        } catch (e) {
+          // File doesn't exist, skip
+        }
+      }
+      
+      if (schemaFiles.length > 0) {
         break; // Found loader, don't check other scripts
       }
     }
@@ -256,7 +276,7 @@ async function extractJsonLd(htmlString, pageUrl = null) {
     const typeInJsonLd = new RegExp(`"@type"\\s*:\\s*"${typeName}"`, 'i').test(jsonLdHtml) ||
                          new RegExp(`@type["\s]*:["\s]*["']${typeName}["']`, 'i').test(jsonLdHtml);
     
-    if (typeInHtml) {
+    if (typeInJsonLd) {
       // Check if we already have this type in extracted blocks (use normalizeSchemaTypes for accurate check)
       const hasType = jsonLdBlocks.some(block => {
         if (!block) return false;
@@ -507,7 +527,66 @@ function normalizeSchemaTypes(schemaObject) {
 
   // Walk the schema object to catch nested types
   walk(schemaObject);
-
+  
+  // PATTERN-BASED DETECTION: Check if ItemList should be treated as BreadcrumbList
+  // Many sites use ItemList with itemListElement for breadcrumbs instead of explicit BreadcrumbList
+  if (!collected.has('BreadcrumbList')) {
+    function checkForBreadcrumbPattern(node, depth = 0) {
+      if (!node || typeof node !== 'object' || depth > 10) return false;
+      
+      // Check if this is an ItemList with itemListElement
+      const isItemList = collected.has('ItemList') || 
+                        (node['@type'] === 'ItemList' || 
+                         (Array.isArray(node['@type']) && node['@type'].includes('ItemList')));
+      
+      if (isItemList && Array.isArray(node.itemListElement) && node.itemListElement.length > 0) {
+        // Check if items have breadcrumb-like structure (position, name, item.url)
+        // Make it lenient - if at least 50% have breadcrumb structure, treat as BreadcrumbList
+        const breadcrumbLikeItems = node.itemListElement.filter(item =>
+          item && typeof item === 'object' && 
+          (item.position !== undefined || item['@type'] === 'ListItem') &&
+          (item.name || item.item?.name) &&
+          (item.item?.url || item.url)
+        );
+        
+        if (breadcrumbLikeItems.length >= Math.ceil(node.itemListElement.length * 0.5)) {
+          collected.add('BreadcrumbList');
+          return true;
+        }
+      }
+      
+      // Check @graph for ItemList with breadcrumb structure
+      if (Array.isArray(node['@graph'])) {
+        for (const graphItem of node['@graph']) {
+          if (checkForBreadcrumbPattern(graphItem, depth + 1)) {
+            return true;
+          }
+        }
+      }
+      
+      // Check nested structures
+      if (node.itemListElement && Array.isArray(node.itemListElement)) {
+        const parent = node;
+        const breadcrumbLikeItems = node.itemListElement.filter(item =>
+          item && typeof item === 'object' && 
+          (item.position !== undefined || item['@type'] === 'ListItem') &&
+          (item.name || item.item?.name) &&
+          (item.item?.url || item.url)
+        );
+        
+        if (breadcrumbLikeItems.length >= Math.ceil(node.itemListElement.length * 0.5) && 
+            (parent['@type'] === 'ItemList' || collected.has('ItemList'))) {
+          collected.add('BreadcrumbList');
+          return true;
+        }
+      }
+      
+      return false;
+    }
+    
+    checkForBreadcrumbPattern(schemaObject);
+  }
+  
   return Array.from(collected);
 }
 
