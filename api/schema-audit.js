@@ -45,6 +45,18 @@ function extractJsonLd(htmlString) {
     }
   }
   
+  // Also check for microdata BreadcrumbList (itemscope/itemtype)
+  // This is a fallback for sites that use microdata instead of JSON-LD
+  const breadcrumbMicrodataRegex = /<nav[^>]*itemscope[^>]*itemtype=["']https?:\/\/schema\.org\/BreadcrumbList["'][^>]*>/i;
+  if (breadcrumbMicrodataRegex.test(htmlString)) {
+    // Create a synthetic BreadcrumbList object for microdata detection
+    jsonLdBlocks.push({
+      '@type': 'BreadcrumbList',
+      '@context': 'https://schema.org',
+      _detectedFrom: 'microdata'
+    });
+  }
+  
   return jsonLdBlocks;
 }
 
