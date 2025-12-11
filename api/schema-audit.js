@@ -132,13 +132,26 @@ function normalizeSchemaTypes(schemaObject) {
     // Prevent infinite recursion (max depth 15, increased to catch deeply nested structures)
     if (depth > 15) return;
 
-    // 1) Top-level @type for this node
+    // 1) Top-level @type for this node (CRITICAL - must always check this first)
     // Handle both string and array formats for @type
     const nodeType = node['@type'];
-    if (Array.isArray(nodeType)) {
-      nodeType.forEach(t => addType(t));
-    } else {
-      addType(nodeType);
+    if (nodeType) {
+      if (Array.isArray(nodeType)) {
+        nodeType.forEach(t => {
+          if (t) addType(t);
+        });
+      } else {
+        addType(nodeType);
+      }
+    }
+    
+    // Special case: If this is the root node and has @type, ensure it's captured
+    // This handles simple schemas like { "@type": "BreadcrumbList", ... }
+    if (depth === 0 && nodeType && !collected.has(nodeType)) {
+      // Double-check: if @type exists but wasn't added, add it now
+      if (typeof nodeType === 'string') {
+        addType(nodeType);
+      }
     }
 
     // 2) Any items in @graph (critical for BreadcrumbList, ItemList, etc.)
@@ -534,19 +547,34 @@ async function crawlUrl(url, semaphore, delayAfterMs = 0) {
     const title = extractTitle(html);
     const metaDescription = extractMetaDescription(html);
     
-    // Debug: Check ALL schemas for BreadcrumbList and log details
+    // Debug: Check ALL schemas for BreadcrumbList, HowTo, FAQPage, BlogPosting and log details
     schemas.forEach((schema, idx) => {
       const types = normalizeSchemaTypes(schema);
-      if (types.includes('BreadcrumbList')) {
-        console.log(`✅ BreadcrumbList detected in schema block ${idx} for ${url}`);
-        console.log(`  Schema structure:`, JSON.stringify(schema).substring(0, 400));
+      const importantTypes = ['BreadcrumbList', 'HowTo', 'FAQPage', 'BlogPosting', 'Article'];
+      const foundImportantTypes = types.filter(t => importantTypes.includes(t));
+      
+      if (foundImportantTypes.length > 0) {
+        console.log(`✅ ${foundImportantTypes.join(', ')} detected in schema block ${idx} for ${url}`);
+        console.log(`  All types in block: ${types.join(', ')}`);
+        console.log(`  Schema @type: ${schema['@type'] || 'missing'}`);
+        console.log(`  Schema structure sample:`, JSON.stringify(schema).substring(0, 300));
       }
     });
     
-    // Also check if BreadcrumbList is mentioned anywhere in HTML but not detected
-    if (/BreadcrumbList/i.test(html) && !schemas.some(s => normalizeSchemaTypes(s).includes('BreadcrumbList'))) {
-      console.log(`⚠️ BreadcrumbList mentioned in HTML but not detected in JSON-LD for ${url}`);
-    }
+    // Also check if important types are mentioned anywhere in HTML but not detected
+    const allDetectedTypes = new Set();
+    schemas.forEach(s => normalizeSchemaTypes(s).forEach(t => allDetectedTypes.add(t)));
+    
+    ['BreadcrumbList', 'HowTo', 'FAQPage', 'BlogPosting'].forEach(type => {
+      if (new RegExp(type, 'i').test(html) && !allDetectedTypes.has(type)) {
+        console.log(`⚠️ ${type} mentioned in HTML but not detected in JSON-LD for ${url}`);
+        // Try to find where it's mentioned
+        const matches = html.match(new RegExp(`"@type"\\s*:\\s*"${type}"`, 'i'));
+        if (matches) {
+          console.log(`  Found @type reference in HTML at position ${matches.index}`);
+        }
+      }
+    });
     
     // Add delay after successful request to avoid rate limiting
     if (delayAfterMs > 0) {
@@ -824,9 +852,12 @@ export default async function handler(req, res) {
             schemaTypes[type] = (schemaTypes[type] || 0) + 1;
           });
           
-          // Debug: Check each schema block for BreadcrumbList
-          if (types.includes('BreadcrumbList')) {
-            console.log(`✅ BreadcrumbList found in schema block ${schemaIdx} for ${result.url}`);
+          // Debug: Check each schema block for important types
+          const importantTypes = ['BreadcrumbList', 'HowTo', 'FAQPage', 'BlogPosting', 'Article'];
+          const foundImportantTypes = types.filter(t => importantTypes.includes(t));
+          if (foundImportantTypes.length > 0) {
+            console.log(`✅ ${foundImportantTypes.join(', ')} found in schema block ${schemaIdx} for ${result.url}`);
+            console.log(`  Schema @type: ${schema['@type'] || 'missing'}, All types: ${types.join(', ')}`);
           }
         });
         
@@ -834,14 +865,31 @@ export default async function handler(req, res) {
         const pageTypesArray = Array.from(pageTypes);
         pageSchemaTypesMap.set(result.url, pageTypesArray);
         
-        // Debug logging for ALL pages to diagnose BreadcrumbList detection
+        // Debug logging for pages missing important types
         if (pageTypesArray.length > 0) {
-          const hasBreadcrumb = pageTypesArray.includes('BreadcrumbList');
-          if (!hasBreadcrumb && result.schemas.length > 0) {
-            // Log pages that should have BreadcrumbList but don't
-            console.log(`⚠️ Page missing BreadcrumbList: ${result.url}`);
-            console.log(`  Total schemas: ${result.schemas.length}, Types found: ${pageTypesArray.length}`);
-            console.log(`  Types: ${pageTypesArray.slice(0, 10).join(', ')}${pageTypesArray.length > 10 ? '...' : ''}`);
+          const importantTypes = ['BreadcrumbList', 'HowTo', 'FAQPage', 'BlogPosting', 'Article'];
+          const missingImportantTypes = importantTypes.filter(t => !pageTypesArray.includes(t));
+          
+          // Only log if page has schemas but is missing important types (to reduce noise)
+          if (missingImportantTypes.length > 0 && result.schemas.length > 0) {
+            // Check if any schema block has @type matching missing types (might be detection issue)
+            const schemaTypesInBlocks = result.schemas.map(s => s['@type']).filter(Boolean);
+            const hasTypeInBlock = missingImportantTypes.some(t => 
+              schemaTypesInBlocks.some(st => 
+                (Array.isArray(st) ? st.includes(t) : st === t)
+              )
+            );
+            
+            if (hasTypeInBlock) {
+              console.log(`⚠️ Page has @type in schema but normalizeSchemaTypes didn't detect: ${result.url}`);
+              console.log(`  Missing types: ${missingImportantTypes.join(', ')}`);
+              console.log(`  Schema @types found: ${schemaTypesInBlocks.join(', ')}`);
+              console.log(`  Detected types: ${pageTypesArray.slice(0, 15).join(', ')}${pageTypesArray.length > 15 ? '...' : ''}`);
+              // Log first schema block structure for debugging
+              if (result.schemas[0]) {
+                console.log(`  First schema sample:`, JSON.stringify(result.schemas[0]).substring(0, 400));
+              }
+            }
           }
         }
         
