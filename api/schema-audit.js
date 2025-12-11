@@ -143,7 +143,27 @@ function normalizeSchemaTypes(schemaObject) {
 
     // 2) Any items in @graph (critical for BreadcrumbList, ItemList, etc.)
     if (Array.isArray(node['@graph'])) {
-      node['@graph'].forEach(child => walk(child, depth + 1));
+      node['@graph'].forEach(child => {
+        // Check @type in @graph items directly
+        const childType = child['@type'];
+        if (Array.isArray(childType)) {
+          childType.forEach(t => addType(t));
+        } else {
+          addType(childType);
+        }
+        walk(child, depth + 1);
+      });
+    }
+    
+    // Also check for @graph as an object (some schemas nest @graph differently)
+    if (node['@graph'] && typeof node['@graph'] === 'object' && !Array.isArray(node['@graph'])) {
+      const graphType = node['@graph']['@type'];
+      if (Array.isArray(graphType)) {
+        graphType.forEach(t => addType(t));
+      } else {
+        addType(graphType);
+      }
+      walk(node['@graph'], depth + 1);
     }
 
     // 3) Common nested properties that often contain Person/Organization
