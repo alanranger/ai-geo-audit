@@ -552,6 +552,7 @@ export default async function handler(req, res) {
           segment: row.segment ? String(row.segment).trim() : null,
           page_type: row.pageType ? String(row.pageType).trim() : null,
           demand_share: row.demand_share !== null && row.demand_share !== undefined ? parseFloat(row.demand_share) : null,
+          opportunity_score: row.opportunityScore !== null && row.opportunityScore !== undefined ? parseInt(row.opportunityScore) : null,
           updated_at: new Date().toISOString()
         }));
 
