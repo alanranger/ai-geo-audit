@@ -18781,47 +18781,100 @@ Final Score: ${score}/100`;
         RankingAiProgressModal.updateProgress(50, 1);
         RankingAiProgressModal.updateCounts(`✓ Retrieved SERP data for ${allSerpResults.length}/${keywords.length} keywords (saved incrementally)`);
         
-        // Step 2: Fetch AI Overview Data (non-blocking - continue with SERP data if it fails)
+        // Step 2: Fetch AI Overview Data (batched to avoid server timeout)
         RankingAiProgressModal.updateProgress(55, 2);
         RankingAiProgressModal.setActiveStep(2);
         RankingAiProgressModal.updateCounts(`Checking AI Overview presence and citations...`);
         
-        debugLog('📊 Starting AI fetch...', 'info');
+        debugLog('📊 Starting AI fetch (batched)...', 'info');
         let aiRows = [];
         let aiFetchError = null;
         
         try {
-          // Add timeout wrapper for AI fetch (60 seconds max)
-          const aiFetchPromise = fetch(mod.AI_MODE_ENDPOINT, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ queries: keywords })
-          });
-          
-          // Increase timeout to 360 seconds (6 minutes) to match Vercel serverless function timeout (300s) with buffer
-          const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('AI fetch timeout after 360 seconds')), 360000)
-          );
-          
-          const aiRes = await Promise.race([aiFetchPromise, timeoutPromise]);
-          debugLog(`📊 AI response status: ${aiRes.status}`, 'info');
-
-          if (!aiRes.ok) {
-            const errorText = await aiRes.text();
-            debugLog(`✗ AI request failed: ${aiRes.status} - ${errorText}`, 'error');
-            RankingAiProgressModal.updateCounts(`⚠ AI Overview check failed (${aiRes.status}), continuing with SERP data only...`);
-            aiFetchError = `AI mode request failed: ${aiRes.status} - ${errorText}`;
-          } else {
-            RankingAiProgressModal.updateProgress(75, 2);
-            RankingAiProgressModal.updateCounts(`✓ Retrieved AI Overview data`);
-            
-            const aiJson = await aiRes.json();
-            debugLog(`📊 AI JSON keys: ${Object.keys(aiJson).join(', ')}`, 'info');
-            aiRows = aiJson.per_query || [];
-            debugLog(`✓ Retrieved ${aiRows.length} AI results`, 'success');
+          // Batch AI requests to avoid Vercel 300s timeout
+          // Process 10 keywords per batch (each API call takes ~5s, so 10 keywords = ~50s per batch)
+          const AI_BATCH_SIZE = 10;
+          const aiBatches = [];
+          for (let i = 0; i < keywords.length; i += AI_BATCH_SIZE) {
+            aiBatches.push(keywords.slice(i, i + AI_BATCH_SIZE));
           }
+          
+          debugLog(`📊 Processing AI data in ${aiBatches.length} batches of up to ${AI_BATCH_SIZE} keywords each`, 'info');
+          
+          // Process batches sequentially to avoid overwhelming the API
+          for (let batchIdx = 0; batchIdx < aiBatches.length; batchIdx++) {
+            const batch = aiBatches[batchIdx];
+            const batchProgress = 55 + Math.floor((batchIdx / aiBatches.length) * 20); // 55-75% progress
+            
+            RankingAiProgressModal.updateProgress(batchProgress, 2);
+            RankingAiProgressModal.updateCounts(`Fetching AI data: batch ${batchIdx + 1}/${aiBatches.length} (${batch.length} keywords)...`);
+            
+            debugLog(`📊 AI batch ${batchIdx + 1}/${aiBatches.length}: ${batch.length} keywords`, 'info');
+            
+            try {
+              // Timeout per batch: 90 seconds (should be enough for 10 keywords)
+              const aiFetchPromise = fetch(mod.AI_MODE_ENDPOINT, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ queries: batch })
+              });
+              
+              const timeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error(`AI batch ${batchIdx + 1} timeout after 90 seconds`)), 90000)
+              );
+              
+              const aiRes = await Promise.race([aiFetchPromise, timeoutPromise]);
+              debugLog(`📊 AI batch ${batchIdx + 1} response status: ${aiRes.status}`, 'info');
+
+              if (!aiRes.ok) {
+                const errorText = await aiRes.text();
+                debugLog(`✗ AI batch ${batchIdx + 1} failed: ${aiRes.status} - ${errorText}`, 'error');
+                // Add empty results for this batch
+                batch.forEach(keyword => {
+                  aiRows.push({
+                    query: keyword,
+                    has_ai_overview: false,
+                    total_citations: 0,
+                    alanranger_citations_count: 0,
+                    alanranger_citations: [],
+                    sample_citations: [],
+                    error: `Batch request failed: ${aiRes.status}`
+                  });
+                });
+              } else {
+                const aiJson = await aiRes.json();
+                const batchResults = aiJson.per_query || [];
+                aiRows.push(...batchResults);
+                debugLog(`✓ AI batch ${batchIdx + 1}: Retrieved ${batchResults.length} results`, 'success');
+              }
+            } catch (batchErr) {
+              debugLog(`✗ AI batch ${batchIdx + 1} error: ${batchErr.message}`, 'error');
+              // Add empty results for this batch
+              batch.forEach(keyword => {
+                aiRows.push({
+                  query: keyword,
+                  has_ai_overview: false,
+                  total_citations: 0,
+                  alanranger_citations_count: 0,
+                  alanranger_citations: [],
+                  sample_citations: [],
+                  error: batchErr.message
+                });
+              });
+            }
+            
+            // Small delay between batches to avoid rate limiting
+            if (batchIdx < aiBatches.length - 1) {
+              await new Promise(resolve => setTimeout(resolve, 500));
+            }
+          }
+          
+          RankingAiProgressModal.updateProgress(75, 2);
+          RankingAiProgressModal.updateCounts(`✓ Retrieved AI Overview data for ${aiRows.length} keywords`);
+          debugLog(`✓ Retrieved ${aiRows.length} AI results total`, 'success');
+          
         } catch (aiErr) {
           debugLog(`✗ AI fetch error: ${aiErr.message}`, 'error');
           RankingAiProgressModal.updateCounts(`⚠ AI Overview check failed (${aiErr.message}), continuing with SERP data only...`);
