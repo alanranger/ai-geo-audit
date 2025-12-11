@@ -171,6 +171,7 @@ export default async function handler(req, res) {
       schema_pages_detail: (() => {
         // First try: schemaData.pages (detailed array from schema audit)
         if (Array.isArray(schemaData.pages) && schemaData.pages.length > 0) {
+          console.log('[Save Audit] Using schemaData.pages array:', schemaData.pages.length, 'pages');
           return schemaData.pages.map(p => ({
             url: p.url || '',
             schemaTypes: Array.isArray(p.schemaTypes) ? p.schemaTypes : (p.schemaTypes ? [p.schemaTypes] : [])
@@ -178,25 +179,39 @@ export default async function handler(req, res) {
         }
         // Second try: pagesWithSchema if it's an array
         if (Array.isArray(schemaData.pagesWithSchema) && schemaData.pagesWithSchema.length > 0) {
+          console.log('[Save Audit] Using schemaData.pagesWithSchema array:', schemaData.pagesWithSchema.length, 'pages');
           return schemaData.pagesWithSchema.map(p => ({
             url: typeof p === 'string' ? p : (p.url || ''),
             schemaTypes: Array.isArray(p.schemaTypes) ? p.schemaTypes : (p.schemaTypes ? [p.schemaTypes] : [])
           })).filter(p => p.url);
         }
+        console.warn('[Save Audit] schema_pages_detail is missing - schema coverage will not be available in scorecard');
         return null;
       })(),
       
       // GSC query+page level data (for CTR metrics in scorecard)
-      query_pages: Array.isArray(searchData?.queryPages) && searchData.queryPages.length > 0
-        ? searchData.queryPages.map(qp => ({
-            query: qp.query || '',
-            page: qp.page || qp.url || '',
-            clicks: qp.clicks || 0,
-            impressions: qp.impressions || 0,
-            ctr: qp.ctr || 0, // Store as percentage (0-100)
-            position: qp.position || qp.avg_position || null
-          })).filter(qp => qp.query || qp.page)
-        : null,
+      query_pages: (() => {
+        const qp = searchData?.queryPages;
+        console.log('[Save Audit] queryPages check:', {
+          exists: !!qp,
+          isArray: Array.isArray(qp),
+          length: Array.isArray(qp) ? qp.length : 'N/A',
+          type: typeof qp,
+          sample: Array.isArray(qp) && qp.length > 0 ? qp[0] : null
+        });
+        if (Array.isArray(qp) && qp.length > 0) {
+          return qp.map(qpItem => ({
+            query: qpItem.query || '',
+            page: qpItem.page || qpItem.url || '',
+            clicks: qpItem.clicks || 0,
+            impressions: qpItem.impressions || 0,
+            ctr: qpItem.ctr || 0, // Store as percentage (0-100)
+            position: qpItem.position || qpItem.avg_position || null
+          })).filter(qpItem => qpItem.query || qpItem.page);
+        }
+        console.warn('[Save Audit] queryPages is missing or empty - CTR metrics will not be available in scorecard');
+        return null;
+      })(),
       
       // Pillar Scores
       visibility_score: ensureNumber(scores?.visibility),
