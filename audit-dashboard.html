@@ -20629,15 +20629,16 @@ Final Score: ${score}/100`;
         if (savedAudit && savedAudit.schemaAudit && savedAudit.schemaAudit.data) {
           const schemaData = savedAudit.schemaAudit.data;
           
-          // Check schemaData.pages first (original array from schema audit API)
-          // Then check pagesWithSchema (might be array from Supabase or number count)
+          // PRIORITY: Check pagesWithSchema first (from Supabase schema_pages_detail)
+          // Then check pages (original array from schema audit API)
+          // pagesWithSchema from Supabase is the most reliable source
           let pagesArray = null;
-          if (Array.isArray(schemaData.pages) && schemaData.pages.length > 0) {
+          if (Array.isArray(schemaData.pagesWithSchema) && schemaData.pagesWithSchema.length > 0) {
+            pagesArray = schemaData.pagesWithSchema;
+            debugLog('[Schema Coverage] Using schemaData.pagesWithSchema array from Supabase (' + pagesArray.length + ' pages)', 'info');
+          } else if (Array.isArray(schemaData.pages) && schemaData.pages.length > 0) {
             pagesArray = schemaData.pages;
             debugLog('[Schema Coverage] Using schemaData.pages array (' + pagesArray.length + ' pages)', 'info');
-          } else if (Array.isArray(schemaData.pagesWithSchema) && schemaData.pagesWithSchema.length > 0) {
-            pagesArray = schemaData.pagesWithSchema;
-            debugLog('[Schema Coverage] Using schemaData.pagesWithSchema array (' + pagesArray.length + ' pages)', 'info');
           } else {
             debugLog('[Schema Coverage] No pages array found. pages=' + typeof schemaData.pages + ', pagesWithSchema=' + typeof schemaData.pagesWithSchema, 'warn');
           }
