@@ -84,9 +84,11 @@ async function fetchAiModeForKeyword(keyword, auth) {
     ]),
   });
 
-  const data = await dfResponse.json();
-
-  if (!dfResponse.ok || data.status_code !== 20000) {
+  let data;
+  try {
+    data = await dfResponse.json();
+  } catch (parseError) {
+    console.error(`[AI Mode] Failed to parse DataForSEO response for "${keyword}":`, parseError.message);
     return {
       query: keyword,
       has_ai_overview: false,
@@ -94,7 +96,20 @@ async function fetchAiModeForKeyword(keyword, auth) {
       alanranger_citations_count: 0,
       alanranger_citations: [],
       sample_citations: [],
-      error: data.status_message || "DataForSEO request failed",
+      error: `Failed to parse response: ${parseError.message}`,
+    };
+  }
+
+  if (!dfResponse.ok || data.status_code !== 20000) {
+    console.error(`[AI Mode] DataForSEO API error for "${keyword}":`, data.status_message || `HTTP ${dfResponse.status}`);
+    return {
+      query: keyword,
+      has_ai_overview: false,
+      total_citations: 0,
+      alanranger_citations_count: 0,
+      alanranger_citations: [],
+      sample_citations: [],
+      error: data.status_message || `DataForSEO request failed (HTTP ${dfResponse.status})`,
     };
   }
 
@@ -179,6 +194,8 @@ export default async function handler(req, res) {
       const result = await fetchAiModeForKeyword(keyword, auth);
       perQuery.push(result);
     } catch (err) {
+      console.error(`[AI Mode] Error processing keyword "${keyword}":`, err.message);
+      console.error(`[AI Mode] Stack:`, err.stack);
       perQuery.push({
         query: keyword,
         has_ai_overview: false,
@@ -186,7 +203,7 @@ export default async function handler(req, res) {
         alanranger_citations_count: 0,
         alanranger_citations: [],
         sample_citations: [],
-        error: "Unexpected server error",
+        error: err.message || "Unexpected server error",
       });
     }
   }

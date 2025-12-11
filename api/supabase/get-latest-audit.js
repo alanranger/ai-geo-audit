@@ -278,7 +278,20 @@ export default async function handler(req, res) {
         localEntity: record.local_entity_score || null,
         serviceArea: record.service_area_score || null,
         brandOverlay: record.brand_overlay || null,
-        moneyPagesMetrics: record.money_pages_metrics || null,
+        // Fix: Parse JSON if money_pages_metrics is stored as string
+        moneyPagesMetrics: (() => {
+          const metrics = record.money_pages_metrics;
+          if (!metrics) return null;
+          if (typeof metrics === 'string') {
+            try {
+              return JSON.parse(metrics);
+            } catch (e) {
+              console.warn('[get-latest-audit] Failed to parse money_pages_metrics JSON:', e.message);
+              return null;
+            }
+          }
+          return metrics;
+        })(),
         authorityComponents: {
           behaviour: record.authority_behaviour_score || null,
           ranking: record.authority_ranking_score || null,
@@ -305,13 +318,28 @@ export default async function handler(req, res) {
         // CRITICAL: Load timeseries data from gsc_timeseries table for Score Trends chart
         timeseries: null, // Will be loaded separately via get-audit-history endpoint
         // Query+page level data for CTR metrics in keyword scorecard
-        queryPages: Array.isArray(record.query_pages) ? record.query_pages : null
+        // Fix: Parse JSON if query_pages is stored as string
+        queryPages: (() => {
+          const qp = record.query_pages;
+          if (!qp) return null;
+          if (typeof qp === 'string') {
+            try {
+              const parsed = JSON.parse(qp);
+              return Array.isArray(parsed) ? parsed : null;
+            } catch (e) {
+              console.warn('[get-latest-audit] Failed to parse query_pages JSON:', e.message);
+              return null;
+            }
+          }
+          return Array.isArray(qp) ? qp : null;
+        })()
       },
       snippetReadiness: record.snippet_readiness || 0,
-      schemaAudit: record.content_schema_score !== null ? {
+      // Fix: Check for schema data existence, not just content_schema_score (which might be 0)
+      schemaAudit: (record.schema_total_pages != null || record.schema_coverage != null || record.content_schema_score != null || Array.isArray(record.schema_pages_detail)) ? {
         status: 'ok',
         data: {
-          coverage: record.schema_coverage || record.content_schema_score,
+          coverage: record.schema_coverage != null ? record.schema_coverage : (record.content_schema_score != null ? record.content_schema_score : 0),
           totalPages: record.schema_total_pages || 0,
           // CRITICAL: Include pages array for scorecard schema detection
           // schema_pages_detail is the detailed array with url and schemaTypes per page
@@ -320,12 +348,12 @@ export default async function handler(req, res) {
             : null,
           pagesWithSchema: Array.isArray(record.schema_pages_detail) && record.schema_pages_detail.length > 0
             ? record.schema_pages_detail
-            : record.schema_pages_with_schema || 0, // Fallback to count if detail not available
-          schemaTypes: record.schema_types || [],
-          foundation: record.schema_foundation || {},
-          richEligible: record.schema_rich_eligible || {},
-          missingTypes: record.schema_types ? [] : ['Organization', 'Person', 'WebSite', 'BreadcrumbList'],
-          missingSchemaPages: record.schema_missing_pages || []
+            : (record.schema_pages_with_schema != null ? record.schema_pages_with_schema : 0), // Fallback to count if detail not available
+          schemaTypes: Array.isArray(record.schema_types) ? record.schema_types : [],
+          foundation: (typeof record.schema_foundation === 'object' && record.schema_foundation !== null) ? record.schema_foundation : {},
+          richEligible: (typeof record.schema_rich_eligible === 'object' && record.schema_rich_eligible !== null) ? record.schema_rich_eligible : {},
+          missingTypes: Array.isArray(record.schema_types) && record.schema_types.length > 0 ? [] : ['Organization', 'Person', 'WebSite', 'BreadcrumbList'],
+          missingSchemaPages: Array.isArray(record.schema_missing_pages) ? record.schema_missing_pages : []
         }
       } : null,
       localSignals: (record.local_entity_score !== null || record.service_area_score !== null) ? {
@@ -342,8 +370,33 @@ export default async function handler(req, res) {
       timestamp: record.updated_at ? new Date(record.updated_at).getTime() : new Date(record.audit_date + 'T00:00:00').getTime(),
       auditDate: record.audit_date,
       // Money Pages Priority Matrix data - restore from Supabase if available
-      moneyPagePriorityData: record.money_page_priority_data || null, // Restore from Supabase, or rebuild if missing
-      moneySegmentMetrics: record.money_segment_metrics || null,
+      // Fix: Parse JSON if stored as string
+      moneyPagePriorityData: (() => {
+        const data = record.money_page_priority_data;
+        if (!data) return null;
+        if (typeof data === 'string') {
+          try {
+            return JSON.parse(data);
+          } catch (e) {
+            console.warn('[get-latest-audit] Failed to parse money_page_priority_data JSON:', e.message);
+            return null;
+          }
+        }
+        return data;
+      })(),
+      moneySegmentMetrics: (() => {
+        const metrics = record.money_segment_metrics;
+        if (!metrics) return null;
+        if (typeof metrics === 'string') {
+          try {
+            return JSON.parse(metrics);
+          } catch (e) {
+            console.warn('[get-latest-audit] Failed to parse money_segment_metrics JSON:', e.message);
+            return null;
+          }
+        }
+        return metrics;
+      })(),
       rankingAiData: rankingAiData // Ranking & AI data reconstructed from keyword_rankings table
     };
 
