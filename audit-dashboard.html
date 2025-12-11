@@ -19617,10 +19617,10 @@ Final Score: ${score}/100`;
      * @param {string} url - URL to check
      * @returns {Object|null} Schema coverage data or null if not found
      */
-    function getSchemaCoverageForUrl(url) {
+    async function getSchemaCoverageForUrl(url) {
       try {
         // Get audit data from localStorage using loadAuditResultsSync
-        const savedAudit = loadAuditResultsSync();
+        let savedAudit = loadAuditResultsSync();
         if (!savedAudit) {
           debugLog('[Schema Coverage] No saved audit found in localStorage', 'warn');
           return null;
@@ -19630,13 +19630,33 @@ Final Score: ${score}/100`;
           return null;
         }
 
-        const schemaData = savedAudit.schemaAudit.data;
-        const pagesWithSchema = schemaData.pagesWithSchema || [];
+        let schemaData = savedAudit.schemaAudit.data;
+        let pagesWithSchema = schemaData.pagesWithSchema || [];
         
         // Check if pagesWithSchema is an array of objects (detail) or just a number (count)
         if (typeof pagesWithSchema === 'number') {
-          debugLog('[Schema Coverage] pagesWithSchema is a count, not detailed array. Need to run new audit to get detail.', 'warn');
-          return null;
+          debugLog('[Schema Coverage] pagesWithSchema is a count in localStorage, trying Supabase...', 'warn');
+          // Try fetching from Supabase which should have the detailed array
+          const propertyUrl = savedAudit.propertyUrl || localStorage.getItem('gsc_property_url') || 'https://www.alanranger.com';
+          try {
+            const supabaseData = await fetchLatestAuditFromSupabase(propertyUrl);
+            if (supabaseData && supabaseData.schemaAudit && supabaseData.schemaAudit.data) {
+              schemaData = supabaseData.schemaAudit.data;
+              pagesWithSchema = schemaData.pagesWithSchema || [];
+              debugLog('[Schema Coverage] Loaded detailed schema data from Supabase', 'info');
+              // Update localStorage with the correct structure
+              savedAudit.schemaAudit.data = schemaData;
+              localStorage.setItem('last_audit_results', JSON.stringify(savedAudit));
+            }
+          } catch (e) {
+            debugLog('[Schema Coverage] Failed to fetch from Supabase: ' + e.message, 'warn');
+          }
+          
+          // Check again after Supabase fetch
+          if (typeof pagesWithSchema === 'number') {
+            debugLog('[Schema Coverage] pagesWithSchema is still a count after Supabase fetch. Need to run new audit to get detail.', 'warn');
+            return null;
+          }
         }
         
         if (!Array.isArray(pagesWithSchema) || pagesWithSchema.length === 0) {
@@ -20586,8 +20606,38 @@ Final Score: ${score}/100`;
       html += `<div class="scorecard-section">`;
       html += `<h5 style="font-size: 1rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">4. Schema & rich results</h5>`;
       
-      // Get schema coverage if available
-      const schemaCoverage = getSchemaCoverageForUrl(scorecardData.ranking_url);
+      // Get schema coverage if available (async, but we'll handle it synchronously for now)
+      // Note: This will be null if data needs to be fetched from Supabase
+      let schemaCoverage = null;
+      try {
+        // Try sync first (localStorage)
+        const savedAudit = loadAuditResultsSync();
+        if (savedAudit && savedAudit.schemaAudit && savedAudit.schemaAudit.data) {
+          const schemaData = savedAudit.schemaAudit.data;
+          const pagesWithSchema = schemaData.pagesWithSchema || [];
+          if (Array.isArray(pagesWithSchema) && pagesWithSchema.length > 0) {
+            const normalizedUrl = (scorecardData.ranking_url || '').toLowerCase().trim();
+            const pageData = pagesWithSchema.find(p => {
+              const pUrl = (p.url || '').toLowerCase().trim();
+              return pUrl === normalizedUrl || pUrl.includes(normalizedUrl) || normalizedUrl.includes(pUrl);
+            });
+            if (pageData && pageData.schemaTypes) {
+              const schemaTypes = Array.isArray(pageData.schemaTypes) ? pageData.schemaTypes : [];
+              const typeStrings = schemaTypes.map(t => String(t).toLowerCase());
+              schemaCoverage = {
+                hasFAQ: typeStrings.some(t => t.includes('faq') || t === 'faqpage'),
+                hasHowTo: typeStrings.some(t => t.includes('howto') || t === 'howto'),
+                hasEvent: typeStrings.some(t => t.includes('event') && !t.includes('product')),
+                hasProduct: typeStrings.some(t => t.includes('product')),
+                hasBreadcrumb: typeStrings.some(t => t.includes('breadcrumb') || t === 'breadcrumblist'),
+                hasImageObject: typeStrings.some(t => t.includes('image') || t === 'imageobject')
+              };
+            }
+          }
+        }
+      } catch (e) {
+        debugLog('[Schema Coverage] Error in sync check: ' + e.message, 'warn');
+      }
       
       if (schemaCoverage) {
         // Show checklist
