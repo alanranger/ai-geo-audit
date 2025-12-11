@@ -18476,21 +18476,32 @@ Final Score: ${score}/100`;
         const response = await fetch(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}`);
         if (response.ok) {
           const json = await response.json();
-          if (json.status === 'ok' && json.data && json.data.rankingAiData) {
-            debugLog('✓ Ranking & AI data loaded from Supabase', 'success');
-            debugLog(`  Found ${json.data.rankingAiData.combinedRows?.length || 0} keywords in Supabase`, 'info');
-            // Also save to localStorage for faster access next time
-            localStorage.setItem('rankingAiData', JSON.stringify({
-              combinedRows: json.data.rankingAiData.combinedRows,
-              summary: json.data.rankingAiData.summary,
-              timestamp: new Date().toISOString()
-            }));
-            return json.data.rankingAiData;
+          debugLog(`📊 API response: status=${json.status}, hasData=${!!json.data}, hasRankingAiData=${!!json.data?.rankingAiData}`, 'info');
+          if (json.status === 'ok' && json.data) {
+            if (json.data.rankingAiData && json.data.rankingAiData.combinedRows) {
+              const keywordCount = json.data.rankingAiData.combinedRows.length;
+              debugLog('✓ Ranking & AI data loaded from Supabase', 'success');
+              debugLog(`  Found ${keywordCount} keywords in Supabase`, 'info');
+              // Also save to localStorage for faster access next time
+              localStorage.setItem('rankingAiData', JSON.stringify({
+                combinedRows: json.data.rankingAiData.combinedRows,
+                summary: json.data.rankingAiData.summary,
+                timestamp: new Date().toISOString()
+              }));
+              return json.data.rankingAiData;
+            } else {
+              debugLog('⚠ rankingAiData is null or missing combinedRows in Supabase response', 'warn');
+              debugLog(`  Response structure: ${JSON.stringify(Object.keys(json.data || {}))}`, 'warn');
+              if (json.data.rankingAiData === null) {
+                debugLog('  rankingAiData is explicitly null - no keyword rows found in database', 'warn');
+              }
+            }
           } else {
-            debugLog('⚠ No Ranking & AI data found in Supabase', 'warn');
+            debugLog(`⚠ API returned error status: ${json.status}, message: ${json.message || 'unknown'}`, 'warn');
           }
         } else {
-          debugLog(`⚠ Failed to load from Supabase: ${response.status}`, 'warn');
+          const errorText = await response.text();
+          debugLog(`⚠ Failed to load from Supabase: ${response.status} - ${errorText}`, 'warn');
         }
       } catch (err) {
         debugLog(`✗ Error loading Ranking & AI data from storage: ${err.message}`, 'error');

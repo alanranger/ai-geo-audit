@@ -90,8 +90,11 @@ export default async function handler(req, res) {
     // Fetch keyword rankings from keyword_rankings table for this audit_date and property_url
     let rankingAiData = null;
     try {
-      const keywordRankingsUrl = `${supabaseUrl}/rest/v1/keyword_rankings?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${encodeURIComponent(auditDate)}&select=*&order=keyword.asc`;
-      const keywordRankingsResponse = await fetch(keywordRankingsUrl, {
+      console.log(`[get-latest-audit] Fetching keyword rankings for audit_date=${auditDate}, property_url=${propertyUrl}`);
+      
+      // First, try to fetch using the audit_date from audit_results
+      let keywordRankingsUrl = `${supabaseUrl}/rest/v1/keyword_rankings?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${encodeURIComponent(auditDate)}&select=*&order=keyword.asc`;
+      let keywordRankingsResponse = await fetch(keywordRankingsUrl, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -100,8 +103,47 @@ export default async function handler(req, res) {
         }
       });
 
+      let keywordRows = [];
       if (keywordRankingsResponse.ok) {
-        const keywordRows = await keywordRankingsResponse.json();
+        keywordRows = await keywordRankingsResponse.json();
+        console.log(`[get-latest-audit] Found ${keywordRows?.length || 0} keyword rows for audit_date=${auditDate}`);
+      } else {
+        const errorText = await keywordRankingsResponse.text();
+        console.log(`[get-latest-audit] Query with audit_date=${auditDate} failed: ${keywordRankingsResponse.status} - ${errorText}`);
+      }
+      
+      // If no rows found with the audit_date from audit_results, try to get the most recent data
+      if (!keywordRows || keywordRows.length === 0) {
+        console.log(`[get-latest-audit] No rows found for audit_date=${auditDate}, trying to fetch most recent data...`);
+        keywordRankingsUrl = `${supabaseUrl}/rest/v1/keyword_rankings?property_url=eq.${encodeURIComponent(propertyUrl)}&select=*&order=audit_date.desc,keyword.asc&limit=1000`;
+        keywordRankingsResponse = await fetch(keywordRankingsUrl, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': supabaseKey,
+            'Authorization': `Bearer ${supabaseKey}`
+          }
+        });
+        
+        if (keywordRankingsResponse.ok) {
+          const allRows = await keywordRankingsResponse.json();
+          if (allRows && allRows.length > 0) {
+            // Group by audit_date and get the most recent
+            const rowsByDate = {};
+            allRows.forEach(row => {
+              if (!rowsByDate[row.audit_date]) {
+                rowsByDate[row.audit_date] = [];
+              }
+              rowsByDate[row.audit_date].push(row);
+            });
+            const dates = Object.keys(rowsByDate).sort().reverse();
+            if (dates.length > 0) {
+              keywordRows = rowsByDate[dates[0]];
+              console.log(`[get-latest-audit] Found ${keywordRows.length} keyword rows for most recent audit_date=${dates[0]}`);
+            }
+          }
+        }
+      }
         
         if (keywordRows && keywordRows.length > 0) {
           // Convert database rows to frontend format (combinedRows)
@@ -171,19 +213,25 @@ export default async function handler(req, res) {
               keywords_with_volume: keywordsWithVolume.length
             }
           };
+          console.log(`[get-latest-audit] Successfully reconstructed rankingAiData with ${combinedRows.length} keywords`);
         } else {
           // Fallback to ranking_ai_data JSON from audit_results if keyword_rankings is empty
+          console.log(`[get-latest-audit] No keyword rows found, falling back to ranking_ai_data from audit_results`);
           rankingAiData = record.ranking_ai_data || null;
         }
       } else {
         // Fallback to ranking_ai_data JSON from audit_results if keyword_rankings fetch fails
+        const errorText = await keywordRankingsResponse.text();
+        console.error(`[get-latest-audit] Failed to fetch keyword rankings: ${keywordRankingsResponse.status} - ${errorText}`);
         rankingAiData = record.ranking_ai_data || null;
       }
     } catch (keywordErr) {
-      console.error('Error fetching keyword rankings:', keywordErr);
+      console.error('[get-latest-audit] Error fetching keyword rankings:', keywordErr);
       // Fallback to ranking_ai_data JSON from audit_results if keyword_rankings fetch errors
       rankingAiData = record.ranking_ai_data || null;
     }
+    
+    console.log(`[get-latest-audit] Final rankingAiData: ${rankingAiData ? (rankingAiData.combinedRows?.length || 0) + ' keywords' : 'null'}`);
 
     // Reconstruct the full audit object from Supabase data
     const auditData = {
