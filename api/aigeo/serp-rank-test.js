@@ -399,6 +399,11 @@ async function fetchSerpForKeyword(keyword, auth, targetRoot) {
         featured_snippet: false,
         people_also_ask: false,
       },
+      // New boolean fields for SERP feature coverage (all false on error)
+      ai_overview_present_any: false,
+      local_pack_present_any: false,
+      paa_present_any: false,
+      featured_snippet_present_any: false,
       error: "Unexpected server error",
     };
   }
