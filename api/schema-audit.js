@@ -133,7 +133,13 @@ function normalizeSchemaTypes(schemaObject) {
     if (depth > 15) return;
 
     // 1) Top-level @type for this node
-    addType(node['@type']);
+    // Handle both string and array formats for @type
+    const nodeType = node['@type'];
+    if (Array.isArray(nodeType)) {
+      nodeType.forEach(t => addType(t));
+    } else {
+      addType(nodeType);
+    }
 
     // 2) Any items in @graph (critical for BreadcrumbList, ItemList, etc.)
     if (Array.isArray(node['@graph'])) {
