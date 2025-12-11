@@ -26,10 +26,61 @@ const RICH_RESULT_TYPES = [
 
 /**
  * Extract all JSON-LD blocks from HTML
+ * Also fetches dynamically loaded schemas from schema.alanranger.com
  */
-function extractJsonLd(htmlString) {
+async function extractJsonLd(htmlString, pageUrl = null) {
   const jsonLdBlocks = [];
-  // More flexible regex: handles both single and double quotes, and various script tag formats
+  
+  // FIRST: Check ALL script tags for dynamic loaders (before parsing JSON-LD)
+  // This handles cases where JavaScript loaders are in script tags without type="application/ld+json"
+  let slug = null;
+  if (pageUrl) {
+    const slugMatch = pageUrl.match(/\/blog-on-photography\/([^\/]+)/) || 
+                     pageUrl.match(/\/([^\/]+)\/?$/);
+    if (slugMatch) slug = slugMatch[1];
+  }
+  
+  if (slug) {
+    const allScriptsRegex = /<script[^>]*>(.*?)<\/script>/gis;
+    const allScripts = [...htmlString.matchAll(allScriptsRegex)];
+    
+    for (const scriptMatch of allScripts) {
+      const scriptContent = scriptMatch[1].trim();
+      const hasSchemaDomain = /schema\.alanranger\.com/i.test(scriptContent);
+      const isJavaScript = /function|var |const |let |window\.|document\.|fetch\(/i.test(scriptContent);
+      
+      if (hasSchemaDomain && isJavaScript) {
+        const schemaFiles = [
+          `${slug}_schema.json`,
+          `${slug}_blogposting.json`,
+          `${slug}_breadcrumb.json`,
+          `${slug}_howto.json`,
+          `${slug}_faq.json`
+        ];
+        
+        for (const fileName of schemaFiles) {
+          try {
+            const schemaUrl = `https://schema.alanranger.com/${fileName}`;
+            const schemaResponse = await fetch(schemaUrl);
+            if (schemaResponse.ok) {
+              const schemaData = await schemaResponse.json();
+              if (Array.isArray(schemaData)) {
+                jsonLdBlocks.push(...schemaData);
+              } else {
+                jsonLdBlocks.push(schemaData);
+              }
+              console.log(`✅ Fetched schema from ${schemaUrl}: @type=${schemaData['@type'] || 'array'}`);
+            }
+          } catch (e) {
+            // File doesn't exist, skip
+          }
+        }
+        break; // Found loader, don't check other scripts
+      }
+    }
+  }
+  
+  // THEN: Parse regular JSON-LD script tags
   const jsonLdRegex = /<script[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>(.*?)<\/script>/gis;
   const matches = [...htmlString.matchAll(jsonLdRegex)];
   
@@ -54,82 +105,118 @@ function extractJsonLd(htmlString) {
         jsonLdBlocks.push(parsed);
       }
     } else {
-      parseErrors++;
+      // Check if this is JavaScript code that loads schemas dynamically
+      // Pattern: JavaScript code that references schema.alanranger.com
+      const isDynamicLoader = /schema\.alanranger\.com/i.test(jsonText) && 
+                              (/function/i.test(jsonText) || /\.json/i.test(jsonText));
       
-      // CRITICAL: Try to extract @type from failed parse blocks
-      // This is essential because BlogPosting/BreadcrumbList blocks are failing to parse
-      const importantTypes = ['BreadcrumbList', 'HowTo', 'BlogPosting', 'FAQPage', 'WebPage', 'Article', 'ItemList', 'Product', 'Event'];
-      let extractedType = null;
-      
-      // Try multiple regex patterns to extract @type
-      const patterns = [
-        /"@type"\s*:\s*"([^"]+)"/i,                    // Standard: "@type": "BlogPosting"
-        /["']@type["']\s*:\s*["']([^"']+)["']/i,      // Flexible quotes: '@type': 'BlogPosting'
-        /@type\s*:\s*["']([^"']+)["']/i,              // No quotes around @type: @type: "BlogPosting"
-        /"type"\s*:\s*"([^"]+)"/i                     // Just "type" (some malformed JSON)
-      ];
-      
-      for (const pattern of patterns) {
-        const match = jsonText.match(pattern);
-        if (match && match[1]) {
-          extractedType = match[1].trim();
-          if (importantTypes.includes(extractedType)) {
-            break; // Found an important type, stop searching
-          }
-        }
-      }
-      
-      if (extractedType && importantTypes.includes(extractedType)) {
-        console.log(`⚠️ Failed to parse JSON-LD block but detected @type="${extractedType}". Creating recovered schema...`);
-        console.log(`  Failed JSON sample: ${jsonText.substring(0, 500)}`);
-        // Create a minimal schema object with the detected type
-        jsonLdBlocks.push({
-          '@type': extractedType,
-          '@context': 'https://schema.org',
-          _parseError: true,
-          _recovered: true,
-          _originalText: jsonText.substring(0, 1000)
-        });
-        parseErrors--; // Don't count this as an error since we recovered it
-        console.log(`✅ Recovered ${extractedType} schema from parse error`);
-      } else {
-        // Log if important types are mentioned but we couldn't extract @type
-        const mentionedTypes = importantTypes.filter(type => 
-          new RegExp(type, 'i').test(jsonText)
-        );
-        if (mentionedTypes.length > 0) {
-          console.log(`⚠️ Failed to parse JSON-LD block containing: ${mentionedTypes.join(', ')}`);
-          console.log(`  JSON sample (first 800 chars): ${jsonText.substring(0, 800)}`);
-          console.log(`  JSON sample (last 200 chars): ${jsonText.substring(Math.max(0, jsonText.length - 200))}`);
-          
-          // Try harder to extract @type - maybe it's escaped or formatted differently
-          const harderPatterns = [
-            /@type["\s]*:["\s]*["']([^"']+)["']/i,
-            /type["\s]*:["\s]*["']([^"']+)["']/i,
-            new RegExp(`${mentionedTypes[0]}`, 'i') // If we found the type name, try to find it near @type
+      if (isDynamicLoader && pageUrl) {
+        // Extract slug from URL and fetch schema files directly
+        const slugMatch = pageUrl.match(/\/blog-on-photography\/([^\/]+)/) || 
+                         pageUrl.match(/\/([^\/]+)\/?$/);
+        
+        if (slugMatch) {
+          const slug = slugMatch[1];
+          const schemaFiles = [
+            `${slug}_schema.json`,
+            `${slug}_blogposting.json`,
+            `${slug}_breadcrumb.json`,
+            `${slug}_howto.json`,
+            `${slug}_faq.json`
           ];
           
-          for (const pattern of harderPatterns) {
-            const hardMatch = jsonText.match(pattern);
-            if (hardMatch && hardMatch[1] && importantTypes.includes(hardMatch[1].trim())) {
-              const recoveredType = hardMatch[1].trim();
-              console.log(`✅ Hard recovery: Found @type="${recoveredType}" using harder pattern`);
-              jsonLdBlocks.push({
-                '@type': recoveredType,
-                '@context': 'https://schema.org',
-                _parseError: true,
-                _recovered: true,
-                _hardRecovery: true
-              });
-              parseErrors--;
+          // Fetch schema files from schema.alanranger.com
+          for (const fileName of schemaFiles) {
+            try {
+              const schemaUrl = `https://schema.alanranger.com/${fileName}`;
+              const schemaResponse = await fetch(schemaUrl);
+              if (schemaResponse.ok) {
+                const schemaData = await schemaResponse.json();
+                if (Array.isArray(schemaData)) {
+                  jsonLdBlocks.push(...schemaData);
+                } else {
+                  jsonLdBlocks.push(schemaData);
+                }
+                console.log(`✅ Fetched schema from ${schemaUrl}: @type=${schemaData['@type'] || 'array'}`);
+              }
+            } catch (e) {
+              // File doesn't exist, skip
+            }
+          }
+        }
+        continue; // Skip parse error recovery for dynamic loaders
+      }
+      
+      // Not a dynamic loader - try parse error recovery
+      {
+        // Not a dynamic loader - try parse error recovery
+        parseErrors++;
+        
+        // CRITICAL: Try to extract @type from failed parse blocks
+        const importantTypes = ['BreadcrumbList', 'HowTo', 'BlogPosting', 'FAQPage', 'WebPage', 'Article', 'ItemList', 'Product', 'Event'];
+        let extractedType = null;
+        
+        const patterns = [
+          /"@type"\s*:\s*"([^"]+)"/i,
+          /["']@type["']\s*:\s*["']([^"']+)["']/i,
+          /@type\s*:\s*["']([^"']+)["']/i,
+          /"type"\s*:\s*"([^"]+)"/i
+        ];
+        
+        for (const pattern of patterns) {
+          const match = jsonText.match(pattern);
+          if (match && match[1]) {
+            extractedType = match[1].trim();
+            if (importantTypes.includes(extractedType)) {
               break;
             }
           }
-          
-          failedBlocks.push({
-            type: mentionedTypes.join(', '),
-            sample: jsonText.substring(0, 500)
+        }
+        
+        if (extractedType && importantTypes.includes(extractedType)) {
+          console.log(`⚠️ Failed to parse JSON-LD block but detected @type="${extractedType}". Creating recovered schema...`);
+          jsonLdBlocks.push({
+            '@type': extractedType,
+            '@context': 'https://schema.org',
+            _parseError: true,
+            _recovered: true
           });
+          parseErrors--;
+          console.log(`✅ Recovered ${extractedType} schema from parse error`);
+        } else {
+          const mentionedTypes = importantTypes.filter(type => 
+            new RegExp(type, 'i').test(jsonText)
+          );
+          if (mentionedTypes.length > 0) {
+            console.log(`⚠️ Failed to parse JSON-LD block containing: ${mentionedTypes.join(', ')}`);
+            
+            const harderPatterns = [
+              /@type["\s]*:["\s]*["']([^"']+)["']/i,
+              /type["\s]*:["\s]*["']([^"']+)["']/i
+            ];
+            
+            for (const pattern of harderPatterns) {
+              const hardMatch = jsonText.match(pattern);
+              if (hardMatch && hardMatch[1] && importantTypes.includes(hardMatch[1].trim())) {
+                const recoveredType = hardMatch[1].trim();
+                console.log(`✅ Hard recovery: Found @type="${recoveredType}"`);
+                jsonLdBlocks.push({
+                  '@type': recoveredType,
+                  '@context': 'https://schema.org',
+                  _parseError: true,
+                  _recovered: true,
+                  _hardRecovery: true
+                });
+                parseErrors--;
+                break;
+              }
+            }
+            
+            failedBlocks.push({
+              type: mentionedTypes.join(', '),
+              sample: jsonText.substring(0, 500)
+            });
+          }
         }
       }
     }
@@ -488,7 +575,7 @@ async function checkInheritedSchema(url, parentCollectionUrl) {
     }
     
     const html = await response.text();
-    const schemas = extractJsonLd(html);
+    const schemas = await extractJsonLd(html, url);
     
     // Normalize the URL for comparison (remove trailing slashes, etc.)
     const normalizedUrl = url.replace(/\/$/, '');
@@ -702,7 +789,7 @@ async function crawlUrl(url, semaphore, delayAfterMs = 0) {
     }
     
     const html = await response.text();
-    const schemas = extractJsonLd(html);
+    const schemas = await extractJsonLd(html, url);
     const title = extractTitle(html);
     const metaDescription = extractMetaDescription(html);
     
