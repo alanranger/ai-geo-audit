@@ -20629,18 +20629,18 @@ Final Score: ${score}/100`;
         if (savedAudit && savedAudit.schemaAudit && savedAudit.schemaAudit.data) {
           const schemaData = savedAudit.schemaAudit.data;
           
-          // PRIORITY: Check pagesWithSchema first (from Supabase schema_pages_detail)
-          // Then check pages (original array from schema audit API)
-          // pagesWithSchema from Supabase is the most reliable source
+          // PRIORITY: Check pages first (original array from schema audit API - most reliable)
+          // Then check pagesWithSchema ONLY if it's an array (from Supabase schema_pages_detail)
+          // Note: pagesWithSchema might be a number (count) instead of an array
           let pagesArray = null;
-          if (Array.isArray(schemaData.pagesWithSchema) && schemaData.pagesWithSchema.length > 0) {
-            pagesArray = schemaData.pagesWithSchema;
-            debugLog('[Schema Coverage] Using schemaData.pagesWithSchema array from Supabase (' + pagesArray.length + ' pages)', 'info');
-          } else if (Array.isArray(schemaData.pages) && schemaData.pages.length > 0) {
+          if (Array.isArray(schemaData.pages) && schemaData.pages.length > 0) {
             pagesArray = schemaData.pages;
             debugLog('[Schema Coverage] Using schemaData.pages array (' + pagesArray.length + ' pages)', 'info');
+          } else if (Array.isArray(schemaData.pagesWithSchema) && schemaData.pagesWithSchema.length > 0) {
+            pagesArray = schemaData.pagesWithSchema;
+            debugLog('[Schema Coverage] Using schemaData.pagesWithSchema array from Supabase (' + pagesArray.length + ' pages)', 'info');
           } else {
-            debugLog('[Schema Coverage] No pages array found. pages=' + typeof schemaData.pages + ', pagesWithSchema=' + typeof schemaData.pagesWithSchema, 'warn');
+            debugLog('[Schema Coverage] No pages array found. pages=' + typeof schemaData.pages + ' (isArray=' + Array.isArray(schemaData.pages) + '), pagesWithSchema=' + typeof schemaData.pagesWithSchema + ' (isArray=' + Array.isArray(schemaData.pagesWithSchema) + ')', 'warn');
           }
           
           if (pagesArray && pagesArray.length > 0) {
