@@ -18472,36 +18472,55 @@ Final Score: ${score}/100`;
         }
 
         // Try Supabase (either forced or as fallback)
-        debugLog('📊 Loading Ranking & AI data from Supabase...', 'info');
+        debugLog(`📊 Loading Ranking & AI data from Supabase for propertyUrl: ${propertyUrl}`, 'info');
         const response = await fetch(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}`);
+        debugLog(`📊 API fetch response status: ${response.status} ${response.statusText}`, 'info');
+        
         if (response.ok) {
           const json = await response.json();
-          debugLog(`📊 API response: status=${json.status}, hasData=${!!json.data}, hasRankingAiData=${!!json.data?.rankingAiData}`, 'info');
+          debugLog(`📊 API response parsed: status=${json.status}`, 'info');
+          debugLog(`📊 Response has data object: ${!!json.data}`, 'info');
+          debugLog(`📊 Response has rankingAiData: ${!!json.data?.rankingAiData}`, 'info');
+          
           if (json.status === 'ok' && json.data) {
-            if (json.data.rankingAiData && json.data.rankingAiData.combinedRows) {
-              const keywordCount = json.data.rankingAiData.combinedRows.length;
-              debugLog('✓ Ranking & AI data loaded from Supabase', 'success');
-              debugLog(`  Found ${keywordCount} keywords in Supabase`, 'info');
-              // Also save to localStorage for faster access next time
-              localStorage.setItem('rankingAiData', JSON.stringify({
-                combinedRows: json.data.rankingAiData.combinedRows,
-                summary: json.data.rankingAiData.summary,
-                timestamp: new Date().toISOString()
-              }));
-              return json.data.rankingAiData;
+            if (json.data.rankingAiData) {
+              if (json.data.rankingAiData.combinedRows) {
+                const keywordCount = json.data.rankingAiData.combinedRows.length;
+                const summaryKeys = json.data.rankingAiData.summary ? Object.keys(json.data.rankingAiData.summary).join(', ') : 'none';
+                debugLog(`✓ Ranking & AI data loaded from Supabase: ${keywordCount} keywords`, 'success');
+                debugLog(`  Summary fields: ${summaryKeys}`, 'info');
+                debugLog(`  First keyword sample: ${json.data.rankingAiData.combinedRows[0]?.keyword || 'none'}`, 'info');
+                
+                // Also save to localStorage for faster access next time
+                localStorage.setItem('rankingAiData', JSON.stringify({
+                  combinedRows: json.data.rankingAiData.combinedRows,
+                  summary: json.data.rankingAiData.summary,
+                  timestamp: new Date().toISOString()
+                }));
+                debugLog(`✓ Saved ${keywordCount} keywords to localStorage`, 'success');
+                return json.data.rankingAiData;
+              } else {
+                debugLog('⚠ rankingAiData exists but missing combinedRows array', 'warn');
+                debugLog(`  rankingAiData keys: ${Object.keys(json.data.rankingAiData || {}).join(', ')}`, 'warn');
+              }
             } else {
-              debugLog('⚠ rankingAiData is null or missing combinedRows in Supabase response', 'warn');
-              debugLog(`  Response structure: ${JSON.stringify(Object.keys(json.data || {}))}`, 'warn');
+              debugLog('⚠ rankingAiData is null or undefined in Supabase response', 'warn');
+              debugLog(`  Available data keys: ${Object.keys(json.data || {}).join(', ')}`, 'warn');
               if (json.data.rankingAiData === null) {
                 debugLog('  rankingAiData is explicitly null - no keyword rows found in database', 'warn');
               }
             }
           } else {
-            debugLog(`⚠ API returned error status: ${json.status}, message: ${json.message || 'unknown'}`, 'warn');
+            debugLog(`⚠ API returned error status: ${json.status}`, 'warn');
+            debugLog(`  Error message: ${json.message || 'unknown'}`, 'warn');
+            if (json.details) {
+              debugLog(`  Error details: ${typeof json.details === 'string' ? json.details : JSON.stringify(json.details)}`, 'warn');
+            }
           }
         } else {
           const errorText = await response.text();
-          debugLog(`⚠ Failed to load from Supabase: ${response.status} - ${errorText}`, 'warn');
+          debugLog(`⚠ Failed to load from Supabase: HTTP ${response.status}`, 'error');
+          debugLog(`  Error response: ${errorText.substring(0, 200)}`, 'error');
         }
       } catch (err) {
         debugLog(`✗ Error loading Ranking & AI data from storage: ${err.message}`, 'error');
@@ -18538,17 +18557,32 @@ Final Score: ${score}/100`;
       // But if force=false and hasLoadedOnce=true, still check Supabase for newer data
       if (!force) {
         const storedData = await loadRankingAiDataFromStorage(hasLoadedOnce);
+        debugLog(`📊 loadRankingAiDataFromStorage returned: ${storedData ? 'data found' : 'null'}`, 'info');
+        if (storedData) {
+          debugLog(`📊 Stored data has combinedRows: ${!!storedData.combinedRows}, count: ${storedData.combinedRows?.length || 0}`, 'info');
+          debugLog(`📊 Stored data has summary: ${!!storedData.summary}`, 'info');
+        }
+        
         if (storedData && storedData.combinedRows && storedData.summary) {
+          debugLog(`✓ Setting data in RankingAiModule: ${storedData.combinedRows.length} keywords`, 'success');
           mod.setData(storedData.combinedRows, storedData.summary);
           mod.setLoadedOnce(true);
+          debugLog(`✓ Calling renderRankingAiTab()`, 'info');
           renderRankingAiTab();
           const lastRunEl = document.getElementById("ranking-ai-last-run");
           if (lastRunEl && storedData.timestamp) {
             const date = new Date(storedData.timestamp);
             lastRunEl.textContent = `Last run: ${date.toLocaleString()}`;
+            debugLog(`✓ Updated last run timestamp: ${date.toLocaleString()}`, 'info');
           }
           debugLog(`✓ Ranking & AI data loaded from storage (${storedData.combinedRows.length} keywords)`, 'success');
           return;
+        } else {
+          debugLog(`⚠ Stored data incomplete or missing`, 'warn');
+          if (storedData) {
+            debugLog(`  Missing combinedRows: ${!storedData.combinedRows}`, 'warn');
+            debugLog(`  Missing summary: ${!storedData.summary}`, 'warn');
+          }
         }
       }
       
@@ -19802,9 +19836,16 @@ Final Score: ${score}/100`;
     }
 
     function renderRankingAiTab() {
+      debugLog('📊 renderRankingAiTab() called', 'info');
       const { combinedRows, summary } = RankingAiModule.state();
-
-      if (!summary || !Array.isArray(combinedRows)) return;
+      debugLog(`📊 renderRankingAiTab: combinedRows=${combinedRows?.length || 0}, hasSummary=${!!summary}`, 'info');
+      
+      if (!summary || !Array.isArray(combinedRows)) {
+        debugLog(`⚠ renderRankingAiTab: Early return - summary=${!!summary}, combinedRows is array=${Array.isArray(combinedRows)}`, 'warn');
+        return;
+      }
+      
+      debugLog(`✓ renderRankingAiTab: Proceeding with ${combinedRows.length} keywords`, 'success');
 
       // Apply filters first
       const filteredRows = applyRankingFilters(combinedRows);
@@ -20673,27 +20714,41 @@ Final Score: ${score}/100`;
               // Load from localStorage/Supabase ONLY - never trigger API scan from tab click
               // Only load if data exists, otherwise show empty state
               (async () => {
+                debugLog('📊 Ranking & AI tab clicked - loading data from storage...', 'info');
                 const storedData = await loadRankingAiDataFromStorage(false);
+                debugLog(`📊 Tab click: loadRankingAiDataFromStorage returned: ${storedData ? 'data found' : 'null'}`, 'info');
+                if (storedData) {
+                  debugLog(`📊 Tab click: Stored data has ${storedData.combinedRows?.length || 0} keywords, has summary: ${!!storedData.summary}`, 'info');
+                }
+                
                 if (storedData && storedData.combinedRows && storedData.summary) {
                   const mod = window.RankingAiModule;
                   if (mod) {
+                    debugLog(`✓ Tab click: Setting ${storedData.combinedRows.length} keywords in RankingAiModule`, 'success');
                     mod.setData(storedData.combinedRows, storedData.summary);
                     mod.setLoadedOnce(true);
+                    debugLog(`✓ Tab click: Calling renderRankingAiTab()`, 'info');
                     renderRankingAiTab();
                     const lastRunEl = document.getElementById("ranking-ai-last-run");
                     if (lastRunEl && storedData.timestamp) {
                       const date = new Date(storedData.timestamp);
                       lastRunEl.textContent = `Last run: ${date.toLocaleString()}`;
+                      debugLog(`✓ Tab click: Updated last run timestamp`, 'info');
                     }
-                    debugLog(`✓ Ranking & AI data loaded from storage (${storedData.combinedRows.length} keywords)`, 'success');
+                    debugLog(`✓ Tab click: Ranking & AI data loaded from storage (${storedData.combinedRows.length} keywords)`, 'success');
+                  } else {
+                    debugLog('✗ Tab click: RankingAiModule not found in window', 'error');
                   }
                 } else {
                   // No data available - just render empty state, don't trigger scan
-                  debugLog('⚠ No Ranking & AI data available. Click "Run ranking & AI check" to fetch data.', 'info');
+                  debugLog('⚠ Tab click: No Ranking & AI data available. Click "Run ranking & AI check" to fetch data.', 'warn');
                   const mod = window.RankingAiModule;
                   if (mod) {
+                    debugLog('📊 Tab click: Setting empty data in RankingAiModule', 'info');
                     mod.setData([], { total_keywords: 0, keywords_with_rank: 0, keywords_with_ai_overview: 0, keywords_with_ai_citations: 0, top10: 0, top3: 0 });
                     renderRankingAiTab();
+                  } else {
+                    debugLog('✗ Tab click: RankingAiModule not found in window', 'error');
                   }
                 }
               })();
