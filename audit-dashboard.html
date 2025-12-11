@@ -4558,7 +4558,25 @@
       }
       
       // Use canonical page classification (same as Money Pages)
-      const { isMoney, segmentType } = classifyMoneyPage(rawUrlOrPath);
+      // Try window.classifyMoneyPage first (if available), then fallback to local scope
+      let isMoney = false;
+      let segmentType = null;
+      
+      const classifyMoneyPageFn = (typeof window !== 'undefined' && window.classifyMoneyPage) 
+        ? window.classifyMoneyPage 
+        : (typeof classifyMoneyPage !== 'undefined' ? classifyMoneyPage : null);
+      
+      if (classifyMoneyPageFn) {
+        const result = classifyMoneyPageFn(rawUrlOrPath);
+        isMoney = result.isMoney;
+        segmentType = result.segmentType;
+      } else {
+        debugLog('⚠ classifyMoneyPage not available, using fallback classification', 'warn');
+        // Fallback: use classifyPageSegment directly
+        const segment = classifyPageSegment(rawUrlOrPath);
+        isMoney = segment === PageSegment.MONEY;
+        segmentType = isMoney ? 'landing' : null;
+      }
       
       // Determine pageType from canonical segmentType
       let pageType = "Landing"; // Default
@@ -6222,6 +6240,11 @@
         }
         
         return { isMoney: true, segmentType };
+      }
+      
+      // Make available globally for classifyUrlForRankingAi
+      if (typeof window !== 'undefined') {
+        window.classifyMoneyPage = classifyMoneyPage;
       }
       
       /**
