@@ -18999,6 +18999,23 @@ Final Score: ${score}/100`;
           keywords_with_volume: withSearchVolume
         };
 
+        // Debug: Log AI citations for first few keywords
+        const keywordsWithCitations = combined.filter(r => r.ai_alan_citations_count > 0);
+        debugLog(`📊 AI Citations Summary: ${keywordsWithCitations.length}/${totalKeywords} keywords have citations`, 'info');
+        if (keywordsWithCitations.length > 0) {
+          keywordsWithCitations.slice(0, 5).forEach(row => {
+            debugLog(`  ✓ "${row.keyword}": ${row.ai_alan_citations_count} citations`, 'info');
+          });
+        } else {
+          debugLog(`  ⚠ No keywords have AI citations. AI fetch error: ${aiFetchError || 'none'}`, 'warn');
+          if (aiRows.length > 0) {
+            debugLog(`  📊 AI rows received: ${aiRows.length}, checking first few...`, 'info');
+            aiRows.slice(0, 3).forEach(aiRow => {
+              debugLog(`    - "${aiRow.query}": alanranger_citations_count=${aiRow.alanranger_citations_count ?? 'undefined'}, total_citations=${aiRow.total_citations ?? 'undefined'}`, 'info');
+            });
+          }
+        }
+
         mod.setData(combined, summary);
         mod.setLoadedOnce(true);
         
@@ -19006,6 +19023,17 @@ Final Score: ${score}/100`;
         RankingAiProgressModal.updateProgress(95, 4);
         RankingAiProgressModal.setActiveStep(4);
         RankingAiProgressModal.updateCounts(`Saving to database...`);
+        
+        // Update incrementally saved rows with merged AI data
+        if (propertyUrl && combined.length > 0) {
+          debugLog(`📊 Updating incrementally saved rows with merged AI data...`, 'info');
+          const updateResult = await saveRankingAiDataIncremental(combined, auditDate, propertyUrl);
+          if (updateResult.success) {
+            debugLog(`✓ Updated ${updateResult.saved} keyword rows with AI data`, 'success');
+          } else {
+            debugLog(`⚠ Failed to update rows with AI data: ${updateResult.error}`, 'warn');
+          }
+        }
         
         // Save to Supabase and localStorage
         await saveRankingAiData(combined, summary);
