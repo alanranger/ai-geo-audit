@@ -1208,8 +1208,23 @@
       padding: 0;
     }
     
-    .ranking-table-section * {
+    /* Apply 14pt to section elements but exclude table */
+    .ranking-table-section .card-header,
+    .ranking-table-section .card-subtitle,
+    .ranking-table-section .filter-group,
+    .ranking-table-section .filter-control,
+    .ranking-table-section .btn {
       font-size: 14pt !important;
+    }
+    
+    /* Table font size - must come after to override any universal selectors */
+    .ranking-table-section .ranking-table,
+    .ranking-table-section .ranking-table th,
+    .ranking-table-section .ranking-table td,
+    .ranking-table-section .ranking-table-wrapper .ranking-table,
+    .ranking-table-section .ranking-table-wrapper .ranking-table th,
+    .ranking-table-section .ranking-table-wrapper .ranking-table td {
+      font-size: 0.875rem !important;
     }
     
     /* Pagination controls */
@@ -1719,6 +1734,10 @@
       <button class="aigeo-nav-item" data-panel="ranking">
         <span class="aigeo-nav-icon">🔍</span>
         <span>Ranking & AI</span>
+      </button>
+      <button class="aigeo-nav-item" data-panel="ai-sources">
+        <span class="aigeo-nav-icon">🤖</span>
+        <span>AI Sources & Influence</span>
       </button>
       <button class="aigeo-nav-item" data-panel="local">
         <span class="aigeo-nav-icon">📍</span>
@@ -2408,7 +2427,7 @@
             </div>
 
             <div class="filter-group">
-              <label>Opportunity score:</label>
+              <label>Opportunity score: <span title="Keyword opportunity score&#10;Combines three signals for this tracked keyword:&#10;• Demand share (how much search volume this query represents in your tracked set).&#10;• Classic ranking strength (page 1 vs page 2+ and current position).&#10;• AI usage (whether AI Overviews exist and if you're cited).&#10;Higher scores highlight the best &quot;bang-for-buck&quot; queries to improve first." style="opacity: 0.6; cursor: help;">ℹ</span></label>
               <select id="ranking-filter-opportunity" class="filter-control">
                 <option value="all">All</option>
                 <option value="high">High (70-100)</option>
@@ -2431,7 +2450,8 @@
           <div class="card" style="background: rgba(204, 255, 255, 0.15); border-left: 4px solid #CCFFFF; padding: 1.5rem;">
             <h3 style="margin: 0 0 0.5rem 0; font-size: 1.1rem; font-weight: 700; color: #1e293b;">Keyword Priority – Impact & Difficulty</h3>
             <p style="margin: 0 0 1rem 0; font-size: 0.85rem; color: #64748b; line-height: 1.6;">
-              Uses demand and current rank to surface the highest-impact keywords to work on. Click a cell to filter the table below.
+              Uses demand and current rank to surface the highest-impact keywords to work on.
+              Impact is driven mainly by demand share and opportunity score. Difficulty reflects current rank bucket (page 1 vs page 2+).
             </p>
             <div id="ranking-keyword-priority-matrix" style="background: #f8fafc; padding: 1rem; border-radius: 8px;">
               <!-- 3x3 grid rendered by JS -->
@@ -2456,7 +2476,7 @@
                     <th data-sort="rank" class="sortable">Best rank <span class="sort-indicator"></span></th>
                     <th data-sort="volume" class="sortable">Search volume <span class="sort-indicator"></span><span title="Average monthly Google search volume for this keyword in the UK. Source: DataForSEO Labs – Keyword Overview." style="margin-left: 0.25rem; opacity: 0.6; cursor: help;">ℹ</span></th>
                     <th data-sort="demand_share" class="sortable">Demand share <span class="sort-indicator"></span><span title="Percentage of total search volume across all tracked keywords. High values indicate keywords with the most search demand." style="margin-left: 0.25rem; opacity: 0.6; cursor: help;">ℹ</span></th>
-                    <th data-sort="opportunityScore" class="sortable">Opportunity score <span class="sort-indicator"></span><span title="Keyword opportunity score (0-100) based on demand share, ranking improvement potential, and AI Overview leverage. Higher scores indicate better opportunities." style="margin-left: 0.25rem; opacity: 0.6; cursor: help;">ℹ</span></th>
+                    <th data-sort="opportunityScore" class="sortable">Opportunity score <span class="sort-indicator"></span><span title="Keyword opportunity score&#10;Combines three signals for this tracked keyword:&#10;• Demand share (how much search volume this query represents in your tracked set).&#10;• Classic ranking strength (page 1 vs page 2+ and current position).&#10;• AI usage (whether AI Overviews exist and if you're cited).&#10;Higher scores highlight the best &quot;bang-for-buck&quot; queries to improve first." style="margin-left: 0.25rem; opacity: 0.6; cursor: help;">ℹ</span></th>
                     <th>AI Overview</th>
                     <th data-sort="citations" class="sortable">AI citations <span class="sort-indicator"></span></th>
                     <th>Ranking URL</th>
@@ -2476,7 +2496,7 @@
               <div class="ranking-pagination-buttons">
                 <button id="ranking-pagination-first" type="button">First</button>
                 <button id="ranking-pagination-prev" type="button">Previous</button>
-                <span id="ranking-pagination-page-info" style="padding: 0 0.5rem; font-size: 14pt;">Page 1 of 1</span>
+                <span id="ranking-pagination-page-info" style="padding: 0 0.5rem; font-size: 0.875rem;">Page 1 of 1</span>
                 <button id="ranking-pagination-next" type="button">Next</button>
                 <button id="ranking-pagination-last" type="button">Last</button>
               </div>
@@ -2561,6 +2581,113 @@
               </div>
             </div>
 
+          </div>
+        </div>
+      </section>
+
+      <!-- AI Sources & Influence Panel -->
+      <section class="aigeo-panel" data-panel="ai-sources">
+        <div class="container" style="max-width: 1400px; margin: 0 auto; padding: 2rem;">
+          <div class="card" style="margin-bottom: 2rem;">
+            <div class="card-header">
+              <h2>AI Sources & Influence</h2>
+              <p class="card-subtitle">
+                Domains that AI relies on most often when answering your tracked keywords. Identify which external sources you should strengthen or join so AI is more confident recommending you.
+              </p>
+            </div>
+          </div>
+
+          <!-- Summary Tiles -->
+          <div id="ai-sources-tiles" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; margin-bottom: 2rem;">
+            <!-- Tiles will be populated by JS -->
+          </div>
+
+          <!-- Source Types & Quick Insights -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 2rem;">
+            <!-- Left: Source Types Overview -->
+            <div class="card">
+              <div class="card-header">
+                <h3>Source Types Overview</h3>
+              </div>
+              <div class="card-body" id="ai-sources-types-breakdown">
+                <p style="color: #64748b; text-align: center; padding: 2rem;">Loading source types...</p>
+              </div>
+            </div>
+
+            <!-- Right: AI Influence Summary -->
+            <div class="card" style="background: #fef3c7; border-left: 4px solid #f59e0b;">
+              <div class="card-header">
+                <h3 style="color: #92400e;">How to read this tab</h3>
+              </div>
+              <div class="card-body" style="color: #78350f;">
+                <p style="line-height: 1.6; margin-bottom: 0.75rem;">
+                  This view shows the domains AI relies on most often when answering your tracked keywords.
+                </p>
+                <ul style="line-height: 1.8; padding-left: 1.5rem;">
+                  <li>Repeated citations from the same domain signal trusted sources in your niche.</li>
+                  <li>Directories and review platforms highlight places where you need consistent NAP, reviews and listings.</li>
+                  <li>Course marketplaces and education sites show where learners are discovering alternatives to your workshops and lessons.</li>
+                </ul>
+                <p style="line-height: 1.6; margin-top: 0.75rem; font-weight: 600;">
+                  The goal is to identify which external sources you should strengthen or join so AI is more confident recommending you.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Domain Influence Table -->
+          <div class="card">
+            <div class="card-header">
+              <h3>Domain Influence Table</h3>
+              <div style="display: flex; gap: 1rem; margin-top: 1rem; flex-wrap: wrap;">
+                <div class="filter-group">
+                  <label>Source type:</label>
+                  <select id="ai-sources-filter-type" class="filter-control">
+                    <option value="all">All</option>
+                    <option value="Directory">Directory</option>
+                    <option value="Review platform">Review platform</option>
+                    <option value="Course marketplace / education">Course marketplace / education</option>
+                    <option value="Publisher / blog">Publisher / blog</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+                <div class="filter-group">
+                  <label>Search:</label>
+                  <input type="text" id="ai-sources-filter-domain" class="filter-control" placeholder="Filter by domain...">
+                </div>
+                <button id="ai-sources-filter-clear" class="btn btn-small">Clear filters</button>
+              </div>
+            </div>
+            <div class="ranking-table-wrapper">
+              <table class="ranking-table" id="ai-sources-table">
+                <thead>
+                  <tr>
+                    <th data-sort="domain" class="sortable">Domain <span class="sort-indicator"></span></th>
+                    <th data-sort="type" class="sortable">Type <span class="sort-indicator"></span></th>
+                    <th data-sort="citations" class="sortable">AI citations <span class="sort-indicator"></span></th>
+                    <th data-sort="keywords" class="sortable">Keywords <span class="sort-indicator"></span></th>
+                    <th data-sort="share" class="sortable">Citation share <span class="sort-indicator"></span></th>
+                    <th>Example page</th>
+                  </tr>
+                </thead>
+                <tbody id="ai-sources-table-body">
+                  <tr><td colspan="6" class="ranking-table-empty">Loading domain data...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Domain Detail Panel (Right Side) -->
+          <div id="ai-sources-detail-panel" style="display: none; margin-top: 2rem;">
+            <div class="card">
+              <div class="card-header">
+                <h3 id="ai-sources-detail-domain">Domain Details</h3>
+                <p id="ai-sources-detail-meta" class="card-subtitle"></p>
+              </div>
+              <div class="card-body" id="ai-sources-detail-content">
+                <!-- Content populated by JS -->
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -20559,11 +20686,11 @@ Final Score: ${score}/100`;
         difficulty: calculateDifficultyBucket(row.best_rank_group)
       }));
 
-      // Calculate total search volume for demand share percentages
-      const totalSearchVolume = filteredRows.reduce((sum, r) => {
-        const vol = r.search_volume;
-        return sum + (vol && vol > 0 ? vol : 0);
-      }, 0) || 1; // Avoid division by zero
+      // Calculate total demand share for percentages
+      const totalDemandShare = filteredRows.reduce((sum, r) => {
+        const share = r.demand_share || 0;
+        return sum + share;
+      }, 0) || 0.0001; // Avoid division by zero
 
       const impacts = ['high', 'medium', 'low'];
       const difficulties = ['low', 'medium', 'high'];
@@ -20580,11 +20707,13 @@ Final Score: ${score}/100`;
             r => r.impact === impact && r.difficulty === difficulty
           );
           const count = cellRows.length;
+          // Sum demand_share (0-1) for keywords in this cell
           const demandShareSum = cellRows.reduce((sum, r) => {
-            const vol = r.search_volume;
-            return sum + (vol && vol > 0 ? vol : 0);
+            const share = r.demand_share || 0;
+            return sum + share;
           }, 0);
-          const demandSharePct = totalSearchVolume > 0 ? (demandShareSum / totalSearchVolume) * 100 : 0;
+          // Convert to percentage
+          const demandSharePct = totalDemandShare > 0 ? (demandShareSum / totalDemandShare) * 100 : 0;
           
           // Calculate average opportunity score for this cell
           const totalOpportunityScore = cellRows.reduce((sum, r) => {
@@ -20634,10 +20763,11 @@ Final Score: ${score}/100`;
               style="padding: 1.25rem; border: ${borderWidth} solid ${borderColor}; border-radius: 8px; background: ${backgroundColor}; cursor: pointer; text-align: center; transition: all 0.2s; box-shadow: ${isActive ? '0 4px 8px rgba(37, 99, 235, 0.3)' : 'none'};"
               onmouseover="this.style.transform='scale(1.05)'"
               onmouseout="this.style.transform='scale(1)'"
+              title="${impact.toUpperCase()} / ${difficulty.toUpperCase()}"
             >
-              <div class="cell-title" style="font-weight: 600; font-size: 1rem; margin-bottom: 0.75rem; color: #1e293b;">${impact.toUpperCase()} / ${difficulty.toUpperCase()}</div>
-              <div class="cell-count" style="font-size: 1.75rem; font-weight: 700; color: #1e293b; margin-bottom: 0.5rem;">${count}</div>
-              <div class="cell-share" style="font-size: 1rem; color: #64748b; font-weight: 500;">${demandSharePct.toFixed(1)}% of demand</div>
+              <div class="cell-title" style="font-weight: 600; font-size: 0.9rem; margin-bottom: 0.5rem; color: #64748b; text-transform: uppercase;">${impact.toUpperCase()} / ${difficulty.toUpperCase()}</div>
+              <div class="cell-count" style="font-size: 1.5rem; font-weight: 700; color: #1e293b; margin-bottom: 0.25rem;">${count}</div>
+              <div class="cell-share" style="font-size: 0.9rem; color: #64748b; font-weight: 500;">${demandSharePct.toFixed(1)}% of demand</div>
             </button>
           `;
         }
@@ -21480,26 +21610,6 @@ Final Score: ${score}/100`;
       // Build HTML for scorecard
       let html = '';
 
-      // Opportunity Score headline (above Impact/Difficulty/Priority)
-      const oppScore = scorecardData.opportunity_score ?? null;
-      if (oppScore != null) {
-        let oppColor = '#b91c1c'; // Red (Low)
-        let oppClass = 'low';
-        if (oppScore >= 70) {
-          oppColor = '#166534'; // Green (High)
-          oppClass = 'high';
-        } else if (oppScore >= 40) {
-          oppColor = '#92400e'; // Amber (Medium)
-          oppClass = 'medium';
-        }
-        
-        html += `<div style="margin-bottom: 1rem; padding-bottom: 0.75rem; border-bottom: 2px solid #e5e7eb;">`;
-        html += `<p style="margin: 0; font-size: 1.25rem; font-weight: 700; color: ${oppColor}; line-height: 1.4;">`;
-        html += `Keyword opportunity score: <span style="color: ${oppColor};">${oppScore}/100</span>`;
-        html += `</p>`;
-        html += `</div>`;
-      }
-      
       // Impact & Difficulty summary line (under card header) - RAG color-coded
       const impactLabel = scorecardData.impact_bucket.charAt(0).toUpperCase() + scorecardData.impact_bucket.slice(1);
       const difficultyLabel = scorecardData.difficulty_bucket.charAt(0).toUpperCase() + scorecardData.difficulty_bucket.slice(1);
@@ -21517,7 +21627,27 @@ Final Score: ${score}/100`;
       const difficultyColor = getRagColor(difficultyLabel);
       const priorityColor = getRagColor(priorityLabel);
       
+      // Opportunity Score (under header title, in same section as Impact/Difficulty/Priority)
+      const oppScore = scorecardData.opportunity_score ?? null;
+      let oppColor = '#b91c1c'; // Red (Low)
+      let oppClass = 'low';
+      if (oppScore != null) {
+        if (oppScore >= 70) {
+          oppColor = '#166534'; // Green (High)
+          oppClass = 'high';
+        } else if (oppScore >= 40) {
+          oppColor = '#92400e'; // Amber (Medium)
+          oppClass = 'medium';
+        }
+      }
+      
       html += `<div style="margin-bottom: 1.25rem; padding-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb;">`;
+      if (oppScore != null) {
+        html += `<p style="margin: 0 0 0.5rem 0; font-size: 1.1rem; font-weight: 700; color: ${oppColor}; line-height: 1.4;">`;
+        html += `Keyword opportunity score: <span style="color: ${oppColor};">${oppScore}/100</span>`;
+        html += ` <span title="Keyword opportunity score&#10;Combines three signals for this tracked keyword:&#10;• Demand share (how much search volume this query represents in your tracked set).&#10;• Classic ranking strength (page 1 vs page 2+ and current position).&#10;• AI usage (whether AI Overviews exist and if you're cited).&#10;Higher scores highlight the best &quot;bang-for-buck&quot; queries to improve first." style="opacity: 0.6; cursor: help; font-size: 0.9rem;">ℹ</span>`;
+        html += `</p>`;
+      }
       html += `<p style="margin: 0; font-size: 1.1rem; font-weight: 700; color: #1e293b; line-height: 1.4;">`;
       html += `<span>Impact: <span style="color: ${impactColor};">${impactLabel}</span></span> • `;
       html += `<span>Difficulty: <span style="color: ${difficultyColor};">${difficultyLabel}</span></span> • `;
@@ -21538,7 +21668,28 @@ Final Score: ${score}/100`;
       html += `<div style="display: flex; gap: 1rem; margin-top: 0.5rem; flex-wrap: wrap;">`;
       html += `<span class="ranking-badge ${scorecardData.segment === 'money' ? 'ranking-badge--segment-money' : scorecardData.segment === 'education' ? 'ranking-badge--segment-education' : scorecardData.segment === 'brand' ? 'ranking-badge--segment-brand' : 'ranking-badge--segment-general'}" style="font-size: 0.875rem;">${scorecardData.segment || 'Other'}</span>`;
       html += `<span style="font-size: 0.875rem; color: #64748b;">${scorecardData.page_type}</span>`;
-      html += `</div></div>`;
+      html += `</div>`;
+      
+      // Grey meta line (under chips)
+      const metaParts = [];
+      if (row.best_rank_group != null) {
+        metaParts.push(`Classic rank: #${row.best_rank_group}`);
+      } else {
+        metaParts.push("Classic rank: not in top 50");
+      }
+      if (row.has_ai_overview) {
+        const total = row.ai_total_citations || 0;
+        const ours = row.ai_alan_citations_count || 0;
+        metaParts.push(`AI Overview: present (${ours}/${total || "?"} citations from alanranger.com)`);
+      } else {
+        metaParts.push("AI Overview: not present");
+      }
+      const segLabel = row.segment === "money" ? "Money page (commercial intent)" :
+                      row.segment === "education" ? "Education content" :
+                      row.segment === "brand" ? "Brand query" : "General / other";
+      metaParts.push(`Segment: ${segLabel}`);
+      html += `<p style="margin: 0.5rem 0 0 0; font-size: 0.875rem; color: #64748b; line-height: 1.5;">${metaParts.join(" • ")}</p>`;
+      html += `</div>`;
 
       // 1. Demand
       html += `<div class="scorecard-section">`;
@@ -21557,9 +21708,22 @@ Final Score: ${score}/100`;
       // 2. Classic ranking
       html += `<div class="scorecard-section">`;
       html += `<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">2. Classic ranking</h5>`;
-      const rankText = scorecardData.best_rank_group != null 
-        ? `Currently ranking #${scorecardData.best_rank_group} (${scorecardData.rank_bucket_label})`
-        : 'Currently ranking (beyond page 2)';
+      let rankText = '';
+      if (scorecardData.best_rank_group != null) {
+        const rankBucket = scorecardData.rank_bucket || scorecardData.rank_bucket_label || '';
+        // Format: "Currently ranking #24 (page 2+ / Not ranked)"
+        if (rankBucket === 'top3' || rankBucket === 'page 1') {
+          rankText = `Currently ranking #${scorecardData.best_rank_group} (page 1)`;
+        } else if (rankBucket === 'top10' || rankBucket === 'page 1') {
+          rankText = `Currently ranking #${scorecardData.best_rank_group} (page 1)`;
+        } else if (rankBucket === 'page2plus' || rankBucket === 'beyond page 2') {
+          rankText = `Currently ranking #${scorecardData.best_rank_group} (page 2+)`;
+        } else {
+          rankText = `Currently ranking #${scorecardData.best_rank_group} (${rankBucket || 'beyond page 2'})`;
+        }
+      } else {
+        rankText = 'Currently ranking (beyond page 2 / Not ranked)';
+      }
       html += `<p style="margin-bottom: 0.5rem; font-size: 0.875rem; color: #1e293b; line-height: 1.6;">${rankText}</p>`;
       const strengthClass = scorecardData.position_strength === 'Strong' ? 'status-green' : 
                          scorecardData.position_strength === 'OK' ? 'status-amber' : 'status-red';
@@ -21627,7 +21791,7 @@ Final Score: ${score}/100`;
         }
       } else {
         // Fallback placeholder text when CTR data not available
-        html += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">CTR data not available for this keyword/page; using rank as a proxy. Check the Behaviour panel for more detail.</p>`;
+        html += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">CTR data currently not wired into this module yet – using rank as a proxy.</p>`;
       }
       html += `</div>`;
 
@@ -21794,16 +21958,37 @@ Final Score: ${score}/100`;
         html += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">${schemaInterpretation}</p>`;
       } else {
         // Fallback placeholder text when schema data not available
-        html += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">Schema coverage data is not available for this page in the current scan. Check the Content/Schema pillar for more detail.</p>`;
+        html += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">Schema coverage assessment not wired into this module yet. Check the Content/Schema pillar for a full schema audit.</p>`;
       }
       html += `</div>`;
 
       // 5. AI usage
       html += `<div class="scorecard-section">`;
       html += `<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">5. AI usage</h5>`;
-      html += `<p style="font-size: 0.875rem; color: #1e293b; line-height: 1.6;">${scorecardData.ai_status_label}</p>`;
+      
+      // Format AI status with citation details
+      const aiTotal = row.ai_total_citations || 0;
+      const aiOurs = row.ai_alan_citations_count || 0;
+      let aiStatusText = '';
+      if (row.has_ai_overview) {
+        if (aiOurs > 0) {
+          aiStatusText = `AI Overview present, cited in ${aiOurs}/${aiTotal} citation${aiTotal !== 1 ? 's' : ''}`;
+          if (aiOurs / aiTotal < 0.33) {
+            aiStatusText += ' (light)';
+          }
+        } else {
+          aiStatusText = 'AI Overview present, not cited';
+        }
+      } else {
+        aiStatusText = 'AI Overview not present';
+      }
+      
+      html += `<p style="font-size: 0.875rem; color: #1e293b; line-height: 1.6; margin-bottom: 0.5rem;">${aiStatusText}</p>`;
+      
+      // Show cited pages list
       if (scorecardData.ai_citations_ours > 0 && scorecardData.ai_alan_citations && scorecardData.ai_alan_citations.length > 0) {
-        html += `<ul style="margin-top: 0.5rem; padding-left: 1.5rem; font-size: 0.875rem; line-height: 1.6;">`;
+        html += `<div style="font-size: 0.875rem; color: #64748b; margin-bottom: 0.25rem; font-weight: 500;">Your cited pages:</div>`;
+        html += `<ul style="margin-top: 0.25rem; padding-left: 1.5rem; font-size: 0.875rem; line-height: 1.6;">`;
         scorecardData.ai_alan_citations.forEach(c => {
           html += `<li><a href="${c.url}" target="_blank" rel="noopener noreferrer" style="color: #0284c7;">${c.title || c.url}</a></li>`;
         });
@@ -21869,32 +22054,7 @@ Final Score: ${score}/100`;
       html += `</ul>`;
       html += `</div>`;
 
-      // Build summary line and include it in the main HTML
-      const parts = [];
-      if (row.best_rank_group != null) {
-        parts.push(`Classic rank: #${row.best_rank_group}`);
-      } else {
-        parts.push("Classic rank: not in top 50");
-      }
-      if (row.has_ai_overview) {
-        const total = row.ai_total_citations || 0;
-        const ours = row.ai_alan_citations_count || 0;
-        parts.push(`AI Overview: present (${ours}/${total || "?"} citations from alanranger.com)`);
-      } else {
-        parts.push("AI Overview: not present");
-      }
-      const segLabel = row.segment === "money" ? "Money page (commercial intent)" :
-                      row.segment === "education" ? "Education content" :
-                      row.segment === "brand" ? "Brand query" : "General / other";
-      parts.push(`Segment: ${segLabel}.`);
-      
-      // Insert summary line after Impact/Difficulty line, before keyword header
-      const summaryHtml = `<p style="margin: 0 0 1rem 0; font-size: 0.875rem; color: #64748b; padding-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; line-height: 1.5;">${parts.join(" • ")}</p>`;
-      // Find the end of the Impact/Difficulty div and insert summary before keyword header
-      const impactDivEnd = html.indexOf('</div>');
-      if (impactDivEnd !== -1) {
-        html = html.slice(0, impactDivEnd + 6) + summaryHtml + html.slice(impactDivEnd + 6);
-      }
+      // Summary line is now included in the keyword header section above
 
       // Update the content element - everything is now in one container
       const kwEl = document.getElementById("ranking-ai-detail-keyword");
@@ -22153,6 +22313,33 @@ Final Score: ${score}/100`;
                     renderRankingAiTab();
                   } else {
                     debugLog('✗ Tab click: RankingAiModule not found in window', 'error');
+                  }
+                }
+              })();
+            }
+
+            // Load AI Sources & Influence tab when opened
+            if (target === "ai-sources" && isNowActive && !wasActive) {
+              setTimeout(() => {
+                if (typeof wireAiSourcesFilters === 'function') wireAiSourcesFilters();
+              }, 100);
+              // Load from RankingAiModule state (same data as Ranking & AI tab)
+              (async () => {
+                debugLog('📊 AI Sources & Influence tab clicked - loading data...', 'info');
+                const storedData = await loadRankingAiDataFromStorage(false);
+                if (storedData && storedData.combinedRows && storedData.combinedRows.length > 0) {
+                  const mod = window.RankingAiModule;
+                  if (mod) {
+                    mod.setData(storedData.combinedRows, storedData.summary);
+                    debugLog(`✓ AI Sources tab: Rendering with ${storedData.combinedRows.length} keywords`, 'success');
+                    if (typeof renderAiSourcesTab === 'function') {
+                      renderAiSourcesTab();
+                    }
+                  }
+                } else {
+                  debugLog('⚠ AI Sources tab: No keyword data available. Run a Ranking & AI check first.', 'warn');
+                  if (typeof renderAiSourcesTab === 'function') {
+                    renderAiSourcesTab(); // Will show empty state
                   }
                 }
               })();
@@ -22475,6 +22662,540 @@ Final Score: ${score}/100`;
           });
         }
       }
+
+      // ============================================
+      // AI Sources & Influence Tab Functions
+      // ============================================
+
+      /**
+       * Classify domain source type based on domain pattern
+       * @param {string} domain - Domain name (e.g., "visualeducation.com")
+       * @returns {string} Source type classification
+       */
+      function classifyDomainSourceType(domain) {
+        if (!domain) return 'Other';
+        const lower = domain.toLowerCase();
+        
+        // Directory patterns
+        if (lower.includes('yell.com') || lower.includes('tripadvisor') || 
+            lower.includes('facebook.com/pages') || lower.includes('thomsonlocal') ||
+            lower.includes('yell.co.uk') || lower.includes('freeindex')) {
+          return 'Directory';
+        }
+        
+        // Review platform patterns
+        if (lower.includes('trustpilot') || lower.includes('google.com/maps') ||
+            lower.includes('reviews.co.uk') || lower.includes('feefo')) {
+          return 'Review platform';
+        }
+        
+        // Course marketplace / education patterns
+        if (lower.includes('udemy') || lower.includes('coursera') ||
+            lower.includes('visualeducation') || lower.includes('skillshare') ||
+            lower.includes('edx') || lower.includes('futurelearn')) {
+          return 'Course marketplace / education';
+        }
+        
+        // Publisher / blog patterns (common content domains)
+        if (lower.includes('blog') || lower.includes('medium.com') ||
+            lower.includes('wordpress.com') || lower.includes('blogger.com')) {
+          return 'Publisher / blog';
+        }
+        
+        return 'Other';
+      }
+
+      /**
+       * Aggregate AI citation data by domain
+       * @param {Array} combinedRows - Array of keyword rows with AI citation data
+       * @param {string} targetDomain - Target domain (e.g., "alanranger.com")
+       * @returns {Array} Array of domain stats objects
+       */
+      function aggregateAiDomainStats(combinedRows, targetDomain = 'alanranger.com') {
+        if (!combinedRows || !Array.isArray(combinedRows)) {
+          debugLog('⚠ aggregateAiDomainStats: No combinedRows provided', 'warn');
+          return [];
+        }
+
+        const domainMap = new Map();
+        const targetDomainLower = targetDomain.toLowerCase();
+
+        // Track total citations across all keywords
+        let totalAllCitations = 0;
+
+        combinedRows.forEach(row => {
+          // Get AI citations for this keyword
+          const aiCitations = row.ai_alan_citations || [];
+          const competitorCounts = row.competitor_counts || {};
+          const aiTotalCitations = row.ai_total_citations || 0;
+
+          totalAllCitations += aiTotalCitations;
+
+          // Process our own citations
+          if (aiCitations && aiCitations.length > 0) {
+            aiCitations.forEach(citation => {
+              if (!citation || !citation.url) return;
+              
+              try {
+                const urlObj = new URL(citation.url);
+                const domain = urlObj.hostname.toLowerCase();
+                
+                if (!domainMap.has(domain)) {
+                  domainMap.set(domain, {
+                    domain,
+                    is_self: domain.includes(targetDomainLower),
+                    total_citations: 0,
+                    keyword_count: 0,
+                    keywords: new Set(),
+                    example_urls: []
+                  });
+                }
+                
+                const stats = domainMap.get(domain);
+                stats.total_citations += 1;
+                if (!stats.keywords.has(row.keyword)) {
+                  stats.keywords.add(row.keyword);
+                  stats.keyword_count += 1;
+                }
+                if (stats.example_urls.length < 2) {
+                  stats.example_urls.push(citation.url);
+                }
+              } catch (e) {
+                // Invalid URL, skip
+              }
+            });
+          }
+
+          // Process competitor citations from competitor_counts (per keyword)
+          Object.entries(competitorCounts).forEach(([domain, count]) => {
+            if (!domain || !count) return;
+            
+            const domainLower = domain.toLowerCase();
+            
+            if (!domainMap.has(domainLower)) {
+              domainMap.set(domainLower, {
+                domain: domainLower,
+                is_self: domainLower.includes(targetDomainLower),
+                total_citations: 0,
+                keyword_count: 0,
+                keywords: new Set(),
+                example_urls: []
+              });
+            }
+            
+            const stats = domainMap.get(domainLower);
+            stats.total_citations += count;
+            if (!stats.keywords.has(row.keyword)) {
+              stats.keywords.add(row.keyword);
+              stats.keyword_count += 1;
+            }
+          });
+        });
+
+        // Convert to array and calculate share_of_citations
+        const domainStats = Array.from(domainMap.values()).map(stats => {
+          const share_of_citations = totalAllCitations > 0 
+            ? (stats.total_citations / totalAllCitations) * 100 
+            : 0;
+          
+          return {
+            domain: stats.domain,
+            is_self: stats.is_self,
+            total_citations: stats.total_citations,
+            keyword_count: stats.keyword_count,
+            share_of_citations,
+            source_type: classifyDomainSourceType(stats.domain),
+            example_urls: stats.example_urls.slice(0, 2),
+            keywords: Array.from(stats.keywords)
+          };
+        });
+
+        // Sort by total_citations descending
+        domainStats.sort((a, b) => b.total_citations - a.total_citations);
+
+        debugLog(`✓ Aggregated ${domainStats.length} domains from AI citations`, 'info');
+        return domainStats;
+      }
+
+      /**
+       * Render AI Sources & Influence tab
+       */
+      function renderAiSourcesTab() {
+        debugLog('📊 renderAiSourcesTab() called', 'info');
+        
+        const { combinedRows } = RankingAiModule.state();
+        if (!combinedRows || combinedRows.length === 0) {
+          debugLog('⚠ renderAiSourcesTab: No keyword data available', 'warn');
+          const tilesContainer = document.getElementById('ai-sources-tiles');
+          const tableBody = document.getElementById('ai-sources-table-body');
+          if (tilesContainer) tilesContainer.innerHTML = '<div class="card"><p style="padding: 2rem; text-align: center; color: #64748b;">No AI citation data available. Run a Ranking & AI check first.</p></div>';
+          if (tableBody) tableBody.innerHTML = '<tr><td colspan="6" class="ranking-table-empty">No data available. Run a Ranking & AI check first.</td></tr>';
+          return;
+        }
+
+        // Get target domain from property URL
+        const propertyUrl = localStorage.getItem('gsc_property_url') || 'https://www.alanranger.com';
+        let targetDomain = 'alanranger.com';
+        try {
+          const urlObj = new URL(propertyUrl);
+          targetDomain = urlObj.hostname.replace('www.', '');
+        } catch (e) {
+          debugLog(`⚠ Could not parse property URL: ${propertyUrl}, using default domain`, 'warn');
+        }
+
+        // Aggregate domain stats
+        const domainStats = aggregateAiDomainStats(combinedRows, targetDomain);
+        
+        // Store globally for filtering/sorting
+        window.aiSourcesDomainStats = domainStats;
+
+        // Render tiles
+        renderAiSourcesTiles(domainStats, combinedRows.length);
+
+        // Render source types breakdown
+        renderAiSourcesTypesBreakdown(domainStats);
+
+        // Render domain table
+        renderAiSourcesTable(domainStats);
+      }
+
+      /**
+       * Render summary tiles for AI Sources & Influence
+       */
+      function renderAiSourcesTiles(domainStats, totalKeywords) {
+        const tilesContainer = document.getElementById('ai-sources-tiles');
+        if (!tilesContainer) return;
+
+        // Calculate metrics
+        const selfDomain = domainStats.find(d => d.is_self);
+        const selfCitations = selfDomain ? selfDomain.total_citations : 0;
+        const totalCitations = domainStats.reduce((sum, d) => sum + d.total_citations, 0);
+        const selfShare = totalCitations > 0 ? (selfCitations / totalCitations) * 100 : 0;
+        const keywordsWithSelfCitations = selfDomain ? selfDomain.keyword_count : 0;
+        const externalDomains = domainStats.filter(d => !d.is_self).length;
+
+        let html = `
+          <div class="metric-pill">
+            <div class="metric-pill-value">${selfCitations}/${totalCitations}</div>
+            <div class="metric-pill-label">Your AI citations</div>
+            <div class="metric-pill-status">Share of AI citations that reference your site across tracked keywords.</div>
+          </div>
+          <div class="metric-pill">
+            <div class="metric-pill-value">${externalDomains}</div>
+            <div class="metric-pill-label">Top external domains</div>
+            <div class="metric-pill-status">Domains most often cited alongside you in AI answers.</div>
+          </div>
+          <div class="metric-pill">
+            <div class="metric-pill-value">${keywordsWithSelfCitations}/${totalKeywords}</div>
+            <div class="metric-pill-label">Keywords with your citations</div>
+            <div class="metric-pill-status">How often AI can already see your site as a source for your tracked queries.</div>
+          </div>
+          <div class="metric-pill">
+            <div class="metric-pill-value">${selfShare.toFixed(1)}%</div>
+            <div class="metric-pill-label">Your share of AI citations</div>
+            <div class="metric-pill-status">Higher values mean AI relies more on your content instead of competitors or directories.</div>
+          </div>
+        `;
+
+        tilesContainer.innerHTML = html;
+      }
+
+      /**
+       * Render source types breakdown
+       */
+      function renderAiSourcesTypesBreakdown(domainStats) {
+        const container = document.getElementById('ai-sources-types-breakdown');
+        if (!container) return;
+
+        // Group by source type
+        const typeGroups = {};
+        domainStats.forEach(stat => {
+          const type = stat.source_type;
+          if (!typeGroups[type]) {
+            typeGroups[type] = {
+              domains: 0,
+              citations: 0
+            };
+          }
+          typeGroups[type].domains += 1;
+          typeGroups[type].citations += stat.total_citations;
+        });
+
+        const totalCitations = domainStats.reduce((sum, d) => sum + d.total_citations, 0);
+
+        let html = '<ul style="list-style: none; padding: 0; margin: 0;">';
+        Object.entries(typeGroups).forEach(([type, data]) => {
+          const pct = totalCitations > 0 ? (data.citations / totalCitations) * 100 : 0;
+          html += `<li style="padding: 0.75rem 0; border-bottom: 1px solid #e5e7eb;">
+            <strong>${type}:</strong> ${data.domains} domains (${pct.toFixed(1)}% of citations)
+          </li>`;
+        });
+        html += '</ul>';
+
+        container.innerHTML = html;
+      }
+
+      /**
+       * Render domain influence table
+       */
+      function renderAiSourcesTable(domainStats, filters = {}) {
+        const tableBody = document.getElementById('ai-sources-table-body');
+        if (!tableBody) return;
+
+        // Apply filters
+        let filtered = domainStats.filter(stat => {
+          if (filters.type && filters.type !== 'all' && stat.source_type !== filters.type) {
+            return false;
+          }
+          if (filters.domain && !stat.domain.toLowerCase().includes(filters.domain.toLowerCase())) {
+            return false;
+          }
+          return true;
+        });
+
+        // Apply sorting (default: citations descending)
+        const sortColumn = window.aiSourcesSortState?.column || 'citations';
+        const sortDirection = window.aiSourcesSortState?.direction || 'desc';
+        filtered.sort((a, b) => {
+          let aVal, bVal;
+          switch (sortColumn) {
+            case 'domain':
+              aVal = a.domain.toLowerCase();
+              bVal = b.domain.toLowerCase();
+              break;
+            case 'type':
+              aVal = a.source_type;
+              bVal = b.source_type;
+              break;
+            case 'citations':
+              aVal = a.total_citations;
+              bVal = b.total_citations;
+              break;
+            case 'keywords':
+              aVal = a.keyword_count;
+              bVal = b.keyword_count;
+              break;
+            case 'share':
+              aVal = a.share_of_citations;
+              bVal = b.share_of_citations;
+              break;
+            default:
+              return 0;
+          }
+          if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
+          if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
+          return 0;
+        });
+
+        if (filtered.length === 0) {
+          tableBody.innerHTML = '<tr><td colspan="6" class="ranking-table-empty">No domains match the current filters.</td></tr>';
+          return;
+        }
+
+        tableBody.innerHTML = '';
+        filtered.forEach(stat => {
+          const tr = document.createElement('tr');
+          tr.dataset.domain = stat.domain;
+          
+          // Domain
+          const tdDomain = document.createElement('td');
+          tdDomain.textContent = stat.domain;
+          if (stat.is_self) {
+            tdDomain.style.fontWeight = '700';
+            tdDomain.style.color = '#166534';
+          }
+          tr.appendChild(tdDomain);
+
+          // Type
+          const tdType = document.createElement('td');
+          tdType.textContent = stat.source_type;
+          tr.appendChild(tdType);
+
+          // Citations
+          const tdCitations = document.createElement('td');
+          tdCitations.textContent = stat.total_citations;
+          tr.appendChild(tdCitations);
+
+          // Keywords
+          const tdKeywords = document.createElement('td');
+          tdKeywords.textContent = stat.keyword_count;
+          tr.appendChild(tdKeywords);
+
+          // Citation share
+          const tdShare = document.createElement('td');
+          tdShare.textContent = `${stat.share_of_citations.toFixed(1)}%`;
+          tr.appendChild(tdShare);
+
+          // Example page
+          const tdExample = document.createElement('td');
+          if (stat.example_urls && stat.example_urls.length > 0) {
+            const a = document.createElement('a');
+            a.href = stat.example_urls[0];
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            a.textContent = stat.is_self ? new URL(stat.example_urls[0]).pathname : stat.example_urls[0];
+            a.style.color = '#0284c7';
+            a.style.textDecoration = 'none';
+            tdExample.appendChild(a);
+          } else {
+            tdExample.textContent = '—';
+          }
+          tr.appendChild(tdExample);
+
+          // Click handler
+          tr.style.cursor = 'pointer';
+          tr.addEventListener('click', () => {
+            document.querySelectorAll('#ai-sources-table-body tr').forEach(r => r.classList.remove('ranking-table-row--selected'));
+            tr.classList.add('ranking-table-row--selected');
+            renderAiSourcesDetail(stat);
+          });
+
+          tableBody.appendChild(tr);
+        });
+      }
+
+      /**
+       * Render domain detail panel
+       */
+      function renderAiSourcesDetail(stat) {
+        const panel = document.getElementById('ai-sources-detail-panel');
+        const domainEl = document.getElementById('ai-sources-detail-domain');
+        const metaEl = document.getElementById('ai-sources-detail-meta');
+        const contentEl = document.getElementById('ai-sources-detail-content');
+
+        if (!panel || !domainEl || !metaEl || !contentEl) return;
+
+        panel.style.display = 'block';
+        domainEl.textContent = stat.domain;
+        metaEl.textContent = `Cited in ${stat.total_citations} AI answer${stat.total_citations !== 1 ? 's' : ''} across ${stat.keyword_count} tracked keyword${stat.keyword_count !== 1 ? 's' : ''} (${stat.share_of_citations.toFixed(1)}% of all citations).`;
+
+        let html = '';
+
+        // Why this domain matters
+        html += '<div class="scorecard-section">';
+        html += '<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">Why this domain matters</h5>';
+        
+        if (stat.is_self) {
+          html += '<p style="font-size: 0.875rem; color: #1e293b; line-height: 1.6;">This is your own site. AI is using your content in ' + stat.total_citations + ' answer' + (stat.total_citations !== 1 ? 's' : '') + ' across ' + stat.keyword_count + ' keyword' + (stat.keyword_count !== 1 ? 's' : '') + '. Increasing citations here usually comes from stronger schema, internal linking and coverage on key topics.</p>';
+        } else if (stat.source_type === 'Directory') {
+          html += '<p style="font-size: 0.875rem; color: #1e293b; line-height: 1.6;">This is a directory / listing site. Repeated citations suggest AI trusts this listing as a key reference in your niche. Ensure your profile, NAP details and reviews are complete and consistent.</p>';
+        } else if (stat.source_type === 'Review platform') {
+          html += '<p style="font-size: 0.875rem; color: #1e293b; line-height: 1.6;">This is a review platform. AI often surfaces businesses with strong, consistent reviews from here. Make sure your profile is claimed, reviews are encouraged, and descriptions match your positioning.</p>';
+        } else if (stat.source_type === 'Course marketplace / education') {
+          html += '<p style="font-size: 0.875rem; color: #1e293b; line-height: 1.6;">This is an education or course marketplace. AI is seeing it as an alternative source for photography learning. Consider whether partnering, listing, or differentiating your on-site course pages against this platform makes sense.</p>';
+        } else if (stat.source_type === 'Publisher / blog') {
+          html += '<p style="font-size: 0.875rem; color: #1e293b; line-height: 1.6;">This is a content publisher. Repeated citations suggest AI trusts their articles for informational queries. Collaborations, guest posts, or references from this domain can help strengthen your topical authority.</p>';
+        } else {
+          html += '<p style="font-size: 0.875rem; color: #1e293b; line-height: 1.6;">This domain is frequently cited, but doesn\'t fall into a specific category. Review its content and decide if it\'s a directory, partner, competitor or something to monitor.</p>';
+        }
+        html += '</div>';
+
+        // Keywords where this domain appears
+        html += '<div class="scorecard-section">';
+        html += '<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">Keywords where this domain appears</h5>';
+        html += '<ul style="font-size: 0.875rem; color: #1e293b; line-height: 1.8; padding-left: 1.5rem;">';
+        const keywordsToShow = stat.keywords.slice(0, 10);
+        keywordsToShow.forEach(keyword => {
+          html += `<li>${keyword}</li>`;
+        });
+        if (stat.keywords.length > 10) {
+          html += `<li style="color: #64748b; font-style: italic;">... and ${stat.keywords.length - 10} more</li>`;
+        }
+        html += '</ul></div>';
+
+        // Suggested next steps
+        html += '<div class="scorecard-section">';
+        html += '<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">Suggested next steps</h5>';
+        html += '<ul style="font-size: 0.875rem; color: #1e293b; line-height: 1.8; padding-left: 1.5rem;">';
+        
+        if (stat.is_self) {
+          const selfShare = stat.share_of_citations;
+          if (selfShare < 30) {
+            html += '<li>Strengthen schema and content coverage on high-demand keywords where you\'re not cited yet.</li>';
+            html += '<li>Revisit internal linking from money pages to these informational topics to raise their prominence.</li>';
+          }
+        } else if (stat.source_type === 'Directory' || stat.source_type === 'Review platform') {
+          html += '<li>Audit your listing/profile on this domain (NAP details, description, categories).</li>';
+          html += '<li>Encourage satisfied students/clients to leave reviews here to reinforce Authority.</li>';
+        } else if (stat.source_type === 'Course marketplace / education') {
+          html += '<li>Review how your offerings compare to what\'s listed here. Decide whether to list on this platform or create on-site content addressing the same needs.</li>';
+        } else if (stat.source_type === 'Publisher / blog') {
+          html += '<li>Identify relevant articles and consider outreach for mentions, interviews or guest content pointing back to your key pages.</li>';
+        }
+        
+        html += '</ul></div>';
+
+        contentEl.innerHTML = html;
+      }
+
+      // Initialize AI Sources sort state
+      if (!window.aiSourcesSortState) {
+        window.aiSourcesSortState = { column: 'citations', direction: 'desc' };
+      }
+
+      // Wire up AI Sources tab filters and sorting
+      function wireAiSourcesFilters() {
+        const typeFilter = document.getElementById('ai-sources-filter-type');
+        const domainFilter = document.getElementById('ai-sources-filter-domain');
+        const clearBtn = document.getElementById('ai-sources-filter-clear');
+
+        const updateFilters = () => {
+          const filters = {
+            type: typeFilter ? typeFilter.value : 'all',
+            domain: domainFilter ? domainFilter.value.trim() : ''
+          };
+          if (window.aiSourcesDomainStats) {
+            renderAiSourcesTable(window.aiSourcesDomainStats, filters);
+          }
+        };
+
+        if (typeFilter) typeFilter.addEventListener('change', updateFilters);
+        if (domainFilter) domainFilter.addEventListener('input', updateFilters);
+        if (clearBtn) {
+          clearBtn.addEventListener('click', () => {
+            if (typeFilter) typeFilter.value = 'all';
+            if (domainFilter) domainFilter.value = '';
+            updateFilters();
+          });
+        }
+
+        // Wire up table sorting
+        const sortableHeaders = document.querySelectorAll('#ai-sources-table th.sortable');
+        sortableHeaders.forEach(th => {
+          th.addEventListener('click', () => {
+            const column = th.dataset.sort;
+            if (!column) return;
+
+            if (window.aiSourcesSortState.column === column) {
+              window.aiSourcesSortState.direction = window.aiSourcesSortState.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+              window.aiSourcesSortState.column = column;
+              window.aiSourcesSortState.direction = 'desc';
+            }
+
+            // Update sort indicators
+            sortableHeaders.forEach(h => {
+              h.classList.remove('sort-asc', 'sort-desc');
+              if (h.dataset.sort === window.aiSourcesSortState.column) {
+                h.classList.add(`sort-${window.aiSourcesSortState.direction}`);
+              }
+            });
+
+            // Re-render table with new sort
+            const filters = {
+              type: typeFilter ? typeFilter.value : 'all',
+              domain: domainFilter ? domainFilter.value.trim() : ''
+            };
+            if (window.aiSourcesDomainStats) {
+              renderAiSourcesTable(window.aiSourcesDomainStats, filters);
+            }
+          });
+        });
+      }
+
+      // Make functions globally available
+      window.renderAiSourcesTab = renderAiSourcesTab;
+      window.wireAiSourcesFilters = wireAiSourcesFilters;
     })();
   </script>
 </body>
