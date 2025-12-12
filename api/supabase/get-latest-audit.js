@@ -26,7 +26,8 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { propertyUrl } = req.query;
+    const { propertyUrl, minimal } = req.query;
+    const isMinimalRequest = minimal === 'true';
 
     if (!propertyUrl) {
       return res.status(400).json({
@@ -48,14 +49,19 @@ export default async function handler(req, res) {
       });
     }
 
-    // Fetch the most recent audit (order by audit_date desc, limit 1)
-    // Include all fields needed to reconstruct the audit object
-    // Using select=* to get all columns including money_pages_metrics, money_pages_summary, money_pages_behaviour_score, money_segment_metrics
+    // CRITICAL: For minimal requests, only fetch essential fields to prevent FUNCTION_INVOCATION_FAILED
+    // For full requests, fetch all fields but with aggressive truncation later
     let record;
     let auditDate;
     
     try {
-      const queryUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.desc&limit=1&select=*`;
+      // For minimal requests, only fetch essential fields (timestamp + scores)
+      // This prevents the function from crashing when large JSON fields are present
+      const selectFields = isMinimalRequest
+        ? 'audit_date,updated_at,visibility_score,content_schema_score,authority_score,local_entity_score,service_area_score'
+        : '*';
+      
+      const queryUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.desc&limit=1&select=${selectFields}`;
       
       const response = await fetch(queryUrl, {
         method: 'GET',
@@ -90,14 +96,37 @@ export default async function handler(req, res) {
 
       record = results[0];
       auditDate = record.audit_date;
-      console.log(`[get-latest-audit] Found audit record for date: ${auditDate}`);
+      console.log(`[get-latest-audit] Found audit record for date: ${auditDate} (minimal: ${isMinimalRequest})`);
     } catch (queryError) {
       console.error('[get-latest-audit] Error fetching audit record:', queryError);
+      console.error('[get-latest-audit] Query error stack:', queryError.stack);
       return res.status(500).json({
         status: 'error',
         message: 'Failed to fetch audit record from Supabase',
         details: queryError.message,
         meta: { generatedAt: new Date().toISOString() }
+      });
+    }
+
+    // CRITICAL: If minimal request, return immediately after fetching essential fields
+    // This prevents the function from processing large JSON fields that cause FUNCTION_INVOCATION_FAILED
+    if (isMinimalRequest) {
+      console.log(`[get-latest-audit] Returning minimal response (timestamp + scores only)`);
+      return res.status(200).json({
+        status: 'ok',
+        data: {
+          timestamp: record.updated_at ? new Date(record.updated_at).getTime() : new Date(record.audit_date + 'T00:00:00').getTime(),
+          auditDate: record.audit_date,
+          scores: {
+            visibility: record.visibility_score || null,
+            contentSchema: record.content_schema_score || null,
+            authority: record.authority_score || null,
+            localEntity: record.local_entity_score || null,
+            serviceArea: record.service_area_score || null
+          },
+          _minimal: true
+        },
+        meta: { generatedAt: new Date().toISOString(), auditDate: record.audit_date, minimal: true }
       });
     }
 
@@ -321,36 +350,10 @@ export default async function handler(req, res) {
     
     console.log(`[get-latest-audit] Final rankingAiData: ${rankingAiData ? (rankingAiData.combinedRows?.length || 0) + ' keywords' : 'null'}`);
 
-    // CRITICAL: Check if client wants minimal response (just timestamp and scores)
-    // This allows the UI to update the timestamp even if full data fetch fails
-    const minimalOnly = req.query.minimal === 'true';
-    
     // Reconstruct the full audit object from Supabase data
     // Wrap in try-catch to handle any parsing errors gracefully
     let auditData;
     try {
-      // If minimal only, return just timestamp and scores
-      if (minimalOnly) {
-        auditData = {
-          timestamp: record.updated_at ? new Date(record.updated_at).getTime() : new Date(record.audit_date + 'T00:00:00').getTime(),
-          auditDate: record.audit_date,
-          scores: {
-            visibility: record.visibility_score || null,
-            contentSchema: record.content_schema_score || null,
-            authority: record.authority_score || null,
-            localEntity: record.local_entity_score || null,
-            serviceArea: record.service_area_score || null
-          },
-          _minimal: true
-        };
-        console.log(`[get-latest-audit] Returning minimal response (timestamp + scores only)`);
-        return res.status(200).json({
-          status: 'ok',
-          data: auditData,
-          meta: { generatedAt: new Date().toISOString(), auditDate: record.audit_date, minimal: true }
-        });
-      }
-      
       auditData = {
       scores: {
         visibility: record.visibility_score || null,
