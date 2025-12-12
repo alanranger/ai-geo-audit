@@ -8640,12 +8640,17 @@ Based on snippet-friendly content (FAQ / HowTo / Article / Event blocks), how of
                           const label = brandOverlay.label || 'Weak';
                           const bgColor = score >= 70 ? '#d1fae5' : score >= 40 ? '#fef3c7' : '#fee2e2';
                           const textColor = score >= 70 ? '#065f46' : score >= 40 ? '#92400e' : '#991b1b';
+                          const brandQueryShare = brandOverlay.brandQueryShare != null ? (brandOverlay.brandQueryShare * 100).toFixed(1) : 'N/A';
+                          const brandCtr = brandOverlay.brandCtr != null ? (brandOverlay.brandCtr * 100).toFixed(1) : 'N/A';
+                          const brandAvgPos = brandOverlay.brandAvgPosition != null ? brandOverlay.brandAvgPosition.toFixed(1) : 'N/A';
+                          const reviewScore = brandOverlay.reviewScore != null ? brandOverlay.reviewScore : 'N/A';
+                          const entityScore = brandOverlay.entityScore != null ? brandOverlay.entityScore : 'N/A';
                           const brandTooltip = `Brand & Entity Overlay Breakdown:
-• Brand Query Share: ${(brandOverlay.brandQueryShare * 100).toFixed(1)}% of impressions
-• Brand CTR: ${(brandOverlay.brandCtr * 100).toFixed(1)}%
-• Avg Brand Position: ${brandOverlay.brandAvgPosition.toFixed(1)}
-• Review Score: ${brandOverlay.reviewScore}/100
-• Entity Score: ${brandOverlay.entityScore}/100
+• Brand Query Share: ${brandQueryShare}% of impressions
+• Brand CTR: ${brandCtr}%
+• Avg Brand Position: ${brandAvgPos}
+• Review Score: ${reviewScore}/100
+• Entity Score: ${entityScore}/100
 Final Score: ${score}/100`;
                           return `
                             <div style="display: flex; align-items: flex-start; gap: 1rem; justify-content: center; flex-wrap: wrap;">
@@ -8656,11 +8661,11 @@ Final Score: ${score}/100`;
                               <div style="background: white; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0.75rem 1rem; box-shadow: 0 2px 8px rgba(0,0,0,0.1); font-size: 0.85rem; color: #1e293b; line-height: 1.6; width: 320px; min-height: 140px;">
                                 <div style="font-weight: 600; margin-bottom: 0.5rem; color: #1e293b;">Brand & Entity Overlay Breakdown:</div>
                                 <div style="color: #64748b;">
-                                  <div>• Brand Query Share: ${(brandOverlay.brandQueryShare * 100).toFixed(1)}% of impressions</div>
-                                  <div>• Brand CTR: ${(brandOverlay.brandCtr * 100).toFixed(1)}%</div>
-                                  <div>• Avg Brand Position: ${brandOverlay.brandAvgPosition.toFixed(1)}</div>
-                                  <div>• Review Score: ${brandOverlay.reviewScore}/100</div>
-                                  <div>• Entity Score: ${brandOverlay.entityScore}/100</div>
+                                  <div>• Brand Query Share: ${brandQueryShare}% of impressions</div>
+                                  <div>• Brand CTR: ${brandCtr}%</div>
+                                  <div>• Avg Brand Position: ${brandAvgPos}</div>
+                                  <div>• Review Score: ${reviewScore}/100</div>
+                                  <div>• Entity Score: ${entityScore}/100</div>
                                   <div style="margin-top: 0.5rem; font-weight: 600; color: #1e293b;">Final Score: ${score}/100</div>
                                 </div>
                               </div>
@@ -8999,14 +9004,18 @@ Final Score: ${score}/100`;
             const metrics = getGSCMetricsForSegment(mode, qp, tq);
             const metricsDiv = document.getElementById(`${modeId}-gsc-metrics`);
             if (metricsDiv) {
-              debugLog(`📊 Updating GSC metrics for mode ${mode}: CTR=${metrics.siteCtr.toFixed(2)}%, Position=${metrics.avgPosition.toFixed(1)}`, 'info');
+              const siteCtrStr = metrics.siteCtr != null ? metrics.siteCtr.toFixed(2) : 'N/A';
+              const avgPosStr = metrics.avgPosition != null ? metrics.avgPosition.toFixed(1) : 'N/A';
+              debugLog(`📊 Updating GSC metrics for mode ${mode}: CTR=${siteCtrStr}%, Position=${avgPosStr}`, 'info');
+              const top10CtrStr = metrics.top10Ctr != null ? metrics.top10Ctr.toFixed(2) : 'N/A';
+              const top10ShareStr = metrics.top10ImpressionShare != null ? metrics.top10ImpressionShare.toFixed(1) : 'N/A';
               metricsDiv.innerHTML = `
                 <div style="margin-bottom: 0.5rem;"><strong>Behaviour & Ranking:</strong></div>
                 <div style="margin-bottom: 0.25rem; font-size: 0.7rem; color: #999;">Segment: ${mode === 'all' ? 'All pages' : mode === 'nonEducation' ? 'Exclude education (blogs / free course)' : 'Money pages only'}</div>
-                <div>Site CTR (ranking queries): ${metrics.siteCtr.toFixed(2)}%</div>
-                <div>Top-10 CTR: ${metrics.top10Ctr.toFixed(2)}%</div>
-                <div>Avg position (ranking): ${metrics.avgPosition.toFixed(1)}</div>
-                <div>Top-10 impression share: ${metrics.top10ImpressionShare.toFixed(1)}%</div>
+                <div>Site CTR (ranking queries): ${siteCtrStr}%</div>
+                <div>Top-10 CTR: ${top10CtrStr}%</div>
+                <div>Avg position (ranking): ${avgPosStr}</div>
+                <div>Top-10 impression share: ${top10ShareStr}%</div>
               `;
             } else {
               debugLog(`⚠ GSC metrics div not found: ${modeId}-gsc-metrics`, 'warn');
@@ -9036,10 +9045,10 @@ Final Score: ${score}/100`;
                 <div id="${modeId}-gsc-metrics">
                   <div style="margin-bottom: 0.5rem;"><strong>Behaviour & Ranking:</strong></div>
                   <div style="margin-bottom: 0.25rem; font-size: 0.7rem; color: #999;">Segment: ${currentMode === 'all' ? 'All pages' : currentMode === 'nonEducation' ? 'Exclude education (blogs / free course)' : 'Money pages only'}</div>
-                  <div>Site CTR (ranking queries): ${siteCtr.toFixed(2)}%</div>
-                  <div>Top-10 CTR: ${top10Ctr.toFixed(2)}%</div>
-                  <div>Avg position (ranking): ${avgPosition.toFixed(1)}</div>
-                  <div>Top-10 impression share: ${top10ImpressionShare.toFixed(1)}%</div>
+                  <div>Site CTR (ranking queries): ${siteCtr != null ? siteCtr.toFixed(2) : 'N/A'}%</div>
+                  <div>Top-10 CTR: ${top10Ctr != null ? top10Ctr.toFixed(2) : 'N/A'}%</div>
+                  <div>Avg position (ranking): ${avgPosition != null ? avgPosition.toFixed(1) : 'N/A'}</div>
+                  <div>Top-10 impression share: ${top10ImpressionShare != null ? top10ImpressionShare.toFixed(1) : 'N/A'}%</div>
                 </div>
                 ${backlinkMetrics ? `
                   <div style="margin-top: 0.75rem; margin-bottom: 0.5rem;"><strong>Backlink Metrics:</strong></div>
@@ -9108,14 +9117,18 @@ Final Score: ${score}/100`;
             `;
             
             topPages.forEach((page, idx) => {
+              const ctrStr = page.ctr != null ? page.ctr.toFixed(2) : 'N/A';
+              const posStr = page.avgPosition != null ? page.avgPosition.toFixed(1) : 'N/A';
+              const impressionsStr = page.impressions != null ? page.impressions.toLocaleString() : 'N/A';
+              const clicksStr = page.clicks != null ? page.clicks.toLocaleString() : 'N/A';
               tableHtml += `
                 <tr style="border-bottom: 1px solid #f1f5f9;">
                   <td style="padding: 0.25rem 0.4rem; color: #666;">${idx + 1}</td>
-                  <td style="padding: 0.25rem 0.4rem; word-break: break-all; color: #333;">${page.url}</td>
-                  <td style="padding: 0.25rem 0.4rem; text-align: right; color: #666;">${page.ctr.toFixed(2)}%</td>
-                  <td style="padding: 0.25rem 0.4rem; text-align: right; color: #666;">${page.impressions.toLocaleString()}</td>
-                  <td style="padding: 0.25rem 0.4rem; text-align: right; color: #666;">${page.clicks.toLocaleString()}</td>
-                  <td style="padding: 0.25rem 0.4rem; text-align: right; color: #666;">${page.avgPosition.toFixed(1)}</td>
+                  <td style="padding: 0.25rem 0.4rem; word-break: break-all; color: #333;">${page.url || 'N/A'}</td>
+                  <td style="padding: 0.25rem 0.4rem; text-align: right; color: #666;">${ctrStr}%</td>
+                  <td style="padding: 0.25rem 0.4rem; text-align: right; color: #666;">${impressionsStr}</td>
+                  <td style="padding: 0.25rem 0.4rem; text-align: right; color: #666;">${clicksStr}</td>
+                  <td style="padding: 0.25rem 0.4rem; text-align: right; color: #666;">${posStr}</td>
                 </tr>
               `;
             });
@@ -9916,7 +9929,7 @@ Final Score: ${score}/100`;
               <td style="padding: 0.75rem; text-align: right; color: ${ctrColor}; font-weight: 600;">${page.ctr.toFixed(2)}%</td>
               <td style="padding: 0.75rem; text-align: right; color: #0f172a; font-weight: 500;">${page.impressions.toLocaleString()}</td>
               <td style="padding: 0.75rem; text-align: right; color: #0f172a; font-weight: 500;">${page.clicks.toLocaleString()}</td>
-              <td style="padding: 0.75rem; text-align: right; color: ${posColor}; font-weight: 600;">${page.avgPosition.toFixed(1)}</td>
+              <td style="padding: 0.75rem; text-align: right; color: ${posColor}; font-weight: 600;">${page.avgPosition != null ? page.avgPosition.toFixed(1) : 'N/A'}</td>
             </tr>
           `;
         });
@@ -14436,7 +14449,10 @@ Final Score: ${score}/100`;
                     
                     // Show metrics when available
                     if (share > 0 || brandCtr > 0 || pos > 0) {
-                      brandDesc += ` <strong>Current Metrics:</strong> Brand queries: ${(share * 100).toFixed(1)}% of impressions, brand CTR ${(brandCtr * 100).toFixed(1)}%, avg brand position ${pos.toFixed(1)}.`;
+                      const sharePct = share != null ? (share * 100).toFixed(1) : 'N/A';
+                      const brandCtrPct = brandCtr != null ? (brandCtr * 100).toFixed(1) : 'N/A';
+                      const posStr = pos != null ? pos.toFixed(1) : 'N/A';
+                      brandDesc += ` <strong>Current Metrics:</strong> Brand queries: ${sharePct}% of impressions, brand CTR ${brandCtrPct}%, avg brand position ${posStr}.`;
                     }
                   } else {
                     brandDesc = 'No brand overlay data available – run an audit with access to query data.';
