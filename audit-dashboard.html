@@ -4355,23 +4355,54 @@
         debugLog(`saveAuditToSupabase: moneySegmentMetrics ready with ${Object.keys(moneySegmentMetrics).length} segments`, 'info');
         debugLog(`saveAuditToSupabase: moneySegmentMetrics.allMoney clicks=${moneySegmentMetrics.allMoney?.clicks || 0}, impressions=${moneySegmentMetrics.allMoney?.impressions || 0}`, 'info');
         
+        // Prepare payload
+        const payload = {
+          propertyUrl,
+          auditDate,
+          schemaAudit,
+          scores,
+          searchData,
+          snippetReadiness,
+          localSignals, // Pass Business Profile data for storage
+          moneyPagesSummary, // Phase 3: Money Pages summary for trend tracking
+          moneySegmentMetrics, // Phase: Money Pages Priority Matrix - segment metrics for KPI tracker
+          moneyPagePriorityData: window.moneyPagePriorityData || null // CRITICAL: Save Priority Matrix data to Supabase
+        };
+        
+        // Check payload size before sending (Vercel limit is ~4.5MB)
+        const payloadJson = JSON.stringify(payload);
+        const payloadSizeKB = Math.round(payloadJson.length / 1024);
+        debugLog(`saveAuditToSupabase: Payload size: ${payloadSizeKB}KB`, 'info');
+        
+        if (payloadSizeKB > 4000) {
+          debugLog(`⚠ Payload size (${payloadSizeKB}KB) exceeds 4MB - truncating large fields...`, 'warn');
+          // Truncate queryPages if too large
+          if (searchData?.queryPages && Array.isArray(searchData.queryPages) && searchData.queryPages.length > 2000) {
+            debugLog(`⚠ Truncating queryPages from ${searchData.queryPages.length} to 2000 items`, 'warn');
+            searchData.queryPages = searchData.queryPages.slice(0, 2000);
+          }
+          // Truncate topQueries if too large
+          if (searchData?.topQueries && Array.isArray(searchData.topQueries) && searchData.topQueries.length > 500) {
+            debugLog(`⚠ Truncating topQueries from ${searchData.topQueries.length} to 500 items`, 'warn');
+            searchData.topQueries = searchData.topQueries.slice(0, 500);
+          }
+          // Recalculate payload size after truncation
+          const truncatedPayload = {
+            ...payload,
+            searchData: { ...searchData }
+          };
+          const truncatedJson = JSON.stringify(truncatedPayload);
+          const truncatedSizeKB = Math.round(truncatedJson.length / 1024);
+          debugLog(`saveAuditToSupabase: Payload size after truncation: ${truncatedSizeKB}KB`, 'info');
+          payload.searchData = truncatedPayload.searchData;
+        }
+        
         const response = await fetch(apiUrl('/api/supabase/save-audit'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            propertyUrl,
-            auditDate,
-            schemaAudit,
-            scores,
-            searchData,
-            snippetReadiness,
-            localSignals, // Pass Business Profile data for storage
-            moneyPagesSummary, // Phase 3: Money Pages summary for trend tracking
-            moneySegmentMetrics, // Phase: Money Pages Priority Matrix - segment metrics for KPI tracker
-            moneyPagePriorityData: window.moneyPagePriorityData || null // CRITICAL: Save Priority Matrix data to Supabase
-          })
+          body: JSON.stringify(payload)
         });
         
         if (response.ok) {
