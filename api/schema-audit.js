@@ -827,9 +827,9 @@ function delay(ms) {
 }
 
 /**
- * Crawl a single URL with concurrency control
+ * Crawl a single URL with concurrency control and rate limiting handling
  */
-async function crawlUrl(url, semaphore, delayAfterMs = 0) {
+async function crawlUrl(url, semaphore, delayAfterMs = 0, retryCount = 0) {
   await semaphore.acquire();
   
   try {
@@ -845,6 +845,32 @@ async function crawlUrl(url, semaphore, delayAfterMs = 0) {
       let errorType = 'HTTP Error';
       if (response.status === 429) {
         errorType = 'Rate Limited';
+        
+        // Check for Retry-After header
+        const retryAfter = response.headers.get('Retry-After');
+        let waitTime = delayAfterMs;
+        
+        if (retryAfter) {
+          // Parse Retry-After header (can be seconds or HTTP date)
+          const retrySeconds = parseInt(retryAfter, 10);
+          if (!isNaN(retrySeconds)) {
+            waitTime = retrySeconds * 1000; // Convert to milliseconds
+          } else {
+            // If it's a date, calculate difference
+            const retryDate = new Date(retryAfter);
+            if (!isNaN(retryDate.getTime())) {
+              waitTime = Math.max(retryDate.getTime() - Date.now(), 5000); // At least 5 seconds
+            }
+          }
+        } else {
+          // Exponential backoff for 429 errors: 2s, 4s, 8s, 16s
+          waitTime = Math.min(2000 * Math.pow(2, retryCount), 16000);
+        }
+        
+        // Wait before returning error (so we don't immediately retry)
+        if (waitTime > 0) {
+          await delay(waitTime);
+        }
       } else if (response.status >= 500) {
         errorType = 'Server Error';
       } else if (response.status === 404) {
@@ -853,8 +879,8 @@ async function crawlUrl(url, semaphore, delayAfterMs = 0) {
         errorType = 'Forbidden';
       }
       
-      // Add delay after failed request
-      if (delayAfterMs > 0) {
+      // Add delay after failed request (if not already waited for 429)
+      if (response.status !== 429 && delayAfterMs > 0) {
         await delay(delayAfterMs);
       }
       
@@ -863,7 +889,8 @@ async function crawlUrl(url, semaphore, delayAfterMs = 0) {
         success: false,
         error: `HTTP ${response.status}: ${response.statusText}`,
         errorType: errorType,
-        schemas: []
+        schemas: [],
+        retryCount: retryCount
       };
     }
     
@@ -1072,38 +1099,65 @@ export default async function handler(req, res) {
     }
     
     // Crawl URLs with concurrency limit and delay between requests
-    // Reduced delay to avoid Vercel timeout limits
-    const semaphore = new Semaphore(4);
-    const delayBetweenRequests = 150; // 150ms delay after each request (reduced from 300ms)
+    // Increased delays and reduced concurrency to avoid rate limiting
+    const semaphore = new Semaphore(2); // Reduced from 4 to 2 concurrent requests
+    const delayBetweenRequests = 300; // Increased from 150ms to 300ms delay after each request
     
     let results = [];
     try {
       // Initial crawl with delays
-      console.log(`🕷️ Starting initial crawl of ${urls.length} URLs with ${delayBetweenRequests}ms delay between requests...`);
+      console.log(`🕷️ Starting initial crawl of ${urls.length} URLs with ${delayBetweenRequests}ms delay between requests (concurrency: 2)...`);
       const startTime = Date.now();
-      const crawlPromises = urls.map(url => crawlUrl(url, semaphore, delayBetweenRequests));
+      const crawlPromises = urls.map(url => crawlUrl(url, semaphore, delayBetweenRequests, 0));
       results = await Promise.all(crawlPromises);
       const crawlTime = ((Date.now() - startTime) / 1000).toFixed(1);
       console.log(`✓ Initial crawl completed in ${crawlTime} seconds`);
       
-      // Identify failed crawls for retry
+      // Identify failed crawls for retry, with special handling for 429 errors
       const failedResults = results.filter(r => !r.success);
+      const rateLimitedResults = failedResults.filter(r => r.errorType === 'Rate Limited');
+      const otherFailedResults = failedResults.filter(r => r.errorType !== 'Rate Limited');
       const retryCount = failedResults.length;
       
       if (retryCount > 0) {
-        console.log(`🔄 Retrying ${retryCount} failed crawls with longer delays (1.5 seconds)...`);
-        const retrySemaphore = new Semaphore(2); // Lower concurrency for retries
-        const retryDelay = 1500; // 1.5 second delay for retries (reduced from 2s)
+        console.log(`🔄 Retrying ${retryCount} failed crawls (${rateLimitedResults.length} rate-limited, ${otherFailedResults.length} other errors)...`);
+        const retrySemaphore = new Semaphore(1); // Very low concurrency for retries (1 at a time)
+        const retryDelay = 3000; // 3 second delay for retries (increased from 1.5s)
         
-        // Add a shorter initial delay before starting retries
-        await delay(2000); // Reduced from 3s
+        // Add initial delay before starting retries (longer for rate-limited pages)
+        if (rateLimitedResults.length > 0) {
+          console.log(`⏳ Waiting 10 seconds before retrying rate-limited pages...`);
+          await delay(10000); // Wait 10 seconds before retrying 429 errors
+        } else {
+          await delay(3000); // 3 seconds for other errors
+        }
         
         const retryStartTime = Date.now();
-        const retryPromises = failedResults.map(result => {
-          return crawlUrl(result.url, retrySemaphore, retryDelay);
-        });
         
-        const retryResults = await Promise.all(retryPromises);
+        // Retry rate-limited pages first with exponential backoff
+        let retryResults = [];
+        if (rateLimitedResults.length > 0) {
+          console.log(`🔄 Retrying ${rateLimitedResults.length} rate-limited pages with exponential backoff...`);
+          for (const result of rateLimitedResults) {
+            const retryResult = await crawlUrl(result.url, retrySemaphore, retryDelay, (result.retryCount || 0) + 1);
+            retryResults.push(retryResult);
+            // Additional delay between rate-limited retries
+            if (rateLimitedResults.indexOf(result) < rateLimitedResults.length - 1) {
+              await delay(5000); // 5 second delay between each rate-limited retry
+            }
+          }
+        }
+        
+        // Retry other failed pages
+        if (otherFailedResults.length > 0) {
+          console.log(`🔄 Retrying ${otherFailedResults.length} other failed pages...`);
+          const otherRetryPromises = otherFailedResults.map(result => {
+            return crawlUrl(result.url, retrySemaphore, retryDelay, (result.retryCount || 0) + 1);
+          });
+          const otherRetryResults = await Promise.all(otherRetryPromises);
+          retryResults.push(...otherRetryResults);
+        }
+        
         const retryTime = ((Date.now() - retryStartTime) / 1000).toFixed(1);
         console.log(`✓ Retry completed in ${retryTime} seconds`);
         
@@ -1116,7 +1170,8 @@ export default async function handler(req, res) {
         
         const retrySuccessCount = retryResults.filter(r => r.success).length;
         const retryFailedCount = retryCount - retrySuccessCount;
-        console.log(`✓ Retry results: ${retrySuccessCount}/${retryCount} succeeded, ${retryFailedCount} still failed`);
+        const rateLimitedStillFailed = retryResults.filter(r => !r.success && r.errorType === 'Rate Limited').length;
+        console.log(`✓ Retry results: ${retrySuccessCount}/${retryCount} succeeded, ${retryFailedCount} still failed (${rateLimitedStillFailed} still rate-limited)`);
       }
     } catch (crawlError) {
       console.error('❌ Error during crawl process:', crawlError);
