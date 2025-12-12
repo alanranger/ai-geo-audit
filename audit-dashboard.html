@@ -7616,10 +7616,17 @@
                 debugLog('═══════════════════════════════════════════════════════', 'info');
               }
             } else {
-              debugLog('⚠ Schema audit returned error, using fallback', 'warn');
+              debugLog(`⚠ Schema audit returned error status: ${schemaAudit.status}`, 'warn');
+              if (schemaAudit.message) {
+                debugLog(`  Error message: ${schemaAudit.message}`, 'warn');
+              }
             }
           } else {
-            debugLog('⚠ Schema audit endpoint not available, using saved data', 'warn');
+            const errorText = await schemaResponse.text();
+            debugLog(`⚠ Schema audit endpoint returned ${schemaResponse.status}: ${schemaResponse.statusText}`, 'warn');
+            if (errorText) {
+              debugLog(`  Response: ${errorText.substring(0, 200)}`, 'warn');
+            }
             // schemaAudit already initialized with saved data at start, so it's preserved
             if (schemaAudit) {
               debugLog('✓ Using saved schema audit data from previous audit', 'success');

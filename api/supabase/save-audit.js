@@ -26,6 +26,18 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Check request size before processing (Vercel limit is ~4.5MB)
+    const contentLength = req.headers['content-length'];
+    if (contentLength && parseInt(contentLength) > 4 * 1024 * 1024) {
+      console.warn(`[Supabase Save] ⚠ Request too large: ${Math.round(parseInt(contentLength) / 1024)}KB (limit: 4MB)`);
+      return res.status(413).json({
+        status: 'error',
+        message: 'Request payload too large',
+        details: `Payload size: ${Math.round(parseInt(contentLength) / 1024)}KB, limit: 4MB. Consider reducing query_pages or other large data fields.`,
+        meta: { generatedAt: new Date().toISOString() }
+      });
+    }
+    
     // In Vercel serverless functions, req.body should be automatically parsed for JSON
     // Access it once and immediately extract all needed data to avoid "body already read" errors
     let bodyData;
@@ -202,6 +214,7 @@ export default async function handler(req, res) {
       })(),
       
       // GSC query+page level data (for CTR metrics in scorecard)
+      // Limit to 5000 items to prevent payload size issues (Vercel limit is ~4.5MB)
       query_pages: (() => {
         const qp = searchData?.queryPages;
         console.log('[Save Audit] queryPages check:', {
@@ -212,7 +225,7 @@ export default async function handler(req, res) {
           sample: Array.isArray(qp) && qp.length > 0 ? qp[0] : null
         });
         if (Array.isArray(qp) && qp.length > 0) {
-          return qp.map(qpItem => ({
+          const mapped = qp.map(qpItem => ({
             query: qpItem.query || '',
             page: qpItem.page || qpItem.url || '',
             clicks: qpItem.clicks || 0,
@@ -220,6 +233,13 @@ export default async function handler(req, res) {
             ctr: qpItem.ctr || 0, // Store as percentage (0-100)
             position: qpItem.position || qpItem.avg_position || null
           })).filter(qpItem => qpItem.query || qpItem.page);
+          
+          // Limit to 5000 items to prevent payload size issues
+          if (mapped.length > 5000) {
+            console.warn(`[Save Audit] ⚠ query_pages has ${mapped.length} items, truncating to 5000 to prevent payload size issues`);
+            return mapped.slice(0, 5000);
+          }
+          return mapped;
         }
         console.warn('[Save Audit] queryPages is missing or empty - CTR metrics will not be available in scorecard');
         return null;
