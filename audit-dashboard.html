@@ -4547,6 +4547,7 @@
         });
         
         // Step 1: Try minimal request first to get timestamp (fast, unlikely to timeout)
+        let minimalData = null;
         if (!minimalOnly) {
           debugLog(`Fetching minimal audit data (timestamp + scores) from Supabase for ${propertyUrl}...`, 'info');
           try {
@@ -4561,6 +4562,7 @@
             if (minimalResponse.ok) {
               const minimalResult = await minimalResponse.json();
               if (minimalResult.status === 'ok' && minimalResult.data && minimalResult.data.timestamp) {
+                minimalData = minimalResult.data; // Store minimal data for fallback
                 // Update timestamp immediately, even if full data fetch fails
                 updateAuditTimestamp(minimalResult.data.timestamp);
                 debugLog(`✓ Updated audit timestamp from minimal Supabase response: ${new Date(minimalResult.data.timestamp).toLocaleString()}`, 'success');
@@ -4578,64 +4580,94 @@
         
         // Step 2: Try full request (may timeout, but we already have timestamp)
         debugLog(`Fetching full audit data from Supabase for ${propertyUrl}...`, 'info');
-        const fullController = new AbortController();
-        const fullTimeout = setTimeout(() => fullController.abort(), 30000); // 30 second timeout
-        
-        const response = await fetch(urlHelper(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}`), {
-          signal: fullController.signal
-        });
-        clearTimeout(fullTimeout);
-        
-        if (response.ok) {
-          const result = await response.json();
-          if (result.status === 'ok' && result.data) {
-            debugLog(`✓ Found latest audit from Supabase: ${result.data.auditDate || 'unknown date'}`, 'success');
-            // Debug: Check what moneyPagesMetrics structure we got
-            const hasMoneyPages = !!(result.data?.scores?.moneyPagesMetrics || result.data?.moneyPagesMetrics);
-            debugLog(`✓ Supabase data check: hasMoneyPagesMetrics=${hasMoneyPages}, structure=${result.data?.scores?.moneyPagesMetrics ? 'scores.moneyPagesMetrics' : result.data?.moneyPagesMetrics ? 'moneyPagesMetrics' : 'none'}`, 'info');
-            if (hasMoneyPages) {
-              const rows = result.data?.scores?.moneyPagesMetrics?.rows || result.data?.moneyPagesMetrics?.rows || [];
-              debugLog(`✓ Supabase moneyPagesMetrics has ${rows.length} rows`, 'success');
+        try {
+          const fullController = new AbortController();
+          const fullTimeout = setTimeout(() => fullController.abort(), 30000); // 30 second timeout
+          
+          const response = await fetch(urlHelper(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}`), {
+            signal: fullController.signal
+          });
+          clearTimeout(fullTimeout);
+          
+          if (response.ok) {
+            const result = await response.json();
+            if (result.status === 'ok' && result.data) {
+              debugLog(`✓ Found latest audit from Supabase: ${result.data.auditDate || 'unknown date'}`, 'success');
+              // Debug: Check what moneyPagesMetrics structure we got
+              const hasMoneyPages = !!(result.data?.scores?.moneyPagesMetrics || result.data?.moneyPagesMetrics);
+              debugLog(`✓ Supabase data check: hasMoneyPagesMetrics=${hasMoneyPages}, structure=${result.data?.scores?.moneyPagesMetrics ? 'scores.moneyPagesMetrics' : result.data?.moneyPagesMetrics ? 'moneyPagesMetrics' : 'none'}`, 'info');
+              if (hasMoneyPages) {
+                const rows = result.data?.scores?.moneyPagesMetrics?.rows || result.data?.moneyPagesMetrics?.rows || [];
+                debugLog(`✓ Supabase moneyPagesMetrics has ${rows.length} rows`, 'success');
+              } else {
+                debugLog(`⚠ Supabase data missing moneyPagesMetrics!`, 'warn');
+              }
+              // Ensure timestamp is set from Supabase data (use timestamp if available, otherwise construct from auditDate)
+              if (result.data.timestamp) {
+                // Timestamp is already set
+              } else if (result.data.auditDate) {
+                // Construct timestamp from auditDate (use current time as fallback for time component)
+                const auditDateStr = result.data.auditDate;
+                result.data.timestamp = new Date(auditDateStr + 'T12:00:00').getTime();
+                debugLog(`✓ Constructed timestamp from auditDate: ${auditDateStr}`, 'info');
+              }
+              // Update timestamp display immediately when Supabase data is loaded
+              if (result.data.timestamp) {
+                updateAuditTimestamp(result.data.timestamp);
+                debugLog(`✓ Updated audit timestamp display from Supabase data`, 'success');
+              }
+              return result.data;
             } else {
-              debugLog(`⚠ Supabase data missing moneyPagesMetrics!`, 'warn');
+              debugLog('⚠ No audit found in Supabase', 'warn');
+              // Return minimal data if available, otherwise null
+              if (minimalData) {
+                debugLog(`⚠ Returning minimal data (timestamp + scores) as fallback`, 'info');
+                return minimalData;
+              }
+              return null;
             }
-            // Ensure timestamp is set from Supabase data (use timestamp if available, otherwise construct from auditDate)
-            if (result.data.timestamp) {
-              // Timestamp is already set
-            } else if (result.data.auditDate) {
-              // Construct timestamp from auditDate (use current time as fallback for time component)
-              const auditDateStr = result.data.auditDate;
-              result.data.timestamp = new Date(auditDateStr + 'T12:00:00').getTime();
-              debugLog(`✓ Constructed timestamp from auditDate: ${auditDateStr}`, 'info');
-            }
-            // Update timestamp display immediately when Supabase data is loaded
-            if (result.data.timestamp) {
-              updateAuditTimestamp(result.data.timestamp);
-              debugLog(`✓ Updated audit timestamp display from Supabase data`, 'success');
-            }
-            return result.data;
           } else {
-            debugLog('⚠ No audit found in Supabase', 'warn');
+            const responseText = await response.text();
+            try {
+              const error = JSON.parse(responseText);
+              debugLog(`⚠ Could not fetch latest audit from Supabase: ${error.message || 'Unknown error'}`, 'warn');
+              if (error.message && error.message.includes('FUNCTION_INVOCATION_FAILED')) {
+                debugLog(`⚠ Full data fetch failed due to timeout/size. Returning minimal data (timestamp + scores) as fallback.`, 'warn');
+                if (minimalData) {
+                  return minimalData;
+                }
+              }
+            } catch (parseError) {
+              debugLog(`⚠ Could not fetch latest audit from Supabase: ${responseText || 'Unknown error'}`, 'warn');
+            }
+            // Return minimal data if available, otherwise null
+            if (minimalData) {
+              debugLog(`⚠ Returning minimal data (timestamp + scores) as fallback after full request failure`, 'info');
+              return minimalData;
+            }
             return null;
           }
-        } else {
-          const responseText = await response.text();
-          try {
-            const error = JSON.parse(responseText);
-            debugLog(`⚠ Could not fetch latest audit from Supabase: ${error.message || 'Unknown error'}`, 'warn');
-            if (error.message && error.message.includes('FUNCTION_INVOCATION_FAILED')) {
-              debugLog(`⚠ Full data fetch failed due to timeout/size. Timestamp should already be updated from minimal request.`, 'warn');
+        } catch (error) {
+          if (error.name === 'AbortError' || error.name === 'TimeoutError' || error.message.includes('timeout')) {
+            debugLog(`⚠ Supabase fetch timed out. Returning minimal data (timestamp + scores) as fallback.`, 'warn');
+            if (minimalData) {
+              return minimalData;
             }
-          } catch (parseError) {
-            debugLog(`⚠ Could not fetch latest audit from Supabase: ${responseText || 'Unknown error'}`, 'warn');
+          } else {
+            debugLog(`⚠ Supabase fetch error: ${error.message}`, 'warn');
+          }
+          // Return minimal data if available, otherwise null
+          if (minimalData) {
+            debugLog(`⚠ Returning minimal data (timestamp + scores) as fallback after error`, 'info');
+            return minimalData;
           }
           return null;
         }
-      } catch (error) {
-        if (error.name === 'AbortError' || error.name === 'TimeoutError' || error.message.includes('timeout')) {
-          debugLog(`⚠ Supabase fetch timed out. Timestamp should already be updated from minimal request.`, 'warn');
-        } else {
-          debugLog(`⚠ Supabase fetch error: ${error.message}`, 'warn');
+      } catch (outerError) {
+        // Catch any errors in the outer try block (shouldn't happen, but just in case)
+        debugLog(`⚠ Outer error in fetchLatestAuditFromSupabase: ${outerError.message}`, 'warn');
+        if (minimalData) {
+          return minimalData;
         }
         return null;
       }

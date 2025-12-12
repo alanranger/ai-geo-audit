@@ -925,7 +925,42 @@ export default async function handler(req, res) {
     console.error('[get-latest-audit] Error type:', error.constructor.name);
     console.error('[get-latest-audit] Error details:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
     
-    // Check if it's a timeout or memory error
+    // Try to return minimal data (timestamp + scores) even if full processing failed
+    // This ensures the UI can at least update the timestamp
+    try {
+      // If we have the record, extract minimal data from it
+      if (typeof record !== 'undefined' && record) {
+        const minimalData = {
+          timestamp: record.updated_at ? new Date(record.updated_at).getTime() : new Date(record.audit_date + 'T00:00:00').getTime(),
+          auditDate: record.audit_date,
+          scores: {
+            visibility: record.visibility_score || null,
+            contentSchema: record.content_schema_score || null,
+            authority: record.authority_score || null,
+            localEntity: record.local_entity_score || null,
+            serviceArea: record.service_area_score || null
+          },
+          _error: 'Full data processing failed',
+          _errorMessage: error.message || String(error),
+          _minimal: true
+        };
+        console.log('[get-latest-audit] Returning minimal data due to error');
+        return res.status(200).json({
+          status: 'ok',
+          data: minimalData,
+          meta: { 
+            generatedAt: new Date().toISOString(), 
+            auditDate: record.audit_date, 
+            minimal: true,
+            error: error.message || String(error)
+          }
+        });
+      }
+    } catch (minimalError) {
+      console.error('[get-latest-audit] Failed to return minimal data:', minimalError);
+    }
+    
+    // If we can't return minimal data, return error
     const errorMessage = error.message || String(error);
     if (errorMessage.includes('timeout') || errorMessage.includes('memory') || errorMessage.includes('invocation') || errorMessage.includes('FUNCTION_INVOCATION_FAILED')) {
       return res.status(500).json({
