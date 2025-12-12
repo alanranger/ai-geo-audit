@@ -11842,11 +11842,17 @@ Final Score: ${score}/100`;
           ctr: row.moneyPagesSummary?.ctr ?? null
         })).filter(h => h.date); // Filter out entries without dates
         
-        debugLog(`📊 Money Pages Trend: Extracted ${moneyHistory.length} history entries`, 'info');
+        debugLog(`📊 Money Pages Trend: Extracted ${moneyHistory.length} history entries from ${history.length} total records`, 'info');
         if (moneyHistory.length > 0) {
           const sample = moneyHistory[0];
           debugLog(`📊 Sample entry: date=${sample.date}, behaviourScore=${sample.behaviourScore}, shareOfImpressions=${sample.shareOfImpressions}, shareOfClicks=${sample.shareOfClicks}, ctr=${sample.ctr}`, 'info');
           debugLog(`📊 Sample entry moneyPagesSummary: ${JSON.stringify(sample.moneyPagesSummary || 'missing')}`, 'info');
+        } else {
+          debugLog(`⚠ Money Pages Trend: No valid history entries extracted. History records: ${history.length}`, 'warn');
+          if (history.length > 0) {
+            debugLog(`⚠ Sample history record keys: ${Object.keys(history[0]).join(', ')}`, 'warn');
+            debugLog(`⚠ Sample history record: ${JSON.stringify(history[0])}`, 'warn');
+          }
         }
         
         // Add current audit data if available
@@ -12630,31 +12636,36 @@ Final Score: ${score}/100`;
        * @returns {{ labels: string[], segments: Record<string, number[]> }}
        */
       function buildMoneyKpiHistory(history, metricKey) {
-        // Take last 12 audits, grouped by audit_date month (YYYY-MM).
-        const byMonth = new Map();
-
+        // Take last 12 audits (all audits, not grouped by month)
+        // Filter and sort audits by date
+        const validAudits = [];
+        
         for (const row of history) {
           // API returns 'date' field (not 'audit_date')
           const dateStr = row.date || row.audit_date;
           if (!dateStr) continue;
           const date = new Date(dateStr);
           if (Number.isNaN(date.getTime())) continue;
-          const ym = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
           // API returns camelCase: moneySegmentMetrics (not snake_case)
           if (!row.moneySegmentMetrics) continue;
-
-          // Keep the latest audit per month
-          const existing = byMonth.get(ym);
-          if (!existing || date > existing._date) {
-            byMonth.set(ym, { _date: date, metrics: row.moneySegmentMetrics });
-          }
+          
+          validAudits.push({
+            date: date,
+            dateStr: dateStr,
+            metrics: row.moneySegmentMetrics
+          });
         }
-
-        const sortedMonths = Array.from(byMonth.entries())
-          .sort((a, b) => a[0].localeCompare(b[0]))
-          .slice(-12); // last 12 months with data
-
-        const labels = sortedMonths.map(([ym]) => ym);
+        
+        // Sort by date (oldest first) and take last 12
+        validAudits.sort((a, b) => a.date - b.date);
+        const last12Audits = validAudits.slice(-12);
+        
+        // Create labels using date format (YYYY-MM-DD or short date)
+        const labels = last12Audits.map(audit => {
+          const date = audit.date;
+          return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+        });
+        
         const segments = {
           allMoney: [],
           landingPages: [],
@@ -12662,8 +12673,8 @@ Final Score: ${score}/100`;
           productPages: []
         };
 
-        for (const [, value] of sortedMonths) {
-          const m = value.metrics;
+        for (const audit of last12Audits) {
+          const m = audit.metrics;
           for (const key of Object.keys(segments)) {
             const seg = m[key] || null;
             const v = seg ? seg[metricKey] : null;
@@ -13007,7 +13018,9 @@ Final Score: ${score}/100`;
                   display: true,
                   text: metricKey === 'ctr' ? 'CTR (%)' : 
                         metricKey === 'avgPosition' ? 'Avg Position' :
-                        metricKey.charAt(0).toUpperCase() + metricKey.slice(1)
+                        metricKey === 'impressions' ? 'Impressions' :
+                        metricKey === 'clicks' ? 'Clicks' :
+                        (metricKey ? metricKey.charAt(0).toUpperCase() + metricKey.slice(1) : 'Value')
                 }
               }
             },
@@ -13078,9 +13091,12 @@ Final Score: ${score}/100`;
           }
           
           debugLog(`✓ Money Pages KPI Tracker: Found ${history.filter(r => r.moneySegmentMetrics).length} records with moneySegmentMetrics`, 'success');
+          debugLog(`✓ Money Pages KPI Tracker: Total history records: ${history.length}`, 'info');
 
           const metricKey = document.getElementById("money-kpi-metric-select")?.value || "ctr";
+          debugLog(`✓ Money Pages KPI Tracker: Using metricKey="${metricKey}"`, 'info');
           const historyData = buildMoneyKpiHistory(history, metricKey);
+          debugLog(`✓ Money Pages KPI Tracker: Built history with ${historyData.labels.length} labels`, 'info');
           
           renderMoneyKpiTable(historyData, metricKey);
           renderMoneyKpiSparkline(historyData, metricKey);
