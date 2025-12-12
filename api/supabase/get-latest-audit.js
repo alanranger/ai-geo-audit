@@ -102,7 +102,15 @@ export default async function handler(req, res) {
     }
 
     // Fetch keyword rankings from keyword_rankings table for this audit_date and property_url
+    // TEMPORARILY DISABLED: Skip keyword rankings fetch to prevent FUNCTION_INVOCATION_FAILED errors
+    // The rankingAiData will be loaded from the audit_results.ranking_ai_data JSON field instead
     let rankingAiData = null;
+    
+    // Use fallback from audit_results immediately to prevent timeouts
+    rankingAiData = record.ranking_ai_data || null;
+    console.log(`[get-latest-audit] Using rankingAiData from audit_results (${rankingAiData ? 'found' : 'null'})`);
+    
+    /* DISABLED: Keyword rankings fetch - re-enable when function timeout issues are resolved
     try {
       console.log(`[get-latest-audit] Fetching keyword rankings for audit_date=${auditDate}, property_url=${propertyUrl}`);
       
@@ -309,6 +317,7 @@ export default async function handler(req, res) {
       // Fallback to ranking_ai_data JSON from audit_results if keyword_rankings fetch errors
       rankingAiData = record.ranking_ai_data || null;
     }
+    */
     
     console.log(`[get-latest-audit] Final rankingAiData: ${rankingAiData ? (rankingAiData.combinedRows?.length || 0) + ' keywords' : 'null'}`);
 
