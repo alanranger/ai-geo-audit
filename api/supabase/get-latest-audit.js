@@ -67,15 +67,17 @@ export default async function handler(req, res) {
     try {
       // For minimal requests, only fetch essential fields (timestamp + scores)
       // This prevents the function from crashing when large JSON fields are present
+      // CRITICAL: Fetch multiple records and find the most recent one with actual data
+      // This handles cases where the latest audit date has no data but older audits do
       let queryUrl;
       if (isMinimalRequest) {
         // For minimal requests, explicitly select only essential fields
         // URL encode the select parameter to handle commas properly
         const selectFields = 'audit_date,updated_at,visibility_score,content_schema_score,authority_score,local_entity_score,service_area_score';
-        queryUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.desc&limit=1&select=${encodeURIComponent(selectFields)}`;
+        queryUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.desc&limit=10&select=${encodeURIComponent(selectFields)}`;
       } else {
-        // For full requests, fetch all fields (but we'll truncate large ones later)
-        queryUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.desc&limit=1&select=*`;
+        // For full requests, fetch multiple records to find one with data
+        queryUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.desc&limit=10&select=*`;
       }
       
       let response;
@@ -159,7 +161,37 @@ export default async function handler(req, res) {
         });
       }
 
-      record = results[0];
+      // Find the most recent audit that has actual data
+      // For minimal requests, check if scores exist
+      // For full requests, check if schema_total_pages > 0 or other data exists
+      let selectedRecord = null;
+      for (const r of results) {
+        if (isMinimalRequest) {
+          // For minimal, any record with a date is fine (scores might be null)
+          selectedRecord = r;
+          break;
+        } else {
+          // For full requests, prefer records with actual data
+          const hasData = (r.schema_total_pages != null && r.schema_total_pages > 0) ||
+                         (r.gsc_clicks != null && r.gsc_clicks > 0) ||
+                         (r.visibility_score != null) ||
+                         (r.content_schema_score != null) ||
+                         (r.authority_score != null);
+          if (hasData) {
+            selectedRecord = r;
+            console.log(`[get-latest-audit] Found audit with data: ${r.audit_date}`);
+            break;
+          }
+        }
+      }
+      
+      // If no record with data found, use the most recent one anyway
+      if (!selectedRecord) {
+        selectedRecord = results[0];
+        console.log(`[get-latest-audit] No audit with data found, using most recent: ${selectedRecord.audit_date}`);
+      }
+      
+      record = selectedRecord;
       if (!record) {
         console.error('[get-latest-audit] Record is null or undefined');
         return res.status(500).json({
@@ -170,7 +202,7 @@ export default async function handler(req, res) {
       }
       
       auditDate = record.audit_date;
-      console.log(`[get-latest-audit] Found audit record for date: ${auditDate} (minimal: ${isMinimalRequest})`);
+      console.log(`[get-latest-audit] Using audit record for date: ${auditDate} (minimal: ${isMinimalRequest})`);
       console.log(`[get-latest-audit] Record keys: ${Object.keys(record).join(', ')}`);
     } catch (queryError) {
       console.error('[get-latest-audit] Error fetching audit record:', queryError);
