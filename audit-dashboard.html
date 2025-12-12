@@ -2697,7 +2697,8 @@
         : '';
       
       // Helper function to prepend API_BASE_URL when running locally
-      const apiUrl = (path) => {
+      // Make it globally available so it can be used by functions defined outside this scope
+      window.apiUrl = function apiUrl(path) {
         if (!API_BASE_URL) {
           // When deployed on Vercel, use relative paths
           return path.startsWith('/') ? path : `/${path}`;
@@ -2707,6 +2708,9 @@
         const cleanPath = path.startsWith('/') ? path : `/${path}`;
         return `${API_BASE_URL}${cleanPath}`;
       };
+      
+      // Also create a local const for use within this scope
+      const apiUrl = window.apiUrl;
       
       const SERP_RANK_ENDPOINT = apiUrl('/api/aigeo/serp-rank-test');
       const AI_MODE_ENDPOINT = apiUrl('/api/aigeo/ai-mode-serp-batch-test'); // Using batch endpoint
@@ -4367,7 +4371,18 @@
     // Fetch historical Content/Schema data from Supabase
     async function fetchContentSchemaHistory(propertyUrl, startDate, endDate) {
       try {
-        const response = await fetch(apiUrl(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}&startDate=${startDate}&endDate=${endDate}`));
+        // Use window.apiUrl if available (for functions outside the main scope)
+        const urlHelper = window.apiUrl || ((path) => {
+          // Fallback: check if running locally and prepend Vercel URL
+          const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+          const baseUrl = isLocal ? 'https://ai-geo-audit.vercel.app' : '';
+          if (!baseUrl) {
+            return path.startsWith('/') ? path : `/${path}`;
+          }
+          const cleanPath = path.startsWith('/') ? path : `/${path}`;
+          return `${baseUrl}${cleanPath}`;
+        });
+        const response = await fetch(urlHelper(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}&startDate=${startDate}&endDate=${endDate}`));
         
         if (response.ok) {
           const result = await response.json();
@@ -4405,7 +4420,18 @@
         
         debugLog(`Fetching latest audit from Supabase for ${propertyUrl}...`, 'info');
         
-        const response = await fetch(apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}`));
+        // Use window.apiUrl if available (for functions outside the main scope)
+        const urlHelper = window.apiUrl || ((path) => {
+          // Fallback: check if running locally and prepend Vercel URL
+          const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+          const baseUrl = isLocal ? 'https://ai-geo-audit.vercel.app' : '';
+          if (!baseUrl) {
+            return path.startsWith('/') ? path : `/${path}`;
+          }
+          const cleanPath = path.startsWith('/') ? path : `/${path}`;
+          return `${baseUrl}${cleanPath}`;
+        });
+        const response = await fetch(urlHelper(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}`));
         
         if (response.ok) {
           const result = await response.json();
@@ -13063,7 +13089,17 @@ Final Score: ${score}/100`;
         const startDateStr = startDate.toISOString().split('T')[0];
         
         try {
-          const res = await fetch(apiUrl(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDate}`));
+          // Use window.apiUrl if available (for functions outside the main scope)
+          const urlHelper = window.apiUrl || ((path) => {
+            const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+            const baseUrl = isLocal ? 'https://ai-geo-audit.vercel.app' : '';
+            if (!baseUrl) {
+              return path.startsWith('/') ? path : `/${path}`;
+            }
+            const cleanPath = path.startsWith('/') ? path : `/${path}`;
+            return `${baseUrl}${cleanPath}`;
+          });
+          const res = await fetch(urlHelper(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDate}`));
           const json = await res.json();
           if (json.status !== "ok") {
             debugLog('⚠ Could not load audit history for KPI tracker', 'warn');
@@ -14451,7 +14487,16 @@ Final Score: ${score}/100`;
                   
                   if (schemaTypes && schemaTypes.length > 0) {
                     // Show top 15 most common types for readability (still sorted by count)
-                    const topTypes = schemaTypes.slice(0, 15).map(t => `${t.type} (${t.count})`).join(', ');
+                    // Handle both object format {type, count} and string format
+                    const topTypes = schemaTypes.slice(0, 15).map(t => {
+                      if (typeof t === 'string') {
+                        return t;
+                      } else if (t && typeof t === 'object' && t.type) {
+                        return `${t.type}${t.count ? ` (${t.count})` : ''}`;
+                      } else {
+                        return String(t); // Fallback
+                      }
+                    }).filter(Boolean).join(', ');
                     contentSchemaDesc += `Schema types found: ${topTypes}${schemaTypes.length > 15 ? '...' : ''}. `;
                   }
                   
