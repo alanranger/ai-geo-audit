@@ -644,7 +644,7 @@ export default async function handler(req, res) {
       snippetReadiness: record.snippet_readiness || 0,
       // Fix: Check for schema data existence, not just content_schema_score (which might be 0)
       // Also check if schema_pages_detail exists (even as a string that needs parsing)
-      schemaAudit: (record.schema_total_pages != null || record.schema_coverage != null || record.content_schema_score != null || record.schema_pages_detail != null) ? {
+      schemaAudit: ((record.schema_total_pages != null && record.schema_total_pages > 0) || record.schema_coverage != null || record.content_schema_score != null || (record.schema_pages_detail != null && record.schema_pages_detail !== '[]' && record.schema_pages_detail !== '')) ? {
         status: 'ok',
         data: {
           coverage: record.schema_coverage != null ? record.schema_coverage : (record.content_schema_score != null ? record.content_schema_score : 0),
