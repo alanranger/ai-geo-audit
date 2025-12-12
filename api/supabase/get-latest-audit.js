@@ -26,10 +26,16 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Add early logging to verify function execution
+    console.log('[get-latest-audit] Function invoked');
+    console.log('[get-latest-audit] Method:', req.method);
+    console.log('[get-latest-audit] Query:', JSON.stringify(req.query));
+    
     const { propertyUrl, minimal } = req.query;
     const isMinimalRequest = minimal === 'true';
 
     if (!propertyUrl) {
+      console.log('[get-latest-audit] Missing propertyUrl parameter');
       return res.status(400).json({
         status: 'error',
         message: 'Missing required parameter: propertyUrl',
@@ -41,7 +47,11 @@ export default async function handler(req, res) {
     const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+    console.log('[get-latest-audit] Supabase URL present:', !!supabaseUrl);
+    console.log('[get-latest-audit] Supabase Key present:', !!supabaseKey);
+
     if (!supabaseUrl || !supabaseKey) {
+      console.error('[get-latest-audit] Missing Supabase credentials');
       return res.status(500).json({
         status: 'error',
         message: 'Supabase not configured. Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables.',
