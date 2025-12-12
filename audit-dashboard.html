@@ -4558,6 +4558,20 @@
             } else {
               debugLog(`⚠ Supabase data missing moneyPagesMetrics!`, 'warn');
             }
+            // Ensure timestamp is set from Supabase data (use timestamp if available, otherwise construct from auditDate)
+            if (result.data.timestamp) {
+              // Timestamp is already set
+            } else if (result.data.auditDate) {
+              // Construct timestamp from auditDate (use current time as fallback for time component)
+              const auditDateStr = result.data.auditDate;
+              result.data.timestamp = new Date(auditDateStr + 'T12:00:00').getTime();
+              debugLog(`✓ Constructed timestamp from auditDate: ${auditDateStr}`, 'info');
+            }
+            // Update timestamp display immediately when Supabase data is loaded
+            if (result.data.timestamp) {
+              updateAuditTimestamp(result.data.timestamp);
+              debugLog(`✓ Updated audit timestamp display from Supabase data`, 'success');
+            }
             return result.data;
           } else {
             debugLog('⚠ No audit found in Supabase', 'warn');
@@ -17607,6 +17621,10 @@ Final Score: ${score}/100`;
             if (auditToDisplay) {
               // Save to localStorage for future use
               safeSetLocalStorage('last_audit_results', auditToDisplay);
+              // Update timestamp display
+              if (auditToDisplay.timestamp) {
+                updateAuditTimestamp(auditToDisplay.timestamp);
+              }
               debugLog('✓ Latest audit loaded from Supabase and saved to localStorage', 'success');
             } else {
               debugLog('⚠ No audit data found in Supabase either', 'warn');
@@ -21885,7 +21903,7 @@ Final Score: ${score}/100`;
       const panels = document.querySelectorAll(".aigeo-panel");
 
       navItems.forEach(btn => {
-        btn.addEventListener("click", () => {
+        btn.addEventListener("click", async () => {
           const target = btn.getAttribute("data-panel");
 
           navItems.forEach(b => b.classList.toggle("is-active", b === btn));
@@ -21893,6 +21911,35 @@ Final Score: ${score}/100`;
             const wasActive = p.classList.contains("is-active");
             p.classList.toggle("is-active", p.getAttribute("data-panel") === target);
             const isNowActive = p.classList.contains("is-active");
+            
+            // Try to refresh audit data from Supabase when switching tabs (if data seems stale or missing)
+            if (isNowActive && !wasActive) {
+              const propertyUrl = localStorage.getItem('gsc_property_url');
+              const savedAudit = loadAuditResultsSync();
+              const savedTimestamp = savedAudit?.timestamp;
+              const hoursSinceLastAudit = savedTimestamp ? (Date.now() - savedTimestamp) / (1000 * 60 * 60) : Infinity;
+              
+              // If no data or data is more than 1 hour old, try to refresh from Supabase
+              if ((!savedAudit || hoursSinceLastAudit > 1) && propertyUrl) {
+                debugLog(`🔄 Tab switch: Attempting to refresh audit data from Supabase (${hoursSinceLastAudit > 1 ? 'data is stale' : 'no data found'})...`, 'info');
+                try {
+                  const freshData = await fetchLatestAuditFromSupabase(propertyUrl);
+                  if (freshData && freshData.timestamp) {
+                    const freshTimestamp = freshData.timestamp;
+                    // Only update if fresh data is newer
+                    if (!savedTimestamp || freshTimestamp > savedTimestamp) {
+                      safeSetLocalStorage('last_audit_results', freshData);
+                      updateAuditTimestamp(freshTimestamp);
+                      debugLog(`✓ Tab switch: Refreshed audit data from Supabase (newer timestamp)`, 'success');
+                    } else {
+                      debugLog(`⚠ Tab switch: Supabase data is not newer than cached data`, 'info');
+                    }
+                  }
+                } catch (error) {
+                  debugLog(`⚠ Tab switch: Failed to refresh from Supabase: ${error.message}`, 'warn');
+                }
+              }
+            }
             
             // Lazy-load Ranking & AI data when tab is opened (from storage only, never trigger API scan)
             if (target === "ranking" && isNowActive && !wasActive) {
