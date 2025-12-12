@@ -128,18 +128,19 @@ export default async function handler(req, res) {
 
       let results;
       try {
-        const responseText = await response.text();
-        console.log(`[get-latest-audit] Response text length: ${responseText.length} chars`);
-        if (responseText.length > 0) {
-          results = JSON.parse(responseText);
-          console.log(`[get-latest-audit] Successfully parsed JSON, results length: ${results?.length || 0}`);
-        } else {
-          console.warn(`[get-latest-audit] Empty response from Supabase`);
-          results = [];
-        }
+        results = await response.json();
+        console.log(`[get-latest-audit] Successfully parsed JSON, results length: ${results?.length || 0}`);
       } catch (jsonError) {
         console.error('[get-latest-audit] Failed to parse Supabase response as JSON:', jsonError.message);
         console.error('[get-latest-audit] JSON error stack:', jsonError.stack);
+        // Try to get the raw response for debugging (but this might fail if body was already consumed)
+        try {
+          const responseClone = response.clone();
+          const rawText = await responseClone.text();
+          console.error('[get-latest-audit] Raw response (first 500 chars):', rawText.substring(0, 500));
+        } catch (cloneError) {
+          console.error('[get-latest-audit] Could not clone response for debugging:', cloneError.message);
+        }
         return res.status(500).json({
           status: 'error',
           message: 'Failed to parse Supabase response',
