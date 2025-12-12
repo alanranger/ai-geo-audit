@@ -398,50 +398,83 @@ export default async function handler(req, res) {
           totalClicks: record.gsc_clicks || 0
         },
         // CRITICAL: Load timeseries data from audit_results table (now stored directly)
+        // CRITICAL: Truncate immediately to prevent FUNCTION_INVOCATION_FAILED
         timeseries: (() => {
           const ts = record.gsc_timeseries;
           if (!ts) return null;
+          let parsed;
           if (typeof ts === 'string') {
             try {
-              const parsed = JSON.parse(ts);
-              return Array.isArray(parsed) ? parsed : null;
+              parsed = JSON.parse(ts);
             } catch (e) {
               console.warn('[get-latest-audit] Failed to parse gsc_timeseries JSON:', e.message);
               return null;
             }
+          } else {
+            parsed = ts;
           }
-          return Array.isArray(ts) ? ts : null;
+          if (Array.isArray(parsed)) {
+            // Truncate to 90 items (3 months of daily data) immediately to prevent large responses
+            if (parsed.length > 90) {
+              console.warn(`[get-latest-audit] Truncating gsc_timeseries from ${parsed.length} to 90 immediately`);
+              return parsed.slice(-90); // Keep the most recent 90 days
+            }
+            return parsed;
+          }
+          return null;
         })(),
         // Query+page level data for CTR metrics in keyword scorecard
         // Fix: Parse JSON if query_pages is stored as string
+        // CRITICAL: Truncate immediately to prevent FUNCTION_INVOCATION_FAILED
         queryPages: (() => {
           const qp = record.query_pages;
           if (!qp) return null;
+          let parsed;
           if (typeof qp === 'string') {
             try {
-              const parsed = JSON.parse(qp);
-              return Array.isArray(parsed) ? parsed : null;
+              parsed = JSON.parse(qp);
             } catch (e) {
               console.warn('[get-latest-audit] Failed to parse query_pages JSON:', e.message);
               return null;
             }
+          } else {
+            parsed = qp;
           }
-          return Array.isArray(qp) ? qp : null;
+          if (Array.isArray(parsed)) {
+            // Truncate to 1000 items immediately to prevent large responses
+            if (parsed.length > 1000) {
+              console.warn(`[get-latest-audit] Truncating queryPages from ${parsed.length} to 1000 immediately`);
+              return parsed.slice(0, 1000);
+            }
+            return parsed;
+          }
+          return null;
         })(),
         // Top queries from GSC
+        // CRITICAL: Truncate immediately to prevent FUNCTION_INVOCATION_FAILED
         topQueries: (() => {
           const tq = record.top_queries;
           if (!tq) return null;
+          let parsed;
           if (typeof tq === 'string') {
             try {
-              const parsed = JSON.parse(tq);
-              return Array.isArray(parsed) ? parsed : null;
+              parsed = JSON.parse(tq);
             } catch (e) {
               console.warn('[get-latest-audit] Failed to parse top_queries JSON:', e.message);
               return null;
             }
+          } else {
+            parsed = tq;
           }
-          return Array.isArray(tq) ? tq : null;
+          if (Array.isArray(parsed)) {
+            // Truncate to 200 items immediately to prevent large responses
+            if (parsed.length > 200) {
+              console.warn(`[get-latest-audit] Truncating topQueries from ${parsed.length} to 200 immediately`);
+              return parsed.slice(0, 200);
+            }
+            return parsed;
+          }
+          return null;
         })(),
         // Date range used for this audit
         dateRange: record.date_range || null,
@@ -459,6 +492,7 @@ export default async function handler(req, res) {
           // CRITICAL: Include pages array for scorecard schema detection
           // schema_pages_detail is the detailed array with url, title, metaDescription, hasSchema, schemaTypes, error per page
           // Parse JSON if stored as string in Supabase
+          // CRITICAL: Truncate immediately to prevent FUNCTION_INVOCATION_FAILED
           pages: (() => {
             let pagesDetail = record.schema_pages_detail;
             if (!pagesDetail) return null;
@@ -474,7 +508,12 @@ export default async function handler(req, res) {
             // Return array if valid, otherwise null
             // Ensure all fields are present (backward compatibility for old records)
             if (Array.isArray(pagesDetail) && pagesDetail.length > 0) {
-              return pagesDetail.map(p => ({
+              // Truncate to 200 items immediately to prevent large responses
+              const truncated = pagesDetail.length > 200 ? pagesDetail.slice(0, 200) : pagesDetail;
+              if (pagesDetail.length > 200) {
+                console.warn(`[get-latest-audit] Truncating schema_pages_detail from ${pagesDetail.length} to 200 immediately`);
+              }
+              return truncated.map(p => ({
                 url: p.url || '',
                 title: p.title || null,
                 metaDescription: p.metaDescription || null,
@@ -503,9 +542,15 @@ export default async function handler(req, res) {
               }
             }
             // Return array if valid, otherwise fallback to count
-            return Array.isArray(pagesDetail) && pagesDetail.length > 0
-              ? pagesDetail
-              : (record.schema_pages_with_schema != null ? record.schema_pages_with_schema : 0);
+            // CRITICAL: Truncate array if too large to prevent FUNCTION_INVOCATION_FAILED
+            if (Array.isArray(pagesDetail) && pagesDetail.length > 0) {
+              if (pagesDetail.length > 200) {
+                console.warn(`[get-latest-audit] Truncating pagesWithSchema array from ${pagesDetail.length} to 200 immediately`);
+                return pagesDetail.slice(0, 200);
+              }
+              return pagesDetail;
+            }
+            return record.schema_pages_with_schema != null ? record.schema_pages_with_schema : 0;
           })(),
           schemaTypes: (() => {
             let types = record.schema_types;
