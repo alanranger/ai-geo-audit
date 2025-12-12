@@ -21924,24 +21924,27 @@ Final Score: ${score}/100`;
               const hoursSinceLastAudit = savedTimestamp ? (Date.now() - savedTimestamp) / (1000 * 60 * 60) : Infinity;
               
               // If no data or data is more than 1 hour old, try to refresh from Supabase
+              // Use IIFE to handle async code inside forEach callback
               if ((!savedAudit || hoursSinceLastAudit > 1) && propertyUrl) {
-                debugLog(`🔄 Tab switch: Attempting to refresh audit data from Supabase (${hoursSinceLastAudit > 1 ? 'data is stale' : 'no data found'})...`, 'info');
-                try {
-                  const freshData = await fetchLatestAuditFromSupabase(propertyUrl);
-                  if (freshData && freshData.timestamp) {
-                    const freshTimestamp = freshData.timestamp;
-                    // Only update if fresh data is newer
-                    if (!savedTimestamp || freshTimestamp > savedTimestamp) {
-                      safeSetLocalStorage('last_audit_results', freshData);
-                      updateAuditTimestamp(freshTimestamp);
-                      debugLog(`✓ Tab switch: Refreshed audit data from Supabase (newer timestamp)`, 'success');
-                    } else {
-                      debugLog(`⚠ Tab switch: Supabase data is not newer than cached data`, 'info');
+                (async () => {
+                  debugLog(`🔄 Tab switch: Attempting to refresh audit data from Supabase (${hoursSinceLastAudit > 1 ? 'data is stale' : 'no data found'})...`, 'info');
+                  try {
+                    const freshData = await fetchLatestAuditFromSupabase(propertyUrl);
+                    if (freshData && freshData.timestamp) {
+                      const freshTimestamp = freshData.timestamp;
+                      // Only update if fresh data is newer
+                      if (!savedTimestamp || freshTimestamp > savedTimestamp) {
+                        safeSetLocalStorage('last_audit_results', freshData);
+                        updateAuditTimestamp(freshTimestamp);
+                        debugLog(`✓ Tab switch: Refreshed audit data from Supabase (newer timestamp)`, 'success');
+                      } else {
+                        debugLog(`⚠ Tab switch: Supabase data is not newer than cached data`, 'info');
+                      }
                     }
+                  } catch (error) {
+                    debugLog(`⚠ Tab switch: Failed to refresh from Supabase: ${error.message}`, 'warn');
                   }
-                } catch (error) {
-                  debugLog(`⚠ Tab switch: Failed to refresh from Supabase: ${error.message}`, 'warn');
-                }
+                })();
               }
             }
             
