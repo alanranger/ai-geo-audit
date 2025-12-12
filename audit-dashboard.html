@@ -1374,7 +1374,7 @@
     .ranking-table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 14pt !important;
+      font-size: 0.875rem !important;
     }
 
     .ranking-table th,
@@ -1382,7 +1382,7 @@
       padding: 0.75rem 1rem;
       border-bottom: 1px solid #e5e7eb;
       text-align: left;
-      font-size: 14pt !important;
+      font-size: 0.875rem !important;
     }
 
     .ranking-table th {
@@ -1391,7 +1391,7 @@
       background: #f3f4f6;
       z-index: 10;
       font-weight: 600;
-      font-size: 14pt !important;
+      font-size: 0.875rem !important;
     }
 
     .ranking-table th.sortable {
@@ -1460,7 +1460,7 @@
 
 
     .ranking-subtitle-tight {
-      font-size: 14pt !important;
+      font-size: 0.875rem !important;
       max-width: 48rem;
     }
 
@@ -4359,6 +4359,23 @@
         debugLog(`saveAuditToSupabase: moneySegmentMetrics ready with ${Object.keys(moneySegmentMetrics).length} segments`, 'info');
         debugLog(`saveAuditToSupabase: moneySegmentMetrics.allMoney clicks=${moneySegmentMetrics.allMoney?.clicks || 0}, impressions=${moneySegmentMetrics.allMoney?.impressions || 0}`, 'info');
         
+        // Get rankingAiData from localStorage or window if available
+        let rankingAiData = null;
+        try {
+          const localRankingData = localStorage.getItem('rankingAiData');
+          if (localRankingData) {
+            rankingAiData = JSON.parse(localRankingData);
+            debugLog(`✓ saveAuditToSupabase: Loaded rankingAiData from localStorage (${rankingAiData.combinedRows?.length || 0} keywords)`, 'info');
+          } else if (window.rankingAiData) {
+            rankingAiData = window.rankingAiData;
+            debugLog(`✓ saveAuditToSupabase: Using rankingAiData from window (${rankingAiData.combinedRows?.length || 0} keywords)`, 'info');
+          } else {
+            debugLog(`⚠ saveAuditToSupabase: No rankingAiData available`, 'warn');
+          }
+        } catch (rankingErr) {
+          debugLog(`⚠ saveAuditToSupabase: Error loading rankingAiData: ${rankingErr.message}`, 'warn');
+        }
+        
         // Prepare payload
         const payload = {
           propertyUrl,
@@ -4370,7 +4387,8 @@
           localSignals, // Pass Business Profile data for storage
           moneyPagesSummary, // Phase 3: Money Pages summary for trend tracking
           moneySegmentMetrics, // Phase: Money Pages Priority Matrix - segment metrics for KPI tracker
-          moneyPagePriorityData: window.moneyPagePriorityData || null // CRITICAL: Save Priority Matrix data to Supabase
+          moneyPagePriorityData: window.moneyPagePriorityData || null, // CRITICAL: Save Priority Matrix data to Supabase
+          rankingAiData // Ranking & AI data (SERP rankings + AI Overview citations)
         };
         
         // Check payload size before sending (Vercel limit is ~4.5MB)
@@ -4411,7 +4429,30 @@
         
         if (response.ok) {
           const result = await response.json();
-          debugLog('✓ Audit results saved to Supabase', 'success');
+          debugLog(`✓ Audit results saved to Supabase successfully (audit_date: ${auditDate})`, 'success');
+          debugLog(`✓ Saved data: schema_total_pages=${schemaAudit?.data?.totalPages || 'N/A'}, scores=${JSON.stringify(Object.keys(scores || {}))}`, 'info');
+          
+          // Verify the save by checking Supabase
+          try {
+            debugLog('Verifying audit save in Supabase...', 'info');
+            const verifyResponse = await fetch(apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}&minimal=true`));
+            if (verifyResponse.ok) {
+              const verifyResult = await verifyResponse.json();
+              if (verifyResult.status === 'ok' && verifyResult.data && verifyResult.data.auditDate === auditDate) {
+                debugLog(`✓ Verified: Audit ${auditDate} exists in Supabase with schema_total_pages=${verifyResult.data.scores?.contentSchema !== null ? 'present' : 'null'}`, 'success');
+                showStatus(`✓ Audit saved and verified in Supabase (${auditDate})`, 'success');
+              } else {
+                debugLog(`⚠ Verification failed: Audit ${auditDate} not found in Supabase yet`, 'warn');
+                showStatus(`⚠ Audit save reported success but verification pending (${auditDate})`, 'warn');
+              }
+            } else {
+              debugLog(`⚠ Could not verify audit save: ${verifyResponse.status}`, 'warn');
+              showStatus(`✓ Audit saved to Supabase (${auditDate}) - verification skipped`, 'success');
+            }
+          } catch (verifyError) {
+            debugLog(`⚠ Verification error (non-critical): ${verifyError.message}`, 'warn');
+            showStatus(`✓ Audit saved to Supabase (${auditDate})`, 'success');
+          }
           
           // After saving, refresh Money Pages charts with updated history
           // This ensures the trend chart and KPI tracker show the new audit data
@@ -4474,13 +4515,15 @@
           if (errorDetails) {
             console.error('[Supabase Save] Full error details:', JSON.stringify(errorDetails, null, 2));
           }
-          // Don't show error to user - Supabase is optional for now
-          debugLog(`⚠ Could not save to Supabase: ${errorMessage}`, 'warn');
+          // Show error to user - this is critical for data persistence
+          debugLog(`✗ FAILED to save audit to Supabase: ${errorMessage}`, 'error');
+          showStatus(`⚠ Audit completed but failed to save to Supabase: ${errorMessage}. Check console for details.`, 'error');
         }
       } catch (error) {
-        // Don't show error to user - Supabase is optional for now
-        debugLog(`⚠ Supabase save error: ${error.message}`, 'warn');
+        // Show error to user - this is critical for data persistence
+        debugLog(`✗ Supabase save exception: ${error.message}`, 'error');
         console.error('[Supabase Save] Exception:', error);
+        showStatus(`✗ Failed to save audit to Supabase: ${error.message}. Check console for details.`, 'error');
       }
     }
     
@@ -11015,20 +11058,30 @@ Final Score: ${score}/100`;
         
         // Pagination controls and total count (using filtered data)
         tableHtml += `
-          <div style="margin-top: 1rem; display: flex; justify-content: space-between; align-items: center; padding-top: 1rem; border-top: 1px solid #e2e8f0;">
+          <div style="margin-top: 1rem; display: flex; justify-content: space-between; align-items: center; padding-top: 1rem; border-top: 1px solid #e2e8f0; flex-wrap: wrap; gap: 1rem;">
             <div style="font-size: 0.85rem; color: #64748b;">
               ${filteredTotalPages > 1 ? `Page ${currentPage} of ${filteredTotalPages} • ` : ''}Total URLs: ${filteredRows.length}${filteredRows.length !== sortedRows.length ? ` (filtered from ${sortedRows.length})` : ''}
             </div>
-            ${filteredTotalPages > 1 ? `
-            <div style="display: flex; gap: 0.5rem;">
+            <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+              <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #475569;">
+                Rows per page:
+                <select id="money-pages-rows-per-page" style="padding: 0.4rem 0.6rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.85rem; background: white; cursor: pointer;">
+                  <option value="10" ${rowsPerPage === 10 ? 'selected' : ''}>10</option>
+                  <option value="25" ${rowsPerPage === 25 ? 'selected' : ''}>25</option>
+                  <option value="50" ${rowsPerPage === 50 ? 'selected' : ''}>50</option>
+                  <option value="100" ${rowsPerPage === 100 ? 'selected' : ''}>100</option>
+                  <option value="200" ${rowsPerPage === 200 ? 'selected' : ''}>200</option>
+                </select>
+              </label>
+              ${filteredTotalPages > 1 ? `
               <button id="money-pages-prev" type="button" ${currentPage === 1 ? 'disabled' : ''} style="font-size: 0.8rem; padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #cbd5e1; background: ${currentPage === 1 ? '#f1f5f9' : 'white'}; cursor: ${currentPage === 1 ? 'not-allowed' : 'pointer'}; color: ${currentPage === 1 ? '#94a3b8' : '#475569'}; font-weight: 600; transition: all 0.2s;" ${currentPage === 1 ? '' : 'onmouseover="this.style.background=\'#f8f9fa\'; this.style.borderColor=\'#94a3b8\';" onmouseout="this.style.background=\'white\'; this.style.borderColor=\'#cbd5e1\';"'}>
                 Previous
               </button>
               <button id="money-pages-next" type="button" ${currentPage === filteredTotalPages ? 'disabled' : ''} style="font-size: 0.8rem; padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #cbd5e1; background: ${currentPage === filteredTotalPages ? '#f1f5f9' : 'white'}; cursor: ${currentPage === filteredTotalPages ? 'not-allowed' : 'pointer'}; color: ${currentPage === filteredTotalPages ? '#94a3b8' : '#475569'}; font-weight: 600; transition: all 0.2s;" ${currentPage === filteredTotalPages ? '' : 'onmouseover="this.style.background=\'#f8f9fa\'; this.style.borderColor=\'#94a3b8\';" onmouseout="this.style.background=\'white\'; this.style.borderColor=\'#cbd5e1\';"'}>
                 Next
               </button>
+              ` : ''}
             </div>
-            ` : ''}
           </div>
         `;
         
@@ -11241,6 +11294,9 @@ Final Score: ${score}/100`;
         if (window.moneyPagesCurrentPage === undefined) {
           window.moneyPagesCurrentPage = 1;
         }
+        if (window.moneyPagesRowsPerPage === undefined) {
+          window.moneyPagesRowsPerPage = 10;
+        }
         
         // Store full rows array for filtering
         window.moneyPagesAllRows = rows;
@@ -11274,7 +11330,8 @@ Final Score: ${score}/100`;
           
           // Update table with FILTERED rows
           const currentPage = window.moneyPagesCurrentPage || 1;
-          tableContainer.innerHTML = renderMoneyPagesTable(filteredRows, currentPage, 10);
+          const rowsPerPage = window.moneyPagesRowsPerPage || 10;
+          tableContainer.innerHTML = renderMoneyPagesTable(filteredRows, currentPage, rowsPerPage);
           
           // Re-attach all handlers after re-render
           // Use filtered rows for pagination/copy, but use original rows for filter handlers
@@ -11307,7 +11364,8 @@ Final Score: ${score}/100`;
         
         // Initial render
         const currentPage = window.moneyPagesCurrentPage || 1;
-        tableContainer.innerHTML = renderMoneyPagesTable(rows, currentPage, 10);
+        const rowsPerPage = window.moneyPagesRowsPerPage || 10;
+        tableContainer.innerHTML = renderMoneyPagesTable(rows, currentPage, rowsPerPage);
         
         // Attach sort handlers
         attachMoneyPagesSortHandlers();
@@ -11358,7 +11416,8 @@ Final Score: ${score}/100`;
         if (allRows.length > 0) {
           const tableContainer = document.getElementById('money-pages-table-container');
           if (tableContainer) {
-            tableContainer.innerHTML = renderMoneyPagesTable(allRows, 1, 10);
+            const rowsPerPage = window.moneyPagesRowsPerPage || 10;
+            tableContainer.innerHTML = renderMoneyPagesTable(allRows, 1, rowsPerPage);
             attachMoneyPagesSortHandlers();
             attachMoneyPagesPaginationHandlers(allRows);
             attachMoneyPagesCopyHandler(allRows);
@@ -11371,9 +11430,29 @@ Final Score: ${score}/100`;
         setTimeout(() => {
           const prevBtn = document.getElementById('money-pages-prev');
           const nextBtn = document.getElementById('money-pages-next');
+          const rowsPerPageSelect = document.getElementById('money-pages-rows-per-page');
           
           // Use stored sorted data for pagination
           const sortedRows = window.moneyPagesData || allRows || [];
+          const rowsPerPage = window.moneyPagesRowsPerPage || 10;
+          
+          // Handle rows-per-page change
+          if (rowsPerPageSelect) {
+            const newSelect = rowsPerPageSelect.cloneNode(true);
+            rowsPerPageSelect.parentNode.replaceChild(newSelect, rowsPerPageSelect);
+            newSelect.addEventListener('change', () => {
+              const newRowsPerPage = parseInt(newSelect.value, 10);
+              window.moneyPagesRowsPerPage = newRowsPerPage;
+              window.moneyPagesCurrentPage = 1; // Reset to first page when changing rows per page
+              const tableContainer = document.getElementById('money-pages-table-container');
+              if (tableContainer) {
+                tableContainer.innerHTML = renderMoneyPagesTable(sortedRows, 1, newRowsPerPage);
+                attachMoneyPagesSortHandlers();
+                attachMoneyPagesPaginationHandlers(sortedRows);
+                attachMoneyPagesCopyHandler(sortedRows);
+              }
+            });
+          }
           
           if (prevBtn) {
             const newPrevBtn = prevBtn.cloneNode(true);
@@ -11383,7 +11462,8 @@ Final Score: ${score}/100`;
                 window.moneyPagesCurrentPage--;
                 const tableContainer = document.getElementById('money-pages-table-container');
                 if (tableContainer) {
-                  tableContainer.innerHTML = renderMoneyPagesTable(sortedRows, window.moneyPagesCurrentPage, 10);
+                  const currentRowsPerPage = window.moneyPagesRowsPerPage || 10;
+                  tableContainer.innerHTML = renderMoneyPagesTable(sortedRows, window.moneyPagesCurrentPage, currentRowsPerPage);
                   attachMoneyPagesSortHandlers();
                   attachMoneyPagesPaginationHandlers(sortedRows);
                   attachMoneyPagesCopyHandler(sortedRows);
@@ -11396,12 +11476,13 @@ Final Score: ${score}/100`;
             const newNextBtn = nextBtn.cloneNode(true);
             nextBtn.parentNode.replaceChild(newNextBtn, nextBtn);
             newNextBtn.addEventListener('click', () => {
-              const totalPages = Math.ceil(sortedRows.length / 10);
+              const currentRowsPerPage = window.moneyPagesRowsPerPage || 10;
+              const totalPages = Math.ceil(sortedRows.length / currentRowsPerPage);
               if (window.moneyPagesCurrentPage < totalPages) {
                 window.moneyPagesCurrentPage++;
                 const tableContainer = document.getElementById('money-pages-table-container');
                 if (tableContainer) {
-                  tableContainer.innerHTML = renderMoneyPagesTable(sortedRows, window.moneyPagesCurrentPage, 10);
+                  tableContainer.innerHTML = renderMoneyPagesTable(sortedRows, window.moneyPagesCurrentPage, currentRowsPerPage);
                   attachMoneyPagesSortHandlers();
                   attachMoneyPagesPaginationHandlers(sortedRows);
                   attachMoneyPagesCopyHandler(sortedRows);
@@ -11496,7 +11577,8 @@ Final Score: ${score}/100`;
               
               // Update table with FILTERED rows
               const currentPage = 1;
-              tableContainer.innerHTML = renderMoneyPagesTable(filteredRows, currentPage, 10);
+              const rowsPerPage = window.moneyPagesRowsPerPage || 10;
+              tableContainer.innerHTML = renderMoneyPagesTable(filteredRows, currentPage, rowsPerPage);
               attachMoneyPagesSortHandlers();
               attachMoneyPagesPaginationHandlers(filteredRows);
               attachMoneyPagesCopyHandler(filteredRows);
@@ -21412,7 +21494,7 @@ Final Score: ${score}/100`;
         }
         
         html += `<div style="margin-bottom: 1rem; padding-bottom: 0.75rem; border-bottom: 2px solid #e5e7eb;">`;
-        html += `<p style="margin: 0; font-size: 1.5rem; font-weight: 700; color: ${oppColor}; line-height: 1.4;">`;
+        html += `<p style="margin: 0; font-size: 1.25rem; font-weight: 700; color: ${oppColor}; line-height: 1.4;">`;
         html += `Keyword opportunity score: <span style="color: ${oppColor};">${oppScore}/100</span>`;
         html += `</p>`;
         html += `</div>`;
@@ -21436,7 +21518,7 @@ Final Score: ${score}/100`;
       const priorityColor = getRagColor(priorityLabel);
       
       html += `<div style="margin-bottom: 1.25rem; padding-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb;">`;
-      html += `<p style="margin: 0; font-size: 1.25rem; font-weight: 700; color: #1e293b; line-height: 1.4;">`;
+      html += `<p style="margin: 0; font-size: 1.1rem; font-weight: 700; color: #1e293b; line-height: 1.4;">`;
       html += `<span>Impact: <span style="color: ${impactColor};">${impactLabel}</span></span> • `;
       html += `<span>Difficulty: <span style="color: ${difficultyColor};">${difficultyLabel}</span></span> • `;
       html += `<span>Priority: <span style="color: ${priorityColor};">${priorityLabel}</span></span>`;
@@ -21444,53 +21526,53 @@ Final Score: ${score}/100`;
       
       // Add derived summary sentence
       const summarySentence = generateKeywordSummary(scorecardData);
-      html += `<p style="margin: 0.5rem 0 0 0; font-size: 0.9rem; font-weight: 400; color: #64748b; line-height: 1.5;">${summarySentence}</p>`;
+      html += `<p style="margin: 0.5rem 0 0 0; font-size: 0.875rem; font-weight: 400; color: #64748b; line-height: 1.5;">${summarySentence}</p>`;
       html += `</div>`;
 
       // Keyword & URL header
       html += `<div style="margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 2px solid #e5e7eb;">`;
-      html += `<h4 style="font-size: 1.25rem; font-weight: 700; color: #1e293b; margin-bottom: 0.5rem;">${scorecardData.keyword}</h4>`;
+      html += `<h4 style="font-size: 1.1rem; font-weight: 700; color: #1e293b; margin-bottom: 0.5rem;">${scorecardData.keyword}</h4>`;
       if (scorecardData.ranking_url) {
-        html += `<p style="margin: 0.25rem 0; font-size: 0.9rem;"><a href="${scorecardData.ranking_url}" target="_blank" rel="noopener noreferrer" style="color: #0284c7; text-decoration: none;">${scorecardData.ranking_url}</a></p>`;
+        html += `<p style="margin: 0.25rem 0; font-size: 0.875rem;"><a href="${scorecardData.ranking_url}" target="_blank" rel="noopener noreferrer" style="color: #0284c7; text-decoration: none;">${scorecardData.ranking_url}</a></p>`;
       }
       html += `<div style="display: flex; gap: 1rem; margin-top: 0.5rem; flex-wrap: wrap;">`;
-      html += `<span class="ranking-badge ${scorecardData.segment === 'money' ? 'ranking-badge--segment-money' : scorecardData.segment === 'education' ? 'ranking-badge--segment-education' : scorecardData.segment === 'brand' ? 'ranking-badge--segment-brand' : 'ranking-badge--segment-general'}" style="font-size: 0.9rem;">${scorecardData.segment || 'Other'}</span>`;
-      html += `<span style="font-size: 0.9rem; color: #64748b;">${scorecardData.page_type}</span>`;
+      html += `<span class="ranking-badge ${scorecardData.segment === 'money' ? 'ranking-badge--segment-money' : scorecardData.segment === 'education' ? 'ranking-badge--segment-education' : scorecardData.segment === 'brand' ? 'ranking-badge--segment-brand' : 'ranking-badge--segment-general'}" style="font-size: 0.875rem;">${scorecardData.segment || 'Other'}</span>`;
+      html += `<span style="font-size: 0.875rem; color: #64748b;">${scorecardData.page_type}</span>`;
       html += `</div></div>`;
 
       // 1. Demand
       html += `<div class="scorecard-section">`;
-      html += `<h5 style="font-size: 1rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">1. Demand</h5>`;
+      html += `<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">1. Demand</h5>`;
       const volumeFormatted = scorecardData.search_volume != null ? scorecardData.search_volume.toLocaleString() : '—';
       const volumeClass = scorecardData.demand_level === 'High' ? 'ranking-badge-volume--high' : 
                          scorecardData.demand_level === 'Medium' ? 'ranking-badge-volume--med' : 
                          'ranking-badge-volume--low';
-      html += `<div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.5rem; font-size: 0.95rem;">`;
+      html += `<div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.5rem; font-size: 0.875rem;">`;
       html += `<span>Search volume:</span> <span class="ranking-badge-volume ${volumeClass}">${volumeFormatted} ${scorecardData.demand_level}</span>`;
       html += `</div>`;
-      html += `<div style="display: flex; gap: 1rem; align-items: center; font-size: 0.95rem;">`;
+      html += `<div style="display: flex; gap: 1rem; align-items: center; font-size: 0.875rem;">`;
       html += `<span>Demand share:</span> <strong style="color: #0284c7;">${(scorecardData.demand_share * 100).toFixed(1)}%</strong>`;
       html += `</div></div>`;
 
       // 2. Classic ranking
       html += `<div class="scorecard-section">`;
-      html += `<h5 style="font-size: 1rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">2. Classic ranking</h5>`;
+      html += `<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">2. Classic ranking</h5>`;
       const rankText = scorecardData.best_rank_group != null 
         ? `Currently ranking #${scorecardData.best_rank_group} (${scorecardData.rank_bucket_label})`
         : 'Currently ranking (beyond page 2)';
-      html += `<p style="margin-bottom: 0.5rem; font-size: 0.95rem; color: #1e293b; line-height: 1.6;">${rankText}</p>`;
+      html += `<p style="margin-bottom: 0.5rem; font-size: 0.875rem; color: #1e293b; line-height: 1.6;">${rankText}</p>`;
       const strengthClass = scorecardData.position_strength === 'Strong' ? 'status-green' : 
-                           scorecardData.position_strength === 'OK' ? 'status-amber' : 'status-red';
+                         scorecardData.position_strength === 'OK' ? 'status-amber' : 'status-red';
       const strengthBg = scorecardData.position_strength === 'Strong' ? '#f0fdf4' : 
                         scorecardData.position_strength === 'OK' ? '#fffbeb' : '#fef2f2';
       const strengthBorder = scorecardData.position_strength === 'Strong' ? '#10b981' : 
                             scorecardData.position_strength === 'OK' ? '#f59e0b' : '#ef4444';
-      html += `<p style="font-size: 0.95rem; color: #1e293b; line-height: 1.6;">Position strength: <span style="padding: 0.25rem 0.5rem; border-radius: 4px; font-weight: 600; background: ${strengthBg}; border-left: 3px solid ${strengthBorder}; color: #1e293b;">${scorecardData.position_strength}</span></p>`;
+      html += `<p style="font-size: 0.875rem; color: #1e293b; line-height: 1.6;">Position strength: <span style="padding: 0.25rem 0.5rem; border-radius: 4px; font-weight: 600; background: ${strengthBg}; border-left: 3px solid ${strengthBorder}; color: #1e293b;">${scorecardData.position_strength}</span></p>`;
       html += `</div>`;
 
       // 3. CTR & snippet
       html += `<div class="scorecard-section">`;
-      html += `<h5 style="font-size: 1rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">3. CTR & snippet</h5>`;
+      html += `<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">3. CTR & snippet</h5>`;
       
       // Get CTR metrics if available
       const ctrMetrics = getCtrMetricsForKeyword({
@@ -21521,12 +21603,12 @@ Final Score: ${score}/100`;
         }
         
         html += `<div style="margin-bottom: 0.75rem;">`;
-        html += `<div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.5rem; font-size: 0.95rem;">`;
+        html += `<div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.5rem; font-size: 0.875rem;">`;
         html += `<span>CTR (last 30 days): <strong style="color: #1e293b;">${ctrPercent}%</strong></span>`;
         html += `<span>·</span>`;
         html += `<span>Impressions: <strong style="color: #1e293b;">${impressionsFormatted}</strong></span>`;
         html += `</div>`;
-        html += `<div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.5rem; font-size: 0.95rem;">`;
+        html += `<div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.5rem; font-size: 0.875rem;">`;
         html += `<span>Expected CTR at this position: <strong style="color: #64748b;">${benchmarkPercent}%</strong></span>`;
         html += `</div>`;
         html += `<div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.75rem;">`;
@@ -21536,22 +21618,22 @@ Final Score: ${score}/100`;
         
         // Explanatory text based on performance
         if (ctrPerformance === 'Weak') {
-          html += `<p style="color: #64748b; font-size: 0.9rem; line-height: 1.5;">CTR is weak for this position. Improving the snippet (title, meta description and rich results) should unlock more clicks for this keyword.</p>`;
+          html += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">CTR is weak for this position. Improving the snippet (title, meta description and rich results) should unlock more clicks for this keyword.</p>`;
         } else if (ctrPerformance === 'Strong') {
-          html += `<p style="color: #64748b; font-size: 0.9rem; line-height: 1.5;">CTR is in line with expectations for this position. Further gains are more likely to come from improving rank (links and authority) than snippet tweaks alone.</p>`;
+          html += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">CTR is in line with expectations for this position. Further gains are more likely to come from improving rank (links and authority) than snippet tweaks alone.</p>`;
         } else {
           // OK performance
-          html += `<p style="color: #64748b; font-size: 0.9rem; line-height: 1.5;">CTR is in line with expectations for this position. Further gains are more likely to come from improving rank (links and authority) than snippet tweaks alone.</p>`;
+          html += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">CTR is in line with expectations for this position. Further gains are more likely to come from improving rank (links and authority) than snippet tweaks alone.</p>`;
         }
       } else {
         // Fallback placeholder text when CTR data not available
-        html += `<p style="color: #64748b; font-size: 0.9rem; line-height: 1.5;">CTR data not available for this keyword/page; using rank as a proxy. Check the Behaviour panel for more detail.</p>`;
+        html += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">CTR data not available for this keyword/page; using rank as a proxy. Check the Behaviour panel for more detail.</p>`;
       }
       html += `</div>`;
 
       // 4. Schema & rich results
       html += `<div class="scorecard-section">`;
-      html += `<h5 style="font-size: 1rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">4. Schema & rich results</h5>`;
+      html += `<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">4. Schema & rich results</h5>`;
       
       // Get schema coverage if available (async, but we'll handle it synchronously for now)
       // Note: This will be null if data needs to be fetched from Supabase
@@ -21688,8 +21770,8 @@ Final Score: ${score}/100`;
       if (schemaCoverage) {
         // Show checklist
         html += `<div style="margin-bottom: 0.75rem;">`;
-        html += `<div style="font-size: 0.9rem; color: #1e293b; margin-bottom: 0.5rem; font-weight: 500;">Schema coverage for this page:</div>`;
-        html += `<div style="display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.9rem; color: #1e293b;">`;
+        html += `<div style="font-size: 0.875rem; color: #1e293b; margin-bottom: 0.5rem; font-weight: 500;">Schema coverage for this page:</div>`;
+        html += `<div style="display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.875rem; color: #1e293b;">`;
         html += `<span>FAQ: ${schemaCoverage.hasFAQ ? '✅' : '❌'}</span>`;
         html += `<span>HowTo: ${schemaCoverage.hasHowTo ? '✅' : '❌'}</span>`;
         html += `<span>Event/Product: ${(schemaCoverage.hasEvent || schemaCoverage.hasProduct) ? '✅' : '❌'}</span>`;
@@ -21709,19 +21791,19 @@ Final Score: ${score}/100`;
         } else {
           schemaInterpretation = 'Some schema types are present. Review the Content/Schema pillar for a complete assessment.';
         }
-        html += `<p style="color: #64748b; font-size: 0.9rem; line-height: 1.5;">${schemaInterpretation}</p>`;
+        html += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">${schemaInterpretation}</p>`;
       } else {
         // Fallback placeholder text when schema data not available
-        html += `<p style="color: #64748b; font-size: 0.9rem; line-height: 1.5;">Schema coverage data is not available for this page in the current scan. Check the Content/Schema pillar for more detail.</p>`;
+        html += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">Schema coverage data is not available for this page in the current scan. Check the Content/Schema pillar for more detail.</p>`;
       }
       html += `</div>`;
 
       // 5. AI usage
       html += `<div class="scorecard-section">`;
-      html += `<h5 style="font-size: 1rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">5. AI usage</h5>`;
-      html += `<p style="font-size: 0.95rem; color: #1e293b; line-height: 1.6;">${scorecardData.ai_status_label}</p>`;
+      html += `<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">5. AI usage</h5>`;
+      html += `<p style="font-size: 0.875rem; color: #1e293b; line-height: 1.6;">${scorecardData.ai_status_label}</p>`;
       if (scorecardData.ai_citations_ours > 0 && scorecardData.ai_alan_citations && scorecardData.ai_alan_citations.length > 0) {
-        html += `<ul style="margin-top: 0.5rem; padding-left: 1.5rem; font-size: 0.95rem; line-height: 1.6;">`;
+        html += `<ul style="margin-top: 0.5rem; padding-left: 1.5rem; font-size: 0.875rem; line-height: 1.6;">`;
         scorecardData.ai_alan_citations.forEach(c => {
           html += `<li><a href="${c.url}" target="_blank" rel="noopener noreferrer" style="color: #0284c7;">${c.title || c.url}</a></li>`;
         });
@@ -21731,7 +21813,7 @@ Final Score: ${score}/100`;
 
       // 6. SERP features
       html += `<div class="scorecard-section">`;
-      html += `<h5 style="font-size: 1rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">6. SERP features</h5>`;
+      html += `<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">6. SERP features</h5>`;
       
       // Get SERP feature presence from scorecardData
       const hasAiOverview = scorecardData.ai_overview_present_any === true;
@@ -21743,14 +21825,14 @@ Final Score: ${score}/100`;
       const featuresPresent = [hasAiOverview, hasLocalPack, hasPaa, hasFeaturedSnippet].filter(Boolean).length;
       
       html += `<div style="margin-bottom: 0.75rem;">`;
-      html += `<div style="font-size: 0.9rem; color: #1e293b; margin-bottom: 0.5rem; font-weight: 500;">SERP features present for this keyword:</div>`;
-      html += `<div style="display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.9rem; color: #1e293b;">`;
+      html += `<div style="font-size: 0.875rem; color: #1e293b; margin-bottom: 0.5rem; font-weight: 500;">SERP features present for this keyword:</div>`;
+      html += `<div style="display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.875rem; color: #1e293b;">`;
       html += `<span>AI Overview: ${hasAiOverview ? '✅' : '❌'}</span>`;
       html += `<span>Local pack: ${hasLocalPack ? '✅' : '❌'}</span>`;
       html += `<span>People Also Ask: ${hasPaa ? '✅' : '❌'}</span>`;
       html += `<span>Featured snippet: ${hasFeaturedSnippet ? '✅' : '❌'}</span>`;
       html += `</div>`;
-      html += `<div style="margin-top: 0.5rem; font-size: 0.9rem; color: #64748b;">${featuresPresent}/4 features present</div>`;
+      html += `<div style="margin-top: 0.5rem; font-size: 0.875rem; color: #64748b;">${featuresPresent}/4 features present</div>`;
       html += `</div>`;
       
       // Interpretation based on SERP features
@@ -21766,21 +21848,21 @@ Final Score: ${score}/100`;
       } else {
         serpInterpretation = 'Few SERP features are present. This keyword may have lower competition or less rich result potential.';
       }
-      html += `<p style="color: #64748b; font-size: 0.9rem; line-height: 1.5;">${serpInterpretation}</p>`;
+      html += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">${serpInterpretation}</p>`;
       html += `</div>`;
 
       // 7. Priority & next actions
       html += `<div class="scorecard-section">`;
-      html += `<h5 style="font-size: 1rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">7. Priority & next actions</h5>`;
+      html += `<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">7. Priority & next actions</h5>`;
       const priorityBg = scorecardData.priority_level === 'High' ? '#fef2f2' : 
                         scorecardData.priority_level === 'Medium' ? '#fffbeb' : '#f0fdf4';
       const priorityBorder = scorecardData.priority_level === 'High' ? '#ef4444' : 
                             scorecardData.priority_level === 'Medium' ? '#f59e0b' : '#10b981';
-      html += `<p style="margin-bottom: 0.75rem; font-size: 0.95rem; color: #1e293b; line-height: 1.6;">Overall priority: <span style="padding: 0.25rem 0.5rem; border-radius: 4px; font-weight: 600; background: ${priorityBg}; border-left: 3px solid ${priorityBorder}; color: #1e293b;">${scorecardData.priority_level}</span></p>`;
+      html += `<p style="margin-bottom: 0.75rem; font-size: 0.875rem; color: #1e293b; line-height: 1.6;">Overall priority: <span style="padding: 0.25rem 0.5rem; border-radius: 4px; font-weight: 600; background: ${priorityBg}; border-left: 3px solid ${priorityBorder}; color: #1e293b;">${scorecardData.priority_level}</span></p>`;
       
       const actions = generateActionBullets(scorecardData);
       // Always show 3 bullets (function now guarantees 3)
-      html += `<ul style="margin: 0; padding-left: 1.5rem; list-style-type: disc; font-size: 0.95rem; line-height: 1.6;">`;
+      html += `<ul style="margin: 0; padding-left: 1.5rem; list-style-type: disc; font-size: 0.875rem; line-height: 1.6;">`;
       actions.forEach(action => {
         html += `<li style="margin-bottom: 0.5rem; color: #1e293b;">${action}</li>`;
       });
@@ -21807,7 +21889,7 @@ Final Score: ${score}/100`;
       parts.push(`Segment: ${segLabel}.`);
       
       // Insert summary line after Impact/Difficulty line, before keyword header
-      const summaryHtml = `<p style="margin: 0 0 1rem 0; font-size: 0.9rem; color: #64748b; padding-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; line-height: 1.5;">${parts.join(" • ")}</p>`;
+      const summaryHtml = `<p style="margin: 0 0 1rem 0; font-size: 0.875rem; color: #64748b; padding-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; line-height: 1.5;">${parts.join(" • ")}</p>`;
       // Find the end of the Impact/Difficulty div and insert summary before keyword header
       const impactDivEnd = html.indexOf('</div>');
       if (impactDivEnd !== -1) {

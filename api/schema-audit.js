@@ -502,7 +502,7 @@ function normalizeSchemaTypes(schemaObject) {
         }
       }
     });
-
+    
     // Walk all other object properties recursively
     for (const key in node) {
       if (key === '@type' || key === '@graph' || nestedKeys.includes(key)) {
@@ -586,7 +586,7 @@ function normalizeSchemaTypes(schemaObject) {
     
     checkForBreadcrumbPattern(schemaObject);
   }
-  
+
   return Array.from(collected);
 }
 
@@ -1153,7 +1153,7 @@ export default async function handler(req, res) {
           console.log(`🔄 Retrying ${otherFailedResults.length} other failed pages...`);
           const otherRetryPromises = otherFailedResults.map(result => {
             return crawlUrl(result.url, retrySemaphore, retryDelay, (result.retryCount || 0) + 1);
-          });
+        });
           const otherRetryResults = await Promise.all(otherRetryPromises);
           retryResults.push(...otherRetryResults);
         }
