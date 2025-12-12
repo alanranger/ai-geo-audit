@@ -1,89 +1,51 @@
+#!/usr/bin/env node
+
 /**
- * Test the deployed API endpoint to check if search volume is returned
- * Run with: node test-api-endpoint.js
+ * Test the actual API endpoint
  */
 
-const keywords = [
-  "photography lessons online",
-  "photography courses",
-  "camera settings"
+const testUrls = [
+  'https://www.alanranger.com/blog-on-photography/what-is-aperture-in-photography',
+  'https://www.alanranger.com/blog-on-photography/what-is-iso-in-photography',
+  'https://www.alanranger.com/blog-on-photography/what-is-exposure-in-photography'
 ];
 
-async function testApiEndpoint() {
-  const baseUrl = process.argv[2] || 'https://ai-geo-audit.vercel.app';
-  const endpoint = `${baseUrl}/api/aigeo/serp-rank-test`;
-  const queryParam = encodeURIComponent(keywords.join(','));
-  const url = `${endpoint}?keywords=${queryParam}`;
-  
-  console.log(`\n🧪 Testing API Endpoint`);
-  console.log(`   URL: ${url}\n`);
-  
-  try {
-    const response = await fetch(url);
-    const data = await response.json();
+async function testApi() {
+  for (const url of testUrls) {
+    console.log(`\n${'='.repeat(80)}`);
+    console.log(`Testing API with: ${url}`);
+    console.log('='.repeat(80));
     
-    console.log(`📊 Response Status: ${response.status}`);
-    console.log(`📊 Response Keys: ${Object.keys(data).join(', ')}\n`);
-    
-    if (!response.ok) {
-      console.error('❌ API Error:');
-      console.error(JSON.stringify(data, null, 2));
-      return;
-    }
-    
-    const perKeyword = data.per_keyword || [];
-    console.log(`📋 Found ${perKeyword.length} keywords in response\n`);
-    
-    if (perKeyword.length === 0) {
-      console.warn('⚠️  No keywords found in response');
-      return;
-    }
-    
-    console.log('📊 Keyword Results:\n');
-    let hasVolume = 0;
-    let noVolume = 0;
-    
-    perKeyword.forEach((item, index) => {
-      const keyword = item.keyword || 'Unknown';
-      const volume = item.search_volume;
-      const rank = item.best_rank_group;
+    try {
+      const response = await fetch('http://localhost:3000/api/schema-audit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ urls: [url] })
+      });
       
-      if (volume !== null && volume !== undefined) {
-        hasVolume++;
-        console.log(`   ${index + 1}. "${keyword}"`);
-        console.log(`      ✓ Search Volume: ${volume.toLocaleString()}`);
-        console.log(`      ✓ Rank: ${rank ?? 'Not ranked'}`);
-        console.log(`      ✓ Has AI Overview: ${item.has_ai_overview ? 'Yes' : 'No'}`);
-        console.log(`      ✓ AI Citations: ${item.ai_alan_citations_count ?? 0}`);
-        console.log('');
+      const result = await response.json();
+      
+      if (result.pages && result.pages.length > 0) {
+        const page = result.pages[0];
+        const types = page.schemaTypes || [];
+        
+        console.log(`\n📊 Results:`);
+        console.log(`  URL: ${page.url}`);
+        console.log(`  Schema types detected: ${types.length}`);
+        console.log(`  Types: ${types.join(', ')}`);
+        console.log(`  BlogPosting detected: ${types.includes('BlogPosting') ? 'YES ✅' : 'NO ❌'}`);
+        console.log(`  BreadcrumbList detected: ${types.includes('BreadcrumbList') ? 'YES ✅' : 'NO ❌'}`);
+        console.log(`  HowTo detected: ${types.includes('HowTo') ? 'YES ✅' : 'NO ❌'}`);
       } else {
-        noVolume++;
-        console.log(`   ${index + 1}. "${keyword}"`);
-        console.log(`      ✗ Search Volume: null/undefined`);
-        console.log(`      ✓ Rank: ${rank ?? 'Not ranked'}`);
-        console.log(`      ✓ Has AI Overview: ${item.has_ai_overview ? 'Yes' : 'No'}`);
-        console.log(`      ✓ AI Citations: ${item.ai_alan_citations_count ?? 0}`);
-        console.log('');
+        console.log(`❌ No results returned`);
+        console.log(`Response:`, JSON.stringify(result, null, 2));
       }
-    });
-    
-    console.log(`\n📈 Summary:`);
-    console.log(`   Keywords with volume: ${hasVolume}`);
-    console.log(`   Keywords without volume: ${noVolume}`);
-    console.log(`   Total keywords: ${perKeyword.length}`);
-    
-    if (hasVolume === 0) {
-      console.log(`\n❌ No search volume data found! This indicates an issue with the API integration.`);
-      console.log(`\n   Check Vercel function logs for errors in fetchKeywordOverview()`);
-    } else {
-      console.log(`\n✅ Search volume data is being returned successfully!`);
+    } catch (error) {
+      console.error(`❌ Error: ${error.message}`);
     }
     
-  } catch (err) {
-    console.error('❌ Error:', err.message);
-    console.error(err.stack);
+    await new Promise(resolve => setTimeout(resolve, 1000));
   }
 }
 
-testApiEndpoint();
-
+testApi().catch(console.error);

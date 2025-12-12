@@ -1576,7 +1576,7 @@
     /* Section breaks for scorecard components */
     .scorecard-section {
       padding: 1rem 1.25rem;
-      margin-bottom: 0;
+      margin-bottom: 0.15rem;
       background: #f5f5f5;
       border-left: 3px solid #cbd5e1;
       border-radius: 4px;
@@ -2597,6 +2597,25 @@
     console.log('Page URL:', window.location.href);
     
     // Helper function to safely save to localStorage (handles quota errors gracefully)
+    // Define apiUrl helper IMMEDIATELY at the top level so it's available to all functions
+    // This must be defined before any functions that use it
+    (function() {
+      const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
+        ? 'https://ai-geo-audit.vercel.app' // Change this to your Vercel deployment URL
+        : '';
+      
+      window.apiUrl = function apiUrl(path) {
+        if (!API_BASE_URL) {
+          // When deployed on Vercel, use relative paths
+          return path.startsWith('/') ? path : `/${path}`;
+        }
+        // When running locally, prepend the Vercel URL
+        // Handle paths with or without leading slash
+        const cleanPath = path.startsWith('/') ? path : `/${path}`;
+        return `${API_BASE_URL}${cleanPath}`;
+      };
+    })();
+    
     function safeSetLocalStorage(key, value) {
       try {
         const valueString = typeof value === 'string' ? value : JSON.stringify(value);
@@ -2712,25 +2731,7 @@
       ];
 
       // API endpoints – adjust if the deployed paths differ.
-      // For local development: Set API_BASE_URL to your Vercel deployment URL (e.g., "https://your-app.vercel.app")
-      // Leave empty string "" to use relative paths (works when deployed on Vercel)
-      const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
-        ? 'https://ai-geo-audit.vercel.app' // Change this to your Vercel deployment URL
-        : '';
-      
-      // Helper function to prepend API_BASE_URL when running locally
-      // Make it globally available so it can be used by functions defined outside this scope
-      window.apiUrl = function apiUrl(path) {
-        if (!API_BASE_URL) {
-          // When deployed on Vercel, use relative paths
-          return path.startsWith('/') ? path : `/${path}`;
-        }
-        // When running locally, prepend the Vercel URL
-        // Handle paths with or without leading slash
-        const cleanPath = path.startsWith('/') ? path : `/${path}`;
-        return `${API_BASE_URL}${cleanPath}`;
-      };
-      
+      // window.apiUrl is already defined at the top level, so we can use it here
       // Also create a local const for use within this scope
       const apiUrl = window.apiUrl;
       
@@ -14506,7 +14507,12 @@ Final Score: ${score}/100`;
                   // Handle pagesWithSchema - it might be an array or a number
                   const pagesWithSchemaCount = Array.isArray(pagesWithSchema) ? pagesWithSchema.length : (typeof pagesWithSchema === 'number' ? pagesWithSchema : 0);
                   const totalPagesCount = typeof totalPages === 'number' ? totalPages : (Array.isArray(schemaData.pages) ? schemaData.pages.length : 0);
-                  const coverageValue = typeof coverage === 'number' ? coverage : (totalPagesCount > 0 ? ((pagesWithSchemaCount / totalPagesCount) * 100).toFixed(1) : '0');
+                  let coverageValue = 'N/A';
+                  if (typeof coverage === 'number' && !isNaN(coverage)) {
+                    coverageValue = coverage.toFixed(1);
+                  } else if (totalPagesCount > 0) {
+                    coverageValue = ((pagesWithSchemaCount / totalPagesCount) * 100).toFixed(1);
+                  }
                   
                   // Calculate foundation schemas - use allDetectedTypes if available (all types), otherwise use schemaTypes (all types, sorted by count)
                   const allTypes = new Set();
@@ -14537,16 +14543,18 @@ Final Score: ${score}/100`;
                   const richTypesPresent = richResultTypesList.filter(type => allTypes.has(type));
                   contentSchemaDesc += ` <strong>Data Checked:</strong> Foundation schemas: ${foundationPresent}/4 (${foundationTypes.filter(t => allTypes.has(t)).join(', ') || 'none'}), Rich result types: ${richEligibleCount}/${richResultTypesList.length} eligible, Coverage: ${coverageValue}% (${pagesWithSchemaCount}/${totalPagesCount} pages), Type diversity: ${richTypesPresent.length}/${richResultTypesList.length} rich result types present (${richTypesPresent.join(', ') || 'none'}), ${uniqueTypesCount} total unique types across the site. `;
                   
-                  if (schemaTypes && schemaTypes.length > 0) {
+                  if (schemaTypes && Array.isArray(schemaTypes) && schemaTypes.length > 0) {
                     // Show top 15 most common types for readability (still sorted by count)
                     // Handle both object format {type, count} and string format
                     // Filter out page objects (those with 'url' property) and invalid objects
                     const topTypes = schemaTypes
                       .filter(t => {
-                        // Skip page objects (have 'url' property) and invalid objects
-                        if (t && typeof t === 'object' && t.url) return false;
+                        // Skip null/undefined
+                        if (!t) return false;
+                        // Skip page objects (have 'url' property)
+                        if (typeof t === 'object' && ('url' in t || 'title' in t && 'metaDescription' in t)) return false;
                         // Only keep valid type objects or strings
-                        return typeof t === 'string' || (t && typeof t === 'object' && t.type && typeof t.type === 'string');
+                        return typeof t === 'string' || (typeof t === 'object' && t.type && typeof t.type === 'string' && !t.url);
                       })
                       .slice(0, 15)
                       .map(t => {
@@ -14559,7 +14567,7 @@ Final Score: ${score}/100`;
                           return null;
                         }
                       })
-                      .filter(t => t !== null && t !== undefined && t !== '' && !t.includes('[object Object]'))
+                      .filter(t => t !== null && t !== undefined && t !== '' && typeof t === 'string' && !t.includes('[object Object]'))
                       .join(', ');
                     if (topTypes) {
                       contentSchemaDesc += `Schema types found: ${topTypes}${schemaTypes.length > 15 ? '...' : ''}. `;

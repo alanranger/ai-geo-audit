@@ -156,9 +156,14 @@ async function testUrl(url) {
       console.log(`⚠️ ${parseErrors} block(s) failed to parse`);
     }
     
-    // Check for BlogPosting ONLY in JSON-LD script tags (not regular JS)
+    // Check for BlogPosting in JSON-LD script tags (with type attribute)
     const jsonLdScriptRegex = /<script[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>[\s\S]*?<\/script>/gi;
     const jsonLdScripts = html.match(jsonLdScriptRegex) || [];
+    
+    // Also check script tags WITHOUT type attribute that might contain JSON-LD
+    const allScriptRegex = /<script[^>]*>[\s\S]*?<\/script>/gi;
+    const allScripts = html.match(allScriptRegex) || [];
+    const scriptsWithoutType = allScripts.filter(s => !/type\s*=\s*["']application\/ld\+json["']/i.test(s));
     
     let blogPostingInJsonLd = false;
     let blogPostingScripts = [];
@@ -166,16 +171,26 @@ async function testUrl(url) {
     jsonLdScripts.forEach((script, idx) => {
       if (/BlogPosting/i.test(script)) {
         blogPostingInJsonLd = true;
-        blogPostingScripts.push({ idx, script });
+        blogPostingScripts.push({ idx, script, hasType: true });
+      }
+    });
+    
+    // Check scripts without type attribute for JSON-LD-like content
+    scriptsWithoutType.forEach((script, idx) => {
+      const content = script.replace(/<script[^>]*>/i, '').replace(/<\/script>/i, '').trim();
+      // Check if it looks like JSON-LD (starts with { or [ and contains @type)
+      if (/^[\s\n]*[{\[]/.test(content) && /"@type"/i.test(content) && /BlogPosting/i.test(content)) {
+        blogPostingInJsonLd = true;
+        blogPostingScripts.push({ idx, script, hasType: false });
       }
     });
     
     if (blogPostingScripts.length > 0) {
-      console.log(`\n🔍 BlogPosting found in ${blogPostingScripts.length} JSON-LD script tag(s):`);
-      blogPostingScripts.forEach(({ idx, script }) => {
+      console.log(`\n🔍 BlogPosting found in ${blogPostingScripts.length} script tag(s):`);
+      blogPostingScripts.forEach(({ idx, script, hasType }) => {
         const content = script.replace(/<script[^>]*>/i, '').replace(/<\/script>/i, '').trim();
         const typeMatch = content.match(/"@type"\s*:\s*"([^"]+)"/i);
-        console.log(`  Script ${idx + 1}: @type=${typeMatch ? typeMatch[1] : 'NOT FOUND'}`);
+        console.log(`  Script ${idx + 1} (${hasType ? 'with type="application/ld+json"' : 'NO type attribute'}): @type=${typeMatch ? typeMatch[1] : 'NOT FOUND'}`);
         console.log(`  Content sample: ${content.substring(0, 400)}`);
         
         // Try to parse it
