@@ -320,7 +320,7 @@
     /* Override for scorecard sections inside ranking-ai-detail-content */
     .ranking-ai-detail-content .scorecard-section {
       margin-top: 0;
-      margin-bottom: 0.5rem !important;
+      margin-bottom: 1.0rem !important;
     }
     
     .ranking-ai-detail-content .scorecard-section:last-child {
@@ -1586,7 +1586,7 @@
     /* Section breaks for scorecard components */
     .ranking-ai-detail-content .scorecard-section {
       padding: 1rem 1.25rem;
-      margin-bottom: 0.5rem !important;
+      margin-bottom: 1.0rem !important;
       background: #f5f5f5;
       border-left: 3px solid #cbd5e1;
       border-radius: 4px;
@@ -6024,7 +6024,11 @@
         const desiredSchemaTypes = ['Product', 'Event', 'FAQPage'];
         // Normalize present types to lowercase for case-insensitive comparison
         const presentTypes = Array.isArray(schemaTypes) && schemaTypes.length > 0 
-          ? schemaTypes.map(t => String(t).trim().toLowerCase()) 
+          ? schemaTypes.map(t => {
+              if (typeof t === 'string') return t.trim().toLowerCase();
+              if (t && typeof t === 'object' && t.type && typeof t.type === 'string') return t.type.trim().toLowerCase();
+              return String(t).trim().toLowerCase();
+            }).filter(t => t && t !== '[object object]')
           : [];
         // Check for missing types (case-insensitive comparison)
         const missingTypes = desiredSchemaTypes.filter(type => {
@@ -6498,7 +6502,11 @@
         if (!page) return false;
         
         const schemaTypes = page.schemaTypes || [];
-        const typesLower = schemaTypes.map(t => String(t).toLowerCase());
+        const typesLower = schemaTypes.map(t => {
+          if (typeof t === 'string') return t.toLowerCase();
+          if (t && typeof t === 'object' && t.type && typeof t.type === 'string') return t.type.toLowerCase();
+          return String(t).toLowerCase();
+        }).filter(t => t && t !== '[object object]');
         
         if (segmentType === "event") {
           return typesLower.includes("event") || typesLower.includes("course");
@@ -14600,9 +14608,18 @@ Final Score: ${score}/100`;
                   }
                   
                   if (schemaData.missingTypes && Array.isArray(schemaData.missingTypes) && schemaData.missingTypes.length > 0) {
-                    // Ensure all items are strings
-                    const missingTypesList = schemaData.missingTypes.map(t => typeof t === 'string' ? t : (t && t.type ? t.type : String(t))).filter(Boolean);
-                    contentSchemaDesc += `Missing foundation types: ${missingTypesList.join(', ')}. `;
+                    // Ensure all items are strings - properly handle objects
+                    const missingTypesList = schemaData.missingTypes
+                      .map(t => {
+                        if (typeof t === 'string') return t;
+                        if (t && typeof t === 'object' && t.type && typeof t.type === 'string') return t.type;
+                        // Skip objects that can't be converted
+                        return null;
+                      })
+                      .filter(t => t !== null && t !== undefined && typeof t === 'string');
+                    if (missingTypesList.length > 0) {
+                      contentSchemaDesc += `Missing foundation types: ${missingTypesList.join(', ')}. `;
+                    }
                   }
                   
                   const richTypes = Object.entries(schemaData.richEligible || {})
@@ -20252,7 +20269,11 @@ Final Score: ${score}/100`;
         const schemaTypes = Array.isArray(pageData.schemaTypes) ? pageData.schemaTypes : [];
         
         // Check for specific schema types (case-insensitive)
-        const typeStrings = schemaTypes.map(t => String(t).toLowerCase());
+        const typeStrings = schemaTypes.map(t => {
+          if (typeof t === 'string') return t.toLowerCase();
+          if (t && typeof t === 'object' && t.type && typeof t.type === 'string') return t.type.toLowerCase();
+          return String(t).toLowerCase();
+        }).filter(t => t && t !== '[object object]');
         
         return {
           hasFAQ: typeStrings.some(t => t.includes('faq') || t === 'faqpage'),
@@ -21448,8 +21469,17 @@ Final Score: ${score}/100`;
               debugLog('[Schema Coverage] Matched page URL: ' + (pageData.url || 'missing'), 'info');
               if (pageData.schemaTypes) {
                 const schemaTypes = Array.isArray(pageData.schemaTypes) ? pageData.schemaTypes : [];
-                const typeStrings = schemaTypes.map(t => String(t).toLowerCase());
-                debugLog('[Schema Coverage] Schema types found (' + schemaTypes.length + '): ' + schemaTypes.join(', '), 'info');
+                const typeStrings = schemaTypes.map(t => {
+                  if (typeof t === 'string') return t.toLowerCase();
+                  if (t && typeof t === 'object' && t.type) return String(t.type).toLowerCase();
+                  return String(t).toLowerCase();
+                });
+                const typeDisplay = schemaTypes.map(t => {
+                  if (typeof t === 'string') return t;
+                  if (t && typeof t === 'object' && t.type) return t.type;
+                  return String(t);
+                }).join(', ');
+                debugLog('[Schema Coverage] Schema types found (' + schemaTypes.length + '): ' + typeDisplay, 'info');
                 schemaCoverage = {
                   hasFAQ: typeStrings.some(t => t.includes('faq') || t === 'faqpage'),
                   hasHowTo: typeStrings.some(t => t.includes('howto') || t === 'howto'),
