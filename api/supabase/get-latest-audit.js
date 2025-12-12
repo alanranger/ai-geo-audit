@@ -93,8 +93,9 @@ export default async function handler(req, res) {
       console.log(`[get-latest-audit] Fetching keyword rankings for audit_date=${auditDate}, property_url=${propertyUrl}`);
       
       // First, try to fetch using the audit_date from audit_results
-      // Limit to 5000 rows to prevent timeout/response size issues
-      let keywordRankingsUrl = `${supabaseUrl}/rest/v1/keyword_rankings?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${encodeURIComponent(auditDate)}&select=*&order=keyword.asc&limit=5000`;
+      // Limit to 2000 rows initially to prevent timeout/response size issues
+      let keywordRankingsUrl = `${supabaseUrl}/rest/v1/keyword_rankings?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${encodeURIComponent(auditDate)}&select=*&order=keyword.asc&limit=2000`;
+      
       let keywordRankingsResponse = await fetch(keywordRankingsUrl, {
         method: 'GET',
         headers: {
@@ -147,6 +148,12 @@ export default async function handler(req, res) {
       }
         
         if (keywordRows && keywordRows.length > 0) {
+          // Early truncation: limit to 2000 rows to prevent processing too much data
+          if (keywordRows.length > 2000) {
+            console.warn(`[get-latest-audit] Truncating keyword rows from ${keywordRows.length} to 2000 before processing`);
+            keywordRows = keywordRows.slice(0, 2000);
+          }
+          
           // Convert database rows to frontend format (combinedRows)
           const combinedRows = keywordRows.map(row => {
             // Parse JSON fields if they're strings (Supabase may return JSON as strings)
@@ -160,6 +167,11 @@ export default async function handler(req, res) {
               }
             }
             if (!Array.isArray(aiCitations)) aiCitations = [];
+            
+            // Truncate large aiCitations arrays (limit to 10 citations per keyword)
+            if (aiCitations.length > 10) {
+              aiCitations = aiCitations.slice(0, 10);
+            }
 
             let competitorCounts = row.competitor_counts || {};
             if (typeof competitorCounts === 'string') {
@@ -170,6 +182,12 @@ export default async function handler(req, res) {
               }
             }
             if (typeof competitorCounts !== 'object' || competitorCounts === null) competitorCounts = {};
+            
+            // Truncate competitor_counts if it has too many entries (limit to top 20)
+            if (Object.keys(competitorCounts).length > 20) {
+              const entries = Object.entries(competitorCounts).sort((a, b) => b[1] - a[1]).slice(0, 20);
+              competitorCounts = Object.fromEntries(entries);
+            }
 
             let serpFeatures = row.serp_features || {};
             if (typeof serpFeatures === 'string') {
@@ -180,6 +198,18 @@ export default async function handler(req, res) {
               }
             }
             if (typeof serpFeatures !== 'object' || serpFeatures === null) serpFeatures = {};
+            
+            // Truncate serp_features if it's too large (limit to essential fields only)
+            if (Object.keys(serpFeatures).length > 10) {
+              const essentialFields = ['ai_overview', 'local_pack', 'people_also_ask', 'featured_snippet'];
+              const truncated = {};
+              essentialFields.forEach(field => {
+                if (serpFeatures[field] !== undefined) {
+                  truncated[field] = serpFeatures[field];
+                }
+              });
+              serpFeatures = truncated;
+            }
 
             return {
               keyword: row.keyword,
@@ -646,10 +676,10 @@ export default async function handler(req, res) {
         auditData.searchData.topQueries = auditData.searchData.topQueries.slice(0, 500);
       }
       
-      // Truncate rankingAiData combinedRows if too large
-      if (auditData.rankingAiData?.combinedRows && auditData.rankingAiData.combinedRows.length > 5000) {
-        console.warn(`[get-latest-audit] Truncating rankingAiData.combinedRows from ${auditData.rankingAiData.combinedRows.length} to 5000`);
-        auditData.rankingAiData.combinedRows = auditData.rankingAiData.combinedRows.slice(0, 5000);
+      // Truncate rankingAiData combinedRows if too large (should already be limited to 2000, but double-check)
+      if (auditData.rankingAiData?.combinedRows && auditData.rankingAiData.combinedRows.length > 2000) {
+        console.warn(`[get-latest-audit] Truncating rankingAiData.combinedRows from ${auditData.rankingAiData.combinedRows.length} to 2000`);
+        auditData.rankingAiData.combinedRows = auditData.rankingAiData.combinedRows.slice(0, 2000);
         // Recalculate summary with truncated data
         const totalKeywords = auditData.rankingAiData.combinedRows.length;
         const keywordsWithRank = auditData.rankingAiData.combinedRows.filter(r => r.best_rank_group != null && r.best_rank_group > 0).length;
