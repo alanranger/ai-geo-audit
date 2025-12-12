@@ -78,17 +78,35 @@ export default async function handler(req, res) {
         queryUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.desc&limit=1&select=*`;
       }
       
-      const response = await fetch(queryUrl, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': supabaseKey,
-          'Authorization': `Bearer ${supabaseKey}`
-        }
-      });
+      let response;
+      try {
+        response = await fetch(queryUrl, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': supabaseKey,
+            'Authorization': `Bearer ${supabaseKey}`
+          }
+        });
+        console.log(`[get-latest-audit] Supabase fetch completed, status: ${response.status}`);
+      } catch (fetchError) {
+        console.error('[get-latest-audit] Fetch error:', fetchError.message);
+        console.error('[get-latest-audit] Fetch error stack:', fetchError.stack);
+        return res.status(500).json({
+          status: 'error',
+          message: 'Failed to fetch from Supabase',
+          details: fetchError.message,
+          meta: { generatedAt: new Date().toISOString() }
+        });
+      }
 
       if (!response.ok) {
-        const errorText = await response.text();
+        let errorText;
+        try {
+          errorText = await response.text();
+        } catch (textError) {
+          errorText = `HTTP ${response.status}: ${response.statusText}`;
+        }
         console.error('[get-latest-audit] Supabase query error:', errorText);
         return res.status(response.status).json({
           status: 'error',
@@ -110,12 +128,18 @@ export default async function handler(req, res) {
 
       let results;
       try {
-        results = await response.json();
+        const responseText = await response.text();
+        console.log(`[get-latest-audit] Response text length: ${responseText.length} chars`);
+        if (responseText.length > 0) {
+          results = JSON.parse(responseText);
+          console.log(`[get-latest-audit] Successfully parsed JSON, results length: ${results?.length || 0}`);
+        } else {
+          console.warn(`[get-latest-audit] Empty response from Supabase`);
+          results = [];
+        }
       } catch (jsonError) {
         console.error('[get-latest-audit] Failed to parse Supabase response as JSON:', jsonError.message);
-        // Try to get the raw response for debugging
-        const rawText = await response.text();
-        console.error('[get-latest-audit] Raw response (first 500 chars):', rawText.substring(0, 500));
+        console.error('[get-latest-audit] JSON error stack:', jsonError.stack);
         return res.status(500).json({
           status: 'error',
           message: 'Failed to parse Supabase response',
@@ -125,6 +149,7 @@ export default async function handler(req, res) {
       }
 
       if (!results || results.length === 0) {
+        console.log(`[get-latest-audit] No audit records found`);
         return res.status(200).json({
           status: 'ok',
           data: null,
@@ -134,8 +159,18 @@ export default async function handler(req, res) {
       }
 
       record = results[0];
+      if (!record) {
+        console.error('[get-latest-audit] Record is null or undefined');
+        return res.status(500).json({
+          status: 'error',
+          message: 'Invalid record returned from Supabase',
+          meta: { generatedAt: new Date().toISOString() }
+        });
+      }
+      
       auditDate = record.audit_date;
       console.log(`[get-latest-audit] Found audit record for date: ${auditDate} (minimal: ${isMinimalRequest})`);
+      console.log(`[get-latest-audit] Record keys: ${Object.keys(record).join(', ')}`);
     } catch (queryError) {
       console.error('[get-latest-audit] Error fetching audit record:', queryError);
       console.error('[get-latest-audit] Query error stack:', queryError.stack);
