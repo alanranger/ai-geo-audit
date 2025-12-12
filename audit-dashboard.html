@@ -2690,8 +2690,26 @@
       ];
 
       // API endpoints – adjust if the deployed paths differ.
-      const SERP_RANK_ENDPOINT = "/api/aigeo/serp-rank-test";
-      const AI_MODE_ENDPOINT = "/api/aigeo/ai-mode-serp-batch-test"; // Using batch endpoint
+      // For local development: Set API_BASE_URL to your Vercel deployment URL (e.g., "https://your-app.vercel.app")
+      // Leave empty string "" to use relative paths (works when deployed on Vercel)
+      const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
+        ? 'https://ai-geo-audit.vercel.app' // Change this to your Vercel deployment URL
+        : '';
+      
+      // Helper function to prepend API_BASE_URL when running locally
+      const apiUrl = (path) => {
+        if (!API_BASE_URL) {
+          // When deployed on Vercel, use relative paths
+          return path.startsWith('/') ? path : `/${path}`;
+        }
+        // When running locally, prepend the Vercel URL
+        // Handle paths with or without leading slash
+        const cleanPath = path.startsWith('/') ? path : `/${path}`;
+        return `${API_BASE_URL}${cleanPath}`;
+      };
+      
+      const SERP_RANK_ENDPOINT = apiUrl('/api/aigeo/serp-rank-test');
+      const AI_MODE_ENDPOINT = apiUrl('/api/aigeo/ai-mode-serp-batch-test'); // Using batch endpoint
 
       let hasLoadedOnce = false;
       let isLoading = false;
@@ -2951,7 +2969,7 @@
       let vercelApiKey = null;
       try {
         debugLog('Checking Vercel environment variable...', 'info');
-        const response = await fetch('/api/get-api-key');
+        const response = await fetch(apiUrl('/api/get-api-key'));
         if (response.ok) {
           const data = await response.json();
           if (data.apiKey) {
@@ -3040,7 +3058,7 @@
         }
         // Check if backlink metrics are already uploaded
         try {
-          const backlinkResponse = await fetch('/api/aigeo/backlink-metrics');
+          const backlinkResponse = await fetch(apiUrl('/api/aigeo/backlink-metrics'));
           if (backlinkResponse.ok) {
             const backlinkData = await backlinkResponse.json();
             if (backlinkData.status === 'ok' && backlinkData.data && backlinkData.data.totalBacklinks > 0) {
@@ -3354,7 +3372,7 @@
         debugLog('Uploading backlink CSV to API...', 'info');
         
         // Send CSV as JSON since Vercel doesn't parse text/csv automatically
-        const response = await fetch('/api/aigeo/backlink-metrics', {
+        const response = await fetch(apiUrl('/api/aigeo/backlink-metrics'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -3465,7 +3483,7 @@
       
       try {
         debugLog('Fetching /api/sync-csv endpoint...', 'info');
-        const response = await fetch('/api/sync-csv', {
+        const response = await fetch(apiUrl('/api/sync-csv'), {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
@@ -3706,7 +3724,7 @@
         debugLog(`Sending retry request for ${failedUrls.length} URLs`, 'info');
         
         // Call schema-audit API with only the failed URLs
-        const schemaResponse = await fetch('/api/schema-audit', {
+        const schemaResponse = await fetch(apiUrl('/api/schema-audit'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -3866,7 +3884,7 @@
         // Fetch local signals (Business Profile data doesn't change with date range, but fetch to ensure it's fresh)
         let localSignals = savedAudit.localSignals || null;
         try {
-          const localSignalsResponse = await fetch(`/api/aigeo/local-signals?property=${encodeURIComponent(propertyUrl)}`);
+          const localSignalsResponse = await fetch(apiUrl(`/api/aigeo/local-signals?property=${encodeURIComponent(propertyUrl)}`));
           if (localSignalsResponse.ok) {
             localSignals = await localSignalsResponse.json();
             if (localSignals.status === 'ok') {
@@ -4252,7 +4270,7 @@
         debugLog(`saveAuditToSupabase: moneySegmentMetrics ready with ${Object.keys(moneySegmentMetrics).length} segments`, 'info');
         debugLog(`saveAuditToSupabase: moneySegmentMetrics.allMoney clicks=${moneySegmentMetrics.allMoney?.clicks || 0}, impressions=${moneySegmentMetrics.allMoney?.impressions || 0}`, 'info');
         
-        const response = await fetch('/api/supabase/save-audit', {
+        const response = await fetch(apiUrl('/api/supabase/save-audit'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -4286,7 +4304,7 @@
             startDate.setFullYear(startDate.getFullYear() - 1);
             const startDateStr = startDate.toISOString().split('T')[0];
             
-            const historyResponse = await fetch(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDate}`);
+            const historyResponse = await fetch(apiUrl(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDate}`));
             if (historyResponse.ok) {
               const historyJson = await historyResponse.json();
               if (historyJson.status === 'ok' && historyJson.data) {
@@ -4349,7 +4367,7 @@
     // Fetch historical Content/Schema data from Supabase
     async function fetchContentSchemaHistory(propertyUrl, startDate, endDate) {
       try {
-        const response = await fetch(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}&startDate=${startDate}&endDate=${endDate}`);
+        const response = await fetch(apiUrl(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}&startDate=${startDate}&endDate=${endDate}`));
         
         if (response.ok) {
           const result = await response.json();
@@ -4387,7 +4405,7 @@
         
         debugLog(`Fetching latest audit from Supabase for ${propertyUrl}...`, 'info');
         
-        const response = await fetch(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}`);
+        const response = await fetch(apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}`));
         
         if (response.ok) {
           const result = await response.json();
@@ -7077,7 +7095,7 @@
       
       try {
         // Call unified GSC entity metrics endpoint
-        const response = await fetch(`/api/aigeo/gsc-entity-metrics?property=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDateStr}`);
+        const response = await fetch(apiUrl(`/api/aigeo/gsc-entity-metrics?property=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDateStr}`));
 
         if (!response.ok) {
           const errorData = await response.json();
@@ -7147,7 +7165,7 @@
       if (!apiKey) {
         try {
           debugLog('Fetching API key from Vercel environment variable...', 'info');
-          const response = await fetch('/api/get-api-key');
+          const response = await fetch(apiUrl('/api/get-api-key'));
           if (response.ok) {
             const data = await response.json();
             if (data.apiKey) {
@@ -7229,7 +7247,7 @@
         // Fetch local signals (Business Profile) data
         // Only fetch if we don't have saved data, or always fetch fresh (Business Profile can change)
         try {
-          const localSignalsResponse = await fetch(`/api/aigeo/local-signals?property=${encodeURIComponent(propertyUrl)}`);
+          const localSignalsResponse = await fetch(apiUrl(`/api/aigeo/local-signals?property=${encodeURIComponent(propertyUrl)}`));
           if (localSignalsResponse.ok) {
             const freshLocalSignals = await localSignalsResponse.json();
             if (freshLocalSignals.status === 'ok') {
@@ -7256,7 +7274,7 @@
         debugLog('Fetching Trustpilot snapshot data...', 'info');
         // Always fetch fresh Trustpilot snapshot data (it's a fixed snapshot, so should always work)
         try {
-          const siteReviewsResponse = await fetch('/api/reviews/site-reviews');
+          const siteReviewsResponse = await fetch(apiUrl('/api/reviews/site-reviews'));
           if (siteReviewsResponse.ok) {
             const siteReviewsData = await siteReviewsResponse.json();
             if (siteReviewsData.status === 'ok' && siteReviewsData.data) {
@@ -7328,7 +7346,7 @@
         // If not in localStorage, try API (for cases where metrics were uploaded via API directly)
         if (!backlinkMetrics) {
           try {
-            const backlinkResponse = await fetch('/api/aigeo/backlink-metrics');
+            const backlinkResponse = await fetch(apiUrl('/api/aigeo/backlink-metrics'));
             if (backlinkResponse.ok) {
               const backlinkData = await backlinkResponse.json();
               if (backlinkData.status === 'ok' && backlinkData.data && backlinkData.data.totalBacklinks > 0) {
@@ -7367,7 +7385,7 @@
               const urls = JSON.parse(manualUrlList);
               debugLog(`Using manual URL list: ${urls.length} URLs`, 'info');
               updateProgress(45, `Crawling ${urls.length} URLs for schema markup...`);
-              schemaRequest = fetch('/api/schema-audit', {
+              schemaRequest = fetch(apiUrl('/api/schema-audit'), {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
@@ -7377,12 +7395,12 @@
             } catch (e) {
               debugLog('⚠ Failed to parse manual URL list, using default CSV', 'warn');
               updateProgress(45, 'Loading URLs from CSV and crawling for schema markup...');
-              schemaRequest = fetch('/api/schema-audit');
+              schemaRequest = fetch(apiUrl('/api/schema-audit'));
             }
           } else {
             debugLog('No manual URL list, using default CSV source', 'info');
             updateProgress(45, 'Loading URLs from CSV and crawling for schema markup...');
-            schemaRequest = fetch('/api/schema-audit');
+            schemaRequest = fetch(apiUrl('/api/schema-audit'));
           }
           
           const schemaResponse = await schemaRequest;
@@ -13045,7 +13063,7 @@ Final Score: ${score}/100`;
         const startDateStr = startDate.toISOString().split('T')[0];
         
         try {
-          const res = await fetch(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDate}`);
+          const res = await fetch(apiUrl(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDate}`));
           const json = await res.json();
           if (json.status !== "ok") {
             debugLog('⚠ Could not load audit history for KPI tracker', 'warn');
@@ -17241,7 +17259,7 @@ Final Score: ${score}/100`;
     async function loadSharedAudit(shareId) {
       try {
         debugLog(`Loading shared audit: ${shareId}`, 'info');
-        const response = await fetch(`/api/supabase/get-shared-audit?shareId=${encodeURIComponent(shareId)}`);
+        const response = await fetch(apiUrl(`/api/supabase/get-shared-audit?shareId=${encodeURIComponent(shareId)}`));
         
         if (!response.ok) {
           const error = await response.json();
@@ -17272,7 +17290,7 @@ Final Score: ${score}/100`;
 
       try {
         showStatus('Creating shareable link...', 'info');
-        const response = await fetch('/api/supabase/create-shared-audit', {
+        const response = await fetch(apiUrl('/api/supabase/create-shared-audit'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -17507,7 +17525,7 @@ Final Score: ${score}/100`;
                     startDate.setDate(startDate.getDate() - 30); // Last 30 days
                     const startDateStr = startDate.toISOString().split('T')[0];
                     
-                    const timeseriesResponse = await fetch(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDate}`);
+                    const timeseriesResponse = await fetch(apiUrl(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDate}`));
                     if (timeseriesResponse.ok) {
                       const timeseriesData = await timeseriesResponse.json();
                       if (timeseriesData.status === 'ok' && timeseriesData.timeseries && Array.isArray(timeseriesData.timeseries)) {
@@ -18550,7 +18568,7 @@ Final Score: ${score}/100`;
         }));
 
         // Use upsert endpoint to save batch (will merge duplicates based on unique constraint)
-        const response = await fetch('/api/supabase/save-keyword-batch', {
+        const response = await fetch(apiUrl('/api/supabase/save-keyword-batch'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -18594,7 +18612,7 @@ Final Score: ${score}/100`;
 
         // Save to Supabase
         const auditDate = new Date().toISOString().split('T')[0];
-        const response = await fetch('/api/supabase/save-audit', {
+        const response = await fetch(apiUrl('/api/supabase/save-audit'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -18670,7 +18688,7 @@ Final Score: ${score}/100`;
 
         // Try Supabase (either forced or as fallback)
         debugLog(`📊 Loading Ranking & AI data from Supabase for propertyUrl: ${propertyUrl}`, 'info');
-        const response = await fetch(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}`);
+        const response = await fetch(apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}`));
         debugLog(`📊 API fetch response status: ${response.status} ${response.statusText}`, 'info');
         
         if (response.ok) {
