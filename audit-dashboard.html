@@ -21867,7 +21867,7 @@ Final Score: ${score}/100`;
       if (oppScore != null) {
         html += `<p style="margin: 0 0 0.5rem 0; font-size: 1.1rem; font-weight: 700; color: ${oppColor}; line-height: 1.4;">`;
         html += `Keyword opportunity score: <span style="color: ${oppColor};">${oppScore}/100</span>`;
-        html += ` <span title="Keyword opportunity score&#10;Combines three signals for this tracked keyword:&#10;• Demand share (how much search volume this query represents in your tracked set).&#10;• Classic ranking strength (page 1 vs page 2+ and current position).&#10;• AI usage (whether AI Overviews exist and if you're cited).&#10;Higher scores highlight the best &quot;bang-for-buck&quot; queries to improve first." style="opacity: 0.6; cursor: help; font-size: 0.9rem;">ℹ</span>`;
+        html += ` <span title="Keyword opportunity score&#10;Combines three signals for this tracked keyword:&#10;• Demand share (how much search volume this query represents in your tracked set).&#10;• Classic ranking strength (page 1 vs page 2+ and current position).&#10;• AI usage (whether AI Overviews exist and if you're cited).&#10;Higher scores highlight the best &quot;bang-for-buck&quot; queries to improve first." style="opacity: 0.6; cursor: help; font-size: 0.875rem;">ℹ</span>`;
         html += `</p>`;
       }
       html += `<p style="margin: 0; font-size: 1.1rem; font-weight: 700; color: #1e293b; line-height: 1.4;">`;
@@ -22021,11 +22021,11 @@ Final Score: ${score}/100`;
       html += `<div class="scorecard-section">`;
       html += `<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">4. Schema & rich results</h5>`;
       
-      // Get schema coverage if available (async, but we'll handle it synchronously for now)
-      // Note: This will be null if data needs to be fetched from Supabase
+      // Get schema coverage if available
+      // Try to use the async getSchemaCoverageForUrl function which handles Supabase fallback
       let schemaCoverage = null;
       try {
-        // Try sync first (localStorage)
+        // First try sync (localStorage) for immediate display
         const savedAudit = loadAuditResultsSync();
         if (savedAudit && savedAudit.schemaAudit && savedAudit.schemaAudit.data) {
           const schemaData = savedAudit.schemaAudit.data;
@@ -22145,9 +22145,50 @@ Final Score: ${score}/100`;
                 });
               }
             }
+          } else {
+            debugLog('[Schema Coverage] No pages array available in schemaData', 'warn');
           }
         } else {
-          debugLog('[Schema Coverage] No schemaAudit.data in saved audit', 'warn');
+          debugLog('[Schema Coverage] No schemaAudit.data in saved audit, trying async fetch...', 'warn');
+          // Try async fetch from Supabase as fallback
+          if (typeof getSchemaCoverageForUrl === 'function' && scorecardData.ranking_url) {
+            getSchemaCoverageForUrl(scorecardData.ranking_url).then(coverage => {
+              if (coverage) {
+                schemaCoverage = coverage;
+                // Re-render just the schema section
+                const schemaSection = contentEl.querySelector('.scorecard-section:nth-of-type(4)');
+                if (schemaSection) {
+                  let schemaHtml = '';
+                  schemaHtml += `<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">4. Schema & rich results</h5>`;
+                  schemaHtml += `<div style="margin-bottom: 0.75rem;">`;
+                  schemaHtml += `<div style="font-size: 0.875rem; color: #1e293b; margin-bottom: 0.5rem; font-weight: 500;">Schema coverage for this page:</div>`;
+                  schemaHtml += `<div style="display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.875rem; color: #1e293b;">`;
+                  schemaHtml += `<span>FAQ: ${coverage.hasFAQ ? '✅' : '❌'}</span>`;
+                  schemaHtml += `<span>HowTo: ${coverage.hasHowTo ? '✅' : '❌'}</span>`;
+                  schemaHtml += `<span>Event/Product: ${(coverage.hasEvent || coverage.hasProduct) ? '✅' : '❌'}</span>`;
+                  schemaHtml += `<span>Breadcrumb: ${coverage.hasBreadcrumb ? '✅' : '❌'}</span>`;
+                  schemaHtml += `<span>ImageObject: ${coverage.hasImageObject ? '✅' : '❌'}</span>`;
+                  schemaHtml += `</div></div>`;
+                  
+                  let schemaInterpretation = '';
+                  if (scorecardData.segment && scorecardData.segment.toLowerCase() === 'education' && !coverage.hasFAQ) {
+                    schemaInterpretation = 'This education page has no FAQ schema. Adding an FAQ block could help snippet richness for this keyword.';
+                  } else if ((scorecardData.page_type === 'Event' || scorecardData.page_type === 'Product') && !coverage.hasEvent && !coverage.hasProduct) {
+                    schemaInterpretation = 'This looks like a money page but no Event/Product schema was detected. Adding Event or Product schema could improve visibility in commercial results.';
+                  } else if (coverage.hasFAQ && (coverage.hasEvent || coverage.hasProduct) && coverage.hasBreadcrumb) {
+                    schemaInterpretation = 'Core schema types are already present for this page. Further gains are more likely to come from authority/behaviour than new schema types.';
+                  } else {
+                    schemaInterpretation = 'Some schema types are present. Review the Content/Schema pillar for a complete assessment.';
+                  }
+                  schemaHtml += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">${schemaInterpretation}</p>`;
+                  schemaSection.innerHTML = schemaHtml;
+                  debugLog('[Schema Coverage] ✅ Updated schema section with async data', 'success');
+                }
+              }
+            }).catch(err => {
+              debugLog('[Schema Coverage] Async fetch failed: ' + err.message, 'warn');
+            });
+          }
         }
       } catch (e) {
         debugLog('[Schema Coverage] Error in sync check: ' + e.message, 'warn');
