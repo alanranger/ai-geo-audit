@@ -6258,12 +6258,12 @@
           ? clicks / totalClicks
           : null;
 
-        // Debug logging
-        if (shareOfImpressions == null) {
-          const overviewType = overview === null ? 'null' : overview === undefined ? 'undefined' : typeof overview;
-          const overviewStr = typeof overview === 'object' ? JSON.stringify(overview) : String(overview);
-          debugLog(`⚠ buildMoneyPagesSummary: shareOfImpressions is null - overview type=${overviewType}, overview=${overviewStr.substring(0, 200)}, siteTotalImpressions=${overview?.siteTotalImpressions || 'missing'}, totalImpressions=${overview?.totalImpressions || 'missing'}, impressions=${impressions}`, 'warn');
-        } else {
+        // Debug logging (only log if we have impressions but no overview - expected when overview is missing)
+        if (shareOfImpressions == null && impressions > 0) {
+          // Only log if this is unexpected (we have impressions but no overview data)
+          // This is expected when overview data is not available, so reduce log level
+          debugLog(`ℹ buildMoneyPagesSummary: shareOfImpressions is null (overview data not available) - impressions=${impressions}`, 'info');
+        } else if (shareOfImpressions != null) {
           debugLog(`✓ buildMoneyPagesSummary: shareOfImpressions=${shareOfImpressions} (${impressions}/${totalImpressions})`, 'info');
         }
 
@@ -11938,20 +11938,38 @@ Final Score: ${score}/100`;
         
         // Check if canvas is visible and panel is active AFTER setting dimensions
         const moneyPanel = ctx.closest('.aigeo-panel[data-panel="money"]');
-        const isPanelVisible = !moneyPanel || (moneyPanel.classList.contains('is-active') && window.getComputedStyle(moneyPanel).display !== 'none');
+        const isPanelActive = moneyPanel && moneyPanel.classList.contains('is-active');
+        const panelStyle = moneyPanel ? window.getComputedStyle(moneyPanel) : null;
+        const isPanelVisible = !moneyPanel || (isPanelActive && panelStyle && panelStyle.display !== 'none' && panelStyle.visibility !== 'hidden');
         const canvasRect = ctx.getBoundingClientRect();
         
+        // Wait a bit for layout to settle if panel was just activated
         if (!isPanelVisible || canvasRect.width === 0 || canvasRect.height === 0) {
-          debugLog(`⚠ Money Pages trend chart: Panel hidden or canvas has zero dimensions (width=${canvasRect.width}, height=${canvasRect.height}, panelVisible=${isPanelVisible}). Chart will render when panel is shown.`, 'warn');
-          // Schedule retry when panel becomes visible
-          if (moneyPanel && !moneyPanel.classList.contains('is-active')) {
-            const observer = new MutationObserver((mutations) => {
-              if (moneyPanel.classList.contains('is-active')) {
+          // Only log warning if panel is not active (to reduce noise)
+          if (!isPanelActive) {
+            debugLog(`⚠ Money Pages trend chart: Panel hidden or canvas has zero dimensions (width=${canvasRect.width}, height=${canvasRect.height}, panelVisible=${isPanelVisible}). Chart will render when panel is shown.`, 'warn');
+            // Schedule retry when panel becomes visible
+            if (moneyPanel && !moneyPanel.classList.contains('is-active')) {
+              // Use a one-time observer
+              const observer = new MutationObserver((mutations) => {
+                if (moneyPanel.classList.contains('is-active')) {
+                  observer.disconnect();
+                  // Wait a bit longer for layout to settle
+                  setTimeout(() => renderMoneyPagesTrendChart(history), 200);
+                }
+              });
+              observer.observe(moneyPanel, { attributes: true, attributeFilter: ['class'] });
+              // Also set a timeout fallback (max 5 seconds)
+              setTimeout(() => {
                 observer.disconnect();
-                setTimeout(() => renderMoneyPagesTrendChart(history), 100);
-              }
-            });
-            observer.observe(moneyPanel, { attributes: true, attributeFilter: ['class'] });
+                if (moneyPanel.classList.contains('is-active')) {
+                  renderMoneyPagesTrendChart(history);
+                }
+              }, 5000);
+            }
+          } else {
+            // Panel is active but canvas still has zero dimensions - retry after a short delay
+            setTimeout(() => renderMoneyPagesTrendChart(history), 200);
           }
           return;
         }
@@ -12852,20 +12870,38 @@ Final Score: ${score}/100`;
         
         // Check if panel is visible AFTER setting dimensions
         const moneyPanel = ctx.closest('.aigeo-panel[data-panel="money"]');
-        const isPanelVisible = !moneyPanel || (moneyPanel.classList.contains('is-active') && window.getComputedStyle(moneyPanel).display !== 'none');
+        const isPanelActive = moneyPanel && moneyPanel.classList.contains('is-active');
+        const panelStyle = moneyPanel ? window.getComputedStyle(moneyPanel) : null;
+        const isPanelVisible = !moneyPanel || (isPanelActive && panelStyle && panelStyle.display !== 'none' && panelStyle.visibility !== 'hidden');
         const canvasRect = ctx.getBoundingClientRect();
         
+        // Wait a bit for layout to settle if panel was just activated
         if (!isPanelVisible || canvasRect.width === 0 || canvasRect.height === 0) {
-          debugLog(`⚠ Money KPI sparkline: Panel hidden or canvas has zero dimensions (width=${canvasRect.width}, height=${canvasRect.height}, panelVisible=${isPanelVisible}). Chart will render when panel is shown.`, 'warn');
-          // Schedule retry when panel becomes visible
-          if (moneyPanel && !moneyPanel.classList.contains('is-active')) {
-            const observer = new MutationObserver((mutations) => {
-              if (moneyPanel.classList.contains('is-active')) {
+          // Only log warning if panel is not active (to reduce noise)
+          if (!isPanelActive) {
+            debugLog(`⚠ Money KPI sparkline: Panel hidden or canvas has zero dimensions (width=${canvasRect.width}, height=${canvasRect.height}, panelVisible=${isPanelVisible}). Chart will render when panel is shown.`, 'warn');
+            // Schedule retry when panel becomes visible
+            if (moneyPanel && !moneyPanel.classList.contains('is-active')) {
+              // Use a one-time observer
+              const observer = new MutationObserver((mutations) => {
+                if (moneyPanel.classList.contains('is-active')) {
+                  observer.disconnect();
+                  // Wait a bit longer for layout to settle
+                  setTimeout(() => renderMoneyKpiSparkline(historyData, metricKey), 200);
+                }
+              });
+              observer.observe(moneyPanel, { attributes: true, attributeFilter: ['class'] });
+              // Also set a timeout fallback (max 5 seconds)
+              setTimeout(() => {
                 observer.disconnect();
-                setTimeout(() => renderMoneyKpiSparkline(historyData, metricKey), 100);
-              }
-            });
-            observer.observe(moneyPanel, { attributes: true, attributeFilter: ['class'] });
+                if (moneyPanel.classList.contains('is-active')) {
+                  renderMoneyKpiSparkline(historyData, metricKey);
+                }
+              }, 5000);
+            }
+          } else {
+            // Panel is active but canvas still has zero dimensions - retry after a short delay
+            setTimeout(() => renderMoneyKpiSparkline(historyData, metricKey), 200);
           }
           return;
         }
@@ -14515,8 +14551,19 @@ Final Score: ${score}/100`;
                         const richEligibleCount = Object.values(richEligible || {}).filter(eligible => eligible === true).length;
                         const richMissing = richResultTypes.filter(type => !richEligible[type]);
                         
+                        // Check for failed crawls that might affect rich result detection
+                        const failedPages = schemaAuditData.missingSchemaPages ? schemaAuditData.missingSchemaPages.filter(p => p.error).length : 0;
+                        const hasFailedCrawls = failedPages > 0;
+                        
                         if (richEligibleCount < richResultTypes.length) {
-                          steps.push(`<strong>Rich results (35%):</strong> ${richEligibleCount}/${richResultTypes.length} eligible. Add: ${richMissing.slice(0, 3).join(', ')}${richMissing.length > 3 ? '...' : ''}`);
+                          let richResultMsg = `<strong>Rich results (35%):</strong> ${richEligibleCount}/${richResultTypes.length} eligible.`;
+                          if (richMissing.length > 0) {
+                            richResultMsg += ` Missing: ${richMissing.slice(0, 3).join(', ')}${richMissing.length > 3 ? '...' : ''}`;
+                            if (hasFailedCrawls) {
+                              richResultMsg += ` <em>(Note: ${failedPages} page${failedPages !== 1 ? 's' : ''} failed to crawl - missing types may exist but weren't detected)</em>`;
+                            }
+                          }
+                          steps.push(richResultMsg);
                         } else {
                           steps.push(`<strong>Rich results (35%):</strong> ✅ All ${richResultTypes.length} types eligible`);
                         }
@@ -15058,10 +15105,18 @@ Final Score: ${score}/100`;
                 return !schemaData.richEligible || !schemaData.richEligible[type];
               });
               
+              // Check for failed crawls that might affect rich result detection
+              const failedPages = schemaData.missingSchemaPages ? schemaData.missingSchemaPages.filter(p => p.error).length : 0;
+              const hasFailedCrawls = failedPages > 0;
+              
               // Build suggestion text
               let suggestionText;
               if (applicableMissingTypes.length > 0) {
-                suggestionText = `Add more rich result types. Currently ${richEligibleCount}/${totalRichResultTypes} eligible. Add: ${applicableMissingTypes.join(', ')} schemas. Potential gain: +${potentialGain.toFixed(1)} points.`;
+                suggestionText = `Add more rich result types. Currently ${richEligibleCount}/${totalRichResultTypes} eligible. Add: ${applicableMissingTypes.join(', ')} schemas.`;
+                if (hasFailedCrawls) {
+                  suggestionText += ` Note: ${failedPages} page${failedPages !== 1 ? 's' : ''} failed to crawl - missing types may exist but weren't detected.`;
+                }
+                suggestionText += ` Potential gain: +${potentialGain.toFixed(1)} points.`;
               } else {
                 suggestionText = `Add more rich result types. Currently ${richEligibleCount}/${totalRichResultTypes} eligible. Potential gain: +${potentialGain.toFixed(1)} points.`;
               }
