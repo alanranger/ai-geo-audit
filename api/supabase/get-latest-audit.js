@@ -222,12 +222,19 @@ export default async function handler(req, res) {
     // The rankingAiData will be loaded from the audit_results.ranking_ai_data JSON field instead
     let rankingAiData = null;
     
+    // CRITICAL: Temporarily skip ranking_ai_data parsing to prevent FUNCTION_INVOCATION_FAILED
+    // The 246KB ranking_ai_data field is causing the function to crash
+    // TODO: Re-enable after implementing proper pagination or chunking
+    console.log(`[get-latest-audit] Skipping ranking_ai_data parsing to prevent FUNCTION_INVOCATION_FAILED (field is 246KB)`);
+    rankingAiData = null;
+    
+    /* TEMPORARILY DISABLED: ranking_ai_data parsing
     // CRITICAL: Parse ranking_ai_data if it's a string (Supabase may return JSON as strings)
     // Also check size to prevent FUNCTION_INVOCATION_FAILED errors
     const rawRankingData = record.ranking_ai_data;
     if (rawRankingData) {
-      // Skip parsing if string is too large (over 500KB) to prevent memory issues
-      if (typeof rawRankingData === 'string' && rawRankingData.length > 500 * 1024) {
+      // Skip parsing if string is too large (over 200KB) to prevent memory issues
+      if (typeof rawRankingData === 'string' && rawRankingData.length > 200 * 1024) {
         console.warn(`[get-latest-audit] ⚠️  ranking_ai_data too large (${Math.round(rawRankingData.length / 1024)}KB), skipping parse to prevent FUNCTION_INVOCATION_FAILED`);
         rankingAiData = null;
       } else {
@@ -246,6 +253,7 @@ export default async function handler(req, res) {
     } else {
       console.log(`[get-latest-audit] No rankingAiData in audit_results`);
     }
+    */
     
     /* DISABLED: Keyword rankings fetch - re-enable when function timeout issues are resolved
     try {
