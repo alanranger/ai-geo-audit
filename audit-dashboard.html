@@ -3698,7 +3698,20 @@
         
         html += `</div>`;
       } else {
-        html += `<p>Unable to load audit summary data.</p>`;
+        // Provide more helpful error message
+        let errorMsg = 'Unable to load audit summary data.';
+        if (!schemaAudit) {
+          errorMsg = 'Schema audit data is missing. The audit may have failed or data was not saved properly.';
+        } else if (schemaAudit.status !== 'ok') {
+          errorMsg = `Schema audit failed with status: ${schemaAudit.status}. ${schemaAudit.error || schemaAudit.message || ''}`;
+        } else if (!schemaAudit.data) {
+          errorMsg = 'Schema audit completed but data is missing. Please check the console for errors.';
+        }
+        html += `<div style="background: #fef2f2; border-left: 4px solid #ef4444; padding: 1rem; border-radius: 4px;">`;
+        html += `<p style="margin: 0; color: #991b1b; line-height: 1.6;">${errorMsg}</p>`;
+        html += `<p style="margin: 0.5rem 0 0 0; font-size: 0.85rem; color: #666;">Check the debug log at the bottom of the page for more details.</p>`;
+        html += `</div>`;
+        debugLog(`⚠ Completion modal error: schemaAudit=${!!schemaAudit}, status=${schemaAudit?.status}, hasData=${!!schemaAudit?.data}, hasMeta=${!!schemaAudit?.meta}`, 'warn');
       }
       
       content.innerHTML = html;
