@@ -3,21 +3,151 @@
 /**
  * Test script for get-latest-audit endpoint
  * 
- * This script tests the deployed get-latest-audit endpoint via HTTP
+ * This script tests the Supabase query directly and the deployed endpoint
  * to diagnose FUNCTION_INVOCATION_FAILED errors and identify bottlenecks.
  */
 
 const PROPERTY_URL = 'https://www.alanranger.com';
 const API_BASE_URL = 'https://ai-geo-audit.vercel.app'; // Deployed endpoint
+const SUPABASE_URL = 'https://igzvwbvgvmzvvzoclufx.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlnenZ3YnZndm16dnZ6b2NsdWZ4Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1NzY3NzkyOCwiZXhwIjoyMDczMjUzOTI4fQ.W9tkTSYu6Wml0mUr-gJD6hcLMZDcbaYYaOsyDXuwd8M';
 
-console.log('🧪 Testing get-latest-audit endpoint via HTTP...\n');
+console.log('🧪 Testing get-latest-audit endpoint...\n');
 console.log(`Property URL: ${PROPERTY_URL}`);
-console.log(`API Base URL: ${API_BASE_URL}\n`);
+console.log(`Supabase URL: ${SUPABASE_URL}\n`);
 
-// Test the deployed endpoint via HTTP
+// Test Supabase query directly and then the endpoint
 async function testEndpoint() {
   try {
-    console.log('📥 Step 1: Testing minimal request (timestamp + scores only)...\n');
+    console.log('📥 Step 1: Testing Supabase query directly (minimal fields)...\n');
+    
+    // Test minimal query (only essential fields)
+    const minimalSelectFields = 'audit_date,updated_at,visibility_score,content_schema_score,authority_score,local_entity_score,service_area_score';
+    const minimalQueryUrl = `${SUPABASE_URL}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(PROPERTY_URL)}&order=audit_date.desc&limit=1&select=${encodeURIComponent(minimalSelectFields)}`;
+    
+    const minimalQueryStart = Date.now();
+    let minimalQueryResponse;
+    try {
+      minimalQueryResponse = await fetch(minimalQueryUrl, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${SUPABASE_KEY}`
+        }
+      });
+    } catch (fetchError) {
+      console.error(`❌ Minimal query fetch failed: ${fetchError.message}`);
+      return;
+    }
+    
+    const minimalQueryTime = Date.now() - minimalQueryStart;
+    console.log(`⏱️  Minimal query took: ${minimalQueryTime}ms`);
+    console.log(`📊 Status: ${minimalQueryResponse.status}`);
+    
+    if (minimalQueryResponse.ok) {
+      const minimalResults = await minimalQueryResponse.json();
+      const responseSize = JSON.stringify(minimalResults).length;
+      console.log(`📦 Response size: ${Math.round(responseSize / 1024)}KB`);
+      
+      if (minimalResults && minimalResults.length > 0) {
+        const record = minimalResults[0];
+        console.log(`✅ Minimal query successful:`);
+        console.log(`   - audit_date: ${record.audit_date || 'null'}`);
+        console.log(`   - updated_at: ${record.updated_at || 'null'}`);
+        console.log(`   - visibility_score: ${record.visibility_score ?? 'null'}`);
+        console.log(`   - content_schema_score: ${record.content_schema_score ?? 'null'}`);
+        console.log(`   - authority_score: ${record.authority_score ?? 'null'}`);
+      } else {
+        console.log(`❌ No records found`);
+      }
+    } else {
+      const errorText = await minimalQueryResponse.text();
+      console.error(`❌ Minimal query failed: ${errorText}`);
+    }
+    
+    console.log('\n' + '='.repeat(80) + '\n');
+    console.log('📥 Step 2: Testing Supabase query directly (all fields)...\n');
+    
+    // Test full query (all fields)
+    const fullQueryUrl = `${SUPABASE_URL}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(PROPERTY_URL)}&order=audit_date.desc&limit=1&select=*`;
+    
+    const fullQueryStart = Date.now();
+    let fullQueryResponse;
+    try {
+      fullQueryResponse = await fetch(fullQueryUrl, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${SUPABASE_KEY}`
+        }
+      });
+    } catch (fetchError) {
+      console.error(`❌ Full query fetch failed: ${fetchError.message}`);
+      return;
+    }
+    
+    const fullQueryTime = Date.now() - fullQueryStart;
+    console.log(`⏱️  Full query took: ${fullQueryTime}ms`);
+    console.log(`📊 Status: ${fullQueryResponse.status}`);
+    
+    if (fullQueryResponse.ok) {
+      const contentLength = fullQueryResponse.headers.get('content-length');
+      if (contentLength) {
+        const sizeKB = Math.round(parseInt(contentLength) / 1024);
+        console.log(`📦 Response size (from header): ${sizeKB}KB`);
+      }
+      
+      let fullResults;
+      try {
+        fullResults = await fullQueryResponse.json();
+        const responseSize = JSON.stringify(fullResults).length;
+        console.log(`📦 Response size (actual): ${Math.round(responseSize / 1024)}KB`);
+        
+        if (fullResults && fullResults.length > 0) {
+          const record = fullResults[0];
+          console.log(`✅ Full query successful:`);
+          console.log(`   - audit_date: ${record.audit_date || 'null'}`);
+          
+          // Check field sizes
+          const fields = [
+            'query_pages',
+            'top_queries',
+            'schema_pages_detail',
+            'gsc_timeseries',
+            'ranking_ai_data',
+            'money_page_priority_data',
+            'money_segment_metrics'
+          ];
+          
+          console.log(`\n📊 Field sizes:`);
+          for (const field of fields) {
+            if (record[field]) {
+              const size = typeof record[field] === 'string' 
+                ? record[field].length 
+                : JSON.stringify(record[field]).length;
+              const sizeKB = Math.round(size / 1024);
+              console.log(`   - ${field}: ${sizeKB}KB`);
+            } else {
+              console.log(`   - ${field}: null`);
+            }
+          }
+        } else {
+          console.log(`❌ No records found`);
+        }
+      } catch (jsonError) {
+        console.error(`❌ Failed to parse full query response: ${jsonError.message}`);
+        const rawText = await fullQueryResponse.text();
+        console.error(`   Raw response (first 500 chars): ${rawText.substring(0, 500)}`);
+      }
+    } else {
+      const errorText = await fullQueryResponse.text();
+      console.error(`❌ Full query failed: ${errorText}`);
+    }
+    
+    console.log('\n' + '='.repeat(80) + '\n');
+    console.log('📥 Step 3: Testing deployed endpoint (minimal request)...\n');
     
     // Test minimal request
     const minimalUrl = `${API_BASE_URL}/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(PROPERTY_URL)}&minimal=true`;
@@ -65,7 +195,7 @@ async function testEndpoint() {
     }
     
     console.log('\n' + '='.repeat(80) + '\n');
-    console.log('📥 Step 2: Testing full request (all data)...\n');
+    console.log('📥 Step 4: Testing deployed endpoint (full request)...\n');
     
     // Test full request
     const fullUrl = `${API_BASE_URL}/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(PROPERTY_URL)}`;

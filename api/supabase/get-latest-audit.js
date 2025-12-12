@@ -186,9 +186,30 @@ export default async function handler(req, res) {
     // The rankingAiData will be loaded from the audit_results.ranking_ai_data JSON field instead
     let rankingAiData = null;
     
-    // Use fallback from audit_results immediately to prevent timeouts
-    rankingAiData = record.ranking_ai_data || null;
-    console.log(`[get-latest-audit] Using rankingAiData from audit_results (${rankingAiData ? 'found' : 'null'})`);
+    // CRITICAL: Parse ranking_ai_data if it's a string (Supabase may return JSON as strings)
+    // Also check size to prevent FUNCTION_INVOCATION_FAILED errors
+    const rawRankingData = record.ranking_ai_data;
+    if (rawRankingData) {
+      // Skip parsing if string is too large (over 500KB) to prevent memory issues
+      if (typeof rawRankingData === 'string' && rawRankingData.length > 500 * 1024) {
+        console.warn(`[get-latest-audit] ⚠️  ranking_ai_data too large (${Math.round(rawRankingData.length / 1024)}KB), skipping parse to prevent FUNCTION_INVOCATION_FAILED`);
+        rankingAiData = null;
+      } else {
+        try {
+          if (typeof rawRankingData === 'string') {
+            rankingAiData = JSON.parse(rawRankingData);
+          } else {
+            rankingAiData = rawRankingData;
+          }
+          console.log(`[get-latest-audit] Using rankingAiData from audit_results (${rankingAiData ? (rankingAiData.combinedRows?.length || 0) + ' keywords' : 'null'})`);
+        } catch (parseError) {
+          console.error(`[get-latest-audit] Failed to parse ranking_ai_data: ${parseError.message}`);
+          rankingAiData = null;
+        }
+      }
+    } else {
+      console.log(`[get-latest-audit] No rankingAiData in audit_results`);
+    }
     
     /* DISABLED: Keyword rankings fetch - re-enable when function timeout issues are resolved
     try {
@@ -399,7 +420,12 @@ export default async function handler(req, res) {
     }
     */
     
-    console.log(`[get-latest-audit] Final rankingAiData: ${rankingAiData ? (rankingAiData.combinedRows?.length || 0) + ' keywords' : 'null'}`);
+    // Log final rankingAiData status (safely, without accessing nested properties if it's still a string)
+    if (rankingAiData && typeof rankingAiData === 'object' && rankingAiData.combinedRows) {
+      console.log(`[get-latest-audit] Final rankingAiData: ${rankingAiData.combinedRows.length} keywords`);
+    } else {
+      console.log(`[get-latest-audit] Final rankingAiData: null or invalid`);
+    }
 
     // Reconstruct the full audit object from Supabase data
     // Wrap in try-catch to handle any parsing errors gracefully
@@ -822,7 +848,24 @@ export default async function handler(req, res) {
         }
         return metrics;
       })(),
-      rankingAiData: rankingAiData // Ranking & AI data reconstructed from keyword_rankings table
+      rankingAiData: (() => {
+        // Truncate rankingAiData if it's too large to prevent FUNCTION_INVOCATION_FAILED
+        if (!rankingAiData) return null;
+        
+        // If it has combinedRows, truncate to prevent large responses
+        if (rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
+          if (rankingAiData.combinedRows.length > 2000) {
+            console.warn(`[get-latest-audit] Truncating rankingAiData.combinedRows from ${rankingAiData.combinedRows.length} to 2000`);
+            return {
+              ...rankingAiData,
+              combinedRows: rankingAiData.combinedRows.slice(0, 2000),
+              _truncated: true
+            };
+          }
+        }
+        
+        return rankingAiData;
+      })() // Ranking & AI data reconstructed from keyword_rankings table
     };
     } catch (reconstructionError) {
       console.error('[get-latest-audit] Error reconstructing audit data:', reconstructionError);
