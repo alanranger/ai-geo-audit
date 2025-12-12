@@ -51,41 +51,55 @@ export default async function handler(req, res) {
     // Fetch the most recent audit (order by audit_date desc, limit 1)
     // Include all fields needed to reconstruct the audit object
     // Using select=* to get all columns including money_pages_metrics, money_pages_summary, money_pages_behaviour_score, money_segment_metrics
-    const queryUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.desc&limit=1&select=*`;
+    let record;
+    let auditDate;
     
-    const response = await fetch(queryUrl, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': supabaseKey,
-        'Authorization': `Bearer ${supabaseKey}`
+    try {
+      const queryUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.desc&limit=1&select=*`;
+      
+      const response = await fetch(queryUrl, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`
+        }
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[get-latest-audit] Supabase query error:', errorText);
+        return res.status(response.status).json({
+          status: 'error',
+          message: 'Failed to fetch latest audit from Supabase',
+          details: errorText,
+          meta: { generatedAt: new Date().toISOString() }
+        });
       }
-    });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Supabase error:', errorText);
-      return res.status(response.status).json({
+      const results = await response.json();
+
+      if (!results || results.length === 0) {
+        return res.status(200).json({
+          status: 'ok',
+          data: null,
+          message: 'No audit found for this property URL',
+          meta: { generatedAt: new Date().toISOString() }
+        });
+      }
+
+      record = results[0];
+      auditDate = record.audit_date;
+      console.log(`[get-latest-audit] Found audit record for date: ${auditDate}`);
+    } catch (queryError) {
+      console.error('[get-latest-audit] Error fetching audit record:', queryError);
+      return res.status(500).json({
         status: 'error',
-        message: 'Failed to fetch latest audit from Supabase',
-        details: errorText,
+        message: 'Failed to fetch audit record from Supabase',
+        details: queryError.message,
         meta: { generatedAt: new Date().toISOString() }
       });
     }
-
-    const results = await response.json();
-
-    if (!results || results.length === 0) {
-      return res.status(200).json({
-        status: 'ok',
-        data: null,
-        message: 'No audit found for this property URL',
-        meta: { generatedAt: new Date().toISOString() }
-      });
-    }
-
-    const record = results[0];
-    const auditDate = record.audit_date;
 
     // Fetch keyword rankings from keyword_rankings table for this audit_date and property_url
     let rankingAiData = null;
@@ -299,7 +313,10 @@ export default async function handler(req, res) {
     console.log(`[get-latest-audit] Final rankingAiData: ${rankingAiData ? (rankingAiData.combinedRows?.length || 0) + ' keywords' : 'null'}`);
 
     // Reconstruct the full audit object from Supabase data
-    const auditData = {
+    // Wrap in try-catch to handle any parsing errors gracefully
+    let auditData;
+    try {
+      auditData = {
       scores: {
         visibility: record.visibility_score || null,
         contentSchema: record.content_schema_score || null,
@@ -653,11 +670,74 @@ export default async function handler(req, res) {
       })(),
       rankingAiData: rankingAiData // Ranking & AI data reconstructed from keyword_rankings table
     };
+    } catch (reconstructionError) {
+      console.error('[get-latest-audit] Error reconstructing audit data:', reconstructionError);
+      console.error('[get-latest-audit] Stack:', reconstructionError.stack);
+      // Return minimal audit data if reconstruction fails
+      auditData = {
+        scores: {
+          visibility: record.visibility_score || null,
+          contentSchema: record.content_schema_score || null,
+          authority: record.authority_score || null,
+          localEntity: record.local_entity_score || null,
+          serviceArea: record.service_area_score || null
+        },
+        searchData: {
+          totalClicks: record.gsc_clicks || 0,
+          totalImpressions: record.gsc_impressions || 0,
+          averagePosition: record.gsc_avg_position || null,
+          ctr: record.gsc_ctr || 0
+        },
+        schemaAudit: record.schema_pages_with_schema ? {
+          status: 'ok',
+          data: {
+            totalPages: record.schema_total_pages || 0,
+            pagesWithSchema: record.schema_pages_with_schema || 0,
+            coverage: record.schema_pages_with_schema && record.schema_total_pages 
+              ? (record.schema_pages_with_schema / record.schema_total_pages) * 100 
+              : 0
+          }
+        } : null,
+        timestamp: record.updated_at ? new Date(record.updated_at).getTime() : new Date(record.audit_date + 'T00:00:00').getTime(),
+        auditDate: record.audit_date,
+        _error: 'Partial data - reconstruction failed',
+        _errorMessage: reconstructionError.message
+      };
+    }
 
     // Check response size before sending (Vercel limit is ~4.5MB)
-    let responseJson = JSON.stringify({ status: 'ok', data: auditData, meta: { generatedAt: new Date().toISOString(), auditDate: record.audit_date } });
-    let responseSizeKB = Math.round(responseJson.length / 1024);
-    console.log(`[get-latest-audit] Initial response size: ${responseSizeKB}KB`);
+    let responseJson;
+    let responseSizeKB = 0;
+    try {
+      responseJson = JSON.stringify({ status: 'ok', data: auditData, meta: { generatedAt: new Date().toISOString(), auditDate: record.audit_date } });
+      responseSizeKB = Math.round(responseJson.length / 1024);
+      console.log(`[get-latest-audit] Initial response size: ${responseSizeKB}KB`);
+    } catch (stringifyError) {
+      console.error('[get-latest-audit] Error stringifying response:', stringifyError);
+      // Try to return a minimal response
+      try {
+        const minimalData = {
+          scores: auditData.scores || {},
+          searchData: auditData.searchData || {},
+          schemaAudit: auditData.schemaAudit || null,
+          timestamp: auditData.timestamp || Date.now(),
+          auditDate: auditData.auditDate || record.audit_date,
+          _error: 'Response too large to stringify',
+          _truncated: true
+        };
+        responseJson = JSON.stringify({ status: 'ok', data: minimalData, meta: { generatedAt: new Date().toISOString(), auditDate: record.audit_date, truncated: true } });
+        responseSizeKB = Math.round(responseJson.length / 1024);
+        console.log(`[get-latest-audit] Using minimal response, size: ${responseSizeKB}KB`);
+      } catch (minimalError) {
+        console.error('[get-latest-audit] Even minimal response failed:', minimalError);
+        return res.status(500).json({
+          status: 'error',
+          message: 'Failed to serialize response data',
+          details: 'Response data is too large or contains circular references',
+          meta: { generatedAt: new Date().toISOString() }
+        });
+      }
+    }
     
     // If response is too large, truncate large arrays
     const MAX_RESPONSE_SIZE_KB = 4000; // 4MB limit (leaving 500KB buffer)
