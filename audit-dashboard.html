@@ -2485,7 +2485,7 @@
                   </tr>
                 </thead>
                 <tbody id="ranking-ai-table-body">
-                  <tr><td colspan="10" class="ranking-table-empty">Click "Run ranking &amp; AI check" to load data.</td></tr>
+                  <tr><td colspan="11" class="ranking-table-empty">Click "Run ranking &amp; AI check" to load data.</td></tr>
                 </tbody>
               </table>
             </div>
@@ -21373,8 +21373,19 @@ Final Score: ${score}/100`;
       const { combinedRows, summary } = RankingAiModule.state();
       debugLog(`📊 renderRankingAiTab: combinedRows=${combinedRows?.length || 0}, hasSummary=${!!summary}`, 'info');
       
-      if (!summary || !Array.isArray(combinedRows)) {
-        debugLog(`⚠ renderRankingAiTab: Early return - summary=${!!summary}, combinedRows is array=${Array.isArray(combinedRows)}`, 'warn');
+      // Always render table, even if no data (will show empty state)
+      const tbody = document.getElementById("ranking-ai-table-body");
+      if (!tbody) {
+        debugLog('⚠ renderRankingAiTab: Table body not found', 'warn');
+        return;
+      }
+      
+      if (!summary || !Array.isArray(combinedRows) || combinedRows.length === 0) {
+        debugLog(`⚠ renderRankingAiTab: No data - summary=${!!summary}, combinedRows is array=${Array.isArray(combinedRows)}, length=${combinedRows?.length || 0}`, 'warn');
+        // Show empty state message
+        tbody.innerHTML = '<tr><td colspan="11" class="ranking-table-empty">Click "Run ranking &amp; AI check" to load data.</td></tr>';
+        const paginationControls = document.getElementById("ranking-pagination-controls");
+        if (paginationControls) paginationControls.style.display = "none";
         return;
       }
       
@@ -21495,7 +21506,7 @@ Final Score: ${score}/100`;
       if (!sortedRows.length) {
         const tr = document.createElement("tr");
         const td = document.createElement("td");
-        td.colSpan = 10; // Updated: now 10 columns (added Opportunity score)
+        td.colSpan = 11; // Updated: 11 columns (Keyword, Segment, Best rank, Search volume, Demand share, Opportunity score, AI Overview, AI citations, Ranking URL, Page type, SERP features)
         td.className = "ranking-table-empty";
         td.textContent = filteredRows.length === 0 && combinedRows.length > 0
           ? "No rows match the current filters."
