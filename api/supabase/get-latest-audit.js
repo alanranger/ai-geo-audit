@@ -93,7 +93,8 @@ export default async function handler(req, res) {
       console.log(`[get-latest-audit] Fetching keyword rankings for audit_date=${auditDate}, property_url=${propertyUrl}`);
       
       // First, try to fetch using the audit_date from audit_results
-      let keywordRankingsUrl = `${supabaseUrl}/rest/v1/keyword_rankings?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${encodeURIComponent(auditDate)}&select=*&order=keyword.asc`;
+      // Limit to 5000 rows to prevent timeout/response size issues
+      let keywordRankingsUrl = `${supabaseUrl}/rest/v1/keyword_rankings?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${encodeURIComponent(auditDate)}&select=*&order=keyword.asc&limit=5000`;
       let keywordRankingsResponse = await fetch(keywordRankingsUrl, {
         method: 'GET',
         headers: {
@@ -624,12 +625,63 @@ export default async function handler(req, res) {
     };
 
     // Check response size before sending (Vercel limit is ~4.5MB)
-    const responseJson = JSON.stringify({ status: 'ok', data: auditData, meta: { generatedAt: new Date().toISOString(), auditDate: record.audit_date } });
-    const responseSizeKB = Math.round(responseJson.length / 1024);
-    console.log(`[get-latest-audit] Response size: ${responseSizeKB}KB`);
+    let responseJson = JSON.stringify({ status: 'ok', data: auditData, meta: { generatedAt: new Date().toISOString(), auditDate: record.audit_date } });
+    let responseSizeKB = Math.round(responseJson.length / 1024);
+    console.log(`[get-latest-audit] Initial response size: ${responseSizeKB}KB`);
     
-    if (responseSizeKB > 4000) {
-      console.warn(`[get-latest-audit] ⚠ Response size (${responseSizeKB}KB) is close to Vercel limit (4.5MB)`);
+    // If response is too large, truncate large arrays
+    const MAX_RESPONSE_SIZE_KB = 4000; // 4MB limit (leaving 500KB buffer)
+    if (responseSizeKB > MAX_RESPONSE_SIZE_KB) {
+      console.warn(`[get-latest-audit] ⚠ Response size (${responseSizeKB}KB) exceeds limit, truncating large fields...`);
+      
+      // Truncate queryPages if too large
+      if (auditData.searchData?.queryPages && auditData.searchData.queryPages.length > 2000) {
+        console.warn(`[get-latest-audit] Truncating queryPages from ${auditData.searchData.queryPages.length} to 2000`);
+        auditData.searchData.queryPages = auditData.searchData.queryPages.slice(0, 2000);
+      }
+      
+      // Truncate topQueries if too large
+      if (auditData.searchData?.topQueries && auditData.searchData.topQueries.length > 500) {
+        console.warn(`[get-latest-audit] Truncating topQueries from ${auditData.searchData.topQueries.length} to 500`);
+        auditData.searchData.topQueries = auditData.searchData.topQueries.slice(0, 500);
+      }
+      
+      // Truncate rankingAiData combinedRows if too large
+      if (auditData.rankingAiData?.combinedRows && auditData.rankingAiData.combinedRows.length > 5000) {
+        console.warn(`[get-latest-audit] Truncating rankingAiData.combinedRows from ${auditData.rankingAiData.combinedRows.length} to 5000`);
+        auditData.rankingAiData.combinedRows = auditData.rankingAiData.combinedRows.slice(0, 5000);
+        // Recalculate summary with truncated data
+        const totalKeywords = auditData.rankingAiData.combinedRows.length;
+        const keywordsWithRank = auditData.rankingAiData.combinedRows.filter(r => r.best_rank_group != null && r.best_rank_group > 0).length;
+        const top10 = auditData.rankingAiData.combinedRows.filter(r => r.best_rank_group != null && r.best_rank_group <= 10).length;
+        const top3 = auditData.rankingAiData.combinedRows.filter(r => r.best_rank_group != null && r.best_rank_group <= 3).length;
+        const keywordsWithAiOverview = auditData.rankingAiData.combinedRows.filter(r => r.has_ai_overview === true).length;
+        const keywordsWithAiCitations = auditData.rankingAiData.combinedRows.filter(r => r.ai_alan_citations_count > 0).length;
+        auditData.rankingAiData.summary = {
+          total_keywords: totalKeywords,
+          keywords_with_rank: keywordsWithRank,
+          top10,
+          top3,
+          keywords_with_ai_overview: keywordsWithAiOverview,
+          keywords_with_ai_citations: keywordsWithAiCitations,
+          truncated: true // Flag to indicate data was truncated
+        };
+      }
+      
+      // Re-stringify to check new size
+      responseJson = JSON.stringify({ status: 'ok', data: auditData, meta: { generatedAt: new Date().toISOString(), auditDate: record.audit_date } });
+      responseSizeKB = Math.round(responseJson.length / 1024);
+      console.log(`[get-latest-audit] Response size after truncation: ${responseSizeKB}KB`);
+      
+      if (responseSizeKB > MAX_RESPONSE_SIZE_KB) {
+        console.error(`[get-latest-audit] ✗ Response still too large (${responseSizeKB}KB) after truncation`);
+        return res.status(500).json({
+          status: 'error',
+          message: 'Response too large',
+          details: `Response size (${responseSizeKB}KB) exceeds maximum allowed size (${MAX_RESPONSE_SIZE_KB}KB)`,
+          meta: { generatedAt: new Date().toISOString() }
+        });
+      }
     }
 
     return res.status(200).json({
@@ -637,20 +689,24 @@ export default async function handler(req, res) {
       data: auditData,
       meta: { 
         generatedAt: new Date().toISOString(),
-        auditDate: record.audit_date
+        auditDate: record.audit_date,
+        responseSizeKB
       }
     });
 
   } catch (error) {
     console.error('[get-latest-audit] Exception:', error.message);
     console.error('[get-latest-audit] Stack:', error.stack);
+    console.error('[get-latest-audit] Error type:', error.constructor.name);
+    console.error('[get-latest-audit] Error details:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
     
     // Check if it's a timeout or memory error
-    if (error.message && (error.message.includes('timeout') || error.message.includes('memory') || error.message.includes('invocation'))) {
+    const errorMessage = error.message || String(error);
+    if (errorMessage.includes('timeout') || errorMessage.includes('memory') || errorMessage.includes('invocation') || errorMessage.includes('FUNCTION_INVOCATION_FAILED')) {
       return res.status(500).json({
         status: 'error',
         message: 'Function invocation failed - response may be too large or function timed out',
-        details: error.message,
+        details: errorMessage,
         suggestion: 'Try reducing the amount of data requested or check Vercel function logs',
         meta: { generatedAt: new Date().toISOString() }
       });
@@ -659,7 +715,7 @@ export default async function handler(req, res) {
     return res.status(500).json({
       status: 'error',
       message: 'Internal server error',
-      details: error.message,
+      details: errorMessage,
       meta: { generatedAt: new Date().toISOString() }
     });
   }
