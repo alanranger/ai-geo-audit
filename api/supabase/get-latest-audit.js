@@ -424,7 +424,8 @@ export default async function handler(req, res) {
                 hasSchema: p.hasSchema === true,
                 hasInheritedSchema: p.hasInheritedSchema === true,
                 schemaTypes: Array.isArray(p.schemaTypes) ? p.schemaTypes : (p.schemaTypes ? [p.schemaTypes] : []),
-                error: p.error || null
+                error: p.error || null,
+                errorType: p.errorType || null
               })).filter(p => p.url);
             }
             return null;
@@ -516,7 +517,67 @@ export default async function handler(req, res) {
             }
             return Array.isArray(missing) ? missing : [];
           })()
-        }
+        },
+        meta: (() => {
+          // Reconstruct meta.diagnostic from schema_pages_detail by counting error types
+          let pagesDetail = record.schema_pages_detail;
+          if (!pagesDetail) return { generatedAt: record.created_at || new Date().toISOString() };
+          
+          // Parse if stored as string
+          if (typeof pagesDetail === 'string') {
+            try {
+              pagesDetail = JSON.parse(pagesDetail);
+            } catch (e) {
+              return { generatedAt: record.created_at || new Date().toISOString() };
+            }
+          }
+          
+          if (!Array.isArray(pagesDetail) || pagesDetail.length === 0) {
+            return { generatedAt: record.created_at || new Date().toISOString() };
+          }
+          
+          // Count error types
+          const errorTypes = {};
+          const errorExamples = {};
+          let failedPages = 0;
+          let successfulPages = 0;
+          
+          pagesDetail.forEach(p => {
+            if (p.error) {
+              failedPages++;
+              const errorType = p.errorType || 'Unknown';
+              errorTypes[errorType] = (errorTypes[errorType] || 0) + 1;
+              if (!errorExamples[errorType]) {
+                errorExamples[errorType] = {
+                  url: p.url,
+                  error: p.error
+                };
+              }
+            } else {
+              successfulPages++;
+            }
+          });
+          
+          const totalPages = pagesDetail.length;
+          const pagesWithSchema = pagesDetail.filter(p => p.hasSchema === true).length;
+          
+          return {
+            generatedAt: record.created_at || new Date().toISOString(),
+            urlsScanned: totalPages,
+            urlsWithSchema: pagesWithSchema,
+            diagnostic: {
+              totalPages,
+              successfulPages,
+              failedPages,
+              pagesWithInlineSchema: pagesWithSchema,
+              pagesWithoutInlineSchema: totalPages - pagesWithSchema,
+              errorTypes: Object.keys(errorTypes).length > 0 ? errorTypes : undefined,
+              errorExamples: Object.keys(errorExamples).length > 0 ? errorExamples : undefined,
+              note: 'Failed crawls are counted as pages without schema since schema cannot be verified'
+            }
+          };
+        })()
+      }
       } : null,
       localSignals: (record.local_entity_score !== null || record.service_area_score !== null) ? {
         data: {

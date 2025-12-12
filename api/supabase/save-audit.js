@@ -179,7 +179,8 @@ export default async function handler(req, res) {
             hasSchema: p.hasSchema === true,
             hasInheritedSchema: p.hasInheritedSchema === true,
             schemaTypes: Array.isArray(p.schemaTypes) ? p.schemaTypes : (p.schemaTypes ? [p.schemaTypes] : []),
-            error: p.error || null
+            error: p.error || null,
+            errorType: p.errorType || null
           })).filter(p => p.url);
         }
         // Second try: pagesWithSchema if it's an array
@@ -192,7 +193,8 @@ export default async function handler(req, res) {
             hasSchema: (typeof p === 'object' && p !== null) ? (p.hasSchema === true) : false,
             hasInheritedSchema: (typeof p === 'object' && p !== null) ? (p.hasInheritedSchema === true) : false,
             schemaTypes: Array.isArray(p.schemaTypes) ? p.schemaTypes : ((typeof p === 'object' && p !== null && p.schemaTypes) ? [p.schemaTypes] : []),
-            error: (typeof p === 'object' && p !== null) ? (p.error || null) : null
+            error: (typeof p === 'object' && p !== null) ? (p.error || null) : null,
+            errorType: (typeof p === 'object' && p !== null) ? (p.errorType || null) : null
           })).filter(p => p.url);
         }
         console.warn('[Save Audit] schema_pages_detail is missing - schema coverage will not be available in scorecard');

@@ -1463,7 +1463,8 @@ export default async function handler(req, res) {
       hasSchema: result.success && result.schemas && result.schemas.length > 0,
       hasInheritedSchema: result.success && !result.schemas?.length && inheritanceMap.get(result.url) === true,
       schemaTypes: pageSchemaTypesMap.get(result.url) || [],
-      error: result.success ? null : (result.error || null)
+      error: result.success ? null : (result.error || null),
+      errorType: result.success ? null : (result.errorType || null)
     }));
     
     return res.status(200).json({
