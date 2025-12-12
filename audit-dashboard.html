@@ -3703,8 +3703,39 @@
         
         html += `<div style="background: #f8f9fa; padding: 1rem; border-radius: 6px; margin-top: 1rem;">`;
         html += `<div style="font-size: 0.85rem; color: #666; margin-bottom: 0.5rem;"><strong>Schema Coverage</strong></div>`;
-        html += `<div style="font-size: 1.25rem; font-weight: 600; color: #333;">${data.coverage || 0}%</div>`;
-        html += `<div style="font-size: 0.85rem; color: #666; margin-top: 0.25rem;">${data.pagesWithSchema || 0} pages with inline schema</div>`;
+        // Ensure coverage is a number, not an object
+        const coverageValue = typeof data.coverage === 'number' && !isNaN(data.coverage) 
+          ? data.coverage 
+          : (() => {
+              // Calculate from pagesWithSchema and totalPages if coverage is not a number
+              const pagesWithSchemaCount = Array.isArray(data.pagesWithSchema) 
+                ? data.pagesWithSchema.length 
+                : (typeof data.pagesWithSchema === 'number' ? data.pagesWithSchema : 0);
+              const totalPagesCount = typeof data.totalPages === 'number' ? data.totalPages : totalPages;
+              return totalPagesCount > 0 ? ((pagesWithSchemaCount / totalPagesCount) * 100) : 0;
+            })();
+        html += `<div style="font-size: 1.25rem; font-weight: 600; color: #333;">${coverageValue.toFixed(1)}%</div>`;
+        const pagesWithSchemaCount = Array.isArray(data.pagesWithSchema) 
+          ? data.pagesWithSchema.length 
+          : (typeof data.pagesWithSchema === 'number' ? data.pagesWithSchema : 0);
+        html += `<div style="font-size: 0.85rem; color: #666; margin-top: 0.25rem;">${pagesWithSchemaCount} pages with inline schema</div>`;
+        
+        // Display schema types if available, properly formatted
+        if (data.schemaTypes && Array.isArray(data.schemaTypes) && data.schemaTypes.length > 0) {
+          const formattedTypes = data.schemaTypes
+            .filter(t => t !== null && t !== undefined)
+            .map(t => {
+              if (typeof t === 'string') return t;
+              if (t && typeof t === 'object' && t.type && typeof t.type === 'string') return t.type;
+              return null;
+            })
+            .filter(t => t !== null && typeof t === 'string')
+            .slice(0, 10)
+            .join(', ');
+          if (formattedTypes) {
+            html += `<div style="font-size: 0.75rem; color: #666; margin-top: 0.5rem; line-height: 1.4;">Schema types: ${formattedTypes}${data.schemaTypes.length > 10 ? '...' : ''}</div>`;
+          }
+        }
         html += `</div>`;
         
         html += `</div>`;
