@@ -1672,7 +1672,7 @@
 </head>
 <body>
   <div class="header">
-    <h1>AI GEO Audit Dashboard</h1>
+    <h1>AIO Audit Dashboard</h1>
     <p>Automated SEO Analysis & Pillar Score Tracking</p>
     <p style="font-size: 0.9rem; margin-top: 0.5rem; opacity: 1; background: rgba(0,0,0,0.3); padding: 0.25rem 0.5rem; border-radius: 4px; display: inline-block;">
       <strong>Version: <span id="gitVersion">37685db</span></strong> | Built: <span id="buildDate"></span> | 
@@ -14489,14 +14489,15 @@ Final Score: ${score}/100`;
                     // Show top 15 most common types for readability (still sorted by count)
                     // Handle both object format {type, count} and string format
                     const topTypes = schemaTypes.slice(0, 15).map(t => {
-                      if (typeof t === 'string') {
-                        return t;
-                      } else if (t && typeof t === 'object' && t.type) {
+                      if (typeof t === 'string' && t.trim()) {
+                        return t.trim();
+                      } else if (t && typeof t === 'object' && t.type && typeof t.type === 'string') {
                         return `${t.type}${t.count ? ` (${t.count})` : ''}`;
                       } else {
-                        return String(t); // Fallback
+                        // Skip objects without a valid type property - don't convert to [object Object]
+                        return null;
                       }
-                    }).filter(Boolean).join(', ');
+                    }).filter(t => t !== null && t !== undefined && t !== '' && !t.includes('[object Object]')).join(', ');
                     contentSchemaDesc += `Schema types found: ${topTypes}${schemaTypes.length > 15 ? '...' : ''}. `;
                   }
                   
