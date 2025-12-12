@@ -320,7 +320,7 @@
     /* Override for scorecard sections inside ranking-ai-detail-content */
     .ranking-ai-detail-content .scorecard-section {
       margin-top: 0;
-      margin-bottom: 0.15rem !important;
+      margin-bottom: 0.5rem !important;
     }
     
     .ranking-ai-detail-content .scorecard-section:last-child {
@@ -1586,7 +1586,7 @@
     /* Section breaks for scorecard components */
     .ranking-ai-detail-content .scorecard-section {
       padding: 1rem 1.25rem;
-      margin-bottom: 0.15rem !important;
+      margin-bottom: 0.5rem !important;
       background: #f5f5f5;
       border-left: 3px solid #cbd5e1;
       border-radius: 4px;
@@ -5849,7 +5849,22 @@
         const richResultScore = (richEligibleCount / richResultTypes.length) * 100;
         
         // 3. Coverage Score (20% weight): Pages with schema / total pages
-        const coverageScore = schemaData.coverage || 0;
+        // Calculate coverage from pagesWithSchema and totalPages if coverage is not available
+        let coverageScore = 0;
+        if (typeof schemaData.coverage === 'number' && !isNaN(schemaData.coverage)) {
+          coverageScore = schemaData.coverage;
+        } else {
+          // Calculate from pagesWithSchema and totalPages
+          const pagesWithSchemaCount = Array.isArray(schemaData.pagesWithSchema) 
+            ? schemaData.pagesWithSchema.length 
+            : (typeof schemaData.pagesWithSchema === 'number' ? schemaData.pagesWithSchema : 0);
+          const totalPagesCount = typeof schemaData.totalPages === 'number' 
+            ? schemaData.totalPages 
+            : (Array.isArray(schemaData.pages) ? schemaData.pages.length : 0);
+          if (totalPagesCount > 0) {
+            coverageScore = (pagesWithSchemaCount / totalPagesCount) * 100;
+          }
+        }
         
         // 4. Type Diversity Score (15% weight): Number of unique schema types (normalized to 15 types)
         const uniqueTypesCount = allTypes.size;
