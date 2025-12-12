@@ -623,6 +623,15 @@ export default async function handler(req, res) {
       rankingAiData: rankingAiData // Ranking & AI data reconstructed from keyword_rankings table
     };
 
+    // Check response size before sending (Vercel limit is ~4.5MB)
+    const responseJson = JSON.stringify({ status: 'ok', data: auditData, meta: { generatedAt: new Date().toISOString(), auditDate: record.audit_date } });
+    const responseSizeKB = Math.round(responseJson.length / 1024);
+    console.log(`[get-latest-audit] Response size: ${responseSizeKB}KB`);
+    
+    if (responseSizeKB > 4000) {
+      console.warn(`[get-latest-audit] ⚠ Response size (${responseSizeKB}KB) is close to Vercel limit (4.5MB)`);
+    }
+
     return res.status(200).json({
       status: 'ok',
       data: auditData,
@@ -633,7 +642,20 @@ export default async function handler(req, res) {
     });
 
   } catch (error) {
-    console.error('Error fetching latest audit:', error);
+    console.error('[get-latest-audit] Exception:', error.message);
+    console.error('[get-latest-audit] Stack:', error.stack);
+    
+    // Check if it's a timeout or memory error
+    if (error.message && (error.message.includes('timeout') || error.message.includes('memory') || error.message.includes('invocation'))) {
+      return res.status(500).json({
+        status: 'error',
+        message: 'Function invocation failed - response may be too large or function timed out',
+        details: error.message,
+        suggestion: 'Try reducing the amount of data requested or check Vercel function logs',
+        meta: { generatedAt: new Date().toISOString() }
+      });
+    }
+    
     return res.status(500).json({
       status: 'error',
       message: 'Internal server error',
