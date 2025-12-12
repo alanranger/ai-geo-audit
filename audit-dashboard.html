@@ -14500,6 +14500,11 @@ Final Score: ${score}/100`;
                   const schemaData = schemaAudit.data;
                   const { coverage, totalPages, pagesWithSchema, missingSchemaCount, missingSchemaPages, schemaTypes } = schemaData;
                   
+                  // Handle pagesWithSchema - it might be an array or a number
+                  const pagesWithSchemaCount = Array.isArray(pagesWithSchema) ? pagesWithSchema.length : (typeof pagesWithSchema === 'number' ? pagesWithSchema : 0);
+                  const totalPagesCount = typeof totalPages === 'number' ? totalPages : (Array.isArray(schemaData.pages) ? schemaData.pages.length : 0);
+                  const coverageValue = typeof coverage === 'number' ? coverage : (totalPagesCount > 0 ? ((pagesWithSchemaCount / totalPagesCount) * 100).toFixed(1) : '0');
+                  
                   // Calculate foundation schemas - use allDetectedTypes if available (all types), otherwise use schemaTypes (all types, sorted by count)
                   const allTypes = new Set();
                   if (schemaData.allDetectedTypes && Array.isArray(schemaData.allDetectedTypes)) {
@@ -14527,7 +14532,7 @@ Final Score: ${score}/100`;
                   
                   const richResultTypesList = ['Article', 'Event', 'FAQPage', 'Product', 'LocalBusiness', 'Course', 'Review', 'HowTo', 'VideoObject', 'ImageObject', 'ItemList'];
                   const richTypesPresent = richResultTypesList.filter(type => allTypes.has(type));
-                  contentSchemaDesc += ` <strong>Data Checked:</strong> Foundation schemas: ${foundationPresent}/4 (${foundationTypes.filter(t => allTypes.has(t)).join(', ') || 'none'}), Rich result types: ${richEligibleCount}/${richResultTypesList.length} eligible, Coverage: ${coverage}% (${pagesWithSchema}/${totalPages} pages), Type diversity: ${richTypesPresent.length}/${richResultTypesList.length} rich result types present (${richTypesPresent.join(', ') || 'none'}), ${uniqueTypesCount} total unique types across the site. `;
+                  contentSchemaDesc += ` <strong>Data Checked:</strong> Foundation schemas: ${foundationPresent}/4 (${foundationTypes.filter(t => allTypes.has(t)).join(', ') || 'none'}), Rich result types: ${richEligibleCount}/${richResultTypesList.length} eligible, Coverage: ${coverageValue}% (${pagesWithSchemaCount}/${totalPagesCount} pages), Type diversity: ${richTypesPresent.length}/${richResultTypesList.length} rich result types present (${richTypesPresent.join(', ') || 'none'}), ${uniqueTypesCount} total unique types across the site. `;
                   
                   if (schemaTypes && schemaTypes.length > 0) {
                     // Show top 15 most common types for readability (still sorted by count)
