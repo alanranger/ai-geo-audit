@@ -57,11 +57,16 @@ export default async function handler(req, res) {
     try {
       // For minimal requests, only fetch essential fields (timestamp + scores)
       // This prevents the function from crashing when large JSON fields are present
-      const selectFields = isMinimalRequest
-        ? 'audit_date,updated_at,visibility_score,content_schema_score,authority_score,local_entity_score,service_area_score'
-        : '*';
-      
-      const queryUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.desc&limit=1&select=${selectFields}`;
+      let queryUrl;
+      if (isMinimalRequest) {
+        // For minimal requests, explicitly select only essential fields
+        // URL encode the select parameter to handle commas properly
+        const selectFields = 'audit_date,updated_at,visibility_score,content_schema_score,authority_score,local_entity_score,service_area_score';
+        queryUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.desc&limit=1&select=${encodeURIComponent(selectFields)}`;
+      } else {
+        // For full requests, fetch all fields (but we'll truncate large ones later)
+        queryUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.desc&limit=1&select=*`;
+      }
       
       const response = await fetch(queryUrl, {
         method: 'GET',
@@ -83,7 +88,31 @@ export default async function handler(req, res) {
         });
       }
 
-      const results = await response.json();
+      // Check response size before parsing (for minimal requests, should be very small)
+      const contentLength = response.headers.get('content-length');
+      if (contentLength && isMinimalRequest) {
+        const sizeKB = Math.round(parseInt(contentLength) / 1024);
+        console.log(`[get-latest-audit] Minimal response size: ${sizeKB}KB`);
+        if (sizeKB > 100) {
+          console.warn(`[get-latest-audit] ⚠️  Minimal response is unexpectedly large (${sizeKB}KB)`);
+        }
+      }
+
+      let results;
+      try {
+        results = await response.json();
+      } catch (jsonError) {
+        console.error('[get-latest-audit] Failed to parse Supabase response as JSON:', jsonError.message);
+        // Try to get the raw response for debugging
+        const rawText = await response.text();
+        console.error('[get-latest-audit] Raw response (first 500 chars):', rawText.substring(0, 500));
+        return res.status(500).json({
+          status: 'error',
+          message: 'Failed to parse Supabase response',
+          details: jsonError.message,
+          meta: { generatedAt: new Date().toISOString() }
+        });
+      }
 
       if (!results || results.length === 0) {
         return res.status(200).json({
@@ -111,23 +140,35 @@ export default async function handler(req, res) {
     // CRITICAL: If minimal request, return immediately after fetching essential fields
     // This prevents the function from processing large JSON fields that cause FUNCTION_INVOCATION_FAILED
     if (isMinimalRequest) {
-      console.log(`[get-latest-audit] Returning minimal response (timestamp + scores only)`);
-      return res.status(200).json({
-        status: 'ok',
-        data: {
-          timestamp: record.updated_at ? new Date(record.updated_at).getTime() : new Date(record.audit_date + 'T00:00:00').getTime(),
-          auditDate: record.audit_date,
+      try {
+        console.log(`[get-latest-audit] Returning minimal response (timestamp + scores only)`);
+        const minimalData = {
+          timestamp: record.updated_at ? new Date(record.updated_at).getTime() : (record.audit_date ? new Date(record.audit_date + 'T00:00:00').getTime() : Date.now()),
+          auditDate: record.audit_date || null,
           scores: {
-            visibility: record.visibility_score || null,
-            contentSchema: record.content_schema_score || null,
-            authority: record.authority_score || null,
-            localEntity: record.local_entity_score || null,
-            serviceArea: record.service_area_score || null
+            visibility: record.visibility_score ?? null,
+            contentSchema: record.content_schema_score ?? null,
+            authority: record.authority_score ?? null,
+            localEntity: record.local_entity_score ?? null,
+            serviceArea: record.service_area_score ?? null
           },
           _minimal: true
-        },
-        meta: { generatedAt: new Date().toISOString(), auditDate: record.audit_date, minimal: true }
-      });
+        };
+        return res.status(200).json({
+          status: 'ok',
+          data: minimalData,
+          meta: { generatedAt: new Date().toISOString(), auditDate: record.audit_date || null, minimal: true }
+        });
+      } catch (minimalError) {
+        console.error('[get-latest-audit] Error creating minimal response:', minimalError);
+        console.error('[get-latest-audit] Record keys:', record ? Object.keys(record) : 'null');
+        return res.status(500).json({
+          status: 'error',
+          message: 'Failed to create minimal response',
+          details: minimalError.message,
+          meta: { generatedAt: new Date().toISOString() }
+        });
+      }
     }
 
     // Fetch keyword rankings from keyword_rankings table for this audit_date and property_url
