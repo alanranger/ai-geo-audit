@@ -849,7 +849,6 @@ export default async function handler(req, res) {
             }
           };
         })()
-      }
       } : null,
       localSignals: (record.local_entity_score !== null || record.service_area_score !== null) ? {
         data: {
