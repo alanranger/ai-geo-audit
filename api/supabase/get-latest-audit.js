@@ -321,10 +321,36 @@ export default async function handler(req, res) {
     
     console.log(`[get-latest-audit] Final rankingAiData: ${rankingAiData ? (rankingAiData.combinedRows?.length || 0) + ' keywords' : 'null'}`);
 
+    // CRITICAL: Check if client wants minimal response (just timestamp and scores)
+    // This allows the UI to update the timestamp even if full data fetch fails
+    const minimalOnly = req.query.minimal === 'true';
+    
     // Reconstruct the full audit object from Supabase data
     // Wrap in try-catch to handle any parsing errors gracefully
     let auditData;
     try {
+      // If minimal only, return just timestamp and scores
+      if (minimalOnly) {
+        auditData = {
+          timestamp: record.updated_at ? new Date(record.updated_at).getTime() : new Date(record.audit_date + 'T00:00:00').getTime(),
+          auditDate: record.audit_date,
+          scores: {
+            visibility: record.visibility_score || null,
+            contentSchema: record.content_schema_score || null,
+            authority: record.authority_score || null,
+            localEntity: record.local_entity_score || null,
+            serviceArea: record.service_area_score || null
+          },
+          _minimal: true
+        };
+        console.log(`[get-latest-audit] Returning minimal response (timestamp + scores only)`);
+        return res.status(200).json({
+          status: 'ok',
+          data: auditData,
+          meta: { generatedAt: new Date().toISOString(), auditDate: record.audit_date, minimal: true }
+        });
+      }
+      
       auditData = {
       scores: {
         visibility: record.visibility_score || null,
@@ -398,10 +424,15 @@ export default async function handler(req, res) {
           totalClicks: record.gsc_clicks || 0
         },
         // CRITICAL: Load timeseries data from audit_results table (now stored directly)
-        // CRITICAL: Truncate immediately to prevent FUNCTION_INVOCATION_FAILED
+        // CRITICAL: Skip parsing if string is too large to prevent FUNCTION_INVOCATION_FAILED
         timeseries: (() => {
           const ts = record.gsc_timeseries;
           if (!ts) return null;
+          // Skip parsing if string is larger than 500KB to prevent timeouts
+          if (typeof ts === 'string' && ts.length > 500 * 1024) {
+            console.warn(`[get-latest-audit] Skipping gsc_timeseries parse (too large: ${Math.round(ts.length / 1024)}KB)`);
+            return null;
+          }
           let parsed;
           if (typeof ts === 'string') {
             try {
@@ -425,10 +456,15 @@ export default async function handler(req, res) {
         })(),
         // Query+page level data for CTR metrics in keyword scorecard
         // Fix: Parse JSON if query_pages is stored as string
-        // CRITICAL: Truncate immediately to prevent FUNCTION_INVOCATION_FAILED
+        // CRITICAL: Skip parsing if string is too large to prevent FUNCTION_INVOCATION_FAILED
         queryPages: (() => {
           const qp = record.query_pages;
           if (!qp) return null;
+          // Skip parsing if string is larger than 1MB to prevent timeouts
+          if (typeof qp === 'string' && qp.length > 1024 * 1024) {
+            console.warn(`[get-latest-audit] Skipping query_pages parse (too large: ${Math.round(qp.length / 1024)}KB)`);
+            return null;
+          }
           let parsed;
           if (typeof qp === 'string') {
             try {
@@ -492,10 +528,15 @@ export default async function handler(req, res) {
           // CRITICAL: Include pages array for scorecard schema detection
           // schema_pages_detail is the detailed array with url, title, metaDescription, hasSchema, schemaTypes, error per page
           // Parse JSON if stored as string in Supabase
-          // CRITICAL: Truncate immediately to prevent FUNCTION_INVOCATION_FAILED
+          // CRITICAL: Skip parsing if string is too large to prevent FUNCTION_INVOCATION_FAILED
           pages: (() => {
             let pagesDetail = record.schema_pages_detail;
             if (!pagesDetail) return null;
+            // Skip parsing if string is larger than 500KB to prevent timeouts
+            if (typeof pagesDetail === 'string' && pagesDetail.length > 500 * 1024) {
+              console.warn(`[get-latest-audit] Skipping schema_pages_detail parse (too large: ${Math.round(pagesDetail.length / 1024)}KB)`);
+              return null;
+            }
             // Parse if stored as string
             if (typeof pagesDetail === 'string') {
               try {
@@ -530,6 +571,11 @@ export default async function handler(req, res) {
             let pagesDetail = record.schema_pages_detail;
             if (!pagesDetail) {
               // Fallback to count if detail not available
+              return record.schema_pages_with_schema != null ? record.schema_pages_with_schema : 0;
+            }
+            // Skip parsing if string is larger than 500KB to prevent timeouts
+            if (typeof pagesDetail === 'string' && pagesDetail.length > 500 * 1024) {
+              console.warn(`[get-latest-audit] Skipping pagesWithSchema parse (too large: ${Math.round(pagesDetail.length / 1024)}KB)`);
               return record.schema_pages_with_schema != null ? record.schema_pages_with_schema : 0;
             }
             // Parse if stored as string
@@ -784,12 +830,27 @@ export default async function handler(req, res) {
         console.log(`[get-latest-audit] Using minimal response, size: ${responseSizeKB}KB`);
       } catch (minimalError) {
         console.error('[get-latest-audit] Even minimal response failed:', minimalError);
-        return res.status(500).json({
-          status: 'error',
-          message: 'Failed to serialize response data',
-          details: 'Response data is too large or contains circular references',
-          meta: { generatedAt: new Date().toISOString() }
-        });
+        // Last resort: return just the timestamp so UI can update
+        try {
+          const timestampOnly = {
+            timestamp: record.updated_at ? new Date(record.updated_at).getTime() : new Date(record.audit_date + 'T00:00:00').getTime(),
+            auditDate: record.audit_date,
+            _error: 'Could not serialize full response',
+            _minimal: true
+          };
+          return res.status(200).json({
+            status: 'ok',
+            data: timestampOnly,
+            meta: { generatedAt: new Date().toISOString(), auditDate: record.audit_date, minimal: true, error: 'Full response too large' }
+          });
+        } catch (finalError) {
+          return res.status(500).json({
+            status: 'error',
+            message: 'Failed to serialize response data',
+            details: 'Response data is too large or contains circular references',
+            meta: { generatedAt: new Date().toISOString() }
+          });
+        }
       }
     }
     
