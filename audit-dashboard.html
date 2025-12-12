@@ -12782,6 +12782,14 @@ Final Score: ${score}/100`;
         return sorted;
       }
       
+      // Initialize pagination state for Money Pages Priority table
+      if (window.moneyPagesPriorityCurrentPage === undefined) {
+        window.moneyPagesPriorityCurrentPage = 1;
+      }
+      if (window.moneyPagesPriorityRowsPerPage === undefined) {
+        window.moneyPagesPriorityRowsPerPage = 10;
+      }
+
       function renderMoneyPagesTable(moneyPages, filters = {}) {
         const tbody = document.querySelector("#money-pages-priority-table tbody");
         const thead = document.querySelector("#money-pages-priority-table thead");
@@ -12795,6 +12803,11 @@ Final Score: ${score}/100`;
         if (!sourcePages || sourcePages.length === 0) {
           debugLog('⚠ renderMoneyPagesTable: No money pages data available', 'warn');
           tbody.innerHTML = '<tr><td colspan="9" style="padding: 2rem; text-align: center; color: #64748b;">No money pages data available. Run an audit to generate priority matrix data.</td></tr>';
+          // Clear pagination if no data
+          const paginationContainer = document.getElementById('money-pages-priority-pagination');
+          if (paginationContainer) {
+            paginationContainer.innerHTML = '';
+          }
           return;
         }
 
@@ -12820,6 +12833,30 @@ Final Score: ${score}/100`;
 
         // Apply sorting
         rows = sortMoneyPagesRows(rows, moneyPagesTableSort.column, moneyPagesTableSort.direction);
+        
+        // Store filtered rows for pagination and copy button
+        window.moneyPagesPriorityFilteredRows = rows;
+        
+        // Pagination logic
+        const rowsPerPage = window.moneyPagesPriorityRowsPerPage || 10;
+        const totalRows = rows.length;
+        const totalPages = Math.max(1, Math.ceil(totalRows / rowsPerPage));
+        let currentPage = window.moneyPagesPriorityCurrentPage || 1;
+        
+        // Ensure currentPage is within valid range
+        if (currentPage > totalPages) {
+          currentPage = totalPages;
+          window.moneyPagesPriorityCurrentPage = currentPage;
+        }
+        if (currentPage < 1) {
+          currentPage = 1;
+          window.moneyPagesPriorityCurrentPage = currentPage;
+        }
+        
+        // Slice rows for current page
+        const startIndex = (currentPage - 1) * rowsPerPage;
+        const endIndex = startIndex + rowsPerPage;
+        const pageRows = rows.slice(startIndex, endIndex);
         
         // Render sortable header
         const sortArrow = (col) => {
@@ -12853,6 +12890,8 @@ Final Score: ${score}/100`;
               moneyPagesTableSort.column = col;
               moneyPagesTableSort.direction = 'asc';
             }
+            // Reset to page 1 when sorting changes
+            window.moneyPagesPriorityCurrentPage = 1;
             renderMoneyPagesTable(moneyPages, filters);
           });
           
@@ -12864,7 +12903,7 @@ Final Score: ${score}/100`;
           });
         });
 
-        tbody.innerHTML = rows
+        tbody.innerHTML = pageRows
           .map(p => {
             // Safety checks for undefined values
             const priorityLevel = p.priorityLevel || "LOW";
@@ -12904,7 +12943,7 @@ Final Score: ${score}/100`;
           })
           .join("");
 
-        // Copy URLs button
+        // Copy URLs button - copy all filtered rows, not just current page
         const copyBtn = document.getElementById("money-pages-copy-urls-btn");
         if (copyBtn) {
           copyBtn.onclick = () => {
@@ -12916,6 +12955,152 @@ Final Score: ${score}/100`;
               copyBtn.textContent = "Copy failed";
             });
           };
+        }
+        
+        // Render pagination controls
+        renderMoneyPagesPriorityPagination(totalRows, currentPage, totalPages, rowsPerPage);
+      }
+      
+      function renderMoneyPagesPriorityPagination(totalRows, currentPage, totalPages, rowsPerPage) {
+        const paginationContainer = document.getElementById('money-pages-priority-pagination');
+        if (!paginationContainer) {
+          debugLog('⚠ Pagination container not found', 'warn');
+          return;
+        }
+        
+        if (totalRows === 0) {
+          paginationContainer.innerHTML = '';
+          return;
+        }
+        
+        const startRow = totalRows === 0 ? 0 : (currentPage - 1) * rowsPerPage + 1;
+        const endRow = Math.min(currentPage * rowsPerPage, totalRows);
+        
+        paginationContainer.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #e5e7eb; flex-wrap: wrap; gap: 1rem;">
+            <div style="font-size: 0.875rem; color: #374151;">
+              Showing ${startRow}-${endRow} of ${totalRows.toLocaleString()}
+            </div>
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
+              <button 
+                id="money-pages-priority-pagination-first" 
+                type="button" 
+                style="padding: 0.5rem 1rem; border: 1px solid #d1d5db; border-radius: 6px; background: #ffffff; cursor: pointer; color: #374151; font-size: 0.875rem;"
+                ${currentPage === 1 ? 'disabled' : ''}
+              >First</button>
+              <button 
+                id="money-pages-priority-pagination-prev" 
+                type="button" 
+                style="padding: 0.5rem 1rem; border: 1px solid #d1d5db; border-radius: 6px; background: #ffffff; cursor: pointer; color: #374151; font-size: 0.875rem;"
+                ${currentPage === 1 ? 'disabled' : ''}
+              >Previous</button>
+              <span style="padding: 0 0.5rem; font-size: 0.875rem; color: #374151;">Page ${currentPage} of ${totalPages}</span>
+              <button 
+                id="money-pages-priority-pagination-next" 
+                type="button" 
+                style="padding: 0.5rem 1rem; border: 1px solid #d1d5db; border-radius: 6px; background: #ffffff; cursor: pointer; color: #374151; font-size: 0.875rem;"
+                ${currentPage === totalPages ? 'disabled' : ''}
+              >Next</button>
+              <button 
+                id="money-pages-priority-pagination-last" 
+                type="button" 
+                style="padding: 0.5rem 1rem; border: 1px solid #d1d5db; border-radius: 6px; background: #ffffff; cursor: pointer; color: #374151; font-size: 0.875rem;"
+                ${currentPage === totalPages ? 'disabled' : ''}
+              >Last</button>
+            </div>
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <label style="font-size: 0.875rem; color: #374151; white-space: nowrap;">Rows per page:</label>
+              <select 
+                id="money-pages-priority-rows-per-page" 
+                style="padding: 0.5rem 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.875rem; background: #ffffff; cursor: pointer;"
+              >
+                <option value="10" ${rowsPerPage === 10 ? 'selected' : ''}>10</option>
+                <option value="25" ${rowsPerPage === 25 ? 'selected' : ''}>25</option>
+                <option value="50" ${rowsPerPage === 50 ? 'selected' : ''}>50</option>
+                <option value="100" ${rowsPerPage === 100 ? 'selected' : ''}>100</option>
+                <option value="200" ${rowsPerPage === 200 ? 'selected' : ''}>200</option>
+              </select>
+            </div>
+          </div>
+        `;
+        
+        // Wire up pagination buttons
+        const firstBtn = document.getElementById('money-pages-priority-pagination-first');
+        const prevBtn = document.getElementById('money-pages-priority-pagination-prev');
+        const nextBtn = document.getElementById('money-pages-priority-pagination-next');
+        const lastBtn = document.getElementById('money-pages-priority-pagination-last');
+        const rowsPerPageSelect = document.getElementById('money-pages-priority-rows-per-page');
+        
+        if (firstBtn) {
+          firstBtn.addEventListener('click', () => {
+            window.moneyPagesPriorityCurrentPage = 1;
+            const filters = {
+              typeFilter: window.moneyPagesTypeFilter || 'all',
+              minImpr: window.moneyPagesMinImpr || 0,
+              matrixFilter: window.moneyPagesMatrixFilter || null
+            };
+            renderMoneyPagesTable(null, filters);
+          });
+        }
+        
+        if (prevBtn) {
+          prevBtn.addEventListener('click', () => {
+            if (window.moneyPagesPriorityCurrentPage > 1) {
+              window.moneyPagesPriorityCurrentPage--;
+              const filters = {
+                typeFilter: window.moneyPagesTypeFilter || 'all',
+                minImpr: window.moneyPagesMinImpr || 0,
+                matrixFilter: window.moneyPagesMatrixFilter || null
+              };
+              renderMoneyPagesTable(null, filters);
+            }
+          });
+        }
+        
+        if (nextBtn) {
+          nextBtn.addEventListener('click', () => {
+            const totalRows = window.moneyPagesPriorityFilteredRows?.length || 0;
+            const rowsPerPage = window.moneyPagesPriorityRowsPerPage || 10;
+            const totalPages = Math.max(1, Math.ceil(totalRows / rowsPerPage));
+            if (window.moneyPagesPriorityCurrentPage < totalPages) {
+              window.moneyPagesPriorityCurrentPage++;
+              const filters = {
+                typeFilter: window.moneyPagesTypeFilter || 'all',
+                minImpr: window.moneyPagesMinImpr || 0,
+                matrixFilter: window.moneyPagesMatrixFilter || null
+              };
+              renderMoneyPagesTable(null, filters);
+            }
+          });
+        }
+        
+        if (lastBtn) {
+          lastBtn.addEventListener('click', () => {
+            const totalRows = window.moneyPagesPriorityFilteredRows?.length || 0;
+            const rowsPerPage = window.moneyPagesPriorityRowsPerPage || 10;
+            const totalPages = Math.max(1, Math.ceil(totalRows / rowsPerPage));
+            window.moneyPagesPriorityCurrentPage = totalPages;
+            const filters = {
+              typeFilter: window.moneyPagesTypeFilter || 'all',
+              minImpr: window.moneyPagesMinImpr || 0,
+              matrixFilter: window.moneyPagesMatrixFilter || null
+            };
+            renderMoneyPagesTable(null, filters);
+          });
+        }
+        
+        if (rowsPerPageSelect) {
+          rowsPerPageSelect.addEventListener('change', (e) => {
+            const newRowsPerPage = parseInt(e.target.value, 10);
+            window.moneyPagesPriorityRowsPerPage = newRowsPerPage;
+            window.moneyPagesPriorityCurrentPage = 1; // Reset to first page
+            const filters = {
+              typeFilter: window.moneyPagesTypeFilter || 'all',
+              minImpr: window.moneyPagesMinImpr || 0,
+              matrixFilter: window.moneyPagesMatrixFilter || null
+            };
+            renderMoneyPagesTable(null, filters);
+          });
         }
       }
       
@@ -13919,6 +14104,7 @@ Final Score: ${score}/100`;
                       <!-- JS rows -->
                     </tbody>
                   </table>
+                  <div id="money-pages-priority-pagination"></div>
                   <button id="money-pages-copy-urls-btn" type="button" class="btn btn-small" style="margin-top: 1rem;" title="Copy all filtered page URLs to clipboard. URLs are copied one per line, ready to paste into spreadsheets or other tools.">Copy URLs</button>
                 </div>
               </div>
@@ -14087,6 +14273,9 @@ Final Score: ${score}/100`;
               
               debugLog(`Money Pages Update: Filtered to ${filteredPages.length} pages (type: ${typeFilter}, minImpr: ${minImpr})`, 'info');
               
+              // Reset pagination to page 1 when filters change
+              window.moneyPagesPriorityCurrentPage = 1;
+              
               // Re-render summary strip with filtered pages
               const summaryStrip = document.getElementById('money-pages-summary-strip');
               if (summaryStrip && typeof renderMoneyPagesSummaryStrip === 'function') {
@@ -14101,6 +14290,7 @@ Final Score: ${score}/100`;
                   matrixEl,
                   (impact, diff) => {
                     window.moneyMatrixFilterState = { impact, diff };
+                    window.moneyPagesPriorityCurrentPage = 1; // Reset pagination when matrix cell clicked
                     debugLog(`Money Pages Matrix: Cell clicked - Impact: ${impact}, Difficulty: ${diff}`, 'info');
                     // Re-render matrix to show active state
                     updateMatrixAndTable();
@@ -14108,6 +14298,11 @@ Final Score: ${score}/100`;
                   window.moneyMatrixFilterState
                 );
               }
+              
+              // Store filter state globally for pagination
+              window.moneyPagesTypeFilter = typeFilter;
+              window.moneyPagesMinImpr = minImpr;
+              window.moneyPagesMatrixFilter = window.moneyMatrixFilterState;
               
               // Re-render table with filters
               if (typeof renderMoneyPagesTable === 'function') {
@@ -14140,6 +14335,11 @@ Final Score: ${score}/100`;
               );
             }
             
+            // Initialize filter state
+            window.moneyPagesTypeFilter = 'all';
+            window.moneyPagesMinImpr = 1000;
+            window.moneyPagesMatrixFilter = null;
+            
             // Render initial table
             if (typeof renderMoneyPagesTable === 'function') {
               renderMoneyPagesTable(window.moneyPagePriorityData, {
@@ -14157,18 +14357,24 @@ Final Score: ${score}/100`;
               typeFilter.addEventListener('change', () => {
                 const selectedType = typeFilter.value;
                 debugLog(`Money Pages Filter: Type changed to "${selectedType}"`, 'info');
+                // Store filter state globally for pagination
+                window.moneyPagesTypeFilter = selectedType;
                 // Clear matrix filter when type filter changes
                 window.moneyMatrixFilterState = { impact: null, diff: null };
+                window.moneyPagesMatrixFilter = null;
                 updateMatrixAndTable();
               });
             }
             
             if (minImprFilter) {
               minImprFilter.addEventListener('change', () => {
-                const minImpr = minImprFilter.value;
+                const minImpr = Number(minImprFilter.value) || 0;
                 debugLog(`Money Pages Filter: Min impressions changed to ${minImpr}`, 'info');
+                // Store filter state globally for pagination
+                window.moneyPagesMinImpr = minImpr;
                 // Clear matrix filter when min impressions filter changes
                 window.moneyMatrixFilterState = { impact: null, diff: null };
+                window.moneyPagesMatrixFilter = null;
                 updateMatrixAndTable();
               });
             }
