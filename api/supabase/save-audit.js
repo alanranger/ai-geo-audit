@@ -234,10 +234,11 @@ export default async function handler(req, res) {
             position: qpItem.position || qpItem.avg_position || null
           })).filter(qpItem => qpItem.query || qpItem.page);
           
-          // Limit to 5000 items to prevent payload size issues
-          if (mapped.length > 5000) {
-            console.warn(`[Save Audit] ⚠ query_pages has ${mapped.length} items, truncating to 5000 to prevent payload size issues`);
-            return mapped.slice(0, 5000);
+          // Limit to 2000 items to prevent payload size issues (Vercel limit is ~4.5MB)
+          // Each item is ~65 bytes, so 2000 items = ~130KB, leaving room for other fields
+          if (mapped.length > 2000) {
+            console.warn(`[Save Audit] ⚠ query_pages has ${mapped.length} items, truncating to 2000 to prevent payload size issues`);
+            return mapped.slice(0, 2000);
           }
           return mapped;
         }
@@ -381,6 +382,25 @@ export default async function handler(req, res) {
       
       updated_at: new Date().toISOString()
     };
+
+    // Calculate and log payload size before sending
+    const payloadJson = JSON.stringify(auditRecord);
+    const payloadSizeKB = Math.round(payloadJson.length / 1024);
+    console.log(`[Supabase Save] 📊 Payload size: ${payloadSizeKB}KB`);
+    
+    if (payloadSizeKB > 3500) {
+      console.warn(`[Supabase Save] ⚠ Payload size (${payloadSizeKB}KB) is close to Vercel limit (4.5MB)`);
+      // Log sizes of individual fields to help identify what's large
+      const fieldSizes = {
+        query_pages: auditRecord.query_pages ? Math.round(JSON.stringify(auditRecord.query_pages).length / 1024) : 0,
+        schema_pages_detail: auditRecord.schema_pages_detail ? Math.round(JSON.stringify(auditRecord.schema_pages_detail).length / 1024) : 0,
+        ranking_ai_data: auditRecord.ranking_ai_data ? Math.round(JSON.stringify(auditRecord.ranking_ai_data).length / 1024) : 0,
+        money_pages_metrics: auditRecord.money_pages_metrics ? Math.round(JSON.stringify(auditRecord.money_pages_metrics).length / 1024) : 0,
+        top_queries: auditRecord.top_queries ? Math.round(JSON.stringify(auditRecord.top_queries).length / 1024) : 0,
+        gsc_timeseries: auditRecord.gsc_timeseries ? Math.round(JSON.stringify(auditRecord.gsc_timeseries).length / 1024) : 0
+      };
+      console.log(`[Supabase Save] 📊 Field sizes (KB):`, fieldSizes);
+    }
 
     // Debug: Log authority_by_segment structure for verification
     if (auditRecord.authority_by_segment) {
