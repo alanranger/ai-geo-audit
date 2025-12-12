@@ -2475,6 +2475,7 @@
                     <th data-sort="segment" class="sortable">Segment <span class="sort-indicator"></span></th>
                     <th data-sort="rank" class="sortable">Best rank <span class="sort-indicator"></span></th>
                     <th data-sort="volume" class="sortable">Search volume <span class="sort-indicator"></span><span title="Average monthly Google search volume for this keyword in the UK. Source: DataForSEO Labs – Keyword Overview." style="margin-left: 0.25rem; opacity: 0.6; cursor: help;">ℹ</span></th>
+                    <th data-sort="ctr" class="sortable">CTR <span class="sort-indicator"></span><span title="Click-through rate (CTR) for this keyword from Google Search Console data (last 30 days)." style="margin-left: 0.25rem; opacity: 0.6; cursor: help;">ℹ</span></th>
                     <th data-sort="demand_share" class="sortable">Demand share <span class="sort-indicator"></span><span title="Percentage of total search volume across all tracked keywords. High values indicate keywords with the most search demand." style="margin-left: 0.25rem; opacity: 0.6; cursor: help;">ℹ</span></th>
                     <th data-sort="opportunityScore" class="sortable">Opportunity score <span class="sort-indicator"></span><span title="Keyword opportunity score&#10;Combines three signals for this tracked keyword:&#10;• Demand share (how much search volume this query represents in your tracked set).&#10;• Classic ranking strength (page 1 vs page 2+ and current position).&#10;• AI usage (whether AI Overviews exist and if you're cited).&#10;Higher scores highlight the best &quot;bang-for-buck&quot; queries to improve first." style="margin-left: 0.25rem; opacity: 0.6; cursor: help;">ℹ</span></th>
                     <th>AI Overview</th>
@@ -2485,7 +2486,7 @@
                   </tr>
                 </thead>
                 <tbody id="ranking-ai-table-body">
-                  <tr><td colspan="11" class="ranking-table-empty">Click "Run ranking &amp; AI check" to load data.</td></tr>
+                  <tr><td colspan="12" class="ranking-table-empty">Click "Run ranking &amp; AI check" to load data.</td></tr>
                 </tbody>
               </table>
             </div>
@@ -21152,6 +21153,12 @@ Final Score: ${score}/100`;
             aVal = a.search_volume ?? 0;
             bVal = b.search_volume ?? 0;
             break;
+          case 'ctr':
+            const aCtr = getCtrMetricsForKeyword({ keyword: a.keyword, url: a.ranking_url });
+            const bCtr = getCtrMetricsForKeyword({ keyword: b.keyword, url: b.ranking_url });
+            aVal = (aCtr && aCtr.ctr != null) ? aCtr.ctr : -1; // Put nulls at end
+            bVal = (bCtr && bCtr.ctr != null) ? bCtr.ctr : -1;
+            break;
           case 'demand_share':
             aVal = a.demand_share ?? 0;
             bVal = b.demand_share ?? 0;
@@ -21511,7 +21518,7 @@ Final Score: ${score}/100`;
       if (!sortedRows.length) {
         const tr = document.createElement("tr");
         const td = document.createElement("td");
-        td.colSpan = 11; // Updated: 11 columns (Keyword, Segment, Best rank, Search volume, Demand share, Opportunity score, AI Overview, AI citations, Ranking URL, Page type, SERP features)
+        td.colSpan = 12; // Updated: 12 columns (Keyword, Segment, Best rank, Search volume, CTR, Demand share, Opportunity score, AI Overview, AI citations, Ranking URL, Page type, SERP features)
         td.className = "ranking-table-empty";
         td.textContent = filteredRows.length === 0 && combinedRows.length > 0
           ? "No rows match the current filters."
@@ -21597,6 +21604,22 @@ Final Score: ${score}/100`;
         }
         tdVolume.appendChild(volumeBadge);
         tr.appendChild(tdVolume);
+
+        // CTR
+        const tdCtr = document.createElement("td");
+        const ctrMetrics = getCtrMetricsForKeyword({
+          keyword: row.keyword,
+          url: row.ranking_url
+        });
+        if (ctrMetrics && ctrMetrics.ctr != null && ctrMetrics.impressions != null) {
+          const ctrPercent = (ctrMetrics.ctr * 100).toFixed(2);
+          tdCtr.textContent = `${ctrPercent}%`;
+          tdCtr.style.color = '#1e293b';
+        } else {
+          tdCtr.textContent = "—";
+          tdCtr.style.color = '#94a3b8';
+        }
+        tr.appendChild(tdCtr);
 
         // Demand share
         const tdDemandShare = document.createElement("td");
