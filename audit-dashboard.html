@@ -4687,11 +4687,42 @@
     
     // Update audit results for new date range without full rescan
     async function updateAuditForNewDateRange(newDateRange, savedAudit) {
+      // Show loading spinner in trend chart area immediately
+      const trendCanvas = document.getElementById('trendChart');
+      if (trendCanvas && trendCanvas.parentElement) {
+        // Remove any existing error messages
+        const existingError = trendCanvas.parentElement.querySelector('.trend-chart-error');
+        if (existingError) existingError.remove();
+        
+        // Remove any existing loading spinner
+        const existingLoading = trendCanvas.parentElement.querySelector('.trend-chart-loading');
+        if (existingLoading) existingLoading.remove();
+        
+        // Show loading spinner
+        const loadingDiv = document.createElement('div');
+        loadingDiv.className = 'trend-chart-loading';
+        loadingDiv.style.cssText = 'text-align: center; padding: 2rem; color: #64748b; font-size: 0.9rem;';
+        loadingDiv.innerHTML = '<div style="display: inline-block; width: 20px; height: 20px; border: 3px solid #e2e8f0; border-top-color: #3b82f6; border-radius: 50%; animation: spin 1s linear infinite; margin-right: 0.5rem;"></div>Loading historical data from Supabase...';
+        // Add spin animation if not already in stylesheet
+        if (!document.getElementById('trend-chart-spin-style')) {
+          const style = document.createElement('style');
+          style.id = 'trend-chart-spin-style';
+          style.textContent = '@keyframes spin { to { transform: rotate(360deg); } }';
+          document.head.appendChild(style);
+        }
+        trendCanvas.parentElement.insertBefore(loadingDiv, trendCanvas);
+      }
+      
       try {
         showStatus(`Updating metrics for ${newDateRange} day period...`, 'info');
         
         const propertyUrl = document.getElementById('propertyUrl')?.value || savedAudit.propertyUrl || '';
         if (!propertyUrl) {
+          // Remove loading spinner
+          if (trendCanvas && trendCanvas.parentElement) {
+            const loadingDiv = trendCanvas.parentElement.querySelector('.trend-chart-loading');
+            if (loadingDiv) loadingDiv.remove();
+          }
           clearDashboard();
           showStatus(`Date range changed to ${newDateRange} days. Please run a new audit to see updated metrics.`, 'info');
           return;
@@ -4765,6 +4796,25 @@
         
       } catch (error) {
         debugLog(`✗ Error updating audit for new date range: ${error.message}`, 'error');
+        
+        // Remove loading spinner and show error
+        const trendCanvas = document.getElementById('trendChart');
+        if (trendCanvas && trendCanvas.parentElement) {
+          const loadingDiv = trendCanvas.parentElement.querySelector('.trend-chart-loading');
+          if (loadingDiv) loadingDiv.remove();
+          
+          // Remove any existing error messages
+          const existingError = trendCanvas.parentElement.querySelector('.trend-chart-error');
+          if (existingError) existingError.remove();
+          
+          // Show error message
+          const errorDiv = document.createElement('div');
+          errorDiv.className = 'trend-chart-error';
+          errorDiv.style.cssText = 'background: #fee2e2; padding: 1rem; border-radius: 4px; border-left: 3px solid #ef4444; margin-bottom: 1rem; font-size: 0.9rem; color: #991b1b;';
+          errorDiv.innerHTML = `<strong>Error updating trend chart:</strong> ${error.message}. Please refresh the page or run a new audit.`;
+          trendCanvas.parentElement.insertBefore(errorDiv, trendCanvas);
+        }
+        
         clearDashboard();
         showStatus(`Date range changed to ${newDateRange} days. Please run a new audit to see updated metrics.`, 'info');
       }
@@ -17889,11 +17939,11 @@ Final Score: ${score}/100`;
                 const modeScore = historicalAuthorityBySegment[selectedMode].total || historicalAuthorityBySegment[selectedMode].score || historicalAuthorityBySegment[selectedMode];
                 authorityData.push(modeScore);
                 debugLog(`Using historical segmented Authority (${modeScore}) for ${pointDate} (mode: ${selectedMode})`, 'info');
-              } else if (isToday && authorityBySegment) {
-                // For today, use current segmented Authority scores (allows toggling between segments)
+              } else if (isLatestAudit && authorityBySegment) {
+                // For latest audit date, use current segmented Authority scores (allows toggling between segments)
                 const modeScore = getAuthorityForMode(selectedMode);
                 authorityData.push(modeScore);
-                debugLog(`Using current Authority score (${modeScore}) for ${pointDate} (mode: ${selectedMode}, today)`, 'info');
+                debugLog(`Using current Authority score (${modeScore}) for ${pointDate} (mode: ${selectedMode}, latest audit)`, 'info');
               } else if (historicalAuthority !== undefined && historicalAuthority !== null) {
                 // Fallback: use legacy historical Authority from Supabase (single value, not segmented)
                 authorityData.push(historicalAuthority);
@@ -17919,8 +17969,8 @@ Final Score: ${score}/100`;
                 // Use stored score from database (fast - no calculation needed)
                 visibilityData.push(historicalVisibility);
                 debugLog(`Using stored Visibility (${historicalVisibility}) for ${pointDate}`, 'info');
-              } else if (isToday) {
-                // For today, use current Visibility score
+              } else if (isLatestAudit) {
+                // For latest audit date, use current Visibility score
               visibilityData.push(pillarScores.visibility);
                 debugLog(`Using current Visibility (${pillarScores.visibility}) for ${pointDate}`, 'info');
               } else {
