@@ -10476,7 +10476,7 @@ Final Score: ${score}/100`;
                   <div style="margin-bottom: 0.5rem;"><strong>Schema Details:</strong></div>
                   <div>Foundation schemas: ${foundationPresent}/4 (${foundationTypes.filter(t => (schemaData.foundation && schemaData.foundation[t] === true) || allTypes.has(t)).join(', ') || 'none'})</div>
                   <div>Rich result types: ${richEligibleCount}/${richResultTypes.length} eligible</div>
-                  <div>Coverage: ${coverageScore != null ? coverageScore.toFixed(1) : 'N/A'}% (${schemaData.pagesWithSchema || 0}/${schemaData.totalPages || 0} pages)</div>
+                  <div>Coverage: ${coverageScore != null ? coverageScore.toFixed(1) : 'N/A'}% (${Array.isArray(schemaData.pagesWithSchema) ? schemaData.pagesWithSchema.length : (typeof schemaData.pagesWithSchema === 'number' ? schemaData.pagesWithSchema : 0)}/${Array.isArray(schemaData.pages) ? schemaData.pages.length : (typeof schemaData.totalPages === 'number' ? schemaData.totalPages : (Array.isArray(schemaData.pages) ? schemaData.pages.length : 0))} pages)</div>
                   <div>Type diversity: ${uniqueTypesCount} unique types</div>
                   <div style="margin-top: 0.5rem;"><strong>Schema types found:</strong> ${schemaTypesDisplay}${schemaTypesList.length >= 20 ? '...' : ''}</div>
                 </div>
@@ -23303,13 +23303,14 @@ Final Score: ${score}/100`;
         // This will update the schema section even if sync data was found
         if (typeof getSchemaCoverageForUrl === 'function' && scorecardData.ranking_url) {
           getSchemaCoverageForUrl(scorecardData.ranking_url).then(coverage => {
-            if (coverage) {
-              // Re-render just the schema section
-              const schemaSection = contentEl.querySelector('.scorecard-section:nth-of-type(4)');
-              if (schemaSection) {
-                let schemaHtml = '';
-                schemaHtml += `<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">4. Schema & rich results</h5>`;
-                schemaHtml += `<div style="padding-left: 0.75rem;">`;
+            // Re-render just the schema section
+            const schemaSection = contentEl.querySelector('.scorecard-section:nth-of-type(4)');
+            if (schemaSection) {
+              let schemaHtml = '';
+              schemaHtml += `<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">4. Schema & rich results</h5>`;
+              schemaHtml += `<div style="padding-left: 0.75rem;">`;
+              
+              if (coverage) {
                 schemaHtml += `<div style="margin-bottom: 0.75rem;">`;
                 schemaHtml += `<div style="font-size: 0.875rem; color: #1e293b; margin-bottom: 0.5rem; font-weight: 500;">Schema coverage for this page:</div>`;
                 schemaHtml += `<div style="display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.875rem; color: #1e293b;">`;
@@ -23331,15 +23332,26 @@ Final Score: ${score}/100`;
                   schemaInterpretation = 'Some schema types are present. Review the Content/Schema pillar for a complete assessment.';
                 }
                 schemaHtml += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">${schemaInterpretation}</p>`;
-                schemaHtml += `</div></div>`;
-                schemaSection.innerHTML = schemaHtml;
                 debugLog('[Schema Coverage] ✅ Updated schema section with async data', 'success');
+              } else {
+                // No coverage data found - show helpful message
+                schemaHtml += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">Schema coverage data not available for this URL. Check the Content/Schema pillar for a full schema audit.</p>`;
+                debugLog('[Schema Coverage] Async fetch returned no coverage data', 'warn');
               }
-            } else {
-              debugLog('[Schema Coverage] Async fetch returned no coverage data', 'warn');
+              
+              schemaHtml += `</div></div>`;
+              schemaSection.innerHTML = schemaHtml;
             }
           }).catch(err => {
             debugLog('[Schema Coverage] Async fetch failed: ' + err.message, 'warn');
+            // Update the loading message to show error
+            const schemaSection = contentEl.querySelector('.scorecard-section:nth-of-type(4)');
+            if (schemaSection) {
+              const loadingMsg = schemaSection.querySelector('[id^="schema-coverage-loading-"]');
+              if (loadingMsg) {
+                loadingMsg.textContent = 'Unable to load schema coverage. Check the Content/Schema pillar for a full schema audit.';
+              }
+            }
           });
         }
       } catch (e) {
@@ -23372,8 +23384,9 @@ Final Score: ${score}/100`;
         }
         html += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">${schemaInterpretation}</p>`;
       } else {
-        // Fallback placeholder text when schema data not available
-        html += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">Schema coverage assessment not wired into this module yet. Check the Content/Schema pillar for a full schema audit.</p>`;
+        // Show loading state if async fetch is in progress, otherwise show fallback
+        // The async fetch will update this section if data is found
+        html += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;" id="schema-coverage-loading-${Date.now()}">Checking schema coverage...</p>`;
       }
       html += `</div></div>`;
 
