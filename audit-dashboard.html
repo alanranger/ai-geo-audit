@@ -4722,7 +4722,9 @@
         // Keep existing schema audit data (doesn't change with date range)
         // Always use correct Trustpilot snapshot (4.6, 610) - override any old cached values
         const normalizedSiteReviews = getTrustpilotSnapshot(savedAudit.siteReviews || null);
-        const scores = await calculatePillarScores(searchData, savedAudit.schemaAudit, localSignals, normalizedSiteReviews, savedAudit.backlinkMetrics || null);
+        // Get backlinkMetrics from savedAudit (it should be there from the last audit)
+        const backlinkMetrics = savedAudit.backlinkMetrics || null;
+        const scores = await calculatePillarScores(searchData, savedAudit.schemaAudit, localSignals, normalizedSiteReviews, backlinkMetrics);
         const snippetReadiness = calculateSnippetReadiness(scores, searchData);
         
         debugLog(`Recalculated scores for ${newDateRange} days: ${JSON.stringify(scores)}`, 'info');
@@ -4744,9 +4746,8 @@
         // Save updated audit
         // Always use correct Trustpilot snapshot (4.6, 610) - override any old cached values
         const normalizedSiteReviewsForLoad = getTrustpilotSnapshot(savedAudit.siteReviews || null);
-        // Preserve backlinkMetrics from current run if available, don't overwrite with old savedAudit.backlinkMetrics
-        // The backlinkMetrics should have been loaded earlier in the audit flow
-        const preservedBacklinkMetrics = backlinkMetrics || savedAudit.backlinkMetrics || null;
+        // Use backlinkMetrics from savedAudit (preserved from last audit)
+        const preservedBacklinkMetrics = backlinkMetrics;
         saveAuditResults(scores, searchData, snippetReadiness, savedAudit.schemaAudit, localSignals, normalizedSiteReviewsForLoad, preservedBacklinkMetrics);
         safeSetLocalStorage('last_audit_results', updatedAudit);
         
@@ -17289,6 +17290,28 @@ Final Score: ${score}/100`;
         }
         debugLog('✓ Trend chart canvas found', 'success');
         
+        // Show loading state while fetching data
+        const trendChartContainer = trendCanvas.parentElement;
+        if (trendChartContainer) {
+          // Remove any existing error messages
+          const existingError = trendChartContainer.querySelector('.trend-chart-error');
+          if (existingError) existingError.remove();
+          
+          // Show loading spinner
+          const loadingDiv = document.createElement('div');
+          loadingDiv.className = 'trend-chart-loading';
+          loadingDiv.style.cssText = 'text-align: center; padding: 2rem; color: #64748b; font-size: 0.9rem;';
+          loadingDiv.innerHTML = '<div style="display: inline-block; width: 20px; height: 20px; border: 3px solid #e2e8f0; border-top-color: #3b82f6; border-radius: 50%; animation: spin 1s linear infinite; margin-right: 0.5rem;"></div>Loading historical data from Supabase...';
+          // Add spin animation if not already in stylesheet
+          if (!document.getElementById('trend-chart-spin-style')) {
+            const style = document.createElement('style');
+            style.id = 'trend-chart-spin-style';
+            style.textContent = '@keyframes spin { to { transform: rotate(360deg); } }';
+            document.head.appendChild(style);
+          }
+          trendChartContainer.insertBefore(loadingDiv, trendCanvas);
+        }
+        
         // Safely destroy existing chart if it exists
         debugLog(`Checking for existing trendChart: ${window.trendChart ? 'exists' : 'null'}`, 'info');
         try {
@@ -17422,6 +17445,12 @@ Final Score: ${score}/100`;
           const currentContentSchema = scores.contentSchema || 0;
           const currentBrandOverlay = scores.brandOverlay?.score || null;
           
+          // Declare latestAuditDateStr in outer scope so it's accessible in timeseries.forEach
+          let today = new Date();
+          today.setHours(0, 0, 0, 0);
+          let todayStr = today.toISOString().split('T')[0];
+          let latestAuditDateStr = todayStr; // Default to today if no audit found
+          
           if (timeseries.length > 0) {
             // Fetch historical Content/Schema data from Supabase (async operation)
             const propertyUrl = document.getElementById('propertyUrl')?.value || '';
@@ -17429,9 +17458,6 @@ Final Score: ${score}/100`;
             // This ensures we query the correct year (2024 vs 2025)
             const timeseriesStartDate = timeseries[0].date; // First date in timeseries
             const timeseriesEndDate = timeseries[timeseries.length - 1].date; // Last date in timeseries
-            // Use today's date (declare as 'let' so it can be reused later)
-            let today = new Date();
-            let todayStr = today.toISOString().split('T')[0];
             // CRITICAL: Query ALL historical audit data, not just timeseries range
             // The user manually added 18 months of historical data, so we need to fetch all of it
             // Query from 2 years ago to today to ensure we get all historical data
@@ -17440,10 +17466,7 @@ Final Score: ${score}/100`;
             historicalStartDate.setFullYear(historicalStartDate.getFullYear() - 2);
             const startDate = historicalStartDate.toISOString().split('T')[0]; // 2 years ago
             const endDate = todayStr; // Use today, not timeseries end date
-            
-            // Get the latest audit date from Supabase (will be set after fetching history)
-            // This ensures we use the actual latest audit date, not just "today"
-            let latestAuditDateStr = todayStr; // Default to today if no audit found
+            // latestAuditDateStr is already declared in outer scope above
             
             debugLog(`Fetching Content/Schema history from Supabase: ${startDate} to ${endDate} (ALL historical data)`, 'info');
             debugLog(`Timeseries date range: ${timeseriesStartDate} to ${timeseriesEndDate}`, 'info');
@@ -17484,6 +17507,7 @@ Final Score: ${score}/100`;
                 
                 // Create maps of dates to scores from Supabase
                 // Normalize dates to YYYY-MM-DD format (Supabase might return with timezone)
+                // latestAuditDate is already tracked from the deduplication loop above
                 contentSchemaHistory.forEach(record => {
                   // Ensure date is in YYYY-MM-DD format (strip time if present)
                   // Handle both date strings and Date objects
@@ -17499,6 +17523,10 @@ Final Score: ${score}/100`;
                   }
                   
                   if (normalizedDate) {
+                    // Update latestAuditDate if this date is newer (should already be set, but ensure it's current)
+                    if (!latestAuditDate || normalizedDate > latestAuditDate) {
+                      latestAuditDate = normalizedDate;
+                    }
                     // Content/Schema data
                     if (record.contentSchemaScore !== null && record.contentSchemaScore !== undefined) {
                       contentSchemaMap.set(normalizedDate, record.contentSchemaScore);
@@ -17540,11 +17568,6 @@ Final Score: ${score}/100`;
                 const hasHistoricalData = contentSchemaHistory.length > 0;
                 if (hasHistoricalData) {
                   debugLog(`Using ${contentSchemaHistory.length} historical audit records from Supabase`, 'info');
-                  // Update latestAuditDateStr to use the actual latest audit date from Supabase
-                  if (latestAuditDate) {
-                    latestAuditDateStr = latestAuditDate;
-                    debugLog(`Latest audit date from Supabase: ${latestAuditDateStr}`, 'info');
-                  }
                 } else {
                   debugLog(`No historical data found. Will use current scores for all points.`, 'info');
                 }
@@ -17559,6 +17582,9 @@ Final Score: ${score}/100`;
                 }
               } catch (error) {
                 debugLog(`⚠ Error fetching historical data: ${error.message}`, 'warn');
+                // Ensure latestAuditDateStr is still defined even if fetch fails
+                // It's already set to todayStr as default, so it should be fine
+                debugLog(`Using default latestAuditDateStr: ${latestAuditDateStr}`, 'info');
                 contentSchemaHistory = [];
               }
             } else {
@@ -17795,8 +17821,9 @@ Final Score: ${score}/100`;
             timeseries.forEach(point => {
               const pointDate = point.date; // YYYY-MM-DD format
               
-              // Check if this is today's date - if so, use full Authority calculation
-              const isToday = pointDate === todayStr;
+              // Check if this is the latest audit date - if so, use stored scores from Supabase or current audit
+              // Use latestAuditDateStr (from Supabase) instead of todayStr to ensure we use actual latest audit
+              const isLatestAudit = pointDate === latestAuditDateStr;
               
               // Check if we have historical data from Supabase for Local Entity, Service Area, and Authority
               const historicalLocalEntity = localEntityMap.get(pointDate);
@@ -18621,6 +18648,13 @@ Final Score: ${score}/100`;
           debugLog(`[Trend Chart] Latest audit date: ${latestAuditDateStr}`, 'info');
           debugLog(`[Trend Chart] Data arrays length - Local Entity: ${localEntityData.length}, Service Area: ${serviceAreaData.length}, Authority: ${authorityData.length}, Visibility: ${visibilityData.length}, Content/Schema: ${contentSchemaData.length}`, 'info');
           
+          // Remove loading spinner if it exists
+          const trendChartContainer = trendCanvas.parentElement;
+          if (trendChartContainer) {
+            const loadingDiv = trendChartContainer.querySelector('.trend-chart-loading');
+            if (loadingDiv) loadingDiv.remove();
+          }
+          
           window.trendChart = new Chart(trendCtx, {
             type: 'line',
             data: {
@@ -18859,10 +18893,20 @@ Final Score: ${score}/100`;
           debugLog(`✗ Error creating trend chart: ${e.message}`, 'error');
           debugLog(`Stack: ${e.stack}`, 'error');
           console.error('Error creating trend chart:', e);
-          // Show error message to user
+          
+          // Remove loading spinner if it exists
           const trendCanvas = document.getElementById('trendChart');
           if (trendCanvas && trendCanvas.parentElement) {
+            const loadingDiv = trendCanvas.parentElement.querySelector('.trend-chart-loading');
+            if (loadingDiv) loadingDiv.remove();
+            
+            // Remove any existing error messages
+            const existingError = trendCanvas.parentElement.querySelector('.trend-chart-error');
+            if (existingError) existingError.remove();
+            
+            // Show error message to user
             const errorDiv = document.createElement('div');
+            errorDiv.className = 'trend-chart-error';
             errorDiv.style.cssText = 'background: #fee2e2; padding: 1rem; border-radius: 4px; border-left: 3px solid #ef4444; margin-bottom: 1rem; font-size: 0.9rem; color: #991b1b;';
             errorDiv.innerHTML = `<strong>Error loading trend chart:</strong> ${e.message}. Please refresh the page or run a new audit.`;
             trendCanvas.parentElement.insertBefore(errorDiv, trendCanvas);
