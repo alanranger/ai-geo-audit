@@ -6765,10 +6765,30 @@
           schemaData.allDetectedTypes.forEach(type => {
             if (type) allTypes.add(type);
           });
+        } else if (schemaData.foundation && typeof schemaData.foundation === 'object') {
+          // Use foundation object to get foundation types (most reliable)
+          Object.keys(schemaData.foundation).forEach(type => {
+            if (schemaData.foundation[type] === true) {
+              allTypes.add(type);
+            }
+          });
+          // Also add from richEligible for complete type list
+          if (schemaData.richEligible && typeof schemaData.richEligible === 'object') {
+            Object.keys(schemaData.richEligible).forEach(type => {
+              if (schemaData.richEligible[type] === true) {
+                allTypes.add(type);
+              }
+            });
+          }
         } else if (schemaData.schemaTypes && Array.isArray(schemaData.schemaTypes)) {
           // Fallback: collect from schemaTypes array (contains all types, sorted by count)
+          // Handle both object format {type, count} and string format
           schemaData.schemaTypes.forEach(item => {
-            if (item.type) allTypes.add(item.type);
+            if (typeof item === 'string') {
+              allTypes.add(item);
+            } else if (item && typeof item === 'object' && item.type) {
+              allTypes.add(item.type);
+            }
           });
         }
         
@@ -15734,16 +15754,34 @@ Final Score: ${score}/100`;
                     coverageValue = ((pagesWithSchemaCount / totalPagesCount) * 100).toFixed(1);
                   }
                   
-                  // Calculate foundation schemas - use allDetectedTypes if available (all types), otherwise use schemaTypes (all types, sorted by count)
+                  // Calculate foundation schemas - PRIORITY: use schemaData.foundation object first (most reliable)
+                  // foundation object has {Organization: true, Person: true, WebSite: true, BreadcrumbList: true}
                   const allTypes = new Set();
+                  
+                  // First, use foundation object if available (most reliable source)
+                  if (schemaData.foundation && typeof schemaData.foundation === 'object') {
+                    Object.keys(schemaData.foundation).forEach(type => {
+                      if (schemaData.foundation[type] === true) {
+                        allTypes.add(type);
+                      }
+                    });
+                  }
+                  
+                  // Also add types from allDetectedTypes if available (for complete type list)
                   if (schemaData.allDetectedTypes && Array.isArray(schemaData.allDetectedTypes)) {
-                    // Use all detected types for accurate calculation
                     schemaData.allDetectedTypes.forEach(type => {
                       if (type) allTypes.add(type);
                     });
-                  } else if (schemaTypes && Array.isArray(schemaTypes)) {
-                    // Fallback: collect from schemaTypes array (contains all types, sorted by count)
+                  }
+                  
+                  // Fallback: collect from schemaTypes array (contains all types, sorted by count)
+                  // IMPORTANT: schemaTypes might be the pages array, so filter carefully
+                  if (schemaTypes && Array.isArray(schemaTypes) && allTypes.size === 0) {
                     schemaTypes.forEach(item => {
+                      // Skip page objects (have 'url' property) - these are NOT schema types
+                      if (item && typeof item === 'object' && item.url) {
+                        return; // Skip page objects
+                      }
                       // Only process valid schema type objects (not page objects with url property)
                       if (item && typeof item === 'object' && item.type && typeof item.type === 'string' && !item.url) {
                         allTypes.add(item.type);
@@ -15763,20 +15801,27 @@ Final Score: ${score}/100`;
                   const richTypesPresent = richResultTypesList.filter(type => allTypes.has(type));
                   contentSchemaDesc += ` <strong>Data Checked:</strong> Foundation schemas: ${foundationPresent}/4 (${foundationTypes.filter(t => allTypes.has(t)).join(', ') || 'none'}), Rich result types: ${richEligibleCount}/${richResultTypesList.length} eligible, Coverage: ${coverageValue}% (${pagesWithSchemaCount}/${totalPagesCount} pages), Type diversity: ${richTypesPresent.length}/${richResultTypesList.length} rich result types present (${richTypesPresent.join(', ') || 'none'}), ${uniqueTypesCount} total unique types across the site. `;
                   
-                  if (schemaTypes && Array.isArray(schemaTypes) && schemaTypes.length > 0) {
-                    // Show top 15 most common types for readability (still sorted by count)
-                    // Handle both object format {type, count} and string format
-                    // Filter out page objects (those with 'url' property) and invalid objects
-                    const topTypes = schemaTypes
+                  // Display schema types - use allDetectedTypes if available, otherwise try schemaTypes (but filter out pages)
+                  let schemaTypesToDisplay = [];
+                  if (schemaData.allDetectedTypes && Array.isArray(schemaData.allDetectedTypes)) {
+                    schemaTypesToDisplay = schemaData.allDetectedTypes.slice(0, 15);
+                  } else if (schemaTypes && Array.isArray(schemaTypes)) {
+                    // Filter out page objects (those with 'url' property) - these are NOT schema types
+                    schemaTypesToDisplay = schemaTypes
                       .filter(t => {
                         // Skip null/undefined
                         if (!t) return false;
-                        // Skip page objects (have 'url' property)
-                        if (typeof t === 'object' && ('url' in t || 'title' in t && 'metaDescription' in t)) return false;
+                        // Skip page objects (have 'url' property) - these are pages, not types!
+                        if (typeof t === 'object' && ('url' in t || ('title' in t && 'metaDescription' in t))) return false;
                         // Only keep valid type objects or strings
                         return typeof t === 'string' || (typeof t === 'object' && t.type && typeof t.type === 'string' && !t.url);
                       })
-                      .slice(0, 15)
+                      .slice(0, 15);
+                  }
+                  
+                  if (schemaTypesToDisplay.length > 0) {
+                    // Convert to display strings
+                    const topTypes = schemaTypesToDisplay
                       .map(t => {
                         if (typeof t === 'string' && t.trim()) {
                           return t.trim();
@@ -15790,7 +15835,7 @@ Final Score: ${score}/100`;
                       .filter(t => t !== null && t !== undefined && t !== '' && typeof t === 'string' && !t.includes('[object Object]'))
                       .join(', ');
                     if (topTypes) {
-                      contentSchemaDesc += `Schema types found: ${topTypes}${schemaTypes.length > 15 ? '...' : ''}. `;
+                      contentSchemaDesc += `Schema types found: ${topTypes}${schemaTypesToDisplay.length > 15 ? '...' : ''}. `;
                     }
                   }
                   
