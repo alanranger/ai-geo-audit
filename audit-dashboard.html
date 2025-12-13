@@ -21565,7 +21565,12 @@ Final Score: ${score}/100`;
      */
     function normalizeUrlForMatching(url) {
       if (!url || typeof url !== 'string') return '';
-      let normalized = url.toLowerCase().trim();
+      
+      // Explicitly strip everything from ? onwards (query parameters) and # onwards (hash)
+      // This ensures URLs with Google SERP params like ?srsltid=... are matched correctly
+      let cleanUrl = url.split('?')[0].split('#')[0];
+      
+      let normalized = cleanUrl.toLowerCase().trim();
       try {
         // Handle relative URLs by adding a base URL
         let urlToParse = normalized;
@@ -21573,14 +21578,15 @@ Final Score: ${score}/100`;
           urlToParse = 'https://www.alanranger.com' + (normalized.startsWith('/') ? normalized : '/' + normalized);
         }
         const urlObj = new URL(urlToParse);
+        // pathname automatically excludes query params and hash, but we already stripped them above
         normalized = urlObj.pathname.toLowerCase().replace(/\/$/, '').trim();
         // If pathname is empty or just '/', treat as homepage
         if (!normalized || normalized === '/') {
           normalized = '/';
         }
       } catch (e) {
-        // If URL parsing fails, remove query params and hash manually
-        normalized = url.split('?')[0].split('#')[0].toLowerCase().replace(/\/$/, '').trim();
+        // If URL parsing fails, use the manually cleaned URL
+        normalized = cleanUrl.toLowerCase().replace(/\/$/, '').trim();
         // Ensure it starts with / if it's a path
         if (normalized && !normalized.startsWith('/')) {
           normalized = '/' + normalized;
@@ -21649,56 +21655,23 @@ Final Score: ${score}/100`;
         const normalizedUrl = normalizeUrlForMatching(url);
         debugLog('[Schema Coverage] Looking for normalized URL: ' + normalizedUrl + ' (original: ' + url + ')', 'info');
         
-        // First try exact/path matching
-        let pageData = allPages.find(p => {
+        // Exact matching only - normalize both URLs identically (strips query params, hash, trailing slashes)
+        const pageData = allPages.find(p => {
           if (!p || !p.url) return false;
           const pNormalized = normalizeUrlForMatching(p.url);
           
+          // Exact match after normalization (both URLs stripped of query params, hash, trailing slashes)
           const exactMatch = pNormalized === normalizedUrl;
+          
           // For homepage, also check if both are '/' or empty
           const homepageMatch = (normalizedUrl === '/' || normalizedUrl === '') && (pNormalized === '/' || pNormalized === '');
-          // Path matching: check if one contains the other (for partial matches)
-          const pathMatch = !exactMatch && !homepageMatch && (pNormalized.includes(normalizedUrl) || normalizedUrl.includes(pNormalized));
-          // Also check if the last path segment matches (e.g., both end with same slug)
-          const lastSegmentMatch = !exactMatch && !homepageMatch && !pathMatch && 
-            normalizedUrl.split('/').pop() === pNormalized.split('/').pop() &&
-            normalizedUrl.split('/').pop() !== '';
           
-          if (exactMatch || homepageMatch || pathMatch || lastSegmentMatch) {
-            debugLog('[Schema Coverage] URL match found: ' + p.url + ' -> ' + pNormalized + ' (search: ' + normalizedUrl + ')', 'info');
+          if (exactMatch || homepageMatch) {
+            debugLog('[Schema Coverage] ✅ Exact URL match: ' + p.url + ' -> ' + pNormalized + ' (search: ' + normalizedUrl + ')', 'info');
             return true;
           }
           return false;
         });
-        
-        // If no exact match, try semantic matching (extract key terms from search URL and find pages containing them)
-        if (!pageData && normalizedUrl && normalizedUrl !== '/') {
-          const searchTerms = normalizedUrl.split('/').filter(term => term && term.length > 3); // Get meaningful path segments
-          if (searchTerms.length > 0) {
-            // Find pages that contain any of the search terms in their path
-            const semanticMatches = allPages.filter(p => {
-              if (!p || !p.url) return false;
-              const pNormalized = normalizeUrlForMatching(p.url);
-              // Check if any search term appears in the page URL
-              return searchTerms.some(term => pNormalized.includes(term.toLowerCase()));
-            });
-            
-            if (semanticMatches.length > 0) {
-              // Prefer matches that contain more search terms or are shorter (more specific)
-              semanticMatches.sort((a, b) => {
-                const aNorm = normalizeUrlForMatching(a.url);
-                const bNorm = normalizeUrlForMatching(b.url);
-                const aScore = searchTerms.filter(term => aNorm.includes(term.toLowerCase())).length;
-                const bScore = searchTerms.filter(term => bNorm.includes(term.toLowerCase())).length;
-                if (aScore !== bScore) return bScore - aScore; // More matches first
-                return aNorm.length - bNorm.length; // Shorter (more specific) first
-              });
-              
-              pageData = semanticMatches[0];
-              debugLog('[Schema Coverage] Semantic match found: ' + pageData.url + ' -> ' + normalizeUrlForMatching(pageData.url) + ' (search: ' + normalizedUrl + ')', 'info');
-            }
-          }
-        }
 
         if (!pageData) {
           // Enhanced debugging: show sample URLs and search for similar URLs
@@ -23260,51 +23233,23 @@ Final Score: ${score}/100`;
             
             debugLog('[Schema Coverage] Looking for URL: ' + normalizedUrl + ' (original: ' + rankingUrl + ')', 'info');
             
-            // First try exact/path matching
-            let pageData = pagesArray.find(p => {
+            // Exact matching only - normalize both URLs identically (strips query params, hash, trailing slashes)
+            const pageData = pagesArray.find(p => {
               if (!p || !p.url) return false;
               const pNormalized = normalizeUrlForMatching(p.url);
               
+              // Exact match after normalization (both URLs stripped of query params, hash, trailing slashes)
               const exactMatch = pNormalized === normalizedUrl;
+              
               // For homepage, also check if both are '/' or empty
               const homepageMatch = (normalizedUrl === '/' || normalizedUrl === '') && (pNormalized === '/' || pNormalized === '');
-              const pathMatch = !exactMatch && !homepageMatch && (pNormalized.includes(normalizedUrl) || normalizedUrl.includes(pNormalized));
               
-              if (exactMatch || homepageMatch || pathMatch) {
-                debugLog('[Schema Coverage] URL match: ' + p.url + ' -> ' + pNormalized + ' (search: ' + normalizedUrl + ')', 'info');
+              if (exactMatch || homepageMatch) {
+                debugLog('[Schema Coverage] ✅ Exact URL match: ' + p.url + ' -> ' + pNormalized + ' (search: ' + normalizedUrl + ')', 'info');
                 return true;
               }
               return false;
             });
-            
-            // If no exact match, try semantic matching (extract key terms from search URL and find pages containing them)
-            if (!pageData && normalizedUrl && normalizedUrl !== '/') {
-              const searchTerms = normalizedUrl.split('/').filter(term => term && term.length > 3); // Get meaningful path segments
-              if (searchTerms.length > 0) {
-                // Find pages that contain any of the search terms in their path
-                const semanticMatches = pagesArray.filter(p => {
-                  if (!p || !p.url) return false;
-                  const pNormalized = normalizeUrlForMatching(p.url);
-                  // Check if any search term appears in the page URL
-                  return searchTerms.some(term => pNormalized.includes(term.toLowerCase()));
-                });
-                
-                if (semanticMatches.length > 0) {
-                  // Prefer matches that contain more search terms or are shorter (more specific)
-                  semanticMatches.sort((a, b) => {
-                    const aNorm = normalizeUrlForMatching(a.url);
-                    const bNorm = normalizeUrlForMatching(b.url);
-                    const aScore = searchTerms.filter(term => aNorm.includes(term.toLowerCase())).length;
-                    const bScore = searchTerms.filter(term => bNorm.includes(term.toLowerCase())).length;
-                    if (aScore !== bScore) return bScore - aScore; // More matches first
-                    return aNorm.length - bNorm.length; // Shorter (more specific) first
-                  });
-                  
-                  pageData = semanticMatches[0];
-                  debugLog('[Schema Coverage] Semantic match found: ' + pageData.url + ' -> ' + normalizeUrlForMatching(pageData.url) + ' (search: ' + normalizedUrl + ')', 'info');
-                }
-              }
-            }
             
             if (pageData) {
               debugLog('[Schema Coverage] ✅ Found page data for URL: ' + scorecardData.ranking_url, 'info');
