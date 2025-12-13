@@ -1177,11 +1177,13 @@
       gap: 1.5rem;
       margin: 1.5rem 0;
       align-items: flex-start;
+      flex-wrap: nowrap;
     }
 
     .ranking-cards-side-by-side > * {
-      flex: 1;
+      flex: 1 1 0;
       min-width: 0;
+      max-width: 100%;
     }
 
     @media (max-width: 1024px) {
@@ -3352,6 +3354,171 @@
         panel.classList.add('collapsed');
         if (icon) icon.textContent = '▲';
       }
+    }
+
+    // Performance optimization: Defer heavy work to improve INP
+    function defer(fn) {
+      if (window.requestIdleCallback) {
+        requestIdleCallback(fn, { timeout: 800 });
+      } else {
+        setTimeout(fn, 0);
+      }
+    }
+
+    const panelInitDone = new Set();
+
+    function setActivePanel(panelId) {
+      // 1) fast: toggle active nav styles
+      document.querySelectorAll('.aigeo-nav-item').forEach(btn => {
+        btn.classList.toggle('is-active', btn.dataset.panel === panelId);
+        btn.setAttribute('aria-selected', btn.dataset.panel === panelId ? 'true' : 'false');
+      });
+
+      // 2) fast: show/hide panels only (NO rendering work here)
+      document.querySelectorAll('.aigeo-panel').forEach(p => {
+        p.classList.toggle('is-active', p.dataset.panel === panelId);
+      });
+    }
+
+    function ensurePanelRendered(panelId) {
+      if (panelInitDone.has(panelId)) return;
+
+      // IMPORTANT: only do heavy first-time render here
+      // e.g. build big tables, compute summaries, populate dropdowns
+      if (panelId === 'ranking') {
+        // Load data and render ranking panel
+        (async () => {
+          debugLog('📊 Ranking panel: Loading data from storage...', 'info');
+          const storedData = await loadRankingAiDataFromStorage(false);
+          if (storedData && storedData.combinedRows && storedData.summary) {
+            const mod = window.RankingAiModule;
+            if (mod) {
+              mod.setData(storedData.combinedRows, storedData.summary);
+              mod.setLoadedOnce(true);
+              renderRankingAiTab();
+              const lastRunEl = document.getElementById("ranking-ai-last-run");
+              if (lastRunEl && storedData.timestamp) {
+                const date = new Date(storedData.timestamp);
+                lastRunEl.textContent = `Last run: ${date.toLocaleString()}`;
+              }
+            }
+          } else {
+            const mod = window.RankingAiModule;
+            if (mod) {
+              mod.setData([], { total_keywords: 0, keywords_with_rank: 0, keywords_with_ai_overview: 0, keywords_with_ai_citations: 0, top10: 0, top3: 0 });
+              renderRankingAiTab();
+            }
+          }
+          // Wire up filters and sorting after render
+          setTimeout(() => {
+            if (typeof wireRankingAiButton === 'function') wireRankingAiButton();
+            if (typeof wireRankingFilters === 'function') wireRankingFilters();
+            if (typeof wireRankingSorting === 'function') wireRankingSorting();
+            if (typeof wireRankingPagination === 'function') wireRankingPagination();
+          }, 100);
+        })();
+      } else if (panelId === 'ai-sources') {
+        setTimeout(() => {
+          if (typeof wireAiSourcesFilters === 'function') wireAiSourcesFilters();
+        }, 100);
+        (async () => {
+          debugLog('📊 AI Sources & Influence tab clicked - loading data...', 'info');
+          const storedData = await loadRankingAiDataFromStorage(false);
+          if (storedData && storedData.combinedRows && storedData.combinedRows.length > 0) {
+            const mod = window.RankingAiModule;
+            if (mod) {
+              mod.setData(storedData.combinedRows, storedData.summary);
+              debugLog(`✓ AI Sources tab: Rendering with ${storedData.combinedRows.length} keywords`, 'success');
+              if (typeof renderAiSourcesTab === 'function') {
+                renderAiSourcesTab();
+              }
+            }
+          } else {
+            debugLog('⚠ AI Sources tab: No keyword data available. Run a Ranking & AI check first.', 'warn');
+            if (typeof renderAiSourcesTab === 'function') {
+              renderAiSourcesTab(); // Will show empty state
+            }
+          }
+        })();
+      } else if (panelId === 'overview') {
+        setTimeout(async () => {
+          const saved = loadAuditResultsSync();
+          if (saved && saved.scores && saved.searchData) {
+            const trendCanvas = document.getElementById('trendChart');
+            if (trendCanvas && typeof displayDashboard === 'function') {
+              debugLog('Re-rendering Score Trends chart for Overview tab', 'info');
+              try {
+                await displayDashboard(saved.scores, saved.searchData, saved.snippetReadiness || 0, saved.schemaAudit || null, saved.localSignals || null);
+              } catch (err) {
+                debugLog(`Error re-rendering trend chart: ${err.message}`, 'warn');
+              }
+            }
+          }
+        }, 200);
+      } else if (panelId === 'money') {
+        setTimeout(() => {
+          const saved = loadAuditResultsSync();
+          
+          if (typeof renderMoneyPagesTable === 'function') {
+            const priorityData = window.moneyPagePriorityData || (saved && saved.moneyPagePriorityData) || [];
+            if (priorityData && priorityData.length > 0) {
+              debugLog('Re-rendering Money Pages Priority Matrix table', 'info');
+              renderMoneyPagesTable(priorityData);
+            }
+          }
+          
+          if (typeof renderMoneyPagesSection === 'function' && saved && saved.scores && saved.scores.moneyPagesMetrics) {
+            debugLog('Re-rendering Money Pages section', 'info');
+            renderMoneyPagesSection(saved.scores.moneyPagesMetrics);
+          }
+          
+          const categoryCanvas = document.getElementById('moneyPagesCategoryChart');
+          if (categoryCanvas && typeof renderMoneyPagesCategoryChart === 'function') {
+            if (saved && saved.scores && saved.scores.moneyPagesMetrics) {
+              renderMoneyPagesCategoryChart(saved.scores.moneyPagesMetrics, 0);
+            }
+          }
+          
+          const trendCanvas = document.getElementById('moneyPagesTrendChart');
+          if (trendCanvas && typeof renderMoneyPagesTrendChart === 'function') {
+            const propertyUrl = document.getElementById('propertyUrl')?.value;
+            if (propertyUrl) {
+              const endDate = new Date();
+              const startDate = new Date();
+              startDate.setFullYear(startDate.getFullYear() - 1);
+              const startDateStr = startDate.toISOString().split('T')[0];
+              const endDateStr = endDate.toISOString().split('T')[0];
+              
+              fetch(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDateStr}`)
+                .then(res => res.json())
+                .then(json => {
+                  if (json.status === 'ok' && json.data) {
+                    renderMoneyPagesTrendChart(json.data);
+                  }
+                })
+                .catch(err => debugLog(`Error fetching history for trend chart: ${err.message}`, 'warn'));
+            }
+          }
+          
+          const sparklineCanvas = document.getElementById('money-kpi-sparkline');
+          if (sparklineCanvas && typeof loadAuditHistoryAndRenderKpis === 'function') {
+            const propertyUrl = document.getElementById('propertyUrl')?.value;
+            if (propertyUrl) {
+              loadAuditHistoryAndRenderKpis(propertyUrl);
+            }
+          }
+          
+          if (typeof window.wireTopLevelFilter === 'function') {
+            window.wireTopLevelFilter();
+          }
+          if (typeof window.wirePriorityActionsFilters === 'function') {
+            window.wirePriorityActionsFilters();
+          }
+        }, 100);
+      }
+
+      // Mark panel as initialized
+      panelInitDone.add(panelId);
     }
 
     function toggleCalculationExplanation() {
@@ -23074,30 +23241,28 @@ Final Score: ${score}/100`;
       }
     }
 
-    // Tab switching for sidebar navigation
+    // Tab switching for sidebar navigation - Optimized for performance (INP)
     (function() {
       const navItems = document.querySelectorAll(".aigeo-nav-item");
-      const panels = document.querySelectorAll(".aigeo-panel");
 
       navItems.forEach(btn => {
-        btn.addEventListener("click", async () => {
-          const target = btn.getAttribute("data-panel");
+        btn.addEventListener("click", () => {
+          const panelId = btn.getAttribute("data-panel");
+          if (!panelId) return;
 
-          navItems.forEach(b => b.classList.toggle("is-active", b === btn));
-          panels.forEach(p => {
-            const wasActive = p.classList.contains("is-active");
-            p.classList.toggle("is-active", p.getAttribute("data-panel") === target);
-            const isNowActive = p.classList.contains("is-active");
-            
-            // Try to refresh audit data from Supabase when switching tabs (if data seems stale or missing)
-            if (isNowActive && !wasActive) {
+          // Fast UI switch first - no heavy work here
+          setActivePanel(panelId);
+
+          // Defer heavy work so the click paints immediately
+          requestAnimationFrame(() => {
+            defer(() => {
+              // Try to refresh audit data from Supabase when switching tabs (if data seems stale or missing)
               const propertyUrl = localStorage.getItem('gsc_property_url');
               const savedAudit = loadAuditResultsSync();
               const savedTimestamp = savedAudit?.timestamp;
               const hoursSinceLastAudit = savedTimestamp ? (Date.now() - savedTimestamp) / (1000 * 60 * 60) : Infinity;
               
               // If no data or data is more than 1 hour old, try to refresh from Supabase
-              // Use IIFE to handle async code inside forEach callback
               if ((!savedAudit || hoursSinceLastAudit > 1) && propertyUrl) {
                 (async () => {
                   debugLog(`🔄 Tab switch: Attempting to refresh audit data from Supabase (${hoursSinceLastAudit > 1 ? 'data is stale' : 'no data found'})...`, 'info');
@@ -23119,183 +23284,14 @@ Final Score: ${score}/100`;
                   }
                 })();
               }
-            }
-            
-            // Lazy-load Ranking & AI data when tab is opened (from storage only, never trigger API scan)
-            if (target === "ranking" && isNowActive && !wasActive) {
-              // Wire button, filters, and sorting when panel becomes visible
-              setTimeout(() => {
-                if (typeof wireRankingAiButton === 'function') wireRankingAiButton();
-                if (typeof wireRankingFilters === 'function') wireRankingFilters();
-                if (typeof wireRankingSorting === 'function') wireRankingSorting();
-                if (typeof wireRankingPagination === 'function') wireRankingPagination();
-              }, 100);
-              // Load from localStorage/Supabase ONLY - never trigger API scan from tab click
-              // Only load if data exists, otherwise show empty state
-              (async () => {
-                debugLog('📊 Ranking & AI tab clicked - loading data from storage...', 'info');
-                const storedData = await loadRankingAiDataFromStorage(false);
-                debugLog(`📊 Tab click: loadRankingAiDataFromStorage returned: ${storedData ? 'data found' : 'null'}`, 'info');
-                if (storedData) {
-                  debugLog(`📊 Tab click: Stored data has ${storedData.combinedRows?.length || 0} keywords, has summary: ${!!storedData.summary}`, 'info');
-                }
-                
-                if (storedData && storedData.combinedRows && storedData.summary) {
-                  const mod = window.RankingAiModule;
-                  if (mod) {
-                    debugLog(`✓ Tab click: Setting ${storedData.combinedRows.length} keywords in RankingAiModule`, 'success');
-                    mod.setData(storedData.combinedRows, storedData.summary);
-                    mod.setLoadedOnce(true);
-                    debugLog(`✓ Tab click: Calling renderRankingAiTab()`, 'info');
-                    renderRankingAiTab();
-                    const lastRunEl = document.getElementById("ranking-ai-last-run");
-                    if (lastRunEl && storedData.timestamp) {
-                      const date = new Date(storedData.timestamp);
-                      lastRunEl.textContent = `Last run: ${date.toLocaleString()}`;
-                      debugLog(`✓ Tab click: Updated last run timestamp`, 'info');
-                    }
-                    debugLog(`✓ Tab click: Ranking & AI data loaded from storage (${storedData.combinedRows.length} keywords)`, 'success');
-                  } else {
-                    debugLog('✗ Tab click: RankingAiModule not found in window', 'error');
-                  }
-                } else {
-                  // No data available - just render empty state, don't trigger scan
-                  debugLog('⚠ Tab click: No Ranking & AI data available. Click "Run ranking & AI check" to fetch data.', 'warn');
-                  const mod = window.RankingAiModule;
-                  if (mod) {
-                    debugLog('📊 Tab click: Setting empty data in RankingAiModule', 'info');
-                    mod.setData([], { total_keywords: 0, keywords_with_rank: 0, keywords_with_ai_overview: 0, keywords_with_ai_citations: 0, top10: 0, top3: 0 });
-                    renderRankingAiTab();
-                  } else {
-                    debugLog('✗ Tab click: RankingAiModule not found in window', 'error');
-                  }
-                }
-              })();
-            }
 
-            // Load AI Sources & Influence tab when opened
-            if (target === "ai-sources" && isNowActive && !wasActive) {
-              setTimeout(() => {
-                if (typeof wireAiSourcesFilters === 'function') wireAiSourcesFilters();
-              }, 100);
-              // Load from RankingAiModule state (same data as Ranking & AI tab)
-              (async () => {
-                debugLog('📊 AI Sources & Influence tab clicked - loading data...', 'info');
-                const storedData = await loadRankingAiDataFromStorage(false);
-                if (storedData && storedData.combinedRows && storedData.combinedRows.length > 0) {
-                  const mod = window.RankingAiModule;
-                  if (mod) {
-                    mod.setData(storedData.combinedRows, storedData.summary);
-                    debugLog(`✓ AI Sources tab: Rendering with ${storedData.combinedRows.length} keywords`, 'success');
-                    if (typeof renderAiSourcesTab === 'function') {
-                      renderAiSourcesTab();
-                    }
-                  }
-                } else {
-                  debugLog('⚠ AI Sources tab: No keyword data available. Run a Ranking & AI check first.', 'warn');
-                  if (typeof renderAiSourcesTab === 'function') {
-                    renderAiSourcesTab(); // Will show empty state
-                  }
-                }
-              })();
-            }
-
-            // Re-render Score Trends chart when Overview tab is shown
-            if (target === "overview" && isNowActive && !wasActive) {
-              setTimeout(async () => {
-                const saved = loadAuditResultsSync();
-                if (saved && saved.scores && saved.searchData) {
-                  // Re-render trend chart by calling displayDashboard
-                  const trendCanvas = document.getElementById('trendChart');
-                  if (trendCanvas && typeof displayDashboard === 'function') {
-                    debugLog('Re-rendering Score Trends chart for Overview tab', 'info');
-                    try {
-                      await displayDashboard(saved.scores, saved.searchData, saved.snippetReadiness || 0, saved.schemaAudit || null, saved.localSignals || null);
-                    } catch (err) {
-                      debugLog(`Error re-rendering trend chart: ${err.message}`, 'warn');
-                    }
-                  } else {
-                    debugLog('⚠ Trend chart canvas or displayDashboard function not found', 'warn');
-                  }
-                } else {
-                  debugLog('⚠ No saved audit data available for Score Trends', 'warn');
-                }
-              }, 200); // Slightly longer delay to ensure panel is visible
-            }
-
-            // If money panel just became active, re-render charts that may have failed due to hidden panel
-            if (target === "money" && isNowActive && !wasActive) {
-              setTimeout(() => {
-                const saved = loadAuditResultsSync();
-                
-                // Re-render Money Pages Priority Matrix table
-                if (typeof renderMoneyPagesTable === 'function') {
-                  const priorityData = window.moneyPagePriorityData || (saved && saved.moneyPagePriorityData) || [];
-                  if (priorityData && priorityData.length > 0) {
-                    debugLog('Re-rendering Money Pages Priority Matrix table', 'info');
-                    renderMoneyPagesTable(priorityData);
-                  } else {
-                    debugLog('⚠ No moneyPagePriorityData available for table', 'warn');
-                  }
-                }
-                
-                // Re-render entire Money Pages section if function exists
-                if (typeof renderMoneyPagesSection === 'function' && saved && saved.scores && saved.scores.moneyPagesMetrics) {
-                  debugLog('Re-rendering Money Pages section', 'info');
-                  renderMoneyPagesSection(saved.scores.moneyPagesMetrics);
-                }
-                
-                // Re-render money pages category chart if it exists
-                const categoryCanvas = document.getElementById('moneyPagesCategoryChart');
-                if (categoryCanvas && typeof renderMoneyPagesCategoryChart === 'function') {
-                  if (saved && saved.scores && saved.scores.moneyPagesMetrics) {
-                    renderMoneyPagesCategoryChart(saved.scores.moneyPagesMetrics, 0);
-                  }
-                }
-                
-                // Re-render money pages trend chart if it exists
-                const trendCanvas = document.getElementById('moneyPagesTrendChart');
-                if (trendCanvas && typeof renderMoneyPagesTrendChart === 'function') {
-                  const propertyUrl = document.getElementById('propertyUrl')?.value;
-                  if (propertyUrl) {
-                    const endDate = new Date();
-                    const startDate = new Date();
-                    startDate.setFullYear(startDate.getFullYear() - 1);
-                    const startDateStr = startDate.toISOString().split('T')[0];
-                    const endDateStr = endDate.toISOString().split('T')[0];
-                    
-                    fetch(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDateStr}`)
-                      .then(res => res.json())
-                      .then(json => {
-                        if (json.status === 'ok' && json.data) {
-                          renderMoneyPagesTrendChart(json.data);
-                        }
-                      })
-                      .catch(err => debugLog(`Error fetching history for trend chart: ${err.message}`, 'warn'));
-                  }
-                }
-                
-                // Re-render KPI sparkline if it exists
-                const sparklineCanvas = document.getElementById('money-kpi-sparkline');
-                if (sparklineCanvas && typeof loadAuditHistoryAndRenderKpis === 'function') {
-                  const propertyUrl = document.getElementById('propertyUrl')?.value;
-                  if (propertyUrl) {
-                    loadAuditHistoryAndRenderKpis(propertyUrl);
-                  }
-                }
-                
-                // Wire up filters when panel becomes visible
-                if (typeof window.wireTopLevelFilter === 'function') {
-                  window.wireTopLevelFilter();
-                }
-                if (typeof window.wirePriorityActionsFilters === 'function') {
-                  window.wirePriorityActionsFilters();
-                }
-              }, 100); // Small delay to ensure panel is fully visible
-            }
+              // Lazy-render panel content (only first time)
+              ensurePanelRendered(panelId);
+            });
           });
         });
       });
+    })();
 
       // Manual refresh button for Ranking & AI
       function wireRankingAiButton() {
