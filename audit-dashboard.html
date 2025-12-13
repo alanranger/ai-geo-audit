@@ -4846,9 +4846,25 @@
           saveAuditToSupabase(propertyUrl, scores, searchData, snippetReadiness, savedAudit.schemaAudit, localSignals);
         }
         
+        // Update saved audit with new date range BEFORE updating dashboard
+        // This ensures the dateRange is saved so subsequent switches detect the change
+        const updatedAudit = {
+          ...savedAudit,
+          dateRange: newDateRange,
+          searchData: searchData,
+          scores: scores,
+          snippetReadiness: snippetReadiness,
+          localSignals: localSignals,
+          timestamp: new Date().toISOString()
+        };
+        safeSetLocalStorage('last_audit_results', updatedAudit);
+        
         // Update dashboard with new data - ensure scores object has all required properties
         debugLog(`Updating dashboard with scores: ${JSON.stringify(scores)}`, 'info');
         displayDashboard(scores, searchData, snippetReadiness, savedAudit.schemaAudit, localSignals);
+        
+        // Hide full-screen loading overlay
+        hideFullScreenLoading();
         
         showStatus(`Metrics updated for ${newDateRange} day period.`, 'success');
         debugLog(`✓ Audit updated for ${newDateRange} day period`, 'success');
