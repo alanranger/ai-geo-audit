@@ -20019,6 +20019,9 @@ Final Score: ${score}/100`;
           return null;
         }
 
+        // Store localStorage data as fallback (in case Supabase check fails)
+        let localStorageFallback = null;
+        
         // If forcing Supabase check, skip localStorage
         if (!forceCheckSupabase) {
           // Try localStorage first
@@ -20027,8 +20030,10 @@ Final Score: ${score}/100`;
             try {
               const parsed = JSON.parse(localData);
               if (parsed.combinedRows && parsed.summary) {
-                debugLog('✓ Ranking & AI data loaded from localStorage', 'success');
+                debugLog('✓ Ranking & AI data found in localStorage', 'success');
                 debugLog(`  Found ${parsed.combinedRows.length} keywords in localStorage`, 'info');
+                // Store as fallback before checking Supabase
+                localStorageFallback = parsed;
                 // Always check Supabase if localStorage has fewer than 10 keywords (likely stale data)
                 if (parsed.combinedRows.length < 10) {
                   debugLog(`⚠ LocalStorage has only ${parsed.combinedRows.length} keywords, checking Supabase for more...`, 'info');
@@ -20126,8 +20131,19 @@ Final Score: ${score}/100`;
           debugLog(`⚠ Failed to load from Supabase: HTTP ${response.status}`, 'error');
           debugLog(`  Error response: ${errorText.substring(0, 200)}`, 'error');
         }
+        
+        // If Supabase check failed or returned no data, fall back to localStorage if available
+        if (localStorageFallback) {
+          debugLog(`✓ Falling back to localStorage data (${localStorageFallback.combinedRows.length} keywords)`, 'success');
+          return localStorageFallback;
+        }
       } catch (err) {
         debugLog(`✗ Error loading Ranking & AI data from storage: ${err.message}`, 'error');
+        // If error occurred but we have localStorage fallback, return it
+        if (localStorageFallback) {
+          debugLog(`✓ Falling back to localStorage data after error (${localStorageFallback.combinedRows.length} keywords)`, 'success');
+          return localStorageFallback;
+        }
       }
       return null;
     }

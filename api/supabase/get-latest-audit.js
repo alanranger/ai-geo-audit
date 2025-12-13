@@ -218,44 +218,10 @@ export default async function handler(req, res) {
     }
 
     // Fetch keyword rankings from keyword_rankings table for this audit_date and property_url
-    // TEMPORARILY DISABLED: Skip keyword rankings fetch to prevent FUNCTION_INVOCATION_FAILED errors
-    // The rankingAiData will be loaded from the audit_results.ranking_ai_data JSON field instead
+    // Re-enabled: Fetching from keyword_rankings table with proper limits to prevent timeouts
     let rankingAiData = null;
     
-    // CRITICAL: Temporarily skip ranking_ai_data parsing to prevent FUNCTION_INVOCATION_FAILED
-    // The 246KB ranking_ai_data field is causing the function to crash
-    // TODO: Re-enable after implementing proper pagination or chunking
-    console.log(`[get-latest-audit] Skipping ranking_ai_data parsing to prevent FUNCTION_INVOCATION_FAILED (field is 246KB)`);
-    rankingAiData = null;
-    
-    /* TEMPORARILY DISABLED: ranking_ai_data parsing
-    // CRITICAL: Parse ranking_ai_data if it's a string (Supabase may return JSON as strings)
-    // Also check size to prevent FUNCTION_INVOCATION_FAILED errors
-    const rawRankingData = record.ranking_ai_data;
-    if (rawRankingData) {
-      // Skip parsing if string is too large (over 200KB) to prevent memory issues
-      if (typeof rawRankingData === 'string' && rawRankingData.length > 200 * 1024) {
-        console.warn(`[get-latest-audit] ⚠️  ranking_ai_data too large (${Math.round(rawRankingData.length / 1024)}KB), skipping parse to prevent FUNCTION_INVOCATION_FAILED`);
-        rankingAiData = null;
-      } else {
-        try {
-          if (typeof rawRankingData === 'string') {
-            rankingAiData = JSON.parse(rawRankingData);
-          } else {
-            rankingAiData = rawRankingData;
-          }
-          console.log(`[get-latest-audit] Using rankingAiData from audit_results (${rankingAiData ? (rankingAiData.combinedRows?.length || 0) + ' keywords' : 'null'})`);
-        } catch (parseError) {
-          console.error(`[get-latest-audit] Failed to parse ranking_ai_data: ${parseError.message}`);
-          rankingAiData = null;
-        }
-      }
-    } else {
-      console.log(`[get-latest-audit] No rankingAiData in audit_results`);
-    }
-    */
-    
-    /* DISABLED: Keyword rankings fetch - re-enable when function timeout issues are resolved
+    // Re-enabled: Keyword rankings fetch with proper limits (2000 rows max)
     try {
       console.log(`[get-latest-audit] Fetching keyword rankings for audit_date=${auditDate}, property_url=${propertyUrl}`);
       
@@ -453,16 +419,16 @@ export default async function handler(req, res) {
           };
           console.log(`[get-latest-audit] Successfully reconstructed rankingAiData with ${combinedRows.length} keywords`);
         } else {
-          // Fallback to ranking_ai_data JSON from audit_results if keyword_rankings is empty
-          console.log(`[get-latest-audit] No keyword rows found, falling back to ranking_ai_data from audit_results`);
-          rankingAiData = record.ranking_ai_data || null;
+          // No keyword rows found in keyword_rankings table
+          console.log(`[get-latest-audit] No keyword rows found in keyword_rankings table`);
+          rankingAiData = null;
         }
     } catch (keywordErr) {
       console.error('[get-latest-audit] Error fetching keyword rankings:', keywordErr);
-      // Fallback to ranking_ai_data JSON from audit_results if keyword_rankings fetch errors
-      rankingAiData = record.ranking_ai_data || null;
+      console.error('[get-latest-audit] Error stack:', keywordErr.stack);
+      // Set to null on error - will be handled by frontend fallback to localStorage
+      rankingAiData = null;
     }
-    */
     
     // Log final rankingAiData status (safely, without accessing nested properties if it's still a string)
     if (rankingAiData && typeof rankingAiData === 'object' && rankingAiData.combinedRows) {
