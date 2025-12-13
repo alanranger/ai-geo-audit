@@ -21544,15 +21544,50 @@ Final Score: ${score}/100`;
           const homepageMatch = (normalizedUrl === '/' || normalizedUrl === '') && (pNormalized === '/' || pNormalized === '');
           // Path matching: check if one contains the other (for partial matches)
           const pathMatch = !exactMatch && !homepageMatch && (pNormalized.includes(normalizedUrl) || normalizedUrl.includes(pNormalized));
+          // Also check if the last path segment matches (e.g., both end with same slug)
+          const lastSegmentMatch = !exactMatch && !homepageMatch && !pathMatch && 
+            normalizedUrl.split('/').pop() === pNormalized.split('/').pop() &&
+            normalizedUrl.split('/').pop() !== '';
           
-          if (exactMatch || homepageMatch || pathMatch) {
+          if (exactMatch || homepageMatch || pathMatch || lastSegmentMatch) {
             debugLog('[Schema Coverage] URL match found: ' + p.url + ' -> ' + pNormalized + ' (search: ' + normalizedUrl + ')', 'info');
             return true;
           }
           return false;
         });
 
-        if (!pageData || !pageData.schemaTypes) {
+        if (!pageData) {
+          // Enhanced debugging: show sample URLs and search for similar URLs
+          debugLog('[Schema Coverage] ❌ No page data found for URL: ' + url, 'warn');
+          debugLog('[Schema Coverage] Normalized search URL: ' + normalizedUrl, 'warn');
+          debugLog('[Schema Coverage] Total pages in array: ' + allPages.length, 'warn');
+          if (allPages.length > 0) {
+            debugLog('[Schema Coverage] Sample URLs in pages array (first 10):', 'warn');
+            allPages.slice(0, 10).forEach((p, idx) => {
+              const pNorm = normalizeUrlForMatching(p.url);
+              debugLog(`  ${idx + 1}. ${p.url} -> ${pNorm}`, 'warn');
+            });
+            // Try to find similar URLs (contains photography-courses or courses-coventry)
+            const similarUrls = allPages.filter(p => {
+              const pNorm = normalizeUrlForMatching(p.url);
+              return pNorm.includes('photography-courses') || 
+                     pNorm.includes('courses-coventry') ||
+                     normalizedUrl.includes(pNorm.split('/').pop() || '') ||
+                     (pNorm.split('/').pop() || '').includes(normalizedUrl.split('/').pop() || '');
+            });
+            if (similarUrls.length > 0) {
+              debugLog('[Schema Coverage] Found similar URLs that might match:', 'warn');
+              similarUrls.forEach((p, idx) => {
+                const pNorm = normalizeUrlForMatching(p.url);
+                debugLog(`  ${idx + 1}. ${p.url} -> ${pNorm}`, 'warn');
+              });
+            }
+          }
+          return null;
+        }
+        
+        if (!pageData.schemaTypes) {
+          debugLog('[Schema Coverage] ⚠ Page found but no schemaTypes: ' + pageData.url, 'warn');
           return null;
         }
 
