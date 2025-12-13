@@ -1266,54 +1266,76 @@
       background: rgba(204, 255, 255, 0.15) !important;
       border-left: 4px solid #CCFFFF !important;
       border-radius: 8px;
-      padding: 1.5rem;
-      font-size: 14pt !important;
-    }
-    
-    .ranking-filters-section * {
-      font-size: 14pt !important;
+      padding: 1rem 1.25rem;
+      font-size: 0.75rem !important;
     }
 
     .ranking-filter-bar {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 1rem;
-      align-items: center;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 0.75rem 1rem;
+      align-items: end;
       padding: 0;
       background: transparent;
-      font-size: 14pt !important;
     }
 
     .filter-group {
       display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      font-size: 14pt !important;
+      flex-direction: column;
+      gap: 0.375rem;
+      min-width: 0;
     }
 
     .filter-group label {
-      font-size: 14pt !important;
+      font-size: 0.7rem !important;
       font-weight: 600;
       color: #374151;
       white-space: nowrap;
+      margin: 0;
+      line-height: 1.2;
     }
 
     .filter-control {
-      padding: 0.5rem 0.875rem;
+      padding: 0.4rem 0.65rem;
       border: 1px solid #d1d5db;
-      border-radius: 6px;
-      font-size: 14pt !important;
+      border-radius: 4px;
+      font-size: 0.7rem !important;
       background: #ffffff;
+      width: 100%;
+      min-width: 120px;
+      transition: all 0.2s ease;
+    }
+
+    /* Active filter state - when value is not "all" */
+    .filter-control.filter-active {
+      background: #eff6ff !important;
+      border-color: #3b82f6 !important;
+      color: #1e40af !important;
+      font-weight: 600;
     }
 
     .filter-control:focus {
       outline: none;
       border-color: #2563eb;
-      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+      box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
     }
 
     #ranking-filter-keyword {
-      min-width: 200px;
+      min-width: 300px;
+      flex: 1 1 300px;
+    }
+
+    /* Search filter group should be wider */
+    .filter-group:has(#ranking-filter-keyword) {
+      grid-column: span 2;
+      min-width: 300px;
+    }
+
+    /* Clear filters button */
+    #ranking-filter-clear {
+      font-size: 0.7rem !important;
+      padding: 0.4rem 0.75rem;
+      align-self: end;
     }
 
     /* Section C: Table section - separate card */
@@ -2520,6 +2542,55 @@
             <div class="metric-pill-footer">Pillars: Content/Schema, Local Entity</div>
             <div class="metric-pill-toggle" onclick="toggleMetricPillDetails('ranking-card-serp-features')">Show details</div>
             <div class="metric-pill-details" id="ranking-card-serp-features-details"></div>
+          </div>
+        </div>
+
+        <!-- Global Insights & actions and Visibility metrics side by side (underneath summary tiles) -->
+        <div class="ranking-cards-side-by-side">
+          <!-- Global Insights & actions (all tracked keywords) -->
+          <section class="card card--insights" id="ranking-ai-insights-card-global">
+            <div class="card-header">
+              <h2>Insights &amp; actions (all tracked keywords)</h2>
+              <p class="card-subtitle">
+                Recommendations based on how your tracked keywords currently rank in classic search and appear in AI Overviews.
+                These insights are global, not tied to the selected keyword.
+              </p>
+            </div>
+            <div class="card-pill-container" id="ranking-ai-insights-list-global">
+              <!-- Content populated by renderRankingAiInsights -->
+            </div>
+          </section>
+
+          <!-- Tracked keyword visibility metrics (DataForSEO only - not part of AIO pillars) -->
+          <div class="ranking-visibility-metrics-section" id="ranking-visibility-metrics" style="display: none;">
+            <div class="card" style="background: rgba(204, 255, 255, 0.15); border-left: 4px solid #CCFFFF;">
+            <div class="card-header">
+              <h4 style="font-size: 14pt !important; margin-bottom: 0.5rem;">Tracked keyword visibility (DataForSEO)</h4>
+              <div style="font-size: 12pt !important; color: #666; margin-bottom: 0.75rem; line-height: 1.5;">
+                <p style="margin-bottom: 0.5rem;">
+                  These metrics use DataForSEO live rankings and Google Ads search volume for your tracked keyword set only.
+                </p>
+                <ul style="margin: 0.5rem 0; padding-left: 1.5rem;">
+                  <li><strong>Demand-weighted avg position</strong> – average Google rank where each keyword is weighted by its monthly search volume (high-demand terms pull this number more).</li>
+                  <li><strong>Unweighted avg position</strong> – simple average rank across all tracked keywords, with each keyword counted equally.</li>
+                </ul>
+                <p style="margin-top: 0.5rem; margin-bottom: 0;">
+                  These are diagnostic metrics for your tracked set; the main Visibility and Authority pillar scores are still calculated from full Google Search Console data across all queries and pages.
+                </p>
+              </div>
+              <div style="display: flex; gap: 2rem; flex-wrap: wrap; font-size: 14pt !important; align-items: baseline;">
+                <div>
+                  <strong style="font-size: 13pt !important;">Demand-weighted avg position:</strong>
+                  <span id="ranking-avg-position-weighted" style="font-weight: bold; color: #0284c7; font-size: 16pt !important; margin-left: 0.5rem;">—</span>
+                  <span title="Average rank for tracked keywords where each rank is weighted by the keyword's monthly search volume from DataForSEO." style="margin-left: 0.25rem; opacity: 0.6; cursor: help; font-size: 12pt !important;">ℹ</span>
+                </div>
+                <div style="font-size: 12pt !important; color: #666;">
+                  <strong>Unweighted avg position:</strong>
+                  <span id="ranking-avg-position-unweighted" style="font-weight: normal; margin-left: 0.5rem;">—</span>
+                  <span title="Simple average rank for all tracked keywords from DataForSEO, each keyword counted once." style="margin-left: 0.25rem; opacity: 0.6; cursor: help;">ℹ</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -23297,6 +23368,41 @@ Final Score: ${score}/100`;
         const keywordFilter = document.getElementById("ranking-filter-keyword");
         const clearBtn = document.getElementById("ranking-filter-clear");
 
+        // Update active state styling for filters
+        const updateFilterActiveStates = () => {
+          const filterControls = [
+            { el: segmentFilter, value: rankingFilterState.segment },
+            { el: rankFilter, value: rankingFilterState.rank },
+            { el: volumeFilter, value: rankingFilterState.volume },
+            { el: ctrFilter, value: rankingFilterState.ctr },
+            { el: demandShareFilter, value: rankingFilterState.demandShare },
+            { el: aiOverviewFilter, value: rankingFilterState.aiOverview },
+            { el: aiCitationFilter, value: rankingFilterState.aiCitation },
+            { el: opportunityFilter, value: rankingFilterState.opportunity },
+            { el: pageTypeFilter, value: rankingFilterState.pageType },
+            { el: serpFeaturesFilter, value: rankingFilterState.serpFeatures }
+          ];
+
+          filterControls.forEach(({ el, value }) => {
+            if (el) {
+              if (value && value !== 'all') {
+                el.classList.add('filter-active');
+              } else {
+                el.classList.remove('filter-active');
+              }
+            }
+          });
+
+          // Handle keyword filter separately (active if not empty)
+          if (keywordFilter) {
+            if (rankingFilterState.keyword && rankingFilterState.keyword.trim() !== '') {
+              keywordFilter.classList.add('filter-active');
+            } else {
+              keywordFilter.classList.remove('filter-active');
+            }
+          }
+        };
+
         const updateFilters = () => {
           if (segmentFilter) rankingFilterState.segment = segmentFilter.value;
           if (rankFilter) rankingFilterState.rank = rankFilter.value;
@@ -23309,6 +23415,10 @@ Final Score: ${score}/100`;
           if (pageTypeFilter) rankingFilterState.pageType = pageTypeFilter.value;
           if (serpFeaturesFilter) rankingFilterState.serpFeatures = serpFeaturesFilter.value;
           if (keywordFilter) rankingFilterState.keyword = keywordFilter.value.trim();
+          
+          // Update active states
+          updateFilterActiveStates();
+          
           rankingPaginationState.currentPage = 1; // Reset to first page on filter change
           renderRankingAiTab();
         };
