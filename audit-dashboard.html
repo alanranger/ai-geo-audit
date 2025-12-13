@@ -17983,18 +17983,39 @@ Final Score: ${score}/100`;
                 siteReviewsForDate
               );
               
-              // Use historical data from Supabase if available, otherwise use calculated scores (only if valid GSC data)
+              // Local Entity and Service Area: Use historical data from Supabase if available
+              // These don't require GSC data, so should use latest available score for missing dates
               if (historicalLocalEntity !== undefined && historicalLocalEntity !== null) {
                 localEntityData.push(historicalLocalEntity);
                 debugLog(`Using historical Local Entity (${historicalLocalEntity}) for ${pointDate}`, 'info');
               } else {
-                // Check if GSC data is valid before calculating
-                const hasValidGscData = point.position && point.position > 0 && point.ctr !== null && point.ctr >= 0;
-                if (hasValidGscData) {
-              localEntityData.push(pillarScores.localEntity);
+                // For missing dates, use the most recent available score from the map
+                let latestAvailableLocalEntity = null;
+                let latestAvailableDate = null;
+                localEntityMap.forEach((score, mapDate) => {
+                  if (mapDate <= pointDate && (latestAvailableDate === null || mapDate > latestAvailableDate)) {
+                    latestAvailableDate = mapDate;
+                    latestAvailableLocalEntity = score;
+                  }
+                });
+                
+                if (latestAvailableLocalEntity !== null && latestAvailableLocalEntity !== undefined) {
+                  localEntityData.push(latestAvailableLocalEntity);
+                  debugLog(`Using latest available Local Entity (${latestAvailableLocalEntity} from ${latestAvailableDate}) for ${pointDate}`, 'info');
+                } else if (isLatestAudit) {
+                  // For latest audit date, use current score
+                  const savedAuditForLocal = loadAuditResultsSync();
+                  const currentLocalEntity = savedAuditForLocal?.scores?.localEntity;
+                  if (currentLocalEntity !== null && currentLocalEntity !== undefined && currentLocalEntity > 0) {
+                    localEntityData.push(currentLocalEntity);
+                    debugLog(`Using current Local Entity (${currentLocalEntity}) for ${pointDate} (latest audit)`, 'info');
+                  } else {
+                    localEntityData.push(null);
+                    debugLog(`No Local Entity data for ${pointDate}`, 'warn');
+                  }
                 } else {
                   localEntityData.push(null);
-                  debugLog(`No valid GSC data for Local Entity on ${pointDate} - using null`, 'warn');
+                  debugLog(`No Local Entity data for ${pointDate} (no historical or current data)`, 'info');
                 }
               }
               
@@ -18002,13 +18023,33 @@ Final Score: ${score}/100`;
                 serviceAreaData.push(historicalServiceArea);
                 debugLog(`Using historical Service Area (${historicalServiceArea}) for ${pointDate}`, 'info');
               } else {
-                // Check if GSC data is valid before calculating
-                const hasValidGscData = point.position && point.position > 0 && point.ctr !== null && point.ctr >= 0;
-                if (hasValidGscData) {
-              serviceAreaData.push(pillarScores.serviceArea);
+                // For missing dates, use the most recent available score from the map
+                let latestAvailableServiceArea = null;
+                let latestAvailableDate = null;
+                serviceAreaMap.forEach((score, mapDate) => {
+                  if (mapDate <= pointDate && (latestAvailableDate === null || mapDate > latestAvailableDate)) {
+                    latestAvailableDate = mapDate;
+                    latestAvailableServiceArea = score;
+                  }
+                });
+                
+                if (latestAvailableServiceArea !== null && latestAvailableServiceArea !== undefined) {
+                  serviceAreaData.push(latestAvailableServiceArea);
+                  debugLog(`Using latest available Service Area (${latestAvailableServiceArea} from ${latestAvailableDate}) for ${pointDate}`, 'info');
+                } else if (isLatestAudit) {
+                  // For latest audit date, use current score
+                  const savedAuditForService = loadAuditResultsSync();
+                  const currentServiceArea = savedAuditForService?.scores?.serviceArea;
+                  if (currentServiceArea !== null && currentServiceArea !== undefined && currentServiceArea > 0) {
+                    serviceAreaData.push(currentServiceArea);
+                    debugLog(`Using current Service Area (${currentServiceArea}) for ${pointDate} (latest audit)`, 'info');
+                  } else {
+                    serviceAreaData.push(null);
+                    debugLog(`No Service Area data for ${pointDate}`, 'warn');
+                  }
                 } else {
                   serviceAreaData.push(null);
-                  debugLog(`No valid GSC data for Service Area on ${pointDate} - using null`, 'warn');
+                  debugLog(`No Service Area data for ${pointDate} (no historical or current data)`, 'info');
                 }
               }
               
