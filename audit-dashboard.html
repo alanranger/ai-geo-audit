@@ -10370,14 +10370,56 @@ Final Score: ${score}/100`;
           if (key === 'contentSchema' && schemaAuditData && schemaAuditData.status === 'ok' && schemaAuditData.data) {
             const schemaData = schemaAuditData.data;
             const allTypes = new Set();
-            if (schemaData.allDetectedTypes && Array.isArray(schemaData.allDetectedTypes)) {
-              schemaData.allDetectedTypes.forEach(type => { if (type) allTypes.add(type); });
-            } else if (schemaData.schemaTypes && Array.isArray(schemaData.schemaTypes)) {
-              schemaData.schemaTypes.forEach(item => { if (item.type) allTypes.add(item.type); });
+            
+            // PRIORITY: Use foundation object first (most reliable source)
+            if (schemaData.foundation && typeof schemaData.foundation === 'object') {
+              Object.keys(schemaData.foundation).forEach(type => {
+                if (schemaData.foundation[type] === true) {
+                  allTypes.add(type);
+                }
+              });
             }
             
+            // Also add types from allDetectedTypes if available (for complete type list)
+            if (schemaData.allDetectedTypes && Array.isArray(schemaData.allDetectedTypes)) {
+              schemaData.allDetectedTypes.forEach(type => { if (type) allTypes.add(type); });
+            }
+            
+            // Also add from richEligible for complete type list
+            if (schemaData.richEligible && typeof schemaData.richEligible === 'object') {
+              Object.keys(schemaData.richEligible).forEach(type => {
+                if (schemaData.richEligible[type] === true) {
+                  allTypes.add(type);
+                }
+              });
+            }
+            
+            // Fallback: collect from schemaTypes array (but filter out page objects)
+            if (schemaData.schemaTypes && Array.isArray(schemaData.schemaTypes)) {
+              schemaData.schemaTypes.forEach(item => {
+                // Skip page objects (have 'url' property) - these are NOT schema types
+                if (item && typeof item === 'object' && item.url) {
+                  return; // Skip page objects
+                }
+                // Only process valid schema type objects or strings
+                if (typeof item === 'string') {
+                  allTypes.add(item);
+                } else if (item && typeof item === 'object' && item.type && typeof item.type === 'string' && !item.url) {
+                  allTypes.add(item.type);
+                }
+              });
+            }
+            
+            // Foundation detection: Use foundation object directly (most reliable)
             const foundationTypes = ['Organization', 'Person', 'WebSite', 'BreadcrumbList'];
-            const foundationPresent = foundationTypes.filter(type => allTypes.has(type)).length;
+            let foundationPresent = 0;
+            if (schemaData.foundation && typeof schemaData.foundation === 'object') {
+              // Use foundation object directly - count how many are true
+              foundationPresent = foundationTypes.filter(type => schemaData.foundation[type] === true).length;
+            } else {
+              // Fallback: check allTypes set
+              foundationPresent = foundationTypes.filter(type => allTypes.has(type)).length;
+            }
             const foundationScore = (foundationPresent / foundationTypes.length) * 100;
             
             const richResultTypes = ['Article', 'Event', 'FAQPage', 'Product', 'LocalBusiness', 'Course', 'Review', 'HowTo', 'VideoObject', 'ImageObject', 'ItemList'];
@@ -10387,6 +10429,32 @@ Final Score: ${score}/100`;
             const coverageScore = schemaData.coverage || 0;
             const uniqueTypesCount = allTypes.size;
             const diversityScore = Math.min((uniqueTypesCount / 15) * 100, 100);
+            
+            // Get schema types list for display (properly formatted to avoid [object Object])
+            let schemaTypesList = [];
+            if (schemaData.allDetectedTypes && Array.isArray(schemaData.allDetectedTypes)) {
+              schemaTypesList = schemaData.allDetectedTypes.slice(0, 20).filter(t => t && typeof t === 'string');
+            } else if (schemaData.schemaTypes && Array.isArray(schemaData.schemaTypes)) {
+              schemaTypesList = schemaData.schemaTypes
+                .filter(t => {
+                  // Skip null/undefined
+                  if (!t) return false;
+                  // Skip page objects (have 'url' property) - these are pages, not types!
+                  if (typeof t === 'object' && ('url' in t || ('title' in t && 'metaDescription' in t))) return false;
+                  // Only keep valid type objects or strings
+                  return typeof t === 'string' || (typeof t === 'object' && t.type && typeof t.type === 'string' && !t.url);
+                })
+                .map(t => {
+                  if (typeof t === 'string') return t.trim();
+                  if (t && typeof t === 'object' && t.type && typeof t.type === 'string') {
+                    return `${t.type}${t.count ? ` (${t.count})` : ''}`;
+                  }
+                  return null;
+                })
+                .filter(t => t !== null && t !== undefined && t !== '' && typeof t === 'string')
+                .slice(0, 20);
+            }
+            const schemaTypesDisplay = schemaTypesList.length > 0 ? schemaTypesList.join(', ') : 'None detected';
             
             pillarBreakdown = `
               <div id="${breakdownId}" style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #e2e8f0; font-size: 0.8rem; min-height: 4.5rem;">
@@ -10406,10 +10474,11 @@ Final Score: ${score}/100`;
                 </button>
                 <div id="${detailsId}" style="display: none; margin-top: 0.75rem; padding: 0.75rem; background: #f8f9fa; border-radius: 4px; font-size: 0.75rem; color: #666; line-height: 1.6;">
                   <div style="margin-bottom: 0.5rem;"><strong>Schema Details:</strong></div>
-                  <div>Foundation schemas: ${foundationPresent}/4 (${foundationTypes.filter(t => allTypes.has(t)).join(', ') || 'none'})</div>
+                  <div>Foundation schemas: ${foundationPresent}/4 (${foundationTypes.filter(t => (schemaData.foundation && schemaData.foundation[t] === true) || allTypes.has(t)).join(', ') || 'none'})</div>
                   <div>Rich result types: ${richEligibleCount}/${richResultTypes.length} eligible</div>
                   <div>Coverage: ${coverageScore != null ? coverageScore.toFixed(1) : 'N/A'}% (${schemaData.pagesWithSchema || 0}/${schemaData.totalPages || 0} pages)</div>
                   <div>Type diversity: ${uniqueTypesCount} unique types</div>
+                  <div style="margin-top: 0.5rem;"><strong>Schema types found:</strong> ${schemaTypesDisplay}${schemaTypesList.length >= 20 ? '...' : ''}</div>
                 </div>
               </div>
             `;
