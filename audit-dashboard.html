@@ -23569,6 +23569,27 @@ Final Score: ${score}/100`;
           renderRankingAiTab();
         };
 
+        // Debounce function for keyword filter to improve performance
+        let keywordFilterTimeout = null;
+        const debouncedUpdateFilters = () => {
+          // Update the keyword value immediately for active state
+          if (keywordFilter) {
+            rankingFilterState.keyword = keywordFilter.value.trim();
+            updateFilterActiveStates();
+          }
+          
+          // Clear existing timeout
+          if (keywordFilterTimeout) {
+            clearTimeout(keywordFilterTimeout);
+          }
+          
+          // Set new timeout to actually apply the filter after user stops typing
+          keywordFilterTimeout = setTimeout(() => {
+            updateFilters();
+            keywordFilterTimeout = null;
+          }, 300); // 300ms delay
+        };
+
         if (segmentFilter) segmentFilter.addEventListener("change", updateFilters);
         if (rankFilter) rankFilter.addEventListener("change", updateFilters);
         if (volumeFilter) volumeFilter.addEventListener("change", updateFilters);
@@ -23579,10 +23600,16 @@ Final Score: ${score}/100`;
         if (opportunityFilter) opportunityFilter.addEventListener("change", updateFilters);
         if (pageTypeFilter) pageTypeFilter.addEventListener("change", updateFilters);
         if (serpFeaturesFilter) serpFeaturesFilter.addEventListener("change", updateFilters);
-        if (keywordFilter) keywordFilter.addEventListener("input", updateFilters);
+        if (keywordFilter) keywordFilter.addEventListener("input", debouncedUpdateFilters);
 
         if (clearBtn) {
           clearBtn.addEventListener("click", () => {
+            // Cancel any pending debounced keyword filter updates
+            if (keywordFilterTimeout) {
+              clearTimeout(keywordFilterTimeout);
+              keywordFilterTimeout = null;
+            }
+            
             rankingFilterState = {
               segment: 'all',
               rank: 'all',
