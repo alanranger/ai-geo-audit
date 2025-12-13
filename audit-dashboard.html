@@ -3879,10 +3879,20 @@
       const savedAudit = loadAuditResultsSync();
       if (savedAudit && savedAudit.scores) {
         const savedDateRange = savedAudit.dateRange || oldDateRange;
+        // Always update if date range changed (even if going back to a previous range)
+        // This ensures charts refresh properly when switching between ranges
         if (savedDateRange !== days) {
           // Date range changed - update GSC data and recalculate scores
           debugLog(`Date range changed from ${savedDateRange} to ${days} days. Updating metrics...`, 'info');
           updateAuditForNewDateRange(days, savedAudit);
+        } else {
+          // Date range matches, but force refresh to ensure charts are updated
+          // This handles the case where user switches back to the same range
+          debugLog(`Date range is already ${days} days, but refreshing charts to ensure they're up to date...`, 'info');
+          // Force a refresh by calling displayDashboard with current data
+          if (savedAudit.scores && savedAudit.searchData) {
+            displayDashboard(savedAudit.scores, savedAudit.searchData, savedAudit.snippetReadiness, savedAudit.schemaAudit, savedAudit.localSignals);
+          }
         }
       }
     }
@@ -10281,17 +10291,25 @@ Final Score: ${score}/100`;
           let gbpReviewCount = null;
           
           if (localSignals) {
-            debugLog(`[Authority Card] Local signals status: ${localSignals.status}, has data: ${!!localSignals.data}`, 'info');
-            if (localSignals.status === 'ok' && localSignals.data) {
-              gbpRating = localSignals.data.gbpRating !== null && localSignals.data.gbpRating !== undefined 
-                ? localSignals.data.gbpRating 
+            debugLog(`[Authority Card] Local signals structure: status=${localSignals.status}, has data: ${!!localSignals.data}, direct keys: ${localSignals.gbpRating !== undefined ? 'has gbpRating' : 'no gbpRating'}`, 'info');
+            
+            // Handle both structures: {status: 'ok', data: {...}} OR direct data object
+            const signalsData = (localSignals.status === 'ok' && localSignals.data) 
+              ? localSignals.data 
+              : (localSignals.gbpRating !== undefined || localSignals.napConsistencyScore !== undefined)
+                ? localSignals  // Direct data structure
                 : null;
-              gbpReviewCount = localSignals.data.gbpReviewCount !== null && localSignals.data.gbpReviewCount !== undefined 
-                ? localSignals.data.gbpReviewCount 
+            
+            if (signalsData) {
+              gbpRating = signalsData.gbpRating !== null && signalsData.gbpRating !== undefined 
+                ? signalsData.gbpRating 
+                : null;
+              gbpReviewCount = signalsData.gbpReviewCount !== null && signalsData.gbpReviewCount !== undefined 
+                ? signalsData.gbpReviewCount 
                 : null;
               debugLog(`[Authority Card] GBP data extracted: rating=${gbpRating}, count=${gbpReviewCount}`, 'info');
             } else {
-              debugLog(`[Authority Card] Local signals not OK or missing data. Status: ${localSignals.status}, data keys: ${localSignals.data ? Object.keys(localSignals.data).join(', ') : 'no data'}`, 'warn');
+              debugLog(`[Authority Card] Local signals structure not recognized. Keys: ${Object.keys(localSignals).join(', ')}`, 'warn');
             }
           } else {
             debugLog(`[Authority Card] No localSignals available`, 'warn');
@@ -18051,21 +18069,35 @@ Final Score: ${score}/100`;
               // Check if we have real historical data for this date
               const realScore = contentSchemaMap.get(pointDate);
               
-              if (realScore !== undefined && realScore !== null) {
+              if (realScore !== undefined && realScore !== null && realScore > 0) {
                 // We have real data for this date
                 contentSchemaData.push(realScore);
                 contentSchemaDataEstimated.push(null); // No estimated value
                 debugLog(`Content/Schema: Added ${realScore} for ${pointDate} from Supabase`, 'info');
-              } else if (isLatestAudit && currentContentSchema !== null && currentContentSchema !== undefined) {
-                // For latest audit date, use current Content/Schema score if available
-                contentSchemaData.push(currentContentSchema);
-                contentSchemaDataEstimated.push(null);
-                debugLog(`Content/Schema: Added ${currentContentSchema} for ${pointDate} from current audit (latest)`, 'info');
+              } else if (isLatestAudit) {
+                // For latest audit date, try multiple sources
+                const savedAuditForContentSchema = loadAuditResultsSync();
+                const savedContentSchema = savedAuditForContentSchema?.scores?.contentSchema;
+                const scoreToUse = (currentContentSchema !== null && currentContentSchema !== undefined && currentContentSchema > 0)
+                  ? currentContentSchema
+                  : (savedContentSchema !== null && savedContentSchema !== undefined && savedContentSchema > 0)
+                    ? savedContentSchema
+                    : null;
+                
+                if (scoreToUse !== null) {
+                  contentSchemaData.push(scoreToUse);
+                  contentSchemaDataEstimated.push(null);
+                  debugLog(`Content/Schema: Added ${scoreToUse} for ${pointDate} from ${scoreToUse === currentContentSchema ? 'current audit' : 'saved audit'} (latest)`, 'info');
+                } else {
+                  contentSchemaData.push(null);
+                  contentSchemaDataEstimated.push(null);
+                  debugLog(`Content/Schema: No valid score for ${pointDate} (isLatestAudit=${isLatestAudit}, currentContentSchema=${currentContentSchema}, savedContentSchema=${savedContentSchema})`, 'warn');
+                }
               } else {
                 // No real data for this date - use null (don't show estimated line)
                 contentSchemaData.push(null);
                 contentSchemaDataEstimated.push(null);
-                debugLog(`Content/Schema: No data for ${pointDate} (isLatestAudit=${isLatestAudit}, currentContentSchema=${currentContentSchema})`, 'info');
+                debugLog(`Content/Schema: No data for ${pointDate} (not latest audit, map has ${contentSchemaMap.size} entries)`, 'info');
               }
               
               // Brand Overlay data (ALWAYS prioritize historical data from Supabase first)
