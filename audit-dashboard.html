@@ -4744,7 +4744,10 @@
         // Save updated audit
         // Always use correct Trustpilot snapshot (4.6, 610) - override any old cached values
         const normalizedSiteReviewsForLoad = getTrustpilotSnapshot(savedAudit.siteReviews || null);
-        saveAuditResults(scores, searchData, snippetReadiness, savedAudit.schemaAudit, localSignals, normalizedSiteReviewsForLoad, savedAudit.backlinkMetrics || null);
+        // Preserve backlinkMetrics from current run if available, don't overwrite with old savedAudit.backlinkMetrics
+        // The backlinkMetrics should have been loaded earlier in the audit flow
+        const preservedBacklinkMetrics = backlinkMetrics || savedAudit.backlinkMetrics || null;
+        saveAuditResults(scores, searchData, snippetReadiness, savedAudit.schemaAudit, localSignals, normalizedSiteReviewsForLoad, preservedBacklinkMetrics);
         safeSetLocalStorage('last_audit_results', updatedAudit);
         
         // Also save to Supabase for historical tracking
@@ -8596,7 +8599,28 @@
         saveAuditResults(scores, searchData, snippetReadiness, schemaAudit, localSignals, siteReviews, backlinkMetrics);
         
         // Save audit results to Supabase for historical tracking
-        saveAuditToSupabase(propertyUrl, scores, searchData, snippetReadiness, schemaAudit, localSignals);
+        // Note: saveAuditToSupabase is async, so we can await it or use .then()
+        (async () => {
+          try {
+            await saveAuditToSupabase(propertyUrl, scores, searchData, snippetReadiness, schemaAudit, localSignals);
+            // After saving to Supabase, refresh the trend chart to show the latest audit
+            debugLog('Refreshing Score Trends chart after saving audit...', 'info');
+            // Re-render the dashboard to update the trend chart with new data
+            setTimeout(async () => {
+              const saved = loadAuditResultsSync();
+              if (saved && saved.scores && saved.searchData) {
+                try {
+                  await displayDashboard(saved.scores, saved.searchData, saved.snippetReadiness || 0, saved.schemaAudit || null, saved.localSignals || null);
+                  debugLog('✓ Score Trends chart refreshed after saving audit', 'success');
+                } catch (err) {
+                  debugLog(`⚠ Error refreshing trend chart: ${err.message}`, 'warn');
+                }
+              }
+            }, 1000); // Delay to ensure Supabase save is complete
+          } catch (err) {
+            debugLog(`⚠ Error saving to Supabase (chart refresh skipped): ${err.message}`, 'warn');
+          }
+        })();
         
         showStatus('Audit completed successfully!', 'success');
       } catch (error) {
@@ -8803,7 +8827,8 @@
       
       // Use current audit data (passed as parameter) or fallback to saved data
       // This ensures we always use the most recent audit run data, not stale localStorage
-      const currentLocalSignals = localSignals || (saved && saved.localSignals) || null;
+      // Check both localSignals and localSignalsSnapshot (different storage formats)
+      const currentLocalSignals = localSignals || (saved && (saved.localSignals || saved.localSignalsSnapshot)) || null;
       
       // Restore Money Pages Priority Matrix data from localStorage
       // If not available, try to rebuild from saved data
@@ -9022,8 +9047,17 @@
 
       // Use current audit data (passed as parameter) for health dashboard
       // This ensures we use the most recent audit run data, not stale localStorage
-      const hasLocalSignals = currentLocalSignals && currentLocalSignals.status === 'ok' && currentLocalSignals.data;
-      const localSignalsData = hasLocalSignals ? currentLocalSignals.data : null;
+      // Handle both status/data structure and direct data structure
+      const hasLocalSignals = currentLocalSignals && (
+        (currentLocalSignals.status === 'ok' && currentLocalSignals.data) ||
+        (currentLocalSignals.data && (currentLocalSignals.data.napConsistencyScore !== undefined || currentLocalSignals.data.locationsScore !== undefined))
+      );
+      const localSignalsData = hasLocalSignals 
+        ? (currentLocalSignals.data || currentLocalSignals)
+        : null;
+      
+      // DEBUG: Log local signals status for health dashboard
+      debugLog(`[Health Dashboard] Local signals: hasLocalSignals=${hasLocalSignals}, currentLocalSignals=${JSON.stringify(currentLocalSignals ? {status: currentLocalSignals.status, hasData: !!currentLocalSignals.data} : null)}`, 'info');
       
       // DEBUG: Verify brandOverlay is populated
       console.log('DEBUG brandOverlay', scores.brandOverlay);
@@ -9859,12 +9893,27 @@ Final Score: ${score}/100`;
         card.className = 'pillar-card';
         
         // Get pillar description with data source info (dynamic based on whether we have real data)
+        // Use currentLocalSignals (from displayDashboard parameter) for pillar cards, not just health dashboard
+        // Check both localSignals and localSignalsSnapshot (different storage formats)
+        const pillarLocalSignals = currentLocalSignals || (saved && (saved.localSignals || saved.localSignalsSnapshot)) || null;
+        // Handle both status/data structure and direct data structure
+        const pillarHasLocalSignals = pillarLocalSignals && (
+          (pillarLocalSignals.status === 'ok' && pillarLocalSignals.data) ||
+          (pillarLocalSignals.data && (pillarLocalSignals.data.napConsistencyScore !== undefined || pillarLocalSignals.data.locationsScore !== undefined))
+        );
+        const pillarLocalSignalsData = pillarHasLocalSignals 
+          ? (pillarLocalSignals.data || pillarLocalSignals)
+          : null;
+        
+        // DEBUG: Log local signals status for pillar cards
+        debugLog(`[Pillar Cards] Local signals in definitions: hasLocalSignals=${pillarHasLocalSignals}, currentLocalSignals=${JSON.stringify(pillarLocalSignals ? {status: pillarLocalSignals.status, hasData: !!pillarLocalSignals.data} : null)}`, 'info');
+        
         let localEntityDesc, serviceAreaDesc;
-        if (hasLocalSignals && localSignalsData) {
-          const napScore = localSignalsData.napConsistencyScore !== null ? localSignalsData.napConsistencyScore : 'N/A';
-          const serviceAreasCount = localSignalsData.serviceAreas?.length || 0;
-          const locationsCount = localSignalsData.locations?.length || 0;
-          localEntityDesc = `How clearly your business and you as a person are recognised as entities by AI search systems. <strong>Data Source:</strong> ✅ Live data from Google Business Profile API. <strong>Data Checked:</strong> NAP consistency (${napScore}%), knowledge panel (${localSignalsData.knowledgePanelDetected ? 'detected' : 'not detected'}), locations (${locationsCount}).`;
+        if (pillarHasLocalSignals && pillarLocalSignalsData) {
+          const napScore = pillarLocalSignalsData.napConsistencyScore !== null ? pillarLocalSignalsData.napConsistencyScore : 'N/A';
+          const serviceAreasCount = pillarLocalSignalsData.serviceAreas?.length || 0;
+          const locationsCount = pillarLocalSignalsData.locations?.length || 0;
+          localEntityDesc = `How clearly your business and you as a person are recognised as entities by AI search systems. <strong>Data Source:</strong> ✅ Live data from Google Business Profile API. <strong>Data Checked:</strong> NAP consistency (${napScore}%), knowledge panel (${pillarLocalSignalsData.knowledgePanelDetected ? 'detected' : 'not detected'}), locations (${locationsCount}).`;
           serviceAreaDesc = `How well AI understands where you operate and which regions you serve. <strong>Data Source:</strong> ✅ Live data from Google Business Profile API. <strong>Data Checked:</strong> Service areas (${serviceAreasCount}), NAP consistency (${napScore}%).`;
         } else {
           localEntityDesc = 'How clearly your business and you as a person are recognised as entities by AI search systems. <strong>Data Source:</strong> ⚠️ Currently derived from search performance (GSC position/CTR). Real local signals API integration pending.';
@@ -9894,8 +9943,23 @@ Final Score: ${score}/100`;
         
         if (key === 'authority') {
           const savedAudit = loadAuditResultsSync();
-          const backlinkMetrics = savedAudit?.backlinkMetrics;
-          const localSignals = savedAudit?.localSignals;
+          // Try multiple sources for backlinkMetrics: savedAudit, then localStorage
+          // Note: API call removed from here since forEach doesn't support async properly
+          // Backlink metrics should be loaded during audit run and saved to savedAudit
+          let backlinkMetrics = savedAudit?.backlinkMetrics || null;
+          if (!backlinkMetrics) {
+            try {
+              const storedMetrics = localStorage.getItem('backlink_metrics');
+              if (storedMetrics) {
+                backlinkMetrics = JSON.parse(storedMetrics);
+                debugLog('✓ Backlink metrics loaded from localStorage for Authority card', 'info');
+              }
+            } catch (e) {
+              debugLog(`⚠ Error reading backlink metrics from localStorage: ${e.message}`, 'warn');
+            }
+          }
+          // Use currentLocalSignals from displayDashboard parameter, or fallback to savedAudit
+          const localSignals = currentLocalSignals || savedAudit?.localSignals || null;
           // Always use correct Trustpilot snapshot (4.6, 610) - override any old cached values
           const siteReviews = getTrustpilotSnapshot(savedAudit?.siteReviews);
           const searchData = savedAudit?.searchData;
@@ -9926,6 +9990,10 @@ Final Score: ${score}/100`;
           
           // Get current Authority data
           let selectedAuthority = getAuthorityForMode(currentMode);
+          
+          // DEBUG: Log authority components and backlink metrics
+          debugLog(`[Authority Card] Current authority components: ${JSON.stringify(selectedAuthority)}`, 'info');
+          debugLog(`[Authority Card] Scores authorityComponents: ${JSON.stringify(scores.authorityComponents)}`, 'info');
           
           // Build mode toggle UI (only if bySegment is available)
           if (authorityBySegment) {
@@ -10131,15 +10199,37 @@ Final Score: ${score}/100`;
                   <div>Avg position (ranking): ${avgPosition != null ? avgPosition.toFixed(1) : 'N/A'}</div>
                   <div>Top-10 impression share: ${top10ImpressionShare != null ? top10ImpressionShare.toFixed(1) : 'N/A'}%</div>
                 </div>
-                ${backlinkMetrics ? `
-                  <div style="margin-top: 0.75rem; margin-bottom: 0.5rem;"><strong>Backlink Metrics:</strong></div>
-                  <div>Referring domains: ${backlinkMetrics.referringDomains || 0}</div>
-                  <div>Total backlinks: ${backlinkMetrics.totalBacklinks || 0}</div>
-                  <div>Follow ratio: ${backlinkMetrics.followRatio ? Math.round(backlinkMetrics.followRatio * 100) : 50}%</div>
-                ` : `
-                  <div style="margin-top: 0.75rem; margin-bottom: 0.5rem;"><strong>Backlink Metrics:</strong></div>
-                  <div>No backlink data uploaded</div>
-                `}
+                ${(() => {
+                  // Use authorityComponents.backlinks to determine if backlinks exist
+                  // Also try to get backlinkMetrics for detailed display if available
+                  const hasBacklinkScore = selectedAuthority.backlinks > 0 || (scores.authorityComponents && scores.authorityComponents.backlinks > 0);
+                  const hasBacklinkMetrics = backlinkMetrics && (backlinkMetrics.referringDomains > 0 || backlinkMetrics.totalBacklinks > 0);
+                  
+                  // Only show "No backlink data uploaded" if both score and metrics are missing
+                  if (!hasBacklinkScore && !hasBacklinkMetrics) {
+                    return `
+                      <div style="margin-top: 0.75rem; margin-bottom: 0.5rem;"><strong>Backlink Metrics:</strong></div>
+                      <div>No backlink data uploaded</div>
+                    `;
+                  }
+                  
+                  // Show backlink metrics if available, otherwise show score-based info
+                  if (hasBacklinkMetrics) {
+                    return `
+                      <div style="margin-top: 0.75rem; margin-bottom: 0.5rem;"><strong>Backlink Metrics:</strong></div>
+                      <div>Referring domains: ${backlinkMetrics.referringDomains || 0}</div>
+                      <div>Total backlinks: ${backlinkMetrics.totalBacklinks || 0}</div>
+                      <div>Follow ratio: ${backlinkMetrics.followRatio ? Math.round(backlinkMetrics.followRatio * 100) : 50}%</div>
+                      <div style="margin-top: 0.25rem; font-size: 0.7rem; color: #999;">Backlink score: ${selectedAuthority.backlinks.toFixed(0)}</div>
+                    `;
+                  } else {
+                    return `
+                      <div style="margin-top: 0.75rem; margin-bottom: 0.5rem;"><strong>Backlink Metrics:</strong></div>
+                      <div>Backlink score: ${selectedAuthority.backlinks.toFixed(0)}</div>
+                      <div style="font-size: 0.7rem; color: #999;">Detailed metrics not available</div>
+                    `;
+                  }
+                })()}
                 <div style="margin-top: 0.75rem; margin-bottom: 0.5rem;"><strong>Review Metrics:</strong></div>
                 <div>GBP rating: ${gbpRating !== null ? gbpRating.toFixed(2) : 'N/A'} (${gbpReviewCount !== null ? gbpReviewCount : 'N/A'} reviews)</div>
                 <div>Trustpilot (snapshot): ${siteRating !== null ? siteRating.toFixed(2) : 'N/A'} (${siteReviewCount !== null ? siteReviewCount : 'N/A'} reviews)</div>
@@ -10537,10 +10627,10 @@ Final Score: ${score}/100`;
                 });
               }
             }, 0);
-          } else if (key === 'localEntity' && hasLocalSignals && localSignalsData) {
-            const napScore = localSignalsData.napConsistencyScore || 0;
-            const knowledgePanelScore = localSignalsData.knowledgePanelDetected ? 100 : 0;
-            const locationsScore = (localSignalsData.locations?.length || 0) > 0 ? 100 : 0;
+          } else if (key === 'localEntity' && pillarHasLocalSignals && pillarLocalSignalsData) {
+            const napScore = pillarLocalSignalsData.napConsistencyScore || 0;
+            const knowledgePanelScore = pillarLocalSignalsData.knowledgePanelDetected ? 100 : 0;
+            const locationsScore = (pillarLocalSignalsData.locations?.length || 0) > 0 ? 100 : 0;
             
             pillarBreakdown = `
               <div id="${breakdownId}" style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #e2e8f0; font-size: 0.8rem; min-height: 4.5rem;">
@@ -10560,8 +10650,8 @@ Final Score: ${score}/100`;
                 <div id="${detailsId}" style="display: none; margin-top: 0.75rem; padding: 0.75rem; background: #f8f9fa; border-radius: 4px; font-size: 0.75rem; color: #666; line-height: 1.6;">
                   <div style="margin-bottom: 0.5rem;"><strong>Business Profile Data:</strong></div>
                   <div>NAP consistency: ${napScore}%</div>
-                  <div>Knowledge panel: ${localSignalsData.knowledgePanelDetected ? 'detected' : 'not detected'}</div>
-                  <div>Locations: ${localSignalsData.locations?.length || 0}</div>
+                  <div>Knowledge panel: ${pillarLocalSignalsData.knowledgePanelDetected ? 'detected' : 'not detected'}</div>
+                  <div>Locations: ${pillarLocalSignalsData.locations?.length || 0}</div>
                 </div>
               </div>
             `;
@@ -10577,10 +10667,10 @@ Final Score: ${score}/100`;
                 });
               }
             }, 0);
-          } else if (key === 'serviceArea' && hasLocalSignals && localSignalsData) {
-            const serviceAreasCount = localSignalsData.serviceAreas?.length || 0;
+          } else if (key === 'serviceArea' && pillarHasLocalSignals && pillarLocalSignalsData) {
+            const serviceAreasCount = pillarLocalSignalsData.serviceAreas?.length || 0;
             const serviceAreasScore = serviceAreasCount >= 8 ? 100 : Math.min(100, serviceAreasCount * 12.5);
-            const napScore = localSignalsData.napConsistencyScore || 0;
+            const napScore = pillarLocalSignalsData.napConsistencyScore || 0;
             
             pillarBreakdown = `
               <div id="${breakdownId}" style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #e2e8f0; font-size: 0.8rem; min-height: 4.5rem;">
@@ -17351,6 +17441,10 @@ Final Score: ${score}/100`;
             const startDate = historicalStartDate.toISOString().split('T')[0]; // 2 years ago
             const endDate = todayStr; // Use today, not timeseries end date
             
+            // Get the latest audit date from Supabase (will be set after fetching history)
+            // This ensures we use the actual latest audit date, not just "today"
+            let latestAuditDateStr = todayStr; // Default to today if no audit found
+            
             debugLog(`Fetching Content/Schema history from Supabase: ${startDate} to ${endDate} (ALL historical data)`, 'info');
             debugLog(`Timeseries date range: ${timeseriesStartDate} to ${timeseriesEndDate}`, 'info');
             
@@ -17358,6 +17452,36 @@ Final Score: ${score}/100`;
             if (propertyUrl) {
               try {
                 contentSchemaHistory = await fetchContentSchemaHistory(propertyUrl, startDate, endDate);
+                
+                // Handle multiple audits per day: only keep the latest audit for each date
+                // Group by date and keep only the most recent one (by timestamp if available, or last in array)
+                const auditsByDate = new Map();
+                contentSchemaHistory.forEach(record => {
+                  let normalizedDate = null;
+                  if (record.date) {
+                    if (typeof record.date === 'string') {
+                      normalizedDate = record.date.split('T')[0];
+                    } else if (record.date instanceof Date) {
+                      normalizedDate = record.date.toISOString().split('T')[0];
+                    } else {
+                      normalizedDate = String(record.date).split('T')[0];
+                    }
+                  }
+                  
+                  if (normalizedDate) {
+                    // If we already have an audit for this date, keep the one with later timestamp
+                    const existing = auditsByDate.get(normalizedDate);
+                    if (!existing || (record.timestamp && existing.timestamp && record.timestamp > existing.timestamp)) {
+                      auditsByDate.set(normalizedDate, record);
+                    }
+                  }
+                });
+                
+                // Use only the latest audit per date
+                const deduplicatedHistory = Array.from(auditsByDate.values());
+                debugLog(`Deduplicated ${contentSchemaHistory.length} audits to ${deduplicatedHistory.length} unique dates (removed ${contentSchemaHistory.length - deduplicatedHistory.length} duplicate dates)`, 'info');
+                contentSchemaHistory = deduplicatedHistory;
+                
                 // Create maps of dates to scores from Supabase
                 // Normalize dates to YYYY-MM-DD format (Supabase might return with timezone)
                 contentSchemaHistory.forEach(record => {
@@ -17416,6 +17540,11 @@ Final Score: ${score}/100`;
                 const hasHistoricalData = contentSchemaHistory.length > 0;
                 if (hasHistoricalData) {
                   debugLog(`Using ${contentSchemaHistory.length} historical audit records from Supabase`, 'info');
+                  // Update latestAuditDateStr to use the actual latest audit date from Supabase
+                  if (latestAuditDate) {
+                    latestAuditDateStr = latestAuditDate;
+                    debugLog(`Latest audit date from Supabase: ${latestAuditDateStr}`, 'info');
+                  }
                 } else {
                   debugLog(`No historical data found. Will use current scores for all points.`, 'info');
                 }
@@ -17674,12 +17803,12 @@ Final Score: ${score}/100`;
               const historicalServiceArea = serviceAreaMap.get(pointDate);
               const historicalAuthority = authorityMap.get(pointDate);
               
-              // For today's date, use current topQueries, backlinkMetrics, and reviews for full calculation
+              // For latest audit date, use current topQueries, backlinkMetrics, and reviews for full calculation
               // For historical dates, pass null (will use simplified calculation)
-              const topQueriesForDate = isToday ? currentTopQueries : null;
-              const backlinkMetricsForDate = isToday ? currentBacklinkMetrics : null;
-              const localSignalsForDate = isToday ? currentLocalSignals : null;
-              const siteReviewsForDate = isToday ? currentSiteReviews : null;
+              const topQueriesForDate = isLatestAudit ? currentTopQueries : null;
+              const backlinkMetricsForDate = isLatestAudit ? currentBacklinkMetrics : null;
+              const localSignalsForDate = isLatestAudit ? currentLocalSignals : null;
+              const siteReviewsForDate = isLatestAudit ? currentSiteReviews : null;
               
               // Pass date to calculatePillarFromMetrics so it can check for historical data
               // For today, pass topQueries and other data for full calculation
@@ -17798,8 +17927,8 @@ Final Score: ${score}/100`;
               if (historicalBrandOverlay !== undefined && historicalBrandOverlay !== null) {
                 brandOverlayData.push(historicalBrandOverlay);
                 debugLog(`✓ Added Brand Overlay score (${historicalBrandOverlay}) for ${pointDate} from Supabase`, 'info');
-              } else if (isToday && currentBrandOverlay !== null) {
-                // For today, use current Brand Overlay score if available
+              } else if (isLatestAudit && currentBrandOverlay !== null) {
+                // For latest audit date, use current Brand Overlay score if available
                 brandOverlayData.push(currentBrandOverlay);
                 debugLog(`✓ Added Brand Overlay score (${currentBrandOverlay}) for ${pointDate} from current audit`, 'info');
               } else {
@@ -17866,13 +17995,19 @@ Final Score: ${score}/100`;
             const contentSchemaValid = contentSchemaData.filter(v => v !== null && v !== undefined);
             debugLog(`Content/Schema data after timeseries: ${contentSchemaValid.length} valid values out of ${contentSchemaData.length} total. Values: ${contentSchemaValid.join(', ')}`, 'info');
             
-            // Fill in missing dates between last GSC date and today
-            // GSC data is delayed by 2-3 days, so we need to add missing dates
+            // Fill in missing dates between last GSC date and latest audit date
+            // GSC data is delayed by 2-3 days, but we want to show the latest audit date
             // Reuse 'today' and 'todayStr' variables (already declared above)
             today = new Date();
             today.setHours(0, 0, 0, 0); // Normalize to start of day
             todayStr = today.toISOString().split('T')[0];
             const lastTimeseriesDate = timeseries.length > 0 ? timeseries[timeseries.length - 1].date : null;
+            
+            // Ensure latest audit date is included even if not in timeseries
+            // Add it to the chart if it's after the last timeseries date
+            if (latestAuditDateStr && lastTimeseriesDate && latestAuditDateStr > lastTimeseriesDate) {
+              debugLog(`Latest audit date (${latestAuditDateStr}) is after last GSC date (${lastTimeseriesDate}), will add to chart`, 'info');
+            }
             
             // Check if we're missing recent dates (likely due to GSC delay)
             let hasRecentMissingDates = false;
@@ -17912,9 +18047,12 @@ Final Score: ${score}/100`;
               currentDate.setDate(currentDate.getDate() + 1); // Start from day after last GSC date
               
               // Compare dates as strings to avoid timezone issues
-              const todayDateStr = today.toISOString().split('T')[0];
+              // Use latestAuditDateStr instead of todayStr to ensure we include the actual latest audit
+              const targetDateStr = latestAuditDateStr || today.toISOString().split('T')[0];
               
-              while (currentDate.toISOString().split('T')[0] <= todayDateStr) {
+              debugLog(`Filling missing dates from ${currentDate.toISOString().split('T')[0]} to ${targetDateStr} (latest audit: ${latestAuditDateStr})`, 'info');
+              
+              while (currentDate.toISOString().split('T')[0] <= targetDateStr) {
                 const dateStr = currentDate.toISOString().split('T')[0];
                 const dateObj = new Date(dateStr);
                 
@@ -17922,9 +18060,10 @@ Final Score: ${score}/100`;
                 allDates.push(dateObj.toLocaleDateString('en-GB', dateFormat));
                 
                 // For GSC-based pillars (Authority, Visibility), use current audit data if available
-                // Check if this is today or recent date - if so, use current audit data
-                const isTodayOrRecent = dateStr === todayStr || (currentDate >= lastDate && currentDate <= today);
-                if (isTodayOrRecent && savedAuditForTrend) {
+                // Check if this is the latest audit date or recent date - if so, use current audit data
+                // Use latestAuditDateStr instead of todayStr to ensure we include the actual latest audit
+                const isLatestAuditOrRecent = dateStr === latestAuditDateStr || (currentDate >= lastDate && currentDate <= today);
+                if (isLatestAuditOrRecent && savedAuditForTrend) {
                   // Use current audit data for Authority and Visibility
                   const currentSearchData = savedAuditForTrend?.searchData;
                   const currentScores = savedAuditForTrend?.scores;
@@ -18010,8 +18149,8 @@ Final Score: ${score}/100`;
                 if (historicalBrandOverlay !== undefined && historicalBrandOverlay !== null) {
                   brandOverlayData.push(historicalBrandOverlay);
                   debugLog(`✓ Added Brand Overlay score (${historicalBrandOverlay}) for ${dateStr} from Supabase`, 'info');
-                } else if (dateStr === todayStr && currentBrandOverlay !== null) {
-                  // For today, use current Brand Overlay score if available
+                } else if (dateStr === latestAuditDateStr && currentBrandOverlay !== null) {
+                  // For latest audit date, use current Brand Overlay score if available
                   brandOverlayData.push(currentBrandOverlay);
                   debugLog(`✓ Added Brand Overlay score (${currentBrandOverlay}) for ${dateStr} from current audit`, 'info');
                 } else {
@@ -18024,11 +18163,15 @@ Final Score: ${score}/100`;
               }
               
               debugLog(`Filled missing dates: added ${allDateObjects.length - timeseries.length} additional dates`, 'info');
+              debugLog(`Chart date range: ${allDates[0]} to ${allDates[allDates.length - 1]} (${allDates.length} total dates)`, 'info');
+              debugLog(`Latest audit date: ${latestAuditDateStr}`, 'info');
+              debugLog(`Chart labels (first 5, last 5): ${allDates.slice(0, 5).join(', ')} ... ${allDates.slice(-5).join(', ')}`, 'info');
             } else if (timeseries.length === 0) {
-              // No timeseries data at all - just add today
-              const todayDateObj = new Date(todayStr);
-              allDateObjects.push(todayDateObj);
-              allDates.push(todayDateObj.toLocaleDateString('en-GB', dateFormat));
+              // No timeseries data at all - just add latest audit date or today
+              const targetDateStr = latestAuditDateStr || todayStr;
+              const targetDateObj = new Date(targetDateStr);
+              allDateObjects.push(targetDateObj);
+              allDates.push(targetDateObj.toLocaleDateString('en-GB', dateFormat));
               
               // For GSC-based pillars (Authority, Visibility), use current audit data if available
               if (savedAuditForTrend) {
@@ -18470,6 +18613,13 @@ Final Score: ${score}/100`;
           // Debug: Log the actual data arrays being passed to the chart
           const brandOverlayValid = brandOverlayData.filter(v => v !== null && v !== undefined && !isNaN(v));
           debugLog(`Chart creation: Local Entity data length=${localEntityData.length}, last 3 values=${localEntityData.slice(-3).join(', ')}, Service Area data length=${serviceAreaData.length}, last 3 values=${serviceAreaData.slice(-3).join(', ')}, Brand & Entity data length=${brandOverlayData.length}, valid values=${brandOverlayValid.length}, last 3 values=${brandOverlayData.slice(-3).join(', ')}, all values=${brandOverlayData.join(', ')}`, 'info');
+          
+          // DEBUG: Log exact labels being passed to Chart.js
+          debugLog(`[Trend Chart] Creating chart with ${chartDates.length} labels`, 'info');
+          debugLog(`[Trend Chart] First 5 labels: ${chartDates.slice(0, 5).join(', ')}`, 'info');
+          debugLog(`[Trend Chart] Last 5 labels: ${chartDates.slice(-5).join(', ')}`, 'info');
+          debugLog(`[Trend Chart] Latest audit date: ${latestAuditDateStr}`, 'info');
+          debugLog(`[Trend Chart] Data arrays length - Local Entity: ${localEntityData.length}, Service Area: ${serviceAreaData.length}, Authority: ${authorityData.length}, Visibility: ${visibilityData.length}, Content/Schema: ${contentSchemaData.length}`, 'info');
           
           window.trendChart = new Chart(trendCtx, {
             type: 'line',
