@@ -3482,7 +3482,8 @@
           if (storedData && storedData.combinedRows && storedData.summary) {
             const mod = window.RankingAiModule;
             if (mod) {
-              mod.setData(storedData.combinedRows, storedData.summary);
+              const normalizedSummary = normalizeSummaryFields(storedData.summary);
+              mod.setData(storedData.combinedRows, normalizedSummary);
               mod.setLoadedOnce(true);
               renderRankingAiTab();
               const lastRunEl = document.getElementById("ranking-ai-last-run");
@@ -3518,7 +3519,8 @@
           if (storedData && storedData.combinedRows && storedData.combinedRows.length > 0) {
             const mod = window.RankingAiModule;
             if (mod) {
-              mod.setData(storedData.combinedRows, storedData.summary);
+              const normalizedSummary = normalizeSummaryFields(storedData.summary);
+              mod.setData(storedData.combinedRows, normalizedSummary);
               debugLog(`✓ AI Sources tab: Rendering with ${storedData.combinedRows.length} keywords`, 'success');
               if (typeof renderAiSourcesTab === 'function') {
                 renderAiSourcesTab();
@@ -20009,6 +20011,26 @@ Final Score: ${score}/100`;
     }
 
     // ======================
+    // Ranking & AI: Normalize summary field names (snake_case to camelCase)
+    // ======================
+    function normalizeSummaryFields(summary) {
+      if (!summary) return summary;
+      // Convert snake_case to camelCase for display compatibility
+      return {
+        totalKeywords: summary.total_keywords ?? summary.totalKeywords,
+        keywordsWithRank: summary.keywords_with_rank ?? summary.keywordsWithRank,
+        keywordsWithAiOverview: summary.keywords_with_ai_overview ?? summary.keywordsWithAiOverview,
+        keywordsWithAiCitations: summary.keywords_with_ai_citations ?? summary.keywordsWithAiCitations,
+        top10: summary.top10,
+        top3: summary.top3,
+        avgPositionUnweighted: summary.avg_position_unweighted ?? summary.avgPositionUnweighted,
+        avgPositionVolumeWeighted: summary.avg_position_volume_weighted ?? summary.avgPositionVolumeWeighted,
+        keywordsUsedForAvg: summary.keywords_used_for_avg ?? summary.keywordsUsedForAvg,
+        keywordsWithVolume: summary.keywords_with_volume ?? summary.keywordsWithVolume
+      };
+    }
+
+    // ======================
     // Ranking & AI: Load data from localStorage or Supabase
     // ======================
     async function loadRankingAiDataFromStorage(forceCheckSupabase = false) {
@@ -20032,6 +20054,8 @@ Final Score: ${score}/100`;
               if (parsed.combinedRows && parsed.summary) {
                 debugLog('✓ Ranking & AI data found in localStorage', 'success');
                 debugLog(`  Found ${parsed.combinedRows.length} keywords in localStorage`, 'info');
+                // Normalize summary field names for compatibility
+                parsed.summary = normalizeSummaryFields(parsed.summary);
                 // Store as fallback before checking Supabase
                 localStorageFallback = parsed;
                 // Always check Supabase if localStorage has fewer than 10 keywords (likely stale data)
@@ -20100,14 +20124,17 @@ Final Score: ${score}/100`;
                   });
                 }
                 
+                // Normalize summary field names (convert snake_case to camelCase for compatibility)
+                const normalizedSummary = normalizeSummaryFields(json.data.rankingAiData.summary);
+                
                 // Also save to localStorage for faster access next time
                 localStorage.setItem('rankingAiData', JSON.stringify({
                   combinedRows: combinedRows,
-                  summary: json.data.rankingAiData.summary,
+                  summary: normalizedSummary,
                   timestamp: new Date().toISOString()
                 }));
                 debugLog(`✓ Saved ${keywordCount} keywords to localStorage`, 'success');
-                return { combinedRows, summary: json.data.rankingAiData.summary };
+                return { combinedRows, summary: normalizedSummary };
               } else {
                 debugLog('⚠ rankingAiData exists but missing combinedRows array', 'warn');
                 debugLog(`  rankingAiData keys: ${Object.keys(json.data.rankingAiData || {}).join(', ')}`, 'warn');
@@ -20185,7 +20212,9 @@ Final Score: ${score}/100`;
         
         if (storedData && storedData.combinedRows && storedData.summary) {
           debugLog(`✓ Setting data in RankingAiModule: ${storedData.combinedRows.length} keywords`, 'success');
-          mod.setData(storedData.combinedRows, storedData.summary);
+          // Normalize summary field names before setting
+          const normalizedSummary = normalizeSummaryFields(storedData.summary);
+          mod.setData(storedData.combinedRows, normalizedSummary);
           mod.setLoadedOnce(true);
           debugLog(`✓ Calling renderRankingAiTab()`, 'info');
           renderRankingAiTab();
@@ -20733,7 +20762,9 @@ Final Score: ${score}/100`;
           }
         }
 
-        mod.setData(combined, summary);
+        // Normalize summary field names before setting (ensure camelCase for display)
+        const normalizedSummary = normalizeSummaryFields(summary);
+        mod.setData(combined, normalizedSummary);
         mod.setLoadedOnce(true);
         
         // Step 4: Save Data
@@ -20798,7 +20829,8 @@ Final Score: ${score}/100`;
           const savedData = await loadRankingAiDataFromStorage(true); // Force Supabase check
           if (savedData && savedData.combinedRows && savedData.combinedRows.length > 0) {
             debugLog(`✓ Loaded ${savedData.combinedRows.length} keywords from Supabase after error`, 'success');
-            mod.setData(savedData.combinedRows, savedData.summary);
+            const normalizedSummary = normalizeSummaryFields(savedData.summary);
+            mod.setData(savedData.combinedRows, normalizedSummary);
             mod.setLoadedOnce(true);
             renderRankingAiTab();
             RankingAiProgressModal.updateProgress(100, 5);
