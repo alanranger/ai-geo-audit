@@ -1322,11 +1322,10 @@
 
     #ranking-filter-keyword {
       min-width: 300px;
-      flex: 1 1 300px;
     }
 
     /* Search filter group should be wider */
-    .filter-group:has(#ranking-filter-keyword) {
+    .filter-group-search {
       grid-column: span 2;
       min-width: 300px;
     }
@@ -22645,11 +22644,20 @@ Final Score: ${score}/100`;
       // Get schema coverage if available
       // Try to use the async getSchemaCoverageForUrl function which handles Supabase fallback
       let schemaCoverage = null;
+      let schemaData = null;
       try {
         // First try sync (localStorage) for immediate display
         const savedAudit = loadAuditResultsSync();
-        if (savedAudit && savedAudit.schemaAudit && savedAudit.schemaAudit.data) {
-          const schemaData = savedAudit.schemaAudit.data;
+        if (savedAudit && savedAudit.schemaAudit) {
+          // Check if schemaAudit has data property, or if schemaAudit itself is the data
+          schemaData = savedAudit.schemaAudit.data || savedAudit.schemaAudit;
+          
+          // If schemaAudit has a status property, it might be the API response format
+          if (savedAudit.schemaAudit.status === 'ok' && savedAudit.schemaAudit.data) {
+            schemaData = savedAudit.schemaAudit.data;
+          }
+          
+          if (schemaData) {
           
           // PRIORITY: Check pages first (original array from schema audit API - most reliable)
           // Then check pagesWithSchema ONLY if it's an array (from Supabase schema_pages_detail)
