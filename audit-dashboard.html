@@ -1135,6 +1135,90 @@
       display: block;
     }
 
+    /* Tile details styling */
+    .tile-details-title {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: #374151;
+      margin: 0 0 0.75rem 0;
+      line-height: 1.5;
+    }
+
+    .tile-details-list {
+      list-style: none;
+      padding: 0;
+      margin: 0 0 0.75rem 0;
+    }
+
+    .tile-details-list li {
+      font-size: 0.875rem;
+      color: #4b5563;
+      line-height: 1.8;
+      margin-bottom: 0.5rem;
+    }
+
+    .tile-details-list li strong {
+      color: #1f2937;
+      font-weight: 600;
+    }
+
+    .tile-details-footnote {
+      font-size: 0.8rem;
+      color: #6b7280;
+      margin: 0.75rem 0 0 0;
+      font-style: italic;
+      line-height: 1.5;
+    }
+
+    /* Insights card styling */
+    .card--insights {
+      background: #fef3c7;
+      border-left: 4px solid #f59e0b;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      margin: 1.5rem 0;
+    }
+
+    .card--insights h2 {
+      font-weight: 700;
+      color: #92400e;
+      margin: 0 0 0.5rem 0;
+      font-size: 1.1rem;
+    }
+
+    .card--insights .card-subtitle {
+      font-weight: 500;
+      color: #78350f;
+      margin: 0 0 1rem 0;
+      font-size: 0.9rem;
+      line-height: 1.6;
+    }
+
+    .card-pill-container {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .card-pill {
+      background: #fffbeb;
+      border: 1px solid #fde68a;
+      border-radius: 6px;
+      padding: 1rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .card-pill p {
+      margin: 0;
+      font-size: 0.9rem;
+      line-height: 1.6;
+      color: #78350f;
+    }
+
+    .card-pill strong {
+      color: #92400e;
+      font-weight: 700;
+    }
+
     /* Section C: Filters */
     .ranking-filters-section {
       margin-bottom: 1rem;
@@ -2309,6 +2393,20 @@
           </div>
         </div>
 
+        <!-- Global Insights & actions (all tracked keywords) -->
+        <section class="card card--insights" id="ranking-ai-insights-card-global">
+          <div class="card-header">
+            <h2>Insights &amp; actions (all tracked keywords)</h2>
+            <p class="card-subtitle">
+              Recommendations based on how your tracked keywords currently rank in classic search and appear in AI Overviews.
+              These insights are global, not tied to the selected keyword.
+            </p>
+          </div>
+          <div class="card-pill-container" id="ranking-ai-insights-list-global">
+            <!-- Content populated by renderRankingAiInsights -->
+          </div>
+        </section>
+
         <!-- Tracked keyword visibility metrics (DataForSEO only - not part of AIO pillars) -->
         <div class="ranking-visibility-metrics-section" id="ranking-visibility-metrics" style="display: none; margin-top: 1.5rem; margin-bottom: 1.5rem;">
           <div class="card" style="background: rgba(204, 255, 255, 0.15); border-left: 4px solid #CCFFFF;">
@@ -2637,16 +2735,6 @@
           </div>
 
           <div class="ranking-details-right">
-            <div class="card" id="ranking-ai-insights-card" style="background: #fef3c7; border-left: 4px solid #f59e0b; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);">
-              <div class="card-header">
-                <h3 style="font-weight: 700; color: #92400e;">Insights &amp; actions</h3>
-                <p class="card-subtitle ranking-subtitle-tight" style="font-weight: 500; color: #78350f;">
-                  Recommendations based on ranking and AI usage. Tagged with pillar(s) most likely to move.
-                </p>
-              </div>
-              <ul id="ranking-ai-insights-list" class="ranking-ai-detail-list"></ul>
-            </div>
-
             <div class="card" id="ranking-ai-competitors-card">
               <div class="card-header">
                 <h3>Competitors in AI &amp; SERPs</h3>
@@ -21398,11 +21486,21 @@ Final Score: ${score}/100`;
         
         // Update details
         if (detailsEl) {
+          const withoutOverview = countToUse - withAiOverview;
+          const pctWithoutOverview = countToUse > 0 ? Math.round((withoutOverview / countToUse) * 100) : 0;
           detailsEl.innerHTML = `
-            <div style="font-size: 0.9rem; color: #374151; line-height: 1.8;">
-              <div>Keywords with AI Overview: ${withAiOverview}/${countToUse} (${aiCoveragePct}%)</div>
-              <div>Keywords without AI Overview: ${countToUse - withAiOverview}/${countToUse} (${100 - aiCoveragePct}%)</div>
-            </div>
+            <p class="tile-details-title">How often any AI Overview appears for your tracked keywords.</p>
+            <ul class="tile-details-list">
+              <li>
+                <strong>With AI Overview:</strong> ${withAiOverview}/${countToUse} (${aiCoveragePct}%)
+              </li>
+              <li>
+                <strong>Without AI Overview:</strong> ${withoutOverview}/${countToUse} (${pctWithoutOverview}%)
+              </li>
+            </ul>
+            <p class="tile-details-footnote">
+              Counted per keyword. It does not matter which domains are cited.
+            </p>
           `;
         }
       }
@@ -21426,14 +21524,30 @@ Final Score: ${score}/100`;
         // Calculate total citations
         const totalCitations = rowsToUse.reduce((sum, r) => sum + (r.ai_alan_citations_count || 0), 0);
         
+        // Calculate withOverviewNoCitation (keywords with AI Overview but no alanranger.com citation)
+        const withOverviewNoCitation = rowsToUse.filter(r => r.has_ai_overview && r.ai_alan_citations_count === 0).length;
+        const pctWithOverviewNoCitation = countToUse > 0 ? Math.round((withOverviewNoCitation / countToUse) * 100) : 0;
+        
         // Update details
         if (detailsEl) {
           detailsEl.innerHTML = `
-            <div style="font-size: 0.9rem; color: #374151; line-height: 1.8;">
-              <div>Keywords with citations: ${withAiCitation}/${countToUse} (${aiCitationPct}%)</div>
-              <div>Total citations: ${totalCitations}</div>
-              <div>Keywords without citations: ${countToUse - withAiCitation}/${countToUse} (${100 - aiCitationPct}%)</div>
-            </div>
+            <p class="tile-details-title">
+              How often alanranger.com is actually cited inside the AI Overview.
+            </p>
+            <ul class="tile-details-list">
+              <li>
+                <strong>Keywords with citations:</strong> ${withAiCitation}/${countToUse} (${aiCitationPct}%)
+              </li>
+              <li>
+                <strong>With AI Overview but no alanranger.com citation:</strong> ${withOverviewNoCitation}/${countToUse} (${pctWithOverviewNoCitation}%)
+              </li>
+              <li>
+                <strong>Total citations across all keywords:</strong> ${totalCitations}
+              </li>
+            </ul>
+            <p class="tile-details-footnote">
+              A single keyword can cite alanranger.com multiple times; all those links are counted in "Total citations".
+            </p>
           `;
         }
       }
@@ -21462,15 +21576,35 @@ Final Score: ${score}/100`;
         top10Card.className = `metric-pill metric-pill--${ragClass}`;
         if (statusEl) statusEl.textContent = statusLabel;
         
+        // Calculate top10Only (positions 4-10)
+        const top10Only = top10 - top3;
+        const pctTop10Only = countToUse > 0 ? Math.round((top10Only / countToUse) * 100) : 0;
+        const pct11to20 = countToUse > 0 ? Math.round((rank11to20 / countToUse) * 100) : 0;
+        const pctNotRanked = countToUse > 0 ? Math.round((notRanked / countToUse) * 100) : 0;
+        
         // Update details
         if (detailsEl) {
           detailsEl.innerHTML = `
-            <div style="font-size: 0.9rem; color: #374151; line-height: 1.8;">
-              <div>Top 3: ${top3}/${countToUse} (${top3Pct}%)</div>
-              <div>Top 10: ${top10}/${countToUse} (${top10Pct}%)</div>
-              <div>Rank 11-20: ${rank11to20}/${countToUse} (${rank11to20Pct}%)</div>
-              <div>Not ranked (21+): ${notRanked}/${countToUse} (${notRankedPct}%)</div>
-            </div>
+            <p class="tile-details-title">
+              Distribution of best classic (blue-link) rankings across your tracked keywords.
+            </p>
+            <ul class="tile-details-list">
+              <li>
+                <strong>Top 3 (positions 1–3):</strong> ${top3}/${countToUse} (${top3Pct}%)
+              </li>
+              <li>
+                <strong>Positions 4–10:</strong> ${top10Only}/${countToUse} (${pctTop10Only}%)
+              </li>
+              <li>
+                <strong>Positions 11–20:</strong> ${rank11to20}/${countToUse} (${pct11to20}%)
+              </li>
+              <li>
+                <strong>Not ranked (21+):</strong> ${notRanked}/${countToUse} (${pctNotRanked}%)
+              </li>
+            </ul>
+            <p class="tile-details-footnote">
+              "Top 3" and "4–10" together make up your total Top-10 coverage.
+            </p>
           `;
         }
       }
@@ -21514,12 +21648,26 @@ Final Score: ${score}/100`;
         // Update details content
         if (detailsEl) {
           detailsEl.innerHTML = `
-            <div style="font-size: 0.9rem; color: #374151; line-height: 1.8;">
-              <div>AI Overview present: ${withAiOverview}/${countToUse} (${aiOverviewPct}%)</div>
-              <div>Local pack present: ${withLocalPack}/${countToUse} (${localPackPct}%)</div>
-              <div>People Also Ask present: ${withPaa}/${countToUse} (${paaPct}%)</div>
-              <div>Featured snippet present: ${withFeaturedSnippet}/${countToUse} (${featuredSnippetPct}%)</div>
-            </div>
+            <p class="tile-details-title">
+              How often rich SERP features appear for your tracked keywords.
+            </p>
+            <ul class="tile-details-list">
+              <li>
+                <strong>AI Overview present:</strong> ${withAiOverview}/${countToUse} (${aiOverviewPct}%)
+              </li>
+              <li>
+                <strong>Local pack present:</strong> ${withLocalPack}/${countToUse} (${localPackPct}%)
+              </li>
+              <li>
+                <strong>People Also Ask present:</strong> ${withPaa}/${countToUse} (${paaPct}%)
+              </li>
+              <li>
+                <strong>Featured snippet present:</strong> ${withFeaturedSnippet}/${countToUse} (${featuredSnippetPct}%)
+              </li>
+            </ul>
+            <p class="tile-details-footnote">
+              Counts are per keyword. A single SERP can contain multiple features (for example AI Overview + People Also Ask).
+            </p>
           `;
         }
       }
@@ -21773,6 +21921,9 @@ Final Score: ${score}/100`;
       
       // Update metric pills from filtered data
       updateMetricPills(filteredRows, combinedRows);
+      
+      // Expand all metric pill details by default
+      setTimeout(() => expandAllMetricPillDetails(), 100);
 
       // Render Keyword Priority Matrix
       const matrixContainer = document.getElementById('ranking-keyword-priority-matrix');
@@ -22046,9 +22197,11 @@ Final Score: ${score}/100`;
         });
       });
 
-      // Competitors + insights (use filtered rows)
+      // Competitors (use filtered rows)
       renderRankingAiCompetitors(filteredRows);
-      renderRankingAiInsights(filteredRows, summary);
+      
+      // Insights (use all rows for global insights across all tracked keywords)
+      renderRankingAiInsights(combinedRows, summary);
     }
     
     function updatePaginationControls(totalRows, currentPage, totalPages, startIdx, endIdx) {
@@ -22742,73 +22895,56 @@ Final Score: ${score}/100`;
 
 
     function renderRankingAiInsights(rows, summary) {
-      const list = document.getElementById("ranking-ai-insights-list");
-      if (!list) return;
+      const container = document.getElementById("ranking-ai-insights-list-global");
+      if (!container) return;
 
-      list.innerHTML = "";
+      container.innerHTML = "";
       if (!rows.length) return;
 
-      const insights = [];
+      // Calculate goodRankWithOverviewNoCitation: keywords with good rank (top-10), AI Overview, but no citations
+      const goodRankWithOverviewNoCitation = rows.filter(
+        r => r.best_rank_group != null && r.best_rank_group <= 10 && r.has_ai_overview && r.ai_alan_citations_count === 0
+      ).length;
 
-      // Example pillar-tagged insights
-      const moneyRows = rows.filter(r => r.segment === "money");
-      const eduRows = rows.filter(r => r.segment === "education");
+      // Calculate weakRankWithCitation: keywords with weaker rank (21+), but alanranger.com is cited
+      const weakRankWithCitation = rows.filter(
+        r => (r.best_rank_group == null || r.best_rank_group > 20) && r.ai_alan_citations_count > 0
+      ).length;
 
-      const moneyCited = moneyRows.filter(r => r.ai_alan_citations_count > 0).length;
-      const eduCited = eduRows.filter(r => r.ai_alan_citations_count > 0).length;
-
-      if (summary.withAiCitation > 0 && moneyCited < eduCited) {
-        insights.push({
-          text:
-            "AI cites your Education content more often than Money pages for these topics. " +
-            "To move the Content/Schema and Authority pillars for commercial intent, strengthen schema and " +
-            "internal links on Money landing/event/product pages.",
-          pillars: ["Content/Schema", "Authority"]
-        });
+      // Create card pills for the two main insights
+      if (goodRankWithOverviewNoCitation > 0) {
+        const pill = document.createElement("div");
+        pill.className = "card-pill";
+        pill.innerHTML = `
+          <p>
+            <strong>[Visibility, Content/Schema]</strong> ${goodRankWithOverviewNoCitation} keyword(s) have strong classic rankings and an AI Overview, but no citations for alanranger.com. Improving snippet-friendly content blocks and structured data on those pages can help convert existing Visibility into AI citations.
+          </p>
+        `;
+        container.appendChild(pill);
       }
 
-      const strongRankNotCited = rows.filter(
-        r => r.best_rank_group != null && r.best_rank_group <= 10 && r.ai_alan_citations_count === 0 && r.has_ai_overview
-      );
-      if (strongRankNotCited.length) {
-        insights.push({
-          text:
-            `${strongRankNotCited.length} keyword(s) have good classic rankings and an AI Overview but no citations ` +
-            "for alanranger.com. Improving snippet-friendly content blocks and structured data can help turn existing " +
-            "Visibility into AI citations.",
-          pillars: ["Visibility", "Content/Schema"]
-        });
+      if (weakRankWithCitation > 0) {
+        const pill = document.createElement("div");
+        pill.className = "card-pill";
+        pill.innerHTML = `
+          <p>
+            <strong>[Authority, Visibility]</strong> ${weakRankWithCitation} keyword(s) already cite your content in AI Overviews despite weaker classic rankings. This indicates strong topical Authority; improving backlinks and on-page optimisation could lift classic Visibility for these terms.
+          </p>
+        `;
+        container.appendChild(pill);
       }
 
-      const citedButPoorRank = rows.filter(
-        r => r.ai_alan_citations_count > 0 && (r.best_rank_group == null || r.best_rank_group > 20)
-      );
-      if (citedButPoorRank.length) {
-        insights.push({
-          text:
-            `${citedButPoorRank.length} keyword(s) cite your content in AI despite weaker classic rankings. ` +
-            "This indicates strong topical Authority; improving backlinks and on-page optimisation could lift Visibility.",
-          pillars: ["Authority", "Visibility"]
-        });
+      // If no insights, show a general message
+      if (goodRankWithOverviewNoCitation === 0 && weakRankWithCitation === 0) {
+        const pill = document.createElement("div");
+        pill.className = "card-pill";
+        pill.innerHTML = `
+          <p>
+            Current ranking and AI signals are broadly aligned. Focus on incremental improvements to Money-page CTR, schema coverage, and consolidating reviews to keep Authority and Content/Schema strong.
+          </p>
+        `;
+        container.appendChild(pill);
       }
-
-      if (!insights.length) {
-        insights.push({
-          text:
-            "Current ranking and AI signals are broadly aligned. Focus on incremental improvements to Money-page CTR, " +
-            "schema coverage, and consolidating reviews to keep Authority and Content/Schema strong.",
-          pillars: ["Authority", "Content/Schema", "Visibility"]
-        });
-      }
-
-      insights.forEach(item => {
-        const li = document.createElement("li");
-        const pillarTags = item.pillars.map(p => `<strong>${p}</strong>`).join(", ");
-        li.innerHTML = `<strong>[${pillarTags}]</strong> ${item.text}`;
-        li.style.fontWeight = "600";
-        li.style.marginBottom = "0.75rem";
-        list.appendChild(li);
-      });
     }
 
     // Tab switching for sidebar navigation
