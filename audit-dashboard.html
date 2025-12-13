@@ -21402,6 +21402,30 @@ Final Score: ${score}/100`;
      * @param {string} url - URL to check
      * @returns {Object|null} Schema coverage data or null if not found
      */
+    /**
+     * Normalize URL by stripping query parameters, hash, and trailing slashes
+     * Returns just the pathname for matching
+     */
+    function normalizeUrlForMatching(url) {
+      if (!url) return '';
+      let normalized = url.toLowerCase().trim();
+      try {
+        const urlObj = new URL(url);
+        normalized = urlObj.pathname.toLowerCase().replace(/\/$/, '').trim();
+        // If pathname is empty or just '/', treat as homepage
+        if (!normalized || normalized === '/') {
+          normalized = '/';
+        }
+      } catch (e) {
+        // If URL parsing fails, remove query params and hash manually
+        normalized = url.split('?')[0].split('#')[0].toLowerCase().replace(/\/$/, '').trim();
+        if (!normalized || normalized === '/') {
+          normalized = '/';
+        }
+      }
+      return normalized;
+    }
+
     async function getSchemaCoverageForUrl(url) {
       try {
         // Get audit data from localStorage using loadAuditResultsSync
@@ -21416,10 +21440,16 @@ Final Score: ${score}/100`;
         }
 
         let schemaData = savedAudit.schemaAudit.data;
+        // Check both pages and pagesWithSchema arrays
+        let pagesArray = schemaData.pages || [];
         let pagesWithSchema = schemaData.pagesWithSchema || [];
         
+        // Use pages array if available (more reliable), otherwise use pagesWithSchema
+        let allPages = Array.isArray(pagesArray) && pagesArray.length > 0 ? pagesArray : 
+                       (Array.isArray(pagesWithSchema) && pagesWithSchema.length > 0 ? pagesWithSchema : []);
+        
         // Check if pagesWithSchema is an array of objects (detail) or just a number (count)
-        if (typeof pagesWithSchema === 'number') {
+        if (allPages.length === 0 && typeof pagesWithSchema === 'number') {
           debugLog('[Schema Coverage] pagesWithSchema is a count in localStorage, trying Supabase...', 'warn');
           // Try fetching from Supabase which should have the detailed array
           const propertyUrl = savedAudit.propertyUrl || localStorage.getItem('gsc_property_url') || 'https://www.alanranger.com';
@@ -21427,32 +21457,47 @@ Final Score: ${score}/100`;
             const supabaseData = await fetchLatestAuditFromSupabase(propertyUrl);
             if (supabaseData && supabaseData.schemaAudit && supabaseData.schemaAudit.data) {
               schemaData = supabaseData.schemaAudit.data;
+              pagesArray = schemaData.pages || [];
               pagesWithSchema = schemaData.pagesWithSchema || [];
-              debugLog('[Schema Coverage] Loaded detailed schema data from Supabase', 'info');
+              const supabasePages = Array.isArray(pagesArray) && pagesArray.length > 0 ? pagesArray : 
+                                   (Array.isArray(pagesWithSchema) && pagesWithSchema.length > 0 ? pagesWithSchema : []);
+              debugLog('[Schema Coverage] Loaded detailed schema data from Supabase (' + supabasePages.length + ' pages)', 'info');
               // Update localStorage with the correct structure
               savedAudit.schemaAudit.data = schemaData;
               safeSetLocalStorage('last_audit_results', savedAudit);
+              if (supabasePages.length > 0) {
+                allPages = supabasePages;
+              }
             }
           } catch (e) {
             debugLog('[Schema Coverage] Failed to fetch from Supabase: ' + e.message, 'warn');
           }
-          
-          // Check again after Supabase fetch
-          if (typeof pagesWithSchema === 'number') {
-            debugLog('[Schema Coverage] pagesWithSchema is still a count after Supabase fetch. Need to run new audit to get detail.', 'warn');
-            return null;
-          }
         }
         
-        if (!Array.isArray(pagesWithSchema) || pagesWithSchema.length === 0) {
-          debugLog('[Schema Coverage] pagesWithSchema is empty or not an array', 'warn');
+        if (!Array.isArray(allPages) || allPages.length === 0) {
+          debugLog('[Schema Coverage] No pages array available (length: ' + (Array.isArray(allPages) ? allPages.length : 'not array') + ')', 'warn');
           return null;
         }
 
-        const normalizedUrl = (url || '').toLowerCase().trim();
-        const pageData = pagesWithSchema.find(p => {
-          const pUrl = (p.url || '').toLowerCase().trim();
-          return pUrl === normalizedUrl || pUrl.includes(normalizedUrl) || normalizedUrl.includes(pUrl);
+        // Normalize the input URL
+        const normalizedUrl = normalizeUrlForMatching(url);
+        debugLog('[Schema Coverage] Looking for normalized URL: ' + normalizedUrl + ' (original: ' + url + ')', 'info');
+        
+        const pageData = allPages.find(p => {
+          if (!p || !p.url) return false;
+          const pNormalized = normalizeUrlForMatching(p.url);
+          
+          const exactMatch = pNormalized === normalizedUrl;
+          // For homepage, also check if both are '/' or empty
+          const homepageMatch = (normalizedUrl === '/' || normalizedUrl === '') && (pNormalized === '/' || pNormalized === '');
+          // Path matching: check if one contains the other (for partial matches)
+          const pathMatch = !exactMatch && !homepageMatch && (pNormalized.includes(normalizedUrl) || normalizedUrl.includes(pNormalized));
+          
+          if (exactMatch || homepageMatch || pathMatch) {
+            debugLog('[Schema Coverage] URL match found: ' + p.url + ' -> ' + pNormalized + ' (search: ' + normalizedUrl + ')', 'info');
+            return true;
+          }
+          return false;
         });
 
         if (!pageData || !pageData.schemaTypes) {
@@ -22980,45 +23025,13 @@ Final Score: ${score}/100`;
           if (pagesArray && pagesArray.length > 0) {
             // Normalize URL: remove query params and trailing slashes for matching
             const rankingUrl = scorecardData.ranking_url || '';
-            let normalizedUrl = rankingUrl.toLowerCase().trim();
-            try {
-              if (rankingUrl) {
-                const urlObj = new URL(rankingUrl);
-                normalizedUrl = urlObj.pathname.toLowerCase().replace(/\/$/, '').trim();
-                // If pathname is empty or just '/', treat as homepage
-                if (!normalizedUrl || normalizedUrl === '/') {
-                  normalizedUrl = '/';
-                }
-              }
-            } catch (e) {
-              // If URL parsing fails, remove query params manually
-              normalizedUrl = rankingUrl.split('?')[0].split('#')[0].toLowerCase().replace(/\/$/, '').trim();
-              if (!normalizedUrl || normalizedUrl === '/') {
-                normalizedUrl = '/';
-              }
-            }
+            const normalizedUrl = normalizeUrlForMatching(rankingUrl);
             
             debugLog('[Schema Coverage] Looking for URL: ' + normalizedUrl + ' (original: ' + rankingUrl + ')', 'info');
             
             const pageData = pagesArray.find(p => {
               if (!p || !p.url) return false;
-              let pNormalized = (p.url || '').toLowerCase().trim();
-              try {
-                if (p.url) {
-                  const pUrlObj = new URL(p.url);
-                  pNormalized = pUrlObj.pathname.toLowerCase().replace(/\/$/, '').trim();
-                  // If pathname is empty or just '/', treat as homepage
-                  if (!pNormalized || pNormalized === '/') {
-                    pNormalized = '/';
-                  }
-                }
-              } catch (e) {
-                // If URL parsing fails, remove query params manually
-                pNormalized = (p.url || '').split('?')[0].split('#')[0].toLowerCase().replace(/\/$/, '').trim();
-                if (!pNormalized || pNormalized === '/') {
-                  pNormalized = '/';
-                }
-              }
+              const pNormalized = normalizeUrlForMatching(p.url);
               
               const exactMatch = pNormalized === normalizedUrl;
               // For homepage, also check if both are '/' or empty
