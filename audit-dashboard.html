@@ -18370,18 +18370,21 @@ Final Score: ${score}/100`;
                   debugLog(`No Content/Schema data for ${dateStr} (checked map, not found)`, 'info');
                 }
                 
-                // Brand Overlay data (check historical data from Supabase)
+                // Brand Overlay data (ALWAYS prioritize historical data from Supabase)
+                // Only use current score if no historical data exists for this date
                 const historicalBrandOverlay = brandOverlayMap.get(dateStr);
                 if (historicalBrandOverlay !== undefined && historicalBrandOverlay !== null) {
+                  // Use historical data from Supabase (this should exist for all dates including latest)
                   brandOverlayData.push(historicalBrandOverlay);
-                  debugLog(`✓ Added Brand Overlay score (${historicalBrandOverlay}) for ${dateStr} from Supabase`, 'info');
+                  debugLog(`✓ Added Brand Overlay score (${historicalBrandOverlay}) for ${dateStr} from Supabase (historical)`, 'info');
                 } else if (dateStr === latestAuditDateStr && currentBrandOverlay !== null) {
-                  // For latest audit date, use current Brand Overlay score if available
+                  // Only use current score if no historical data exists for latest audit date
+                  // This should rarely happen if data is being saved to Supabase correctly
                   brandOverlayData.push(currentBrandOverlay);
-                  debugLog(`✓ Added Brand Overlay score (${currentBrandOverlay}) for ${dateStr} from current audit`, 'info');
+                  debugLog(`⚠ Using current Brand Overlay score (${currentBrandOverlay}) for ${dateStr} - no historical data found in Supabase`, 'warn');
                 } else {
                   brandOverlayData.push(null);
-                  debugLog(`No Brand Overlay data for ${dateStr}`, 'info');
+                  debugLog(`No Brand Overlay data for ${dateStr} (not latest audit, map has ${brandOverlayMap.size} entries)`, 'info');
                 }
                 
                 // Move to next day
