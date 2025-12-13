@@ -21483,8 +21483,11 @@ Final Score: ${score}/100`;
       try {
         // Try sync first (localStorage)
         const savedAudit = loadAuditResultsSync();
-        if (savedAudit && savedAudit.schemaAudit && savedAudit.schemaAudit.data) {
-          const schemaData = savedAudit.schemaAudit.data;
+        if (savedAudit && savedAudit.schemaAudit) {
+          const schemaAudit = savedAudit.schemaAudit;
+          // Check status like other parts of the code do (line 3635)
+          if (schemaAudit.status === 'ok' && schemaAudit.data) {
+            const schemaData = schemaAudit.data;
           
           // PRIORITY: Check pages first (original array from schema audit API - most reliable)
           // Then check pagesWithSchema ONLY if it's an array (from Supabase schema_pages_detail)
@@ -21601,12 +21604,14 @@ Final Score: ${score}/100`;
                 });
               }
             }
+          } else {
+            debugLog('[Schema Coverage] Schema audit exists but status is not "ok" or data missing. status=' + (schemaAudit.status || 'undefined') + ', hasData=' + !!schemaAudit.data, 'warn');
           }
         } else {
-          debugLog('[Schema Coverage] No schemaAudit.data in saved audit', 'warn');
+          debugLog('[Schema Coverage] No schemaAudit in saved audit. savedAudit keys: ' + (savedAudit ? Object.keys(savedAudit).join(', ') : 'null'), 'warn');
         }
       } catch (e) {
-        debugLog('[Schema Coverage] Error in sync check: ' + e.message, 'warn');
+        debugLog('[Schema Coverage] Error in sync check: ' + e.message + ' ' + (e.stack ? e.stack.substring(0, 200) : ''), 'error');
       }
       
       if (schemaCoverage) {
