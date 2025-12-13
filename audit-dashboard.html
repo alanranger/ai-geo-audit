@@ -4847,16 +4847,17 @@
         debugLog(`✗ Error updating audit for new date range: ${error.message}`, 'error');
         
         // Remove loading spinner and show error
+        // Hide full-screen loading overlay
+        hideFullScreenLoading();
+        
+        // Show error message in trend chart area
         const trendCanvas = document.getElementById('trendChart');
         if (trendCanvas && trendCanvas.parentElement) {
-          const loadingDiv = trendCanvas.parentElement.querySelector('.trend-chart-loading');
-          if (loadingDiv) loadingDiv.remove();
-          
           // Remove any existing error messages
           const existingError = trendCanvas.parentElement.querySelector('.trend-chart-error');
           if (existingError) existingError.remove();
           
-          // Show error message
+          // Show error message to user
           const errorDiv = document.createElement('div');
           errorDiv.className = 'trend-chart-error';
           errorDiv.style.cssText = 'background: #fee2e2; padding: 1rem; border-radius: 4px; border-left: 3px solid #ef4444; margin-bottom: 1rem; font-size: 0.9rem; color: #991b1b;';
@@ -10275,13 +10276,26 @@ Final Score: ${score}/100`;
           card._updateGSCMetrics = updateGSCMetrics;
           card._getGSCMetricsForSegment = getGSCMetricsForSegment;
           
-          // Get review data
-          const gbpRating = (localSignals && localSignals.status === 'ok' && localSignals.data) 
-            ? (localSignals.data.gbpRating !== null ? localSignals.data.gbpRating : null)
-            : null;
-          const gbpReviewCount = (localSignals && localSignals.status === 'ok' && localSignals.data) 
-            ? (localSignals.data.gbpReviewCount !== null ? localSignals.data.gbpReviewCount : null)
-            : null;
+          // Get review data - check multiple possible data structures
+          let gbpRating = null;
+          let gbpReviewCount = null;
+          
+          if (localSignals) {
+            debugLog(`[Authority Card] Local signals status: ${localSignals.status}, has data: ${!!localSignals.data}`, 'info');
+            if (localSignals.status === 'ok' && localSignals.data) {
+              gbpRating = localSignals.data.gbpRating !== null && localSignals.data.gbpRating !== undefined 
+                ? localSignals.data.gbpRating 
+                : null;
+              gbpReviewCount = localSignals.data.gbpReviewCount !== null && localSignals.data.gbpReviewCount !== undefined 
+                ? localSignals.data.gbpReviewCount 
+                : null;
+              debugLog(`[Authority Card] GBP data extracted: rating=${gbpRating}, count=${gbpReviewCount}`, 'info');
+            } else {
+              debugLog(`[Authority Card] Local signals not OK or missing data. Status: ${localSignals.status}, data keys: ${localSignals.data ? Object.keys(localSignals.data).join(', ') : 'no data'}`, 'warn');
+            }
+          } else {
+            debugLog(`[Authority Card] No localSignals available`, 'warn');
+          }
           const siteRating = siteReviews?.siteRating !== null ? siteReviews?.siteRating : null;
           const siteReviewCount = siteReviews?.siteReviewCount !== null ? siteReviews?.siteReviewCount : null;
           
@@ -18054,15 +18068,18 @@ Final Score: ${score}/100`;
                 debugLog(`Content/Schema: No data for ${pointDate} (isLatestAudit=${isLatestAudit}, currentContentSchema=${currentContentSchema})`, 'info');
               }
               
-              // Brand Overlay data (check historical data from Supabase, then fallback calculation)
+              // Brand Overlay data (ALWAYS prioritize historical data from Supabase first)
+              // Only use current score if no historical data exists for this date
               const historicalBrandOverlay = brandOverlayMap.get(pointDate);
               if (historicalBrandOverlay !== undefined && historicalBrandOverlay !== null) {
+                // Use historical data from Supabase (this should exist for all dates including latest)
                 brandOverlayData.push(historicalBrandOverlay);
-                debugLog(`✓ Added Brand Overlay score (${historicalBrandOverlay}) for ${pointDate} from Supabase`, 'info');
+                debugLog(`✓ Added Brand Overlay score (${historicalBrandOverlay}) for ${pointDate} from Supabase (historical)`, 'info');
               } else if (isLatestAudit && currentBrandOverlay !== null) {
-                // For latest audit date, use current Brand Overlay score if available
+                // Only use current score if no historical data exists for latest audit date
+                // This should rarely happen if data is being saved to Supabase correctly
                 brandOverlayData.push(currentBrandOverlay);
-                debugLog(`✓ Added Brand Overlay score (${currentBrandOverlay}) for ${pointDate} from current audit`, 'info');
+                debugLog(`⚠ Using current Brand Overlay score (${currentBrandOverlay}) for ${pointDate} - no historical data found in Supabase`, 'warn');
               } else {
                 // Fallback: Calculate Brand Overlay from GSC timeseries data
                 // Use historical review/entity scores if available, otherwise use current
