@@ -3476,6 +3476,8 @@
       // IMPORTANT: only do heavy first-time render here
       // e.g. build big tables, compute summaries, populate dropdowns
       if (panelId === 'ranking') {
+        // Fix DOM structure first
+        fixRankingPanelStructure();
         // Load data and render ranking panel
         (async () => {
           debugLog('📊 Ranking panel: Loading data from storage...', 'info');
@@ -3501,6 +3503,8 @@
           }
           // Wire up filters and sorting after render
           setTimeout(() => {
+            // Fix DOM structure after render
+            fixRankingPanelStructure();
             if (typeof wireRankingAiButton === 'function') wireRankingAiButton();
             if (typeof wireRankingFilters === 'function') wireRankingFilters();
             if (typeof wireRankingSorting === 'function') wireRankingSorting();
@@ -3611,6 +3615,50 @@
       panelInitDone.add(panelId);
     }
 
+    // Fix ranking panel DOM structure - ensure sections are siblings, not nested
+    function fixRankingPanelStructure() {
+      const rankingPanel = document.querySelector('.aigeo-panel[data-panel="ranking"]');
+      if (!rankingPanel) return;
+
+      const sideBySide = rankingPanel.querySelector('.ranking-cards-side-by-side');
+      const priority = rankingPanel.querySelector('#ranking-priority-matrix-section');
+      const table = rankingPanel.querySelector('.ranking-table-section');
+      const details = rankingPanel.querySelector('.ranking-details-grid');
+
+      if (!sideBySide) return;
+
+      // Check if sections are incorrectly nested inside side-by-side container
+      const sideBySideChildren = Array.from(sideBySide.children);
+      const needsFix = sideBySideChildren.includes(priority) || 
+                       sideBySideChildren.includes(table) || 
+                       sideBySideChildren.includes(details);
+
+      if (needsFix) {
+        // Move sections out of side-by-side container to be siblings
+        if (priority && sideBySide.contains(priority)) {
+          sideBySide.parentElement.insertBefore(priority, sideBySide.nextSibling);
+        }
+        if (table && sideBySide.contains(table)) {
+          sideBySide.parentElement.insertBefore(table, priority?.nextSibling || sideBySide.nextSibling);
+        }
+        if (details && sideBySide.contains(details)) {
+          sideBySide.parentElement.insertBefore(details, table?.nextSibling || priority?.nextSibling || sideBySide.nextSibling);
+        }
+      }
+
+      // Ensure correct order: side-by-side, priority, table, details
+      const allSections = [sideBySide, priority, table, details].filter(Boolean);
+      allSections.forEach((section, index) => {
+        if (section.parentElement === rankingPanel) {
+          const currentIndex = Array.from(rankingPanel.children).indexOf(section);
+          const expectedIndex = Array.from(rankingPanel.children).indexOf(allSections[0]) + index;
+          if (currentIndex !== expectedIndex && expectedIndex >= 0) {
+            rankingPanel.insertBefore(section, rankingPanel.children[expectedIndex] || null);
+          }
+        }
+      });
+    }
+
     function toggleCalculationExplanation() {
       const explanation = document.getElementById('calculationExplanation');
       const content = document.getElementById('calculationContent');
@@ -3668,6 +3716,15 @@
       debugLog('⚠ RankingAiModule not found in window on page load', 'warn');
     } else {
       debugLog('✓ RankingAiModule verified on page load', 'success');
+    }
+
+    // Fix ranking panel structure on page load
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => {
+        setTimeout(fixRankingPanelStructure, 100);
+      });
+    } else {
+      setTimeout(fixRankingPanelStructure, 100);
     }
 
     // Load saved configuration
