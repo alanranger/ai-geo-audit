@@ -2208,6 +2208,28 @@
 
       <!-- Overview Panel -->
       <section class="aigeo-panel is-active" data-panel="overview">
+      <!-- Date Range Selector -->
+      <div class="config-panel" style="margin-bottom: 2rem;">
+        <div class="form-group">
+          <label for="dateRange">Date Range</label>
+          <div class="date-range-selector">
+            <button class="date-range-btn active" onclick="setDateRange(30)" data-days="30" title="Analyze search performance data from the last 30 days">Last 30 Days</button>
+            <button class="date-range-btn" onclick="setDateRange(60)" data-days="60" title="Analyze search performance data from the last 60 days">Last 60 Days</button>
+            <button class="date-range-btn" onclick="setDateRange(90)" data-days="90" title="Analyze search performance data from the last 90 days">Last 90 Days</button>
+            <button class="date-range-btn" onclick="setDateRange(120)" data-days="120" title="Analyze search performance data from the last 120 days">Last 120 Days</button>
+            <button class="date-range-btn" onclick="setDateRange(180)" data-days="180" title="Analyze search performance data from the last 6 months (180 days)">Last 6 Months</button>
+            <button class="date-range-btn" onclick="setDateRange(365)" data-days="365" title="Analyze search performance data from the last 12 months (365 days)">Last 12 Months</button>
+            <button class="date-range-btn" onclick="setDateRange(540)" data-days="540" title="Analyze search performance data from the last 18 months (540 days)">Last 18 Months</button>
+            <button class="date-range-btn" onclick="showCustomDateRange()" id="customDateBtn" title="Set a custom date range for analysis (enter number of days)">Custom</button>
+        </div>
+          <input type="number" id="dateRange" value="30" min="1" style="display: none;">
+          <div id="customDateRange" style="display: none; margin-top: 0.5rem;">
+            <input type="number" id="customDays" placeholder="Enter days" min="1" style="width: 150px; padding: 0.5rem; border: 2px solid #e2e8f0; border-radius: 6px;">
+            <button class="btn btn-small" onclick="applyCustomDateRange()" style="margin-left: 0.5rem; padding: 0.5rem 1rem;" title="Apply the custom date range you entered">Apply</button>
+      </div>
+          <div class="help-text">Analysis period for historical data</div>
+      </div>
+    </div>
 
       <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; margin-bottom: 3rem; border-left: 4px solid var(--brand-orange);">
         <h3 style="margin-top: 0; color: var(--brand-orange);">Five-Pillar Framework</h3>
@@ -2446,28 +2468,6 @@
             <strong>Note:</strong> All five core pillars (Authority, Content/Schema, Visibility, Local Entity, Service Area) are fully implemented with real data sources. Brand & Entity and AI Summary Likelihood are overlay metrics that enhance the core scoring without changing the AIO score calculation.
           </div>
         </div>
-      </div>
-
-      <!-- Date Range Selector -->
-      <div class="config-panel" style="margin-bottom: 2rem; background: #f8f9fa; padding: 1.5rem; border-radius: 8px; border: 1px solid #e2e8f0;">
-        <div class="form-group">
-          <label for="dateRange">Date Range</label>
-          <div class="date-range-selector">
-            <button class="date-range-btn active" onclick="setDateRange(30)" data-days="30" title="Analyze search performance data from the last 30 days">Last 30 Days</button>
-            <button class="date-range-btn" onclick="setDateRange(60)" data-days="60" title="Analyze search performance data from the last 60 days">Last 60 Days</button>
-            <button class="date-range-btn" onclick="setDateRange(90)" data-days="90" title="Analyze search performance data from the last 90 days">Last 90 Days</button>
-            <button class="date-range-btn" onclick="setDateRange(120)" data-days="120" title="Analyze search performance data from the last 120 days">Last 120 Days</button>
-            <button class="date-range-btn" onclick="setDateRange(180)" data-days="180" title="Analyze search performance data from the last 6 months (180 days)">Last 6 Months</button>
-            <button class="date-range-btn" onclick="setDateRange(365)" data-days="365" title="Analyze search performance data from the last 12 months (365 days)">Last 12 Months</button>
-            <button class="date-range-btn" onclick="setDateRange(540)" data-days="540" title="Analyze search performance data from the last 18 months (540 days)">Last 18 Months</button>
-            <button class="date-range-btn" onclick="showCustomDateRange()" id="customDateBtn" title="Set a custom date range for analysis (enter number of days)">Custom</button>
-        </div>
-          <input type="number" id="dateRange" value="30" min="1" style="display: none;">
-          <div id="customDateRange" style="display: none; margin-top: 0.5rem;">
-            <input type="number" id="customDays" placeholder="Enter days" min="1" style="width: 150px; padding: 0.5rem; border: 2px solid #e2e8f0; border-radius: 6px;">
-            <button class="btn btn-small" onclick="applyCustomDateRange()" style="margin-left: 0.5rem; padding: 0.5rem 1rem;" title="Apply the custom date range you entered">Apply</button>
-      </div>
-          <div class="help-text">Analysis period for historical data</div>
       </div>
 
       <div class="dashboard-grid" id="pillarCards"></div>
@@ -4685,33 +4685,82 @@
       }
     }
     
+    // Show full-screen loading overlay
+    function showFullScreenLoading(message = 'Loading...') {
+      // Remove any existing overlay
+      const existing = document.getElementById('fullScreenLoadingOverlay');
+      if (existing) existing.remove();
+      
+      // Create overlay
+      const overlay = document.createElement('div');
+      overlay.id = 'fullScreenLoadingOverlay';
+      overlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.7);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 10000;
+        backdrop-filter: blur(4px);
+      `;
+      
+      // Create spinner container
+      const spinnerContainer = document.createElement('div');
+      spinnerContainer.style.cssText = `
+        background: white;
+        padding: 3rem 4rem;
+        border-radius: 12px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        text-align: center;
+        min-width: 300px;
+      `;
+      
+      // Create spinner
+      const spinner = document.createElement('div');
+      spinner.style.cssText = `
+        width: 60px;
+        height: 60px;
+        border: 6px solid #e2e8f0;
+        border-top-color: #3b82f6;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 1.5rem;
+      `;
+      
+      // Create message
+      const messageDiv = document.createElement('div');
+      messageDiv.style.cssText = 'font-size: 1.1rem; color: #1f2937; font-weight: 500;';
+      messageDiv.textContent = message;
+      
+      // Add spin animation if not already in stylesheet
+      if (!document.getElementById('full-screen-spin-style')) {
+        const style = document.createElement('style');
+        style.id = 'full-screen-spin-style';
+        style.textContent = '@keyframes spin { to { transform: rotate(360deg); } }';
+        document.head.appendChild(style);
+      }
+      
+      spinnerContainer.appendChild(spinner);
+      spinnerContainer.appendChild(messageDiv);
+      overlay.appendChild(spinnerContainer);
+      document.body.appendChild(overlay);
+    }
+    
+    // Hide full-screen loading overlay
+    function hideFullScreenLoading() {
+      const overlay = document.getElementById('fullScreenLoadingOverlay');
+      if (overlay) overlay.remove();
+    }
+    
     // Update audit results for new date range without full rescan
     async function updateAuditForNewDateRange(newDateRange, savedAudit) {
-      // Show loading spinner in trend chart area immediately
-      const trendCanvas = document.getElementById('trendChart');
-      if (trendCanvas && trendCanvas.parentElement) {
-        // Remove any existing error messages
-        const existingError = trendCanvas.parentElement.querySelector('.trend-chart-error');
-        if (existingError) existingError.remove();
-        
-        // Remove any existing loading spinner
-        const existingLoading = trendCanvas.parentElement.querySelector('.trend-chart-loading');
-        if (existingLoading) existingLoading.remove();
-        
-        // Show loading spinner
-        const loadingDiv = document.createElement('div');
-        loadingDiv.className = 'trend-chart-loading';
-        loadingDiv.style.cssText = 'text-align: center; padding: 2rem; color: #64748b; font-size: 0.9rem;';
-        loadingDiv.innerHTML = '<div style="display: inline-block; width: 20px; height: 20px; border: 3px solid #e2e8f0; border-top-color: #3b82f6; border-radius: 50%; animation: spin 1s linear infinite; margin-right: 0.5rem;"></div>Loading historical data from Supabase...';
-        // Add spin animation if not already in stylesheet
-        if (!document.getElementById('trend-chart-spin-style')) {
-          const style = document.createElement('style');
-          style.id = 'trend-chart-spin-style';
-          style.textContent = '@keyframes spin { to { transform: rotate(360deg); } }';
-          document.head.appendChild(style);
-        }
-        trendCanvas.parentElement.insertBefore(loadingDiv, trendCanvas);
-      }
+      // Show full-screen loading overlay
+      showFullScreenLoading(`Updating metrics for ${newDateRange} day period...`);
       
       try {
         showStatus(`Updating metrics for ${newDateRange} day period...`, 'info');
@@ -17992,11 +18041,17 @@ Final Score: ${score}/100`;
                 // We have real data for this date
                 contentSchemaData.push(realScore);
                 contentSchemaDataEstimated.push(null); // No estimated value
-                debugLog(`Content/Schema: Added ${realScore} for ${pointDate}`, 'info');
+                debugLog(`Content/Schema: Added ${realScore} for ${pointDate} from Supabase`, 'info');
+              } else if (isLatestAudit && currentContentSchema !== null && currentContentSchema !== undefined) {
+                // For latest audit date, use current Content/Schema score if available
+                contentSchemaData.push(currentContentSchema);
+                contentSchemaDataEstimated.push(null);
+                debugLog(`Content/Schema: Added ${currentContentSchema} for ${pointDate} from current audit (latest)`, 'info');
               } else {
                 // No real data for this date - use null (don't show estimated line)
                 contentSchemaData.push(null);
                 contentSchemaDataEstimated.push(null);
+                debugLog(`Content/Schema: No data for ${pointDate} (isLatestAudit=${isLatestAudit}, currentContentSchema=${currentContentSchema})`, 'info');
               }
               
               // Brand Overlay data (check historical data from Supabase, then fallback calculation)
@@ -18698,12 +18753,8 @@ Final Score: ${score}/100`;
           debugLog(`[Trend Chart] Latest audit date: ${latestAuditDateStr}`, 'info');
           debugLog(`[Trend Chart] Data arrays length - Local Entity: ${localEntityData.length}, Service Area: ${serviceAreaData.length}, Authority: ${authorityData.length}, Visibility: ${visibilityData.length}, Content/Schema: ${contentSchemaData.length}`, 'info');
           
-          // Remove loading spinner if it exists
-          const trendChartContainer = trendCanvas.parentElement;
-          if (trendChartContainer) {
-            const loadingDiv = trendChartContainer.querySelector('.trend-chart-loading');
-            if (loadingDiv) loadingDiv.remove();
-          }
+          // Hide full-screen loading overlay
+          hideFullScreenLoading();
           
           window.trendChart = new Chart(trendCtx, {
             type: 'line',
