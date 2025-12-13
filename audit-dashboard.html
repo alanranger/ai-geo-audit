@@ -21525,6 +21525,149 @@ Final Score: ${score}/100`;
       }
     }
 
+    // Update filter counts in dropdowns
+    // Counts show how many items match each option given the current state of OTHER filters
+    function updateFilterCounts(rows) {
+      if (!rows || rows.length === 0) return;
+
+      // For each filter, calculate counts based on rows that match all OTHER filters
+      // Segment counts (excluding segment filter)
+      const segmentRows = applyRankingFilters(rows, 'segment');
+      const segmentCounts = { all: segmentRows.length, brand: 0, money: 0, education: 0, other: 0 };
+      segmentRows.forEach(r => {
+        const seg = (r.segment || '').toLowerCase();
+        if (segmentCounts.hasOwnProperty(seg)) segmentCounts[seg]++;
+        else segmentCounts.other++;
+      });
+      updateSelectCounts('ranking-filter-segment', segmentCounts);
+
+      // Rank counts (excluding rank filter)
+      const rankRows = applyRankingFilters(rows, 'rank');
+      const rankCounts = { all: rankRows.length, top3: 0, top10: 0, top20: 0, low: 0 };
+      rankRows.forEach(r => {
+        const rank = r.best_rank_group;
+        if (rank != null && rank <= 3) rankCounts.top3++;
+        if (rank != null && rank <= 10) rankCounts.top10++;
+        if (rank != null && rank <= 20) rankCounts.top20++;
+        if (rank == null || rank > 20) rankCounts.low++;
+      });
+      updateSelectCounts('ranking-filter-rank', rankCounts);
+
+      // Volume counts (excluding volume filter)
+      const volumeRows = applyRankingFilters(rows, 'volume');
+      const volumeCounts = { all: volumeRows.length, high: 0, medium: 0, low: 0, none: 0 };
+      volumeRows.forEach(r => {
+        const vol = r.search_volume;
+        if (vol == null || vol === 0) volumeCounts.none++;
+        else if (vol < 50) volumeCounts.low++;
+        else if (vol < 200) volumeCounts.medium++;
+        else volumeCounts.high++;
+      });
+      updateSelectCounts('ranking-filter-volume', volumeCounts);
+
+      // CTR counts (excluding CTR filter)
+      const ctrRows = applyRankingFilters(rows, 'ctr');
+      const ctrCounts = { all: ctrRows.length, high: 0, medium: 0, low: 0, none: 0 };
+      ctrRows.forEach(r => {
+        const ctrMetrics = getCtrMetricsForKeyword({ keyword: r.keyword, url: r.ranking_url });
+        const ctr = ctrMetrics && ctrMetrics.ctr != null ? (ctrMetrics.ctr * 100) : null;
+        if (ctr == null) ctrCounts.none++;
+        else if (ctr < 2) ctrCounts.low++;
+        else if (ctr < 5) ctrCounts.medium++;
+        else ctrCounts.high++;
+      });
+      updateSelectCounts('ranking-filter-ctr', ctrCounts);
+
+      // Demand share counts (excluding demand share filter)
+      const demandShareRows = applyRankingFilters(rows, 'demandShare');
+      const demandShareCounts = { all: demandShareRows.length, high: 0, medium: 0, low: 0 };
+      demandShareRows.forEach(r => {
+        const ds = r.demand_share || 0;
+        if (ds > 0.3) demandShareCounts.high++;
+        else if (ds > 0.1) demandShareCounts.medium++;
+        else demandShareCounts.low++;
+      });
+      updateSelectCounts('ranking-filter-demand-share', demandShareCounts);
+
+      // Opportunity score counts (excluding opportunity filter)
+      const oppRows = applyRankingFilters(rows, 'opportunity');
+      const oppCounts = { all: oppRows.length, high: 0, medium: 0, low: 0 };
+      oppRows.forEach(r => {
+        const opp = r.opportunityScore ?? -1;
+        if (opp >= 70) oppCounts.high++;
+        else if (opp >= 40) oppCounts.medium++;
+        else if (opp >= 0) oppCounts.low++;
+      });
+      updateSelectCounts('ranking-filter-opportunity', oppCounts);
+
+      // AI Overview counts (excluding AI Overview filter)
+      const aiOverviewRows = applyRankingFilters(rows, 'aiOverview');
+      const aiOverviewCounts = { all: aiOverviewRows.length, has: 0, no: 0 };
+      aiOverviewRows.forEach(r => {
+        if (r.has_ai_overview) aiOverviewCounts.has++;
+        else aiOverviewCounts.no++;
+      });
+      updateSelectCounts('ranking-filter-ai-overview', aiOverviewCounts);
+
+      // AI Citation counts (excluding AI Citation filter)
+      const aiCitationRows = applyRankingFilters(rows, 'aiCitation');
+      const aiCitationCounts = { all: aiCitationRows.length, cited: 0, 'not-cited': 0 };
+      aiCitationRows.forEach(r => {
+        if (r.ai_alan_citations_count > 0) aiCitationCounts.cited++;
+        else aiCitationCounts['not-cited']++;
+      });
+      updateSelectCounts('ranking-filter-ai-citation', aiCitationCounts);
+
+      // Page type counts (excluding page type filter)
+      const pageTypeRows = applyRankingFilters(rows, 'pageType');
+      const pageTypeCounts = { all: pageTypeRows.length, GBP: 0, Landing: 0, Event: 0, Product: 0, Other: 0 };
+      pageTypeRows.forEach(r => {
+        const pt = r.pageType || 'Landing';
+        if (pageTypeCounts.hasOwnProperty(pt)) pageTypeCounts[pt]++;
+        else pageTypeCounts.Other++;
+      });
+      updateSelectCounts('ranking-filter-page-type', pageTypeCounts);
+
+      // SERP features counts (excluding SERP features filter)
+      const serpRows = applyRankingFilters(rows, 'serpFeatures');
+      const serpCounts = { all: serpRows.length, 'ai-overview': 0, 'local-pack': 0, paa: 0, 'featured-snippet': 0, none: 0 };
+      serpRows.forEach(r => {
+        const hasAi = r.ai_overview_present_any === true;
+        const hasLocal = r.local_pack_present_any === true;
+        const hasPaa = r.paa_present_any === true;
+        const hasFeatured = r.featured_snippet_present_any === true;
+        if (hasAi) serpCounts['ai-overview']++;
+        if (hasLocal) serpCounts['local-pack']++;
+        if (hasPaa) serpCounts.paa++;
+        if (hasFeatured) serpCounts['featured-snippet']++;
+        if (!hasAi && !hasLocal && !hasPaa && !hasFeatured) serpCounts.none++;
+      });
+      updateSelectCounts('ranking-filter-serp-features', serpCounts);
+    }
+
+    function updateSelectCounts(selectId, counts) {
+      const select = document.getElementById(selectId);
+      if (!select) return;
+      // Store original labels (without counts) for each option
+      const originalLabels = {};
+      Array.from(select.options).forEach(opt => {
+        const value = opt.value;
+        if (!originalLabels[value]) {
+          // Store original label (remove existing count if any)
+          originalLabels[value] = opt.textContent.split(' (')[0].trim();
+        }
+      });
+      // Update with counts
+      Array.from(select.options).forEach(opt => {
+        const value = opt.value;
+        if (counts.hasOwnProperty(value)) {
+          const count = counts[value];
+          const label = originalLabels[value] || opt.textContent.split(' (')[0].trim();
+          opt.textContent = value === 'all' ? `All (${count})` : `${label} (${count})`;
+        }
+      });
+    }
+
     function renderRankingAiTab() {
       debugLog('📊 renderRankingAiTab() called', 'info');
       const { combinedRows, summary } = RankingAiModule.state();
@@ -22951,149 +23094,6 @@ Final Score: ${score}/100`;
       window.wireRankingAiButton = wireRankingAiButton;
       window.wireRankingFilters = wireRankingFilters;
       window.wireRankingSorting = wireRankingSorting;
-
-      // Update filter counts in dropdowns
-      // Counts show how many items match each option given the current state of OTHER filters
-      function updateFilterCounts(rows) {
-        if (!rows || rows.length === 0) return;
-
-        // For each filter, calculate counts based on rows that match all OTHER filters
-        // Segment counts (excluding segment filter)
-        const segmentRows = applyRankingFilters(rows, { excludeFilter: 'segment' });
-        const segmentCounts = { all: segmentRows.length, brand: 0, money: 0, education: 0, other: 0 };
-        segmentRows.forEach(r => {
-          const seg = (r.segment || '').toLowerCase();
-          if (segmentCounts.hasOwnProperty(seg)) segmentCounts[seg]++;
-          else segmentCounts.other++;
-        });
-        updateSelectCounts('ranking-filter-segment', segmentCounts);
-
-        // Rank counts (excluding rank filter)
-        const rankRows = applyRankingFilters(rows, { excludeFilter: 'rank' });
-        const rankCounts = { all: rankRows.length, top3: 0, top10: 0, top20: 0, low: 0 };
-        rankRows.forEach(r => {
-          const rank = r.best_rank_group;
-          if (rank != null && rank <= 3) rankCounts.top3++;
-          if (rank != null && rank <= 10) rankCounts.top10++;
-          if (rank != null && rank <= 20) rankCounts.top20++;
-          if (rank == null || rank > 20) rankCounts.low++;
-        });
-        updateSelectCounts('ranking-filter-rank', rankCounts);
-
-        // Volume counts (excluding volume filter)
-        const volumeRows = applyRankingFilters(rows, { excludeFilter: 'volume' });
-        const volumeCounts = { all: volumeRows.length, high: 0, medium: 0, low: 0, none: 0 };
-        volumeRows.forEach(r => {
-          const vol = r.search_volume;
-          if (vol == null || vol === 0) volumeCounts.none++;
-          else if (vol < 50) volumeCounts.low++;
-          else if (vol < 200) volumeCounts.medium++;
-          else volumeCounts.high++;
-        });
-        updateSelectCounts('ranking-filter-volume', volumeCounts);
-
-        // CTR counts (excluding CTR filter)
-        const ctrRows = applyRankingFilters(rows, { excludeFilter: 'ctr' });
-        const ctrCounts = { all: ctrRows.length, high: 0, medium: 0, low: 0, none: 0 };
-        ctrRows.forEach(r => {
-          const ctrMetrics = getCtrMetricsForKeyword({ keyword: r.keyword, url: r.ranking_url });
-          const ctr = ctrMetrics && ctrMetrics.ctr != null ? (ctrMetrics.ctr * 100) : null;
-          if (ctr == null) ctrCounts.none++;
-          else if (ctr < 2) ctrCounts.low++;
-          else if (ctr < 5) ctrCounts.medium++;
-          else ctrCounts.high++;
-        });
-        updateSelectCounts('ranking-filter-ctr', ctrCounts);
-
-        // Demand share counts (excluding demand share filter)
-        const demandShareRows = applyRankingFilters(rows, { excludeFilter: 'demandShare' });
-        const demandShareCounts = { all: demandShareRows.length, high: 0, medium: 0, low: 0 };
-        demandShareRows.forEach(r => {
-          const ds = r.demand_share || 0;
-          if (ds > 0.3) demandShareCounts.high++;
-          else if (ds > 0.1) demandShareCounts.medium++;
-          else demandShareCounts.low++;
-        });
-        updateSelectCounts('ranking-filter-demand-share', demandShareCounts);
-
-        // Opportunity score counts (excluding opportunity filter)
-        const oppRows = applyRankingFilters(rows, { excludeFilter: 'opportunity' });
-        const oppCounts = { all: oppRows.length, high: 0, medium: 0, low: 0 };
-        oppRows.forEach(r => {
-          const opp = r.opportunityScore ?? -1;
-          if (opp >= 70) oppCounts.high++;
-          else if (opp >= 40) oppCounts.medium++;
-          else if (opp >= 0) oppCounts.low++;
-        });
-        updateSelectCounts('ranking-filter-opportunity', oppCounts);
-
-        // AI Overview counts (excluding AI Overview filter)
-        const aiOverviewRows = applyRankingFilters(rows, { excludeFilter: 'aiOverview' });
-        const aiOverviewCounts = { all: aiOverviewRows.length, has: 0, no: 0 };
-        aiOverviewRows.forEach(r => {
-          if (r.has_ai_overview) aiOverviewCounts.has++;
-          else aiOverviewCounts.no++;
-        });
-        updateSelectCounts('ranking-filter-ai-overview', aiOverviewCounts);
-
-        // AI Citation counts (excluding AI Citation filter)
-        const aiCitationRows = applyRankingFilters(rows, { excludeFilter: 'aiCitation' });
-        const aiCitationCounts = { all: aiCitationRows.length, cited: 0, 'not-cited': 0 };
-        aiCitationRows.forEach(r => {
-          if (r.ai_alan_citations_count > 0) aiCitationCounts.cited++;
-          else aiCitationCounts['not-cited']++;
-        });
-        updateSelectCounts('ranking-filter-ai-citation', aiCitationCounts);
-
-        // Page type counts (excluding page type filter)
-        const pageTypeRows = applyRankingFilters(rows, { excludeFilter: 'pageType' });
-        const pageTypeCounts = { all: pageTypeRows.length, GBP: 0, Landing: 0, Event: 0, Product: 0, Other: 0 };
-        pageTypeRows.forEach(r => {
-          const pt = r.pageType || 'Landing';
-          if (pageTypeCounts.hasOwnProperty(pt)) pageTypeCounts[pt]++;
-          else pageTypeCounts.Other++;
-        });
-        updateSelectCounts('ranking-filter-page-type', pageTypeCounts);
-
-        // SERP features counts (excluding SERP features filter)
-        const serpRows = applyRankingFilters(rows, { excludeFilter: 'serpFeatures' });
-        const serpCounts = { all: serpRows.length, 'ai-overview': 0, 'local-pack': 0, paa: 0, 'featured-snippet': 0, none: 0 };
-        serpRows.forEach(r => {
-          const hasAi = r.ai_overview_present_any === true;
-          const hasLocal = r.local_pack_present_any === true;
-          const hasPaa = r.paa_present_any === true;
-          const hasFeatured = r.featured_snippet_present_any === true;
-          if (hasAi) serpCounts['ai-overview']++;
-          if (hasLocal) serpCounts['local-pack']++;
-          if (hasPaa) serpCounts.paa++;
-          if (hasFeatured) serpCounts['featured-snippet']++;
-          if (!hasAi && !hasLocal && !hasPaa && !hasFeatured) serpCounts.none++;
-        });
-        updateSelectCounts('ranking-filter-serp-features', serpCounts);
-      }
-
-      function updateSelectCounts(selectId, counts) {
-        const select = document.getElementById(selectId);
-        if (!select) return;
-        // Store original labels (without counts) for each option
-        const originalLabels = {};
-        Array.from(select.options).forEach(opt => {
-          const value = opt.value;
-          if (!originalLabels[value]) {
-            // Store original label (remove existing count if any)
-            originalLabels[value] = opt.textContent.split(' (')[0].trim();
-          }
-        });
-        // Update with counts
-        Array.from(select.options).forEach(opt => {
-          const value = opt.value;
-          if (counts.hasOwnProperty(value)) {
-            const count = counts[value];
-            const label = originalLabels[value] || opt.textContent.split(' (')[0].trim();
-            opt.textContent = value === 'all' ? `All (${count})` : `${label} (${count})`;
-          }
-        });
-      }
 
       function wireRankingFilters() {
         const segmentFilter = document.getElementById("ranking-filter-segment");
