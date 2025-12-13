@@ -3168,9 +3168,11 @@
     // can be called even if these helpers aren't ready yet
     
     // Placeholder - will be replaced by actual function when script loads
+    // This is a fallback used only if no external Money Pages module is wired.
+    // It returns empty metrics so the UI can show "No data" rather than crash.
     window.buildMoneyPageMetrics = function(topPages, schemaAudit) {
-      console.warn('[Money Pages] buildMoneyPageMetrics called but full implementation not loaded yet');
-      // Return empty array as fallback
+      console.warn('[Money Pages] ⚠️ buildMoneyPageMetrics placeholder called - full implementation not loaded yet. This is a fallback to prevent crashes. The UI will show "No data" until the full implementation loads.');
+      // Return empty array as fallback so UI can gracefully handle missing data
       return [];
     };
     
@@ -21725,6 +21727,7 @@ Final Score: ${score}/100`;
         
         if (!Array.isArray(allPages) || allPages.length === 0) {
           debugLog('[Schema Coverage] No pages array available (length: ' + (Array.isArray(allPages) ? allPages.length : 'not array') + ')', 'warn');
+          debugLog('[Schema Coverage] This usually means the schema audit hasn\'t been run yet, or the data is missing from localStorage/Supabase.', 'info');
           return null;
         }
 
@@ -23374,6 +23377,7 @@ Final Score: ${score}/100`;
             }
           } else {
             debugLog('[Schema Coverage] No pages array available in schemaData', 'warn');
+            debugLog('[Schema Coverage] This usually means the schema audit hasn\'t been run yet, or the data is missing from localStorage/Supabase.', 'info');
           }
         } else {
           debugLog('[Schema Coverage] No schemaAudit.data in saved audit, trying async fetch...', 'warn');
@@ -23414,22 +23418,27 @@ Final Score: ${score}/100`;
                 schemaHtml += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">${schemaInterpretation}</p>`;
                 debugLog('[Schema Coverage] ✅ Updated schema section with async data', 'success');
               } else {
-                // No coverage data found - show helpful message
-                schemaHtml += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">Schema coverage data not available for this URL. Check the Content/Schema pillar for a full schema audit.</p>`;
-                debugLog('[Schema Coverage] Async fetch returned no coverage data', 'warn');
+                // No coverage data found - show helpful message explaining data coverage gap
+                const rankingUrl = scorecardData.ranking_url || 'unknown';
+                const normalizedUrl = normalizeUrlForMatching(rankingUrl);
+                debugLog(`[Schema Coverage] ❌ No schema audit data found for ranking URL: ${rankingUrl} (normalized: ${normalizedUrl})`, 'warn');
+                debugLog(`[Schema Coverage] This usually means the URL wasn't in the last schema crawl. The page may have schema, but it wasn't scanned in the most recent audit.`, 'info');
+                schemaHtml += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">Schema coverage data not available for this URL. This usually means the URL wasn't included in the last schema crawl. Check the Content/Schema pillar for a full schema audit, or run a new schema audit to include this page.</p>`;
               }
               
               schemaHtml += `</div></div>`;
               schemaSection.innerHTML = schemaHtml;
             }
           }).catch(err => {
-            debugLog('[Schema Coverage] Async fetch failed: ' + err.message, 'warn');
+            const rankingUrl = scorecardData.ranking_url || 'unknown';
+            debugLog(`[Schema Coverage] Async fetch failed for URL ${rankingUrl}: ${err.message}`, 'warn');
+            debugLog(`[Schema Coverage] This usually means the URL wasn't in the last schema crawl. The page may have schema, but it wasn't scanned in the most recent audit.`, 'info');
             // Update the loading message to show error
             const schemaSection = contentEl.querySelector('.scorecard-section:nth-of-type(4)');
             if (schemaSection) {
               const loadingMsg = schemaSection.querySelector('[id^="schema-coverage-loading-"]');
               if (loadingMsg) {
-                loadingMsg.textContent = 'Unable to load schema coverage. Check the Content/Schema pillar for a full schema audit.';
+                loadingMsg.textContent = 'Unable to load schema coverage. This usually means the URL wasn\'t included in the last schema crawl. Check the Content/Schema pillar for a full schema audit, or run a new schema audit to include this page.';
               }
             }
           });
@@ -23466,6 +23475,8 @@ Final Score: ${score}/100`;
       } else {
         // Show loading state if async fetch is in progress, otherwise show fallback
         // The async fetch will update this section if data is found
+        const rankingUrl = scorecardData.ranking_url || 'unknown';
+        debugLog(`[Schema Coverage] No schema data found in sync check for URL: ${rankingUrl}. Trying async fetch...`, 'info');
         html += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;" id="schema-coverage-loading-${Date.now()}">Checking schema coverage...</p>`;
       }
       html += `</div></div>`;
