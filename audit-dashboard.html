@@ -21620,10 +21620,79 @@ Final Score: ${score}/100`;
         let allPages = Array.isArray(pagesArray) && pagesArray.length > 0 ? pagesArray : 
                        (Array.isArray(pagesWithSchema) && pagesWithSchema.length > 0 ? pagesWithSchema : []);
         
-        // Check if pagesWithSchema is an array of objects (detail) or just a number (count)
-        if (allPages.length === 0 && typeof pagesWithSchema === 'number') {
+        // Normalize the input URL first to use for matching
+        const normalizedUrl = normalizeUrlForMatching(url);
+        debugLog('[Schema Coverage] Looking for normalized URL: ' + normalizedUrl + ' (original: ' + url + ')', 'info');
+        
+        // Try to find the page in the current array
+        let pageData = allPages.find(p => {
+          if (!p || !p.url) return false;
+          const pNormalized = normalizeUrlForMatching(p.url);
+          const exactMatch = pNormalized === normalizedUrl;
+          const homepageMatch = (normalizedUrl === '/' || normalizedUrl === '') && (pNormalized === '/' || pNormalized === '');
+          return exactMatch || homepageMatch;
+        });
+        
+        // If not found and we have a truncated array (200 items), try fetching from Supabase
+        // The API truncates to 200, but the full data exists in Supabase
+        if (!pageData && allPages.length === 200) {
+          debugLog('[Schema Coverage] Page not found in truncated array (200 items), fetching full data from Supabase...', 'info');
+          const propertyUrl = savedAudit.propertyUrl || localStorage.getItem('gsc_property_url') || 'https://www.alanranger.com';
+          try {
+            const supabaseData = await fetchLatestAuditFromSupabase(propertyUrl);
+            if (supabaseData && supabaseData.schemaAudit && supabaseData.schemaAudit.data) {
+              schemaData = supabaseData.schemaAudit.data;
+              pagesArray = schemaData.pages || [];
+              pagesWithSchema = schemaData.pagesWithSchema || [];
+              const supabasePages = Array.isArray(pagesArray) && pagesArray.length > 0 ? pagesArray : 
+                                   (Array.isArray(pagesWithSchema) && pagesWithSchema.length > 0 ? pagesWithSchema : []);
+              debugLog('[Schema Coverage] Loaded schema data from Supabase (' + supabasePages.length + ' pages, may still be truncated)', 'info');
+              
+              // Search in the Supabase data (may still be truncated, but worth trying)
+              if (supabasePages.length > 0) {
+                pageData = supabasePages.find(p => {
+                  if (!p || !p.url) return false;
+                  const pNormalized = normalizeUrlForMatching(p.url);
+                  const exactMatch = pNormalized === normalizedUrl;
+                  const homepageMatch = (normalizedUrl === '/' || normalizedUrl === '') && (pNormalized === '/' || pNormalized === '');
+                  return exactMatch || homepageMatch;
+                });
+                
+                if (pageData) {
+                  debugLog('[Schema Coverage] ✅ Found page in Supabase data', 'success');
+                  allPages = supabasePages;
+                } else if (supabasePages.length === 200) {
+                  debugLog('[Schema Coverage] ⚠️ Supabase data also truncated to 200 items. Querying full data from API...', 'info');
+                  // Try the dedicated API endpoint that searches the full JSONB field
+                  try {
+                    const propertyUrl = savedAudit.propertyUrl || localStorage.getItem('gsc_property_url') || 'https://www.alanranger.com';
+                    const apiUrl = `/api/supabase/get-schema-for-url?propertyUrl=${encodeURIComponent(propertyUrl)}&searchUrl=${encodeURIComponent(url)}`;
+                    const apiRes = await fetch(apiUrl);
+                    if (apiRes.ok) {
+                      const apiData = await apiRes.json();
+                      if (apiData.status === 'ok' && apiData.data) {
+                        pageData = apiData.data;
+                        debugLog('[Schema Coverage] ✅ Found page in full Supabase data via API', 'success');
+                      } else {
+                        debugLog('[Schema Coverage] API returned: ' + (apiData.message || 'no data'), 'warn');
+                      }
+                    } else {
+                      debugLog('[Schema Coverage] API request failed: ' + apiRes.status, 'warn');
+                    }
+                  } catch (apiErr) {
+                    debugLog('[Schema Coverage] API request error: ' + apiErr.message, 'warn');
+                  }
+                }
+              }
+            }
+          } catch (e) {
+            debugLog('[Schema Coverage] Failed to fetch from Supabase: ' + e.message, 'warn');
+          }
+        }
+        
+        // If still not found, check if pagesWithSchema is just a count (not an array)
+        if (!pageData && allPages.length === 0 && typeof pagesWithSchema === 'number') {
           debugLog('[Schema Coverage] pagesWithSchema is a count in localStorage, trying Supabase...', 'warn');
-          // Try fetching from Supabase which should have the detailed array
           const propertyUrl = savedAudit.propertyUrl || localStorage.getItem('gsc_property_url') || 'https://www.alanranger.com';
           try {
             const supabaseData = await fetchLatestAuditFromSupabase(propertyUrl);
@@ -21639,6 +21708,14 @@ Final Score: ${score}/100`;
               safeSetLocalStorage('last_audit_results', savedAudit);
               if (supabasePages.length > 0) {
                 allPages = supabasePages;
+                // Try to find the page in the newly loaded data
+                pageData = allPages.find(p => {
+                  if (!p || !p.url) return false;
+                  const pNormalized = normalizeUrlForMatching(p.url);
+                  const exactMatch = pNormalized === normalizedUrl;
+                  const homepageMatch = (normalizedUrl === '/' || normalizedUrl === '') && (pNormalized === '/' || pNormalized === '');
+                  return exactMatch || homepageMatch;
+                });
               }
             }
           } catch (e) {
@@ -21651,27 +21728,25 @@ Final Score: ${score}/100`;
           return null;
         }
 
-        // Normalize the input URL
-        const normalizedUrl = normalizeUrlForMatching(url);
-        debugLog('[Schema Coverage] Looking for normalized URL: ' + normalizedUrl + ' (original: ' + url + ')', 'info');
-        
-        // Exact matching only - normalize both URLs identically (strips query params, hash, trailing slashes)
-        const pageData = allPages.find(p => {
-          if (!p || !p.url) return false;
-          const pNormalized = normalizeUrlForMatching(p.url);
-          
-          // Exact match after normalization (both URLs stripped of query params, hash, trailing slashes)
-          const exactMatch = pNormalized === normalizedUrl;
-          
-          // For homepage, also check if both are '/' or empty
-          const homepageMatch = (normalizedUrl === '/' || normalizedUrl === '') && (pNormalized === '/' || pNormalized === '');
-          
-          if (exactMatch || homepageMatch) {
-            debugLog('[Schema Coverage] ✅ Exact URL match: ' + p.url + ' -> ' + pNormalized + ' (search: ' + normalizedUrl + ')', 'info');
-            return true;
-          }
-          return false;
-        });
+        // If pageData wasn't found yet, search in allPages
+        if (!pageData) {
+          pageData = allPages.find(p => {
+            if (!p || !p.url) return false;
+            const pNormalized = normalizeUrlForMatching(p.url);
+            
+            // Exact match after normalization (both URLs stripped of query params, hash, trailing slashes)
+            const exactMatch = pNormalized === normalizedUrl;
+            
+            // For homepage, also check if both are '/' or empty
+            const homepageMatch = (normalizedUrl === '/' || normalizedUrl === '') && (pNormalized === '/' || pNormalized === '');
+            
+            if (exactMatch || homepageMatch) {
+              debugLog('[Schema Coverage] ✅ Exact URL match: ' + p.url + ' -> ' + pNormalized + ' (search: ' + normalizedUrl + ')', 'info');
+              return true;
+            }
+            return false;
+          });
+        }
 
         if (!pageData) {
           // Enhanced debugging: show sample URLs and search for similar URLs
