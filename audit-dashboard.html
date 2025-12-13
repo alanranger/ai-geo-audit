@@ -21398,19 +21398,19 @@ Final Score: ${score}/100`;
     }
 
     /**
-     * Get schema coverage for a URL
-     * @param {string} url - URL to check
-     * @returns {Object|null} Schema coverage data or null if not found
-     */
-    /**
      * Normalize URL by stripping query parameters, hash, and trailing slashes
      * Returns just the pathname for matching
      */
     function normalizeUrlForMatching(url) {
-      if (!url) return '';
+      if (!url || typeof url !== 'string') return '';
       let normalized = url.toLowerCase().trim();
       try {
-        const urlObj = new URL(url);
+        // Handle relative URLs by adding a base URL
+        let urlToParse = normalized;
+        if (!normalized.startsWith('http://') && !normalized.startsWith('https://')) {
+          urlToParse = 'https://www.alanranger.com' + (normalized.startsWith('/') ? normalized : '/' + normalized);
+        }
+        const urlObj = new URL(urlToParse);
         normalized = urlObj.pathname.toLowerCase().replace(/\/$/, '').trim();
         // If pathname is empty or just '/', treat as homepage
         if (!normalized || normalized === '/') {
@@ -21419,6 +21419,10 @@ Final Score: ${score}/100`;
       } catch (e) {
         // If URL parsing fails, remove query params and hash manually
         normalized = url.split('?')[0].split('#')[0].toLowerCase().replace(/\/$/, '').trim();
+        // Ensure it starts with / if it's a path
+        if (normalized && !normalized.startsWith('/')) {
+          normalized = '/' + normalized;
+        }
         if (!normalized || normalized === '/') {
           normalized = '/';
         }
