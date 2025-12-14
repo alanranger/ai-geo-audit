@@ -183,12 +183,40 @@ export default async function handler(req, res) {
   const results = [];
   const insertPayload = [];
 
+  function isNoDataError(msg) {
+    const m = String(msg || "").toLowerCase();
+    return (
+      m === "no data" ||
+      m.includes("no organic metrics") ||
+      m.includes("no organic metric") ||
+      m.includes("no results")
+    );
+  }
+
   for (const domain of runDomains) {
     const r = byDomain.get(domain);
     if (!r || !r.ok || !r.data) {
+      const errMsg = r?.error || "No data";
+
+      // Only treat true "no data" as a 0 score. If the API call failed (plan limits, auth, etc),
+      // don't write misleading "Very weak" rows.
+      if (!isNoDataError(errMsg)) {
+        results.push({
+          domain,
+          score: null,
+          band: null,
+          V: null,
+          B: null,
+          Q: null,
+          raw: null,
+          error: errMsg,
+        });
+        continue;
+      }
+
       const score = 0;
       const band = "Very weak";
-      results.push({ domain, score, band, V: 0, B: 0, Q: 0, raw: null, error: r?.error || "No data" });
+      results.push({ domain, score, band, V: 0, B: 0, Q: 0, raw: null, error: errMsg });
 
       if (mode === "run") {
         insertPayload.push({
