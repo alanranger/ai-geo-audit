@@ -40,7 +40,7 @@ export default async function handler(req, res) {
     }
 
     // Get the latest audit for this property
-    const auditUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.desc&limit=1&select=id,audit_date,schema_pages_detail`;
+    const auditUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&is_partial=eq.false&schema_pages_detail=not.is.null&order=audit_date.desc,updated_at.desc&limit=1&select=id,audit_date,updated_at,schema_pages_detail`;
     
     const auditRes = await fetch(auditUrl, {
       headers: {
@@ -124,16 +124,33 @@ export default async function handler(req, res) {
       return normalized;
     }
 
+    function normalizeLooseSlug(pathname) {
+      const p = (pathname || '').toString().toLowerCase().trim();
+      const last = p.split('/').filter(Boolean).pop() || '';
+      return last.replace(/[^a-z0-9]/g, '');
+    }
+
     const normalizedSearchUrl = normalizeUrl(searchUrl);
+    const normalizedSearchLoose = normalizeLooseSlug(normalizedSearchUrl);
 
     // Search through ALL pages (not truncated)
-    const pageData = pagesDetail.find(p => {
+    let pageData = pagesDetail.find(p => {
       if (!p || !p.url) return false;
       const pNormalized = normalizeUrl(p.url);
       const exactMatch = pNormalized === normalizedSearchUrl;
       const homepageMatch = (normalizedSearchUrl === '/' || normalizedSearchUrl === '') && (pNormalized === '/' || pNormalized === '');
       return exactMatch || homepageMatch;
     });
+
+    // Fallback: loose slug match for variant/redirect slugs (e.g. "121" vs "1-2-1")
+    if (!pageData && normalizedSearchLoose) {
+      pageData = pagesDetail.find(p => {
+        if (!p || !p.url) return false;
+        const pNormalized = normalizeUrl(p.url);
+        const pLoose = normalizeLooseSlug(pNormalized);
+        return pLoose && pLoose === normalizedSearchLoose;
+      });
+    }
 
     if (!pageData) {
       return res.status(200).json({

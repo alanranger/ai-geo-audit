@@ -22444,11 +22444,18 @@ Final Score: ${score}/100`;
           return exactMatch || homepageMatch;
         });
         
+        const domPropertyUrl = document.getElementById('propertyUrl')?.value;
+        const effectivePropertyUrl =
+          domPropertyUrl ||
+          savedAudit.propertyUrl ||
+          localStorage.getItem('gsc_property_url') ||
+          '';
+
         // If not found and we have a truncated array (200 items), try fetching from Supabase
         // The API truncates to 200, but the full data exists in Supabase
         if (!pageData && allPages.length === 200) {
           debugLog('[Schema Coverage] Page not found in truncated array (200 items), fetching full data from Supabase...', 'info');
-          const propertyUrl = savedAudit.propertyUrl || localStorage.getItem('gsc_property_url') || 'https://www.alanranger.com';
+          const propertyUrl = effectivePropertyUrl;
           try {
             const supabaseData = await fetchLatestAuditFromSupabase(propertyUrl);
             if (supabaseData && supabaseData.schemaAudit && supabaseData.schemaAudit.data) {
@@ -22476,8 +22483,14 @@ Final Score: ${score}/100`;
                   debugLog('[Schema Coverage] ⚠️ Supabase data also truncated to 200 items. Querying full data from API...', 'info');
                   // Try the dedicated API endpoint that searches the full JSONB field
                   try {
-                    const propertyUrl = savedAudit.propertyUrl || localStorage.getItem('gsc_property_url') || 'https://www.alanranger.com';
-                    const apiUrl = `/api/supabase/get-schema-for-url?propertyUrl=${encodeURIComponent(propertyUrl)}&searchUrl=${encodeURIComponent(url)}`;
+                    const propertyUrl = effectivePropertyUrl;
+                    const urlHelper = window.apiUrl || ((path) => {
+                      const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || !window.location.hostname;
+                      const baseUrl = isLocal ? 'https://ai-geo-audit.vercel.app' : '';
+                      const cleanPath = path.startsWith('/') ? path : `/${path}`;
+                      return `${baseUrl}${cleanPath}`;
+                    });
+                    const apiUrl = urlHelper(`/api/supabase/get-schema-for-url?propertyUrl=${encodeURIComponent(propertyUrl)}&searchUrl=${encodeURIComponent(url)}`);
                     const apiRes = await fetch(apiUrl);
                     if (apiRes.ok) {
                       const apiData = await apiRes.json();
@@ -24086,7 +24099,7 @@ Final Score: ${score}/100`;
       html += `</div></div>`;
 
       // 4. Schema & rich results
-      html += `<div class="scorecard-section">`;
+      html += `<div class="scorecard-section" data-scorecard-section="schema">`;
       html += `<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">4. Schema & rich results</h5>`;
       html += `<div style="padding-left: 0.75rem;">`;
       
@@ -24257,7 +24270,7 @@ Final Score: ${score}/100`;
         if (typeof getSchemaCoverageForUrl === 'function' && scorecardData.ranking_url) {
           getSchemaCoverageForUrl(scorecardData.ranking_url).then(coverage => {
             // Re-render just the schema section
-            const schemaSection = contentEl.querySelector('.scorecard-section:nth-of-type(4)');
+            const schemaSection = contentEl.querySelector('[data-scorecard-section="schema"]');
             if (schemaSection) {
               let schemaHtml = '';
               schemaHtml += `<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">4. Schema & rich results</h5>`;
@@ -24303,7 +24316,7 @@ Final Score: ${score}/100`;
             debugLog(`[Schema Coverage] Async fetch failed for URL ${rankingUrl}: ${err.message}`, 'warn');
             debugLog(`[Schema Coverage] This usually means the URL wasn't in the last schema crawl. The page may have schema, but it wasn't scanned in the most recent audit.`, 'info');
             // Update the loading message to show error
-            const schemaSection = contentEl.querySelector('.scorecard-section:nth-of-type(4)');
+            const schemaSection = contentEl.querySelector('[data-scorecard-section="schema"]');
             if (schemaSection) {
               const loadingMsg = schemaSection.querySelector('[id^="schema-coverage-loading-"]');
               if (loadingMsg) {
