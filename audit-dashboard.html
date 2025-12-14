@@ -2043,6 +2043,89 @@
     .kpi-trend-up { color: #10b981; font-weight: 700; }
     .kpi-trend-down { color: #ef4444; font-weight: 700; }
     .kpi-trend-flat { color: #64748b; font-weight: 700; }
+
+    /* Domain Strength (Ranking & AI) */
+    .domain-strength-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.25rem 0.6rem;
+      border-radius: 999px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .domain-strength-badge--very-strong { background: #dcfce7; color: #166534; }
+    .domain-strength-badge--strong { background: #ecfdf5; color: #059669; }
+    .domain-strength-badge--moderate { background: #fef3c7; color: #92400e; }
+    .domain-strength-badge--weak { background: #fde68a; color: #92400e; }
+    .domain-strength-badge--very-weak { background: #fee2e2; color: #b91c1c; }
+    .domain-strength-badge--na { background: #f9fafb; color: #6b7280; }
+
+    .domain-strength-summary-row {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      align-items: stretch;
+      margin-top: 1rem;
+    }
+    .domain-strength-summary-card {
+      flex: 1 1 280px;
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 1rem 1.25rem;
+      min-width: 280px;
+    }
+    .domain-strength-summary-top {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    .domain-strength-summary-score {
+      font-size: 2rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: #0f172a;
+      line-height: 1;
+    }
+    .domain-strength-summary-subtitle {
+      margin-top: 0.5rem;
+      font-size: 0.9rem;
+      color: #64748b;
+      line-height: 1.45;
+    }
+    .domain-strength-legend {
+      flex: 1 1 320px;
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      align-content: flex-start;
+      padding: 1rem 1.25rem;
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      min-width: 280px;
+    }
+    .domain-strength-help {
+      margin-left: 0.4rem;
+      opacity: 0.7;
+      cursor: help;
+      font-size: 0.95rem;
+      border: 1px solid rgba(100, 116, 139, 0.35);
+      border-radius: 999px;
+      width: 20px;
+      height: 20px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+      background: rgba(248, 250, 252, 0.8);
+    }
+    .domain-strength-sparkline {
+      display: inline-block;
+    }
   </style>
 </head>
 <body>
@@ -2777,6 +2860,10 @@
               <div>
                 <h3 style="margin: 0 0 0.5rem 0; font-size: 1.1rem; font-weight: 700; color: #1e293b;">
                   Domain Strength (Google – DataForSEO Labs)
+                  <span
+                    class="domain-strength-help"
+                    title="Domain Strength (0–100) is a composite score based on DataForSEO Labs. It combines:&#10;• Estimated organic traffic value (visibility)&#10;• Total organic keywords (breadth)&#10;• Share of keywords ranking in Google’s top 10 (quality)&#10;We calculate it monthly and store history so you can see trends over time."
+                  >?</span>
                 </h3>
                 <p style="margin: 0; font-size: 0.9rem; color: #64748b; line-height: 1.6;">
                   Manual monthly snapshots based on DataForSEO Labs <code style="font-size: 0.85rem;">domain_rank_overview</code>.
@@ -2789,6 +2876,20 @@
                 </button>
               </div>
             </div>
+
+            <div class="domain-strength-summary-row">
+              <div class="domain-strength-summary-card" id="domain-strength-summary-card">
+                <div style="color:#64748b; font-size:0.95rem;">Loading domain strength…</div>
+              </div>
+              <div class="domain-strength-legend" aria-label="Domain strength bands legend">
+                <span class="domain-strength-badge domain-strength-badge--very-weak">Very weak</span>
+                <span class="domain-strength-badge domain-strength-badge--weak">Weak</span>
+                <span class="domain-strength-badge domain-strength-badge--moderate">Moderate</span>
+                <span class="domain-strength-badge domain-strength-badge--strong">Strong</span>
+                <span class="domain-strength-badge domain-strength-badge--very-strong">Very strong</span>
+              </div>
+            </div>
+
             <div id="domain-strength-run-status" style="margin-top: 0.75rem; font-size: 0.875rem; color: #64748b;"></div>
             <div class="ranking-table-wrapper" style="margin-top: 1rem; max-height: 420px;">
               <table class="ranking-table" id="domain-strength-table">
@@ -2796,14 +2897,15 @@
                   <tr>
                     <th>Domain</th>
                     <th>Latest score</th>
+                    <th>Trend</th>
                     <th>Band</th>
                     <th>Top‑10 keywords</th>
                     <th>ETV</th>
-                    <th>Last 12 months</th>
+                    <th>12‑month trend</th>
                   </tr>
                 </thead>
                 <tbody id="domain-strength-table-body">
-                  <tr><td colspan="6" class="ranking-table-empty">No domain strength snapshots yet. Click “Run Domain Strength Snapshot”.</td></tr>
+                  <tr><td colspan="7" class="ranking-table-empty">No domain strength snapshots yet. Click “Run Domain Strength Snapshot”.</td></tr>
                 </tbody>
               </table>
             </div>
@@ -24969,6 +25071,39 @@ Final Score: ${score}/100`;
         }
       }
 
+      function domainStrengthBandKey(band) {
+        const b = String(band || '').trim();
+        if (b === 'Very strong') return 'very-strong';
+        if (b === 'Strong') return 'strong';
+        if (b === 'Moderate') return 'moderate';
+        if (b === 'Weak') return 'weak';
+        if (b === 'Very weak') return 'very-weak';
+        return 'na';
+      }
+
+      function renderDomainStrengthBandPill(band) {
+        const label = String(band || '—');
+        const key = domainStrengthBandKey(label);
+        return `<span class="domain-strength-badge domain-strength-badge--${key}">${label}</span>`;
+      }
+
+      function formatDomainStrengthScore(score) {
+        const n = typeof score === 'number' ? score : parseFloat(score);
+        if (!isFinite(n)) return '—';
+        return Number(n).toFixed(1);
+      }
+
+      function computeDomainStrengthDelta(sortedAscRows) {
+        const list = Array.isArray(sortedAscRows) ? sortedAscRows : [];
+        if (list.length < 2) return null;
+        const last = list[list.length - 1];
+        const prev = list[list.length - 2];
+        const a = typeof last?.score === 'number' ? last.score : parseFloat(last?.score);
+        const b = typeof prev?.score === 'number' ? prev.score : parseFloat(prev?.score);
+        if (!isFinite(a) || !isFinite(b)) return null;
+        return a - b;
+      }
+
       function getDomainStrengthDomainList(maxCompetitors = 20) {
         const domains = [];
         const seen = new Set();
@@ -25007,23 +25142,124 @@ Final Score: ${score}/100`;
         return domains;
       }
 
-      function renderDomainStrengthSparkline(values) {
-        const vals = Array.isArray(values) ? values.filter(v => typeof v === 'number' && isFinite(v)) : [];
-        if (vals.length < 2) return '—';
-        const w = 120;
-        const h = 24;
-        const pad = 2;
-        const min = 0;
-        const max = 100;
-        const stepX = (w - pad * 2) / (vals.length - 1);
-        const points = vals.map((v, i) => {
-          const x = pad + i * stepX;
-          const y = pad + (h - pad * 2) * (1 - ((v - min) / (max - min)));
-          return `${x.toFixed(1)},${Math.max(pad, Math.min(h - pad, y)).toFixed(1)}`;
-        }).join(' ');
-        return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg">
-          <polyline points="${points}" fill="none" stroke="#0284c7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>`;
+      const domainStrengthSparklineCharts = new Map();
+
+      function safeDestroyDomainStrengthSparklines() {
+        for (const ch of domainStrengthSparklineCharts.values()) {
+          try { ch.destroy(); } catch { /* ignore */ }
+        }
+        domainStrengthSparklineCharts.clear();
+      }
+
+      function renderDomainStrengthSparklineChart(canvas, labels, scores) {
+        if (!canvas) return;
+        if (!window.Chart) {
+          canvas.replaceWith(document.createTextNode('—'));
+          return;
+        }
+        const id = canvas.id || '';
+        const existing = id ? domainStrengthSparklineCharts.get(id) : null;
+        if (existing) {
+          try { existing.destroy(); } catch { /* ignore */ }
+          domainStrengthSparklineCharts.delete(id);
+        }
+
+        const pts = Array.isArray(scores) ? scores.map((v) => (typeof v === 'number' ? v : parseFloat(v))).filter((v) => isFinite(v)) : [];
+        const labs = Array.isArray(labels) ? labels : [];
+        if (pts.length === 0) {
+          canvas.replaceWith(document.createTextNode('—'));
+          return;
+        }
+
+        const ctx = canvas.getContext('2d');
+        const chart = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: labs,
+            datasets: [{
+              data: pts,
+              borderColor: '#0284c7',
+              backgroundColor: 'rgba(2, 132, 199, 0.15)',
+              borderWidth: 2,
+              pointRadius: pts.length === 1 ? 2.5 : 0,
+              pointHoverRadius: 0,
+              fill: false,
+              tension: 0.35,
+            }]
+          },
+          options: {
+            responsive: false,
+            maintainAspectRatio: false,
+            animation: false,
+            plugins: {
+              legend: { display: false },
+              tooltip: { enabled: false },
+            },
+            scales: {
+              x: { display: false },
+              y: { display: false, min: 0, max: 100 }
+            },
+            elements: { point: { hitRadius: 0 } }
+          }
+        });
+
+        if (id) domainStrengthSparklineCharts.set(id, chart);
+      }
+
+      async function loadAndRenderDomainStrengthSummary(domain) {
+        const card = document.getElementById('domain-strength-summary-card');
+        if (!card) return;
+
+        if (!domain) {
+          card.innerHTML = `<div style="color:#64748b; font-size:0.95rem;">No active domain found.</div>`;
+          return;
+        }
+
+        try {
+          const qs = encodeURIComponent(domain);
+          const resp = await fetch(apiUrl(`/api/domain-strength/history?domains=${qs}`));
+          const json = await resp.json();
+          const rows = json?.status === 'ok' ? (json.data || []) : [];
+          const list = rows
+            .filter(r => r?.domain === domain)
+            .slice()
+            .sort((a, b) => String(a.snapshot_date).localeCompare(String(b.snapshot_date)));
+
+          if (!list.length) {
+            card.innerHTML = `
+              <div style="font-weight:700; color:#0f172a; margin-bottom:0.25rem;">${domain}</div>
+              <div style="color:#64748b; font-size:0.95rem;">No domain strength snapshots yet. Run a snapshot to populate this card.</div>
+            `;
+            return;
+          }
+
+          const last = list[list.length - 1];
+          const scoreText = formatDomainStrengthScore(last?.score);
+          const band = last?.band || '—';
+          const delta = computeDomainStrengthDelta(list);
+
+          let deltaHtml = `<span style="color:#64748b;">No previous month data yet</span>`;
+          if (delta !== null && isFinite(delta)) {
+            const arrow = delta > 0.5 ? '↑' : (delta < -0.5 ? '↓' : '•');
+            const cls = delta > 0.5 ? 'kpi-trend-up' : (delta < -0.5 ? 'kpi-trend-down' : 'kpi-trend-flat');
+            const sign = delta > 0 ? '+' : '';
+            deltaHtml = `<span class="${cls}" title="Change vs last month: ${sign}${delta.toFixed(1)}">${arrow} ${sign}${delta.toFixed(1)} vs last month</span>`;
+          }
+
+          card.innerHTML = `
+            <div style="font-weight:700; color:#0f172a; margin-bottom:0.35rem;">${domain}</div>
+            <div class="domain-strength-summary-top">
+              <div class="domain-strength-summary-score">${scoreText}</div>
+              <div>${renderDomainStrengthBandPill(band)}</div>
+            </div>
+            <div style="margin-top:0.35rem; font-size:0.95rem;">${deltaHtml}</div>
+            <div class="domain-strength-summary-subtitle">
+              Composite of visibility, breadth, and top‑10 keyword quality (Google).
+            </div>
+          `;
+        } catch (e) {
+          card.innerHTML = `<div style="color:#b91c1c;">Failed to load domain strength summary: ${e?.message || String(e)}</div>`;
+        }
       }
 
       async function loadAndRenderDomainStrength(domains) {
@@ -25031,7 +25267,7 @@ Final Score: ${score}/100`;
         if (!tbody) return;
 
         if (!domains || domains.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="6" class="ranking-table-empty">No domains available. Run “Ranking & AI check” first.</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="7" class="ranking-table-empty">No domains available. Run “Ranking & AI check” first.</td></tr>';
           return;
         }
 
@@ -25040,9 +25276,11 @@ Final Score: ${score}/100`;
         const json = await resp.json();
         const rows = json?.status === 'ok' ? (json.data || []) : [];
         if (!rows.length) {
-          tbody.innerHTML = '<tr><td colspan="6" class="ranking-table-empty">No domain strength snapshots yet. Click “Run Domain Strength Snapshot”.</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="7" class="ranking-table-empty">No domain strength snapshots yet. Click “Run Domain Strength Snapshot”.</td></tr>';
           return;
         }
+
+        safeDestroyDomainStrengthSparklines();
 
         // Group rows by domain
         const byDomain = {};
@@ -25057,27 +25295,45 @@ Final Score: ${score}/100`;
           const list = (byDomain[d] || []).slice().sort((a, b) => String(a.snapshot_date).localeCompare(String(b.snapshot_date)));
           const last = list[list.length - 1] || null;
           const last12 = list.slice(-12);
+          const labels = last12.map(x => String(x.snapshot_date || '')).filter(Boolean);
           const scores = last12.map(x => typeof x.score === 'number' ? x.score : parseFloat(x.score)).filter(v => isFinite(v));
           const latestScore = last ? (typeof last.score === 'number' ? last.score : parseFloat(last.score)) : null;
+          const delta = computeDomainStrengthDelta(list);
           const band = last?.band || '—';
           const top10 = last?.top10_keywords_raw ?? '—';
           const etv = last?.organic_etv_raw ?? '—';
-          const spark = renderDomainStrengthSparkline(scores);
-          return { d, latestScore, band, top10, etv, spark };
+          return { d, latestScore, delta, band, top10, etv, labels, scores };
         });
 
         tbody.innerHTML = '';
         for (const r of renderRows) {
           const tr = document.createElement('tr');
+          const safeId = String(r.d).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+          const canvasId = `domain-strength-spark-${safeId || Math.random().toString(36).slice(2)}`;
+
+          let trendHtml = `<span class="kpi-trend-flat" title="No previous month data yet">—</span>`;
+          if (r.delta !== null && isFinite(r.delta)) {
+            const arrow = r.delta > 0.5 ? '↑' : (r.delta < -0.5 ? '↓' : '•');
+            const cls = r.delta > 0.5 ? 'kpi-trend-up' : (r.delta < -0.5 ? 'kpi-trend-down' : 'kpi-trend-flat');
+            const sign = r.delta > 0 ? '+' : '';
+            trendHtml = `<span class="${cls}" title="Change vs last month: ${sign}${r.delta.toFixed(1)}">${arrow} ${sign}${r.delta.toFixed(1)}</span>`;
+          }
+
           tr.innerHTML = `
             <td>${r.d}</td>
-            <td style="text-align:right;">${(r.latestScore === null || !isFinite(r.latestScore)) ? '—' : Number(r.latestScore).toFixed(2)}</td>
-            <td>${r.band}</td>
+            <td style="text-align:right;">${formatDomainStrengthScore(r.latestScore)}</td>
+            <td style="text-align:center;">${trendHtml}</td>
+            <td>${renderDomainStrengthBandPill(r.band)}</td>
             <td style="text-align:right;">${r.top10 ?? '—'}</td>
             <td style="text-align:right;">${r.etv ?? '—'}</td>
-            <td style="text-align:center;">${r.spark}</td>
+            <td style="text-align:center;">
+              <canvas class="domain-strength-sparkline" id="${canvasId}" width="140" height="28" aria-label="12 month score trend"></canvas>
+            </td>
           `;
           tbody.appendChild(tr);
+
+          const canvas = document.getElementById(canvasId);
+          renderDomainStrengthSparklineChart(canvas, r.labels, r.scores);
         }
       }
 
@@ -25110,6 +25366,7 @@ Final Score: ${score}/100`;
           if (statusEl) statusEl.textContent = `✓ Snapshot saved for ${json.inserted || 0} domains (date: ${json.snapshot_date}).`;
           showStatus(`✓ Domain strength snapshot saved (${json.snapshot_date})`, 'success');
           await loadAndRenderDomainStrength(domains);
+          await loadAndRenderDomainStrengthSummary(getSelfDomainForDomainStrength());
         } catch (e) {
           const msg = e?.message || String(e);
           if (statusEl) statusEl.textContent = `✗ Snapshot failed: ${msg}`;
@@ -25135,6 +25392,7 @@ Final Score: ${score}/100`;
         try {
           const domains = getDomainStrengthDomainList(20);
           loadAndRenderDomainStrength(domains);
+          loadAndRenderDomainStrengthSummary(getSelfDomainForDomainStrength());
         } catch {
           // ignore
         }
