@@ -30,11 +30,26 @@ async function callDataForSeo(endpointPath, taskArray) {
   });
 
   const data = await response.json();
-  const ok = response.ok && (data?.status_code === 20000 || String(data?.status_code || "").startsWith("200"));
+  const ok =
+    response.ok &&
+    (data?.status_code === 20000 || String(data?.status_code || "").startsWith("200"));
   if (!ok) {
     const msg = data?.status_message || `HTTP ${response.status}`;
     throw new Error(msg);
   }
+
+  // DataForSEO often reports errors at task-level even when top-level is OK
+  const task = data?.tasks?.[0];
+  if (task?.status_code && !(task.status_code === 20000 || String(task.status_code).startsWith("200"))) {
+    const msg = task.status_message || `Task status_code ${task.status_code}`;
+    throw new Error(msg);
+  }
+
+  if (task?.error) {
+    const msg = typeof task.error === "string" ? task.error : JSON.stringify(task.error);
+    throw new Error(msg || "Task error");
+  }
+
   return data;
 }
 
@@ -46,8 +61,18 @@ async function callDataForSeo(endpointPath, taskArray) {
  * @returns {Promise<null|{domain:string,rank:number|null,backlinks:number|null,referringDomains:number|null,backlinksSpamScore:number|null,crawledPages:number|null}>}
  */
 export async function fetchDomainBacklinkSummary(domain) {
+  const debug = await fetchDomainBacklinkSummaryDebug(domain);
+  return debug?.data || null;
+}
+
+/**
+ * Debug-friendly variant (no secrets). Returns {data, error} so callers can inspect why null.
+ * @param {string} domain
+ * @returns {Promise<{data: any, error: string|null}>}
+ */
+export async function fetchDomainBacklinkSummaryDebug(domain) {
   const d = String(domain || "").trim();
-  if (!d) return null;
+  if (!d) return { data: null, error: "Missing domain" };
 
   try {
     // Backlinks summary expects an array of task objects
@@ -68,19 +93,23 @@ export async function fetchDomainBacklinkSummary(domain) {
       response?.result?.[0]?.items?.[0] ??
       null;
 
-    if (!result) return null;
+    if (!result) return { data: null, error: "No result items returned by DataForSEO" };
 
     return {
+      error: null,
+      data: {
       domain: d,
       rank: result.rank ?? null,
       backlinks: result.backlinks ?? null,
       referringDomains: result.referring_domains ?? null,
       backlinksSpamScore: result.backlinks_spam_score ?? null,
       crawledPages: result.crawled_pages ?? null,
+      },
     };
   } catch (err) {
-    console.error("[domain-rank] DataForSEO error:", err?.message || err);
-    return null;
+    const msg = err?.message || String(err);
+    console.error("[domain-rank] DataForSEO error:", msg);
+    return { data: null, error: msg };
   }
 }
 

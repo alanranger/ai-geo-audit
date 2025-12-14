@@ -4,7 +4,7 @@
  * GET /api/aigeo/domain-rank-test?domain=alanranger.com
  */
 
-import { fetchDomainBacklinkSummary } from "./dataforseo-client.js";
+import { fetchDomainBacklinkSummary, fetchDomainBacklinkSummaryDebug } from "./dataforseo-client.js";
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -24,12 +24,16 @@ export default async function handler(req, res) {
   }
 
   const domain = (req.query.domain && String(req.query.domain)) || "alanranger.com";
-  const summary = await fetchDomainBacklinkSummary(domain);
+  const debugMode = String(req.query.debug || "").trim() === "1";
+  const result = debugMode
+    ? await fetchDomainBacklinkSummaryDebug(domain)
+    : { data: await fetchDomainBacklinkSummary(domain), error: null };
 
   return res.status(200).json({
     status: "ok",
     domain,
-    data: summary,
+    data: result.data,
+    ...(debugMode ? { debug: { error: result.error } } : {}),
     meta: { generatedAt: new Date().toISOString() },
   });
 }
