@@ -4858,10 +4858,9 @@
         saveAuditResults(scores, searchData, snippetReadiness, savedAudit.schemaAudit, localSignals, normalizedSiteReviewsForLoad, preservedBacklinkMetrics, true);
         safeSetLocalStorage('last_audit_results', updatedAudit);
         
-        // Also save to Supabase for historical tracking
-        if (propertyUrl) {
-          saveAuditToSupabase(propertyUrl, scores, searchData, snippetReadiness, savedAudit.schemaAudit, localSignals);
-        }
+        // Do NOT save to Supabase here.
+        // This "metrics refresh" (date range change) is not a full audit run, and saving it
+        // can incorrectly update today's audit_results row and the "Last Audit" time.
         
         // Update dashboard with new data - ensure scores object has all required properties
         debugLog(`Updating dashboard with scores: ${JSON.stringify(scores)}`, 'info');
@@ -5070,9 +5069,24 @@
     }
     
     // Save audit results to Supabase for historical tracking
-    async function saveAuditToSupabase(propertyUrl, scores, searchData, snippetReadiness, schemaAudit, localSignals = null) {
+    async function saveAuditToSupabase(propertyUrl, scores, searchData, snippetReadiness, schemaAudit, localSignals = null, auditDateOverride = null) {
       try {
-        const auditDate = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+        // IMPORTANT: Only full audits should write a new audit_date.
+        // If auditDateOverride is provided, use it; otherwise try to derive from the saved audit timestamp.
+        let auditDate = auditDateOverride;
+        if (!auditDate) {
+          try {
+            const saved = loadAuditResultsSync();
+            if (saved && saved.timestamp) {
+              auditDate = new Date(saved.timestamp).toISOString().split('T')[0];
+            }
+          } catch (e) {
+            // Ignore
+          }
+        }
+        if (!auditDate) {
+          auditDate = new Date().toISOString().split('T')[0]; // YYYY-MM-DD fallback
+        }
         
         // Ensure searchData has overview object with siteTotalImpressions and siteTotalClicks
         // These are needed for calculating shareOfImpressions in buildMoneyPagesSummary
@@ -8734,7 +8748,7 @@
         // Note: saveAuditToSupabase is async, so we can await it or use .then()
         (async () => {
           try {
-            await saveAuditToSupabase(propertyUrl, scores, searchData, snippetReadiness, schemaAudit, localSignals);
+            await saveAuditToSupabase(propertyUrl, scores, searchData, snippetReadiness, schemaAudit, localSignals, new Date().toISOString().split('T')[0]);
             // After saving to Supabase, refresh the trend chart to show the latest audit
             debugLog('Refreshing Score Trends chart after saving audit...', 'info');
             // Re-render the dashboard to update the trend chart with new data

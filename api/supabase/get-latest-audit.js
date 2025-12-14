@@ -65,87 +65,100 @@ export default async function handler(req, res) {
     let auditDate;
     
     try {
-      // For minimal requests, only fetch essential fields (timestamp + scores)
-      // This prevents the function from crashing when large JSON fields are present
-      let queryUrl;
-      if (isMinimalRequest) {
-        // For minimal requests, explicitly select only essential fields
-        // URL encode the select parameter to handle commas properly
-        const selectFields = 'audit_date,updated_at,visibility_score,content_schema_score,authority_score,local_entity_score,service_area_score';
-        queryUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.desc&limit=1&select=${encodeURIComponent(selectFields)}`;
-      } else {
-        // For full requests, fetch all fields (but we'll truncate large ones later)
-        queryUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.desc&limit=1&select=*`;
-      }
-      
-      let response;
-      try {
-        response = await fetch(queryUrl, {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            'apikey': supabaseKey,
-            'Authorization': `Bearer ${supabaseKey}`
+      // Prefer latest *complete* audit (schema_pages_detail present) to avoid
+      // treating "refresh/partial" rows as a full audit run.
+      const buildQueryUrl = (includeSchemaDetailFilter) => {
+        const base = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.desc&limit=1`;
+        const schemaFilter = includeSchemaDetailFilter ? '&schema_pages_detail=not.is.null' : '';
+        if (isMinimalRequest) {
+          const selectFields = 'audit_date,updated_at,visibility_score,content_schema_score,authority_score,local_entity_score,service_area_score';
+          return `${base}${schemaFilter}&select=${encodeURIComponent(selectFields)}`;
+        }
+        return `${base}${schemaFilter}&select=*`;
+      };
+
+      const queryAttempts = [buildQueryUrl(true), buildQueryUrl(false)];
+      let results;
+      let lastErrorText = null;
+      let lastStatus = null;
+
+      for (const queryUrl of queryAttempts) {
+        let response;
+        try {
+          response = await fetch(queryUrl, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': supabaseKey,
+              'Authorization': `Bearer ${supabaseKey}`
+            }
+          });
+          lastStatus = response.status;
+          console.log(`[get-latest-audit] Supabase fetch completed, status: ${response.status}`);
+        } catch (fetchError) {
+          console.error('[get-latest-audit] Fetch error:', fetchError.message);
+          console.error('[get-latest-audit] Fetch error stack:', fetchError.stack);
+          return res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch from Supabase',
+            details: fetchError.message,
+            meta: { generatedAt: new Date().toISOString() }
+          });
+        }
+
+        if (!response.ok) {
+          try {
+            lastErrorText = await response.text();
+          } catch (textError) {
+            lastErrorText = `HTTP ${response.status}: ${response.statusText}`;
           }
-        });
-        console.log(`[get-latest-audit] Supabase fetch completed, status: ${response.status}`);
-      } catch (fetchError) {
-        console.error('[get-latest-audit] Fetch error:', fetchError.message);
-        console.error('[get-latest-audit] Fetch error stack:', fetchError.stack);
-        return res.status(500).json({
-          status: 'error',
-          message: 'Failed to fetch from Supabase',
-          details: fetchError.message,
-          meta: { generatedAt: new Date().toISOString() }
-        });
+          console.error('[get-latest-audit] Supabase query error:', lastErrorText);
+          continue;
+        }
+
+        // Check response size before parsing (for minimal requests, should be very small)
+        const contentLength = response.headers.get('content-length');
+        if (contentLength && isMinimalRequest) {
+          const sizeKB = Math.round(parseInt(contentLength) / 1024);
+          console.log(`[get-latest-audit] Minimal response size: ${sizeKB}KB`);
+          if (sizeKB > 100) {
+            console.warn(`[get-latest-audit] ⚠️  Minimal response is unexpectedly large (${sizeKB}KB)`);
+          }
+        }
+
+        try {
+          results = await response.json();
+          console.log(`[get-latest-audit] Successfully parsed JSON, results length: ${results?.length || 0}`);
+        } catch (jsonError) {
+          console.error('[get-latest-audit] Failed to parse Supabase response as JSON:', jsonError.message);
+          console.error('[get-latest-audit] JSON error stack:', jsonError.stack);
+          // Try to get the raw response for debugging (but this might fail if body was already consumed)
+          try {
+            const responseClone = response.clone();
+            const rawText = await responseClone.text();
+            console.error('[get-latest-audit] Raw response (first 500 chars):', rawText.substring(0, 500));
+          } catch (cloneError) {
+            console.error('[get-latest-audit] Could not clone response for debugging:', cloneError.message);
+          }
+          return res.status(500).json({
+            status: 'error',
+            message: 'Failed to parse Supabase response',
+            details: jsonError.message,
+            meta: { generatedAt: new Date().toISOString() }
+          });
+        }
+
+        if (results && Array.isArray(results) && results.length > 0) {
+          break;
+        }
       }
 
-      if (!response.ok) {
-        let errorText;
-        try {
-          errorText = await response.text();
-        } catch (textError) {
-          errorText = `HTTP ${response.status}: ${response.statusText}`;
-        }
-        console.error('[get-latest-audit] Supabase query error:', errorText);
-        return res.status(response.status).json({
+      if (!results || !Array.isArray(results)) {
+        return res.status(500).json({
           status: 'error',
           message: 'Failed to fetch latest audit from Supabase',
-          details: errorText,
-          meta: { generatedAt: new Date().toISOString() }
-        });
-      }
-
-      // Check response size before parsing (for minimal requests, should be very small)
-      const contentLength = response.headers.get('content-length');
-      if (contentLength && isMinimalRequest) {
-        const sizeKB = Math.round(parseInt(contentLength) / 1024);
-        console.log(`[get-latest-audit] Minimal response size: ${sizeKB}KB`);
-        if (sizeKB > 100) {
-          console.warn(`[get-latest-audit] ⚠️  Minimal response is unexpectedly large (${sizeKB}KB)`);
-        }
-      }
-
-      let results;
-      try {
-        results = await response.json();
-        console.log(`[get-latest-audit] Successfully parsed JSON, results length: ${results?.length || 0}`);
-      } catch (jsonError) {
-        console.error('[get-latest-audit] Failed to parse Supabase response as JSON:', jsonError.message);
-        console.error('[get-latest-audit] JSON error stack:', jsonError.stack);
-        // Try to get the raw response for debugging (but this might fail if body was already consumed)
-        try {
-          const responseClone = response.clone();
-          const rawText = await responseClone.text();
-          console.error('[get-latest-audit] Raw response (first 500 chars):', rawText.substring(0, 500));
-        } catch (cloneError) {
-          console.error('[get-latest-audit] Could not clone response for debugging:', cloneError.message);
-        }
-        return res.status(500).json({
-          status: 'error',
-          message: 'Failed to parse Supabase response',
-          details: jsonError.message,
-          meta: { generatedAt: new Date().toISOString() }
+          details: lastErrorText || 'Unknown error',
+          meta: { generatedAt: new Date().toISOString(), status: lastStatus }
         });
       }
 
