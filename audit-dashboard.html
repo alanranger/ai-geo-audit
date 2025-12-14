@@ -7955,6 +7955,59 @@
           impressions
         };
       };
+
+      // Fallback: compute Money Pages behaviour from page-level aggregates (no queryPages required)
+      // Used when queryPages is missing/truncated or URLs don't match.
+      function computeMoneyPagesBehaviourFromPageAggregates(moneyPages) {
+        if (!Array.isArray(moneyPages) || moneyPages.length === 0) return null;
+
+        let clicks = 0;
+        let impressions = 0;
+        let weightedPosSum = 0;
+        let weightedPosImps = 0;
+        let top10Clicks = 0;
+        let top10Impressions = 0;
+
+        moneyPages.forEach(p => {
+          const imps = p.impressions || 0;
+          const cls = p.clicks || 0;
+          const pos = typeof p.avgPosition === 'number' ? p.avgPosition : (p.avgPosition ? parseFloat(p.avgPosition) : null);
+          if (!imps || !pos || pos <= 0) return;
+
+          clicks += cls;
+          impressions += imps;
+          weightedPosSum += pos * imps;
+          weightedPosImps += imps;
+
+          // Approximate top-10 using avgPosition (best available without query-level data)
+          if (pos <= 10) {
+            top10Clicks += cls;
+            top10Impressions += imps;
+          }
+        });
+
+        if (!impressions || !weightedPosImps) return null;
+
+        const siteCtr = clicks / impressions;
+        const top10Ctr = top10Impressions > 0 ? (top10Clicks / top10Impressions) : 0;
+        const avgPos = weightedPosSum / weightedPosImps;
+        const top10Share = impressions > 0 ? (top10Impressions / impressions) : 0;
+
+        // Map CTR to score using same bands as Authority behaviour
+        const scoreCtrAll = Math.min(siteCtr / 0.05, 1) * 100;    // 0–5% => 0–100
+        const scoreCtrTop10 = Math.min(top10Ctr / 0.10, 1) * 100; // 0–10% => 0–100
+        const behaviourScore = 0.5 * scoreCtrAll + 0.5 * scoreCtrTop10;
+
+        return {
+          score: behaviourScore,
+          siteCtr,
+          top10Ctr,
+          avgPos,
+          top10Share,
+          clicks,
+          impressions
+        };
+      }
       
       // Compute money pages metrics if we have queryPages data
       let moneyPagesMetrics = null;
@@ -14541,6 +14594,7 @@ Final Score: ${score}/100`;
 
                 // arrow vs previous non-null
                 let arrow = "→";
+                let arrowClass = "kpi-trend-flat";
                 let prev = null;
                 for (let j = idx - 1; j >= 0; j--) {
                   if (values[j] != null) {
@@ -14551,14 +14605,20 @@ Final Score: ${score}/100`;
                 if (prev != null) {
                   let d = v - prev;
                   if (metricKey === "avgPosition") d = -d;
-                  if (d > 0.02 * Math.abs(prev || 1)) arrow = "↑";
-                  else if (d < -0.02 * Math.abs(prev || 1)) arrow = "↓";
+                  if (d > 0.02 * Math.abs(prev || 1)) {
+                    arrow = "↑";
+                    arrowClass = "kpi-trend-up";
+                  } else if (d < -0.02 * Math.abs(prev || 1)) {
+                    arrow = "↓";
+                    arrowClass = "kpi-trend-down";
+                  }
                 }
 
                 let formatted;
-                if (metricKey === "ctr") formatted = `${(v * 100).toFixed(2)}% ${arrow}`;
-                else if (metricKey === "avgPosition") formatted = `${v.toFixed(1)} ${arrow}`;
-                else formatted = `${Math.round(v).toLocaleString()} ${arrow}`;
+                const arrowHtml = `<span class="${arrowClass}">${arrow}</span>`;
+                if (metricKey === "ctr") formatted = `${(v * 100).toFixed(2)}% ${arrowHtml}`;
+                else if (metricKey === "avgPosition") formatted = `${v.toFixed(1)} ${arrowHtml}`;
+                else formatted = `${Math.round(v).toLocaleString()} ${arrowHtml}`;
 
                 return `<td style="padding: 0.75rem; text-align: right;">${formatted}</td>`;
               })
@@ -14593,10 +14653,10 @@ Final Score: ${score}/100`;
         if (parentContainer) {
           const containerWidth = parentContainer.clientWidth || parentContainer.offsetWidth || 500;
           ctx.width = containerWidth;
-          ctx.height = 200;
+          ctx.height = 400;
         } else {
           ctx.width = 500;
-          ctx.height = 200;
+          ctx.height = 400;
         }
         
         // Check if panel is visible AFTER setting dimensions
@@ -14748,6 +14808,15 @@ Final Score: ${score}/100`;
                         metricKey === 'impressions' ? 'Impressions' :
                         metricKey === 'clicks' ? 'Clicks' :
                         (metricKey ? metricKey.charAt(0).toUpperCase() + metricKey.slice(1) : 'Value')
+                },
+                ticks: {
+                  callback: function(value) {
+                    const v = typeof value === 'number' ? value : parseFloat(value);
+                    if (Number.isNaN(v)) return value;
+                    if (metricKey === 'ctr') return `${(v * 100).toFixed(1)}%`;
+                    if (metricKey === 'avgPosition') return v.toFixed(1);
+                    return Math.round(v).toLocaleString();
+                  }
                 }
               }
             },
@@ -14887,6 +14956,18 @@ Final Score: ${score}/100`;
             debugLog(`🎯 Calculated behaviour: ${!!filteredBehaviour}, impressions: ${filteredBehaviour?.impressions || 0}`, 'info');
           } else {
             debugLog(`🎯 No filtered metrics or rows available`, 'warn');
+          }
+        }
+
+        // Fallback #2: compute from page-level aggregates when queryPages is missing/truncated
+        if ((!filteredBehaviour || !filteredBehaviour.impressions) && moneyPagesMetrics) {
+          const filteredMetrics = getFilteredMoneyPagesMetrics(moneyPagesMetrics);
+          if (filteredMetrics && Array.isArray(filteredMetrics.rows) && filteredMetrics.rows.length > 0) {
+            const aggBehaviour = computeMoneyPagesBehaviourFromPageAggregates(filteredMetrics.rows);
+            if (aggBehaviour && aggBehaviour.impressions) {
+              filteredBehaviour = aggBehaviour;
+              debugLog(`🎯 Fallback behaviour (page aggregates): impressions=${aggBehaviour.impressions}, clicks=${aggBehaviour.clicks}`, 'info');
+            }
           }
         }
 
@@ -15181,7 +15262,7 @@ Final Score: ${score}/100`;
                 </label>
               </div>
 
-              <div class="sparkline-wrapper" style="margin-bottom: 2rem; height: 200px;">
+              <div class="sparkline-wrapper" style="margin-bottom: 2rem; height: 400px;">
                 <canvas id="money-kpi-sparkline"></canvas>
               </div>
 
