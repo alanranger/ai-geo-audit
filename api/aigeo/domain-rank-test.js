@@ -29,17 +29,17 @@ async function fetchDomainRankOverview(domain) {
     };
   }
 
-  const requestBody = {
-    data: [
-      {
-        target: d,
-        se_type: "google",
-        location_code: 2826, // UK
-        limit: 1,
-        ignore_synonyms: false,
-      },
-    ],
-  };
+  // DataForSEO Labs endpoints expect an ARRAY of task objects (not { data: [...] }).
+  const requestBody = [
+    {
+      target: d,
+      se_type: "google",
+      location_code: 2826, // UK
+      offset: 0,
+      limit: 100,
+      ignore_synonyms: false,
+    },
+  ];
 
   try {
     const response = await fetch(
@@ -66,7 +66,19 @@ async function fetchDomainRankOverview(domain) {
     }
 
     // DataForSEO commonly uses tasks[0].result[0].items[0]
-    const result = json?.tasks?.[0]?.result?.[0] ?? json?.result?.[0] ?? null;
+    const task = json?.tasks?.[0] ?? null;
+    if (
+      task?.status_code &&
+      !(task.status_code === 20000 || String(task.status_code).startsWith("200"))
+    ) {
+      return {
+        ok: false,
+        error: task.status_message || `Task failed (status_code ${task.status_code})`,
+        raw: json,
+      };
+    }
+
+    const result = task?.result?.[0] ?? json?.result?.[0] ?? null;
     const item = result?.items?.[0] ?? null;
     const organic = item?.metrics?.organic ?? null;
 
