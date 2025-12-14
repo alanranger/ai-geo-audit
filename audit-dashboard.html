@@ -1978,6 +1978,11 @@
     .ranking-badge-page-type--product { background: #fce7f3; color: #9f1239; }
     .ranking-badge-page-type--blog { background: #e0f2fe; color: #075985; }
     .ranking-badge-page-type--gbp { background: #f5f3ff; color: #6d28d9; }
+
+    /* Money Pages KPI trend arrow colors */
+    .kpi-trend-up { color: #10b981; font-weight: 700; }
+    .kpi-trend-down { color: #ef4444; font-weight: 700; }
+    .kpi-trend-flat { color: #64748b; font-weight: 700; }
   </style>
 </head>
 <body>
@@ -3573,12 +3578,14 @@
             debugLog('Re-rendering Money Pages section', 'info');
             renderMoneyPagesSection(saved.scores.moneyPagesMetrics);
           }
-          
-          const categoryCanvas = document.getElementById('moneyPagesCategoryChart');
-          if (categoryCanvas && typeof renderMoneyPagesCategoryChart === 'function') {
-            if (saved && saved.scores && saved.scores.moneyPagesMetrics) {
-              renderMoneyPagesCategoryChart(saved.scores.moneyPagesMetrics, 0);
-            }
+
+          // Opportunity Mix: render after layout settles (Money tab activation can report 0x0)
+          if (saved && saved.scores && saved.scores.moneyPagesMetrics && typeof renderMoneyPagesCategoryChart === 'function') {
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                renderMoneyPagesCategoryChart(saved.scores.moneyPagesMetrics, 0);
+              });
+            });
           }
           
           const trendCanvas = document.getElementById('moneyPagesTrendChart');
@@ -3591,11 +3598,20 @@
               const startDateStr = startDate.toISOString().split('T')[0];
               const endDateStr = endDate.toISOString().split('T')[0];
               
-              fetch(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDateStr}`)
+              // Use apiUrl helper so this works both on Vercel and when opened locally (file://)
+              const urlHelper = window.apiUrl || ((path) => {
+                const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || !window.location.hostname;
+                const baseUrl = isLocal ? 'https://ai-geo-audit.vercel.app' : '';
+                const cleanPath = path.startsWith('/') ? path : `/${path}`;
+                return `${baseUrl}${cleanPath}`;
+              });
+              fetch(urlHelper(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDateStr}`))
                 .then(res => res.json())
                 .then(json => {
                   if (json.status === 'ok' && json.data) {
-                    renderMoneyPagesTrendChart(json.data);
+                    requestAnimationFrame(() => {
+                      requestAnimationFrame(() => renderMoneyPagesTrendChart(json.data));
+                    });
                   }
                 })
                 .catch(err => debugLog(`Error fetching history for trend chart: ${err.message}`, 'warn'));
@@ -3606,7 +3622,9 @@
           if (sparklineCanvas && typeof loadAuditHistoryAndRenderKpis === 'function') {
             const propertyUrl = document.getElementById('propertyUrl')?.value;
             if (propertyUrl) {
-              loadAuditHistoryAndRenderKpis(propertyUrl);
+              requestAnimationFrame(() => {
+                requestAnimationFrame(() => loadAuditHistoryAndRenderKpis(propertyUrl));
+              });
             }
           }
           
@@ -12999,12 +13017,25 @@ Final Score: ${score}/100`;
       let moneyPagesCategoryChart = null;
       
       function renderMoneyPagesCategoryChart(moneyPagesMetrics, retryCount = 0) {
-        // Prevent excessive retries
-        if (retryCount > 5) {
-          debugLog('⚠ Max retries reached for money pages chart, giving up', 'warn');
+        const summaryEl = document.getElementById('money-pages-category-summary');
+        const breakdownEl = document.getElementById('money-pages-category-breakdown');
+
+        // Show loading placeholder early (prevents blank card)
+        if (retryCount === 0 && summaryEl && !summaryEl.textContent) {
+          summaryEl.textContent = 'Loading opportunity mix…';
+        }
+
+        // Prevent excessive retries (show user-facing message instead of blank canvas)
+        if (retryCount > 8) {
+          debugLog('⚠ Max retries reached for Money Pages Opportunity Mix chart', 'warn');
+          if (summaryEl) {
+            summaryEl.textContent = 'Could not render Opportunity Mix chart. Try switching tabs or refreshing.';
+            summaryEl.style.color = '#b45309';
+          }
+          if (breakdownEl) breakdownEl.innerHTML = '';
           return;
         }
-        
+
         debugLog(`renderMoneyPagesCategoryChart called (attempt ${retryCount + 1})`, 'info');
         
         // Check if Chart.js is available
@@ -13034,6 +13065,7 @@ Final Score: ${score}/100`;
           if (chartRow) {
             chartRow.style.display = 'none';
           }
+          if (summaryEl) summaryEl.textContent = 'No opportunity mix data available for this audit.';
           return;
         }
         
@@ -13062,9 +13094,6 @@ Final Score: ${score}/100`;
         // Check for no data
         const totalPages = counts.reduce((a, b) => a + b, 0);
         const totalImpressions = impressions.reduce((a, b) => a + b, 0);
-        const summaryEl = document.getElementById('money-pages-category-summary');
-        const breakdownEl = document.getElementById('money-pages-category-breakdown');
-        
         function setNoDataMessage() {
           if (summaryEl) {
             summaryEl.textContent = 'No meaningful money-page impressions found for this audit period.';
@@ -13134,30 +13163,32 @@ Final Score: ${score}/100`;
           canvas.height = 300;
         }
         
-        // Check if canvas is actually visible and has dimensions AFTER setting them
+        // Check if panel/canvas are actually visible and have dimensions AFTER setting them
         const moneyPanel = canvas.closest('.aigeo-panel[data-panel="money"]');
-        const isPanelVisible = !moneyPanel || (moneyPanel.classList.contains('is-active') && window.getComputedStyle(moneyPanel).display !== 'none');
+        const isPanelActive = !moneyPanel || moneyPanel.classList.contains('is-active');
+        const isPanelVisible = !moneyPanel || (isPanelActive && window.getComputedStyle(moneyPanel).display !== 'none');
         
         const canvasRect = canvas.getBoundingClientRect();
         const hasDimensions = canvasRect.width > 0 && canvasRect.height > 0;
         
-        if (!hasDimensions || !isPanelVisible) {
-          debugLog(`⚠ Canvas has zero dimensions or panel is hidden (width=${canvasRect.width}, height=${canvasRect.height}, panelVisible=${isPanelVisible}, computedDisplay=${moneyPanel ? window.getComputedStyle(moneyPanel).display : 'N/A'}), retrying...`, 'warn');
-          if (retryCount < 5) {
-            setTimeout(() => renderMoneyPagesCategoryChart(moneyPagesMetrics, retryCount + 1), 500);
-          } else {
-            debugLog('⚠ Canvas rendering failed after 5 retries - panel may be hidden or not yet rendered', 'warn');
-            // Don't give up - schedule a retry when panel becomes visible
-            if (moneyPanel && !moneyPanel.classList.contains('is-active')) {
-              const observer = new MutationObserver((mutations) => {
-                if (moneyPanel.classList.contains('is-active')) {
-                  observer.disconnect();
-                  setTimeout(() => renderMoneyPagesCategoryChart(moneyPagesMetrics, 0), 100);
-                }
-              });
-              observer.observe(moneyPanel, { attributes: true, attributeFilter: ['class'] });
-            }
+        if (!isPanelActive) {
+          debugLog(`⚠ Money Pages Opportunity Mix: panel not active yet, waiting…`, 'warn');
+          if (summaryEl) summaryEl.textContent = 'Loading opportunity mix…';
+          if (moneyPanel) {
+            const observer = new MutationObserver(() => {
+              if (moneyPanel.classList.contains('is-active')) {
+                observer.disconnect();
+                requestAnimationFrame(() => renderMoneyPagesCategoryChart(moneyPagesMetrics, 0));
+              }
+            });
+            observer.observe(moneyPanel, { attributes: true, attributeFilter: ['class'] });
           }
+          return;
+        }
+
+        if (!hasDimensions || !isPanelVisible) {
+          debugLog(`⚠ Money Pages Opportunity Mix chart: panelVisible=${isPanelVisible} or canvas ${canvasRect.width}×${canvasRect.height} (width=${canvasRect.width}, height=${canvasRect.height}, display=${moneyPanel ? window.getComputedStyle(moneyPanel).display : 'N/A'}), retrying…`, 'warn');
+          setTimeout(() => renderMoneyPagesCategoryChart(moneyPagesMetrics, retryCount + 1), 300);
           return;
         }
         
@@ -14483,6 +14514,7 @@ Final Score: ${score}/100`;
             if (!values.length) return "";
 
             let trendArrow = "→";
+            let trendClass = "kpi-trend-flat";
             let trendText = "";
 
             const first = values.find(v => v != null);
@@ -14493,8 +14525,10 @@ Final Score: ${score}/100`;
               if (metricKey === "avgPosition") diff = -diff; // lower is better
               if (diff > 0.02 * Math.abs(first || 1)) {
                 trendArrow = "↑";
+                trendClass = "kpi-trend-up";
               } else if (diff < -0.02 * Math.abs(first || 1)) {
                 trendArrow = "↓";
+                trendClass = "kpi-trend-down";
               }
               trendText = (metricKey === "ctr" ? `${(diff * 100).toFixed(1)}pp` : diff.toFixed(1));
             } else {
@@ -14534,7 +14568,9 @@ Final Score: ${score}/100`;
               <tr style="border-bottom: 1px solid #e2e8f0;">
                 <td style="padding: 0.75rem; font-weight: 600;">${label}</td>
                 ${cells}
-                <td style="padding: 0.75rem; text-align: right; font-weight: 600;">${trendArrow} ${trendText}</td>
+                <td style="padding: 0.75rem; text-align: right; font-weight: 600;">
+                  <span class="${trendClass}">${trendArrow}</span> ${trendText}
+                </td>
               </tr>
             `;
           })
@@ -14546,7 +14582,7 @@ Final Score: ${score}/100`;
        * @param {{ labels: string[], segments: Record<string, number[]> }} historyData
        * @param {string} metricKey
        */
-      function renderMoneyKpiSparkline(historyData, metricKey) {
+      function renderMoneyKpiSparkline(historyData, metricKey, retryCount = 0) {
         const ctx = document.getElementById("money-kpi-sparkline");
         if (!ctx) return;
 
@@ -14572,6 +14608,13 @@ Final Score: ${score}/100`;
         
         // Wait a bit for layout to settle if panel was just activated
         if (!isPanelVisible || canvasRect.width === 0 || canvasRect.height === 0) {
+          if (retryCount >= 10) {
+            const wrapper = ctx.closest('.sparkline-wrapper');
+            if (wrapper) {
+              wrapper.innerHTML = '<div style="padding: 1.5rem; text-align: center; color: #b45309; background: #fffbeb; border-left: 3px solid #f59e0b; border-radius: 6px; font-size: 0.9rem;">Could not render KPI chart (canvas still 0×0). Try switching tabs or refreshing.</div>';
+            }
+            return;
+          }
           // Only log warning if panel is not active (to reduce noise)
           if (!isPanelActive) {
             debugLog(`⚠ Money KPI sparkline: Panel hidden or canvas has zero dimensions (width=${canvasRect.width}, height=${canvasRect.height}, panelVisible=${isPanelVisible}). Chart will render when panel is shown.`, 'warn');
@@ -14582,7 +14625,7 @@ Final Score: ${score}/100`;
                 if (moneyPanel.classList.contains('is-active')) {
                   observer.disconnect();
                   // Wait a bit longer for layout to settle
-                  setTimeout(() => renderMoneyKpiSparkline(historyData, metricKey), 200);
+                  setTimeout(() => renderMoneyKpiSparkline(historyData, metricKey, retryCount + 1), 200);
                 }
               });
               observer.observe(moneyPanel, { attributes: true, attributeFilter: ['class'] });
@@ -14590,13 +14633,13 @@ Final Score: ${score}/100`;
               setTimeout(() => {
                 observer.disconnect();
                 if (moneyPanel.classList.contains('is-active')) {
-                  renderMoneyKpiSparkline(historyData, metricKey);
+                  renderMoneyKpiSparkline(historyData, metricKey, retryCount + 1);
                 }
               }, 5000);
             }
           } else {
             // Panel is active but canvas still has zero dimensions - retry after a short delay
-            setTimeout(() => renderMoneyKpiSparkline(historyData, metricKey), 200);
+            setTimeout(() => renderMoneyKpiSparkline(historyData, metricKey, retryCount + 1), 200);
           }
           return;
         }
