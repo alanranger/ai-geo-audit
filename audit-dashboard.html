@@ -12993,6 +12993,57 @@ Final Score: ${score}/100`;
         return parts.join(' ') + ' Pages';
       }
       
+      // Ensure this helper exists in the global scope (Money tab can run before other sections)
+      if (!window.computeMoneyPagesBehaviourFromPageAggregates) {
+        window.computeMoneyPagesBehaviourFromPageAggregates = function(moneyPages) {
+          if (!Array.isArray(moneyPages) || moneyPages.length === 0) return null;
+
+          let clicks = 0;
+          let impressions = 0;
+          let weightedPosSum = 0;
+          let weightedPosImps = 0;
+          let top10Clicks = 0;
+          let top10Impressions = 0;
+
+          moneyPages.forEach(p => {
+            const imps = p.impressions || 0;
+            const cls = p.clicks || 0;
+            const pos = typeof p.avgPosition === 'number' ? p.avgPosition : (p.avgPosition ? Number.parseFloat(p.avgPosition) : null);
+            if (!imps || !pos || pos <= 0) return;
+
+            clicks += cls;
+            impressions += imps;
+            weightedPosSum += pos * imps;
+            weightedPosImps += imps;
+            if (pos <= 10) {
+              top10Clicks += cls;
+              top10Impressions += imps;
+            }
+          });
+
+          if (!impressions || !weightedPosImps) return null;
+
+          const siteCtr = clicks / impressions;
+          const top10Ctr = top10Impressions > 0 ? (top10Clicks / top10Impressions) : 0;
+          const avgPos = weightedPosSum / weightedPosImps;
+          const top10Share = impressions > 0 ? (top10Impressions / impressions) : 0;
+
+          const scoreCtrAll = Math.min(siteCtr / 0.05, 1) * 100;
+          const scoreCtrTop10 = Math.min(top10Ctr / 0.10, 1) * 100;
+          const behaviourScore = 0.5 * scoreCtrAll + 0.5 * scoreCtrTop10;
+
+          return {
+            score: behaviourScore,
+            siteCtr,
+            top10Ctr,
+            avgPos,
+            top10Share,
+            clicks,
+            impressions
+          };
+        };
+      }
+
       // Update chart title and summary box
       function updateMoneyPagesChartSummary(filteredMetrics) {
         if (!filteredMetrics) return;
@@ -13010,7 +13061,8 @@ Final Score: ${score}/100`;
         let filteredBehaviour = window.computeMoneyPagesBehaviour ? 
           window.computeMoneyPagesBehaviour(queryPages, filteredRows, true) : null;
         if (!filteredBehaviour || !filteredBehaviour.impressions) {
-          filteredBehaviour = computeMoneyPagesBehaviourFromPageAggregates(filteredRows);
+          const aggFn = window.computeMoneyPagesBehaviourFromPageAggregates;
+          filteredBehaviour = typeof aggFn === 'function' ? aggFn(filteredRows) : null;
         }
         
         // Update summary box
@@ -14947,7 +14999,8 @@ Final Score: ${score}/100`;
         if ((!filteredBehaviour || !filteredBehaviour.impressions) && moneyPagesMetrics) {
           const filteredMetrics = getFilteredMoneyPagesMetrics(moneyPagesMetrics);
           if (filteredMetrics && Array.isArray(filteredMetrics.rows) && filteredMetrics.rows.length > 0) {
-            const aggBehaviour = computeMoneyPagesBehaviourFromPageAggregates(filteredMetrics.rows);
+            const aggFn = window.computeMoneyPagesBehaviourFromPageAggregates;
+            const aggBehaviour = typeof aggFn === 'function' ? aggFn(filteredMetrics.rows) : null;
             if (aggBehaviour && aggBehaviour.impressions) {
               filteredBehaviour = aggBehaviour;
               debugLog(`🎯 Fallback behaviour (page aggregates): impressions=${aggBehaviour.impressions}, clicks=${aggBehaviour.clicks}`, 'info');
