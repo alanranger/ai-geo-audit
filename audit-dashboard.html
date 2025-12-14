@@ -14193,15 +14193,18 @@ Final Score: ${score}/100`;
 
         let rows = sourcePages.slice();
 
-        rows = rows.filter(p => (p.impressions || 0) >= minImpr);
+        // Min impressions filter should not hide domain-level authority actions.
+        rows = rows.filter(p => p.segmentType === 'authority' || (p.impressions || 0) >= minImpr);
 
         if (typeFilter !== "all") {
           rows = rows.filter(p => p.segmentType === typeFilter);
         }
 
-        if (matrixFilter) {
+        // Matrix filter is only meaningful for money page rows; exclude authority rows unless explicitly filtering for them.
+        if (matrixFilter && typeFilter !== "authority") {
           rows = rows.filter(
             p =>
+              p.segmentType !== 'authority' &&
               p.impactLevel === matrixFilter.impact &&
               p.difficultyLevel === matrixFilter.diff
           );
@@ -14285,14 +14288,17 @@ Final Score: ${score}/100`;
             const priorityLevel = p.priorityLevel || "LOW";
             const impactLevel = p.impactLevel || "LOW";
             const difficultyLevel = p.difficultyLevel || "MEDIUM";
+            const isAuthorityAction = p.segmentType === "authority";
             
             const typeLabel =
+              isAuthorityAction ? "Authority" :
               p.segmentType === "landing" ? "Landing" :
               p.segmentType === "event" ? "Event" :
               p.segmentType === "product" ? "Product" :
               "Money";
 
             const action =
+              isAuthorityAction ? "Authority building" :
               priorityLevel === "HIGH"
                 ? "Fix CTR & strengthen content"
                 : priorityLevel === "MEDIUM"
@@ -14303,16 +14309,28 @@ Final Score: ${score}/100`;
             const priorityBg = priorityLevel === "HIGH" ? "#fee2e2" : priorityLevel === "MEDIUM" ? "#fef3c7" : "#f1f5f9";
             const priorityBorder = priorityLevel === "HIGH" ? "#ef4444" : priorityLevel === "MEDIUM" ? "#f59e0b" : "#94a3b8";
 
+            const authMeta = isAuthorityAction ? (p._authorityMeta || null) : null;
+            const authScore = authMeta && typeof authMeta.score === 'number' ? authMeta.score : null;
+            const authBand = authMeta && typeof authMeta.band === 'string' ? authMeta.band : null;
+            const authSegment = authMeta && typeof authMeta.segment === 'string' ? authMeta.segment : null;
+            const domainStrengthLine =
+              isAuthorityAction
+                ? `Domain strength: ${authScore != null ? authScore.toFixed(1) : '—'}${authBand ? ` (${authBand})` : ''}`
+                : null;
+
             return `
               <tr style="border-bottom: 1px solid #e2e8f0;">
-                <td style="padding: 0.75rem;"><a href="${p.url || '#'}" target="_blank" rel="noopener" style="color: #2563eb; text-decoration: none;">${p.title || p.url || 'Untitled'}</a></td>
-                <td style="padding: 0.75rem;">${typeLabel}</td>
+                <td style="padding: 0.75rem;">
+                  <a href="${p.url || '#'}" target="_blank" rel="noopener" style="color: #2563eb; text-decoration: none;">${p.title || p.url || 'Untitled'}</a>
+                  ${domainStrengthLine ? `<div style="margin-top: 0.25rem; font-size: 0.8rem; color: #64748b;">${domainStrengthLine}</div>` : ''}
+                </td>
+                <td style="padding: 0.75rem;">${typeLabel}${isAuthorityAction && authSegment ? ` · <span style="color:#64748b;">${authSegment}</span>` : ''}</td>
                 <td style="padding: 0.75rem;"><span class="badge badge-priority-${priorityLevel.toLowerCase()}" style="display: inline-block; padding: 0.35rem 0.75rem; border-radius: 6px; background: ${priorityBg}; color: ${priorityColor}; border: 1.5px solid ${priorityBorder}; font-weight: 700; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">${priorityLevel}</span></td>
                 <td style="padding: 0.75rem;">${impactLevel}</td>
                 <td style="padding: 0.75rem;">${difficultyLevel}</td>
-                <td style="padding: 0.75rem; text-align: right;">${((p.ctr || 0) * 100).toFixed(2)}%</td>
-                <td style="padding: 0.75rem; text-align: right;">${(p.impressions || 0).toLocaleString()}</td>
-                <td style="padding: 0.75rem; text-align: right;">${p.avgPosition ? p.avgPosition.toFixed(1) : "—"}</td>
+                <td style="padding: 0.75rem; text-align: right;">${isAuthorityAction ? '—' : `${((p.ctr || 0) * 100).toFixed(2)}%`}</td>
+                <td style="padding: 0.75rem; text-align: right;">${isAuthorityAction ? '—' : `${(p.impressions || 0).toLocaleString()}`}</td>
+                <td style="padding: 0.75rem; text-align: right;">${isAuthorityAction ? '—' : (p.avgPosition ? p.avgPosition.toFixed(1) : "—")}</td>
                 <td style="padding: 0.75rem;">${action}</td>
               </tr>
             `;
@@ -14587,16 +14605,18 @@ Final Score: ${score}/100`;
             debugLog(`🔄 Priority & Actions filter changed: type=${typeFilter}, minImpr=${minImpr}`, 'info');
             
             // Get current data
-            const moneyPages = window.moneyPagePriorityData || [];
-            if (!moneyPages || moneyPages.length === 0) {
+            const base = window.moneyPagePriorityData || [];
+            const authority = window.authorityActionRows || [];
+            const allRows = base.concat(authority);
+            if (!allRows || allRows.length === 0) {
               debugLog('⚠ No moneyPagePriorityData available for Priority & Actions', 'warn');
               return;
             }
             
-            debugLog(`✓ Priority & Actions: Found ${moneyPages.length} pages`, 'success');
+            debugLog(`✓ Priority & Actions: Found ${allRows.length} rows (money + authority)`, 'success');
             
             // Apply filters
-            let filteredPages = moneyPages.filter(p => (p.impressions || 0) >= minImpr);
+            let filteredPages = allRows.filter(p => p.segmentType === 'authority' || (p.impressions || 0) >= minImpr);
             if (typeFilter !== 'all') {
               filteredPages = filteredPages.filter(p => p.segmentType === typeFilter);
             }
@@ -14605,11 +14625,12 @@ Final Score: ${score}/100`;
             
             // Re-render matrix with filtered data
             if (matrixEl && typeof renderMoneyPagesMatrix === 'function') {
+              const pagesOnly = filteredPages.filter(p => p.segmentType !== 'authority');
               const activeFilter = window.moneyMatrixFilterState?.impact && window.moneyMatrixFilterState?.diff
                 ? { impact: window.moneyMatrixFilterState.impact, diff: window.moneyMatrixFilterState.diff }
                 : null;
               
-              renderMoneyPagesMatrix(filteredPages, matrixEl, (impact, diff) => {
+              renderMoneyPagesMatrix(pagesOnly, matrixEl, (impact, diff) => {
                 // Update filter state
                 window.moneyMatrixFilterState = { impact, diff };
                 // Re-render table with matrix filter
@@ -15467,6 +15488,7 @@ Final Score: ${score}/100`;
                   Page type:
                   <select id="money-pages-type-filter" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 4px;" title="Filter money pages by segment type. Landing pages are collection/category pages, Event pages are workshop/event listings, Product pages are service/product offerings.">
                     <option value="all">All money pages</option>
+                    <option value="authority">Authority</option>
                     <option value="landing">Landing pages</option>
                     <option value="event">Event pages</option>
                     <option value="product">Product pages</option>
@@ -15649,13 +15671,56 @@ Final Score: ${score}/100`;
             
             // Initialize state for matrix filter
             window.moneyMatrixFilterState = window.moneyMatrixFilterState || { impact: null, diff: null };
+
+            // Domain-level authority actions (read-only; from Supabase domain_strength_snapshots via /api/actions)
+            window.authorityActionRows = window.authorityActionRows || [];
+            if (typeof window.refreshAuthorityActionsForMoneyPages !== 'function') {
+              window.refreshAuthorityActionsForMoneyPages = async function refreshAuthorityActionsForMoneyPages() {
+                try {
+                  const resp = await fetch('/api/actions');
+                  const json = await resp.json();
+                  const actions = resp.ok && json && json.status === 'ok' && Array.isArray(json.actions) ? json.actions : [];
+
+                  const toUpperLevel = (v, fallback) => {
+                    const s = String(v || '').toUpperCase();
+                    return s === 'HIGH' || s === 'MEDIUM' || s === 'LOW' ? s : fallback;
+                  };
+
+                  window.authorityActionRows = actions
+                    .filter(a => a && a.type === 'authority' && a.level === 'domain' && a.domain)
+                    .map(a => ({
+                      url: `https://${String(a.domain).replace(/^https?:\\/\\//, '').replace(/^www\\./, '').split('/')[0]}`,
+                      title: a.title || 'Build domain authority',
+                      segmentType: 'authority',
+                      clicks: 0,
+                      impressions: 0,
+                      ctr: 0,
+                      avgPosition: null,
+                      impactLevel: toUpperLevel(a.impact, 'LOW'),
+                      difficultyLevel: toUpperLevel(a.difficulty, 'HIGH'),
+                      priorityLevel: toUpperLevel(a.priority, 'LOW'),
+                      _authorityMeta: {
+                        domain: a.domain,
+                        segment: a.segment || null,
+                        score: a.metrics && typeof a.metrics.domainStrengthScore === 'number' ? a.metrics.domainStrengthScore : null,
+                        band: a.metrics && typeof a.metrics.domainStrengthBand === 'string' ? a.metrics.domainStrengthBand : null
+                      }
+                    }));
+                } catch (e) {
+                  // Non-fatal: keep existing authorityActionRows (or empty).
+                  window.authorityActionRows = window.authorityActionRows || [];
+                }
+              };
+            }
             
             // Helper function to get filtered pages based on current filters (defined before use)
             const getFilteredPages = () => {
               const typeFilter = document.getElementById('money-pages-type-filter')?.value || 'all';
               const minImpr = Number(document.getElementById('money-pages-min-impr')?.value) || 0;
               
-              let filtered = window.moneyPagePriorityData.slice();
+              const base = (window.moneyPagePriorityData || []).slice();
+              const authority = (window.authorityActionRows || []).slice();
+              let filtered = base.concat(authority);
               
               // Apply type filter
               if (typeFilter !== 'all') {
@@ -15663,7 +15728,7 @@ Final Score: ${score}/100`;
               }
               
               // Apply min impressions filter
-              filtered = filtered.filter(p => (p.impressions || 0) >= minImpr);
+              filtered = filtered.filter(p => p.segmentType === 'authority' || (p.impressions || 0) >= minImpr);
               
               return filtered;
             };
@@ -15680,16 +15745,17 @@ Final Score: ${score}/100`;
               window.moneyPagesPriorityCurrentPage = 1;
               
               // Re-render summary strip with filtered pages
+              const pagesOnly = filteredPages.filter(p => p.segmentType !== 'authority');
               const summaryStrip = document.getElementById('money-pages-summary-strip');
               if (summaryStrip && typeof renderMoneyPagesSummaryStrip === 'function') {
-                renderMoneyPagesSummaryStrip(filteredPages, data || {}, summaryStrip);
+                renderMoneyPagesSummaryStrip(pagesOnly, data || {}, summaryStrip);
               }
               
               // Re-render matrix with filtered pages
               const matrixEl = document.getElementById('money-pages-matrix');
               if (matrixEl && typeof renderMoneyPagesMatrix === 'function') {
                 renderMoneyPagesMatrix(
-                  filteredPages,
+                  pagesOnly,
                   matrixEl,
                   (impact, diff) => {
                     window.moneyMatrixFilterState = { impact, diff };
@@ -15751,6 +15817,15 @@ Final Score: ${score}/100`;
                 matrixFilter: null
               });
             }
+
+            // Load authority actions async and refresh table (non-blocking).
+            window.refreshAuthorityActionsForMoneyPages()
+              .then(() => {
+                updateMatrixAndTable();
+              })
+              .catch(() => {
+                // ignore
+              });
             
             // Wire up filter controls (functions already defined above)
             const typeFilter = document.getElementById('money-pages-type-filter');
