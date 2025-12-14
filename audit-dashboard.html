@@ -2209,17 +2209,23 @@
       <!-- Overview Panel -->
       <section class="aigeo-panel is-active" data-panel="overview">
 
-      <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; margin-bottom: 3rem; border-left: 4px solid var(--brand-orange);">
-        <h3 style="margin-top: 0; color: var(--brand-orange);">Five-Pillar Framework</h3>
-        <p style="color: #555; line-height: 1.6; margin-bottom: 1rem;">
-          This audit analyzes <strong>www.alanranger.com</strong> as a global entity using a five-pillar framework to assess AI-powered search visibility, entity recognition, and SERP behavior. Each pillar is scored 0-100 and assigned a RAG (Red/Amber/Green) status based on performance thresholds.
-        </p>
-        <p style="color: #555; line-height: 1.6; margin-bottom: 0.5rem;">
-          <strong>Data Sources:</strong> Scores are calculated using data from Google Search Console API (impressions, clicks, position, queries), Google Business Profile API (ratings, reviews, locations, service areas), schema markup validation, backlink CSV upload, and Trustpilot reviews snapshot.
-        </p>
-        <p style="color: #555; line-height: 1.6; margin-bottom: 0;">
-          <strong>Score Calculation:</strong> The AIO score combines five weighted pillars: Authority (30%: Behaviour 40% + Ranking 20% + Backlinks 20% + Reviews 20%), Content/Schema (25%: Foundation schemas 30% + Rich Results 35% + Coverage 20% + Diversity 15%), Visibility (20%: average position mapping), Local Entity (15%: NAP consistency + knowledge panel + locations), and Service Area (10%: service areas count with NAP multiplier). Brand & Entity Overlay and AI Summary Likelihood are overlay metrics that do not affect the AIO score but provide additional insights. Scores are normalized to 0-100 scale with thresholds: Green (≥70), Amber (40-69), Red (&lt;40). Money pages behaviour is tracked separately and stored per audit, so you can see whether Authority improvements are coming from better CTR on commercial pages or from broader site-wide changes.
-        </p>
+      <!-- Five-Pillar Framework (collapsed by default) -->
+      <div class="calculation-explanation collapsed" id="frameworkExplanation">
+        <div class="calculation-header" onclick="toggleFrameworkExplanation()">
+          <h4>🧱 Five-Pillar Framework</h4>
+          <span class="calculation-toggle" id="frameworkToggle">▶</span>
+        </div>
+        <div class="calculation-content collapsed" id="frameworkContent">
+          <p style="margin-top: 0; color: #555; line-height: 1.6; margin-bottom: 1rem;">
+            This audit analyzes <strong>www.alanranger.com</strong> as a global entity using a five-pillar framework to assess AI-powered search visibility, entity recognition, and SERP behavior. Each pillar is scored 0-100 and assigned a RAG (Red/Amber/Green) status based on performance thresholds.
+          </p>
+          <p style="color: #555; line-height: 1.6; margin-bottom: 0.5rem;">
+            <strong>Data Sources:</strong> Scores are calculated using data from Google Search Console API (impressions, clicks, position, queries), Google Business Profile API (ratings, reviews, locations, service areas), schema markup validation, backlink CSV upload, and Trustpilot reviews snapshot.
+          </p>
+          <p style="color: #555; line-height: 1.6; margin-bottom: 0;">
+            <strong>Score Calculation:</strong> The AIO score combines five weighted pillars: Authority (30%: Behaviour 40% + Ranking 20% + Backlinks 20% + Reviews 20%), Content/Schema (25%: Foundation schemas 30% + Rich Results 35% + Coverage 20% + Diversity 15%), Visibility (20%: average position mapping), Local Entity (15%: NAP consistency + knowledge panel + locations), and Service Area (10%: service areas count with NAP multiplier). Brand & Entity Overlay and AI Summary Likelihood are overlay metrics that do not affect the AIO score but provide additional insights. Scores are normalized to 0-100 scale with thresholds: Green (≥70), Amber (40-69), Red (&lt;40). Money pages behaviour is tracked separately and stored per audit, so you can see whether Authority improvements are coming from better CTR on commercial pages or from broader site-wide changes.
+          </p>
+        </div>
       </div>
 
       <div class="calculation-explanation collapsed" id="calculationExplanation">
@@ -3675,6 +3681,22 @@
         if (toggle) toggle.textContent = '▶';
       }
     }
+
+    function toggleFrameworkExplanation() {
+      const explanation = document.getElementById('frameworkExplanation');
+      const content = document.getElementById('frameworkContent');
+      const toggle = document.getElementById('frameworkToggle');
+      if (!explanation || !content) return;
+      if (explanation.classList.contains('collapsed')) {
+        explanation.classList.remove('collapsed');
+        content.classList.remove('collapsed');
+        if (toggle) toggle.textContent = '▼';
+      } else {
+        explanation.classList.add('collapsed');
+        content.classList.add('collapsed');
+        if (toggle) toggle.textContent = '▶';
+      }
+    }
     
     window.toggleCsvSection = function(sectionId) {
       const section = document.getElementById(sectionId);
@@ -4921,6 +4943,7 @@
     async function loadAuditResults() {
       let auditData = null;
       let localStorageData = null;
+      let hasMoneyPagesData = false;
       
       // First, try localStorage
       try {
@@ -4930,10 +4953,11 @@
           debugLog('✓ Audit results loaded from localStorage', 'success');
           
           // Check if localStorage data has critical Money Pages data
-          const hasMoneyPagesData = localStorageData?.scores?.moneyPagesMetrics || localStorageData?.moneyPagesMetrics;
+          hasMoneyPagesData = !!(localStorageData?.scores?.moneyPagesMetrics || localStorageData?.moneyPagesMetrics);
           if (hasMoneyPagesData) {
             debugLog(`✓ localStorage has moneyPagesMetrics: ${localStorageData?.scores?.moneyPagesMetrics?.rows?.length || localStorageData?.moneyPagesMetrics?.rows?.length || 0} rows`, 'success');
-            return localStorageData;
+            // Don't return yet: we still want to confirm "Last Audit" against Supabase
+            auditData = localStorageData;
           } else {
             debugLog('⚠ localStorage data missing moneyPagesMetrics, will try Supabase...', 'warn');
             // Keep localStorageData as fallback
@@ -4971,25 +4995,43 @@
       debugLog(`Property URL for Supabase fetch: ${propertyUrl || 'NOT SET'}`, propertyUrl ? 'info' : 'warn');
       
       if (propertyUrl) {
-        debugLog('⚠ Fetching from Supabase (localStorage empty or incomplete)...', 'info');
-        const supabaseData = await fetchLatestAuditFromSupabase(propertyUrl);
-        if (supabaseData) {
-          debugLog('✓ Audit results loaded from Supabase', 'success');
-          debugLog(`✓ Supabase data structure: scores.moneyPagesMetrics=${!!supabaseData?.scores?.moneyPagesMetrics}, moneyPagesMetrics=${!!supabaseData?.moneyPagesMetrics}`, 'info');
-          // Store in localStorage for future use
-          try {
-            safeSetLocalStorage('last_audit_results', supabaseData);
-            debugLog('✓ Stored Supabase data in localStorage for future use', 'success');
-            // Update timestamp display
-            if (supabaseData.timestamp) {
-              updateAuditTimestamp(supabaseData.timestamp);
+        // Always do a quick minimal check so "Last Audit" reflects the latest *full* audit,
+        // even when we can serve the rest of the page from localStorage.
+        try {
+          const minimalResponse = await fetch(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}&minimal=true`);
+          if (minimalResponse.ok) {
+            const minimalJson = await minimalResponse.json();
+            const minimalData = minimalJson?.data;
+            if (minimalJson?.status === 'ok' && minimalData?.timestamp) {
+              updateAuditTimestamp(minimalData.timestamp);
             }
-          } catch (storageError) {
-            debugLog(`⚠ Could not store Supabase data in localStorage: ${storageError.message}`, 'warn');
           }
-          return supabaseData;
-        } else {
-          debugLog('⚠ No audit data found in Supabase, using localStorage data as fallback', 'warn');
+        } catch (e) {
+          // Non-fatal
+        }
+
+        // Only fetch full Supabase payload when localStorage is missing critical data
+        if (!hasMoneyPagesData) {
+          debugLog('⚠ Fetching from Supabase (localStorage empty or incomplete)...', 'info');
+          const supabaseData = await fetchLatestAuditFromSupabase(propertyUrl);
+          if (supabaseData) {
+            debugLog('✓ Audit results loaded from Supabase', 'success');
+            debugLog(`✓ Supabase data structure: scores.moneyPagesMetrics=${!!supabaseData?.scores?.moneyPagesMetrics}, moneyPagesMetrics=${!!supabaseData?.moneyPagesMetrics}`, 'info');
+            // Store in localStorage for future use
+            try {
+              safeSetLocalStorage('last_audit_results', supabaseData);
+              debugLog('✓ Stored Supabase data in localStorage for future use', 'success');
+              // Update timestamp display
+              if (supabaseData.timestamp) {
+                updateAuditTimestamp(supabaseData.timestamp);
+              }
+            } catch (storageError) {
+              debugLog(`⚠ Could not store Supabase data in localStorage: ${storageError.message}`, 'warn');
+            }
+            return supabaseData;
+          } else {
+            debugLog('⚠ No audit data found in Supabase, using localStorage data as fallback', 'warn');
+          }
         }
       } else {
         debugLog('⚠ Cannot fetch from Supabase: property URL not set, using localStorage data as fallback', 'warn');
@@ -18127,17 +18169,45 @@ Final Score: ${score}/100`;
                 authorityData.push(historicalAuthority);
                 debugLog(`Using legacy historical Authority (${historicalAuthority}) for ${pointDate}`, 'info');
               } else {
-                // Fallback: use calculated Authority score, but only if we have valid GSC data
-                // Check if GSC data is valid (position > 0, ctr >= 0)
-                const hasValidGscData = point.position && point.position > 0 && point.ctr !== null && point.ctr >= 0;
-                if (hasValidGscData) {
-                const authScore = typeof pillarScores.authority === 'object' ? pillarScores.authority.score : pillarScores.authority;
-                authorityData.push(authScore);
-                debugLog(`Using calculated Authority (${authScore}) for ${pointDate}`, 'info');
+                // For missing dates, use the most recent available score from Supabase (prevents artificial dips)
+                let latestAvailableAuthority = null;
+                let latestAvailableAuthorityDate = null;
+                
+                // Prefer segmented historical Authority if available (match selected mode)
+                authorityBySegmentMap.forEach((seg, mapDate) => {
+                  if (mapDate <= pointDate && (latestAvailableAuthorityDate === null || mapDate > latestAvailableAuthorityDate)) {
+                    if (seg && seg[selectedMode] !== undefined && seg[selectedMode] !== null) {
+                      const v = seg[selectedMode].total || seg[selectedMode].score || seg[selectedMode];
+                      latestAvailableAuthorityDate = mapDate;
+                      latestAvailableAuthority = v;
+                    }
+                  }
+                });
+                
+                // Fallback to legacy Authority map if segmented isn't available
+                if (latestAvailableAuthority === null || latestAvailableAuthority === undefined) {
+                  authorityMap.forEach((score, mapDate) => {
+                    if (mapDate <= pointDate && (latestAvailableAuthorityDate === null || mapDate > latestAvailableAuthorityDate)) {
+                      latestAvailableAuthorityDate = mapDate;
+                      latestAvailableAuthority = score;
+                    }
+                  });
+                }
+                
+                if (latestAvailableAuthority !== null && latestAvailableAuthority !== undefined) {
+                  authorityData.push(latestAvailableAuthority);
+                  debugLog(`Using latest available Authority (${latestAvailableAuthority} from ${latestAvailableAuthorityDate}) for ${pointDate}`, 'info');
                 } else {
-                  // Invalid or missing GSC data - use null (chart will show gap)
-                  authorityData.push(null);
-                  debugLog(`No valid GSC data for Authority on ${pointDate} (position=${point.position}, ctr=${point.ctr}) - using null`, 'warn');
+                  // Final fallback: calculate from GSC metrics (only if we have valid data)
+                  const hasValidGscData = point.position && point.position > 0 && point.ctr !== null && point.ctr >= 0;
+                  if (hasValidGscData) {
+                    const authScore = typeof pillarScores.authority === 'object' ? pillarScores.authority.score : pillarScores.authority;
+                    authorityData.push(authScore);
+                    debugLog(`Using calculated Authority (${authScore}) for ${pointDate}`, 'info');
+                  } else {
+                    authorityData.push(null);
+                    debugLog(`No valid GSC data for Authority on ${pointDate} (position=${point.position}, ctr=${point.ctr}) - using null`, 'warn');
+                  }
                 }
               }
               
@@ -18215,71 +18285,71 @@ Final Score: ${score}/100`;
                 }
               }
               
-              // Brand Overlay data (ALWAYS prioritize historical data from Supabase first)
-              // Only use current score if no historical data exists for this date
+              // Brand Overlay data (prioritize Supabase; if missing for a date, carry-forward latest available)
               const historicalBrandOverlay = brandOverlayMap.get(pointDate);
               if (historicalBrandOverlay !== undefined && historicalBrandOverlay !== null) {
-                // Use historical data from Supabase (this should exist for all dates including latest)
                 brandOverlayData.push(historicalBrandOverlay);
                 debugLog(`✓ Added Brand Overlay score (${historicalBrandOverlay}) for ${pointDate} from Supabase (historical)`, 'info');
-              } else if (isLatestAudit && currentBrandOverlay !== null) {
-                // Only use current score if no historical data exists for latest audit date
-                // This should rarely happen if data is being saved to Supabase correctly
-                brandOverlayData.push(currentBrandOverlay);
-                debugLog(`⚠ Using current Brand Overlay score (${currentBrandOverlay}) for ${pointDate} - no historical data found in Supabase`, 'warn');
               } else {
-                // Fallback: Calculate Brand Overlay from GSC timeseries data
-                // Use historical review/entity scores if available, otherwise use current
-                const historicalRecord = contentSchemaHistory.find(r => {
-                  const rDate = typeof r.date === 'string' ? r.date.split('T')[0] : (r.date instanceof Date ? r.date.toISOString().split('T')[0] : String(r.date).split('T')[0]);
-                  return rDate === pointDate;
+                let latestAvailableBrand = null;
+                let latestAvailableBrandDate = null;
+                brandOverlayMap.forEach((score, mapDate) => {
+                  if (mapDate <= pointDate && (latestAvailableBrandDate === null || mapDate > latestAvailableBrandDate)) {
+                    latestAvailableBrandDate = mapDate;
+                    latestAvailableBrand = score;
+                  }
                 });
-                const historicalReviewScore = historicalRecord?.authorityReviewScore;
-                const historicalEntityScore = historicalLocalEntity !== undefined && historicalLocalEntity !== null ? historicalLocalEntity : null;
-                
-                // Use historical scores if available, otherwise use current scores from saved audit
-                const reviewScore = historicalReviewScore !== undefined && historicalReviewScore !== null 
-                  ? historicalReviewScore 
-                  : (currentScores?.authorityComponents?.reviews || currentScores?.authority?.bySegment?.all?.reviews || 0);
-                const entityScore = historicalEntityScore !== null && historicalEntityScore !== undefined
-                  ? historicalEntityScore
-                  : (currentScores?.localEntity || 0);
-                
-                // Calculate fallback brand overlay using GSC position/CTR as proxy
-                // Since we don't have brand-specific queries for historical dates,
-                // we'll estimate brand performance from overall GSC metrics
-                // BUT only if we have valid GSC data (position > 0)
-                const hasValidGscData = point.position && point.position > 0 && point.ctr !== null && point.ctr >= 0;
-                if (!hasValidGscData) {
-                  brandOverlayData.push(null);
-                  debugLog(`No valid GSC data for Brand Overlay on ${pointDate} (position=${point.position}, ctr=${point.ctr}) - using null`, 'warn');
+
+                if (latestAvailableBrand !== null && latestAvailableBrand !== undefined) {
+                  brandOverlayData.push(latestAvailableBrand);
+                  debugLog(`✓ Using latest available Brand Overlay (${latestAvailableBrand} from ${latestAvailableBrandDate}) for ${pointDate}`, 'info');
+                } else if (isLatestAudit && currentBrandOverlay !== null) {
+                  brandOverlayData.push(currentBrandOverlay);
+                  debugLog(`⚠ Using current Brand Overlay score (${currentBrandOverlay}) for ${pointDate} - no historical data found in Supabase`, 'warn');
                 } else {
-                const position = point.position || 40;
-                const ctr = point.ctr || 0;
-                
-                // Estimate brand metrics from overall performance
-                // Brand queries typically have better CTR and position, so we'll use a multiplier
-                const estimatedBrandCtr = Math.min(ctr * 1.5, 0.4); // Cap at 40% (typical max brand CTR)
-                const estimatedBrandPosition = Math.max(position * 0.7, 1); // Brand queries typically rank better
-                const estimatedBrandShare = 0.02; // Assume 2% brand share as baseline (will be adjusted by position/CTR)
-                
-                // Calculate fallback brand overlay score
-                try {
-                  const fallbackBrandOverlay = computeBrandOverlay({
-                    brandQueryShare: estimatedBrandShare,
-                    brandCtr: estimatedBrandCtr,
-                    brandAvgPosition: estimatedBrandPosition,
-                    reviewScore: reviewScore,
-                    entityScore: entityScore
+                  // Final fallback: estimate from GSC metrics
+                  const historicalRecord = contentSchemaHistory.find(r => {
+                    const rDate = typeof r.date === 'string' ? r.date.split('T')[0] : (r.date instanceof Date ? r.date.toISOString().split('T')[0] : String(r.date).split('T')[0]);
+                    return rDate === pointDate;
                   });
-                  brandOverlayData.push(fallbackBrandOverlay.score);
-                  debugLog(`✓ Calculated fallback Brand Overlay score (${fallbackBrandOverlay.score}) for ${pointDate} from GSC timeseries data`, 'info');
-                } catch (e) {
-                  debugLog(`⚠ Error calculating fallback Brand Overlay for ${pointDate}: ${e.message}`, 'warn');
-                  brandOverlayData.push(null);
+                  const historicalReviewScore = historicalRecord?.authorityReviewScore;
+                  const historicalEntityScore = historicalLocalEntity !== undefined && historicalLocalEntity !== null ? historicalLocalEntity : null;
+
+                  const reviewScore = historicalReviewScore !== undefined && historicalReviewScore !== null
+                    ? historicalReviewScore
+                    : (currentScores?.authorityComponents?.reviews || currentScores?.authority?.bySegment?.all?.reviews || 0);
+                  const entityScore = historicalEntityScore !== null && historicalEntityScore !== undefined
+                    ? historicalEntityScore
+                    : (currentScores?.localEntity || 0);
+
+                  const hasValidGscData = point.position && point.position > 0 && point.ctr !== null && point.ctr >= 0;
+                  if (!hasValidGscData) {
+                    brandOverlayData.push(null);
+                    debugLog(`No valid GSC data for Brand Overlay on ${pointDate} (position=${point.position}, ctr=${point.ctr}) - using null`, 'warn');
+                  } else {
+                    const position = point.position || 40;
+                    const ctr = point.ctr || 0;
+                    const estimatedBrandCtr = Math.min(ctr * 1.5, 0.4);
+                    const estimatedBrandPosition = Math.max(position * 0.7, 1);
+                    const estimatedBrandShare = 0.02;
+
+                    try {
+                      const fallbackBrandOverlay = computeBrandOverlay({
+                        brandQueryShare: estimatedBrandShare,
+                        brandCtr: estimatedBrandCtr,
+                        brandAvgPosition: estimatedBrandPosition,
+                        reviewScore: reviewScore,
+                        entityScore: entityScore
+                      });
+                      brandOverlayData.push(fallbackBrandOverlay.score);
+                      debugLog(`✓ Calculated fallback Brand Overlay score (${fallbackBrandOverlay.score}) for ${pointDate} from GSC timeseries data`, 'info');
+                    } catch (e) {
+                      debugLog(`⚠ Error calculating fallback Brand Overlay for ${pointDate}: ${e.message}`, 'warn');
+                      brandOverlayData.push(null);
+                    }
+                  }
                 }
-                } // End else block for valid GSC data
-              } // End else block for Brand Overlay fallback
+              }
               
               // Format date for chart (timeseries dates are YYYY-MM-DD)
               const dateObj = new Date(point.date);
