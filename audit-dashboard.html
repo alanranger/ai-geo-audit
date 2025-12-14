@@ -2209,17 +2209,22 @@
       <!-- Overview Panel -->
       <section class="aigeo-panel is-active" data-panel="overview">
 
-      <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; margin-bottom: 3rem; border-left: 4px solid var(--brand-orange);">
-        <h3 style="margin-top: 0; color: var(--brand-orange);">Five-Pillar Framework</h3>
-        <p style="color: #555; line-height: 1.6; margin-bottom: 1rem;">
-          This audit analyzes <strong>www.alanranger.com</strong> as a global entity using a five-pillar framework to assess AI-powered search visibility, entity recognition, and SERP behavior. Each pillar is scored 0-100 and assigned a RAG (Red/Amber/Green) status based on performance thresholds.
-        </p>
-        <p style="color: #555; line-height: 1.6; margin-bottom: 0.5rem;">
-          <strong>Data Sources:</strong> Scores are calculated using data from Google Search Console API (impressions, clicks, position, queries), Google Business Profile API (ratings, reviews, locations, service areas), schema markup validation, backlink CSV upload, and Trustpilot reviews snapshot.
-        </p>
-        <p style="color: #555; line-height: 1.6; margin-bottom: 0;">
-          <strong>Score Calculation:</strong> The AIO score combines five weighted pillars: Authority (30%: Behaviour 40% + Ranking 20% + Backlinks 20% + Reviews 20%), Content/Schema (25%: Foundation schemas 30% + Rich Results 35% + Coverage 20% + Diversity 15%), Visibility (20%: average position mapping), Local Entity (15%: NAP consistency + knowledge panel + locations), and Service Area (10%: service areas count with NAP multiplier). Brand & Entity Overlay and AI Summary Likelihood are overlay metrics that do not affect the AIO score but provide additional insights. Scores are normalized to 0-100 scale with thresholds: Green (≥70), Amber (40-69), Red (&lt;40). Money pages behaviour is tracked separately and stored per audit, so you can see whether Authority improvements are coming from better CTR on commercial pages or from broader site-wide changes.
-        </p>
+      <div class="pillar-framework-explanation collapsed" id="pillarFrameworkExplanation" style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; margin-bottom: 3rem; border-left: 4px solid var(--brand-orange);">
+        <div class="pillar-framework-header" onclick="togglePillarFrameworkExplanation()" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
+          <h3 style="margin-top: 0; color: var(--brand-orange);">Five-Pillar Framework</h3>
+          <span class="pillar-framework-toggle" id="pillarFrameworkToggle" style="font-size: 1.2rem; color: var(--brand-orange);">▶</span>
+        </div>
+        <div class="pillar-framework-content collapsed" id="pillarFrameworkContent" style="display: none;">
+          <p style="color: #555; line-height: 1.6; margin-bottom: 1rem; margin-top: 1rem;">
+            This audit analyzes <strong>www.alanranger.com</strong> as a global entity using a five-pillar framework to assess AI-powered search visibility, entity recognition, and SERP behavior. Each pillar is scored 0-100 and assigned a RAG (Red/Amber/Green) status based on performance thresholds.
+          </p>
+          <p style="color: #555; line-height: 1.6; margin-bottom: 0.5rem;">
+            <strong>Data Sources:</strong> Scores are calculated using data from Google Search Console API (impressions, clicks, position, queries), Google Business Profile API (ratings, reviews, locations, service areas), schema markup validation, backlink CSV upload, and Trustpilot reviews snapshot.
+          </p>
+          <p style="color: #555; line-height: 1.6; margin-bottom: 0;">
+            <strong>Score Calculation:</strong> The AIO score combines five weighted pillars: Authority (30%: Behaviour 40% + Ranking 20% + Backlinks 20% + Reviews 20%), Content/Schema (25%: Foundation schemas 30% + Rich Results 35% + Coverage 20% + Diversity 15%), Visibility (20%: average position mapping), Local Entity (15%: NAP consistency + knowledge panel + locations), and Service Area (10%: service areas count with NAP multiplier). Brand & Entity Overlay and AI Summary Likelihood are overlay metrics that do not affect the AIO score but provide additional insights. Scores are normalized to 0-100 scale with thresholds: Green (≥70), Amber (40-69), Red (&lt;40). Money pages behaviour is tracked separately and stored per audit, so you can see whether Authority improvements are coming from better CTR on commercial pages or from broader site-wide changes.
+          </p>
+        </div>
       </div>
 
       <div class="calculation-explanation collapsed" id="calculationExplanation">
@@ -3658,6 +3663,25 @@
           }
         }
       });
+    }
+
+    function togglePillarFrameworkExplanation() {
+      const explanation = document.getElementById('pillarFrameworkExplanation');
+      const content = document.getElementById('pillarFrameworkContent');
+      const toggle = document.getElementById('pillarFrameworkToggle');
+      
+      if (explanation && content && toggle) {
+        const isCollapsed = explanation.classList.contains('collapsed');
+        if (isCollapsed) {
+          explanation.classList.remove('collapsed');
+          content.style.display = 'block';
+          toggle.textContent = '▼';
+        } else {
+          explanation.classList.add('collapsed');
+          content.style.display = 'none';
+          toggle.textContent = '▶';
+        }
+      }
     }
 
     function toggleCalculationExplanation() {
@@ -10311,10 +10335,10 @@ Final Score: ${score}/100`;
             if (signalsData) {
               gbpRating = signalsData.gbpRating !== null && signalsData.gbpRating !== undefined 
                 ? signalsData.gbpRating 
-                : null;
+            : null;
               gbpReviewCount = signalsData.gbpReviewCount !== null && signalsData.gbpReviewCount !== undefined 
                 ? signalsData.gbpReviewCount 
-                : null;
+            : null;
               debugLog(`[Authority Card] GBP data extracted: rating=${gbpRating}, count=${gbpReviewCount}`, 'info');
             } else {
               debugLog(`[Authority Card] Local signals structure not recognized. Keys: ${Object.keys(localSignals).join(', ')}, data keys: ${localSignals.data ? Object.keys(localSignals.data).join(', ') : 'no data'}`, 'warn');
@@ -10356,15 +10380,15 @@ Final Score: ${score}/100`;
                   // Show backlink metrics if available, otherwise show score-based info
                   if (hasBacklinkMetrics) {
                     return `
-                      <div style="margin-top: 0.75rem; margin-bottom: 0.5rem;"><strong>Backlink Metrics:</strong></div>
-                      <div>Referring domains: ${backlinkMetrics.referringDomains || 0}</div>
-                      <div>Total backlinks: ${backlinkMetrics.totalBacklinks || 0}</div>
-                      <div>Follow ratio: ${backlinkMetrics.followRatio ? Math.round(backlinkMetrics.followRatio * 100) : 50}%</div>
+                  <div style="margin-top: 0.75rem; margin-bottom: 0.5rem;"><strong>Backlink Metrics:</strong></div>
+                  <div>Referring domains: ${backlinkMetrics.referringDomains || 0}</div>
+                  <div>Total backlinks: ${backlinkMetrics.totalBacklinks || 0}</div>
+                  <div>Follow ratio: ${backlinkMetrics.followRatio ? Math.round(backlinkMetrics.followRatio * 100) : 50}%</div>
                       <div style="margin-top: 0.25rem; font-size: 0.7rem; color: #999;">Backlink score: ${selectedAuthority.backlinks.toFixed(0)}</div>
                     `;
                   } else {
                     return `
-                      <div style="margin-top: 0.75rem; margin-bottom: 0.5rem;"><strong>Backlink Metrics:</strong></div>
+                  <div style="margin-top: 0.75rem; margin-bottom: 0.5rem;"><strong>Backlink Metrics:</strong></div>
                       <div>Backlink score: ${selectedAuthority.backlinks.toFixed(0)}</div>
                       <div style="font-size: 0.7rem; color: #999;">Detailed metrics not available</div>
                     `;
@@ -17573,6 +17597,7 @@ Final Score: ${score}/100`;
           let serviceAreaMap = new Map();
           let authorityMap = new Map(); // Store historical Authority scores from Supabase (legacy: single value)
           let authorityBySegmentMap = new Map(); // Store historical segmented Authority scores from Supabase (new: {all, nonEducation, money})
+          let authorityBacklinkMap = new Map(); // Store historical Authority backlink scores from Supabase
           let visibilityMap = new Map(); // Store historical Visibility scores from Supabase
           let brandOverlayMap = new Map(); // Store historical Brand Overlay scores from Supabase
           const currentContentSchema = scores.contentSchema || 0;
@@ -17640,7 +17665,8 @@ Final Score: ${score}/100`;
                 
                 // Create maps of dates to scores from Supabase
                 // Normalize dates to YYYY-MM-DD format (Supabase might return with timezone)
-                // latestAuditDate is already tracked from the deduplication loop above
+                // Track latestAuditDateStr from the deduplication loop
+                let latestDateFromHistory = null;
                 contentSchemaHistory.forEach(record => {
                   // Ensure date is in YYYY-MM-DD format (strip time if present)
                   // Handle both date strings and Date objects
@@ -17656,21 +17682,25 @@ Final Score: ${score}/100`;
                   }
                   
                   if (normalizedDate) {
-                    // Update latestAuditDate if this date is newer (should already be set, but ensure it's current)
-                    if (!latestAuditDate || normalizedDate > latestAuditDate) {
-                      latestAuditDate = normalizedDate;
+                    // Track latest date from history
+                    if (!latestDateFromHistory || normalizedDate > latestDateFromHistory) {
+                      latestDateFromHistory = normalizedDate;
+                    }
+                    // Update latestAuditDateStr if this date is newer than current
+                    if (!latestAuditDateStr || normalizedDate > latestAuditDateStr) {
+                      latestAuditDateStr = normalizedDate;
                     }
                     // Content/Schema data
-                    if (record.contentSchemaScore !== null && record.contentSchemaScore !== undefined) {
+                    if (record.contentSchemaScore !== null && record.contentSchemaScore !== undefined && record.contentSchemaScore >= 0) {
                       contentSchemaMap.set(normalizedDate, record.contentSchemaScore);
                       debugLog(`Mapped Content/Schema: ${normalizedDate} = ${record.contentSchemaScore}`, 'info');
                     }
                     // Business Profile data (Local Entity and Service Area)
-                    if (record.localEntityScore !== null && record.localEntityScore !== undefined) {
+                    if (record.localEntityScore !== null && record.localEntityScore !== undefined && record.localEntityScore >= 0) {
                       localEntityMap.set(normalizedDate, record.localEntityScore);
                       debugLog(`Mapped Local Entity: ${normalizedDate} = ${record.localEntityScore}`, 'info');
                     }
-                    if (record.serviceAreaScore !== null && record.serviceAreaScore !== undefined) {
+                    if (record.serviceAreaScore !== null && record.serviceAreaScore !== undefined && record.serviceAreaScore >= 0) {
                       serviceAreaMap.set(normalizedDate, record.serviceAreaScore);
                       debugLog(`Mapped Service Area: ${normalizedDate} = ${record.serviceAreaScore}`, 'info');
                     }
@@ -17701,6 +17731,28 @@ Final Score: ${score}/100`;
                 const hasHistoricalData = contentSchemaHistory.length > 0;
                 if (hasHistoricalData) {
                   debugLog(`Using ${contentSchemaHistory.length} historical audit records from Supabase`, 'info');
+                  
+                  // Update latestAuditDateStr from history if we found a newer date
+                  if (latestDateFromHistory && (!latestAuditDateStr || latestDateFromHistory > latestAuditDateStr)) {
+                    latestAuditDateStr = latestDateFromHistory;
+                    debugLog(`Updated latestAuditDateStr from history: ${latestAuditDateStr}`, 'info');
+                  }
+                  
+                  // Debug: Show what data we have for each pillar
+                  const contentSchemaCount = Array.from(contentSchemaMap.values()).filter(v => v !== null && v !== undefined && v > 0).length;
+                  const localEntityCount = Array.from(localEntityMap.values()).filter(v => v !== null && v !== undefined && v > 0).length;
+                  const serviceAreaCount = Array.from(serviceAreaMap.values()).filter(v => v !== null && v !== undefined && v > 0).length;
+                  const authorityCount = Array.from(authorityMap.values()).filter(v => v !== null && v !== undefined && v > 0).length;
+                  const visibilityCount = Array.from(visibilityMap.values()).filter(v => v !== null && v !== undefined && v > 0).length;
+                  const brandCount = Array.from(brandOverlayMap.values()).filter(v => v !== null && v !== undefined && v > 0).length;
+                  debugLog(`[Supabase Data] Content/Schema: ${contentSchemaCount} entries, Local Entity: ${localEntityCount} entries, Service Area: ${serviceAreaCount} entries, Authority: ${authorityCount} entries, Visibility: ${visibilityCount} entries, Brand: ${brandCount} entries`, 'info');
+                  
+                  // Show latest dates for each pillar
+                  const latestContentSchemaDate = Array.from(contentSchemaMap.keys()).sort().reverse()[0] || 'none';
+                  const latestLocalEntityDate = Array.from(localEntityMap.keys()).sort().reverse()[0] || 'none';
+                  const latestServiceAreaDate = Array.from(serviceAreaMap.keys()).sort().reverse()[0] || 'none';
+                  const latestBrandDate = Array.from(brandOverlayMap.keys()).sort().reverse()[0] || 'none';
+                  debugLog(`[Supabase Data] Latest dates - Content/Schema: ${latestContentSchemaDate}, Local Entity: ${latestLocalEntityDate}, Service Area: ${latestServiceAreaDate}, Brand: ${latestBrandDate}, latestAuditDateStr: ${latestAuditDateStr}`, 'info');
                 } else {
                   debugLog(`No historical data found. Will use current scores for all points.`, 'info');
                 }
@@ -18009,8 +18061,8 @@ Final Score: ${score}/100`;
                   if (currentLocalEntity !== null && currentLocalEntity !== undefined && currentLocalEntity > 0) {
                     localEntityData.push(currentLocalEntity);
                     debugLog(`Using current Local Entity (${currentLocalEntity}) for ${pointDate} (latest audit)`, 'info');
-                  } else {
-                    localEntityData.push(null);
+                } else {
+                  localEntityData.push(null);
                     debugLog(`No Local Entity data for ${pointDate}`, 'warn');
                   }
                 } else {
@@ -18043,8 +18095,8 @@ Final Score: ${score}/100`;
                   if (currentServiceArea !== null && currentServiceArea !== undefined && currentServiceArea > 0) {
                     serviceAreaData.push(currentServiceArea);
                     debugLog(`Using current Service Area (${currentServiceArea}) for ${pointDate} (latest audit)`, 'info');
-                  } else {
-                    serviceAreaData.push(null);
+                } else {
+                  serviceAreaData.push(null);
                     debugLog(`No Service Area data for ${pointDate}`, 'warn');
                   }
                 } else {
@@ -18154,10 +18206,10 @@ Final Score: ${score}/100`;
                     contentSchemaDataEstimated.push(null);
                     debugLog(`Content/Schema: No valid score for ${pointDate} (isLatestAudit=${isLatestAudit}, currentContentSchema=${currentContentSchema}, savedContentSchema=${savedContentSchema})`, 'warn');
                   }
-                } else {
-                  // No real data for this date - use null (don't show estimated line)
-                  contentSchemaData.push(null);
-                  contentSchemaDataEstimated.push(null);
+              } else {
+                // No real data for this date - use null (don't show estimated line)
+                contentSchemaData.push(null);
+                contentSchemaDataEstimated.push(null);
                   debugLog(`Content/Schema: No data for ${pointDate} (not latest audit, map has ${contentSchemaMap.size} entries)`, 'info');
                 }
               }
@@ -18417,10 +18469,10 @@ Final Score: ${score}/100`;
                       contentSchemaDataEstimated.push(null);
                       debugLog(`No Content/Schema data for ${dateStr} (latest date but no score available)`, 'warn');
                     }
-                  } else {
-                    // No real data - use null (don't show estimated)
-                    contentSchemaData.push(null);
-                    contentSchemaDataEstimated.push(null);
+                } else {
+                  // No real data - use null (don't show estimated)
+                  contentSchemaData.push(null);
+                  contentSchemaDataEstimated.push(null);
                     debugLog(`No Content/Schema data for ${dateStr} (no historical or current data)`, 'info');
                   }
                 }
