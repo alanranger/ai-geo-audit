@@ -2770,6 +2770,46 @@
           </div>
         </div>
 
+        <!-- Domain Strength (manual monthly snapshots) -->
+        <div class="ranking-domain-strength-section" id="ranking-domain-strength-section" style="width: 100%; clear: both; float: none; margin: 1.5rem 0;">
+          <div class="card" style="background: rgba(204, 255, 255, 0.15); border-left: 4px solid #CCFFFF; padding: 1.5rem;">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;">
+              <div>
+                <h3 style="margin: 0 0 0.5rem 0; font-size: 1.1rem; font-weight: 700; color: #1e293b;">
+                  Domain Strength (Google – DataForSEO Labs)
+                </h3>
+                <p style="margin: 0; font-size: 0.9rem; color: #64748b; line-height: 1.6;">
+                  Manual monthly snapshots based on DataForSEO Labs <code style="font-size: 0.85rem;">domain_rank_overview</code>.
+                  Uses visibility (ETV), breadth (ranking keywords), and top‑10 share to produce a 0–100 score.
+                </p>
+              </div>
+              <div style="display: flex; gap: 0.75rem; align-items: center;">
+                <button id="domain-strength-run-btn" class="btn btn-secondary" type="button">
+                  Run Domain Strength Snapshot (Google)
+                </button>
+              </div>
+            </div>
+            <div id="domain-strength-run-status" style="margin-top: 0.75rem; font-size: 0.875rem; color: #64748b;"></div>
+            <div class="ranking-table-wrapper" style="margin-top: 1rem; max-height: 420px;">
+              <table class="ranking-table" id="domain-strength-table">
+                <thead>
+                  <tr>
+                    <th>Domain</th>
+                    <th>Latest score</th>
+                    <th>Band</th>
+                    <th>Top‑10 keywords</th>
+                    <th>ETV</th>
+                    <th>Last 12 months</th>
+                  </tr>
+                </thead>
+                <tbody id="domain-strength-table-body">
+                  <tr><td colspan="6" class="ranking-table-empty">No domain strength snapshots yet. Click “Run Domain Strength Snapshot”.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
         <!-- Section C: Filters + full-width table -->
         <div class="ranking-table-section" style="width: 100%; clear: both; float: none;">
           <div class="card">
@@ -24913,15 +24953,204 @@ Final Score: ${score}/100`;
           debugLog('⚠ Ranking & AI button not found', 'warn');
         }
       }
+
+      // ======================
+      // Domain Strength (manual monthly snapshot)
+      // ======================
+      function getSelfDomainForDomainStrength() {
+        const propertyUrl =
+          document.getElementById('propertyUrl')?.value ||
+          localStorage.getItem('gsc_property_url') ||
+          'https://www.alanranger.com';
+        try {
+          return new URL(propertyUrl).hostname.replace(/^www\./, '');
+        } catch {
+          return String(propertyUrl).replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+        }
+      }
+
+      function getDomainStrengthDomainList(maxCompetitors = 20) {
+        const domains = [];
+        const seen = new Set();
+        const self = getSelfDomainForDomainStrength();
+        if (self) {
+          seen.add(self);
+          domains.push(self);
+        }
+
+        // Use Ranking AI combined rows as the source of competitor domains
+        const mod = window.RankingAiModule;
+        const combinedRows = mod?.state?.().combinedRows || [];
+        const counts = {};
+
+        for (const row of combinedRows) {
+          const cc = row?.competitor_counts;
+          if (!cc || typeof cc !== 'object') continue;
+          for (const [domain, count] of Object.entries(cc)) {
+            const d = String(domain || '').trim().replace(/^www\./, '');
+            if (!d || seen.has(d)) continue;
+            counts[d] = (counts[d] || 0) + (Number(count) || 0);
+          }
+        }
+
+        const sorted = Object.entries(counts)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, Math.max(0, maxCompetitors))
+          .map(([d]) => d);
+
+        for (const d of sorted) {
+          if (seen.has(d)) continue;
+          seen.add(d);
+          domains.push(d);
+        }
+
+        return domains;
+      }
+
+      function renderDomainStrengthSparkline(values) {
+        const vals = Array.isArray(values) ? values.filter(v => typeof v === 'number' && isFinite(v)) : [];
+        if (vals.length < 2) return '—';
+        const w = 120;
+        const h = 24;
+        const pad = 2;
+        const min = 0;
+        const max = 100;
+        const stepX = (w - pad * 2) / (vals.length - 1);
+        const points = vals.map((v, i) => {
+          const x = pad + i * stepX;
+          const y = pad + (h - pad * 2) * (1 - ((v - min) / (max - min)));
+          return `${x.toFixed(1)},${Math.max(pad, Math.min(h - pad, y)).toFixed(1)}`;
+        }).join(' ');
+        return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg">
+          <polyline points="${points}" fill="none" stroke="#0284c7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>`;
+      }
+
+      async function loadAndRenderDomainStrength(domains) {
+        const tbody = document.getElementById('domain-strength-table-body');
+        if (!tbody) return;
+
+        if (!domains || domains.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="6" class="ranking-table-empty">No domains available. Run “Ranking & AI check” first.</td></tr>';
+          return;
+        }
+
+        const qs = encodeURIComponent(domains.join(','));
+        const resp = await fetch(apiUrl(`/api/domain-strength/history?domains=${qs}`));
+        const json = await resp.json();
+        const rows = json?.status === 'ok' ? (json.data || []) : [];
+        if (!rows.length) {
+          tbody.innerHTML = '<tr><td colspan="6" class="ranking-table-empty">No domain strength snapshots yet. Click “Run Domain Strength Snapshot”.</td></tr>';
+          return;
+        }
+
+        // Group rows by domain
+        const byDomain = {};
+        for (const r of rows) {
+          const d = r.domain;
+          if (!d) continue;
+          if (!byDomain[d]) byDomain[d] = [];
+          byDomain[d].push(r);
+        }
+
+        const renderRows = domains.map(d => {
+          const list = (byDomain[d] || []).slice().sort((a, b) => String(a.snapshot_date).localeCompare(String(b.snapshot_date)));
+          const last = list[list.length - 1] || null;
+          const last12 = list.slice(-12);
+          const scores = last12.map(x => typeof x.score === 'number' ? x.score : parseFloat(x.score)).filter(v => isFinite(v));
+          const latestScore = last ? (typeof last.score === 'number' ? last.score : parseFloat(last.score)) : null;
+          const band = last?.band || '—';
+          const top10 = last?.top10_keywords_raw ?? '—';
+          const etv = last?.organic_etv_raw ?? '—';
+          const spark = renderDomainStrengthSparkline(scores);
+          return { d, latestScore, band, top10, etv, spark };
+        });
+
+        tbody.innerHTML = '';
+        for (const r of renderRows) {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td>${r.d}</td>
+            <td style="text-align:right;">${(r.latestScore === null || !isFinite(r.latestScore)) ? '—' : Number(r.latestScore).toFixed(2)}</td>
+            <td>${r.band}</td>
+            <td style="text-align:right;">${r.top10 ?? '—'}</td>
+            <td style="text-align:right;">${r.etv ?? '—'}</td>
+            <td style="text-align:center;">${r.spark}</td>
+          `;
+          tbody.appendChild(tr);
+        }
+      }
+
+      async function runDomainStrengthSnapshot() {
+        const statusEl = document.getElementById('domain-strength-run-status');
+        const btn = document.getElementById('domain-strength-run-btn');
+        const domains = getDomainStrengthDomainList(20);
+
+        if (!domains || domains.length === 0) {
+          if (statusEl) statusEl.textContent = 'No domains available yet. Run “Ranking & AI check” first.';
+          return;
+        }
+
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = 'Running…';
+        }
+        if (statusEl) statusEl.textContent = `Running snapshot for ${domains.length} domains…`;
+
+        try {
+          const resp = await fetch(apiUrl('/api/domain-strength/snapshot'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: 'run', domains })
+          });
+          const json = await resp.json();
+          if (json?.status !== 'ok') {
+            throw new Error(json?.message || 'Snapshot failed');
+          }
+          if (statusEl) statusEl.textContent = `✓ Snapshot saved for ${json.inserted || 0} domains (date: ${json.snapshot_date}).`;
+          showStatus(`✓ Domain strength snapshot saved (${json.snapshot_date})`, 'success');
+          await loadAndRenderDomainStrength(domains);
+        } catch (e) {
+          const msg = e?.message || String(e);
+          if (statusEl) statusEl.textContent = `✗ Snapshot failed: ${msg}`;
+          showStatus(`✗ Domain strength snapshot failed: ${msg}`, 'error');
+        } finally {
+          if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Run Domain Strength Snapshot (Google)';
+          }
+        }
+      }
+
+      function wireDomainStrengthButton() {
+        const btn = document.getElementById('domain-strength-run-btn');
+        if (!btn) return;
+        const newBtn = btn.cloneNode(true);
+        btn.parentNode.replaceChild(newBtn, btn);
+        newBtn.addEventListener('click', () => {
+          runDomainStrengthSnapshot();
+        });
+
+        // Render current view (if history exists) once the ranking module has data
+        try {
+          const domains = getDomainStrengthDomainList(20);
+          loadAndRenderDomainStrength(domains);
+        } catch {
+          // ignore
+        }
+      }
       
       // Wire button immediately
       wireRankingAiButton();
+      // Wire domain strength button immediately
+      if (typeof wireDomainStrengthButton === 'function') wireDomainStrengthButton();
       wireRankingFilters();
       wireRankingSorting();
       wireRankingPagination();
       
       // Make functions globally available for panel switching
       window.wireRankingAiButton = wireRankingAiButton;
+      window.wireDomainStrengthButton = wireDomainStrengthButton;
       window.wireRankingFilters = wireRankingFilters;
       window.wireRankingSorting = wireRankingSorting;
 
