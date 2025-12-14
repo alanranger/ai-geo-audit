@@ -39,8 +39,10 @@ export default async function handler(req, res) {
       });
     }
 
-    // Get the latest audit for this property
-    const auditUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&is_partial=eq.false&schema_pages_detail=not.is.null&order=audit_date.desc,updated_at.desc&limit=1&select=id,audit_date,updated_at,schema_pages_detail`;
+    // Get a few most-recent audits that have schema_pages_detail.
+    // We may have a newer audit with schema summary fields but without the full per-URL array,
+    // or a truncated/partial array. We'll search across a small window of recent audits.
+    const auditUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&is_partial=eq.false&schema_pages_detail=not.is.null&order=audit_date.desc,updated_at.desc&limit=5&select=id,audit_date,updated_at,schema_pages_detail`;
     
     const auditRes = await fetch(auditUrl, {
       headers: {
@@ -64,36 +66,18 @@ export default async function handler(req, res) {
       });
     }
 
-    const record = audits[0];
-    let pagesDetail = record.schema_pages_detail;
-
-    if (!pagesDetail) {
-      return res.status(200).json({
-        status: 'ok',
-        data: null,
-        message: 'No schema pages detail in audit'
-      });
-    }
-
-    // Parse if stored as string
-    if (typeof pagesDetail === 'string') {
-      try {
-        pagesDetail = JSON.parse(pagesDetail);
-      } catch (e) {
-        return res.status(200).json({
-          status: 'ok',
-          data: null,
-          message: 'Failed to parse schema_pages_detail JSON'
-        });
+    function parsePagesDetail(pagesDetail) {
+      if (!pagesDetail) return null;
+      let parsed = pagesDetail;
+      if (typeof parsed === 'string') {
+        try {
+          parsed = JSON.parse(parsed);
+        } catch (_) {
+          return null;
+        }
       }
-    }
-
-    if (!Array.isArray(pagesDetail) || pagesDetail.length === 0) {
-      return res.status(200).json({
-        status: 'ok',
-        data: null,
-        message: 'Schema pages detail is not an array or is empty'
-      });
+      if (!Array.isArray(parsed) || parsed.length === 0) return null;
+      return parsed;
     }
 
     // Normalize the search URL (strip query params, hash, trailing slashes)
@@ -133,23 +117,36 @@ export default async function handler(req, res) {
     const normalizedSearchUrl = normalizeUrl(searchUrl);
     const normalizedSearchLoose = normalizeLooseSlug(normalizedSearchUrl);
 
-    // Search through ALL pages (not truncated)
-    let pageData = pagesDetail.find(p => {
-      if (!p || !p.url) return false;
-      const pNormalized = normalizeUrl(p.url);
-      const exactMatch = pNormalized === normalizedSearchUrl;
-      const homepageMatch = (normalizedSearchUrl === '/' || normalizedSearchUrl === '') && (pNormalized === '/' || pNormalized === '');
-      return exactMatch || homepageMatch;
-    });
+    let pageData = null;
+    let matchedAudit = null;
 
-    // Fallback: loose slug match for variant/redirect slugs (e.g. "121" vs "1-2-1")
-    if (!pageData && normalizedSearchLoose) {
+    for (const record of audits) {
+      const pagesDetail = parsePagesDetail(record.schema_pages_detail);
+      if (!pagesDetail) continue;
+
+      // Exact path match first
       pageData = pagesDetail.find(p => {
         if (!p || !p.url) return false;
         const pNormalized = normalizeUrl(p.url);
-        const pLoose = normalizeLooseSlug(pNormalized);
-        return pLoose && pLoose === normalizedSearchLoose;
+        const exactMatch = pNormalized === normalizedSearchUrl;
+        const homepageMatch = (normalizedSearchUrl === '/' || normalizedSearchUrl === '') && (pNormalized === '/' || pNormalized === '');
+        return exactMatch || homepageMatch;
       });
+
+      // Fallback: loose slug match for variant/redirect slugs (e.g. "121" vs "1-2-1")
+      if (!pageData && normalizedSearchLoose) {
+        pageData = pagesDetail.find(p => {
+          if (!p || !p.url) return false;
+          const pNormalized = normalizeUrl(p.url);
+          const pLoose = normalizeLooseSlug(pNormalized);
+          return pLoose && pLoose === normalizedSearchLoose;
+        });
+      }
+
+      if (pageData) {
+        matchedAudit = record;
+        break;
+      }
     }
 
     if (!pageData) {
@@ -164,6 +161,8 @@ export default async function handler(req, res) {
     return res.status(200).json({
       status: 'ok',
       data: {
+        auditDate: matchedAudit?.audit_date || null,
+        auditUpdatedAt: matchedAudit?.updated_at || null,
         url: pageData.url,
         title: pageData.title || null,
         metaDescription: pageData.metaDescription || null,
