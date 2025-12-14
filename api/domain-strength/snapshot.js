@@ -134,6 +134,55 @@ async function insertRows(rows) {
   }
 }
 
+async function fetchExistingSnapshotRows(snapshotDate, engine, domains) {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !supabaseKey) return new Map();
+  const list = Array.isArray(domains) ? domains : [];
+  if (list.length === 0) return new Map();
+
+  const out = new Map(); // domain -> { score, band, snapshotDate }
+
+  // Chunk to avoid long URLs
+  const chunkSize = 100;
+  for (let i = 0; i < list.length; i += chunkSize) {
+    const chunk = list.slice(i, i + chunkSize);
+    const inList = `(${chunk.join(",")})`;
+    const url =
+      `${supabaseUrl}/rest/v1/domain_strength_snapshots` +
+      `?snapshot_date=eq.${encodeURIComponent(snapshotDate)}` +
+      `&engine=eq.${encodeURIComponent(engine)}` +
+      `&select=domain,score,band,snapshot_date` +
+      `&domain=in.${encodeURIComponent(inList)}` +
+      `&limit=5000`;
+
+    // eslint-disable-next-line no-await-in-loop
+    const resp = await fetch(url, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: supabaseKey,
+        Authorization: `Bearer ${supabaseKey}`,
+      },
+    });
+
+    if (!resp.ok) continue;
+    // eslint-disable-next-line no-await-in-loop
+    const rows = await resp.json();
+    if (!Array.isArray(rows)) continue;
+    for (const r of rows) {
+      const d = normalizeDomain(r?.domain);
+      if (!d) continue;
+      const score = typeof r?.score === "number" ? r.score : Number(r?.score);
+      const band = typeof r?.band === "string" ? r.band : null;
+      const snap = String(r?.snapshot_date || snapshotDate);
+      out.set(d, { score: Number.isFinite(score) ? score : null, band: band || null, snapshotDate: snap });
+    }
+  }
+
+  return out;
+}
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -150,6 +199,7 @@ export default async function handler(req, res) {
 
   const body = req.body && typeof req.body === "string" ? JSON.parse(req.body) : (req.body || {});
   const mode = (body.mode || "run") === "test" ? "test" : "run";
+  const force = body.force === true;
   const domains = normalizeDomainArray(body.domains);
 
   if (domains.length === 0) {
@@ -166,21 +216,13 @@ export default async function handler(req, res) {
 
   const caps = (await fetchCapsFromSupabase()) || { etvCap: 1_000_000, kwCap: 100_000 };
 
-  const labs = await fetchLabsDomainRankOverviewBatch(runDomains, { includeRaw: mode === "test" });
-  if (!labs.ok) {
-    return res.status(200).json({
-      status: "error",
-      message: labs.error || "Labs request failed",
-      snapshot_date,
-      engine,
-      domains_processed: runDomains.length,
-      mode,
-      meta: { generatedAt: new Date().toISOString(), source: "dataforseo_labs.domain_rank_overview" },
-    });
-  }
+  // Optimization: by default, don't refetch domains that already have today's snapshot row.
+  const existingByDomain =
+    mode === "run" && !force ? await fetchExistingSnapshotRows(snapshot_date, engine, runDomains) : new Map();
+  const domainsToFetch =
+    mode === "run" && !force ? runDomains.filter((d) => !existingByDomain.has(d)) : runDomains;
 
-  const byDomain = new Map(labs.data.map((r) => [r.domain, r]));
-  const results = [];
+  const computedByDomain = new Map();
   const insertPayload = [];
 
   function isNoDataError(msg) {
@@ -193,85 +235,127 @@ export default async function handler(req, res) {
     );
   }
 
-  for (const domain of runDomains) {
-    const r = byDomain.get(domain);
-    if (!r || !r.ok || !r.data) {
-      const errMsg = r?.error || "No data";
+  if (domainsToFetch.length > 0) {
+    const labs = await fetchLabsDomainRankOverviewBatch(domainsToFetch, { includeRaw: mode === "test" });
+    if (!labs.ok) {
+      return res.status(200).json({
+        status: "error",
+        message: labs.error || "Labs request failed",
+        snapshot_date,
+        engine,
+        domains_processed: runDomains.length,
+        mode,
+        meta: { generatedAt: new Date().toISOString(), source: "dataforseo_labs.domain_rank_overview" },
+      });
+    }
 
-      // Only treat true "no data" as a 0 score. If the API call failed (plan limits, auth, etc),
-      // don't write misleading "Very weak" rows.
-      if (!isNoDataError(errMsg)) {
-        results.push({
-          domain,
-          score: null,
-          band: null,
-          V: null,
-          B: null,
-          Q: null,
-          raw: null,
-          error: errMsg,
-        });
+    const byDomain = new Map(labs.data.map((r) => [r.domain, r]));
+
+    for (const domain of domainsToFetch) {
+      const r = byDomain.get(domain);
+      if (!r || !r.ok || !r.data) {
+        const errMsg = r?.error || "No data";
+
+        // Only treat true "no data" as a 0 score. If the API call failed (plan limits, auth, etc),
+        // don't write misleading "Very weak" rows.
+        if (!isNoDataError(errMsg)) {
+          computedByDomain.set(domain, {
+            domain,
+            score: null,
+            band: null,
+            V: null,
+            B: null,
+            Q: null,
+            raw: null,
+            error: errMsg,
+          });
+          continue;
+        }
+
+        const score = 0;
+        const band = "Very weak";
+        computedByDomain.set(domain, { domain, score, band, V: 0, B: 0, Q: 0, raw: null, error: errMsg });
+
+        if (mode === "run") {
+          insertPayload.push({
+            domain,
+            engine,
+            snapshot_date,
+            score,
+            band,
+            vis_component: 0,
+            breadth_component: 0,
+            quality_component: 0,
+            organic_etv_raw: 0,
+            organic_keywords_total_raw: 0,
+            top3_keywords_raw: null,
+            top10_keywords_raw: null,
+          });
+        }
         continue;
       }
 
-      const score = 0;
-      const band = "Very weak";
-      results.push({ domain, score, band, V: 0, B: 0, Q: 0, raw: null, error: errMsg });
+      const raw = {
+        etv: Number(r.data.etv) || 0,
+        keywordsTotal: Number(r.data.keywordsTotal) || 0,
+        top3: Number(r.data.top3) || 0,
+        top10: Number(r.data.top10) || 0,
+      };
+
+      const scored = computeDomainStrengthScore(
+        { etv: raw.etv, keywordsTotal: raw.keywordsTotal, top3: raw.top3, top10: raw.top10 },
+        { etvCap: caps.etvCap, kwCap: caps.kwCap }
+      );
+
+      computedByDomain.set(domain, {
+        domain,
+        score: scored.score,
+        band: scored.band,
+        V: scored.V,
+        B: scored.B,
+        Q: scored.Q,
+        raw,
+      });
 
       if (mode === "run") {
         insertPayload.push({
           domain,
           engine,
           snapshot_date,
-          score,
-          band,
-          vis_component: 0,
-          breadth_component: 0,
-          quality_component: 0,
-          organic_etv_raw: 0,
-          organic_keywords_total_raw: 0,
-          top3_keywords_raw: null,
-          top10_keywords_raw: null,
+          score: scored.score,
+          band: scored.band,
+          vis_component: scored.V,
+          breadth_component: scored.B,
+          quality_component: scored.Q,
+          organic_etv_raw: Math.round(raw.etv),
+          organic_keywords_total_raw: Math.round(raw.keywordsTotal),
+          top3_keywords_raw: raw.top3 || null,
+          top10_keywords_raw: raw.top10 || null,
         });
       }
-      continue;
-    }
-
-    const raw = {
-      etv: Number(r.data.etv) || 0,
-      keywordsTotal: Number(r.data.keywordsTotal) || 0,
-      top3: Number(r.data.top3) || 0,
-      top10: Number(r.data.top10) || 0,
-    };
-
-    const scored = computeDomainStrengthScore(
-      { etv: raw.etv, keywordsTotal: raw.keywordsTotal, top3: raw.top3, top10: raw.top10 },
-      { etvCap: caps.etvCap, kwCap: caps.kwCap }
-    );
-
-    results.push({ domain, score: scored.score, band: scored.band, V: scored.V, B: scored.B, Q: scored.Q, raw });
-
-    if (mode === "run") {
-      insertPayload.push({
-        domain,
-        engine,
-        snapshot_date,
-        score: scored.score,
-        band: scored.band,
-        vis_component: scored.V,
-        breadth_component: scored.B,
-        quality_component: scored.Q,
-        organic_etv_raw: Math.round(raw.etv),
-        organic_keywords_total_raw: Math.round(raw.keywordsTotal),
-        top3_keywords_raw: raw.top3 || null,
-        top10_keywords_raw: raw.top10 || null,
-      });
     }
   }
 
+  // Build response results in the same order as the input domains list
+  const results = runDomains.map((domain) => {
+    if (existingByDomain.has(domain)) {
+      const v = existingByDomain.get(domain);
+      return {
+        domain,
+        score: v?.score ?? null,
+        band: v?.band ?? null,
+        snapshotDate: v?.snapshotDate ?? snapshot_date,
+        reused: true,
+      };
+    }
+    const c = computedByDomain.get(domain);
+    return c ? { ...c, reused: false } : { domain, score: null, band: null, reused: false, error: "Not processed" };
+  });
+
   if (mode === "run") {
     try {
-      await deleteExistingRows(snapshot_date, engine, runDomains);
+      // Only overwrite the domains we actually computed this run.
+      await deleteExistingRows(snapshot_date, engine, domainsToFetch);
       await insertRows(insertPayload);
     } catch (e) {
       return res.status(500).json({
@@ -292,8 +376,11 @@ export default async function handler(req, res) {
     snapshot_date,
     engine,
     mode,
+    force,
     caps,
     domains_processed: runDomains.length,
+    fetched: domainsToFetch.length,
+    reused: runDomains.length - domainsToFetch.length,
     inserted: mode === "run" ? insertPayload.length : 0,
     results,
     meta: { generatedAt: new Date().toISOString(), source: "domain-strength.snapshot" },
