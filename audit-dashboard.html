@@ -5004,6 +5004,22 @@
             const minimalData = minimalJson?.data;
             if (minimalJson?.status === 'ok' && minimalData?.timestamp) {
               updateAuditTimestamp(minimalData.timestamp);
+              // IMPORTANT: also update cached local data, otherwise displayDashboard() will
+              // overwrite the UI with stale localStorageData.timestamp.
+              const normalizedTs = typeof minimalData.timestamp === 'number'
+                ? new Date(minimalData.timestamp).toISOString()
+                : minimalData.timestamp;
+              if (localStorageData && normalizedTs) {
+                localStorageData.timestamp = normalizedTs;
+                try {
+                  safeSetLocalStorage('last_audit_results', localStorageData);
+                } catch (e) {
+                  // Non-fatal
+                }
+              }
+              if (auditData && normalizedTs) {
+                auditData.timestamp = normalizedTs;
+              }
             }
           }
         } catch (e) {

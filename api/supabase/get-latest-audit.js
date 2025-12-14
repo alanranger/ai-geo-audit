@@ -69,7 +69,7 @@ export default async function handler(req, res) {
       // treating "refresh/partial" rows as a full audit run.
       const buildQueryUrl = (includeSchemaDetailFilter) => {
         const base = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.desc&limit=1`;
-        const schemaFilter = includeSchemaDetailFilter ? '&schema_pages_detail=not.is.null' : '';
+        const schemaFilter = includeSchemaDetailFilter ? '&schema_pages_detail=not.is.null&is_partial=eq.false' : '&is_partial=eq.false';
         if (isMinimalRequest) {
           const selectFields = 'audit_date,updated_at,visibility_score,content_schema_score,authority_score,local_entity_score,service_area_score';
           return `${base}${schemaFilter}&select=${encodeURIComponent(selectFields)}`;

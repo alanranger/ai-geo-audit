@@ -380,8 +380,51 @@ export default async function handler(req, res) {
       knowledge_panel_detected: localSignals?.data?.knowledgePanelDetected === true ? true : (localSignals?.data?.knowledgePanelDetected === false ? false : null),
       service_areas: Array.isArray(localSignals?.data?.serviceAreas) ? localSignals.data.serviceAreas : null, // Array of service area objects
       
+      // Partial write flags (set below after validation)
+      is_partial: false,
+      partial_reason: null,
+      
       updated_at: new Date().toISOString()
     };
+
+    // ---- Guardrails: prevent writing "null audits" and mark partials ----
+    // We consider a write "invalid" (reject) if it contains no meaningful audit payload.
+    const hasAnyPillarScore = [
+      auditRecord.visibility_score,
+      auditRecord.authority_score,
+      auditRecord.content_schema_score,
+      auditRecord.local_entity_score,
+      auditRecord.service_area_score
+    ].some(v => v !== null && v !== undefined);
+
+    const hasAnyHeavyPayload =
+      auditRecord.schema_pages_detail !== null ||
+      auditRecord.query_pages !== null ||
+      auditRecord.gsc_timeseries !== null ||
+      auditRecord.top_queries !== null;
+
+    if (!hasAnyPillarScore && !hasAnyHeavyPayload) {
+      console.warn('[Supabase Save] ✗ Rejecting audit write: no scores and no payload (would create null audit row)');
+      return res.status(400).json({
+        status: 'error',
+        message: 'Rejected audit save: payload contained no scores or audit data',
+        meta: { generatedAt: new Date().toISOString() }
+      });
+    }
+
+    // Mark partial if critical fields are missing (but still allow saving).
+    // Full audits should include schema_pages_detail + some GSC payload + core scores.
+    const partialReasons = [];
+    if (auditRecord.schema_pages_detail === null) partialReasons.push('schema_pages_detail missing');
+    if (auditRecord.gsc_timeseries === null) partialReasons.push('gsc_timeseries missing');
+    if (auditRecord.query_pages === null) partialReasons.push('query_pages missing');
+    if (!hasAnyPillarScore) partialReasons.push('pillar scores missing');
+
+    if (partialReasons.length > 0) {
+      auditRecord.is_partial = true;
+      auditRecord.partial_reason = partialReasons.join('; ');
+      console.warn('[Supabase Save] ⚠ Marking audit as partial:', auditRecord.partial_reason);
+    }
 
     // Calculate and log payload size before sending
     const payloadJson = JSON.stringify(auditRecord);
