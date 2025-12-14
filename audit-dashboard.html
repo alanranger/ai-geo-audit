@@ -24093,11 +24093,48 @@ Final Score: ${score}/100`;
       // Get schema coverage if available
       // Try to use the async getSchemaCoverageForUrl function which handles Supabase fallback
       let schemaCoverage = null;
+      let schemaSummary = null;
       try {
         // First try sync (localStorage) for immediate display
         const savedAudit = loadAuditResultsSync();
         if (savedAudit && savedAudit.schemaAudit && savedAudit.schemaAudit.data) {
           const schemaData = savedAudit.schemaAudit.data;
+          // Lightweight debug for the object used in this card
+          try {
+            const pagesWithSchemaCount = Array.isArray(schemaData.pagesWithSchema)
+              ? schemaData.pagesWithSchema.length
+              : (typeof schemaData.pagesWithSchema === 'number' ? schemaData.pagesWithSchema : 0);
+            const totalPagesCount = typeof schemaData.totalPages === 'number'
+              ? schemaData.totalPages
+              : (Array.isArray(schemaData.pages) ? schemaData.pages.length : 0);
+            const coveragePct = (typeof schemaData.coverage === 'number' && !Number.isNaN(schemaData.coverage))
+              ? schemaData.coverage
+              : (totalPagesCount > 0 ? (pagesWithSchemaCount / totalPagesCount) * 100 : 0);
+
+            const allTypes = new Set();
+            if (Array.isArray(schemaData.allDetectedTypes)) {
+              schemaData.allDetectedTypes.forEach(t => t && allTypes.add(t));
+            } else if (Array.isArray(schemaData.schemaTypes)) {
+              schemaData.schemaTypes.forEach(item => {
+                if (typeof item === 'string') allTypes.add(item);
+                else if (item && typeof item === 'object' && item.type) allTypes.add(item.type);
+              });
+            }
+
+            schemaSummary = {
+              pagesWithSchemaCount,
+              totalPagesCount,
+              coveragePct,
+              uniqueTypesCount: allTypes.size
+            };
+
+            debugLog(
+              `Ranking&AI schemaAuditForCard: totalPages=${totalPagesCount}, pagesWithSchema=${pagesWithSchemaCount}, coverage=${coveragePct.toFixed(1)}%, uniqueTypes=${allTypes.size}`,
+              'info'
+            );
+          } catch (e) {
+            // Ignore summary extraction errors; per-page logic may still work
+          }
           
           // PRIORITY: Check pages first (original array from schema audit API - most reliable)
           // Then check pagesWithSchema ONLY if it's an array (from Supabase schema_pages_detail)
@@ -24281,6 +24318,21 @@ Final Score: ${score}/100`;
           schemaInterpretation = 'Some schema types are present. Review the Content/Schema pillar for a complete assessment.';
         }
         html += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">${schemaInterpretation}</p>`;
+      } else if (schemaSummary && schemaSummary.totalPagesCount > 0) {
+        // We have schema audit snapshot, but no per-URL schemaTypes mapping available for this keyword URL
+        html += `<div style="margin-bottom: 0.75rem;">`;
+        html += `<div style="font-size: 0.875rem; color: #1e293b; margin-bottom: 0.5rem; font-weight: 500;">Site-wide schema snapshot (from latest audit):</div>`;
+        html += `<div style="display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.875rem; color: #1e293b;">`;
+        html += `<span>Coverage: <strong>${schemaSummary.coveragePct.toFixed(1)}%</strong></span>`;
+        html += `<span>·</span>`;
+        html += `<span>Pages with schema: <strong>${schemaSummary.pagesWithSchemaCount.toLocaleString()}</strong> / ${schemaSummary.totalPagesCount.toLocaleString()}</span>`;
+        if (schemaSummary.uniqueTypesCount > 0) {
+          html += `<span>·</span>`;
+          html += `<span>Types detected: <strong>${schemaSummary.uniqueTypesCount}</strong></span>`;
+        }
+        html += `</div>`;
+        html += `</div>`;
+        html += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">Per-page schema types aren’t available for this specific URL in the current snapshot. Run a fresh schema crawl (or include this URL in the crawl set) to get URL-level rich-result flags here.</p>`;
       } else {
         // Show loading state if async fetch is in progress, otherwise show fallback
         // The async fetch will update this section if data is found
