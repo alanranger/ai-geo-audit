@@ -2209,22 +2209,17 @@
       <!-- Overview Panel -->
       <section class="aigeo-panel is-active" data-panel="overview">
 
-      <div class="calculation-explanation collapsed" id="fivePillarFramework" style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; margin-bottom: 3rem; border-left: 4px solid var(--brand-orange);">
-        <div class="calculation-header" onclick="toggleFivePillarFramework()">
-          <h3 style="margin-top: 0; color: var(--brand-orange); display: inline-block;">Five-Pillar Framework</h3>
-          <span class="calculation-toggle" id="fivePillarToggle" style="float: right; margin-top: 0.5rem;">▶</span>
-        </div>
-        <div class="calculation-content collapsed" id="fivePillarContent" style="display: none;">
-          <p style="color: #555; line-height: 1.6; margin-bottom: 1rem; margin-top: 1rem;">
-            This audit analyzes <strong>www.alanranger.com</strong> as a global entity using a five-pillar framework to assess AI-powered search visibility, entity recognition, and SERP behavior. Each pillar is scored 0-100 and assigned a RAG (Red/Amber/Green) status based on performance thresholds.
-          </p>
-          <p style="color: #555; line-height: 1.6; margin-bottom: 0.5rem;">
-            <strong>Data Sources:</strong> Scores are calculated using data from Google Search Console API (impressions, clicks, position, queries), Google Business Profile API (ratings, reviews, locations, service areas), schema markup validation, backlink CSV upload, and Trustpilot reviews snapshot.
-          </p>
-          <p style="color: #555; line-height: 1.6; margin-bottom: 0;">
-            <strong>Score Calculation:</strong> The AIO score combines five weighted pillars: Authority (30%: Behaviour 40% + Ranking 20% + Backlinks 20% + Reviews 20%), Content/Schema (25%: Foundation schemas 30% + Rich Results 35% + Coverage 20% + Diversity 15%), Visibility (20%: average position mapping), Local Entity (15%: NAP consistency + knowledge panel + locations), and Service Area (10%: service areas count with NAP multiplier). Brand & Entity Overlay and AI Summary Likelihood are overlay metrics that do not affect the AIO score but provide additional insights. Scores are normalized to 0-100 scale with thresholds: Green (≥70), Amber (40-69), Red (&lt;40). Money pages behaviour is tracked separately and stored per audit, so you can see whether Authority improvements are coming from better CTR on commercial pages or from broader site-wide changes.
-          </p>
-        </div>
+      <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; margin-bottom: 3rem; border-left: 4px solid var(--brand-orange);">
+        <h3 style="margin-top: 0; color: var(--brand-orange);">Five-Pillar Framework</h3>
+        <p style="color: #555; line-height: 1.6; margin-bottom: 1rem;">
+          This audit analyzes <strong>www.alanranger.com</strong> as a global entity using a five-pillar framework to assess AI-powered search visibility, entity recognition, and SERP behavior. Each pillar is scored 0-100 and assigned a RAG (Red/Amber/Green) status based on performance thresholds.
+        </p>
+        <p style="color: #555; line-height: 1.6; margin-bottom: 0.5rem;">
+          <strong>Data Sources:</strong> Scores are calculated using data from Google Search Console API (impressions, clicks, position, queries), Google Business Profile API (ratings, reviews, locations, service areas), schema markup validation, backlink CSV upload, and Trustpilot reviews snapshot.
+        </p>
+        <p style="color: #555; line-height: 1.6; margin-bottom: 0;">
+          <strong>Score Calculation:</strong> The AIO score combines five weighted pillars: Authority (30%: Behaviour 40% + Ranking 20% + Backlinks 20% + Reviews 20%), Content/Schema (25%: Foundation schemas 30% + Rich Results 35% + Coverage 20% + Diversity 15%), Visibility (20%: average position mapping), Local Entity (15%: NAP consistency + knowledge panel + locations), and Service Area (10%: service areas count with NAP multiplier). Brand & Entity Overlay and AI Summary Likelihood are overlay metrics that do not affect the AIO score but provide additional insights. Scores are normalized to 0-100 scale with thresholds: Green (≥70), Amber (40-69), Red (&lt;40). Money pages behaviour is tracked separately and stored per audit, so you can see whether Authority improvements are coming from better CTR on commercial pages or from broader site-wide changes.
+        </p>
       </div>
 
       <div class="calculation-explanation collapsed" id="calculationExplanation">
@@ -3666,22 +3661,6 @@
       });
     }
 
-    function toggleFivePillarFramework() {
-      const content = document.getElementById('fivePillarContent');
-      const toggle = document.getElementById('fivePillarToggle');
-      if (content && toggle) {
-        if (content.classList.contains('collapsed')) {
-          content.classList.remove('collapsed');
-          content.style.display = 'block';
-          toggle.textContent = '▼';
-        } else {
-          content.classList.add('collapsed');
-          content.style.display = 'none';
-          toggle.textContent = '▶';
-        }
-      }
-    }
-    
     function toggleCalculationExplanation() {
       const explanation = document.getElementById('calculationExplanation');
       const content = document.getElementById('calculationContent');
@@ -3901,10 +3880,20 @@
       const savedAudit = loadAuditResultsSync();
       if (savedAudit && savedAudit.scores) {
         const savedDateRange = savedAudit.dateRange || oldDateRange;
+        // Always update if date range changed (even if going back to a previous range)
+        // This ensures charts refresh properly when switching between ranges
         if (savedDateRange !== days) {
           // Date range changed - update GSC data and recalculate scores
           debugLog(`Date range changed from ${savedDateRange} to ${days} days. Updating metrics...`, 'info');
           updateAuditForNewDateRange(days, savedAudit);
+        } else {
+          // Date range matches, but force refresh to ensure charts are updated
+          // This handles the case where user switches back to the same range
+          debugLog(`Date range is already ${days} days, but refreshing charts to ensure they're up to date...`, 'info');
+          // Force a refresh by calling displayDashboard with current data
+          if (savedAudit.scores && savedAudit.searchData) {
+            displayDashboard(savedAudit.scores, savedAudit.searchData, savedAudit.snippetReadiness, savedAudit.schemaAudit, savedAudit.localSignals);
+          }
         }
       }
     }
@@ -10102,18 +10091,11 @@ Final Score: ${score}/100`;
             }
             // Legacy fallback
             const components = scores.authorityComponents || {};
-            // Try to get backlinks from authorityBySegment if available, otherwise use components
-            let backlinksValue = 0;
-            if (authorityBySegment && authorityBySegment.all && authorityBySegment.all.backlinks !== undefined) {
-              backlinksValue = authorityBySegment.all.backlinks;
-            } else if (components.backlinks !== undefined && components.backlinks !== null) {
-              backlinksValue = components.backlinks;
-            }
             return {
               total: score,
               behaviour: components.behaviour || 0,
               ranking: components.ranking || 0,
-              backlinks: backlinksValue,
+              backlinks: components.backlinks || 0,
               reviews: components.reviews || 0
             };
           };
@@ -17592,7 +17574,7 @@ Final Score: ${score}/100`;
           today.setHours(0, 0, 0, 0);
           let todayStr = today.toISOString().split('T')[0];
           let latestAuditDateStr = todayStr; // Default to today if no audit found
-          let latestAuditDate = null; // Will be set when processing historical data
+          let latestAuditDate = null; // Will be set from historical data
           
           if (timeseries.length > 0) {
             // Fetch historical Content/Schema data from Supabase (async operation)
@@ -17609,7 +17591,6 @@ Final Score: ${score}/100`;
             historicalStartDate.setFullYear(historicalStartDate.getFullYear() - 2);
             const startDate = historicalStartDate.toISOString().split('T')[0]; // 2 years ago
             const endDate = todayStr; // Use today, not timeseries end date
-            // latestAuditDateStr is already declared in outer scope above
             
             debugLog(`Fetching Content/Schema history from Supabase: ${startDate} to ${endDate} (ALL historical data)`, 'info');
             debugLog(`Timeseries date range: ${timeseriesStartDate} to ${timeseriesEndDate}`, 'info');
@@ -17651,7 +17632,6 @@ Final Score: ${score}/100`;
                 // Create maps of dates to scores from Supabase
                 // Normalize dates to YYYY-MM-DD format (Supabase might return with timezone)
                 // latestAuditDate is already tracked from the deduplication loop above
-                let mappingCount = 0;
                 contentSchemaHistory.forEach(record => {
                   // Ensure date is in YYYY-MM-DD format (strip time if present)
                   // Handle both date strings and Date objects
@@ -17667,32 +17647,28 @@ Final Score: ${score}/100`;
                   }
                   
                   if (normalizedDate) {
-                    // Update latestAuditDate if this date is newer (should already be set, but ensure it's current)
+                    // Update latestAuditDate if this date is newer
                     if (!latestAuditDate || normalizedDate > latestAuditDate) {
                       latestAuditDate = normalizedDate;
                       latestAuditDateStr = normalizedDate;
                     }
-                    // Content/Schema data - check for valid score (> 0 or null/undefined)
-                    if (record.contentSchemaScore !== null && record.contentSchemaScore !== undefined && record.contentSchemaScore > 0) {
+                    // Content/Schema data
+                    if (record.contentSchemaScore !== null && record.contentSchemaScore !== undefined) {
                       contentSchemaMap.set(normalizedDate, record.contentSchemaScore);
-                      mappingCount++;
                       debugLog(`Mapped Content/Schema: ${normalizedDate} = ${record.contentSchemaScore}`, 'info');
                     }
                     // Business Profile data (Local Entity and Service Area)
-                    if (record.localEntityScore !== null && record.localEntityScore !== undefined && record.localEntityScore > 0) {
+                    if (record.localEntityScore !== null && record.localEntityScore !== undefined) {
                       localEntityMap.set(normalizedDate, record.localEntityScore);
-                      mappingCount++;
                       debugLog(`Mapped Local Entity: ${normalizedDate} = ${record.localEntityScore}`, 'info');
                     }
-                    if (record.serviceAreaScore !== null && record.serviceAreaScore !== undefined && record.serviceAreaScore > 0) {
+                    if (record.serviceAreaScore !== null && record.serviceAreaScore !== undefined) {
                       serviceAreaMap.set(normalizedDate, record.serviceAreaScore);
-                      mappingCount++;
                       debugLog(`Mapped Service Area: ${normalizedDate} = ${record.serviceAreaScore}`, 'info');
                     }
                     // Authority data (use stored Authority score if available, calculated with new formula)
-                    if (record.authorityScore !== null && record.authorityScore !== undefined && record.authorityScore > 0) {
+                    if (record.authorityScore !== null && record.authorityScore !== undefined) {
                       authorityMap.set(normalizedDate, record.authorityScore);
-                      mappingCount++;
                       debugLog(`Mapped Authority: ${normalizedDate} = ${record.authorityScore}`, 'info');
                     }
                     // Segmented Authority data (new: store segmented scores for historical tracking)
@@ -17702,22 +17678,17 @@ Final Score: ${score}/100`;
                       debugLog(`Mapped Authority by Segment: ${normalizedDate} = ${JSON.stringify(record.authorityBySegment)}`, 'info');
                     }
                     // Visibility data (use stored Visibility score from Supabase)
-                    if (record.visibilityScore !== null && record.visibilityScore !== undefined && record.visibilityScore > 0) {
+                    if (record.visibilityScore !== null && record.visibilityScore !== undefined) {
                       visibilityMap.set(normalizedDate, record.visibilityScore);
-                      mappingCount++;
                       debugLog(`Mapped Visibility: ${normalizedDate} = ${record.visibilityScore}`, 'info');
                     }
                     // Brand Overlay data (Phase 1: stored as brand_score)
-                    if (record.brandScore !== null && record.brandScore !== undefined && record.brandScore > 0) {
+                    if (record.brandScore !== null && record.brandScore !== undefined) {
                       brandOverlayMap.set(normalizedDate, record.brandScore);
-                      mappingCount++;
                       debugLog(`Mapped Brand Overlay: ${normalizedDate} = ${record.brandScore}`, 'info');
                     }
-                  } else {
-                    debugLog(`⚠ Skipping record with invalid date: ${JSON.stringify(record.date)}`, 'warn');
                   }
                 });
-                debugLog(`✓ Mapped ${mappingCount} total score entries from ${contentSchemaHistory.length} historical records`, 'info');
                 
                 const hasHistoricalData = contentSchemaHistory.length > 0;
                 if (hasHistoricalData) {
@@ -17734,7 +17705,21 @@ Final Score: ${score}/100`;
                   // Debug: Show sample records to understand structure
                   if (contentSchemaHistory.length > 0) {
                     const sampleRecord = contentSchemaHistory[0];
-                    debugLog(`[Sample Record] Keys: ${Object.keys(sampleRecord).join(', ')}, date: ${sampleRecord.date}, contentSchemaScore: ${sampleRecord.contentSchemaScore}, localEntityScore: ${sampleRecord.localEntityScore}`, 'info');
+                    debugLog(`[Sample Record] Keys: ${Object.keys(sampleRecord).join(', ')}, date: ${sampleRecord.date}, contentSchemaScore: ${sampleRecord.contentSchemaScore}, localEntityScore: ${sampleRecord.localEntityScore}, serviceAreaScore: ${sampleRecord.serviceAreaScore}`, 'info');
+                  }
+                  
+                  // Show latest dates for each pillar
+                  if (contentSchemaMap.size > 0) {
+                    const latestContentSchemaDate = Array.from(contentSchemaMap.keys()).sort().reverse()[0];
+                    debugLog(`[Supabase Data] Latest Content/Schema date: ${latestContentSchemaDate}`, 'info');
+                  }
+                  if (localEntityMap.size > 0) {
+                    const latestLocalEntityDate = Array.from(localEntityMap.keys()).sort().reverse()[0];
+                    debugLog(`[Supabase Data] Latest Local Entity date: ${latestLocalEntityDate}`, 'info');
+                  }
+                  if (serviceAreaMap.size > 0) {
+                    const latestServiceAreaDate = Array.from(serviceAreaMap.keys()).sort().reverse()[0];
+                    debugLog(`[Supabase Data] Latest Service Area date: ${latestServiceAreaDate}`, 'info');
                   }
                 } else {
                   debugLog(`No historical data found. Will use current scores for all points.`, 'info');
@@ -17804,11 +17789,6 @@ Final Score: ${score}/100`;
               debugLog('Trend chart: No Business Profile data available, will use derived calculation for dates without historical data', 'warn');
             }
             
-            // Ensure latestAuditDate is set if it wasn't set during mapping
-            if (!latestAuditDate && latestAuditDateStr) {
-              latestAuditDate = latestAuditDateStr;
-            }
-            
             // Calculate pillar scores for each timeseries point
             // For Local Entity and Service Area: use historical Business Profile data if available,
             // otherwise use calculated data from GSC (derived calculation)
@@ -17846,27 +17826,7 @@ Final Score: ${score}/100`;
                 const rankingScore = computeRankingScore(queriesForCalculation);
                 
                 // Use real backlink and review scores if available (for today's date)
-                // For historical dates, try to get from Supabase historical data
-                let backlinkScore = 0;
-                if (dateStr) {
-                  // Try to get historical backlink score from Supabase
-                  const historicalRecord = contentSchemaHistory.find(r => {
-                    const recordDate = typeof r.date === 'string' ? r.date.split('T')[0] : String(r.date).split('T')[0];
-                    return recordDate === dateStr;
-                  });
-                  if (historicalRecord && historicalRecord.authorityBacklinkScore !== null && historicalRecord.authorityBacklinkScore !== undefined) {
-                    backlinkScore = historicalRecord.authorityBacklinkScore;
-                    debugLog(`Authority: Using historical backlink score (${backlinkScore}) for ${dateStr} from Supabase`, 'info');
-                  } else if (backlinkMetrics) {
-                    backlinkScore = computeBacklinkScore(backlinkMetrics);
-                    debugLog(`Authority: Using current backlink score (${backlinkScore}) for ${dateStr}`, 'info');
-                  } else {
-                    backlinkScore = 0;
-                    debugLog(`Authority: No backlink data for ${dateStr}, using 0`, 'warn');
-                  }
-                } else if (backlinkMetrics) {
-                  backlinkScore = computeBacklinkScore(backlinkMetrics);
-                }
+                const backlinkScore = computeBacklinkScore(backlinkMetrics);
                 
                 // Get review data
                 const gbpRating = (localSignals && localSignals.status === 'ok' && localSignals.data) 
@@ -17903,18 +17863,7 @@ Final Score: ${score}/100`;
                 const estimatedShareScore = 20; // Conservative estimate for top-10 share
                 const estimatedRanking = estimatedRankingScore + estimatedShareScore;
                 
-                // Try to get historical backlink score from Supabase for this date
-                let backlinkScore = 50; // Default placeholder
-                if (dateStr) {
-                  const historicalRecord = contentSchemaHistory.find(r => {
-                    const recordDate = typeof r.date === 'string' ? r.date.split('T')[0] : String(r.date).split('T')[0];
-                    return recordDate === dateStr;
-                  });
-                  if (historicalRecord && historicalRecord.authorityBacklinkScore !== null && historicalRecord.authorityBacklinkScore !== undefined) {
-                    backlinkScore = historicalRecord.authorityBacklinkScore;
-                    debugLog(`Authority: Using historical backlink score (${backlinkScore}) for ${dateStr} from Supabase (simplified calc)`, 'info');
-                  }
-                }
+                const backlinkScore = 50; // Placeholder
                 const reviewScore = 50; // Placeholder
                 
                 authority = clampScore(
@@ -17923,7 +17872,7 @@ Final Score: ${score}/100`;
                   0.2 * backlinkScore +
                   0.2 * reviewScore
                 );
-                debugLog(`Authority: Using simplified calculation from aggregate metrics for ${dateStr || 'current'}: Estimated Behaviour=${estimatedBehaviourScore.toFixed(1)}, Estimated Ranking=${estimatedRanking.toFixed(1)}, Backlinks=${backlinkScore}, Final=${authority}`, 'info');
+                debugLog(`Authority: Using simplified calculation from aggregate metrics for ${dateStr || 'current'}: Estimated Behaviour=${estimatedBehaviourScore.toFixed(1)}, Estimated Ranking=${estimatedRanking.toFixed(1)}, Final=${authority}`, 'info');
               }
               
               // For Local Entity and Service Area:
@@ -18181,23 +18130,55 @@ Final Score: ${score}/100`;
               }
               
               // Check if we have real historical data for this date
+              // Content/Schema doesn't require GSC data, so should always have values
               const realScore = contentSchemaMap.get(pointDate);
               
-              if (realScore !== undefined && realScore !== null) {
+              if (realScore !== undefined && realScore !== null && realScore > 0) {
                 // We have real data for this date
                 contentSchemaData.push(realScore);
                 contentSchemaDataEstimated.push(null); // No estimated value
                 debugLog(`Content/Schema: Added ${realScore} for ${pointDate} from Supabase`, 'info');
-              } else if (isLatestAudit && currentContentSchema !== null && currentContentSchema !== undefined) {
-                // For latest audit date, use current Content/Schema score if available
-                contentSchemaData.push(currentContentSchema);
-                contentSchemaDataEstimated.push(null);
-                debugLog(`Content/Schema: Added ${currentContentSchema} for ${pointDate} from current audit (latest)`, 'info');
               } else {
-                // No real data for this date - use null (don't show estimated line)
-                contentSchemaData.push(null);
-                contentSchemaDataEstimated.push(null);
-                debugLog(`Content/Schema: No data for ${pointDate} (isLatestAudit=${isLatestAudit}, currentContentSchema=${currentContentSchema})`, 'info');
+                // For missing dates, use the most recent available score from the map
+                let latestAvailableContentSchema = null;
+                let latestAvailableDate = null;
+                contentSchemaMap.forEach((score, mapDate) => {
+                  if (mapDate <= pointDate && (latestAvailableDate === null || mapDate > latestAvailableDate)) {
+                    latestAvailableDate = mapDate;
+                    latestAvailableContentSchema = score;
+                  }
+                });
+                
+                // If no historical data found, use current score for latest audit date
+                if (latestAvailableContentSchema !== null && latestAvailableContentSchema !== undefined && latestAvailableContentSchema > 0) {
+                  contentSchemaData.push(latestAvailableContentSchema);
+                  contentSchemaDataEstimated.push(null);
+                  debugLog(`Content/Schema: Added ${latestAvailableContentSchema} for ${pointDate} from latest available (${latestAvailableDate})`, 'info');
+                } else if (isLatestAudit) {
+                  // For latest audit date, try multiple sources
+                  const savedAuditForContentSchema = loadAuditResultsSync();
+                  const savedContentSchema = savedAuditForContentSchema?.scores?.contentSchema;
+                  const scoreToUse = (currentContentSchema !== null && currentContentSchema !== undefined && currentContentSchema > 0)
+                    ? currentContentSchema
+                    : (savedContentSchema !== null && savedContentSchema !== undefined && savedContentSchema > 0)
+                      ? savedContentSchema
+                      : null;
+                  
+                  if (scoreToUse !== null) {
+                    contentSchemaData.push(scoreToUse);
+                    contentSchemaDataEstimated.push(null);
+                    debugLog(`Content/Schema: Added ${scoreToUse} for ${pointDate} from ${scoreToUse === currentContentSchema ? 'current audit' : 'saved audit'} (latest)`, 'info');
+                  } else {
+                    contentSchemaData.push(null);
+                    contentSchemaDataEstimated.push(null);
+                    debugLog(`Content/Schema: No valid score for ${pointDate} (isLatestAudit=${isLatestAudit}, currentContentSchema=${currentContentSchema}, savedContentSchema=${savedContentSchema})`, 'warn');
+                  }
+                } else {
+                  // No real data for this date - use null (don't show estimated line)
+                  contentSchemaData.push(null);
+                  contentSchemaDataEstimated.push(null);
+                  debugLog(`Content/Schema: No data for ${pointDate} (not latest audit, map has ${contentSchemaMap.size} entries)`, 'info');
+                }
               }
               
               // Brand Overlay data (ALWAYS prioritize historical data from Supabase first)
@@ -18392,6 +18373,7 @@ Final Score: ${score}/100`;
                 }
                 
                 // For Local Entity and Service Area, check if we have historical data from Supabase
+                // These don't require GSC data, so should always have values up to today
                 const historicalLocalEntity = localEntityMap.get(dateStr);
                 const historicalServiceArea = serviceAreaMap.get(dateStr);
                 
@@ -18992,6 +18974,13 @@ Final Score: ${score}/100`;
           debugLog(`[Trend Chart] Latest audit date: ${latestAuditDateStr}`, 'info');
           debugLog(`[Trend Chart] Data arrays length - Local Entity: ${localEntityData.length}, Service Area: ${serviceAreaData.length}, Authority: ${authorityData.length}, Visibility: ${visibilityData.length}, Content/Schema: ${contentSchemaData.length}`, 'info');
           
+          // Remove inline loading spinner if it exists
+          const existingLoading = trendChartContainer.querySelector('.trend-chart-loading');
+          if (existingLoading) {
+            existingLoading.remove();
+            debugLog('Removed inline trend chart loading spinner', 'info');
+          }
+          
           // Hide full-screen loading overlay
           hideFullScreenLoading();
           
@@ -19182,13 +19171,6 @@ Final Score: ${score}/100`;
           debugLog('✓ Trend chart created successfully', 'success');
           debugLog(`trendChart type after creation: ${typeof window.trendChart}`, 'info');
           debugLog(`trendChart instanceof Chart: ${window.trendChart instanceof Chart}`, 'info');
-          
-          // Ensure inline loading spinner is removed after successful chart creation
-          const loadingDivAfterChart = trendChartContainer.querySelector('.trend-chart-loading');
-          if (loadingDivAfterChart) {
-            loadingDivAfterChart.remove();
-            debugLog('Removed inline trend chart loading spinner after chart creation', 'info');
-          }
           debugLog(`Chart data points: Local Entity=${localEntityData.length}, Visibility=${visibilityData.length}, Authority=${authorityData.length}`, 'info');
           
           // Add event listeners for Authority mode toggle buttons (sync with KPI toggle)
@@ -19244,14 +19226,9 @@ Final Score: ${score}/100`;
           // Hide full-screen loading overlay
           hideFullScreenLoading();
           
-          // Remove inline loading spinner if it exists
+          // Show error message to user
           const trendCanvas = document.getElementById('trendChart');
           if (trendCanvas && trendCanvas.parentElement) {
-            const loadingDiv = trendCanvas.parentElement.querySelector('.trend-chart-loading');
-            if (loadingDiv) {
-              loadingDiv.remove();
-              debugLog('Removed inline trend chart loading spinner after error', 'info');
-            }
             // Remove any existing error messages
             const existingError = trendCanvas.parentElement.querySelector('.trend-chart-error');
             if (existingError) existingError.remove();
