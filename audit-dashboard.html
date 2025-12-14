@@ -2950,7 +2950,23 @@
                 Domains that appear repeatedly in AI citations and/or classic top-10 rankings. Competitive backdrop for <strong>Authority</strong> and <strong>Visibility</strong>.
               </p>
             </div>
-            <ul id="ranking-ai-competitors-list" class="ranking-ai-detail-list"></ul>
+            <div style="padding: 0 1.25rem 1.25rem 1.25rem;">
+              <div style="overflow-x: auto;">
+                <table id="ranking-ai-competitors-table" style="width: 100%; border-collapse: collapse;">
+                  <thead>
+                    <tr style="background: #f1f5f9;">
+                      <th style="text-align: left; padding: 0.75rem; font-size: 0.85rem; color: #475569; font-weight: 700;">Domain</th>
+                      <th style="text-align: right; padding: 0.75rem; font-size: 0.85rem; color: #475569; font-weight: 700;">AI citations</th>
+                      <th style="text-align: right; padding: 0.75rem; font-size: 0.85rem; color: #475569; font-weight: 700;">Domain Rank</th>
+                    </tr>
+                  </thead>
+                  <tbody id="ranking-ai-competitors-body"></tbody>
+                </table>
+              </div>
+              <p style="margin: 0.75rem 0 0 0; font-size: 0.8rem; color: #64748b;">
+                Domain Rank will be populated in the next enhancement.
+              </p>
+            </div>
           </div>
 
           <div class="card" id="ranking-ai-citations-card">
@@ -24530,9 +24546,25 @@ Final Score: ${score}/100`;
             li.textContent = "No competing domains recorded from AI citations for this keyword.";
             compList.appendChild(li);
           } else {
+            const makeDomainHref = (domain) => {
+              if (!domain) return null;
+              const d = String(domain).trim();
+              if (!d) return null;
+              if (d.startsWith('http://') || d.startsWith('https://')) return d;
+              return `https://${d}`;
+            };
             entries.forEach(([domain, count]) => {
               const li = document.createElement("li");
-              li.textContent = `${domain} – ${count} citation${count === 1 ? "" : "s"}`;
+              const a = document.createElement("a");
+              a.href = makeDomainHref(domain) || '#';
+              a.target = "_blank";
+              a.rel = "noopener noreferrer";
+              a.style.color = "#0284c7";
+              a.style.textDecoration = "none";
+              a.textContent = domain;
+              li.appendChild(a);
+              const suffix = document.createTextNode(` – ${count} citation${count === 1 ? "" : "s"}`);
+              li.appendChild(suffix);
               compList.appendChild(li);
             });
           }
@@ -24548,10 +24580,10 @@ Final Score: ${score}/100`;
     }
 
     function renderRankingAiCompetitors(rows) {
-      const list = document.getElementById("ranking-ai-competitors-list");
-      if (!list) return;
+      const tbody = document.getElementById("ranking-ai-competitors-body");
+      if (!tbody) return;
 
-      list.innerHTML = "";
+      tbody.innerHTML = "";
       const aggregate = {};
 
       rows.forEach(row => {
@@ -24563,16 +24595,64 @@ Final Score: ${score}/100`;
       const entries = Object.entries(aggregate).sort((a, b) => b[1] - a[1]).slice(0, 8);
 
       if (!entries.length) {
-        const li = document.createElement("li");
-        li.textContent = "No competitor citations recorded across tracked keywords.";
-        list.appendChild(li);
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 3;
+        td.style.padding = "1rem 0.75rem";
+        td.style.color = "#64748b";
+        td.style.fontSize = "0.875rem";
+        td.textContent = "No competitor citations recorded across tracked keywords.";
+        tr.appendChild(td);
+        tbody.appendChild(tr);
         return;
       }
 
+      const makeDomainHref = (domain) => {
+        if (!domain) return null;
+        const d = String(domain).trim();
+        if (!d) return null;
+        if (d.startsWith('http://') || d.startsWith('https://')) return d;
+        return `https://${d}`;
+      };
+
       entries.forEach(([domain, count]) => {
-        const li = document.createElement("li");
-        li.textContent = `${domain} – ${count} AI citation${count === 1 ? "" : "s"}`;
-        list.appendChild(li);
+        const tr = document.createElement("tr");
+        tr.style.borderTop = "1px solid #e2e8f0";
+
+        const tdDomain = document.createElement("td");
+        tdDomain.style.padding = "0.75rem";
+        tdDomain.style.fontSize = "0.9rem";
+        const href = makeDomainHref(domain);
+        if (href) {
+          const a = document.createElement("a");
+          a.href = href;
+          a.target = "_blank";
+          a.rel = "noopener noreferrer";
+          a.style.color = "#0284c7";
+          a.style.textDecoration = "none";
+          a.textContent = domain;
+          tdDomain.appendChild(a);
+        } else {
+          tdDomain.textContent = String(domain || '');
+        }
+
+        const tdCount = document.createElement("td");
+        tdCount.style.padding = "0.75rem";
+        tdCount.style.textAlign = "right";
+        tdCount.style.fontWeight = "700";
+        tdCount.style.color = "#1e293b";
+        tdCount.textContent = `${count}`;
+
+        const tdRank = document.createElement("td");
+        tdRank.style.padding = "0.75rem";
+        tdRank.style.textAlign = "right";
+        tdRank.style.color = "#64748b";
+        tdRank.textContent = "—";
+
+        tr.appendChild(tdDomain);
+        tr.appendChild(tdCount);
+        tr.appendChild(tdRank);
+        tbody.appendChild(tr);
       });
     }
 
