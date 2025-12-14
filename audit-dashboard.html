@@ -22517,7 +22517,7 @@ Final Score: ${score}/100`;
         // If still not found, check if pagesWithSchema is just a count (not an array)
         if (!pageData && allPages.length === 0 && typeof pagesWithSchema === 'number') {
           debugLog('[Schema Coverage] pagesWithSchema is a count in localStorage, trying Supabase...', 'warn');
-          const propertyUrl = savedAudit.propertyUrl || localStorage.getItem('gsc_property_url') || 'https://www.alanranger.com';
+          const propertyUrl = effectivePropertyUrl;
           try {
             const supabaseData = await fetchLatestAuditFromSupabase(propertyUrl);
             if (supabaseData && supabaseData.schemaAudit && supabaseData.schemaAudit.data) {
@@ -22540,6 +22540,34 @@ Final Score: ${score}/100`;
                   const homepageMatch = (normalizedUrl === '/' || normalizedUrl === '') && (pNormalized === '/' || pNormalized === '');
                   return exactMatch || homepageMatch;
                 });
+
+                // If still not found and we only have a truncated 200-page array, query full JSONB via API
+                if (!pageData && allPages.length === 200) {
+                  debugLog('[Schema Coverage] Still not found after Supabase load (200 items). Querying full data from API...', 'info');
+                  try {
+                    const urlHelper = window.apiUrl || ((path) => {
+                      const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || !window.location.hostname;
+                      const baseUrl = isLocal ? 'https://ai-geo-audit.vercel.app' : '';
+                      const cleanPath = path.startsWith('/') ? path : `/${path}`;
+                      return `${baseUrl}${cleanPath}`;
+                    });
+                    const apiUrl = urlHelper(`/api/supabase/get-schema-for-url?propertyUrl=${encodeURIComponent(propertyUrl)}&searchUrl=${encodeURIComponent(url)}`);
+                    const apiRes = await fetch(apiUrl);
+                    if (apiRes.ok) {
+                      const apiData = await apiRes.json();
+                      if (apiData.status === 'ok' && apiData.data) {
+                        pageData = apiData.data;
+                        debugLog('[Schema Coverage] ✅ Found page in full Supabase data via API', 'success');
+                      } else {
+                        debugLog('[Schema Coverage] API returned: ' + (apiData.message || 'no data'), 'warn');
+                      }
+                    } else {
+                      debugLog('[Schema Coverage] API request failed: ' + apiRes.status, 'warn');
+                    }
+                  } catch (apiErr) {
+                    debugLog('[Schema Coverage] API request error: ' + apiErr.message, 'warn');
+                  }
+                }
               }
             }
           } catch (e) {
