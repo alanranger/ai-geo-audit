@@ -2208,28 +2208,6 @@
 
       <!-- Overview Panel -->
       <section class="aigeo-panel is-active" data-panel="overview">
-      <!-- Date Range Selector -->
-      <div class="config-panel" style="margin-bottom: 2rem;">
-        <div class="form-group">
-          <label for="dateRange">Date Range</label>
-          <div class="date-range-selector">
-            <button class="date-range-btn active" onclick="setDateRange(30)" data-days="30" title="Analyze search performance data from the last 30 days">Last 30 Days</button>
-            <button class="date-range-btn" onclick="setDateRange(60)" data-days="60" title="Analyze search performance data from the last 60 days">Last 60 Days</button>
-            <button class="date-range-btn" onclick="setDateRange(90)" data-days="90" title="Analyze search performance data from the last 90 days">Last 90 Days</button>
-            <button class="date-range-btn" onclick="setDateRange(120)" data-days="120" title="Analyze search performance data from the last 120 days">Last 120 Days</button>
-            <button class="date-range-btn" onclick="setDateRange(180)" data-days="180" title="Analyze search performance data from the last 6 months (180 days)">Last 6 Months</button>
-            <button class="date-range-btn" onclick="setDateRange(365)" data-days="365" title="Analyze search performance data from the last 12 months (365 days)">Last 12 Months</button>
-            <button class="date-range-btn" onclick="setDateRange(540)" data-days="540" title="Analyze search performance data from the last 18 months (540 days)">Last 18 Months</button>
-            <button class="date-range-btn" onclick="showCustomDateRange()" id="customDateBtn" title="Set a custom date range for analysis (enter number of days)">Custom</button>
-        </div>
-          <input type="number" id="dateRange" value="30" min="1" style="display: none;">
-          <div id="customDateRange" style="display: none; margin-top: 0.5rem;">
-            <input type="number" id="customDays" placeholder="Enter days" min="1" style="width: 150px; padding: 0.5rem; border: 2px solid #e2e8f0; border-radius: 6px;">
-            <button class="btn btn-small" onclick="applyCustomDateRange()" style="margin-left: 0.5rem; padding: 0.5rem 1rem;" title="Apply the custom date range you entered">Apply</button>
-      </div>
-          <div class="help-text">Analysis period for historical data</div>
-      </div>
-    </div>
 
       <div class="calculation-explanation collapsed" id="fivePillarFramework" style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; margin-bottom: 3rem; border-left: 4px solid var(--brand-orange);">
         <div class="calculation-header" onclick="toggleFivePillarFramework()">
@@ -2474,6 +2452,29 @@
           </div>
         </div>
       </div>
+
+      <!-- Date Range Selector -->
+      <div class="config-panel" style="margin-bottom: 2rem; background: #f8f9fa; padding: 1.5rem; border-radius: 8px; border: 1px solid #e2e8f0;">
+        <div class="form-group">
+          <label for="dateRange">Date Range</label>
+          <div class="date-range-selector">
+            <button class="date-range-btn active" onclick="setDateRange(30)" data-days="30" title="Analyze search performance data from the last 30 days">Last 30 Days</button>
+            <button class="date-range-btn" onclick="setDateRange(60)" data-days="60" title="Analyze search performance data from the last 60 days">Last 60 Days</button>
+            <button class="date-range-btn" onclick="setDateRange(90)" data-days="90" title="Analyze search performance data from the last 90 days">Last 90 Days</button>
+            <button class="date-range-btn" onclick="setDateRange(120)" data-days="120" title="Analyze search performance data from the last 120 days">Last 120 Days</button>
+            <button class="date-range-btn" onclick="setDateRange(180)" data-days="180" title="Analyze search performance data from the last 6 months (180 days)">Last 6 Months</button>
+            <button class="date-range-btn" onclick="setDateRange(365)" data-days="365" title="Analyze search performance data from the last 12 months (365 days)">Last 12 Months</button>
+            <button class="date-range-btn" onclick="setDateRange(540)" data-days="540" title="Analyze search performance data from the last 18 months (540 days)">Last 18 Months</button>
+            <button class="date-range-btn" onclick="showCustomDateRange()" id="customDateBtn" title="Set a custom date range for analysis (enter number of days)">Custom</button>
+        </div>
+          <input type="number" id="dateRange" value="30" min="1" style="display: none;">
+          <div id="customDateRange" style="display: none; margin-top: 0.5rem;">
+            <input type="number" id="customDays" placeholder="Enter days" min="1" style="width: 150px; padding: 0.5rem; border: 2px solid #e2e8f0; border-radius: 6px;">
+            <button class="btn btn-small" onclick="applyCustomDateRange()" style="margin-left: 0.5rem; padding: 0.5rem 1rem;" title="Apply the custom date range you entered">Apply</button>
+      </div>
+          <div class="help-text">Analysis period for historical data</div>
+      </div>
+    </div>
 
       <div class="dashboard-grid" id="pillarCards"></div>
 
@@ -10101,11 +10102,18 @@ Final Score: ${score}/100`;
             }
             // Legacy fallback
             const components = scores.authorityComponents || {};
+            // Try to get backlinks from authorityBySegment if available, otherwise use components
+            let backlinksValue = 0;
+            if (authorityBySegment && authorityBySegment.all && authorityBySegment.all.backlinks !== undefined) {
+              backlinksValue = authorityBySegment.all.backlinks;
+            } else if (components.backlinks !== undefined && components.backlinks !== null) {
+              backlinksValue = components.backlinks;
+            }
             return {
               total: score,
               behaviour: components.behaviour || 0,
               ranking: components.ranking || 0,
-              backlinks: components.backlinks || 0,
+              backlinks: backlinksValue,
               reviews: components.reviews || 0
             };
           };
@@ -17579,11 +17587,12 @@ Final Score: ${score}/100`;
           const currentContentSchema = scores.contentSchema || 0;
           const currentBrandOverlay = scores.brandOverlay?.score || null;
           
-          // Declare latestAuditDateStr in outer scope so it's accessible in timeseries.forEach
+          // Declare latestAuditDateStr and latestAuditDate in outer scope so they're accessible in timeseries.forEach
           let today = new Date();
           today.setHours(0, 0, 0, 0);
           let todayStr = today.toISOString().split('T')[0];
           let latestAuditDateStr = todayStr; // Default to today if no audit found
+          let latestAuditDate = null; // Will be set when processing historical data
           
           if (timeseries.length > 0) {
             // Fetch historical Content/Schema data from Supabase (async operation)
@@ -17793,6 +17802,11 @@ Final Score: ${score}/100`;
               currentLocalEntity = null;
               currentServiceArea = null;
               debugLog('Trend chart: No Business Profile data available, will use derived calculation for dates without historical data', 'warn');
+            }
+            
+            // Ensure latestAuditDate is set if it wasn't set during mapping
+            if (!latestAuditDate && latestAuditDateStr) {
+              latestAuditDate = latestAuditDateStr;
             }
             
             // Calculate pillar scores for each timeseries point
@@ -19168,6 +19182,13 @@ Final Score: ${score}/100`;
           debugLog('✓ Trend chart created successfully', 'success');
           debugLog(`trendChart type after creation: ${typeof window.trendChart}`, 'info');
           debugLog(`trendChart instanceof Chart: ${window.trendChart instanceof Chart}`, 'info');
+          
+          // Ensure inline loading spinner is removed after successful chart creation
+          const loadingDivAfterChart = trendChartContainer.querySelector('.trend-chart-loading');
+          if (loadingDivAfterChart) {
+            loadingDivAfterChart.remove();
+            debugLog('Removed inline trend chart loading spinner after chart creation', 'info');
+          }
           debugLog(`Chart data points: Local Entity=${localEntityData.length}, Visibility=${visibilityData.length}, Authority=${authorityData.length}`, 'info');
           
           // Add event listeners for Authority mode toggle buttons (sync with KPI toggle)
@@ -19223,9 +19244,14 @@ Final Score: ${score}/100`;
           // Hide full-screen loading overlay
           hideFullScreenLoading();
           
-          // Show error message to user
+          // Remove inline loading spinner if it exists
           const trendCanvas = document.getElementById('trendChart');
           if (trendCanvas && trendCanvas.parentElement) {
+            const loadingDiv = trendCanvas.parentElement.querySelector('.trend-chart-loading');
+            if (loadingDiv) {
+              loadingDiv.remove();
+              debugLog('Removed inline trend chart loading spinner after error', 'info');
+            }
             // Remove any existing error messages
             const existingError = trendCanvas.parentElement.querySelector('.trend-chart-error');
             if (existingError) existingError.remove();
