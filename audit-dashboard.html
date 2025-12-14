@@ -17857,8 +17857,20 @@ Final Score: ${score}/100`;
                 const behaviourScore = computeBehaviourScore(queriesForCalculation);
                 const rankingScore = computeRankingScore(queriesForCalculation);
                 
-                // Use real backlink and review scores if available (for today's date)
-                const backlinkScore = computeBacklinkScore(backlinkMetrics);
+                // Use real backlink score if available
+                // For historical dates, check if we have stored backlink score from Supabase
+                let backlinkScore = 0;
+                if (dateStr && authorityBacklinkMap && authorityBacklinkMap.has(dateStr)) {
+                  // Use stored backlink score from Supabase for this historical date
+                  backlinkScore = authorityBacklinkMap.get(dateStr);
+                  debugLog(`Using stored backlink score (${backlinkScore}) for ${dateStr} from Supabase`, 'info');
+                } else if (backlinkMetrics) {
+                  // For today's date or if no historical data, calculate from current backlink metrics
+                  backlinkScore = computeBacklinkScore(backlinkMetrics);
+                  debugLog(`Calculated backlink score (${backlinkScore}) for ${dateStr || 'current'} from backlinkMetrics`, 'info');
+                } else {
+                  debugLog(`No backlink data available for ${dateStr || 'current'}`, 'warn');
+                }
                 
                 // Get review data
                 const gbpRating = (localSignals && localSignals.status === 'ok' && localSignals.data) 
@@ -17886,6 +17898,16 @@ Final Score: ${score}/100`;
                 debugLog(`Authority: Calculated from topQueries for ${dateStr || 'current'}: Behaviour=${behaviourScore.toFixed(1)}, Ranking=${rankingScore.toFixed(1)}, Backlinks=${backlinkScore}, Reviews=${reviewScore}, Final=${authority}`, 'info');
               } else {
                 // Fallback: Simplified Authority calculation from aggregate metrics
+                // For historical dates, try to use stored component scores from Supabase
+                let historicalBacklinkScore = null;
+                let historicalReviewScore = null;
+                if (dateStr && authorityBacklinkMap && authorityBacklinkMap.has(dateStr)) {
+                  historicalBacklinkScore = authorityBacklinkMap.get(dateStr);
+                  debugLog(`Using stored backlink score (${historicalBacklinkScore}) for ${dateStr} in simplified calculation`, 'info');
+                }
+                // Check for stored review score (if available in future)
+                // For now, estimate from aggregate metrics
+                
                 // Estimate Behaviour and Ranking scores from aggregate metrics
                 // Behaviour: Use aggregate CTR as proxy (simplified)
                 const estimatedBehaviourScore = Math.min(ctrScore * 0.7, 70); // Max 70 points
@@ -18018,13 +18040,14 @@ Final Score: ${score}/100`;
               // For latest audit date, use current topQueries, backlinkMetrics, and reviews for full calculation
               // For historical dates, pass null (will use simplified calculation)
               const topQueriesForDate = isLatestAudit ? currentTopQueries : null;
-              const backlinkMetricsForDate = isLatestAudit ? currentBacklinkMetrics : null;
+              // For historical dates, use stored backlink score from Supabase if available
+              const backlinkMetricsForDate = isLatestAudit ? currentBacklinkMetrics : (historicalBacklinkScore !== null && historicalBacklinkScore !== undefined ? { score: historicalBacklinkScore } : null);
               const localSignalsForDate = isLatestAudit ? currentLocalSignals : null;
               const siteReviewsForDate = isLatestAudit ? currentSiteReviews : null;
               
               // Pass date to calculatePillarFromMetrics so it can check for historical data
               // For today, pass topQueries and other data for full calculation
-              // For historical dates, pass null (will use simplified calculation)
+              // For historical dates, pass stored backlink score if available (will use simplified calculation)
               const pillarScores = calculatePillarFromMetrics(
                 point.position, 
                 point.ctr, 
