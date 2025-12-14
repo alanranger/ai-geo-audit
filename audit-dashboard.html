@@ -1171,6 +1171,66 @@
       display: block;
     }
 
+    /* ============================================
+       AI Sources & Influence tab: layout styling
+       ============================================ */
+    .aigeo-panel[data-panel="ai-sources"] .ai-sources-explainer {
+      background: #fffbeb;
+      border-left: 4px solid #f59e0b;
+    }
+
+    .aigeo-panel[data-panel="ai-sources"] .ai-sources-explainer .card-header {
+      padding: 1.25rem 1.5rem 0.75rem 1.5rem;
+    }
+
+    .aigeo-panel[data-panel="ai-sources"] .ai-sources-explainer .card-header h3 {
+      color: #92400e;
+    }
+
+    .aigeo-panel[data-panel="ai-sources"] .ai-sources-explainer .card-body {
+      padding: 1.25rem 1.5rem;
+      color: #78350f;
+    }
+
+    .aigeo-panel[data-panel="ai-sources"] .ai-sources-explainer ul {
+      padding-left: 1.5rem;
+      margin: 0.25rem 0;
+    }
+
+    .aigeo-panel[data-panel="ai-sources"] .ai-sources-domain-table-card {
+      background: rgba(204, 255, 255, 0.15);
+      border-left: 4px solid #CCFFFF;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    .aigeo-panel[data-panel="ai-sources"] .ai-sources-domain-table-card .card-header {
+      background: transparent;
+    }
+
+    /* AI sources table: alignment + hover highlight */
+    #ai-sources-table th:nth-child(1),
+    #ai-sources-table td:nth-child(1),
+    #ai-sources-table th:nth-child(2),
+    #ai-sources-table td:nth-child(2),
+    #ai-sources-table th:nth-child(6),
+    #ai-sources-table td:nth-child(6) {
+      text-align: left !important;
+    }
+
+    #ai-sources-table th:nth-child(3),
+    #ai-sources-table td:nth-child(3),
+    #ai-sources-table th:nth-child(4),
+    #ai-sources-table td:nth-child(4),
+    #ai-sources-table th:nth-child(5),
+    #ai-sources-table td:nth-child(5) {
+      text-align: right !important;
+    }
+
+    #ai-sources-table tbody tr:hover td {
+      background: #eff6ff !important;
+    }
+
     /* Tile details styling */
     .tile-details-title {
       font-size: 0.9rem;
@@ -3036,15 +3096,15 @@
             </div>
 
             <!-- Right: AI Influence Summary -->
-            <div class="card" style="background: #fef3c7; border-left: 4px solid #f59e0b;">
+            <div class="card ai-sources-explainer">
               <div class="card-header">
-                <h3 style="color: #92400e;">How to read this tab</h3>
+                <h3>How to read this tab</h3>
               </div>
-              <div class="card-body" style="color: #78350f;">
+              <div class="card-body">
                 <p style="line-height: 1.6; margin-bottom: 0.75rem;">
                   This view shows the domains AI relies on most often when answering your tracked keywords.
                 </p>
-                <ul style="line-height: 1.8; padding-left: 1.5rem;">
+                <ul style="line-height: 1.8;">
                   <li>Repeated citations from the same domain signal trusted sources in your niche.</li>
                   <li>Directories and review platforms highlight places where you need consistent NAP, reviews and listings.</li>
                   <li>Course marketplaces and education sites show where learners are discovering alternatives to your workshops and lessons.</li>
@@ -3058,7 +3118,7 @@
         </div>
 
           <!-- Domain Influence Table -->
-          <div class="card">
+          <div class="card ai-sources-domain-table-card">
             <div class="card-header">
               <h3>Domain Influence Table</h3>
               <div style="display: flex; gap: 1rem; margin-top: 1rem; flex-wrap: wrap;">
@@ -25331,27 +25391,72 @@ Final Score: ${score}/100`;
         const keywordsWithSelfCitations = selfDomain ? selfDomain.keyword_count : 0;
         const externalDomains = domainStats.filter(d => !d.is_self).length;
 
-        let html = `
-          <div class="metric-pill">
-            <div class="metric-pill-value">${selfCitations}/${totalCitations}</div>
-            <div class="metric-pill-label">Your AI citations</div>
-            <div class="metric-pill-status">Share of AI citations that reference your site across tracked keywords.</div>
+        const pctKeywordsWithCitations = totalKeywords > 0
+          ? (keywordsWithSelfCitations / totalKeywords) * 100
+          : 0;
+
+        const ragForShare = () => {
+          if (totalCitations <= 0) return 'neutral';
+          if (selfShare >= 20) return 'green';
+          if (selfShare >= 10) return 'amber';
+          return 'red';
+        };
+
+        const ragForKeywordCoverage = () => {
+          if (totalKeywords <= 0) return 'neutral';
+          if (pctKeywordsWithCitations >= 60) return 'green';
+          if (pctKeywordsWithCitations >= 30) return 'amber';
+          return 'red';
+        };
+
+        const statusForRag = (rag) => {
+          if (rag === 'green') return 'Strong';
+          if (rag === 'amber') return 'Moderate';
+          if (rag === 'red') return 'Weak';
+          return 'Info';
+        };
+
+        const makePill = ({ rag, value, label, status, footer }) => `
+          <div class="metric-pill metric-pill--${rag}">
+            <div class="metric-pill-value">${value}</div>
+            <div class="metric-pill-label">${label}</div>
+            <div class="metric-pill-status">${status}</div>
+            <div class="metric-pill-footer">${footer}</div>
           </div>
-          <div class="metric-pill">
-            <div class="metric-pill-value">${externalDomains}</div>
-            <div class="metric-pill-label">Top external domains</div>
-            <div class="metric-pill-status">Domains most often cited alongside you in AI answers.</div>
-          </div>
-          <div class="metric-pill">
-            <div class="metric-pill-value">${keywordsWithSelfCitations}/${totalKeywords}</div>
-            <div class="metric-pill-label">Keywords with your citations</div>
-            <div class="metric-pill-status">How often AI can already see your site as a source for your tracked queries.</div>
-          </div>
-          <div class="metric-pill">
-            <div class="metric-pill-value">${selfShare.toFixed(1)}%</div>
-            <div class="metric-pill-label">Your share of AI citations</div>
-            <div class="metric-pill-status">Higher values mean AI relies more on your content instead of competitors or directories.</div>
-          </div>
+        `;
+
+        const shareRag = ragForShare();
+        const coverageRag = ragForKeywordCoverage();
+
+        const html = `
+          ${makePill({
+            rag: shareRag,
+            value: `${selfCitations}/${totalCitations}`,
+            label: 'Your AI citations',
+            status: statusForRag(shareRag),
+            footer: 'Share of AI citations that reference your site across tracked keywords.'
+          })}
+          ${makePill({
+            rag: 'neutral',
+            value: `${externalDomains}`,
+            label: 'Top external domains',
+            status: 'Info',
+            footer: 'Domains most often cited alongside you in AI answers.'
+          })}
+          ${makePill({
+            rag: coverageRag,
+            value: `${keywordsWithSelfCitations}/${totalKeywords}`,
+            label: 'Keywords with your citations',
+            status: statusForRag(coverageRag),
+            footer: 'How often AI can already see your site as a source for your tracked queries.'
+          })}
+          ${makePill({
+            rag: shareRag,
+            value: `${selfShare.toFixed(1)}%`,
+            label: 'Your share of AI citations',
+            status: statusForRag(shareRag),
+            footer: 'Higher values mean AI relies more on your content instead of competitors or directories.'
+          })}
         `;
 
         tilesContainer.innerHTML = html;
