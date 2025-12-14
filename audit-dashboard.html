@@ -13007,8 +13007,11 @@ Final Score: ${score}/100`;
         // Calculate behaviour score for filtered pages
         const queryPages = window.currentQueryPages || [];
         const filteredRows = filteredMetrics.rows || [];
-        const filteredBehaviour = window.computeMoneyPagesBehaviour ? 
+        let filteredBehaviour = window.computeMoneyPagesBehaviour ? 
           window.computeMoneyPagesBehaviour(queryPages, filteredRows, true) : null;
+        if (!filteredBehaviour || !filteredBehaviour.impressions) {
+          filteredBehaviour = computeMoneyPagesBehaviourFromPageAggregates(filteredRows);
+        }
         
         // Update summary box
         const overview = filteredMetrics.overview || {};
@@ -14198,13 +14201,59 @@ Final Score: ${score}/100`;
       // Make renderMoneyPagesTable globally available
       window.renderMoneyPagesTable = renderMoneyPagesTable;
       
+      function applyMoneyPagesTopLevelSubSegmentFilter(value) {
+        const subSeg = value || 'ALL';
+        debugLog(`🔄 Top-level filter changed to: ${subSeg}`, 'info');
+        window.moneyPagesSubSegmentFilter = subSeg;
+
+        // Keep table filter in sync (if present)
+        const tableSubSegFilter = document.getElementById('money-pages-filter-subsegment');
+        if (tableSubSegFilter && tableSubSegFilter.value !== subSeg) {
+          tableSubSegFilter.value = subSeg;
+        }
+
+        const moneyPagesMetrics = window.currentMoneyPagesMetrics || window.moneyPagesMetrics;
+        if (!moneyPagesMetrics) {
+          debugLog('⚠ Top-level filter: No moneyPagesMetrics available', 'warn');
+          return;
+        }
+
+        if (typeof updateMoneyPagesSummaryMetrics === 'function') {
+          updateMoneyPagesSummaryMetrics(moneyPagesMetrics);
+        }
+
+        const filteredMetrics = typeof getFilteredMoneyPagesMetrics === 'function'
+          ? getFilteredMoneyPagesMetrics(moneyPagesMetrics)
+          : null;
+        const filteredRows = filteredMetrics?.rows || [];
+        const queryPages = window.currentQueryPages || null;
+
+        if (typeof renderMoneyPagesBehaviourKpis === 'function') {
+          const behaviour = (queryPages && typeof window.computeMoneyPagesBehaviour === 'function')
+            ? window.computeMoneyPagesBehaviour(queryPages, filteredRows, true)
+            : null;
+          renderMoneyPagesBehaviourKpis(behaviour, filteredMetrics || moneyPagesMetrics, queryPages);
+        }
+
+        if (typeof updateMoneyPagesChartSummary === 'function' && filteredMetrics) {
+          updateMoneyPagesChartSummary(filteredMetrics);
+        }
+
+        if (typeof renderMoneyPagesCategoryChart === 'function') {
+          renderMoneyPagesCategoryChart(moneyPagesMetrics, 0);
+        }
+      }
+
       // Wire up top-level filter (independent of table section)
-      function wireTopLevelFilter() {
+      function wireTopLevelFilter(retryCount = 0) {
         setTimeout(() => {
           const topLevelFilterEl = document.getElementById('money-top-level-filter-subsegment');
           
           if (!topLevelFilterEl) {
-            debugLog('⚠ Top-level filter not found (may not be rendered yet)', 'warn');
+            debugLog(`⚠ Top-level filter not found (may not be rendered yet) (attempt ${retryCount + 1})`, 'warn');
+            if (retryCount < 10) {
+              setTimeout(() => wireTopLevelFilter(retryCount + 1), 200);
+            }
             return;
           }
           
@@ -14219,72 +14268,7 @@ Final Score: ${score}/100`;
           debugLog(`✓ Top-level filter found and initialized to: ${currentSubSeg}`, 'success');
           
           // When top-level filter changes, update all sections
-          newFilter.addEventListener('change', () => {
-            const value = newFilter.value;
-            debugLog(`🔄 Top-level filter changed to: ${value}`, 'info');
-            
-            // Update global filter state
-            window.moneyPagesSubSegmentFilter = value;
-            
-            // Update table filter to match (if it exists)
-            const tableSubSegFilter = document.getElementById('money-pages-filter-subsegment');
-            if (tableSubSegFilter && tableSubSegFilter.value !== value) {
-              tableSubSegFilter.value = value;
-            }
-            
-            // Get data from global storage
-            const moneyPagesMetrics = window.currentMoneyPagesMetrics || window.moneyPagesMetrics;
-            const queryPages = window.currentQueryPages || null;
-            
-            if (!moneyPagesMetrics) {
-              debugLog('⚠ Top-level filter: No moneyPagesMetrics available', 'warn');
-              return;
-            }
-            
-            debugLog(`✓ Top-level filter: Found moneyPagesMetrics with ${moneyPagesMetrics.rows?.length || 0} rows`, 'success');
-            
-            // Update summary metrics (Performance Metrics section)
-            if (typeof updateMoneyPagesSummaryMetrics === 'function') {
-              debugLog(`🔄 Updating Performance Metrics with filter: ${value}`, 'info');
-              updateMoneyPagesSummaryMetrics(moneyPagesMetrics);
-            } else {
-              debugLog('⚠ updateMoneyPagesSummaryMetrics function not found', 'warn');
-            }
-            
-            // Update behaviour section
-            if (typeof getFilteredMoneyPagesMetrics === 'function') {
-              const filteredMetrics = getFilteredMoneyPagesMetrics(moneyPagesMetrics);
-              debugLog(`🔄 Filtered metrics: ${filteredMetrics?.rows?.length || 0} rows`, 'info');
-              
-              if (filteredMetrics) {
-                const filteredRows = filteredMetrics.rows || [];
-                
-                if (queryPages && typeof window.computeMoneyPagesBehaviour === 'function') {
-                  const filteredBehaviour = window.computeMoneyPagesBehaviour(queryPages, filteredRows, true);
-                  
-                  if (typeof renderMoneyPagesBehaviourKpis === 'function') {
-                    debugLog(`🔄 Updating Behaviour KPIs with filter: ${value}`, 'info');
-                    renderMoneyPagesBehaviourKpis(filteredBehaviour, filteredMetrics, queryPages);
-                  } else {
-                    debugLog('⚠ renderMoneyPagesBehaviourKpis function not found', 'warn');
-                  }
-                } else if (typeof renderMoneyPagesBehaviourKpis === 'function') {
-                  // Update with filtered metrics even if no queryPages
-                  renderMoneyPagesBehaviourKpis(null, filteredMetrics, null);
-                }
-              }
-            } else {
-              debugLog('⚠ getFilteredMoneyPagesMetrics function not found', 'warn');
-            }
-            
-            // Update Opportunity Mix chart
-            if (typeof renderMoneyPagesCategoryChart === 'function') {
-              debugLog(`🔄 Updating Opportunity Mix chart with filter: ${value}`, 'info');
-              renderMoneyPagesCategoryChart(moneyPagesMetrics, 0);
-            } else {
-              debugLog('⚠ renderMoneyPagesCategoryChart function not found', 'warn');
-            }
-          });
+          newFilter.addEventListener('change', () => applyMoneyPagesTopLevelSubSegmentFilter(newFilter.value));
           
           debugLog('✓ Top-level filter wired up successfully', 'success');
         }, 200);
@@ -15367,6 +15351,11 @@ Final Score: ${score}/100`;
           }, 50);
         } else {
           renderMoneyPagesSection(moneyPagesMetricsToRender || null);
+        }
+
+        // Ensure top-level filter is wired after any re-render of this section
+        if (typeof window.wireTopLevelFilter === 'function') {
+          setTimeout(() => window.wireTopLevelFilter(), 0);
         }
         
         // Phase: Render Money Pages Priority Matrix & Action List
