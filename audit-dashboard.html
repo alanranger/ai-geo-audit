@@ -4653,7 +4653,7 @@
     }
 
     // Save audit results to localStorage
-    function saveAuditResults(scores, searchData, snippetReadiness, schemaAudit, localSignals = null, siteReviews = null, backlinkMetrics = null) {
+    function saveAuditResults(scores, searchData, snippetReadiness, schemaAudit, localSignals = null, siteReviews = null, backlinkMetrics = null, preserveTimestamp = false) {
       try {
         const dateRange = parseInt(document.getElementById('dateRange')?.value) || 30;
         // Get property URL from input field or from searchData
@@ -4662,6 +4662,20 @@
                            searchData?.property_url ||
                            localStorage.getItem('gsc_property_url') ||
                            'https://www.alanranger.com'; // Fallback default
+        
+        // Get existing audit data to preserve timestamp if requested
+        let existingTimestamp = null;
+        if (preserveTimestamp) {
+          try {
+            const existing = localStorage.getItem('last_audit_results');
+            if (existing) {
+              const parsed = JSON.parse(existing);
+              existingTimestamp = parsed.timestamp;
+            }
+          } catch (e) {
+            // Ignore errors when reading existing data
+          }
+        }
         
         const auditData = {
           scores,
@@ -4673,7 +4687,7 @@
           backlinkMetrics, // Store backlink metrics data
           dateRange, // Store the date range used for this audit
           propertyUrl, // CRITICAL: Save property URL so we can fetch from Supabase later
-          timestamp: new Date().toISOString(),
+          timestamp: preserveTimestamp && existingTimestamp ? existingTimestamp : new Date().toISOString(),
           // Save Money Pages Priority Matrix data for persistence
           moneyPagePriorityData: window.moneyPagePriorityData || null,
           moneySegmentMetrics: window.moneySegmentMetrics || null
@@ -4821,6 +4835,7 @@
         debugLog(`Recalculated scores for ${newDateRange} days: ${JSON.stringify(scores)}`, 'info');
         
         // Update saved audit with new data
+        // Preserve the original audit timestamp - don't update it when changing date range
         const updatedAudit = {
           ...savedAudit,
           dateRange: newDateRange,
@@ -4828,7 +4843,7 @@
           scores: scores,
           snippetReadiness: snippetReadiness,
           localSignals: localSignals, // Store local signals for future use
-          timestamp: new Date().toISOString(),
+          timestamp: savedAudit.timestamp || new Date().toISOString(), // Preserve original timestamp
           // Preserve Money Pages Priority Matrix data if it exists
           moneyPagePriorityData: window.moneyPagePriorityData || savedAudit.moneyPagePriorityData || null,
           moneySegmentMetrics: window.moneySegmentMetrics || savedAudit.moneySegmentMetrics || null
@@ -4839,7 +4854,8 @@
         const normalizedSiteReviewsForLoad = getTrustpilotSnapshot(savedAudit.siteReviews || null);
         // Use backlinkMetrics from savedAudit (preserved from last audit)
         const preservedBacklinkMetrics = backlinkMetrics;
-        saveAuditResults(scores, searchData, snippetReadiness, savedAudit.schemaAudit, localSignals, normalizedSiteReviewsForLoad, preservedBacklinkMetrics);
+        // Pass preserveTimestamp=true to keep the original audit timestamp
+        saveAuditResults(scores, searchData, snippetReadiness, savedAudit.schemaAudit, localSignals, normalizedSiteReviewsForLoad, preservedBacklinkMetrics, true);
         safeSetLocalStorage('last_audit_results', updatedAudit);
         
         // Also save to Supabase for historical tracking
@@ -5500,11 +5516,15 @@
               }
               // Ensure timestamp is set from Supabase data (use timestamp if available, otherwise construct from auditDate)
               if (result.data.timestamp) {
-                // Timestamp is already set
+                // Convert to ISO string if it's a number (milliseconds since epoch)
+                if (typeof result.data.timestamp === 'number') {
+                  result.data.timestamp = new Date(result.data.timestamp).toISOString();
+                }
+                // Timestamp is already set (and now in ISO string format)
               } else if (result.data.auditDate) {
-                // Construct timestamp from auditDate (use current time as fallback for time component)
+                // Construct timestamp from auditDate (use noon as default time to avoid timezone issues)
                 const auditDateStr = result.data.auditDate;
-                result.data.timestamp = new Date(auditDateStr + 'T12:00:00').getTime();
+                result.data.timestamp = new Date(auditDateStr + 'T12:00:00').toISOString();
                 debugLog(`✓ Constructed timestamp from auditDate: ${auditDateStr}`, 'info');
               }
               // Update timestamp display immediately when Supabase data is loaded
