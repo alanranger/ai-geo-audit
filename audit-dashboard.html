@@ -3167,7 +3167,7 @@
                 </table>
               </div>
               <p style="margin: 0.75rem 0 0 0; font-size: 0.8rem; color: #64748b;">
-                Domain Rank will be populated in the next enhancement.
+                Domain Rank is sourced from your latest Domain Strength snapshot (0–100).
               </p>
             </div>
           </div>
@@ -24806,12 +24806,32 @@ Final Score: ${score}/100`;
               tdRank.style.textAlign = "right";
               tdRank.style.color = "#64748b";
               tdRank.textContent = "—";
+              tdRank.dataset.domain = normalizeDomainForStrength(domain);
 
               tr.appendChild(tdDomain);
               tr.appendChild(tdCount);
               tr.appendChild(tdRank);
               compTbody.appendChild(tr);
             });
+
+            // Fill Domain Rank column (per keyword) using latest domain_strength snapshots (read-only)
+            (async () => {
+              try {
+                const selfDomain = typeof getSelfDomainForDomainStrength === "function" ? getSelfDomainForDomainStrength() : "alanranger.com";
+                const domains = [
+                  selfDomain,
+                  ...entries.map(([d]) => d),
+                ].map(normalizeDomainForStrength).filter(Boolean);
+                const strengthByDomain = await fetchLatestDomainStrengthForDomains(domains);
+                compTbody.querySelectorAll("td[data-domain]").forEach((cell) => {
+                  const d = normalizeDomainForStrength(cell.dataset.domain || "");
+                  const strength = strengthByDomain[d] || null;
+                  cell.innerHTML = renderDomainRankCellHtml(strength);
+                });
+              } catch {
+                // fail silently
+              }
+            })();
           }
         }
       } else if (citationsEmpty) {
@@ -24822,6 +24842,98 @@ Final Score: ${score}/100`;
     // Keep renderRankingAiDetail as alias for backward compatibility
     function renderRankingAiDetail(row) {
       renderKeywordScorecard(row);
+    }
+
+    // ======================
+    // Domain Rank (Domain Strength snapshots) for Keyword tables
+    // ======================
+    const __domainStrengthLatestCache = new Map(); // domain -> { score, band, snapshotDate }
+
+    function normalizeDomainForStrength(input) {
+      const raw = String(input || "").trim().toLowerCase();
+      if (!raw) return "";
+      try {
+        if (raw.includes("://")) return new URL(raw).hostname.replace(/^www\./, "");
+      } catch {
+        // ignore
+      }
+      return raw.replace(/^www\./, "").split("/")[0];
+    }
+
+    function renderDomainStrengthBandPillOriginal(band) {
+      const label = String(band || "").trim();
+      if (!label) return "";
+      const key = typeof domainStrengthBandKey === "function" ? domainStrengthBandKey(label) : "na";
+      return `<span class="domain-strength-badge domain-strength-badge--${key}">${label}</span>`;
+    }
+
+    function renderDomainRankCellHtml(strength) {
+      if (!strength || typeof strength !== "object") {
+        return `<span title="No domain strength snapshot yet">—</span>`;
+      }
+      const score = typeof strength.score === "number" && isFinite(strength.score) ? strength.score : null;
+      const band = typeof strength.band === "string" ? strength.band : "";
+      if (score === null) {
+        return `<span title="No domain strength snapshot yet">—</span>`;
+      }
+      const pill = renderDomainStrengthBandPillOriginal(band);
+      const scoreRounded = Math.round(score);
+      return `<div style="display:flex; justify-content:flex-end; gap:0.5rem; align-items:center;">
+        <span style="font-weight:800; color:#0f172a;">${scoreRounded}</span>
+        ${pill || ""}
+      </div>`;
+    }
+
+    async function fetchLatestDomainStrengthForDomains(domains) {
+      const list = Array.isArray(domains) ? domains.map(normalizeDomainForStrength).filter(Boolean) : [];
+      const unique = Array.from(new Set(list)).slice(0, 30);
+      if (!unique.length) return {};
+
+      // Serve from cache when available
+      const out = {};
+      const missing = [];
+      for (const d of unique) {
+        if (__domainStrengthLatestCache.has(d)) {
+          out[d] = __domainStrengthLatestCache.get(d);
+        } else {
+          missing.push(d);
+        }
+      }
+      if (!missing.length) return out;
+
+      try {
+        const qs = encodeURIComponent(missing.join(","));
+        const resp = await fetch(apiUrl(`/api/domain-strength/history?domains=${qs}`));
+        if (!resp.ok) return out;
+        const json = await resp.json();
+        const rows = json?.status === "ok" ? (json.data || []) : [];
+
+        // Build latest per domain (google engine only)
+        const latestByDomain = {};
+        for (const r of rows) {
+          const d = normalizeDomainForStrength(r?.domain);
+          if (!d) continue;
+          if (String(r?.engine || "google").toLowerCase() !== "google") continue;
+          const date = String(r?.snapshot_date || "");
+          const score = typeof r?.score === "number" ? r.score : parseFloat(r?.score);
+          const band = typeof r?.band === "string" ? r.band : "";
+          if (!date) continue;
+          const prev = latestByDomain[d];
+          if (!prev || String(prev.snapshotDate) < date) {
+            latestByDomain[d] = { score: isFinite(score) ? score : null, band: band || null, snapshotDate: date };
+          }
+        }
+
+        for (const d of missing) {
+          const v = latestByDomain[d] || { score: null, band: null, snapshotDate: null };
+          __domainStrengthLatestCache.set(d, v);
+          out[d] = v;
+        }
+      } catch {
+        // fail silently
+      }
+
+      return out;
     }
 
     function renderRankingAiCompetitors(rows) {
@@ -24893,12 +25005,32 @@ Final Score: ${score}/100`;
         tdRank.style.textAlign = "right";
         tdRank.style.color = "#64748b";
         tdRank.textContent = "—";
+        tdRank.dataset.domain = normalizeDomainForStrength(domain);
 
         tr.appendChild(tdDomain);
         tr.appendChild(tdCount);
         tr.appendChild(tdRank);
         tbody.appendChild(tr);
       });
+
+      // Fill Domain Rank column using latest domain_strength snapshots (read-only)
+      (async () => {
+        try {
+          const selfDomain = typeof getSelfDomainForDomainStrength === "function" ? getSelfDomainForDomainStrength() : "alanranger.com";
+          const domains = [
+            selfDomain,
+            ...entries.map(([d]) => d),
+          ].map(normalizeDomainForStrength).filter(Boolean);
+          const strengthByDomain = await fetchLatestDomainStrengthForDomains(domains);
+          tbody.querySelectorAll("td[data-domain]").forEach((cell) => {
+            const d = normalizeDomainForStrength(cell.dataset.domain || "");
+            const strength = strengthByDomain[d] || null;
+            cell.innerHTML = renderDomainRankCellHtml(strength);
+          });
+        } catch {
+          // fail silently
+        }
+      })();
     }
 
 
