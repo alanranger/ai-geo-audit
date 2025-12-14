@@ -2988,7 +2988,18 @@
                 <ul id="ranking-ai-detail-our-pages" class="ranking-ai-detail-list"></ul>
 
                 <h5>Other cited domains</h5>
-                <ul id="ranking-ai-detail-competitors" class="ranking-ai-detail-list"></ul>
+                <div style="overflow-x: auto; margin-top: 0.5rem;">
+                  <table id="ranking-ai-detail-competitors-table" style="width: 100%; border-collapse: collapse;">
+                    <thead>
+                      <tr style="background: #f1f5f9;">
+                        <th style="text-align: left; padding: 0.75rem; font-size: 0.85rem; color: #475569; font-weight: 700;">Domain</th>
+                        <th style="text-align: right; padding: 0.75rem; font-size: 0.85rem; color: #475569; font-weight: 700;">Citations</th>
+                        <th style="text-align: right; padding: 0.75rem; font-size: 0.85rem; color: #475569; font-weight: 700;">Domain Rank</th>
+                      </tr>
+                    </thead>
+                    <tbody id="ranking-ai-detail-competitors-body"></tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </div>
@@ -24512,7 +24523,7 @@ Final Score: ${score}/100`;
       const citationsEmpty = document.getElementById("ranking-ai-citations-empty");
       const citationsContent = document.getElementById("ranking-ai-citations-content");
       const ourList = document.getElementById("ranking-ai-detail-our-pages");
-      const compList = document.getElementById("ranking-ai-detail-competitors");
+      const compTbody = document.getElementById("ranking-ai-detail-competitors-body");
 
       if (citationsEmpty && citationsContent) {
         citationsEmpty.hidden = true;
@@ -24538,13 +24549,19 @@ Final Score: ${score}/100`;
           }
         }
 
-        if (compList) {
-          compList.innerHTML = "";
+        if (compTbody) {
+          compTbody.innerHTML = "";
           const entries = Object.entries(row.competitor_counts || {}).sort((a, b) => b[1] - a[1]);
           if (!entries.length) {
-            const li = document.createElement("li");
-            li.textContent = "No competing domains recorded from AI citations for this keyword.";
-            compList.appendChild(li);
+            const tr = document.createElement("tr");
+            const td = document.createElement("td");
+            td.colSpan = 3;
+            td.style.padding = "1rem 0.75rem";
+            td.style.color = "#64748b";
+            td.style.fontSize = "0.875rem";
+            td.textContent = "No competing domains recorded from AI citations for this keyword.";
+            tr.appendChild(td);
+            compTbody.appendChild(tr);
           } else {
             const makeDomainHref = (domain) => {
               if (!domain) return null;
@@ -24554,18 +24571,43 @@ Final Score: ${score}/100`;
               return `https://${d}`;
             };
             entries.forEach(([domain, count]) => {
-              const li = document.createElement("li");
-              const a = document.createElement("a");
-              a.href = makeDomainHref(domain) || '#';
-              a.target = "_blank";
-              a.rel = "noopener noreferrer";
-              a.style.color = "#0284c7";
-              a.style.textDecoration = "none";
-              a.textContent = domain;
-              li.appendChild(a);
-              const suffix = document.createTextNode(` – ${count} citation${count === 1 ? "" : "s"}`);
-              li.appendChild(suffix);
-              compList.appendChild(li);
+              const tr = document.createElement("tr");
+              tr.style.borderTop = "1px solid #e2e8f0";
+
+              const tdDomain = document.createElement("td");
+              tdDomain.style.padding = "0.75rem";
+              tdDomain.style.fontSize = "0.9rem";
+              const href = makeDomainHref(domain);
+              if (href) {
+                const a = document.createElement("a");
+                a.href = href;
+                a.target = "_blank";
+                a.rel = "noopener noreferrer";
+                a.style.color = "#0284c7";
+                a.style.textDecoration = "none";
+                a.textContent = domain;
+                tdDomain.appendChild(a);
+              } else {
+                tdDomain.textContent = String(domain || '');
+              }
+
+              const tdCount = document.createElement("td");
+              tdCount.style.padding = "0.75rem";
+              tdCount.style.textAlign = "right";
+              tdCount.style.fontWeight = "700";
+              tdCount.style.color = "#1e293b";
+              tdCount.textContent = `${count}`;
+
+              const tdRank = document.createElement("td");
+              tdRank.style.padding = "0.75rem";
+              tdRank.style.textAlign = "right";
+              tdRank.style.color = "#64748b";
+              tdRank.textContent = "—";
+
+              tr.appendChild(tdDomain);
+              tr.appendChild(tdCount);
+              tr.appendChild(tdRank);
+              compTbody.appendChild(tr);
             });
           }
         }
