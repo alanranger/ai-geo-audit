@@ -24157,7 +24157,17 @@ Final Score: ${score}/100`;
             
             debugLog('[Schema Coverage] Looking for URL: ' + normalizedUrl + ' (original: ' + rankingUrl + ')', 'info');
             
+            // Fallback matching: some ranking URLs include redirect/variant slugs (e.g. "121" vs "1-2-1")
+            // If exact pathname match fails, compare a "loose" slug that strips non-alphanumerics.
+            const normalizeLooseSlug = (pathname) => {
+              const p = (pathname || '').toString().toLowerCase().trim();
+              const last = p.split('/').filter(Boolean).pop() || '';
+              return last.replace(/[^a-z0-9]/g, '');
+            };
+            const normalizedLoose = normalizeLooseSlug(normalizedUrl);
+            
             // Exact matching only - normalize both URLs identically (strips query params, hash, trailing slashes)
+            let looseMatchedUrl = null;
             const pageData = pagesArray.find(p => {
               if (!p || !p.url) return false;
               const pNormalized = normalizeUrlForMatching(p.url);
@@ -24172,12 +24182,25 @@ Final Score: ${score}/100`;
                 debugLog('[Schema Coverage] ✅ Exact URL match: ' + p.url + ' -> ' + pNormalized + ' (search: ' + normalizedUrl + ')', 'info');
                 return true;
               }
+
+              // Fallback: loose slug match (handles minor slug variants)
+              if (!exactMatch && normalizedLoose) {
+                const pLoose = normalizeLooseSlug(pNormalized);
+                if (pLoose && pLoose === normalizedLoose) {
+                  looseMatchedUrl = p.url;
+                  debugLog('[Schema Coverage] ⚠ Loose slug match: ' + p.url + ' -> ' + pNormalized + ' (search: ' + normalizedUrl + ')', 'warn');
+                  return true;
+                }
+              }
               return false;
             });
             
             if (pageData) {
               debugLog('[Schema Coverage] ✅ Found page data for URL: ' + scorecardData.ranking_url, 'info');
               debugLog('[Schema Coverage] Matched page URL: ' + (pageData.url || 'missing'), 'info');
+              if (looseMatchedUrl) {
+                debugLog('[Schema Coverage] Note: match used loose slug fallback (ranking URL likely redirected or variant slug).', 'warn');
+              }
               if (pageData.schemaTypes) {
                 const schemaTypes = Array.isArray(pageData.schemaTypes) ? pageData.schemaTypes : [];
                 const typeStrings = schemaTypes.map(t => {
