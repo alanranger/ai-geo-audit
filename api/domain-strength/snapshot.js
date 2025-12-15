@@ -10,6 +10,7 @@
 
 import { computeDomainStrengthScore } from "./score.js";
 import { fetchLabsDomainRankOverviewBatch } from "./labs.js";
+import { dequeuePending, clearPending } from "../../lib/domainStrength/domains.js";
 
 function isoDateUTC() {
   return new Date().toISOString().slice(0, 10);
@@ -202,19 +203,37 @@ export default async function handler(req, res) {
   const body = req.body && typeof req.body === "string" ? JSON.parse(req.body) : (req.body || {});
   const mode = (body.mode || "run") === "test" ? "test" : "run";
   const force = body.force === true;
-  const domains = normalizeDomainArray(body.domains);
-
-  if (domains.length === 0) {
-    return res.status(400).json({
-      status: "error",
-      message: "Missing required field: domains (array)",
-      meta: { generatedAt: new Date().toISOString() },
-    });
-  }
+  const includePending = body.includePending !== false; // default true
+  const pendingLimit = Math.max(1, Math.min(1000, Number(body.pendingLimit) || 100));
+  const domains = normalizeDomainArray(body.domains || []);
 
   const snapshot_date = isoDateUTC();
   const engine = "google";
-  const runDomains = mode === "test" ? domains.slice(0, 3) : domains;
+  
+  // Build domain list: core domains + pending queue (if enabled)
+  let runDomains = mode === "test" ? domains.slice(0, 3) : domains;
+  
+  if (mode === "run" && includePending) {
+    const pendingDomains = await dequeuePending({ engine, limit: pendingLimit });
+    // Merge and deduplicate
+    const allDomains = [...runDomains, ...pendingDomains];
+    const seen = new Set();
+    runDomains = [];
+    for (const d of allDomains) {
+      const n = normalizeDomain(d);
+      if (!n || seen.has(n)) continue;
+      seen.add(n);
+      runDomains.push(n);
+    }
+  }
+
+  if (runDomains.length === 0) {
+    return res.status(400).json({
+      status: "error",
+      message: "No domains to process. Provide domains array or enable includePending.",
+      meta: { generatedAt: new Date().toISOString() },
+    });
+  }
 
   const caps = (await fetchCapsFromSupabase()) || { etvCap: 1_000_000, kwCap: 100_000 };
 
@@ -450,6 +469,12 @@ export default async function handler(req, res) {
       // This ensures the "Last Fetched" time reflects when the snapshot was actually run
       await deleteExistingRows(snapshot_date, engine, runDomains);
       await insertRows(insertPayload);
+      
+      // Clear pending queue for successfully processed domains
+      if (includePending && insertPayload.length > 0) {
+        const processedDomains = insertPayload.map(r => r.domain).filter(Boolean);
+        await clearPending(processedDomains, engine);
+      }
     } catch (e) {
       return res.status(500).json({
         status: "error",
@@ -470,6 +495,7 @@ export default async function handler(req, res) {
       engine,
       mode,
       force,
+      includePending,
       caps,
       domains_processed: runDomains.length,
       fetched: domainsToFetch.length,

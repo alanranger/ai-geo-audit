@@ -115,6 +115,40 @@ export default async function handler(req, res) {
   } catch {
     // ignore (table may not exist)
   }
+  
+  // Also fetch from domain_strength_domains (new mapping table)
+  try {
+    const domainStrengthUrl =
+      `${supabaseUrl}/rest/v1/domain_strength_domains` +
+      `?select=domain,label,segment&limit=2000`;
+    const dsResp = await fetch(domainStrengthUrl, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: supabaseKey,
+        Authorization: `Bearer ${supabaseKey}`,
+      },
+    });
+    if (dsResp.ok) {
+      const dsRows = await dsResp.json();
+      if (Array.isArray(dsRows)) {
+        dsRows.forEach((c) => {
+          const d = normalizeDomain(c.domain);
+          if (!d) return;
+          // Only add if not already in competitorMeta (competitor_domains takes precedence)
+          if (!competitorMeta.has(d)) {
+            competitorMeta.set(d, {
+              label: c.label || d,
+              segment: c.segment || 'other',
+              isCompetitor: true,
+            });
+          }
+        });
+      }
+    }
+  } catch {
+    // ignore (table may not exist)
+  }
 
   const primaryDomain = normalizeDomain(
     process.env.NEXT_PUBLIC_SITE_DOMAIN || process.env.SITE_DOMAIN || "alanranger.com"

@@ -88,10 +88,67 @@ export default async function handler(req, res) {
   }
 
   const rows = await resp.json();
+  const snapshotData = Array.isArray(rows) ? rows : [];
+  
+  // Fetch domain metadata (label, segment) from domain_strength_domains
+  const domainMeta = new Map();
+  if (snapshotData.length > 0) {
+    try {
+      const uniqueDomains = [...new Set(snapshotData.map(r => r.domain).filter(Boolean))];
+      if (uniqueDomains.length > 0) {
+        // Query in chunks to avoid URL length limits
+        const chunkSize = 100;
+        for (let i = 0; i < uniqueDomains.length; i += chunkSize) {
+          const chunk = uniqueDomains.slice(i, i + chunkSize);
+          const inList = `(${chunk.map(d => `"${d}"`).join(',')})`;
+          const metaUrl =
+            `${supabaseUrl}/rest/v1/domain_strength_domains` +
+            `?domain=in.${encodeURIComponent(inList)}` +
+            `&select=domain,label,segment`;
+          
+          const metaResp = await fetch(metaUrl, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              apikey: supabaseKey,
+              Authorization: `Bearer ${supabaseKey}`,
+            },
+          });
+          
+          if (metaResp.ok) {
+            const metaRows = await metaResp.json();
+            if (Array.isArray(metaRows)) {
+              metaRows.forEach(r => {
+                if (r.domain) {
+                  domainMeta.set(r.domain, {
+                    label: r.label || null,
+                    segment: r.segment || 'other',
+                  });
+                }
+              });
+            }
+          }
+        }
+      }
+    } catch {
+      // Graceful: if metadata fetch fails, continue without it
+    }
+  }
+  
+  // Enrich snapshot data with metadata
+  const enrichedData = snapshotData.map(row => {
+    const meta = domainMeta.get(row.domain) || { label: null, segment: 'other' };
+    return {
+      ...row,
+      label: meta.label,
+      segment: meta.segment,
+    };
+  });
+  
   return res.status(200).json({
     status: "ok",
-    data: Array.isArray(rows) ? rows : [],
-    count: Array.isArray(rows) ? rows.length : 0,
+    data: enrichedData,
+    count: enrichedData.length,
     meta: { generatedAt: new Date().toISOString(), source: "domain_strength_snapshots" },
   });
 }
