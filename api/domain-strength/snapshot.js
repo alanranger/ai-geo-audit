@@ -292,45 +292,28 @@ export default async function handler(req, res) {
     if (includePending) {
       // Fetch pending domains
       const pendingDomains = await dequeuePending({ engine, limit: pendingLimit * 2 });
-      console.log(`[Snapshot] Fetched ${pendingDomains.length} domains from pending queue`);
       
       if (pendingDomains.length > 0) {
         // Check which pending domains already have snapshots for the current MONTH (not just today)
         // This ensures cost control: each domain is only fetched once per calendar month
         const monthStart = snapshot_date.slice(0, 7) + '-01'; // e.g., '2025-12-01'
         const monthEnd = snapshot_date.slice(0, 7) + '-31'; // e.g., '2025-12-31'
-        console.log(`[Snapshot] Checking for existing snapshots in month range: ${monthStart} to ${monthEnd}`);
         
         const pendingWithSnapshots = await fetchExistingSnapshotRowsForMonth(monthStart, monthEnd, engine, pendingDomains);
-        console.log(`[Snapshot] Found ${pendingWithSnapshots.size} pending domains that already have snapshots this month`);
         
         // Filter out pending domains that already have a snapshot this month (cost control)
         // Primary domain is always included regardless
         const uniquePendingDomains = [];
         for (const d of pendingDomains) {
           const n = normalizeDomain(d);
-          if (!n) {
-            console.log(`[Snapshot] Skipping invalid domain: ${d}`);
-            continue;
-          }
-          if (n === primaryDomain) {
-            console.log(`[Snapshot] Skipping ${n} (same as primary domain)`);
-            continue; // Skip if same as primary domain
-          }
-          if (pendingWithSnapshots.has(n)) {
-            console.log(`[Snapshot] Skipping ${n} (already has snapshot this month)`);
-            continue; // Skip if already has snapshot this month
-          }
+          if (!n || n === primaryDomain) continue; // Skip if invalid or same as primary domain
+          if (pendingWithSnapshots.has(n)) continue; // Skip if already has snapshot this month
           uniquePendingDomains.push(n);
           if (uniquePendingDomains.length >= pendingLimit) break; // Stop once we have enough
         }
         
-        console.log(`[Snapshot] After filtering: ${uniquePendingDomains.length} unique pending domains to process`);
-        
         // Merge: primary domain + unique pending domains
         runDomains = [...runDomains, ...uniquePendingDomains];
-      } else {
-        console.log(`[Snapshot] No pending domains found in queue`);
       }
     } else if (domains.length > 0) {
       // If includePending is false but domains are provided, use those
@@ -628,6 +611,7 @@ export default async function handler(req, res) {
         primaryDomain,
         includePending,
         pendingLimit,
+        pendingDomainsFetched: includePending ? (await dequeuePending({ engine, limit: 1 })).length : 0, // Quick count check
         runDomainsCount: runDomains.length,
         runDomainsSample: runDomains.slice(0, 10), // First 10 for debugging
       },
