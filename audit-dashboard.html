@@ -3419,12 +3419,13 @@
                       <th style="text-align: left; padding: 0.5rem 0.4rem; font-size: 0.8rem; color: #475569; font-weight: 700; width: 35%; word-wrap: break-word;">Domain</th>
                       <th style="text-align: right; padding: 0.5rem 0.4rem; font-size: 0.8rem; color: #475569; font-weight: 700; width: 20%;">AI citations</th>
                       <th style="text-align: right; padding: 0.5rem 0.4rem; font-size: 0.8rem; color: #475569; font-weight: 700; width: 25%;">Domain Rank</th>
-                      <th style="text-align: left; padding: 0.5rem 0.4rem; font-size: 0.8rem; color: #475569; font-weight: 700; width: 18%; word-wrap: break-word; line-height: 1.2;">
+                      <th style="text-align: left; padding: 0.5rem 0.4rem; font-size: 0.8rem; color: #475569; font-weight: 700; width: 15%; word-wrap: break-word; line-height: 1.2;">
                         <div style="display: flex; flex-direction: column; align-items: flex-start;">
                           <span>Domain</span>
                           <span>type</span>
                         </div>
                       </th>
+                      <th style="text-align: center; padding: 0.5rem 0.4rem; font-size: 0.8rem; color: #475569; font-weight: 700; width: 5%;">C</th>
                     </tr>
                   </thead>
                   <tbody id="ranking-ai-competitors-body"></tbody>
@@ -25670,7 +25671,7 @@ Final Score: ${score}/100`;
         if (!entries.length) {
           const tr = document.createElement("tr");
           const td = document.createElement("td");
-            td.colSpan = 4;
+            td.colSpan = 5;
             td.style.padding = "1rem 0.75rem";
             td.style.color = "#64748b";
             td.style.fontSize = "0.875rem";
@@ -25775,11 +25776,67 @@ Final Score: ${score}/100`;
         tdDomainType.textContent = displayType;
         tdDomainType.style.color = displayType ? '#475569' : '#94a3b8';
 
-        // NO competitor checkbox in Competitors in AI & SERPs table (removed per user request)
+        const tdCompetitor = document.createElement("td");
+        tdCompetitor.style.padding = "0.5rem 0.4rem";
+        tdCompetitor.style.textAlign = "center";
+        tdCompetitor.style.fontSize = "0.8rem";
+        tdCompetitor.style.minWidth = "40px";
+        const competitorCheckbox = document.createElement("input");
+        competitorCheckbox.type = "checkbox";
+        competitorCheckbox.checked = meta.is_competitor === true;
+        competitorCheckbox.style.cursor = "pointer";
+        competitorCheckbox.dataset.domain = normalizedDomain;
+        
+        competitorCheckbox.addEventListener('change', async (e) => {
+          const isCompetitor = e.target.checked;
+          const domain = e.target.dataset.domain;
+          try {
+            const resp = await fetch(apiUrl('/api/domain-strength/update-domain'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ domain, is_competitor: isCompetitor })
+            });
+            if (resp.ok) {
+              // Clear cache
+              __domainMetadataCache.delete(domain);
+              // Update badge - find domainContainer first
+              const domainContainer = tdDomain.querySelector('div[style*="flex-direction: column"]') || tdDomain.querySelector('div');
+              let badge = tdDomain.querySelector('span[data-competitor-badge]');
+              if (isCompetitor && !badge && domainContainer) {
+                badge = document.createElement("span");
+                badge.textContent = "Competitor";
+                badge.setAttribute('data-competitor-badge', 'true');
+                badge.style.display = "inline-block";
+                badge.style.padding = "0.125rem 0.5rem";
+                badge.style.fontSize = "0.65rem";
+                badge.style.fontWeight = "600";
+                badge.style.color = "#dc2626";
+                badge.style.backgroundColor = "#fee2e2";
+                badge.style.borderRadius = "4px";
+                badge.style.border = "1px solid #fecaca";
+                badge.style.marginTop = "0.125rem";
+                domainContainer.appendChild(badge);
+              } else if (!isCompetitor && badge) {
+                badge.remove();
+              }
+            } else {
+              // Revert on error
+              e.target.checked = !isCompetitor;
+              alert('Failed to update competitor flag. Please try again.');
+            }
+          } catch (err) {
+            e.target.checked = !isCompetitor;
+            alert('Failed to update competitor flag. Please try again.');
+          }
+        });
+        
+        tdCompetitor.appendChild(competitorCheckbox);
+
         tr.appendChild(tdDomain);
         tr.appendChild(tdCount);
         tr.appendChild(tdRank);
         tr.appendChild(tdDomainType);
+        tr.appendChild(tdCompetitor);
         tbody.appendChild(tr);
         });
 
