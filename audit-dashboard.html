@@ -2848,12 +2848,12 @@
               <button id="edit-keywords-close" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #64748b; padding: 0; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;">&times;</button>
             </div>
             <p style="margin: 0 0 1rem 0; color: #64748b; font-size: 0.9rem;">Enter one keyword per line. Changes will be saved to the latest audit results.</p>
-            <textarea id="edit-keywords-textarea" style="width: 100%; min-height: 300px; padding: 0.75rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.9rem; font-family: inherit; resize: vertical; box-sizing: border-box;"></textarea>
+            <textarea id="edit-keywords-textarea" style="width: 100%; min-height: 300px; padding: 0.75rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.9rem; font-family: inherit; resize: vertical; box-sizing: border-box; color: #1e293b; background: white;"></textarea>
             <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem;">
               <button id="edit-keywords-cancel" style="padding: 0.5rem 1rem; background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; border-radius: 4px; cursor: pointer; font-size: 0.9rem;">Cancel</button>
               <button id="edit-keywords-save" style="padding: 0.5rem 1rem; background: #2563eb; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9rem; font-weight: 600;">Save Keywords</button>
             </div>
-            <div id="edit-keywords-status" style="margin-top: 1rem; font-size: 0.85rem;"></div>
+            <div id="edit-keywords-status" style="margin-top: 1rem; font-size: 0.85rem; color: #475569; min-height: 1.5rem;"></div>
           </div>
         </div>
 
@@ -27847,31 +27847,69 @@ Final Score: ${score}/100`;
           }
 
           async function loadKeywords() {
-            if (!textarea) return;
+            if (!textarea) {
+              console.error('[Edit Keywords] Textarea not found');
+              return;
+            }
             
             textarea.value = 'Loading...';
             textarea.disabled = true;
-            if (statusEl) statusEl.textContent = '';
+            textarea.style.color = '#1e293b';
+            if (statusEl) {
+              statusEl.textContent = 'Loading keywords...';
+              statusEl.style.color = '#64748b';
+            }
             
             try {
-              const resp = await fetch(apiUrl('/api/keywords/get'));
+              const apiEndpoint = apiUrl('/api/keywords/get');
+              console.log('[Edit Keywords] Fetching from:', apiEndpoint);
+              
+              const resp = await fetch(apiEndpoint);
+              console.log('[Edit Keywords] Response status:', resp.status);
+              
               if (!resp.ok) {
-                throw new Error('Failed to load keywords');
+                const errorText = await resp.text();
+                console.error('[Edit Keywords] API error:', errorText);
+                throw new Error(`Failed to load keywords: ${resp.status} ${errorText}`);
               }
+              
               const data = await resp.json();
+              console.log('[Edit Keywords] Response data:', data);
+              
               if (data.status === 'ok' && Array.isArray(data.keywords)) {
-                textarea.value = data.keywords.join('\n');
-                textarea.disabled = false;
-                textarea.focus();
+                if (data.keywords.length > 0) {
+                  textarea.value = data.keywords.join('\n');
+                  textarea.disabled = false;
+                  textarea.style.color = '#1e293b';
+                  textarea.focus();
+                  if (statusEl) {
+                    statusEl.textContent = `Loaded ${data.keywords.length} keywords`;
+                    statusEl.style.color = '#10b981';
+                  }
+                } else {
+                  textarea.value = '';
+                  textarea.disabled = false;
+                  textarea.style.color = '#1e293b';
+                  if (statusEl) {
+                    statusEl.textContent = 'No keywords found. You can add keywords below.';
+                    statusEl.style.color = '#f59e0b';
+                  }
+                }
               } else {
+                console.error('[Edit Keywords] Invalid response format:', data);
                 textarea.value = '';
                 textarea.disabled = false;
-                if (statusEl) statusEl.textContent = 'No keywords found.';
-                if (statusEl) statusEl.style.color = '#64748b';
+                textarea.style.color = '#1e293b';
+                if (statusEl) {
+                  statusEl.textContent = 'Invalid response format from server.';
+                  statusEl.style.color = '#dc2626';
+                }
               }
             } catch (err) {
+              console.error('[Edit Keywords] Error:', err);
               textarea.value = '';
               textarea.disabled = false;
+              textarea.style.color = '#1e293b';
               if (statusEl) {
                 statusEl.textContent = 'Error loading keywords: ' + err.message;
                 statusEl.style.color = '#dc2626';
