@@ -197,6 +197,8 @@ export default async function handler(req, res) {
     });
   }
 
+  try {
+
   const body = req.body && typeof req.body === "string" ? JSON.parse(req.body) : (req.body || {});
   const mode = (body.mode || "run") === "test" ? "test" : "run";
   const force = body.force === true;
@@ -282,10 +284,9 @@ export default async function handler(req, res) {
         });
       }
     } else {
+      const byDomain = new Map(labs.data.map((r) => [r.domain, r]));
 
-    const byDomain = new Map(labs.data.map((r) => [r.domain, r]));
-
-    for (const domain of domainsToFetch) {
+      for (const domain of domainsToFetch) {
       const r = byDomain.get(domain);
       if (!r || !r.ok || !r.data) {
         const errMsg = r?.error || "No data";
@@ -400,6 +401,7 @@ export default async function handler(req, res) {
           top10_keywords_raw: raw.top10 || null,
         });
       }
+      }
     }
   }
 
@@ -462,19 +464,28 @@ export default async function handler(req, res) {
     }
   }
 
-  return res.status(200).json({
-    status: "ok",
-    snapshot_date,
-    engine,
-    mode,
-    force,
-    caps,
-    domains_processed: runDomains.length,
-    fetched: domainsToFetch.length,
-    reused: runDomains.length - domainsToFetch.length,
-    inserted: mode === "run" ? insertPayload.length : 0,
-    results,
-    meta: { generatedAt: new Date().toISOString(), source: "domain-strength.snapshot" },
-  });
+    return res.status(200).json({
+      status: "ok",
+      snapshot_date,
+      engine,
+      mode,
+      force,
+      caps,
+      domains_processed: runDomains.length,
+      fetched: domainsToFetch.length,
+      reused: runDomains.length - domainsToFetch.length,
+      inserted: mode === "run" ? insertPayload.length : 0,
+      results,
+      meta: { generatedAt: new Date().toISOString(), source: "domain-strength.snapshot" },
+    });
+  } catch (e) {
+    // Ensure we always return JSON, even on unexpected errors
+    return res.status(500).json({
+      status: "error",
+      message: "Internal server error",
+      details: e?.message || String(e),
+      meta: { generatedAt: new Date().toISOString() },
+    });
+  }
 }
 

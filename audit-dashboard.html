@@ -25891,11 +25891,20 @@ Final Score: ${score}/100`;
           
           debugLog(`[DomainStrength] API response status: ${resp.status} ${resp.statusText}`, 'info');
           
-          const json = await resp.json();
+          let json;
+          try {
+            const responseText = await resp.text();
+            debugLog(`[DomainStrength] API response text (first 200 chars): ${responseText.substring(0, 200)}`, 'info');
+            json = JSON.parse(responseText);
+          } catch (parseError) {
+            debugLog(`[DomainStrength] Failed to parse JSON response: ${parseError.message}`, 'error');
+            throw new Error(`API returned invalid JSON (status ${resp.status}). Response may be an error page.`);
+          }
+          
           debugLog(`[DomainStrength] API response: status=${json?.status}, inserted=${json?.inserted}, snapshot_date=${json?.snapshot_date}`, 'info');
           
           if (json?.status !== 'ok') {
-            const errorMsg = json?.message || 'Snapshot failed';
+            const errorMsg = json?.message || json?.details || 'Snapshot failed';
             debugLog(`[DomainStrength] API returned error: ${errorMsg}`, 'error');
             throw new Error(errorMsg);
           }
