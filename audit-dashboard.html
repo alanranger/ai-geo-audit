@@ -21658,11 +21658,37 @@ Final Score: ${score}/100`;
                     const now = new Date();
                     const hoursDiff = (now - localTime) / (1000 * 60 * 60);
                     if (hoursDiff < 24) {
+                      // Re-classify pageType before returning
+                      if (RankingAiModule && RankingAiModule.classifyPageTypeForKeyword && parsed.combinedRows) {
+                        parsed.combinedRows.forEach(row => {
+                          const bestUrl = row.best_url || row.bestUrl || null;
+                          if (bestUrl) {
+                            row.pageType = RankingAiModule.classifyPageTypeForKeyword(bestUrl);
+                            if (row.classification) row.classification.pageType = row.pageType;
+                          } else {
+                            row.pageType = 'Landing';
+                            if (row.classification) row.classification.pageType = 'Landing';
+                          }
+                        });
+                      }
                       return parsed;
                     } else {
                       debugLog(`⚠ LocalStorage data is ${Math.round(hoursDiff)} hours old, checking Supabase for newer data...`, 'info');
                     }
                   } else {
+                    // Re-classify pageType before returning
+                    if (RankingAiModule && RankingAiModule.classifyPageTypeForKeyword && parsed.combinedRows) {
+                      parsed.combinedRows.forEach(row => {
+                        const bestUrl = row.best_url || row.bestUrl || null;
+                        if (bestUrl) {
+                          row.pageType = RankingAiModule.classifyPageTypeForKeyword(bestUrl);
+                          if (row.classification) row.classification.pageType = row.pageType;
+                        } else {
+                          row.pageType = 'Landing';
+                          if (row.classification) row.classification.pageType = 'Landing';
+                        }
+                      });
+                    }
                     return parsed;
                   }
                 }
