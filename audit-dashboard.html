@@ -25686,20 +25686,23 @@ Final Score: ${score}/100`;
           const bandPill = renderDomainStrengthBandPill(latest.band);
           const label = selfItem.label || selfDomain;
 
-          // Format last fetched timestamp (prefer createdAt, fallback to snapshotDate)
+          // Format last fetched timestamp (prefer createdAt, fallback to snapshotDate) in GMT
           let lastFetchedText = '—';
           const timestampToUse = latest.createdAt || latest.snapshotDate;
           if (timestampToUse) {
             try {
               const timestamp = new Date(timestampToUse);
               if (!isNaN(timestamp.getTime())) {
+                // Convert to GMT/UTC
                 lastFetchedText = timestamp.toLocaleString('en-GB', {
+                  timeZone: 'UTC',
                   year: 'numeric',
                   month: 'short',
                   day: 'numeric',
                   hour: '2-digit',
-                  minute: '2-digit'
-                });
+                  minute: '2-digit',
+                  hour12: false
+                }) + ' GMT';
               }
             } catch (e) {
               // If date parsing fails, use raw string
@@ -25737,14 +25740,8 @@ Final Score: ${score}/100`;
         // Sort rows using sortDomainStrengthRows
         let sorted = sortDomainStrengthRows(items);
 
-        // Optionally pin self to top (only if not sorting by name)
-        if (selfDomain && domainStrengthSortState.column !== 'name') {
-          const idx = sorted.findIndex((it) => String(it?.domain || '') === selfDomain);
-          if (idx > 0) {
-            const [self] = sorted.splice(idx, 1);
-            sorted.unshift(self);
-          }
-        }
+        // Don't pin self to top when sorting - respect the sort order
+        // (Previously we pinned self to top, but this interferes with sorting)
 
         // Calculate pagination
         const totalRows = sorted.length;
@@ -25900,7 +25897,7 @@ Final Score: ${score}/100`;
         const sortableHeaders = document.querySelectorAll('#domain-strength-table th.sortable');
         if (!sortableHeaders || sortableHeaders.length === 0) return;
         
-        // Remove existing listeners by cloning
+        // Remove existing listeners by cloning (preserve innerHTML structure)
         sortableHeaders.forEach(th => {
           if (th.dataset.sortWired === 'true') {
             const newTh = th.cloneNode(true);
@@ -25908,28 +25905,43 @@ Final Score: ${score}/100`;
           }
         });
         
-        // Re-query after cloning
+        // Re-query after cloning to get fresh elements
         const freshHeaders = document.querySelectorAll('#domain-strength-table th.sortable');
         
         freshHeaders.forEach(th => {
           th.dataset.sortWired = 'true';
           
-          th.addEventListener('click', function(e) {
+          // Use a named function to make debugging easier
+          const handleSortClick = function(e) {
             e.stopPropagation();
+            e.preventDefault();
             const column = this.dataset.sort;
-            if (!column) return;
+            if (!column) {
+              console.warn('[DomainStrength] No sort column found on clicked header');
+              return;
+            }
+            
+            console.log('[DomainStrength] Sort clicked:', column, 'Current state:', domainStrengthSortState);
             
             if (domainStrengthSortState.column === column) {
+              // Toggle direction if clicking the same column
               domainStrengthSortState.direction = domainStrengthSortState.direction === 'asc' ? 'desc' : 'asc';
             } else {
+              // New column, start with ascending
               domainStrengthSortState.column = column;
               domainStrengthSortState.direction = 'asc';
             }
             
+            console.log('[DomainStrength] New sort state:', domainStrengthSortState);
+            
             domainStrengthPaginationState.currentPage = 1;
             renderDomainStrengthSection();
-          });
+          };
+          
+          th.addEventListener('click', handleSortClick);
         });
+        
+        console.log('[DomainStrength] Wired', freshHeaders.length, 'sortable headers');
       }
 
       function wireDomainStrengthPagination() {
