@@ -101,6 +101,11 @@ Vercel will automatically rebuild and deploy (usually takes 1-2 minutes).
 - ✅ **Page Segmentation**: Segment-aware metrics (All pages, Exclude education, Money pages only)
 - ✅ **Dashboard Persistence**: Automatic localStorage saving and loading
 - ✅ **Retry Mechanism**: Rescan failed URLs without full audit
+- ✅ **Intent-Based Keyword Segmentation**: Keyword classification based on search intent (Brand → Money → Education → Other)
+- ✅ **Data-Driven Presets**: Refactored preset system with hard reset and single source of truth
+- ✅ **Ranking & AI Visibility**: Keyword rankings with AI Overview citations, competitor analysis, and domain strength integration
+- ✅ **Domain Strength Tracking**: Domain rank snapshots with competitor flags and domain type classification
+- ✅ **Keyword Management**: Edit Keywords modal for managing keyword list with data loss warnings
 
 ## API Endpoints
 
@@ -119,6 +124,12 @@ The following serverless functions are available:
 - `/api/supabase/get-audit-history` - Fetch historical audit data for all pillars
 - `/api/supabase/create-shared-audit` - Create shareable audit link
 - `/api/supabase/get-shared-audit` - Retrieve shared audit by ID
+- `/api/keywords/get` - Fetch current keyword list from latest audit
+- `/api/keywords/save` - Save updated keyword list to latest audit
+- `/api/aigeo/serp-rank-test` - Test SERP ranking for a single keyword
+- `/api/aigeo/ai-mode-serp-batch-test` - Batch test keywords for AI Overview citations and rankings
+- `/api/domain-strength/overview` - Fetch domain strength overview and domain list
+- `/api/domain-strength/update-domain` - Update domain type and competitor flag
 
 ## Planned Features
 
@@ -163,4 +174,11 @@ A dedicated section tracking money pages performance vs the rest of the site, wi
 - **RAG Thresholds**: Red (0-49), Amber (50-69), Green (70-100) - consistent across all scores
 - **Dashboard State**: Persists in browser localStorage between sessions
 - **Shareable Links**: Valid for 30 days, stored in Supabase `shared_audits` table
+- **Keyword Segmentation**: Intent-based classification (Brand → Money → Education → Other) with confidence scoring
+  - Brand: matches brand terms (alan ranger, alanranger, photography academy, etc.)
+  - Money: transactional terms (lessons, courses, workshops, etc.) OR local modifiers (near me, coventry, etc.) OR postcode patterns
+  - Education: informational terms (how to, guide, tutorial, etc.) OR technique topics (aperture, shutter speed, etc.)
+  - Other: default fallback for unclassified keywords
+- **Preset System**: Data-driven presets with hard reset (no filter stacking)
+  - All keywords, High-impact money, AI Overview not cited, Brand safety, Blog opportunities, Local visibility
 

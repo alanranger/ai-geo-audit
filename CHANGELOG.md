@@ -2,6 +2,89 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2025-12-17] - v1.5.0 - Intent-Based Keyword Segmentation & Preset Refactor
+
+### Added
+- **Intent-Based Keyword Segmentation**: Replaced URL-based classification with intent-based rules
+  - New `lib/segment/classifyKeywordSegment.js` classifier with priority order: Brand → Money → Education → Other
+  - Brand detection: matches brand terms (alan ranger, alanranger, photography academy, etc.)
+  - Money detection: transactional terms (lessons, courses, workshops, etc.) OR local modifiers (near me, coventry, etc.) OR postcode patterns
+  - Education detection: informational terms (how to, guide, tutorial, etc.) OR technique topics (aperture, shutter speed, etc.)
+  - Returns segment, confidence (0-1), and reason for classification
+- **Segment Metadata Columns**: Added to `keyword_rankings` table
+  - `segment_source`: 'auto' (intent-based) or 'manual' (user override)
+  - `segment_confidence`: 0-1 confidence score for auto-classification
+  - `segment_reason`: Explanation text (e.g., "money: contains 'lessons'")
+- **Backfill Script**: `scripts/retag-keyword-segments-direct.js` to re-classify all existing keywords
+  - Skips rows with `segment_source='manual'` to preserve manual overrides
+  - Shows summary of changes and top 20 examples
+  - Run with: `npm run retag:segments` or `node scripts/retag-keyword-segments-direct.js`
+- **Data-Driven Presets**: Refactored preset system with single source of truth
+  - `DEFAULT_FILTERS` constant for default filter state
+  - `PRESETS` object with all preset definitions (filters + sort)
+  - Hard reset implementation (no filter stacking)
+- **Blog Opportunities Preset**: Replaced "Education growth" preset
+  - Uses `pageType: 'Blog'` (not `segment: 'Education'`)
+  - Filters: Page type: Blog, Best rank: Not top 3, Min opportunity: ≥ 30
+  - Sort: Opportunity score descending
+- **Local Visibility Preset**: New preset for GBP/local queries
+  - Uses `pageType: 'GBP'`
+  - Filters: Page type: GBP, Best rank: Not top 3, Min opportunity: ≥ 30
+  - Sort: Opportunity score descending
+- **Not Top 3 Rank Filter**: Added new rank filter option
+  - Filters keywords with rank > 3 or null (not in top 3)
+  - Used by Blog opportunities and Local visibility presets
+- **Competitor Checkbox in Competitors Table**: Added competitor checkbox column
+  - Narrow "C" column header to save space
+  - Checkbox updates competitor flag and shows/hides competitor badge
+  - Wired to same update logic as other competitor checkboxes
+- **Edit Keywords Modal**: Keyword management interface
+  - Load existing keywords from Supabase
+  - Add, remove, or edit keywords
+  - Warning box about data loss when removing/changing keywords
+  - Keywords updated on next Ranking & AI check (no automatic scan)
+- **Pre-scan Keyword Count**: Display keyword count before starting scan
+- **Stop Scan Button**: Ability to abort running scan in progress
+
+### Changed
+- **Keyword Classification**: Now based on keyword intent, not currently ranking URL
+  - Keywords like "photography lessons" correctly classified as Money (not Education)
+  - Keywords like "how to use aperture" correctly classified as Education
+  - Page type used only as weak hint for confidence, not primary classifier
+- **Preset System**: Complete refactor for maintainability
+  - All presets defined in single `PRESETS` object
+  - Hard reset ensures no filter stacking between presets
+  - Tooltips and criteria chips automatically reflect preset definitions
+- **Filter Dropdown Counts**: Updated to reflect new data structure
+  - Added "Blog" to pageType counts
+  - Added "not-top3" to rank counts
+  - All dropdown options now show counts (even if 0)
+- **Domain Rank Display**: Fixed missing Domain Rank in "AI Citations for Selected Keyword" table
+  - Moved Domain Rank filling logic inside async IIFE after rows are appended
+  - Added debug logging for troubleshooting
+
+### Fixed
+- **Domain Rank Missing**: Fixed Domain Rank not showing in "AI Citations for Selected Keyword" table
+- **Filter Counts**: Fixed "Blog" page type not showing count in dropdown
+- **Preset Filter Stacking**: Fixed presets accidentally stacking filters (now hard resets)
+- **Education Segment Collapse**: Fixed "Education (6)" segment issue by using pageType-based presets
+- **Competitor Badge Overlap**: Fixed competitor badge overlapping domain name in citation tables
+  - Changed to vertical flex layout (badge below domain name)
+  - Added word-break for long URLs
+- **Domain Strength Table**: Fixed dropdown showing "Unmapped" instead of actual mapped value
+- **Keyword List Loading**: Fixed modal not loading keywords from Supabase
+- **Keyword Save**: Fixed error preventing keyword save without prior audit (now creates minimal audit record if needed)
+
+### Technical Details
+- **Migration**: `20251217_add_keyword_segment_metadata.sql` adds segment metadata columns
+- **Classifier**: Priority-based matching with confidence scoring
+- **Backfill**: Processes all keywords, preserves manual overrides, shows change summary
+- **Preset Architecture**: Data-driven with `DEFAULT_FILTERS` and `PRESETS` object
+- **Filter Counts**: Calculated based on rows matching all OTHER filters (excluding the filter being counted)
+- **API Endpoints**: 
+  - `/api/keywords/get` - Fetch current keyword list from latest audit
+  - `/api/keywords/save` - Save updated keyword list to latest audit
+
 ## [2025-12-08] - Brand Overlay, AI Summary Likelihood, and Shareable Links
 
 ### Added
