@@ -2920,7 +2920,7 @@
                       <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Estimated Traffic Value (ETV). DataForSEO's estimate of monthly organic traffic value in USD based on keyword rankings and search volume. Higher values indicate more valuable organic traffic potential.">ℹ</div>
                     </th>
                     <th data-sort="top10" class="sortable" style="text-align:right;" title="Number of keywords ranking in Google's top 10 positions. Higher counts indicate broader keyword coverage and stronger domain authority across multiple search terms.">
-                      <div style="text-align:right;">Top‑10 keywords <span class="sort-indicator"></span></div>
+                      <div style="text-align:right; line-height: 1.2;">Top‑10<br>keywords <span class="sort-indicator"></span></div>
                       <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Number of keywords ranking in Google's top 10 positions. Higher counts indicate broader keyword coverage and stronger domain authority across multiple search terms.">ℹ</div>
                     </th>
                     <th data-sort="change" class="sortable" style="text-align:center;" title="Change in Strength score compared to the previous snapshot. Positive values (green ↑) indicate improvement, negative values (red ↓) indicate decline. Shows how domain strength is trending between snapshots.">
@@ -25773,15 +25773,23 @@ Final Score: ${score}/100`;
           const cls = delta > 0.5 ? 'kpi-trend-up' : (delta < -0.5 ? 'kpi-trend-down' : 'kpi-trend-flat');
           const changeTitle = delta === null ? 'No previous snapshot yet' : `Change vs last snapshot: ${formatDelta(delta)}`;
 
+          // Check if this is the self domain row
+          const isSelfDomain = String(it?.domain || '') === selfDomain;
+          const rowStyle = isSelfDomain ? 'font-weight: 700; background-color: #fefce8;' : '';
+
           const tr = document.createElement('tr');
+          if (isSelfDomain) {
+            tr.style.fontWeight = '700';
+            tr.style.backgroundColor = '#fefce8';
+          }
           tr.innerHTML = `
-            <td style="text-align:left;">${it?.label || it?.domain || '—'}</td>
-            <td>${it?.segment || '-'}</td>
-            <td style="text-align:center;">${latest ? formatDomainStrengthScore(latest.score) : '—'}</td>
-            <td>${latest ? renderDomainStrengthBandPill(latest.band) : '—'}</td>
-            <td style="text-align:right;">${latest ? formatEtvDollars(latest.organicEtv) : '—'}</td>
-            <td style="text-align:right;">${latest ? formatIntegerOrDash(latest.top10Keywords) : '—'}</td>
-            <td style="text-align:center;"><span class="${cls}" title="${changeTitle}">${delta === null ? '—' : `${arrow} ${formatDelta(delta)}`}</span></td>
+            <td style="text-align:left; ${isSelfDomain ? 'font-weight: 700;' : ''}">${it?.label || it?.domain || '—'}</td>
+            <td style="${isSelfDomain ? 'font-weight: 700;' : ''}">${it?.segment || '-'}</td>
+            <td style="text-align:center; ${isSelfDomain ? 'font-weight: 700;' : ''}">${latest ? formatDomainStrengthScore(latest.score) : '—'}</td>
+            <td style="${isSelfDomain ? 'font-weight: 700;' : ''}">${latest ? renderDomainStrengthBandPill(latest.band) : '—'}</td>
+            <td style="text-align:right; white-space: nowrap; ${isSelfDomain ? 'font-weight: 700;' : ''}">${latest ? formatEtvDollars(latest.organicEtv) : '—'}</td>
+            <td style="text-align:right; white-space: nowrap; ${isSelfDomain ? 'font-weight: 700;' : ''}">${latest ? formatIntegerOrDash(latest.top10Keywords) : '—'}</td>
+            <td style="text-align:center; ${isSelfDomain ? 'font-weight: 700;' : ''}"><span class="${cls}" title="${changeTitle}">${delta === null ? '—' : `${arrow} ${formatDelta(delta)}`}</span></td>
             <td style="text-align:center;">
               <canvas class="domain-strength-sparkline" id="${canvasId}" width="140" height="28" aria-label="12 month score trend"></canvas>
             </td>
