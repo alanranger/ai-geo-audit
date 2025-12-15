@@ -210,40 +210,57 @@ export default async function handler(req, res) {
   const snapshot_date = isoDateUTC();
   const engine = "google";
   
-  // Build domain list: core domains + pending queue (if enabled)
-  let runDomains = mode === "test" ? domains.slice(0, 3) : domains;
+  // Get primary domain (alanranger.com) - always fetch this
+  const primaryDomain = normalizeDomain(process.env.AI_GEO_DOMAIN || process.env.SITE_DOMAIN || "alanranger.com");
   
-  if (mode === "run" && includePending) {
-    // Normalize core domains to use for exclusion
-    const coreDomainsSet = new Set(runDomains.map(d => normalizeDomain(d)).filter(Boolean));
-    
-    // Fetch pending domains, excluding ones already in core list
-    // We fetch more than the limit to account for exclusions
-    const pendingDomains = await dequeuePending({ engine, limit: pendingLimit * 2 });
-    
-    // Filter out pending domains that are already in core list
-    const uniquePendingDomains = [];
-    for (const d of pendingDomains) {
-      const n = normalizeDomain(d);
-      if (!n || coreDomainsSet.has(n)) continue;
-      uniquePendingDomains.push(n);
-      if (uniquePendingDomains.length >= pendingLimit) break; // Stop once we have enough
+  // Build domain list: primary domain + pending queue (if enabled)
+  let runDomains = [];
+  
+  if (mode === "test") {
+    // Test mode: use provided domains or just primary domain
+    runDomains = domains.length > 0 ? domains.slice(0, 3) : (primaryDomain ? [primaryDomain] : []);
+  } else {
+    // Run mode: always include primary domain, then add pending domains
+    if (primaryDomain) {
+      runDomains.push(primaryDomain);
     }
     
-    // Merge: core domains first, then unique pending domains
-    runDomains = [...runDomains, ...uniquePendingDomains];
-    
-    // Final deduplication (shouldn't be needed, but safety check)
-    const seen = new Set();
-    const finalDomains = [];
-    for (const d of runDomains) {
-      const n = normalizeDomain(d);
-      if (!n || seen.has(n)) continue;
-      seen.add(n);
-      finalDomains.push(n);
+    if (includePending) {
+      // Fetch pending domains (fetch more to account for ones that already have snapshots this month)
+      const pendingDomains = await dequeuePending({ engine, limit: pendingLimit * 3 });
+      
+      // Check which pending domains already have snapshots for this month
+      const pendingWithSnapshots = await fetchExistingSnapshotRows(snapshot_date, engine, pendingDomains);
+      
+      // Filter out pending domains that already have a snapshot this month (cost control)
+      // Primary domain is always included regardless
+      const uniquePendingDomains = [];
+      for (const d of pendingDomains) {
+        const n = normalizeDomain(d);
+        if (!n || n === primaryDomain) continue; // Skip if same as primary domain
+        if (pendingWithSnapshots.has(n)) continue; // Skip if already has snapshot this month
+        uniquePendingDomains.push(n);
+        if (uniquePendingDomains.length >= pendingLimit) break; // Stop once we have enough
+      }
+      
+      // Merge: primary domain + unique pending domains
+      runDomains = [...runDomains, ...uniquePendingDomains];
+    } else if (domains.length > 0) {
+      // If includePending is false but domains are provided, use those
+      runDomains = [...runDomains, ...normalizeDomainArray(domains)];
     }
-    runDomains = finalDomains;
   }
+  
+  // Final deduplication
+  const seen = new Set();
+  const finalDomains = [];
+  for (const d of runDomains) {
+    const n = normalizeDomain(d);
+    if (!n || seen.has(n)) continue;
+    seen.add(n);
+    finalDomains.push(n);
+  }
+  runDomains = finalDomains;
 
   if (runDomains.length === 0) {
     return res.status(400).json({

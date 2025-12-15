@@ -25926,44 +25926,38 @@ Final Score: ${score}/100`;
         const btn = document.getElementById('domain-strength-run-btn');
         const overlay = document.getElementById('domain-strength-overlay');
         const overlayStatus = document.getElementById('domain-strength-overlay-status');
-        const domains = getDomainStrengthDomainList(20);
 
-        debugLog(`[DomainStrength] Domains to snapshot: ${domains.length} domains`, 'info');
-
-        if (!domains || domains.length === 0) {
-          const msg = 'No domains available yet. Run "Ranking & AI check" first.';
-          debugLog(`[DomainStrength] ${msg}`, 'warn');
-          if (statusEl) statusEl.textContent = msg;
-          return;
-        }
+        // Don't send core domains - API will handle alanranger.com + pending queue
+        // This ensures cost control: only fetch domains that don't have snapshots this month
+        const domains = [];
 
         // Show overlay
         if (overlay) {
           overlay.classList.add('show');
         }
-          if (overlayStatus) {
-            overlayStatus.textContent = `Fetching data for ${domains.length} core domains (+ pending domains from queue)...`;
-          }
+        if (overlayStatus) {
+          overlayStatus.textContent = `Fetching alanranger.com + up to 100 pending domains (skipping domains already processed this month)...`;
+        }
 
         if (btn) {
           btn.disabled = true;
           btn.textContent = 'Running…';
         }
-        if (statusEl) statusEl.textContent = `Running snapshot for ${domains.length} core domains (+ pending)...`;
+        if (statusEl) statusEl.textContent = `Running snapshot (alanranger.com + pending queue)...`;
 
         try {
           const apiEndpoint = apiUrl('/api/domain-strength/snapshot');
           debugLog(`[DomainStrength] Calling API: ${apiEndpoint}`, 'info');
-          debugLog(`[DomainStrength] Request: mode=run, domains=${domains.length}`, 'info');
+          debugLog(`[DomainStrength] Request: mode=run, includePending=true`, 'info');
           
           if (overlayStatus) {
-            overlayStatus.textContent = `Calling DataForSEO API (${domains.length} core + pending domains from queue)...`;
+            overlayStatus.textContent = `Calling DataForSEO API (alanranger.com + pending domains)...`;
           }
           
           const resp = await fetch(apiEndpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ mode: 'run', domains })
+            body: JSON.stringify({ mode: 'run', domains: [], includePending: true })
           });
           
           debugLog(`[DomainStrength] API response status: ${resp.status} ${resp.statusText}`, 'info');
