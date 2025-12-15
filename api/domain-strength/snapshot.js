@@ -216,11 +216,14 @@ export default async function handler(req, res) {
 
   const caps = (await fetchCapsFromSupabase()) || { etvCap: 1_000_000, kwCap: 100_000 };
 
-  // Optimization: by default, don't refetch domains that already have today's snapshot row.
+  // Check for existing snapshots - we'll use this to reuse data if API fails
   const existingByDomain =
     mode === "run" && !force ? await fetchExistingSnapshotRows(snapshot_date, engine, runDomains) : new Map();
-  const domainsToFetch =
-    mode === "run" && !force ? runDomains.filter((d) => !existingByDomain.has(d)) : runDomains;
+  // Always fetch all domains to ensure created_at timestamp is updated on each run
+  const domainsToFetch = runDomains;
+  
+  // Track which domains we successfully fetched vs need to reuse existing data
+  const domainsToReuse = new Set();
 
   const computedByDomain = new Map();
   const insertPayload = [];
@@ -238,16 +241,47 @@ export default async function handler(req, res) {
   if (domainsToFetch.length > 0) {
     const labs = await fetchLabsDomainRankOverviewBatch(domainsToFetch, { includeRaw: mode === "test" });
     if (!labs.ok) {
-      return res.status(200).json({
-        status: "error",
-        message: labs.error || "Labs request failed",
-        snapshot_date,
-        engine,
-        domains_processed: runDomains.length,
-        mode,
-        meta: { generatedAt: new Date().toISOString(), source: "dataforseo_labs.domain_rank_overview" },
-      });
-    }
+      // If API fails but we have existing data, reuse it to update timestamp
+      if (existingByDomain.size > 0 && mode === "run") {
+        for (const [domain, v] of existingByDomain.entries()) {
+          insertPayload.push({
+            domain,
+            engine,
+            snapshot_date,
+            score: v?.score ?? 0,
+            band: v?.band ?? "Very weak",
+            vis_component: 0,
+            breadth_component: 0,
+            quality_component: 0,
+            organic_etv_raw: 0,
+            organic_keywords_total_raw: 0,
+            top3_keywords_raw: null,
+            top10_keywords_raw: null,
+          });
+          computedByDomain.set(domain, {
+            domain,
+            score: v?.score ?? null,
+            band: v?.band ?? null,
+            V: null,
+            B: null,
+            Q: null,
+            raw: null,
+            error: labs.error || "Labs request failed",
+            reused: true,
+          });
+        }
+      } else {
+        return res.status(200).json({
+          status: "error",
+          message: labs.error || "Labs request failed",
+          snapshot_date,
+          engine,
+          domains_processed: runDomains.length,
+          mode,
+          meta: { generatedAt: new Date().toISOString(), source: "dataforseo_labs.domain_rank_overview" },
+        });
+      }
+    } else {
 
     const byDomain = new Map(labs.data.map((r) => [r.domain, r]));
 
@@ -257,18 +291,51 @@ export default async function handler(req, res) {
         const errMsg = r?.error || "No data";
 
         // Only treat true "no data" as a 0 score. If the API call failed (plan limits, auth, etc),
-        // don't write misleading "Very weak" rows.
+        // reuse existing data if available, otherwise mark as error
         if (!isNoDataError(errMsg)) {
-          computedByDomain.set(domain, {
-            domain,
-            score: null,
-            band: null,
-            V: null,
-            B: null,
-            Q: null,
-            raw: null,
-            error: errMsg,
-          });
+          // If we have existing data, reuse it to update timestamp
+          if (existingByDomain.has(domain)) {
+            const v = existingByDomain.get(domain);
+            domainsToReuse.add(domain);
+            if (mode === "run") {
+              insertPayload.push({
+                domain,
+                engine,
+                snapshot_date,
+                score: v?.score ?? 0,
+                band: v?.band ?? "Very weak",
+                vis_component: 0,
+                breadth_component: 0,
+                quality_component: 0,
+                organic_etv_raw: 0,
+                organic_keywords_total_raw: 0,
+                top3_keywords_raw: null,
+                top10_keywords_raw: null,
+              });
+            }
+            computedByDomain.set(domain, {
+              domain,
+              score: v?.score ?? null,
+              band: v?.band ?? null,
+              V: null,
+              B: null,
+              Q: null,
+              raw: null,
+              error: errMsg,
+              reused: true,
+            });
+          } else {
+            computedByDomain.set(domain, {
+              domain,
+              score: null,
+              band: null,
+              V: null,
+              B: null,
+              Q: null,
+              raw: null,
+              error: errMsg,
+            });
+          }
           continue;
         }
 
@@ -337,25 +404,49 @@ export default async function handler(req, res) {
   }
 
   // Build response results in the same order as the input domains list
+  // Note: We now always re-fetch and re-insert to update created_at timestamp
   const results = runDomains.map((domain) => {
-    if (existingByDomain.has(domain)) {
-      const v = existingByDomain.get(domain);
-      return {
-        domain,
-        score: v?.score ?? null,
-        band: v?.band ?? null,
-        snapshotDate: v?.snapshotDate ?? snapshot_date,
-        reused: true,
-      };
-    }
-    const c = computedByDomain.get(domain);
-    return c ? { ...c, reused: false } : { domain, score: null, band: null, reused: false, error: "Not processed" };
+      const c = computedByDomain.get(domain);
+      if (c && !c.error) {
+        return { ...c, reused: false };
+      }
+      // If domain wasn't computed (e.g., API error), reuse existing data but still update timestamp
+      if (existingByDomain.has(domain)) {
+        const v = existingByDomain.get(domain);
+        domainsToReuse.add(domain);
+        // Add to insert payload so timestamp gets updated
+        if (mode === "run") {
+          insertPayload.push({
+            domain,
+            engine,
+            snapshot_date,
+            score: v?.score ?? 0,
+            band: v?.band ?? "Very weak",
+            vis_component: 0,
+            breadth_component: 0,
+            quality_component: 0,
+            organic_etv_raw: 0,
+            organic_keywords_total_raw: 0,
+            top3_keywords_raw: null,
+            top10_keywords_raw: null,
+          });
+        }
+        return {
+          domain,
+          score: v?.score ?? null,
+          band: v?.band ?? null,
+          snapshotDate: v?.snapshotDate ?? snapshot_date,
+          reused: true,
+        };
+      }
+      return { domain, score: null, band: null, reused: false, error: "Not processed" };
   });
 
   if (mode === "run") {
     try {
-      // Only overwrite the domains we actually computed this run.
-      await deleteExistingRows(snapshot_date, engine, domainsToFetch);
+      // Delete existing rows for all domains we're processing (to update created_at timestamp)
+      // This ensures the "Last Fetched" time reflects when the snapshot was actually run
+      await deleteExistingRows(snapshot_date, engine, runDomains);
       await insertRows(insertPayload);
     } catch (e) {
       return res.status(500).json({
