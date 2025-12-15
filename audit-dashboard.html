@@ -21693,6 +21693,47 @@ Final Score: ${score}/100`;
                   });
                 }
                 
+                // Re-classify pageType for all rows (fixes stale page_type from database)
+                // This ensures Event/Product pages are correctly identified
+                if (RankingAiModule && RankingAiModule.classifyPageTypeForKeyword) {
+                  debugLog(`🔄 Re-classifying pageType for ${keywordCount} keywords...`, 'info');
+                  let reclassifiedCount = 0;
+                  combinedRows.forEach(row => {
+                    const bestUrl = row.best_url || row.bestUrl || null;
+                    if (bestUrl) {
+                      const newPageType = RankingAiModule.classifyPageTypeForKeyword(bestUrl);
+                      const oldPageType = row.pageType || 'Landing';
+                      if (newPageType !== oldPageType) {
+                        row.pageType = newPageType;
+                        // Also update classification object if it exists
+                        if (row.classification) {
+                          row.classification.pageType = newPageType;
+                        }
+                        reclassifiedCount++;
+                      } else {
+                        // Ensure pageType is set even if unchanged
+                        row.pageType = newPageType;
+                        if (row.classification) {
+                          row.classification.pageType = newPageType;
+                        }
+                      }
+                    } else {
+                      // No URL, default to Landing
+                      row.pageType = 'Landing';
+                      if (row.classification) {
+                        row.classification.pageType = 'Landing';
+                      }
+                    }
+                  });
+                  if (reclassifiedCount > 0) {
+                    debugLog(`✓ Re-classified ${reclassifiedCount} keywords with updated pageType`, 'success');
+                  } else {
+                    debugLog(`✓ Verified pageType for all ${keywordCount} keywords`, 'success');
+                  }
+                } else {
+                  debugLog(`⚠ Cannot re-classify pageType: classifyPageTypeForKeyword not available`, 'warn');
+                }
+                
                 // Normalize summary field names (convert snake_case to camelCase for compatibility)
                 const normalizedSummary = normalizeSummaryFields(json.data.rankingAiData.summary);
                 
