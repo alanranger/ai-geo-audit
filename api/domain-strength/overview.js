@@ -139,7 +139,7 @@ export default async function handler(req, res) {
           if (!competitorMeta.has(d)) {
             competitorMeta.set(d, {
               label: c.label || d,
-              segment: c.segment || 'other',
+              segment: c.segment || 'unmapped',
               isCompetitor: true,
             });
           }

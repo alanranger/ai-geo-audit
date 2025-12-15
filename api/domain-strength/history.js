@@ -139,7 +139,7 @@ export default async function handler(req, res) {
                 if (r.domain) {
                   domainMeta.set(r.domain, {
                     label: r.label || null,
-                    segment: r.segment || 'other',
+                    segment: r.segment || 'unmapped',
                   });
                 }
               });
@@ -152,15 +152,15 @@ export default async function handler(req, res) {
     }
   }
   
-  // Enrich snapshot data with metadata
-  const enrichedData = snapshotData.map(row => {
-    const meta = domainMeta.get(row.domain) || { label: null, segment: 'other' };
-    return {
-      ...row,
-      label: meta.label,
-      segment: meta.segment,
-    };
-  });
+      // Enrich snapshot data with metadata
+      const enrichedData = snapshotData.map(row => {
+        const meta = domainMeta.get(row.domain) || { label: null, segment: 'unmapped' };
+        return {
+          ...row,
+          label: meta.label,
+          segment: meta.segment || 'unmapped', // Use 'unmapped' as fallback, not 'other'
+        };
+      });
   
   return res.status(200).json({
     status: "ok",
