@@ -27827,10 +27827,15 @@ Final Score: ${score}/100`;
           window.forceCloseEditKeywordsModal = forceClose;
 
           function showModal() {
+            console.log('[Edit Keywords] showModal() called');
             if (modal) {
+              console.log('[Edit Keywords] Modal found, showing...');
               modal.style.removeProperty('display');
               modal.style.display = 'flex';
+              console.log('[Edit Keywords] Calling loadKeywords()...');
               loadKeywords();
+            } else {
+              console.error('[Edit Keywords] Modal element not found!');
             }
           }
 
@@ -27847,17 +27852,26 @@ Final Score: ${score}/100`;
           }
 
           async function loadKeywords() {
+            console.log('[Edit Keywords] loadKeywords() called');
             if (!textarea) {
               console.error('[Edit Keywords] Textarea not found');
+              if (statusEl) {
+                statusEl.textContent = 'ERROR: Textarea element not found';
+                statusEl.style.color = '#dc2626';
+                statusEl.style.fontWeight = 'bold';
+              }
               return;
             }
             
-            textarea.value = 'Loading...';
+            console.log('[Edit Keywords] Setting loading state...');
+            textarea.value = 'Loading keywords...';
             textarea.disabled = true;
             textarea.style.color = '#1e293b';
+            textarea.style.backgroundColor = '#ffffff';
             if (statusEl) {
-              statusEl.textContent = 'Loading keywords...';
+              statusEl.textContent = 'Loading keywords from server...';
               statusEl.style.color = '#64748b';
+              statusEl.style.fontWeight = 'normal';
             }
             
             try {
@@ -27865,54 +27879,69 @@ Final Score: ${score}/100`;
               console.log('[Edit Keywords] Fetching from:', apiEndpoint);
               
               const resp = await fetch(apiEndpoint);
-              console.log('[Edit Keywords] Response status:', resp.status);
+              console.log('[Edit Keywords] Response status:', resp.status, resp.statusText);
               
               if (!resp.ok) {
                 const errorText = await resp.text();
-                console.error('[Edit Keywords] API error:', errorText);
-                throw new Error(`Failed to load keywords: ${resp.status} ${errorText}`);
+                console.error('[Edit Keywords] API error response:', errorText);
+                throw new Error(`HTTP ${resp.status}: ${errorText.substring(0, 100)}`);
               }
               
               const data = await resp.json();
-              console.log('[Edit Keywords] Response data:', data);
+              console.log('[Edit Keywords] Response data:', JSON.stringify(data, null, 2));
               
               if (data.status === 'ok' && Array.isArray(data.keywords)) {
+                console.log('[Edit Keywords] Found', data.keywords.length, 'keywords');
                 if (data.keywords.length > 0) {
-                  textarea.value = data.keywords.join('\n');
+                  const keywordsText = data.keywords.join('\n');
+                  console.log('[Edit Keywords] Setting textarea value, length:', keywordsText.length);
+                  textarea.value = keywordsText;
                   textarea.disabled = false;
                   textarea.style.color = '#1e293b';
+                  textarea.style.backgroundColor = '#ffffff';
                   textarea.focus();
                   if (statusEl) {
-                    statusEl.textContent = `Loaded ${data.keywords.length} keywords`;
+                    statusEl.textContent = `✓ Loaded ${data.keywords.length} keywords`;
                     statusEl.style.color = '#10b981';
+                    statusEl.style.fontWeight = '600';
                   }
+                  console.log('[Edit Keywords] Keywords loaded successfully');
                 } else {
+                  console.log('[Edit Keywords] No keywords found in response');
                   textarea.value = '';
                   textarea.disabled = false;
                   textarea.style.color = '#1e293b';
+                  textarea.style.backgroundColor = '#ffffff';
                   if (statusEl) {
-                    statusEl.textContent = 'No keywords found. You can add keywords below.';
+                    statusEl.textContent = '⚠ No keywords found. You can add keywords below (one per line).';
                     statusEl.style.color = '#f59e0b';
+                    statusEl.style.fontWeight = '600';
                   }
                 }
               } else {
-                console.error('[Edit Keywords] Invalid response format:', data);
+                console.error('[Edit Keywords] Invalid response format. Status:', data.status, 'Keywords type:', typeof data.keywords, 'Is array:', Array.isArray(data.keywords));
                 textarea.value = '';
                 textarea.disabled = false;
                 textarea.style.color = '#1e293b';
+                textarea.style.backgroundColor = '#ffffff';
                 if (statusEl) {
-                  statusEl.textContent = 'Invalid response format from server.';
+                  statusEl.textContent = '❌ Invalid response format from server. Check console for details.';
                   statusEl.style.color = '#dc2626';
+                  statusEl.style.fontWeight = 'bold';
                 }
               }
             } catch (err) {
-              console.error('[Edit Keywords] Error:', err);
+              console.error('[Edit Keywords] Exception caught:', err);
+              console.error('[Edit Keywords] Error stack:', err.stack);
               textarea.value = '';
               textarea.disabled = false;
               textarea.style.color = '#1e293b';
+              textarea.style.backgroundColor = '#ffffff';
               if (statusEl) {
-                statusEl.textContent = 'Error loading keywords: ' + err.message;
+                statusEl.textContent = '❌ Error loading keywords: ' + err.message + ' (Check browser console for details)';
                 statusEl.style.color = '#dc2626';
+                statusEl.style.fontWeight = 'bold';
+                statusEl.style.fontSize = '0.9rem';
               }
             }
           }
