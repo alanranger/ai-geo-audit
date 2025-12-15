@@ -108,50 +108,58 @@ export default async function handler(req, res) {
       updatePayload.competitor_notes = competitor_notes || null;
     }
 
+    // Check if domain exists first
+    const checkUrl = `${supabaseUrl}/rest/v1/domain_strength_domains?domain=eq.${encodeURIComponent(domain)}&select=*&limit=1`;
+    const checkResp = await fetch(checkUrl, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: supabaseKey,
+        Authorization: `Bearer ${supabaseKey}`,
+      },
+    });
+
+    const existing = checkResp.ok ? await checkResp.json() : [];
+    const existingRecord = Array.isArray(existing) && existing.length > 0 ? existing[0] : null;
+
     // Always include domain in payload for upsert
     updatePayload.domain = domain;
-    
-    // If domain_type is not being updated, ensure we have defaults for new records
-    if (updatePayload.domain_type === undefined) {
-      // Check if domain exists to see if we should preserve existing values
-      const checkUrl = `${supabaseUrl}/rest/v1/domain_strength_domains?domain=eq.${encodeURIComponent(domain)}&select=domain,domain_type,is_competitor&limit=1`;
-      const checkResp = await fetch(checkUrl, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          apikey: supabaseKey,
-          Authorization: `Bearer ${supabaseKey}`,
-        },
-      });
 
-      const existing = checkResp.ok ? await checkResp.json() : [];
-      const existingRecord = Array.isArray(existing) && existing.length > 0 ? existing[0] : null;
-
-      if (!existingRecord) {
-        // New record - set defaults
-        updatePayload.label = domain;
+    if (!existingRecord) {
+      // New record - set defaults for any missing required fields
+      updatePayload.label = domain;
+      if (updatePayload.domain_type === undefined) {
         updatePayload.domain_type = 'unmapped';
         updatePayload.domain_type_source = 'manual';
         updatePayload.segment = 'unmapped';
-        if (updatePayload.is_competitor === undefined) {
-          updatePayload.is_competitor = false;
-        }
-      } else {
-        // Existing record - preserve existing values if not being updated
-        if (updatePayload.domain_type === undefined) {
-          updatePayload.domain_type = existingRecord.domain_type || 'unmapped';
-        }
-        if (updatePayload.is_competitor === undefined) {
-          updatePayload.is_competitor = existingRecord.is_competitor === true;
-        }
-      }
-    } else {
-      // domain_type is being updated, ensure label exists for new records
-      if (!updatePayload.label) {
-        updatePayload.label = domain;
       }
       if (updatePayload.is_competitor === undefined) {
         updatePayload.is_competitor = false;
+      }
+    } else {
+      // Existing record - merge with existing values for fields not being updated
+      // For upsert with merge-duplicates, we need to include all fields we want to preserve
+      if (updatePayload.domain_type === undefined && existingRecord.domain_type) {
+        updatePayload.domain_type = existingRecord.domain_type;
+        if (existingRecord.domain_type_source) {
+          updatePayload.domain_type_source = existingRecord.domain_type_source;
+        }
+        if (existingRecord.domain_type_confidence !== undefined) {
+          updatePayload.domain_type_confidence = existingRecord.domain_type_confidence;
+        }
+        if (existingRecord.domain_type_reason) {
+          updatePayload.domain_type_reason = existingRecord.domain_type_reason;
+        }
+        updatePayload.segment = existingRecord.segment || existingRecord.domain_type;
+      }
+      if (updatePayload.is_competitor === undefined) {
+        updatePayload.is_competitor = existingRecord.is_competitor === true;
+      }
+      if (existingRecord.label && !updatePayload.label) {
+        updatePayload.label = existingRecord.label;
+      }
+      if (existingRecord.competitor_notes && updatePayload.competitor_notes === undefined) {
+        updatePayload.competitor_notes = existingRecord.competitor_notes;
       }
     }
 
