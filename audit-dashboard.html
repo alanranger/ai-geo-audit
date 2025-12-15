@@ -2829,11 +2829,31 @@
             <li><strong>Local packs</strong> → Local Entity + Service Area.</li>
           </ul>
 
-          <div class="ranking-header-actions">
+          <div class="ranking-header-actions" style="display: flex; align-items: center; gap: 1rem;">
             <button id="ranking-ai-refresh" class="btn btn-secondary" type="button">
               Run ranking &amp; AI check
             </button>
+            <button id="edit-keywords-btn" class="btn btn-secondary" type="button" style="background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1;">
+              Edit Keywords
+            </button>
             <span id="ranking-ai-last-run" class="ranking-ai-last-run"></span>
+          </div>
+        </div>
+
+        <!-- Edit Keywords Modal -->
+        <div id="edit-keywords-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.5); z-index: 10000; align-items: center; justify-content: center;">
+          <div style="background: white; border-radius: 8px; padding: 2rem; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+              <h3 style="margin: 0; font-size: 1.5rem; color: #1e293b;">Edit Keywords</h3>
+              <button id="edit-keywords-close" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #64748b; padding: 0; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;">&times;</button>
+            </div>
+            <p style="margin: 0 0 1rem 0; color: #64748b; font-size: 0.9rem;">Enter one keyword per line. Changes will be saved to the latest audit results.</p>
+            <textarea id="edit-keywords-textarea" style="width: 100%; min-height: 300px; padding: 0.75rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.9rem; font-family: inherit; resize: vertical; box-sizing: border-box;"></textarea>
+            <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem;">
+              <button id="edit-keywords-cancel" style="padding: 0.5rem 1rem; background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; border-radius: 4px; cursor: pointer; font-size: 0.9rem;">Cancel</button>
+              <button id="edit-keywords-save" style="padding: 0.5rem 1rem; background: #2563eb; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9rem; font-weight: 600;">Save Keywords</button>
+            </div>
+            <div id="edit-keywords-status" style="margin-top: 1rem; font-size: 0.85rem;"></div>
           </div>
         </div>
 
@@ -27776,6 +27796,143 @@ Final Score: ${score}/100`;
 
         contentEl.innerHTML = html;
       }
+
+      // Edit Keywords functionality
+      (function() {
+        const modal = document.getElementById('edit-keywords-modal');
+        const openBtn = document.getElementById('edit-keywords-btn');
+        const closeBtn = document.getElementById('edit-keywords-close');
+        const cancelBtn = document.getElementById('edit-keywords-cancel');
+        const saveBtn = document.getElementById('edit-keywords-save');
+        const textarea = document.getElementById('edit-keywords-textarea');
+        const statusEl = document.getElementById('edit-keywords-status');
+
+        function showModal() {
+          if (modal) {
+            modal.style.display = 'flex';
+            loadKeywords();
+          }
+        }
+
+        function hideModal() {
+          if (modal) {
+            modal.style.display = 'none';
+            if (statusEl) statusEl.textContent = '';
+          }
+        }
+
+        async function loadKeywords() {
+          if (!textarea) return;
+          
+          textarea.value = 'Loading...';
+          textarea.disabled = true;
+          if (statusEl) statusEl.textContent = '';
+          
+          try {
+            const resp = await fetch(apiUrl('/api/keywords/get'));
+            if (!resp.ok) {
+              throw new Error('Failed to load keywords');
+            }
+            const data = await resp.json();
+            if (data.status === 'ok' && Array.isArray(data.keywords)) {
+              textarea.value = data.keywords.join('\n');
+              textarea.disabled = false;
+              textarea.focus();
+            } else {
+              textarea.value = '';
+              textarea.disabled = false;
+              if (statusEl) statusEl.textContent = 'No keywords found.';
+              if (statusEl) statusEl.style.color = '#64748b';
+            }
+          } catch (err) {
+            textarea.value = '';
+            textarea.disabled = false;
+            if (statusEl) {
+              statusEl.textContent = 'Error loading keywords: ' + err.message;
+              statusEl.style.color = '#dc2626';
+            }
+          }
+        }
+
+        async function saveKeywords() {
+          if (!textarea || !saveBtn) return;
+          
+          const keywordsText = textarea.value.trim();
+          const keywords = keywordsText.split('\n')
+            .map(k => k.trim())
+            .filter(k => k.length > 0);
+          
+          if (keywords.length === 0) {
+            if (statusEl) {
+              statusEl.textContent = 'Please enter at least one keyword.';
+              statusEl.style.color = '#dc2626';
+            }
+            return;
+          }
+
+          saveBtn.disabled = true;
+          saveBtn.textContent = 'Saving...';
+          if (statusEl) {
+            statusEl.textContent = 'Saving keywords...';
+            statusEl.style.color = '#64748b';
+          }
+
+          try {
+            const resp = await fetch(apiUrl('/api/keywords/save'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ keywords })
+            });
+
+            const data = await resp.json();
+            
+            if (resp.ok && data.status === 'ok') {
+              if (statusEl) {
+                statusEl.textContent = `✓ Successfully saved ${data.count || keywords.length} keywords.`;
+                statusEl.style.color = '#10b981';
+              }
+              
+              // Reload the ranking AI data after a short delay
+              setTimeout(() => {
+                hideModal();
+                if (typeof loadRankingAiData === 'function') {
+                  loadRankingAiData(true); // Force reload
+                }
+              }, 1500);
+            } else {
+              throw new Error(data.message || 'Failed to save keywords');
+            }
+          } catch (err) {
+            if (statusEl) {
+              statusEl.textContent = 'Error saving keywords: ' + err.message;
+              statusEl.style.color = '#dc2626';
+            }
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Save Keywords';
+          }
+        }
+
+        if (openBtn) openBtn.addEventListener('click', showModal);
+        if (closeBtn) closeBtn.addEventListener('click', hideModal);
+        if (cancelBtn) cancelBtn.addEventListener('click', hideModal);
+        if (saveBtn) saveBtn.addEventListener('click', saveKeywords);
+        
+        // Close modal when clicking outside
+        if (modal) {
+          modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+              hideModal();
+            }
+          });
+        }
+
+        // Close modal with Escape key
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape' && modal && modal.style.display === 'flex') {
+            hideModal();
+          }
+        });
+      })();
 
       // Initialize AI Sources sort state
       if (!window.aiSourcesSortState) {

@@ -1,0 +1,172 @@
+/**
+ * Save updated keyword list to latest audit_results
+ * 
+ * POST /api/keywords/save
+ * Body: { keywords: string[] }
+ */
+
+export default async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'POST') {
+    return res.status(405).json({
+      status: 'error',
+      message: 'Method not allowed. Use POST.',
+      meta: { generatedAt: new Date().toISOString() },
+    });
+  }
+
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  
+  if (!supabaseUrl || !supabaseKey) {
+    return res.status(500).json({
+      status: 'error',
+      message: 'Supabase not configured.',
+      meta: { generatedAt: new Date().toISOString() },
+    });
+  }
+
+  try {
+    const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+    const { keywords } = body || {};
+
+    if (!Array.isArray(keywords)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'keywords must be an array',
+        meta: { generatedAt: new Date().toISOString() },
+      });
+    }
+
+    const propertyUrl = process.env.NEXT_PUBLIC_SITE_DOMAIN || process.env.SITE_DOMAIN || 'alanranger.com';
+    
+    // Get latest audit_results with full ranking_ai_data
+    const auditUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.desc&limit=1`;
+    const auditResp = await fetch(auditUrl, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: supabaseKey,
+        Authorization: `Bearer ${supabaseKey}`,
+      },
+    });
+
+    if (!auditResp.ok) {
+      return res.status(auditResp.status).json({
+        status: 'error',
+        message: 'Failed to fetch audit results',
+        meta: { generatedAt: new Date().toISOString() },
+      });
+    }
+
+    const auditRows = await auditResp.json();
+    if (!Array.isArray(auditRows) || auditRows.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'No audit results found. Please run an audit first.',
+        meta: { generatedAt: new Date().toISOString() },
+      });
+    }
+
+    const latestAudit = auditRows[0];
+    const rankingAiData = latestAudit.ranking_ai_data || { combinedRows: [], summary: {} };
+
+    // Update combinedRows to only include keywords from the new list
+    // Preserve existing data for keywords that are still in the list
+    const existingRowsMap = new Map();
+    rankingAiData.combinedRows?.forEach(row => {
+      if (row.keyword) {
+        existingRowsMap.set(row.keyword, row);
+      }
+    });
+
+    // Create new combinedRows with updated keywords
+    const newCombinedRows = keywords.map(keyword => {
+      const trimmed = String(keyword).trim();
+      if (!trimmed) return null;
+      
+      // Use existing row data if available, otherwise create new structure
+      const existing = existingRowsMap.get(trimmed);
+      if (existing) {
+        return existing;
+      }
+      
+      // New keyword - create minimal structure
+      return {
+        keyword: trimmed,
+        segment: 'general',
+        best_rank_group: null,
+        best_rank_absolute: null,
+        best_url: null,
+        best_title: trimmed,
+        has_ai_overview: false,
+        ai_total_citations: 0,
+        ai_alan_citations_count: 0,
+        ai_alan_citations: [],
+        ai_sample_citations: [],
+        serp_features: {
+          has_ai_overview: false,
+          has_local_pack: false,
+          has_featured_snippet: false,
+          has_people_also_ask: false
+        },
+        competitor_counts: {}
+      };
+    }).filter(Boolean);
+
+    // Update ranking_ai_data
+    const updatedRankingAiData = {
+      ...rankingAiData,
+      combinedRows: newCombinedRows,
+      summary: {
+        ...rankingAiData.summary,
+        totalKeywords: newCombinedRows.length
+      }
+    };
+
+    // Update the audit_results record
+    const updateUrl = `${supabaseUrl}/rest/v1/audit_results?id=eq.${latestAudit.id}`;
+    const updateResp = await fetch(updateUrl, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: supabaseKey,
+        Authorization: `Bearer ${supabaseKey}`,
+        Prefer: 'return=representation',
+      },
+      body: JSON.stringify({
+        ranking_ai_data: updatedRankingAiData
+      }),
+    });
+
+    if (!updateResp.ok) {
+      const errorText = await updateResp.text();
+      return res.status(updateResp.status).json({
+        status: 'error',
+        message: 'Failed to update keywords',
+        details: errorText,
+        meta: { generatedAt: new Date().toISOString() },
+      });
+    }
+
+    return res.status(200).json({
+      status: 'ok',
+      message: 'Keywords updated successfully',
+      count: newCombinedRows.length,
+      meta: { generatedAt: new Date().toISOString() },
+    });
+
+  } catch (e) {
+    console.error('[Save Keywords] Error:', e);
+    return res.status(500).json({
+      status: 'error',
+      message: e.message || 'Internal server error',
+      meta: { generatedAt: new Date().toISOString() },
+    });
+  }
+}
+
