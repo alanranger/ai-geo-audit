@@ -3782,37 +3782,43 @@
         return (k || "").trim().toLowerCase();
       }
 
+      // Intent-based keyword segment classifier (client-side version)
       function classifyKeywordSegment(keyword, bestUrl) {
-        // Use shared classification function
-        if (typeof window.classifyUrlForRankingAi === 'function') {
-          const classification = window.classifyUrlForRankingAi(bestUrl || '', keyword);
-          return classification.segment.toLowerCase();
+        if (!keyword || typeof keyword !== 'string') {
+          return 'other';
         }
         
-        // Fallback to old logic if shared function not available
-        const kw = normaliseKeyword(keyword);
-        if (kw.includes("alan ranger")) {
-          return "brand";
+        const normalizedKeyword = keyword.trim().toLowerCase();
+        
+        // Priority 1: Brand (highest priority)
+        const brandTerms = ['alan ranger', 'alanranger', 'alan ranger photography', 'photography academy', 'alan ranger academy'];
+        if (brandTerms.some(term => normalizedKeyword.includes(term.toLowerCase()))) {
+          return 'brand';
         }
-        const url = (bestUrl || "").toLowerCase();
-        if (url.includes("/blog-on-photography/") || url.includes("/free-online-photography-course")) {
-          return "education";
+        
+        // Priority 2: Money (transactional OR local intent)
+        const moneyTerms = ['lesson', 'lessons', 'class', 'classes', 'course', 'courses', 'training', 'workshop', 'workshops', 'mentoring', 'mentor', '1-2-1', '1:1', 'private', 'hire', 'service', 'services', 'photographer', 'booking', 'book', 'price', 'cost', 'voucher', 'gift'];
+        const localModifiers = ['near me', 'in coventry', 'coventry', 'birmingham', 'warwick', 'leamington', 'solihull', 'rugby'];
+        const hasMoneyTerm = moneyTerms.some(term => normalizedKeyword.includes(term.toLowerCase()));
+        const hasLocalModifier = localModifiers.some(term => normalizedKeyword.includes(term.toLowerCase()));
+        const hasPostcode = /\b([A-Z]{1,2}\d{1,2}\s?\d?[A-Z]{0,2})\b/i.test(normalizedKeyword);
+        
+        if (hasMoneyTerm || hasLocalModifier || hasPostcode) {
+          return 'money';
         }
-        if (
-          url.includes("/photography-workshops") ||
-          url.includes("/course-finder") ||
-          url.includes("/photography-services-near-me") ||
-          url.includes("/photography-lessons") ||
-          url.includes("/photography-courses") ||
-          url.includes("/book-now") ||
-          url.includes("/product/")
-        ) {
-          return "money";
+        
+        // Priority 3: Education (informational/learning intent)
+        const educationTerms = ['how to', 'what is', 'guide', 'tutorial', 'tips', 'settings', 'meaning', 'vs', 'difference', 'examples', 'best way to'];
+        const techniqueTopics = ['aperture', 'shutter speed', 'iso', 'depth of field', 'histogram', 'dynamic range', 'composition'];
+        const hasEducationTerm = educationTerms.some(term => normalizedKeyword.includes(term.toLowerCase()));
+        const hasTechniqueTopic = techniqueTopics.some(term => normalizedKeyword.includes(term.toLowerCase()));
+        
+        if (hasEducationTerm || hasTechniqueTopic) {
+          return 'education';
         }
-        if (url.includes("/fine-art") || url.includes("/portfolio") || url.includes("/gallery")) {
-          return "general";
-        }
-        return "general";
+        
+        // Priority 4: Other (fallback)
+        return 'other';
       }
       
       function classifyPageTypeForKeyword(bestUrl) {
@@ -22163,17 +22169,11 @@ Final Score: ${score}/100`;
           const aiRow = aiByKeyword[key] || null;
           const bestUrl = row.best_url || null;
           
-          // Use shared classification function
-          let classification = { segment: "Education", pageType: "Landing" };
-          if (typeof window.classifyUrlForRankingAi === 'function') {
-            classification = window.classifyUrlForRankingAi(bestUrl || '', row.keyword);
-          } else {
-            // Fallback
-            const segment = RankingAiModule.classifyKeywordSegment(row.keyword, bestUrl);
-            const pageType = RankingAiModule.classifyPageTypeForKeyword ? 
-              RankingAiModule.classifyPageTypeForKeyword(bestUrl) : "Landing";
-            classification = { segment, pageType };
-          }
+          // Use intent-based classification (keyword text drives segment, not URL)
+          const segment = RankingAiModule.classifyKeywordSegment(row.keyword, bestUrl);
+          const pageType = RankingAiModule.classifyPageTypeForKeyword ? 
+            RankingAiModule.classifyPageTypeForKeyword(bestUrl) : "Landing";
+          const classification = { segment, pageType };
           
           return {
             ...row,

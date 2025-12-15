@@ -129,10 +129,21 @@ export default async function handler(req, res) {
         return existing;
       }
       
-      // New keyword - create minimal structure
+      // New keyword - create minimal structure with intent-based segment classification
+      let classification = { segment: 'other', confidence: 0.5, reason: 'other: no matching intent signals' };
+      try {
+        const classifierModule = await import('../../lib/segment/classifyKeywordSegment.js');
+        classification = classifierModule.classifyKeywordSegment({ keyword: trimmed });
+      } catch (err) {
+        console.error('[Save Keywords] Error importing classifier, using fallback:', err.message);
+      }
+      
       return {
         keyword: trimmed,
-        segment: 'general',
+        segment: classification.segment,
+        segment_confidence: classification.confidence,
+        segment_reason: classification.reason,
+        segment_source: 'auto',
         best_rank_group: null,
         best_rank_absolute: null,
         best_url: null,

@@ -268,9 +268,7 @@ export default async function handler(req, res) {
   const mode = (body.mode || "run") === "test" ? "test" : "run";
   const force = body.force === true;
   const includePending = body.includePending !== false; // default true
-  // Use env var with default 50, but allow override via body
-  const maxPendingPerRun = Number(process.env.DOMAIN_RANK_PENDING_MAX_PER_RUN || 50);
-  const pendingLimit = Math.max(1, Math.min(1000, Number(body.pendingLimit) || maxPendingPerRun));
+  const pendingLimit = Math.max(1, Math.min(1000, Number(body.pendingLimit) || 100));
   const domains = normalizeDomainArray(body.domains || []);
 
   const snapshot_date = isoDateUTC();
@@ -577,39 +575,6 @@ export default async function handler(req, res) {
       return { domain, score: null, band: null, reused: false, error: "Not processed" };
   });
 
-  // Count core domains (primary domain)
-  const coreCount = primaryDomain && runDomains.includes(primaryDomain) ? 1 : 0;
-  
-  // Get pending remaining count (before processing, will be updated after clearPending)
-  let pendingRemaining = 0;
-  if (includePending && mode === "run") {
-    try {
-      const supabaseUrl = process.env.SUPABASE_URL;
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-      if (supabaseUrl && supabaseKey) {
-        const countUrl = `${supabaseUrl}/rest/v1/domain_rank_pending?search_engine=eq.${encodeURIComponent(engine)}&select=domain&limit=1`;
-        const countResp = await fetch(countUrl, {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-            apikey: supabaseKey,
-            Authorization: `Bearer ${supabaseKey}`,
-            Prefer: "count=exact",
-          },
-        });
-        if (countResp.ok) {
-          const countHeader = countResp.headers.get("content-range");
-          if (countHeader) {
-            const match = countHeader.match(/\/(\d+)$/);
-            if (match) pendingRemaining = parseInt(match[1], 10) || 0;
-          }
-        }
-      }
-    } catch (e) {
-      console.error("[Snapshot] Error fetching pending remaining count:", e);
-    }
-  }
-
   if (mode === "run") {
     try {
       // Delete existing rows for all domains we're processing (to update created_at timestamp)
@@ -621,33 +586,6 @@ export default async function handler(req, res) {
       if (includePending && insertPayload.length > 0) {
         const processedDomains = insertPayload.map(r => r.domain).filter(Boolean);
         await clearPending(processedDomains, engine);
-        
-        // Update pending remaining count after clearing
-        try {
-          const supabaseUrl = process.env.SUPABASE_URL;
-          const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-          if (supabaseUrl && supabaseKey) {
-            const countUrl = `${supabaseUrl}/rest/v1/domain_rank_pending?search_engine=eq.${encodeURIComponent(engine)}&select=domain&limit=1`;
-            const countResp = await fetch(countUrl, {
-              method: "GET",
-              headers: {
-                "Content-Type": "application/json",
-                apikey: supabaseKey,
-                Authorization: `Bearer ${supabaseKey}`,
-                Prefer: "count=exact",
-              },
-            });
-            if (countResp.ok) {
-              const countHeader = countResp.headers.get("content-range");
-              if (countHeader) {
-                const match = countHeader.match(/\/(\d+)$/);
-                if (match) pendingRemaining = parseInt(match[1], 10) || 0;
-              }
-            }
-          }
-        } catch (e) {
-          console.error("[Snapshot] Error fetching pending remaining count after clear:", e);
-        }
       }
     } catch (e) {
       return res.status(500).json({
@@ -672,9 +610,6 @@ export default async function handler(req, res) {
       includePending,
       caps,
       domains_processed: runDomains.length,
-      processed_count: mode === "run" ? insertPayload.length : 0,
-      pending_remaining: pendingRemaining,
-      core_count: coreCount,
       fetched: domainsToFetch.length,
       reused: runDomains.length - domainsToFetch.length,
       inserted: mode === "run" ? insertPayload.length : 0,
