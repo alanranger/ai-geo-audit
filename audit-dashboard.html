@@ -22307,6 +22307,7 @@ Final Score: ${score}/100`;
     };
     let rankingPriorityFilter = null; // { impact: 'high'|'medium'|'low', difficulty: 'high'|'medium'|'low' } | null
     let selectedKeywordId = null; // Store selected keyword identifier (keyword + url combination)
+    let activePreset = null; // Track which preset is currently active ('all', 'high-impact-money', etc.)
 
     // Impact and Difficulty bucket thresholds (constants for tuning)
     const IMPACT_THRESHOLDS = {
@@ -23332,20 +23333,17 @@ Final Score: ${score}/100`;
           if (rankingFilterState.rank === 'top10' && (rank == null || rank > 10)) return false;
           if (rankingFilterState.rank === 'top20' && (rank == null || rank > 20)) return false;
           if (rankingFilterState.rank === 'low' && rank != null && rank <= 20) return false;
-          // Preset-specific: rank 4-20 for high-impact-money
-          if (rankingFilterState.rank === 'top20' && rankingFilterState.segment === 'money' && rankingFilterState.volume === 'high' && rankingFilterState.opportunity === 'high') {
-            // Additional check: must be rank 4-20 (not 1-3)
-            if (rank != null && rank <= 3) return false;
-          }
-          // Preset-specific: rank > 3 for brand-safety
-          if (rankingFilterState.rank === 'low' && rankingFilterState.segment === 'brand') {
-            // Additional check: must be rank > 3 (not just 21+)
-            if (rank != null && rank <= 3) return false;
-          }
-          // Preset-specific: rank > 10 for local-growth
-          if (rankingFilterState.rank === 'low' && rankingFilterState.segment === 'other' && rankingFilterState.volume === 'medium' && rankingFilterState.opportunity === 'medium') {
-            // Additional check: must be rank > 10 (not just 21+)
-            if (rank != null && rank <= 10) return false;
+          
+          // Preset-specific rank ranges
+          if (activePreset === 'high-impact-money') {
+            // Rank 4-20 (not 1-3, not 21+)
+            if (rank == null || rank < 4 || rank > 20) return false;
+          } else if (activePreset === 'brand-safety') {
+            // Rank > 3 (not 1-3, can be 4+)
+            if (rank == null || rank <= 3) return false;
+          } else if (activePreset === 'local-growth') {
+            // Rank > 10 (not 1-10, can be 11+)
+            if (rank == null || rank <= 10) return false;
           }
         }
 
@@ -23356,8 +23354,9 @@ Final Score: ${score}/100`;
           if (rankingFilterState.volume === 'medium' && (volume == null || volume < 50 || volume >= 200)) return false;
           if (rankingFilterState.volume === 'low' && (volume == null || volume < 1 || volume >= 50)) return false;
           if (rankingFilterState.volume === 'none' && volume != null && volume > 0) return false;
+          
           // Preset-specific: volume=Medium+ (Medium OR High) for local-growth
-          if (rankingFilterState.volume === 'medium' && rankingFilterState.segment === 'other' && rankingFilterState.opportunity === 'medium' && rankingFilterState.rank === 'low') {
+          if (activePreset === 'local-growth') {
             // Allow both medium (50-199) and high (200+)
             if (volume != null && volume >= 50) return true; // Override: accept if >= 50
           }
@@ -23421,14 +23420,13 @@ Final Score: ${score}/100`;
           if (rankingFilterState.opportunity === 'high' && (oppScore < 70 || oppScore > 100)) return false;
           if (rankingFilterState.opportunity === 'medium' && (oppScore < 40 || oppScore >= 70)) return false;
           if (rankingFilterState.opportunity === 'low' && (oppScore >= 40 || oppScore < 0)) return false;
-          // Preset-specific: opportunity >= 65 for high-impact-money (using 'high' filter which is 70+, but we need >=65)
-          if (rankingFilterState.opportunity === 'high' && rankingFilterState.segment === 'money' && rankingFilterState.volume === 'high' && rankingFilterState.rank === 'top20') {
-            // Additional check: must be >= 65 (not just >= 70)
+          
+          // Preset-specific opportunity thresholds
+          if (activePreset === 'high-impact-money') {
+            // Opportunity >= 65 (not just >= 70)
             if (oppScore < 65) return false;
-          }
-          // Preset-specific: opportunity >= 50 for ai-overview-not-cited and local-growth
-          if (rankingFilterState.opportunity === 'medium' && ((rankingFilterState.aiOverview === 'has' && rankingFilterState.aiCitation === 'not-cited') || (rankingFilterState.segment === 'other' && rankingFilterState.volume === 'medium'))) {
-            // Additional check: must be >= 50 (not just >= 40)
+          } else if (activePreset === 'ai-overview-not-cited' || activePreset === 'local-growth') {
+            // Opportunity >= 50 (not just >= 40)
             if (oppScore < 50) return false;
           }
         }
@@ -26389,6 +26387,7 @@ Final Score: ${score}/100`;
               serpFeatures: 'all',
               keyword: ''
             };
+            activePreset = null; // Clear active preset
             rankingPriorityFilter = null; // Clear priority matrix filter
             selectedKeywordId = null; // Clear selected keyword
             if (segmentFilter) segmentFilter.value = 'all';
@@ -26437,39 +26436,43 @@ Final Score: ${score}/100`;
             keyword: ''
           };
 
+          // Set active preset
+          activePreset = presetKey;
+
           // Apply preset-specific filters
           if (presetKey === 'all') {
             // All keywords: reset filters + default sort
+            activePreset = null; // Clear preset flag for "all"
             rankingSortState.column = 'opportunityScore';
             rankingSortState.direction = 'desc';
           } else if (presetKey === 'high-impact-money') {
             // High-impact money: segment=Money, volume=High, rank=4-20, opportunity>=65, sort=opportunity desc
             rankingFilterState.segment = 'money';
             rankingFilterState.volume = 'high';
-            rankingFilterState.rank = 'top20'; // Will filter to 4-20 in applyRankingFilters (with additional check)
-            rankingFilterState.opportunity = 'high'; // Will filter to >=65 in applyRankingFilters (with additional check)
+            rankingFilterState.rank = 'top20'; // Will be filtered to 4-20 by preset-specific logic
+            rankingFilterState.opportunity = 'high'; // Will be filtered to >=65 by preset-specific logic
             rankingSortState.column = 'opportunityScore';
             rankingSortState.direction = 'desc';
           } else if (presetKey === 'ai-overview-not-cited') {
             // AI Overview, not cited: aiOverview=On, aiCitations=0, opportunity>=50, sort=volume desc
             rankingFilterState.aiOverview = 'has';
             rankingFilterState.aiCitation = 'not-cited';
-            rankingFilterState.opportunity = 'medium'; // 40-69, but we need >=50
+            rankingFilterState.opportunity = 'medium'; // Will be filtered to >=50 by preset-specific logic
             rankingSortState.column = 'volume';
             rankingSortState.direction = 'desc';
           } else if (presetKey === 'brand-safety') {
             // Brand safety: segment=Brand, rank>3, sort=rank asc
             rankingFilterState.segment = 'brand';
-            rankingFilterState.rank = 'low'; // Will filter to >3 in applyRankingFilters (with additional check)
+            rankingFilterState.rank = 'low'; // Will be filtered to >3 by preset-specific logic
             rankingSortState.column = 'rank';
             rankingSortState.direction = 'asc';
           } else if (presetKey === 'local-growth') {
             // Local growth: segment=Local, volume=Medium+, rank>10, opportunity>=50, sort=opportunity desc
             // Note: Assuming "Local" keywords are in "other" segment. If you have a "local" segment, change this.
             rankingFilterState.segment = 'other'; // Change to 'local' if you have that segment
-            rankingFilterState.volume = 'medium'; // Medium OR High (we'll use medium, but could add logic for both)
-            rankingFilterState.rank = 'low'; // Will filter to >10 in applyRankingFilters (with additional check)
-            rankingFilterState.opportunity = 'medium'; // Will filter to >=50 in applyRankingFilters (with additional check)
+            rankingFilterState.volume = 'medium'; // Will accept both medium and high by preset-specific logic
+            rankingFilterState.rank = 'low'; // Will be filtered to >10 by preset-specific logic
+            rankingFilterState.opportunity = 'medium'; // Will be filtered to >=50 by preset-specific logic
             rankingSortState.column = 'opportunityScore';
             rankingSortState.direction = 'desc';
           }
