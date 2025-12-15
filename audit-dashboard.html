@@ -2929,6 +2929,17 @@
               </div>
             </div>
 
+            <!-- Completion modal -->
+            <div id="domain-strength-completion-modal" class="domain-strength-overlay" style="display: none;">
+              <div class="domain-strength-overlay-content" style="max-width: 500px;">
+                <h3 style="margin: 0 0 1rem 0; font-size: 1.5rem; font-weight: 700; color: #1e293b;">✓ Snapshot Complete</h3>
+                <div id="domain-strength-completion-stats" style="text-align: left; margin: 1.5rem 0;">
+                  <!-- Stats will be inserted here -->
+                </div>
+                <button id="domain-strength-completion-close" class="btn btn-primary" style="margin-top: 1rem; width: 100%;">Close</button>
+              </div>
+            </div>
+
             <div class="domain-strength-summary-row">
               <div class="domain-strength-summary-card" id="domain-strength-summary-card">
                 <div style="color:#64748b; font-size:0.95rem;">Loading domain strength…</div>
@@ -25987,20 +25998,65 @@ Final Score: ${score}/100`;
           
           debugLog(`[DomainStrength] ✓ Snapshot successful: ${json.inserted || 0} domains saved (date: ${json.snapshot_date})`, 'success');
           
-          if (overlayStatus) {
-            overlayStatus.textContent = `✓ Successfully saved ${json.inserted || 0} domain snapshots!`;
+          // Fetch remaining pending count
+          let remainingPending = 0;
+          try {
+            const pendingResp = await fetch(apiUrl('/api/domain-strength/pending-count'));
+            if (pendingResp.ok) {
+              const pendingData = await pendingResp.json();
+              remainingPending = pendingData.count || 0;
+            }
+          } catch (e) {
+            debugLog(`[DomainStrength] Could not fetch pending count: ${e.message}`, 'warn');
           }
           
-          // Small delay to show success message
-          await new Promise(resolve => setTimeout(resolve, 800));
+          // Hide progress overlay
+          if (overlay) {
+            overlay.classList.remove('show');
+          }
+          
+          // Show completion modal
+          const completionModal = document.getElementById('domain-strength-completion-modal');
+          const completionStats = document.getElementById('domain-strength-completion-stats');
+          if (completionModal && completionStats) {
+            const domainsProcessed = json.domains_processed || 0;
+            const domainsInserted = json.inserted || 0;
+            const domainsFetched = json.fetched || 0;
+            
+            completionStats.innerHTML = `
+              <div style="margin-bottom: 1rem; padding: 1rem; background: #f0f9ff; border-radius: 8px; border-left: 4px solid #0ea5e9;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                  <span style="font-weight: 600; color: #0c4a6e;">Domains Processed:</span>
+                  <span style="font-size: 1.25rem; font-weight: 700; color: #0284c7;">${domainsProcessed}</span>
+                </div>
+                <div style="font-size: 0.875rem; color: #075985;">
+                  ${domainsFetched} fetched from DataForSEO • ${domainsInserted} snapshots saved
+                </div>
+              </div>
+              <div style="padding: 1rem; background: ${remainingPending > 0 ? '#fef3c7' : '#f0fdf4'}; border-radius: 8px; border-left: 4px solid ${remainingPending > 0 ? '#f59e0b' : '#10b981'};">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span style="font-weight: 600; color: ${remainingPending > 0 ? '#92400e' : '#065f46'};">Remaining in Queue:</span>
+                  <span style="font-size: 1.25rem; font-weight: 700; color: ${remainingPending > 0 ? '#d97706' : '#059669'};">${remainingPending}</span>
+                </div>
+                ${remainingPending > 0 ? '<div style="font-size: 0.875rem; color: #78350f; margin-top: 0.5rem;">Run snapshot again to process more domains</div>' : '<div style="font-size: 0.875rem; color: #047857; margin-top: 0.5rem;">All domains have been processed!</div>'}
+              </div>
+            `;
+            
+            completionModal.style.display = 'flex';
+            
+            // Wire up close button
+            const closeBtn = document.getElementById('domain-strength-completion-close');
+            if (closeBtn) {
+              closeBtn.onclick = () => {
+                completionModal.style.display = 'none';
+              };
+            }
+          }
           
           if (statusEl) statusEl.textContent = `✓ Snapshot saved for ${json.inserted || 0} domains (date: ${json.snapshot_date}).`;
           showStatus(`✓ Domain strength snapshot saved (${json.snapshot_date})`, 'success');
           
           debugLog('[DomainStrength] Refreshing domain strength section...', 'info');
-          if (overlayStatus) {
-            overlayStatus.textContent = 'Refreshing domain strength table...';
-          }
           await renderDomainStrengthSection();
           debugLog('[DomainStrength] ✓ Domain strength section refreshed', 'success');
         } catch (e) {
@@ -26013,11 +26069,12 @@ Final Score: ${score}/100`;
           showStatus(`✗ Domain strength snapshot failed: ${msg}`, 'error');
           // Keep overlay visible for a moment to show error
           await new Promise(resolve => setTimeout(resolve, 2000));
-        } finally {
-          // Hide overlay
+          
+          // Hide overlay on error
           if (overlay) {
             overlay.classList.remove('show');
           }
+        } finally {
           if (btn) {
             btn.disabled = false;
             btn.textContent = 'Run Domain Strength Snapshot (Google)';
