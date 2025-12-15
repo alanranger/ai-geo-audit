@@ -5,6 +5,8 @@
  * This enables Content/Schema pillar to show real trends over time.
  */
 
+import { enqueuePending, normalizeDomain } from '../../lib/domainStrength/domains.js';
+
 export default async function handler(req, res) {
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -676,6 +678,35 @@ export default async function handler(req, res) {
           console.log(`[Supabase Save] ✓ Successfully saved ${insertedResult.length} keyword rows to keyword_rankings table`);
           if (insertedResult.length !== keywordRows.length) {
             console.warn(`[Supabase Save] ⚠ WARNING: Attempted to save ${keywordRows.length} rows but only ${insertedResult.length} were inserted`);
+          }
+
+          // Auto-enqueue all competitor domains from AI citations to domain_rank_pending
+          try {
+            const competitorDomains = new Set();
+            for (const row of rankingAiData.combinedRows) {
+              if (row.competitor_counts && typeof row.competitor_counts === 'object') {
+                for (const domain of Object.keys(row.competitor_counts)) {
+                  const normalized = normalizeDomain(domain);
+                  if (normalized) {
+                    competitorDomains.add(normalized);
+                  }
+                }
+              }
+            }
+
+            if (competitorDomains.size > 0) {
+              console.log(`[Supabase Save] Enqueuing ${competitorDomains.size} competitor domains to domain_rank_pending...`);
+              await enqueuePending(Array.from(competitorDomains), {
+                engine: 'google',
+                source: 'ranking-ai-citations'
+              });
+              console.log(`[Supabase Save] ✓ Successfully enqueued ${competitorDomains.size} domains for domain strength snapshots`);
+            } else {
+              console.log(`[Supabase Save] No competitor domains found to enqueue`);
+            }
+          } catch (enqueueErr) {
+            console.error('[Supabase Save] ✗ Error enqueuing competitor domains:', enqueueErr.message);
+            // Don't fail the entire request if enqueueing fails
           }
         } else {
           const errorText = await insertResponse.text();

@@ -698,6 +698,49 @@
       margin-top: 0.5rem;
       font-weight: 500;
     }
+    /* Full-page overlay for domain strength snapshot */
+    .domain-strength-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(4px);
+      z-index: 9999;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+    .domain-strength-overlay.show {
+      display: flex;
+    }
+    .domain-strength-overlay-content {
+      background: white;
+      border-radius: 12px;
+      padding: 2.5rem 3rem;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+      text-align: center;
+      max-width: 400px;
+    }
+    .domain-strength-overlay-content .spinner {
+      width: 48px;
+      height: 48px;
+      border-width: 5px;
+      margin: 0 auto 1.5rem;
+    }
+    .domain-strength-overlay-content h3 {
+      margin: 0 0 0.75rem 0;
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #1e293b;
+    }
+    .domain-strength-overlay-content p {
+      margin: 0;
+      font-size: 0.95rem;
+      color: #64748b;
+      line-height: 1.6;
+    }
     .modal {
       display: none;
       position: fixed;
@@ -2874,6 +2917,15 @@
                 <button id="domain-strength-run-btn" class="btn btn-secondary" type="button">
                   Run Domain Strength Snapshot (Google)
                 </button>
+              </div>
+            </div>
+
+            <!-- Full-page progress overlay -->
+            <div id="domain-strength-overlay" class="domain-strength-overlay">
+              <div class="domain-strength-overlay-content">
+                <div class="spinner"></div>
+                <h3>Running Domain Strength Snapshot</h3>
+                <p id="domain-strength-overlay-status">Fetching domain data from DataForSEO...</p>
               </div>
             </div>
 
@@ -25798,7 +25850,7 @@ Final Score: ${score}/100`;
           }
           tr.innerHTML = `
             <td style="text-align:left; ${isSelfDomain ? 'font-weight: 700;' : ''}">${it?.label || it?.domain || '—'}</td>
-            <td style="${isSelfDomain ? 'font-weight: 700;' : ''}">${it?.segment || '-'}</td>
+            <td style="${isSelfDomain ? 'font-weight: 700;' : ''}">${it?.segment || 'other'}</td>
             <td style="text-align:center; ${isSelfDomain ? 'font-weight: 700;' : ''}">${latest ? formatDomainStrengthScore(latest.score) : '—'}</td>
             <td style="${isSelfDomain ? 'font-weight: 700;' : ''}">${latest ? renderDomainStrengthBandPill(latest.band) : '—'}</td>
             <td style="text-align:right; white-space: nowrap; ${isSelfDomain ? 'font-weight: 700;' : ''}">${latest ? formatEtvDollars(latest.organicEtv) : '—'}</td>
@@ -25861,6 +25913,8 @@ Final Score: ${score}/100`;
         debugLog('[DomainStrength] runDomainStrengthSnapshot() called', 'info');
         const statusEl = document.getElementById('domain-strength-run-status');
         const btn = document.getElementById('domain-strength-run-btn');
+        const overlay = document.getElementById('domain-strength-overlay');
+        const overlayStatus = document.getElementById('domain-strength-overlay-status');
         const domains = getDomainStrengthDomainList(20);
 
         debugLog(`[DomainStrength] Domains to snapshot: ${domains.length} domains`, 'info');
@@ -25870,6 +25924,14 @@ Final Score: ${score}/100`;
           debugLog(`[DomainStrength] ${msg}`, 'warn');
           if (statusEl) statusEl.textContent = msg;
           return;
+        }
+
+        // Show overlay
+        if (overlay) {
+          overlay.classList.add('show');
+        }
+        if (overlayStatus) {
+          overlayStatus.textContent = `Fetching data for ${domains.length} domains from DataForSEO...`;
         }
 
         if (btn) {
@@ -25883,6 +25945,10 @@ Final Score: ${score}/100`;
           debugLog(`[DomainStrength] Calling API: ${apiEndpoint}`, 'info');
           debugLog(`[DomainStrength] Request: mode=run, domains=${domains.length}`, 'info');
           
+          if (overlayStatus) {
+            overlayStatus.textContent = `Calling DataForSEO API for ${domains.length} domains...`;
+          }
+          
           const resp = await fetch(apiEndpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -25890,6 +25956,10 @@ Final Score: ${score}/100`;
           });
           
           debugLog(`[DomainStrength] API response status: ${resp.status} ${resp.statusText}`, 'info');
+          
+          if (overlayStatus) {
+            overlayStatus.textContent = 'Processing response and saving to database...';
+          }
           
           let json;
           try {
@@ -25911,18 +25981,37 @@ Final Score: ${score}/100`;
           
           debugLog(`[DomainStrength] ✓ Snapshot successful: ${json.inserted || 0} domains saved (date: ${json.snapshot_date})`, 'success');
           
+          if (overlayStatus) {
+            overlayStatus.textContent = `✓ Successfully saved ${json.inserted || 0} domain snapshots!`;
+          }
+          
+          // Small delay to show success message
+          await new Promise(resolve => setTimeout(resolve, 800));
+          
           if (statusEl) statusEl.textContent = `✓ Snapshot saved for ${json.inserted || 0} domains (date: ${json.snapshot_date}).`;
           showStatus(`✓ Domain strength snapshot saved (${json.snapshot_date})`, 'success');
           
           debugLog('[DomainStrength] Refreshing domain strength section...', 'info');
+          if (overlayStatus) {
+            overlayStatus.textContent = 'Refreshing domain strength table...';
+          }
           await renderDomainStrengthSection();
           debugLog('[DomainStrength] ✓ Domain strength section refreshed', 'success');
         } catch (e) {
           const msg = e?.message || String(e);
           debugLog(`[DomainStrength] ✗ Snapshot error: ${msg}`, 'error');
+          if (overlayStatus) {
+            overlayStatus.textContent = `✗ Error: ${msg}`;
+          }
           if (statusEl) statusEl.textContent = `✗ Snapshot failed: ${msg}`;
           showStatus(`✗ Domain strength snapshot failed: ${msg}`, 'error');
+          // Keep overlay visible for a moment to show error
+          await new Promise(resolve => setTimeout(resolve, 2000));
         } finally {
+          // Hide overlay
+          if (overlay) {
+            overlay.classList.remove('show');
+          }
           if (btn) {
             btn.disabled = false;
             btn.textContent = 'Run Domain Strength Snapshot (Google)';
