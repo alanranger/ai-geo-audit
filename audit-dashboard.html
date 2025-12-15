@@ -21758,7 +21758,23 @@ Final Score: ${score}/100`;
       let keywords = [];
 
       try {
-        keywords = mod.TRACKED_KEYWORDS;
+        // Load keywords from database instead of hardcoded list
+        let keywordsFromDb = [];
+        try {
+          const keywordsResp = await fetch(apiUrl('/api/keywords/get'));
+          if (keywordsResp.ok) {
+            const keywordsData = await keywordsResp.json();
+            if (keywordsData.status === 'ok' && Array.isArray(keywordsData.keywords) && keywordsData.keywords.length > 0) {
+              keywordsFromDb = keywordsData.keywords;
+              debugLog(`✓ Loaded ${keywordsFromDb.length} keywords from database`, 'success');
+            }
+          }
+        } catch (err) {
+          debugLog(`⚠️ Failed to load keywords from database: ${err.message}. Falling back to hardcoded list.`, 'warn');
+        }
+        
+        // Use database keywords if available, otherwise fall back to hardcoded list
+        keywords = keywordsFromDb.length > 0 ? keywordsFromDb : mod.TRACKED_KEYWORDS;
         const BATCH_SIZE = 20; // Match API limit
 
         debugLog(`📊 Fetching ranking & AI data for ${keywords.length} keywords`, 'info');
