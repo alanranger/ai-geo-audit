@@ -91,15 +91,33 @@ export default async function handler(req, res) {
   const snapshotData = Array.isArray(rows) ? rows : [];
   
   // Step 4: Enqueue missing domains (domains requested but with no snapshots)
+  // Also auto-suggest domain_type for new domains
   if (domains.length > 0) {
     try {
       const domainsWithSnapshots = new Set(snapshotData.map(r => r.domain).filter(Boolean));
       const missingDomains = domains.filter(d => !domainsWithSnapshots.has(d));
       
       if (missingDomains.length > 0) {
-        // Import enqueuePending helper
+        // Import helpers
         const { enqueuePending } = await import('../../lib/domainStrength/domains.js');
+        const { createClient } = await import('@supabase/supabase-js');
+        const { ensureDomainTypeMapping } = await import('../../lib/domainTypeClassifier.js');
+        
+        // Enqueue for snapshot
         await enqueuePending(missingDomains, { engine: 'google', source: 'history-miss' });
+        
+        // Auto-suggest domain_type for new domains (non-blocking)
+        if (supabaseUrl && supabaseKey) {
+          const supabase = createClient(supabaseUrl, supabaseKey);
+          for (const domain of missingDomains) {
+            try {
+              await ensureDomainTypeMapping(supabase, domain, 'history-miss');
+            } catch (classifyError) {
+              // Log but don't fail the request
+              console.error(`[History] Error classifying domain ${domain}:`, classifyError);
+            }
+          }
+        }
       }
     } catch (enqueueError) {
       // Graceful: if enqueue fails, continue without it
