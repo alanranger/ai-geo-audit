@@ -25458,11 +25458,8 @@ Final Score: ${score}/100`;
                 tr.appendChild(tdCompetitor);
                 compTbody.appendChild(tr);
               });
-            })();
-
-            // Fill Domain Rank column (per keyword) using latest domain_strength snapshots (read-only)
-            // Wait a bit to ensure DOM is ready, then fill Domain Rank
-            setTimeout(async () => {
+              
+              // Fill Domain Rank column AFTER all rows are appended to DOM
               try {
                 const selfDomain = typeof getSelfDomainForDomainStrength === "function" ? getSelfDomainForDomainStrength() : "alanranger.com";
                 const domains = [
@@ -25473,6 +25470,8 @@ Final Score: ${score}/100`;
                 const rankCells = compTbody.querySelectorAll("td[data-domain]");
                 if (rankCells.length === 0) {
                   debugLog('⚠️ No Domain Rank cells found with data-domain attribute in AI Citations table', 'warn');
+                } else {
+                  debugLog(`✓ Filling Domain Rank for ${rankCells.length} domains in AI Citations table`, 'info');
                 }
                 rankCells.forEach((cell) => {
                   const d = normalizeDomainForStrength(cell.dataset.domain || "");
@@ -25482,7 +25481,7 @@ Final Score: ${score}/100`;
               } catch (err) {
                 debugLog(`✗ Error filling Domain Rank in AI Citations table: ${err.message}`, 'error');
               }
-            }, 100);
+            })();
           }
         }
       } else if (citationsEmpty) {
