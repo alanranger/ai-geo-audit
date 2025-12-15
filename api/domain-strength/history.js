@@ -121,7 +121,7 @@ export default async function handler(req, res) {
           const metaUrl =
             `${supabaseUrl}/rest/v1/domain_strength_domains` +
             `?domain=in.${encodeURIComponent(inList)}` +
-            `&select=domain,label,segment`;
+            `&select=domain,label,domain_type,segment`;
           
           const metaResp = await fetch(metaUrl, {
             method: 'GET',
@@ -137,9 +137,12 @@ export default async function handler(req, res) {
             if (Array.isArray(metaRows)) {
               metaRows.forEach(r => {
                 if (r.domain) {
+                  // Prefer domain_type, fallback to segment for backward compatibility, then 'unmapped'
+                  const domainType = r.domain_type || r.segment || 'unmapped';
                   domainMeta.set(r.domain, {
                     label: r.label || null,
-                    segment: r.segment || 'unmapped',
+                    domain_type: domainType,
+                    segment: domainType, // Keep segment for backward compatibility
                   });
                 }
               });
@@ -154,11 +157,12 @@ export default async function handler(req, res) {
   
       // Enrich snapshot data with metadata
       const enrichedData = snapshotData.map(row => {
-        const meta = domainMeta.get(row.domain) || { label: null, segment: 'unmapped' };
+        const meta = domainMeta.get(row.domain) || { label: null, domain_type: 'unmapped', segment: 'unmapped' };
         return {
           ...row,
           label: meta.label,
-          segment: meta.segment || 'unmapped', // Use 'unmapped' as fallback, not 'other'
+          domain_type: meta.domain_type || 'unmapped', // Use 'unmapped' as fallback, not 'other'
+          segment: meta.segment || meta.domain_type || 'unmapped', // Keep segment for backward compatibility
         };
       });
   

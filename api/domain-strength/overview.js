@@ -120,7 +120,7 @@ export default async function handler(req, res) {
   try {
     const domainStrengthUrl =
       `${supabaseUrl}/rest/v1/domain_strength_domains` +
-      `?select=domain,label,segment&limit=2000`;
+      `?select=domain,label,domain_type,segment&limit=2000`;
     const dsResp = await fetch(domainStrengthUrl, {
       method: "GET",
       headers: {
@@ -137,9 +137,11 @@ export default async function handler(req, res) {
           if (!d) return;
           // Only add if not already in competitorMeta (competitor_domains takes precedence)
           if (!competitorMeta.has(d)) {
+            const domainType = c.domain_type || c.segment || 'unmapped';
             competitorMeta.set(d, {
               label: c.label || d,
-              segment: c.segment || 'unmapped',
+              domain_type: domainType,
+              segment: domainType, // Keep segment for backward compatibility
               isCompetitor: true,
             });
           }
@@ -211,14 +213,15 @@ export default async function handler(req, res) {
     const meta =
       competitorMeta.get(domain) ??
       (domain === primaryDomain
-        ? { label: "Alan Ranger Photography", segment: "Your site", isCompetitor: false }
-        : { label: domain, segment: null, isCompetitor: true });
+        ? { label: "Alan Ranger Photography", domain_type: "your_site", segment: "your_site", isCompetitor: false }
+        : { label: domain, domain_type: "unmapped", segment: "unmapped", isCompetitor: true });
 
     items.push({
       domain,
       searchEngine: engine,
       label: meta.label,
-      segment: meta.segment,
+      domain_type: meta.domain_type || meta.segment || 'unmapped',
+      segment: meta.segment || meta.domain_type || 'unmapped', // Keep segment for backward compatibility
       isCompetitor: meta.isCompetitor,
       latest,
       trend: { points, deltaLatest },

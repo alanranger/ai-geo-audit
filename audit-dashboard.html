@@ -3056,7 +3056,7 @@
                 <button type="button" class="ranking-preset-btn" data-preset="brand-safety" style="padding: 0.5rem 1rem; font-size: 0.875rem; border: 1px solid #cbd5e1; border-radius: 6px; background: rgb(229, 255, 204); cursor: pointer; color: #475569; font-weight: 500; transition: all 0.2s; position: relative;" onmouseover="if (!this.classList.contains('preset-active')) { this.style.background='rgb(210, 240, 180)'; this.style.borderColor='#94a3b8'; }" onmouseout="if (!this.classList.contains('preset-active')) { this.style.background='rgb(229, 255, 204)'; this.style.borderColor='#cbd5e1'; }" title="Segment: Brand | Best rank: Not top 3 | Sort: Rank ↑ (worst first)">
                   Brand safety
                 </button>
-                <button type="button" class="ranking-preset-btn" data-preset="education-growth" style="padding: 0.5rem 1rem; font-size: 0.875rem; border: 1px solid #cbd5e1; border-radius: 6px; background: rgb(229, 255, 204); cursor: pointer; color: #475569; font-weight: 500; transition: all 0.2s; position: relative;" onmouseover="if (!this.classList.contains('preset-active')) { this.style.background='rgb(210, 240, 180)'; this.style.borderColor='#94a3b8'; }" onmouseout="if (!this.classList.contains('preset-active')) { this.style.background='rgb(229, 255, 204)'; this.style.borderColor='#cbd5e1'; }" title="Segment: Education | Best rank: 11–20 + 21+ | Min opportunity: ≥ 50 | Sort: Opportunity ↓">
+                <button type="button" class="ranking-preset-btn" data-preset="education-growth" style="padding: 0.5rem 1rem; font-size: 0.875rem; border: 1px solid #cbd5e1; border-radius: 6px; background: rgb(229, 255, 204); cursor: pointer; color: #475569; font-weight: 500; transition: all 0.2s; position: relative;" onmouseover="if (!this.classList.contains('preset-active')) { this.style.background='rgb(210, 240, 180)'; this.style.borderColor='#94a3b8'; }" onmouseout="if (!this.classList.contains('preset-active')) { this.style.background='rgb(229, 255, 204)'; this.style.borderColor='#cbd5e1'; }" title="Segment: Education | Best rank: 21+ / Not ranked | Min opportunity: ≥ 30 | Sort: Opportunity ↓">
                   Education growth
                 </button>
               </div>
@@ -3087,7 +3087,9 @@
                     <option value="top3">Top 3</option>
                     <option value="4-10">4–10</option>
                     <option value="11-20">11–20</option>
+                    <option value="4-20">4–20 (Near wins)</option>
                     <option value="21+">21+ / Not ranked</option>
+                    <option value="not-top3">Not top 3</option>
                   </select>
                 </div>
 
@@ -23357,19 +23359,9 @@ Final Score: ${score}/100`;
           if (rankingFilterState.rank === 'top3' && (rank === null || rank > 3)) return false;
           if (rankingFilterState.rank === '4-10' && (rank === null || rank < 4 || rank > 10)) return false;
           if (rankingFilterState.rank === '11-20' && (rank === null || rank < 11 || rank > 20)) return false;
+          if (rankingFilterState.rank === '4-20' && (rank === null || rank < 4 || rank > 20)) return false;
           if (rankingFilterState.rank === '21+' && rank !== null && rank <= 20) return false;
-        }
-        
-        // Preset-specific rank predicates (when rank filter is 'all' but preset requires specific range)
-        if (excludeFilter !== 'rank' && rankingFilterState.rank === 'all' && activePreset) {
-          const rank = normalizeRank(row.best_rank_group);
-          if (activePreset === 'brand-safety') {
-            // Not top 3: rank is null OR rank > 3
-            if (rank !== null && rank <= 3) return false;
-          } else if (activePreset === 'education-growth') {
-            // Rank > 10: rank is null OR rank > 10
-            if (rank !== null && rank <= 10) return false;
-          }
+          if (rankingFilterState.rank === 'not-top3' && rank !== null && rank <= 3) return false;
         }
 
         // Search volume filter
@@ -23523,8 +23515,21 @@ Final Score: ${score}/100`;
         if (aVal < bVal) return rankingSortState.direction === 'asc' ? -1 : 1;
         if (aVal > bVal) return rankingSortState.direction === 'asc' ? 1 : -1;
         
-        // Secondary sort: for high-impact-money, sort by rank (asc) when opportunity scores are equal
+        // Secondary sort: for high-impact-money, sort by rank (asc) then volume (desc) when opportunity scores are equal
         if (rankingSortState.column === 'opportunityScore' && activePreset === 'high-impact-money') {
+          const aRank = normalizeRank(a.best_rank_group) ?? 999;
+          const bRank = normalizeRank(b.best_rank_group) ?? 999;
+          if (aRank < bRank) return -1;
+          if (aRank > bRank) return 1;
+          // Tertiary: volume desc
+          const aVol = a.search_volume ?? 0;
+          const bVol = b.search_volume ?? 0;
+          if (aVol > bVol) return -1;
+          if (aVol < bVol) return 1;
+        }
+        
+        // Secondary sort: for education-growth, sort by rank (asc) when opportunity scores are equal
+        if (rankingSortState.column === 'opportunityScore' && activePreset === 'education-growth') {
           const aRank = normalizeRank(a.best_rank_group) ?? 999;
           const bRank = normalizeRank(b.best_rank_group) ?? 999;
           if (aRank < bRank) return -1;
@@ -23830,13 +23835,15 @@ Final Score: ${score}/100`;
 
       // Rank counts (excluding rank filter)
       const rankRows = applyRankingFilters(rows, 'rank');
-      const rankCounts = { all: rankRows.length, top3: 0, '4-10': 0, '11-20': 0, '21+': 0 };
+      const rankCounts = { all: rankRows.length, top3: 0, '4-10': 0, '11-20': 0, '4-20': 0, '21+': 0, 'not-top3': 0 };
       rankRows.forEach(r => {
         const rank = normalizeRank(r.best_rank_group);
         if (rank !== null && rank <= 3) rankCounts.top3++;
         if (rank !== null && rank >= 4 && rank <= 10) rankCounts['4-10']++;
         if (rank !== null && rank >= 11 && rank <= 20) rankCounts['11-20']++;
+        if (rank !== null && rank >= 4 && rank <= 20) rankCounts['4-20']++;
         if (rank === null || rank >= 21) rankCounts['21+']++;
+        if (rank === null || rank >= 4) rankCounts['not-top3']++;
       });
       updateSelectCounts('ranking-filter-rank', rankCounts);
 
@@ -25950,7 +25957,7 @@ Final Score: ${score}/100`;
           }
           tr.innerHTML = `
             <td style="text-align:left; ${isSelfDomain ? 'font-weight: 700;' : ''}">${it?.label || it?.domain || '—'}</td>
-            <td style="${isSelfDomain ? 'font-weight: 700;' : ''}">${it?.segment || 'other'}</td>
+            <td style="${isSelfDomain ? 'font-weight: 700;' : ''}">${it?.domain_type || it?.segment || 'unmapped'}</td>
             <td style="text-align:center; ${isSelfDomain ? 'font-weight: 700;' : ''}">${latest ? formatDomainStrengthScore(latest.score) : '—'}</td>
             <td style="${isSelfDomain ? 'font-weight: 700;' : ''}">${latest ? renderDomainStrengthBandPill(latest.band) : '—'}</td>
             <td style="text-align:right; white-space: nowrap; ${isSelfDomain ? 'font-weight: 700;' : ''}">${latest ? formatEtvDollars(latest.organicEtv) : '—'}</td>
@@ -26522,11 +26529,11 @@ Final Score: ${score}/100`;
             rankingSortState.column = 'opportunityScore';
             rankingSortState.direction = 'desc';
           } else if (presetKey === 'high-impact-money') {
-            // High-impact money: segment=Money, volume=High, rank=11-20, minOpportunity=65, sort=opportunity desc, then rank asc
+            // High-impact money: segment=Money, volume=High, rank=4-20, minOpportunity=60, sort=opportunity desc, then rank asc
             rankingFilterState.segment = 'money';
             rankingFilterState.volume = 'high';
-            rankingFilterState.rank = '11-20';
-            rankingFilterState.minOpportunity = 65;
+            rankingFilterState.rank = '4-20';
+            rankingFilterState.minOpportunity = 60;
             rankingSortState.column = 'opportunityScore';
             rankingSortState.direction = 'desc';
           } else if (presetKey === 'ai-overview-not-cited') {
@@ -26537,16 +26544,16 @@ Final Score: ${score}/100`;
             rankingSortState.column = 'volume';
             rankingSortState.direction = 'desc';
           } else if (presetKey === 'brand-safety') {
-            // Brand safety: segment=Brand, rank not top 3 (rank==null || rank>3), sort=rank asc (worst first)
+            // Brand safety: segment=Brand, rank=Not top 3, sort=rank asc (worst first)
             rankingFilterState.segment = 'brand';
-            rankingFilterState.rank = 'all'; // Use 'all' and apply predicate
+            rankingFilterState.rank = 'not-top3';
             rankingSortState.column = 'rank';
             rankingSortState.direction = 'asc';
           } else if (presetKey === 'education-growth') {
-            // Education growth: segment=Education, rank=11-20 + 21+ (use All + predicate rank>10), minOpportunity=50, sort=opportunity desc
+            // Education growth: segment=Education, rank=21+, minOpportunity=30, sort=opportunity desc, then rank asc
             rankingFilterState.segment = 'education';
-            rankingFilterState.rank = 'all'; // Use 'all' and apply predicate rank>10
-            rankingFilterState.minOpportunity = 50;
+            rankingFilterState.rank = '21+';
+            rankingFilterState.minOpportunity = 30;
             rankingSortState.column = 'opportunityScore';
             rankingSortState.direction = 'desc';
           }

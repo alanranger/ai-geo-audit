@@ -14,14 +14,18 @@ create table if not exists public.domain_rank_pending (
 create index if not exists idx_domain_rank_pending_engine_last_seen
   on public.domain_rank_pending (search_engine, last_seen_at desc);
 
--- 2) domain_strength_domains: Mapping table for Segment and (optionally) a nicer label
+-- 2) domain_strength_domains: Mapping table for domain_type and (optionally) a nicer label
 create table if not exists public.domain_strength_domains (
   domain text primary key,
   label text null,
-  segment text not null default 'other',
+  domain_type text null, -- Changed from segment to domain_type, nullable (null = unmapped)
+  segment text null, -- Keep for backward compatibility, but prefer domain_type
   notes text null,
   updated_at timestamptz not null default now()
 );
+
+create index if not exists idx_domain_strength_domains_domain_type
+  on public.domain_strength_domains (domain_type);
 
 create index if not exists idx_domain_strength_domains_segment
   on public.domain_strength_domains (segment);
