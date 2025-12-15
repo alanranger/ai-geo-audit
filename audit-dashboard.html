@@ -25461,7 +25461,8 @@ Final Score: ${score}/100`;
             })();
 
             // Fill Domain Rank column (per keyword) using latest domain_strength snapshots (read-only)
-            (async () => {
+            // Wait a bit to ensure DOM is ready, then fill Domain Rank
+            setTimeout(async () => {
               try {
                 const selfDomain = typeof getSelfDomainForDomainStrength === "function" ? getSelfDomainForDomainStrength() : "alanranger.com";
                 const domains = [
@@ -25469,15 +25470,19 @@ Final Score: ${score}/100`;
                   ...entries.map(([d]) => d),
                 ].map(normalizeDomainForStrength).filter(Boolean);
                 const strengthByDomain = await fetchLatestDomainStrengthForDomains(domains);
-                compTbody.querySelectorAll("td[data-domain]").forEach((cell) => {
+                const rankCells = compTbody.querySelectorAll("td[data-domain]");
+                if (rankCells.length === 0) {
+                  debugLog('⚠️ No Domain Rank cells found with data-domain attribute in AI Citations table', 'warn');
+                }
+                rankCells.forEach((cell) => {
                   const d = normalizeDomainForStrength(cell.dataset.domain || "");
                   const strength = strengthByDomain[d] || null;
                   cell.innerHTML = renderDomainRankCellHtml(strength);
                 });
-              } catch {
-                // fail silently
+              } catch (err) {
+                debugLog(`✗ Error filling Domain Rank in AI Citations table: ${err.message}`, 'error');
               }
-            })();
+            }, 100);
           }
         }
       } else if (citationsEmpty) {
