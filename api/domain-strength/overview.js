@@ -117,35 +117,46 @@ export default async function handler(req, res) {
   }
   
   // Also fetch from domain_strength_domains (new mapping table)
+  // Only fetch domains that actually appear in the snapshots
   try {
-    const domainStrengthUrl =
-      `${supabaseUrl}/rest/v1/domain_strength_domains` +
-      `?select=domain,label,domain_type,segment&limit=2000`;
-    const dsResp = await fetch(domainStrengthUrl, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: supabaseKey,
-        Authorization: `Bearer ${supabaseKey}`,
-      },
-    });
-    if (dsResp.ok) {
-      const dsRows = await dsResp.json();
-      if (Array.isArray(dsRows)) {
-        dsRows.forEach((c) => {
-          const d = normalizeDomain(c.domain);
-          if (!d) return;
-          // Only add if not already in competitorMeta (competitor_domains takes precedence)
-          if (!competitorMeta.has(d)) {
-            const domainType = c.domain_type || c.segment || 'unmapped';
-            competitorMeta.set(d, {
-              label: c.label || d,
-              domain_type: domainType,
-              segment: domainType, // Keep segment for backward compatibility
-              isCompetitor: true,
+    const uniqueSnapshotDomains = [...new Set(rows.map(r => normalizeDomain(r?.domain)).filter(Boolean))];
+    if (uniqueSnapshotDomains.length > 0) {
+      // Query in chunks to avoid URL length limits
+      const chunkSize = 100;
+      for (let i = 0; i < uniqueSnapshotDomains.length; i += chunkSize) {
+        const chunk = uniqueSnapshotDomains.slice(i, i + chunkSize);
+        const inList = `(${chunk.map(d => `"${d}"`).join(',')})`;
+        const domainStrengthUrl =
+          `${supabaseUrl}/rest/v1/domain_strength_domains` +
+          `?domain=in.${encodeURIComponent(inList)}` +
+          `&select=domain,label,domain_type,segment`;
+        const dsResp = await fetch(domainStrengthUrl, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: supabaseKey,
+            Authorization: `Bearer ${supabaseKey}`,
+          },
+        });
+        if (dsResp.ok) {
+          const dsRows = await dsResp.json();
+          if (Array.isArray(dsRows)) {
+            dsRows.forEach((c) => {
+              const d = normalizeDomain(c.domain);
+              if (!d) return;
+              // Only add if not already in competitorMeta (competitor_domains takes precedence)
+              if (!competitorMeta.has(d)) {
+                const domainType = c.domain_type || c.segment || 'unmapped';
+                competitorMeta.set(d, {
+                  label: c.label || d,
+                  domain_type: domainType,
+                  segment: domainType, // Keep segment for backward compatibility
+                  isCompetitor: true,
+                });
+              }
             });
           }
-        });
+        }
       }
     }
   } catch {
