@@ -3157,8 +3157,11 @@
                 <button type="button" class="ranking-preset-btn" data-preset="brand-safety" style="padding: 0.5rem 1rem; font-size: 0.875rem; border: 1px solid #cbd5e1; border-radius: 6px; background: rgb(229, 255, 204); cursor: pointer; color: #475569; font-weight: 500; transition: all 0.2s; position: relative;" onmouseover="if (!this.classList.contains('preset-active')) { this.style.background='rgb(210, 240, 180)'; this.style.borderColor='#94a3b8'; }" onmouseout="if (!this.classList.contains('preset-active')) { this.style.background='rgb(229, 255, 204)'; this.style.borderColor='#cbd5e1'; }" title="Segment: Brand | Best rank: Not top 3 | Sort: Rank ↑ (worst first)">
                   Brand safety
                 </button>
-                <button type="button" class="ranking-preset-btn" data-preset="education-growth" style="padding: 0.5rem 1rem; font-size: 0.875rem; border: 1px solid #cbd5e1; border-radius: 6px; background: rgb(229, 255, 204); cursor: pointer; color: #475569; font-weight: 500; transition: all 0.2s; position: relative;" onmouseover="if (!this.classList.contains('preset-active')) { this.style.background='rgb(210, 240, 180)'; this.style.borderColor='#94a3b8'; }" onmouseout="if (!this.classList.contains('preset-active')) { this.style.background='rgb(229, 255, 204)'; this.style.borderColor='#cbd5e1'; }" title="Segment: Education | Best rank: 11–20 + 21+ | Min opportunity: ≥ 50 | Sort: Opportunity ↓">
-                  Education growth
+                <button type="button" class="ranking-preset-btn" data-preset="education-growth" style="padding: 0.5rem 1rem; font-size: 0.875rem; border: 1px solid #cbd5e1; border-radius: 6px; background: rgb(229, 255, 204); cursor: pointer; color: #475569; font-weight: 500; transition: all 0.2s; position: relative;" onmouseover="if (!this.classList.contains('preset-active')) { this.style.background='rgb(210, 240, 180)'; this.style.borderColor='#94a3b8'; }" onmouseout="if (!this.classList.contains('preset-active')) { this.style.background='rgb(229, 255, 204)'; this.style.borderColor='#cbd5e1'; }" title="Page type: Blog | Best rank: Not top 3 | Min opportunity: ≥ 30 | Sort: Opportunity ↓">
+                  Blog opportunities
+                </button>
+                <button type="button" class="ranking-preset-btn" data-preset="local-visibility" style="padding: 0.5rem 1rem; font-size: 0.875rem; border: 1px solid #cbd5e1; border-radius: 6px; background: rgb(229, 255, 204); cursor: pointer; color: #475569; font-weight: 500; transition: all 0.2s; position: relative;" onmouseover="if (!this.classList.contains('preset-active')) { this.style.background='rgb(210, 240, 180)'; this.style.borderColor='#94a3b8'; }" onmouseout="if (!this.classList.contains('preset-active')) { this.style.background='rgb(229, 255, 204)'; this.style.borderColor='#cbd5e1'; }" title="Page type: GBP | Best rank: Not top 3 | Min opportunity: ≥ 30 | Sort: Opportunity ↓">
+                  Local visibility
                 </button>
               </div>
               <!-- Criteria chips (shown when preset is active) -->
@@ -3189,6 +3192,7 @@
                     <option value="4-10">4–10</option>
                     <option value="11-20">11–20</option>
                     <option value="21+">21+ / Not ranked</option>
+                    <option value="not-top3">Not top 3</option>
                   </select>
                 </div>
 
@@ -3264,6 +3268,7 @@
                   <select id="ranking-filter-page-type" class="filter-control">
                     <option value="all">All</option>
                     <option value="GBP">GBP</option>
+                    <option value="Blog">Blog</option>
                     <option value="Landing">Landing</option>
                     <option value="Event">Event</option>
                     <option value="Product">Product</option>
@@ -23552,6 +23557,7 @@ Final Score: ${score}/100`;
           if (rankingFilterState.rank === '4-10' && (rank === null || rank < 4 || rank > 10)) return false;
           if (rankingFilterState.rank === '11-20' && (rank === null || rank < 11 || rank > 20)) return false;
           if (rankingFilterState.rank === '21+' && rank !== null && rank <= 20) return false;
+          if (rankingFilterState.rank === 'not-top3' && rank !== null && rank <= 3) return false;
         }
         
         // Preset-specific rank predicates (when rank filter is 'all' but preset requires specific range)
@@ -23560,9 +23566,6 @@ Final Score: ${score}/100`;
           if (activePreset === 'brand-safety') {
             // Not top 3: rank is null OR rank > 3
             if (rank !== null && rank <= 3) return false;
-          } else if (activePreset === 'education-growth') {
-            // Rank > 10: rank is null OR rank > 10
-            if (rank !== null && rank <= 10) return false;
           }
         }
 
@@ -27096,10 +27099,19 @@ Final Score: ${score}/100`;
             rankingSortState.column = 'rank';
             rankingSortState.direction = 'asc';
           } else if (presetKey === 'education-growth') {
-            // Education growth: segment=Education, rank=11-20 + 21+ (use All + predicate rank>10), minOpportunity=50, sort=opportunity desc
-            rankingFilterState.segment = 'education';
-            rankingFilterState.rank = 'all'; // Use 'all' and apply predicate rank>10
-            rankingFilterState.minOpportunity = 50;
+            // Blog opportunities: pageType=Blog, rank=Not top 3, minOpportunity=30, sort=opportunity desc
+            rankingFilterState.segment = 'all';
+            rankingFilterState.pageType = 'Blog';
+            rankingFilterState.rank = 'not-top3';
+            rankingFilterState.minOpportunity = 30;
+            rankingSortState.column = 'opportunityScore';
+            rankingSortState.direction = 'desc';
+          } else if (presetKey === 'local-visibility') {
+            // Local visibility: pageType=GBP, rank=Not top 3, minOpportunity=30, sort=opportunity desc
+            rankingFilterState.segment = 'all';
+            rankingFilterState.pageType = 'GBP';
+            rankingFilterState.rank = 'not-top3';
+            rankingFilterState.minOpportunity = 30;
             rankingSortState.column = 'opportunityScore';
             rankingSortState.direction = 'desc';
           }
@@ -27182,12 +27194,26 @@ Final Score: ${score}/100`;
             else if (rankingFilterState.rank === '4-10') rankLabel = '4–10';
             else if (rankingFilterState.rank === '11-20') rankLabel = '11–20';
             else if (rankingFilterState.rank === '21+') rankLabel = '21+ / Not ranked';
+            else if (rankingFilterState.rank === 'not-top3') rankLabel = 'Not top 3';
             chips.push({
               label: `Best rank: ${rankLabel}`,
               onRemove: () => {
                 rankingFilterState.rank = 'all';
                 const rankFilter = document.getElementById("ranking-filter-rank");
                 if (rankFilter) rankFilter.value = 'all';
+                activePreset = null;
+                updateFilters();
+              }
+            });
+          }
+          
+          if (rankingFilterState.pageType && rankingFilterState.pageType !== 'all') {
+            chips.push({
+              label: `Page type: ${rankingFilterState.pageType}`,
+              onRemove: () => {
+                rankingFilterState.pageType = 'all';
+                const pageTypeFilter = document.getElementById("ranking-filter-page-type");
+                if (pageTypeFilter) pageTypeFilter.value = 'all';
                 activePreset = null;
                 updateFilters();
               }
