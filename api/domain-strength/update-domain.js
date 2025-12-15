@@ -108,46 +108,64 @@ export default async function handler(req, res) {
       updatePayload.competitor_notes = competitor_notes || null;
     }
 
-    // Check if domain exists in domain_strength_domains
-    const checkUrl = `${supabaseUrl}/rest/v1/domain_strength_domains?domain=eq.${encodeURIComponent(domain)}&select=domain&limit=1`;
-    const checkResp = await fetch(checkUrl, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        apikey: supabaseKey,
-        Authorization: `Bearer ${supabaseKey}`,
-      },
-    });
+    // Always include domain in payload for upsert
+    updatePayload.domain = domain;
+    
+    // If domain_type is not being updated, ensure we have defaults for new records
+    if (updatePayload.domain_type === undefined) {
+      // Check if domain exists to see if we should preserve existing values
+      const checkUrl = `${supabaseUrl}/rest/v1/domain_strength_domains?domain=eq.${encodeURIComponent(domain)}&select=domain,domain_type,is_competitor&limit=1`;
+      const checkResp = await fetch(checkUrl, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: supabaseKey,
+          Authorization: `Bearer ${supabaseKey}`,
+        },
+      });
 
-    const existing = checkResp.ok ? await checkResp.json() : [];
-    const domainExists = Array.isArray(existing) && existing.length > 0;
+      const existing = checkResp.ok ? await checkResp.json() : [];
+      const existingRecord = Array.isArray(existing) && existing.length > 0 ? existing[0] : null;
 
-    // If domain doesn't exist, create it with defaults
-    if (!domainExists) {
-      updatePayload.domain = domain;
-      updatePayload.label = domain;
-      // Set defaults for fields not provided
-      if (updatePayload.domain_type === undefined) {
+      if (!existingRecord) {
+        // New record - set defaults
+        updatePayload.label = domain;
         updatePayload.domain_type = 'unmapped';
         updatePayload.domain_type_source = 'manual';
         updatePayload.segment = 'unmapped';
+        if (updatePayload.is_competitor === undefined) {
+          updatePayload.is_competitor = false;
+        }
+      } else {
+        // Existing record - preserve existing values if not being updated
+        if (updatePayload.domain_type === undefined) {
+          updatePayload.domain_type = existingRecord.domain_type || 'unmapped';
+        }
+        if (updatePayload.is_competitor === undefined) {
+          updatePayload.is_competitor = existingRecord.is_competitor === true;
+        }
+      }
+    } else {
+      // domain_type is being updated, ensure label exists for new records
+      if (!updatePayload.label) {
+        updatePayload.label = domain;
       }
       if (updatePayload.is_competitor === undefined) {
         updatePayload.is_competitor = false;
       }
     }
 
-    // Upsert the domain
+    // Use POST with upsert (merge on conflict with domain as primary key)
     const upsertUrl = `${supabaseUrl}/rest/v1/domain_strength_domains`;
     const upsertResp = await fetch(upsertUrl, {
-      method: domainExists ? 'PATCH' : 'POST',
+      method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         apikey: supabaseKey,
         Authorization: `Bearer ${supabaseKey}`,
-        Prefer: 'return=representation',
+        Prefer: 'resolution=merge-duplicates,return=representation',
       },
-      body: JSON.stringify(domainExists ? updatePayload : updatePayload),
+      body: JSON.stringify(updatePayload),
     });
 
     if (!upsertResp.ok) {
