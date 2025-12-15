@@ -71,8 +71,11 @@ export default async function handler(req, res) {
       });
     }
 
-    // Extract unique keywords from combinedRows
-    const allKeywords = rankingAiData.combinedRows.map(row => row?.keyword).filter(Boolean);
+    // Extract unique keywords from combinedRows - filter out empty strings and null values
+    const allKeywords = rankingAiData.combinedRows
+      .map(row => row?.keyword)
+      .filter(kw => kw && typeof kw === 'string' && kw.trim().length > 0)
+      .map(kw => kw.trim());
     const keywords = [...new Set(allKeywords)].sort();
     
     return res.status(200).json({
@@ -82,12 +85,6 @@ export default async function handler(req, res) {
         generatedAt: new Date().toISOString(),
         debug: `Found ${auditRows.length} audit row(s), combinedRows length: ${rankingAiData.combinedRows.length}, extracted: ${allKeywords.length}, unique: ${keywords.length}`
       },
-    });
-
-    return res.status(200).json({
-      status: 'ok',
-      keywords,
-      meta: { generatedAt: new Date().toISOString() },
     });
 
   } catch (e) {
