@@ -624,6 +624,13 @@ export default async function handler(req, res) {
       reused: runDomains.length - domainsToFetch.length,
       inserted: mode === "run" ? insertPayload.length : 0,
       results,
+      debug: {
+        primaryDomain,
+        includePending,
+        pendingLimit,
+        runDomainsCount: runDomains.length,
+        runDomainsSample: runDomains.slice(0, 10), // First 10 for debugging
+      },
       meta: { generatedAt: new Date().toISOString(), source: "domain-strength.snapshot" },
     });
   } catch (e) {
