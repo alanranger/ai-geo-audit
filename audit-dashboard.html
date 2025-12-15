@@ -27098,6 +27098,102 @@ Final Score: ${score}/100`;
           });
         }
 
+        // Default filter state (single source of truth)
+        const DEFAULT_FILTERS = {
+          segment: 'all',
+          rank: 'all',
+          volume: 'all',
+          ctr: 'all',
+          demandShare: 'all',
+          opportunity: 'all',
+          minOpportunity: null,
+          aiOverview: 'all',
+          aiCitation: 'all',
+          pageType: 'all',
+          serpFeatures: 'all',
+          keyword: ''
+        };
+
+        // Default sort state
+        const DEFAULT_SORT = {
+          column: 'opportunityScore',
+          direction: 'desc'
+        };
+
+        // Preset definitions (data-driven)
+        const PRESETS = {
+          'all': {
+            label: 'All keywords',
+            filters: { ...DEFAULT_FILTERS },
+            sort: { ...DEFAULT_SORT }
+          },
+          'high-impact-money': {
+            label: 'High-impact money',
+            filters: {
+              ...DEFAULT_FILTERS,
+              segment: 'money',
+              volume: 'high',
+              rank: '11-20',
+              minOpportunity: 65
+            },
+            sort: {
+              column: 'opportunityScore',
+              direction: 'desc'
+            }
+          },
+          'ai-overview-not-cited': {
+            label: 'AI Overview, not cited',
+            filters: {
+              ...DEFAULT_FILTERS,
+              aiOverview: 'has',
+              aiCitation: 'not-cited',
+              minOpportunity: 50
+            },
+            sort: {
+              column: 'volume',
+              direction: 'desc'
+            }
+          },
+          'brand-safety': {
+            label: 'Brand safety',
+            filters: {
+              ...DEFAULT_FILTERS,
+              segment: 'brand',
+              rank: 'not-top3'
+            },
+            sort: {
+              column: 'rank',
+              direction: 'asc'
+            }
+          },
+          'education-growth': {
+            label: 'Blog opportunities',
+            filters: {
+              ...DEFAULT_FILTERS,
+              pageType: 'Blog',
+              rank: 'not-top3',
+              minOpportunity: 30
+            },
+            sort: {
+              column: 'opportunityScore',
+              direction: 'desc'
+            }
+          },
+          'local-visibility': {
+            label: 'Local visibility',
+            filters: {
+              ...DEFAULT_FILTERS,
+              pageType: 'GBP',
+              rank: 'not-top3',
+              minOpportunity: 30
+            },
+            sort: {
+              column: 'opportunityScore',
+              direction: 'desc'
+            }
+          }
+        };
+
         // Preset button handlers
         function applyPreset(presetKey) {
           // Cancel any pending debounced keyword filter updates
@@ -27110,70 +27206,21 @@ Final Score: ${score}/100`;
           rankingPriorityFilter = null;
           selectedKeywordId = null;
 
-          // Reset all filters first
-          rankingFilterState = {
-            segment: 'all',
-            rank: 'all',
-            volume: 'all',
-            ctr: 'all',
-            demandShare: 'all',
-            opportunity: 'all',
-            aiOverview: 'all',
-            aiCitation: 'all',
-            pageType: 'all',
-            serpFeatures: 'all',
-            keyword: ''
-          };
-
-          // Set active preset
-          activePreset = presetKey;
-
-          // Apply preset-specific filters
-          if (presetKey === 'all') {
-            // All keywords: reset filters + default sort
-            activePreset = null; // Clear preset flag for "all"
-            rankingSortState.column = 'opportunityScore';
-            rankingSortState.direction = 'desc';
-          } else if (presetKey === 'high-impact-money') {
-            // High-impact money: segment=Money, volume=High, rank=11-20, minOpportunity=65, sort=opportunity desc, then rank asc
-            rankingFilterState.segment = 'money';
-            rankingFilterState.volume = 'high';
-            rankingFilterState.rank = '11-20';
-            rankingFilterState.minOpportunity = 65;
-            rankingSortState.column = 'opportunityScore';
-            rankingSortState.direction = 'desc';
-          } else if (presetKey === 'ai-overview-not-cited') {
-            // AI Overview, not cited: aiOverview=On, aiCitations=0, minOpportunity=50, sort=volume desc (or opportunity desc if no volume)
-            rankingFilterState.aiOverview = 'has';
-            rankingFilterState.aiCitation = 'not-cited';
-            rankingFilterState.minOpportunity = 50;
-            rankingSortState.column = 'volume';
-            rankingSortState.direction = 'desc';
-          } else if (presetKey === 'brand-safety') {
-            // Brand safety: segment=Brand, rank not top 3 (rank==null || rank>3), sort=rank asc (worst first)
-            rankingFilterState.segment = 'brand';
-            rankingFilterState.rank = 'all'; // Use 'all' and apply predicate
-            rankingSortState.column = 'rank';
-            rankingSortState.direction = 'asc';
-          } else if (presetKey === 'education-growth') {
-            // Blog opportunities: pageType=Blog, rank=Not top 3, minOpportunity=30, sort=opportunity desc
-            rankingFilterState.segment = 'all';
-            rankingFilterState.pageType = 'Blog';
-            rankingFilterState.rank = 'not-top3';
-            rankingFilterState.minOpportunity = 30;
-            rankingSortState.column = 'opportunityScore';
-            rankingSortState.direction = 'desc';
-          } else if (presetKey === 'local-visibility') {
-            // Local visibility: pageType=GBP, rank=Not top 3, minOpportunity=30, sort=opportunity desc
-            rankingFilterState.segment = 'all';
-            rankingFilterState.pageType = 'GBP';
-            rankingFilterState.rank = 'not-top3';
-            rankingFilterState.minOpportunity = 30;
-            rankingSortState.column = 'opportunityScore';
-            rankingSortState.direction = 'desc';
+          // Get preset definition
+          const preset = PRESETS[presetKey];
+          if (!preset) {
+            console.warn(`Unknown preset: ${presetKey}`);
+            return;
           }
 
-          // Update UI elements
+          // HARD RESET: Apply preset filters (don't merge with existing state)
+          rankingFilterState = { ...preset.filters };
+          rankingSortState = { ...preset.sort };
+
+          // Set active preset (null for 'all')
+          activePreset = presetKey === 'all' ? null : presetKey;
+
+          // Update UI elements to match filter state
           if (segmentFilter) segmentFilter.value = rankingFilterState.segment;
           if (rankFilter) rankFilter.value = rankingFilterState.rank;
           if (volumeFilter) volumeFilter.value = rankingFilterState.volume;
