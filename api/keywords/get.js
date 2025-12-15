@@ -52,38 +52,37 @@ export default async function handler(req, res) {
     }
 
     const auditRows = await auditResp.json();
-    console.log('[Get Keywords] Audit rows count:', auditRows?.length || 0);
     
     if (!Array.isArray(auditRows) || auditRows.length === 0) {
-      console.log('[Get Keywords] No audit rows found');
       return res.status(200).json({
         status: 'ok',
         keywords: [],
-        meta: { generatedAt: new Date().toISOString(), reason: 'no_audit_rows' },
+        meta: { generatedAt: new Date().toISOString(), reason: 'no_audit_rows', debug: 'No audit rows found in database' },
       });
     }
 
     const rankingAiData = auditRows[0]?.ranking_ai_data;
-    console.log('[Get Keywords] ranking_ai_data exists:', !!rankingAiData);
-    console.log('[Get Keywords] combinedRows exists:', !!rankingAiData?.combinedRows);
-    console.log('[Get Keywords] combinedRows length:', rankingAiData?.combinedRows?.length || 0);
     
     if (!rankingAiData || !rankingAiData.combinedRows) {
-      console.log('[Get Keywords] No ranking_ai_data or combinedRows');
       return res.status(200).json({
         status: 'ok',
         keywords: [],
-        meta: { generatedAt: new Date().toISOString(), reason: 'no_ranking_ai_data' },
+        meta: { generatedAt: new Date().toISOString(), reason: 'no_ranking_ai_data', debug: `ranking_ai_data exists: ${!!rankingAiData}, combinedRows exists: ${!!rankingAiData?.combinedRows}` },
       });
     }
 
     // Extract unique keywords from combinedRows
     const allKeywords = rankingAiData.combinedRows.map(row => row?.keyword).filter(Boolean);
-    console.log('[Get Keywords] Extracted keywords count:', allKeywords.length);
-    console.log('[Get Keywords] Sample keywords:', allKeywords.slice(0, 5));
-    
     const keywords = [...new Set(allKeywords)].sort();
-    console.log('[Get Keywords] Unique keywords count:', keywords.length);
+    
+    return res.status(200).json({
+      status: 'ok',
+      keywords,
+      meta: { 
+        generatedAt: new Date().toISOString(),
+        debug: `Found ${auditRows.length} audit row(s), combinedRows length: ${rankingAiData.combinedRows.length}, extracted: ${allKeywords.length}, unique: ${keywords.length}`
+      },
+    });
 
     return res.status(200).json({
       status: 'ok',
