@@ -3036,6 +3036,27 @@
                 Keyword-level inputs to <strong>Visibility</strong> and the <strong>Authority → Behaviour / Ranking</strong> components. Search volume shows demand for each tracked keyword (Visibility pillar). Combined with AI citations, it also highlights topics where you have strong or weak Authority. AI columns show where <strong>Content/Schema</strong> helps make you a source.
               </p>
             </div>
+            <!-- Preset buttons -->
+            <div class="ranking-presets-section" style="padding: 1rem 1.5rem; border-bottom: 1px solid #e2e8f0; background: #f8fafc;">
+              <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
+                <span style="font-size: 0.875rem; font-weight: 600; color: #475569; margin-right: 0.5rem;">Presets:</span>
+                <button type="button" class="ranking-preset-btn" data-preset="all" style="padding: 0.5rem 1rem; font-size: 0.875rem; border: 1px solid #cbd5e1; border-radius: 6px; background: white; cursor: pointer; color: #475569; font-weight: 500; transition: all 0.2s;" onmouseover="this.style.background='#f1f5f9'; this.style.borderColor='#94a3b8';" onmouseout="this.style.background='white'; this.style.borderColor='#cbd5e1';">
+                  All keywords
+                </button>
+                <button type="button" class="ranking-preset-btn" data-preset="high-impact-money" style="padding: 0.5rem 1rem; font-size: 0.875rem; border: 1px solid #cbd5e1; border-radius: 6px; background: white; cursor: pointer; color: #475569; font-weight: 500; transition: all 0.2s;" onmouseover="this.style.background='#f1f5f9'; this.style.borderColor='#94a3b8';" onmouseout="this.style.background='white'; this.style.borderColor='#cbd5e1';">
+                  High-impact money
+                </button>
+                <button type="button" class="ranking-preset-btn" data-preset="ai-overview-not-cited" style="padding: 0.5rem 1rem; font-size: 0.875rem; border: 1px solid #cbd5e1; border-radius: 6px; background: white; cursor: pointer; color: #475569; font-weight: 500; transition: all 0.2s;" onmouseover="this.style.background='#f1f5f9'; this.style.borderColor='#94a3b8';" onmouseout="this.style.background='white'; this.style.borderColor='#cbd5e1';">
+                  AI Overview, not cited
+                </button>
+                <button type="button" class="ranking-preset-btn" data-preset="brand-safety" style="padding: 0.5rem 1rem; font-size: 0.875rem; border: 1px solid #cbd5e1; border-radius: 6px; background: white; cursor: pointer; color: #475569; font-weight: 500; transition: all 0.2s;" onmouseover="this.style.background='#f1f5f9'; this.style.borderColor='#94a3b8';" onmouseout="this.style.background='white'; this.style.borderColor='#cbd5e1';">
+                  Brand safety
+                </button>
+                <button type="button" class="ranking-preset-btn" data-preset="local-growth" style="padding: 0.5rem 1rem; font-size: 0.875rem; border: 1px solid #cbd5e1; border-radius: 6px; background: white; cursor: pointer; color: #475569; font-weight: 500; transition: all 0.2s;" onmouseover="this.style.background='#f1f5f9'; this.style.borderColor='#94a3b8';" onmouseout="this.style.background='white'; this.style.borderColor='#cbd5e1';">
+                  Local growth
+                </button>
+              </div>
+            </div>
             <div class="ranking-filters-section" style="padding: 1rem 1.5rem; border-bottom: 1px solid #e2e8f0;">
               <div class="ranking-filter-bar" style="display: flex; flex-wrap: nowrap; gap: 0.75rem; align-items: flex-end; margin-bottom: 0.75rem;">
                 <div class="filter-group">
@@ -23311,6 +23332,21 @@ Final Score: ${score}/100`;
           if (rankingFilterState.rank === 'top10' && (rank == null || rank > 10)) return false;
           if (rankingFilterState.rank === 'top20' && (rank == null || rank > 20)) return false;
           if (rankingFilterState.rank === 'low' && rank != null && rank <= 20) return false;
+          // Preset-specific: rank 4-20 for high-impact-money
+          if (rankingFilterState.rank === 'top20' && rankingFilterState.segment === 'money' && rankingFilterState.volume === 'high' && rankingFilterState.opportunity === 'high') {
+            // Additional check: must be rank 4-20 (not 1-3)
+            if (rank != null && rank <= 3) return false;
+          }
+          // Preset-specific: rank > 3 for brand-safety
+          if (rankingFilterState.rank === 'low' && rankingFilterState.segment === 'brand') {
+            // Additional check: must be rank > 3 (not just 21+)
+            if (rank != null && rank <= 3) return false;
+          }
+          // Preset-specific: rank > 10 for local-growth
+          if (rankingFilterState.rank === 'low' && rankingFilterState.segment === 'other' && rankingFilterState.volume === 'medium' && rankingFilterState.opportunity === 'medium') {
+            // Additional check: must be rank > 10 (not just 21+)
+            if (rank != null && rank <= 10) return false;
+          }
         }
 
         // Search volume filter
@@ -23320,6 +23356,11 @@ Final Score: ${score}/100`;
           if (rankingFilterState.volume === 'medium' && (volume == null || volume < 50 || volume >= 200)) return false;
           if (rankingFilterState.volume === 'low' && (volume == null || volume < 1 || volume >= 50)) return false;
           if (rankingFilterState.volume === 'none' && volume != null && volume > 0) return false;
+          // Preset-specific: volume=Medium+ (Medium OR High) for local-growth
+          if (rankingFilterState.volume === 'medium' && rankingFilterState.segment === 'other' && rankingFilterState.opportunity === 'medium' && rankingFilterState.rank === 'low') {
+            // Allow both medium (50-199) and high (200+)
+            if (volume != null && volume >= 50) return true; // Override: accept if >= 50
+          }
         }
 
         // CTR filter
@@ -23380,6 +23421,16 @@ Final Score: ${score}/100`;
           if (rankingFilterState.opportunity === 'high' && (oppScore < 70 || oppScore > 100)) return false;
           if (rankingFilterState.opportunity === 'medium' && (oppScore < 40 || oppScore >= 70)) return false;
           if (rankingFilterState.opportunity === 'low' && (oppScore >= 40 || oppScore < 0)) return false;
+          // Preset-specific: opportunity >= 65 for high-impact-money (using 'high' filter which is 70+, but we need >=65)
+          if (rankingFilterState.opportunity === 'high' && rankingFilterState.segment === 'money' && rankingFilterState.volume === 'high' && rankingFilterState.rank === 'top20') {
+            // Additional check: must be >= 65 (not just >= 70)
+            if (oppScore < 65) return false;
+          }
+          // Preset-specific: opportunity >= 50 for ai-overview-not-cited and local-growth
+          if (rankingFilterState.opportunity === 'medium' && ((rankingFilterState.aiOverview === 'has' && rankingFilterState.aiCitation === 'not-cited') || (rankingFilterState.segment === 'other' && rankingFilterState.volume === 'medium'))) {
+            // Additional check: must be >= 50 (not just >= 40)
+            if (oppScore < 50) return false;
+          }
         }
 
         // Keyword search
@@ -26353,9 +26404,120 @@ Final Score: ${score}/100`;
             if (keywordFilter) keywordFilter.value = '';
             updateFilterActiveStates();
             rankingPaginationState.currentPage = 1; // Reset to first page on clear
+            rankingSortState.column = 'opportunityScore'; // Reset sort
+            rankingSortState.direction = 'desc';
             renderRankingAiTab();
           });
         }
+
+        // Preset button handlers
+        function applyPreset(presetKey) {
+          // Cancel any pending debounced keyword filter updates
+          if (keywordFilterTimeout) {
+            clearTimeout(keywordFilterTimeout);
+            keywordFilterTimeout = null;
+          }
+
+          // Clear priority matrix filter and selected keyword
+          rankingPriorityFilter = null;
+          selectedKeywordId = null;
+
+          // Reset all filters first
+          rankingFilterState = {
+            segment: 'all',
+            rank: 'all',
+            volume: 'all',
+            ctr: 'all',
+            demandShare: 'all',
+            opportunity: 'all',
+            aiOverview: 'all',
+            aiCitation: 'all',
+            pageType: 'all',
+            serpFeatures: 'all',
+            keyword: ''
+          };
+
+          // Apply preset-specific filters
+          if (presetKey === 'all') {
+            // All keywords: reset filters + default sort
+            rankingSortState.column = 'opportunityScore';
+            rankingSortState.direction = 'desc';
+          } else if (presetKey === 'high-impact-money') {
+            // High-impact money: segment=Money, volume=High, rank=4-20, opportunity>=65, sort=opportunity desc
+            rankingFilterState.segment = 'money';
+            rankingFilterState.volume = 'high';
+            rankingFilterState.rank = 'top20'; // Will filter to 4-20 in applyRankingFilters (with additional check)
+            rankingFilterState.opportunity = 'high'; // Will filter to >=65 in applyRankingFilters (with additional check)
+            rankingSortState.column = 'opportunityScore';
+            rankingSortState.direction = 'desc';
+          } else if (presetKey === 'ai-overview-not-cited') {
+            // AI Overview, not cited: aiOverview=On, aiCitations=0, opportunity>=50, sort=volume desc
+            rankingFilterState.aiOverview = 'has';
+            rankingFilterState.aiCitation = 'not-cited';
+            rankingFilterState.opportunity = 'medium'; // 40-69, but we need >=50
+            rankingSortState.column = 'volume';
+            rankingSortState.direction = 'desc';
+          } else if (presetKey === 'brand-safety') {
+            // Brand safety: segment=Brand, rank>3, sort=rank asc
+            rankingFilterState.segment = 'brand';
+            rankingFilterState.rank = 'low'; // Will filter to >3 in applyRankingFilters (with additional check)
+            rankingSortState.column = 'rank';
+            rankingSortState.direction = 'asc';
+          } else if (presetKey === 'local-growth') {
+            // Local growth: segment=Local, volume=Medium+, rank>10, opportunity>=50, sort=opportunity desc
+            // Note: Assuming "Local" keywords are in "other" segment. If you have a "local" segment, change this.
+            rankingFilterState.segment = 'other'; // Change to 'local' if you have that segment
+            rankingFilterState.volume = 'medium'; // Medium OR High (we'll use medium, but could add logic for both)
+            rankingFilterState.rank = 'low'; // Will filter to >10 in applyRankingFilters (with additional check)
+            rankingFilterState.opportunity = 'medium'; // Will filter to >=50 in applyRankingFilters (with additional check)
+            rankingSortState.column = 'opportunityScore';
+            rankingSortState.direction = 'desc';
+          }
+
+          // Update UI elements
+          if (segmentFilter) segmentFilter.value = rankingFilterState.segment;
+          if (rankFilter) rankFilter.value = rankingFilterState.rank;
+          if (volumeFilter) volumeFilter.value = rankingFilterState.volume;
+          if (ctrFilter) ctrFilter.value = rankingFilterState.ctr;
+          if (demandShareFilter) demandShareFilter.value = rankingFilterState.demandShare;
+          if (aiOverviewFilter) aiOverviewFilter.value = rankingFilterState.aiOverview;
+          if (aiCitationFilter) aiCitationFilter.value = rankingFilterState.aiCitation;
+          if (opportunityFilter) opportunityFilter.value = rankingFilterState.opportunity;
+          if (pageTypeFilter) pageTypeFilter.value = rankingFilterState.pageType;
+          if (serpFeaturesFilter) serpFeaturesFilter.value = rankingFilterState.serpFeatures;
+          if (keywordFilter) keywordFilter.value = rankingFilterState.keyword;
+
+          updateFilterActiveStates();
+          rankingPaginationState.currentPage = 1;
+          renderRankingAiTab();
+        }
+
+        // Wire up preset buttons (re-wire on each call to handle DOM updates)
+        function wirePresetButtons() {
+          // Remove existing listeners by cloning buttons
+          const presetButtons = document.querySelectorAll('.ranking-preset-btn');
+          presetButtons.forEach(btn => {
+            const newBtn = btn.cloneNode(true);
+            btn.parentNode.replaceChild(newBtn, btn);
+          });
+          
+          // Re-query to get fresh elements
+          const freshPresetButtons = document.querySelectorAll('.ranking-preset-btn');
+          freshPresetButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+              const presetKey = btn.getAttribute('data-preset');
+              if (presetKey) {
+                applyPreset(presetKey);
+              }
+            });
+          });
+        }
+        
+        // Wire preset buttons immediately
+        wirePresetButtons();
+        
+        // Make wirePresetButtons globally available
+        window.wirePresetButtons = wirePresetButtons;
 
         // Initialize active states on page load
         updateFilterActiveStates();
