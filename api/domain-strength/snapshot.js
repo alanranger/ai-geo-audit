@@ -187,9 +187,15 @@ async function fetchExistingSnapshotRows(snapshotDate, engine, domains) {
 async function fetchExistingSnapshotRowsForMonth(monthStart, monthEnd, engine, domains) {
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!supabaseUrl || !supabaseKey) return new Set();
+  if (!supabaseUrl || !supabaseKey) {
+    console.log('[fetchExistingSnapshotRowsForMonth] Supabase not configured');
+    return new Set();
+  }
   const list = Array.isArray(domains) ? domains : [];
-  if (list.length === 0) return new Set();
+  if (list.length === 0) {
+    console.log('[fetchExistingSnapshotRowsForMonth] No domains to check');
+    return new Set();
+  }
 
   const out = new Set(); // Just track which domains have snapshots this month
 
@@ -197,8 +203,8 @@ async function fetchExistingSnapshotRowsForMonth(monthStart, monthEnd, engine, d
   const chunkSize = 100;
   for (let i = 0; i < list.length; i += chunkSize) {
     const chunk = list.slice(i, i + chunkSize);
-    // Format domain list for Supabase: (domain1,domain2,domain3)
-    const domainList = chunk.map(d => `"${d}"`).join(",");
+    // Format domain list for Supabase: domain1,domain2,domain3 (no quotes, no parentheses in the in.() part)
+    const domainList = chunk.join(",");
     const url =
       `${supabaseUrl}/rest/v1/domain_strength_snapshots` +
       `?snapshot_date=gte.${encodeURIComponent(monthStart)}` +
@@ -207,6 +213,8 @@ async function fetchExistingSnapshotRowsForMonth(monthStart, monthEnd, engine, d
       `&domain=in.(${encodeURIComponent(domainList)})` +
       `&select=domain` +
       `&limit=5000`;
+
+    console.log(`[fetchExistingSnapshotRowsForMonth] Checking ${chunk.length} domains for snapshots in ${monthStart} to ${monthEnd}`);
 
     // eslint-disable-next-line no-await-in-loop
     const resp = await fetch(url, {
@@ -218,16 +226,25 @@ async function fetchExistingSnapshotRowsForMonth(monthStart, monthEnd, engine, d
       },
     });
 
-    if (!resp.ok) continue;
+    if (!resp.ok) {
+      const errorText = await resp.text();
+      console.error(`[fetchExistingSnapshotRowsForMonth] Query failed: ${resp.status} - ${errorText}`);
+      continue;
+    }
     // eslint-disable-next-line no-await-in-loop
     const rows = await resp.json();
-    if (!Array.isArray(rows)) continue;
+    if (!Array.isArray(rows)) {
+      console.error(`[fetchExistingSnapshotRowsForMonth] Invalid response format: ${typeof rows}`);
+      continue;
+    }
+    console.log(`[fetchExistingSnapshotRowsForMonth] Found ${rows.length} domains with snapshots this month`);
     for (const r of rows) {
       const d = normalizeDomain(r?.domain);
       if (d) out.add(d);
     }
   }
 
+  console.log(`[fetchExistingSnapshotRowsForMonth] Total domains with snapshots this month: ${out.size}`);
   return out;
 }
 
@@ -275,26 +292,46 @@ export default async function handler(req, res) {
     if (includePending) {
       // Fetch pending domains
       const pendingDomains = await dequeuePending({ engine, limit: pendingLimit * 2 });
+      console.log(`[Snapshot] Fetched ${pendingDomains.length} domains from pending queue`);
       
-      // Check which pending domains already have snapshots for the current MONTH (not just today)
-      // This ensures cost control: each domain is only fetched once per calendar month
-      const monthStart = snapshot_date.slice(0, 7) + '-01'; // e.g., '2025-12-01'
-      const monthEnd = snapshot_date.slice(0, 7) + '-31'; // e.g., '2025-12-31'
-      const pendingWithSnapshots = await fetchExistingSnapshotRowsForMonth(monthStart, monthEnd, engine, pendingDomains);
-      
-      // Filter out pending domains that already have a snapshot this month (cost control)
-      // Primary domain is always included regardless
-      const uniquePendingDomains = [];
-      for (const d of pendingDomains) {
-        const n = normalizeDomain(d);
-        if (!n || n === primaryDomain) continue; // Skip if same as primary domain
-        if (pendingWithSnapshots.has(n)) continue; // Skip if already has snapshot this month
-        uniquePendingDomains.push(n);
-        if (uniquePendingDomains.length >= pendingLimit) break; // Stop once we have enough
+      if (pendingDomains.length > 0) {
+        // Check which pending domains already have snapshots for the current MONTH (not just today)
+        // This ensures cost control: each domain is only fetched once per calendar month
+        const monthStart = snapshot_date.slice(0, 7) + '-01'; // e.g., '2025-12-01'
+        const monthEnd = snapshot_date.slice(0, 7) + '-31'; // e.g., '2025-12-31'
+        console.log(`[Snapshot] Checking for existing snapshots in month range: ${monthStart} to ${monthEnd}`);
+        
+        const pendingWithSnapshots = await fetchExistingSnapshotRowsForMonth(monthStart, monthEnd, engine, pendingDomains);
+        console.log(`[Snapshot] Found ${pendingWithSnapshots.size} pending domains that already have snapshots this month`);
+        
+        // Filter out pending domains that already have a snapshot this month (cost control)
+        // Primary domain is always included regardless
+        const uniquePendingDomains = [];
+        for (const d of pendingDomains) {
+          const n = normalizeDomain(d);
+          if (!n) {
+            console.log(`[Snapshot] Skipping invalid domain: ${d}`);
+            continue;
+          }
+          if (n === primaryDomain) {
+            console.log(`[Snapshot] Skipping ${n} (same as primary domain)`);
+            continue; // Skip if same as primary domain
+          }
+          if (pendingWithSnapshots.has(n)) {
+            console.log(`[Snapshot] Skipping ${n} (already has snapshot this month)`);
+            continue; // Skip if already has snapshot this month
+          }
+          uniquePendingDomains.push(n);
+          if (uniquePendingDomains.length >= pendingLimit) break; // Stop once we have enough
+        }
+        
+        console.log(`[Snapshot] After filtering: ${uniquePendingDomains.length} unique pending domains to process`);
+        
+        // Merge: primary domain + unique pending domains
+        runDomains = [...runDomains, ...uniquePendingDomains];
+      } else {
+        console.log(`[Snapshot] No pending domains found in queue`);
       }
-      
-      // Merge: primary domain + unique pending domains
-      runDomains = [...runDomains, ...uniquePendingDomains];
     } else if (domains.length > 0) {
       // If includePending is false but domains are provided, use those
       runDomains = [...runDomains, ...normalizeDomainArray(domains)];
