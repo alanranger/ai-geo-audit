@@ -26690,7 +26690,7 @@ Final Score: ${score}/100`;
           
           const chips = getActiveCriteriaChips();
           
-          if (chips.length === 0) {
+          if (chips.length === 0 || activePreset === null) {
             chipsContainer.style.display = 'none';
             return;
           }
@@ -26700,11 +26700,16 @@ Final Score: ${score}/100`;
           if (!chipsInner) return;
           
           chipsInner.innerHTML = chips.map(chip => {
-            const removeFunc = chip.onRemove.toString();
+            // Create a wrapper function to handle the removal and update
+            const removeHandler = () => {
+              chip.onRemove();
+              updatePresetButtonActiveStates();
+              renderPresetCriteriaChips();
+            };
             return `
               <span style="display: inline-flex; align-items: center; gap: 0.375rem; padding: 0.375rem 0.75rem; background: #e5e7eb; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.875rem; color: #374151;">
                 ${chip.label}
-                <button type="button" onclick="(${removeFunc})()" style="background: none; border: none; cursor: pointer; color: #6b7280; font-size: 1rem; line-height: 1; padding: 0; margin-left: 0.25rem;" title="Remove this filter">×</button>
+                <button type="button" onclick="(${removeHandler.toString()})()" style="background: none; border: none; cursor: pointer; color: #6b7280; font-size: 1rem; line-height: 1; padding: 0; margin-left: 0.25rem;" title="Remove this filter">×</button>
               </span>
             `;
           }).join('');
