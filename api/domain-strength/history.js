@@ -90,6 +90,23 @@ export default async function handler(req, res) {
   const rows = await resp.json();
   const snapshotData = Array.isArray(rows) ? rows : [];
   
+  // Step 4: Enqueue missing domains (domains requested but with no snapshots)
+  if (domains.length > 0) {
+    try {
+      const domainsWithSnapshots = new Set(snapshotData.map(r => r.domain).filter(Boolean));
+      const missingDomains = domains.filter(d => !domainsWithSnapshots.has(d));
+      
+      if (missingDomains.length > 0) {
+        // Import enqueuePending helper
+        const { enqueuePending } = await import('../../lib/domainStrength/domains.js');
+        await enqueuePending(missingDomains, { engine: 'google', source: 'history-miss' });
+      }
+    } catch (enqueueError) {
+      // Graceful: if enqueue fails, continue without it
+      console.error('Error enqueuing missing domains:', enqueueError);
+    }
+  }
+  
   // Fetch domain metadata (label, segment) from domain_strength_domains
   const domainMeta = new Map();
   if (snapshotData.length > 0) {

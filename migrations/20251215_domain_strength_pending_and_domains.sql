@@ -26,3 +26,17 @@ create table if not exists public.domain_strength_domains (
 create index if not exists idx_domain_strength_domains_segment
   on public.domain_strength_domains (segment);
 
+-- RPC function to increment seen_count for pending domains
+create or replace function public.domain_rank_pending_bump(domains text[], engine text)
+returns void
+language plpgsql
+as $$
+begin
+  update public.domain_rank_pending
+  set
+    seen_count = seen_count + 1,
+    last_seen_at = now()
+  where domain = any(domains) and search_engine = engine;
+end;
+$$;
+
