@@ -21256,8 +21256,35 @@ Final Score: ${score}/100`;
         avgPositionUnweighted: summary.avg_position_unweighted ?? summary.avgPositionUnweighted,
         avgPositionVolumeWeighted: summary.avg_position_volume_weighted ?? summary.avgPositionVolumeWeighted,
         keywordsUsedForAvg: summary.keywords_used_for_avg ?? summary.keywordsUsedForAvg,
-        keywordsWithVolume: summary.keywords_with_volume ?? summary.keywordsWithVolume
+        keywordsWithVolume: summary.keywords_with_volume ?? summary.keywordsWithVolume,
+        // v1.4: Domain Strength context (read-only)
+        domainStrength: summary.domainStrength ?? null,
+        authorityPriority: summary.authorityPriority ?? null
       };
+    }
+
+    // ======================
+    // Ranking & AI: Domain Strength context (read-only)
+    // ======================
+    let __rankingAiAuthorityContext = null;
+    async function fetchRankingAiAuthorityContext() {
+      if (__rankingAiAuthorityContext) return __rankingAiAuthorityContext;
+      try {
+        const resp = await fetch(apiUrl('/api/ranking-ai/summary'));
+        const json = await resp.json();
+        if (!resp.ok || !json || json.status !== 'ok') {
+          __rankingAiAuthorityContext = { domainStrength: null, authorityPriority: null };
+          return __rankingAiAuthorityContext;
+        }
+        __rankingAiAuthorityContext = {
+          domainStrength: json.domainStrength || null,
+          authorityPriority: json.authorityPriority || null
+        };
+        return __rankingAiAuthorityContext;
+      } catch {
+        __rankingAiAuthorityContext = { domainStrength: null, authorityPriority: null };
+        return __rankingAiAuthorityContext;
+      }
     }
 
     // ======================
@@ -23108,14 +23135,14 @@ Final Score: ${score}/100`;
           if (onCellClick) onCellClick(rankingPriorityFilter);
           
           // After filter is applied, check if exactly one row matches and auto-select it
-          setTimeout(() => {
+          setTimeout(async () => {
             const { combinedRows } = RankingAiModule.state();
             const filteredAfterClick = applyRankingFilters(combinedRows);
             if (filteredAfterClick.length === 1) {
               const singleRow = filteredAfterClick[0];
               selectedKeywordId = `${singleRow.keyword}|${singleRow.best_url || ''}`;
               debugLog(`[RankingAI Scorecard] Auto-selecting single matching keyword: "${singleRow.keyword}"`, 'info');
-              renderKeywordScorecard(singleRow);
+              await renderKeywordScorecard(singleRow);
               // Also update table row selection
               const tbody = document.getElementById("ranking-ai-table-body");
               if (tbody) {
@@ -24102,7 +24129,7 @@ Final Score: ${score}/100`;
 
       // Row click → scorecard panel
       tbody.querySelectorAll("tr").forEach(tr => {
-        tr.addEventListener("click", () => {
+        tr.addEventListener("click", async () => {
           tbody.querySelectorAll("tr").forEach(r => r.classList.remove("ranking-table-row--selected"));
           tr.classList.add("ranking-table-row--selected");
           const idx = Number(tr.dataset.index || "-1");
@@ -24111,7 +24138,7 @@ Final Score: ${score}/100`;
             // Create unique identifier for selected keyword
             selectedKeywordId = `${row.keyword}|${row.best_url || ''}`;
             debugLog(`[RankingAI Scorecard] Row clicked - keyword: "${row.keyword}", selectedKeywordId: "${selectedKeywordId}"`, 'info');
-            renderKeywordScorecard(row);
+            await renderKeywordScorecard(row);
           }
         });
       });
@@ -24172,7 +24199,7 @@ Final Score: ${score}/100`;
      * Render Keyword Scorecard Panel
      * @param {Object} row - Keyword row from combinedRows
      */
-    function renderKeywordScorecard(row) {
+    async function renderKeywordScorecard(row) {
       const emptyEl = document.getElementById("ranking-ai-detail-empty");
       const contentEl = document.getElementById("ranking-ai-detail-content");
       if (!emptyEl || !contentEl) return;
@@ -24197,6 +24224,11 @@ Final Score: ${score}/100`;
         contentEl.hidden = true;
         return;
       }
+      
+      // Fetch authority context for authority-building block (v1.4)
+      const authorityContext = await fetchRankingAiAuthorityContext();
+      const authorityPriority = authorityContext?.authorityPriority ?? null;
+      const domainStrength = authorityContext?.domainStrength ?? null;
 
       debugLog(`[RankingAI Scorecard] Rendering scorecard for keyword: "${scorecardData.keyword}"`, 'info');
       debugLog(`[RankingAI Scorecard] Demand: ${scorecardData.demand_level}, Rank: ${scorecardData.rank_bucket_label}, AI: ${scorecardData.ai_status}, Priority: ${scorecardData.priority_level}`, 'info');
@@ -24309,6 +24341,36 @@ Final Score: ${score}/100`;
       const priorityBorder = scorecardData.priority_level === 'High' ? '#ef4444' : 
                             scorecardData.priority_level === 'Medium' ? '#f59e0b' : '#10b981';
       html += `<p style="margin-bottom: 0.75rem; font-size: 0.875rem; color: #1e293b; line-height: 1.6;">Overall priority: <span style="padding: 0.25rem 0.5rem; border-radius: 4px; font-weight: 600; background: ${priorityBg}; border-left: 3px solid ${priorityBorder}; color: #1e293b;">${scorecardData.priority_level}</span></p>`;
+      
+      // Authority-building block (v1.4: Domain Strength integration)
+      const opportunityScore = scorecardData.opportunity_score ?? 0;
+      const currentRank = scorecardData.best_rank_group ?? null;
+      const isAuthorityLimited = authorityPriority === 'high' && 
+                                 opportunityScore >= 60 && 
+                                 (currentRank === null || currentRank > 10);
+      
+      if (isAuthorityLimited) {
+        html += `<div style="margin-bottom: 1rem; padding: 0.75rem; background: #fef3c7; border-left: 3px solid #f59e0b; border-radius: 4px;">`;
+        html += `<h6 style="font-size: 0.875rem; font-weight: 600; color: #92400e; margin: 0 0 0.5rem 0;">Authority & external signals</h6>`;
+        html += `<ul style="margin: 0; padding-left: 1.25rem; list-style-type: disc; font-size: 0.875rem; line-height: 1.6; color: #1e293b;">`;
+        const domainStrengthScore = domainStrength?.score ?? null;
+        const scoreText = domainStrengthScore !== null ? `~${domainStrengthScore.toFixed(1)}` : 'unknown';
+        const bandText = domainStrength?.band ?? 'unknown';
+        html += `<li style="margin-bottom: 0.25rem;">Overall domain strength is currently ${bandText} (score ${scoreText}).</li>`;
+        html += `<li style="margin-bottom: 0.25rem;">For this high-impact keyword on page 2+, focus on authority-building: relevant backlinks, citations, PR, and mentions from trusted sites in the same topic.</li>`;
+        html += `</ul>`;
+        html += `</div>`;
+      } else if (authorityPriority === 'medium' && opportunityScore >= 60 && (currentRank === null || currentRank > 10)) {
+        // Medium priority - softer wording
+        html += `<div style="margin-bottom: 1rem; padding: 0.75rem; background: #fef3c7; border-left: 3px solid #f59e0b; border-radius: 4px;">`;
+        html += `<h6 style="font-size: 0.875rem; font-weight: 600; color: #92400e; margin: 0 0 0.5rem 0;">Authority & external signals</h6>`;
+        html += `<ul style="margin: 0; padding-left: 1.25rem; list-style-type: disc; font-size: 0.875rem; line-height: 1.6; color: #1e293b;">`;
+        const domainStrengthScore = domainStrength?.score ?? null;
+        const scoreText = domainStrengthScore !== null ? `~${domainStrengthScore.toFixed(1)}` : 'unknown';
+        html += `<li style="margin-bottom: 0.25rem;">Domain strength is moderate (score ${scoreText}). Also consider authority-building alongside on-page improvements for this high-impact keyword.</li>`;
+        html += `</ul>`;
+        html += `</div>`;
+      }
       
       const actions = generateActionBullets(scorecardData);
       // Always show 3 bullets (function now guarantees 3)
@@ -24915,8 +24977,8 @@ Final Score: ${score}/100`;
     }
 
     // Keep renderRankingAiDetail as alias for backward compatibility
-    function renderRankingAiDetail(row) {
-      renderKeywordScorecard(row);
+    async function renderRankingAiDetail(row) {
+      await renderKeywordScorecard(row);
     }
 
     // ======================
@@ -25149,8 +25211,34 @@ Final Score: ${score}/100`;
         container.appendChild(pill);
       }
 
+      // Authority priority insight (v1.4: Domain Strength integration)
+      const authorityPriority = summary?.authorityPriority ?? null;
+      const domainStrength = summary?.domainStrength ?? null;
+      
+      if (authorityPriority !== null) {
+        const pill = document.createElement("div");
+        pill.className = "card-pill";
+        
+        let authorityText = '';
+        if (authorityPriority === 'high') {
+          authorityText = 'Domain authority: Low. Overall domain strength is limiting how far your pages can climb, especially for high-impact keywords. Treat "authority building" (links, citations, brand searches) as a high-priority task over the next few months.';
+        } else if (authorityPriority === 'medium') {
+          authorityText = 'Domain authority: Medium. Authority is "good enough" but still a constraint on some high-impact keywords. Mix authority-building with on-page improvements.';
+        } else {
+          // authorityPriority === 'low'
+          authorityText = 'Domain authority: Strong relative to your current scale. Most gains are likely to come from on-page content, snippets, and conversion rather than more links alone.';
+        }
+        
+        pill.innerHTML = `
+          <p>
+            <strong>[Authority]</strong> ${authorityText}
+          </p>
+        `;
+        container.appendChild(pill);
+      }
+
       // If no insights, show a general message
-      if (goodRankWithOverviewNoCitation === 0 && weakRankWithCitation === 0) {
+      if (goodRankWithOverviewNoCitation === 0 && weakRankWithCitation === 0 && authorityPriority === null) {
         const pill = document.createElement("div");
         pill.className = "card-pill";
         pill.innerHTML = `
