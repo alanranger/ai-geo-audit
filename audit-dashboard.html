@@ -27799,139 +27799,165 @@ Final Score: ${score}/100`;
 
       // Edit Keywords functionality
       (function() {
-        const modal = document.getElementById('edit-keywords-modal');
-        const openBtn = document.getElementById('edit-keywords-btn');
-        const closeBtn = document.getElementById('edit-keywords-close');
-        const cancelBtn = document.getElementById('edit-keywords-cancel');
-        const saveBtn = document.getElementById('edit-keywords-save');
-        const textarea = document.getElementById('edit-keywords-textarea');
-        const statusEl = document.getElementById('edit-keywords-status');
+        // Wait for DOM to be ready
+        function initEditKeywords() {
+          const modal = document.getElementById('edit-keywords-modal');
+          const openBtn = document.getElementById('edit-keywords-btn');
+          const closeBtn = document.getElementById('edit-keywords-close');
+          const cancelBtn = document.getElementById('edit-keywords-cancel');
+          const saveBtn = document.getElementById('edit-keywords-save');
+          const textarea = document.getElementById('edit-keywords-textarea');
+          const statusEl = document.getElementById('edit-keywords-status');
 
-        function showModal() {
-          if (modal) {
-            modal.style.display = 'flex';
-            loadKeywords();
-          }
-        }
-
-        function hideModal() {
-          if (modal) {
-            modal.style.display = 'none';
-            if (statusEl) statusEl.textContent = '';
-          }
-        }
-
-        async function loadKeywords() {
-          if (!textarea) return;
-          
-          textarea.value = 'Loading...';
-          textarea.disabled = true;
-          if (statusEl) statusEl.textContent = '';
-          
-          try {
-            const resp = await fetch(apiUrl('/api/keywords/get'));
-            if (!resp.ok) {
-              throw new Error('Failed to load keywords');
-            }
-            const data = await resp.json();
-            if (data.status === 'ok' && Array.isArray(data.keywords)) {
-              textarea.value = data.keywords.join('\n');
-              textarea.disabled = false;
-              textarea.focus();
-            } else {
-              textarea.value = '';
-              textarea.disabled = false;
-              if (statusEl) statusEl.textContent = 'No keywords found.';
-              if (statusEl) statusEl.style.color = '#64748b';
-            }
-          } catch (err) {
-            textarea.value = '';
-            textarea.disabled = false;
-            if (statusEl) {
-              statusEl.textContent = 'Error loading keywords: ' + err.message;
-              statusEl.style.color = '#dc2626';
-            }
-          }
-        }
-
-        async function saveKeywords() {
-          if (!textarea || !saveBtn) return;
-          
-          const keywordsText = textarea.value.trim();
-          const keywords = keywordsText.split('\n')
-            .map(k => k.trim())
-            .filter(k => k.length > 0);
-          
-          if (keywords.length === 0) {
-            if (statusEl) {
-              statusEl.textContent = 'Please enter at least one keyword.';
-              statusEl.style.color = '#dc2626';
-            }
+          if (!modal || !openBtn) {
+            // Elements not found yet, try again later
+            setTimeout(initEditKeywords, 100);
             return;
           }
 
-          saveBtn.disabled = true;
-          saveBtn.textContent = 'Saving...';
-          if (statusEl) {
-            statusEl.textContent = 'Saving keywords...';
-            statusEl.style.color = '#64748b';
+          // Ensure modal is hidden initially
+          modal.style.display = 'none';
+
+          function showModal() {
+            if (modal) {
+              modal.style.display = 'flex';
+              loadKeywords();
+            }
           }
 
-          try {
-            const resp = await fetch(apiUrl('/api/keywords/save'), {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ keywords })
-            });
-
-            const data = await resp.json();
-            
-            if (resp.ok && data.status === 'ok') {
-              if (statusEl) {
-                statusEl.textContent = `✓ Successfully saved ${data.count || keywords.length} keywords.`;
-                statusEl.style.color = '#10b981';
+          function hideModal() {
+            if (modal) {
+              modal.style.display = 'none';
+              if (statusEl) statusEl.textContent = '';
+              if (textarea) {
+                textarea.value = '';
+                textarea.disabled = false;
               }
-              
-              // Reload the ranking AI data after a short delay
-              setTimeout(() => {
-                hideModal();
-                if (typeof loadRankingAiData === 'function') {
-                  loadRankingAiData(true); // Force reload
-                }
-              }, 1500);
-            } else {
-              throw new Error(data.message || 'Failed to save keywords');
             }
-          } catch (err) {
-            if (statusEl) {
-              statusEl.textContent = 'Error saving keywords: ' + err.message;
-              statusEl.style.color = '#dc2626';
-            }
-            saveBtn.disabled = false;
-            saveBtn.textContent = 'Save Keywords';
           }
-        }
 
-        if (openBtn) openBtn.addEventListener('click', showModal);
-        if (closeBtn) closeBtn.addEventListener('click', hideModal);
-        if (cancelBtn) cancelBtn.addEventListener('click', hideModal);
-        if (saveBtn) saveBtn.addEventListener('click', saveKeywords);
-        
-        // Close modal when clicking outside
-        if (modal) {
+          async function loadKeywords() {
+            if (!textarea) return;
+            
+            textarea.value = 'Loading...';
+            textarea.disabled = true;
+            if (statusEl) statusEl.textContent = '';
+            
+            try {
+              const resp = await fetch(apiUrl('/api/keywords/get'));
+              if (!resp.ok) {
+                throw new Error('Failed to load keywords');
+              }
+              const data = await resp.json();
+              if (data.status === 'ok' && Array.isArray(data.keywords)) {
+                textarea.value = data.keywords.join('\n');
+                textarea.disabled = false;
+                textarea.focus();
+              } else {
+                textarea.value = '';
+                textarea.disabled = false;
+                if (statusEl) statusEl.textContent = 'No keywords found.';
+                if (statusEl) statusEl.style.color = '#64748b';
+              }
+            } catch (err) {
+              textarea.value = '';
+              textarea.disabled = false;
+              if (statusEl) {
+                statusEl.textContent = 'Error loading keywords: ' + err.message;
+                statusEl.style.color = '#dc2626';
+              }
+            }
+          }
+
+          async function saveKeywords() {
+            if (!textarea || !saveBtn) return;
+            
+            const keywordsText = textarea.value.trim();
+            const keywords = keywordsText.split('\n')
+              .map(k => k.trim())
+              .filter(k => k.length > 0);
+            
+            if (keywords.length === 0) {
+              if (statusEl) {
+                statusEl.textContent = 'Please enter at least one keyword.';
+                statusEl.style.color = '#dc2626';
+              }
+              return;
+            }
+
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Saving...';
+            if (statusEl) {
+              statusEl.textContent = 'Saving keywords...';
+              statusEl.style.color = '#64748b';
+            }
+
+            try {
+              const resp = await fetch(apiUrl('/api/keywords/save'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ keywords })
+              });
+
+              const data = await resp.json();
+              
+              if (resp.ok && data.status === 'ok') {
+                if (statusEl) {
+                  statusEl.textContent = `✓ Successfully saved ${data.count || keywords.length} keywords.`;
+                  statusEl.style.color = '#10b981';
+                }
+                
+                // Reload the ranking AI data after a short delay
+                setTimeout(() => {
+                  hideModal();
+                  if (typeof loadRankingAiData === 'function') {
+                    loadRankingAiData(true); // Force reload
+                  }
+                }, 1500);
+              } else {
+                throw new Error(data.message || 'Failed to save keywords');
+              }
+            } catch (err) {
+              if (statusEl) {
+                statusEl.textContent = 'Error saving keywords: ' + err.message;
+                statusEl.style.color = '#dc2626';
+              }
+              saveBtn.disabled = false;
+              saveBtn.textContent = 'Save Keywords';
+            }
+          }
+
+          // Only attach event listeners - modal should NOT open automatically
+          openBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            showModal();
+          });
+          closeBtn.addEventListener('click', hideModal);
+          cancelBtn.addEventListener('click', hideModal);
+          saveBtn.addEventListener('click', saveKeywords);
+          
+          // Close modal when clicking outside
           modal.addEventListener('click', (e) => {
             if (e.target === modal) {
               hideModal();
             }
           });
+
+          // Close modal with Escape key
+          document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && modal && modal.style.display === 'flex') {
+              hideModal();
+            }
+          });
         }
 
-        // Close modal with Escape key
-        document.addEventListener('keydown', (e) => {
-          if (e.key === 'Escape' && modal && modal.style.display === 'flex') {
-            hideModal();
-          }
-        });
+        // Initialize when DOM is ready
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', initEditKeywords);
+        } else {
+          initEditKeywords();
+        }
       })();
 
       // Initialize AI Sources sort state
