@@ -2841,7 +2841,7 @@
         </div>
 
         <!-- Edit Keywords Modal -->
-        <div id="edit-keywords-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.5); z-index: 10000; align-items: center; justify-content: center;">
+        <div id="edit-keywords-modal" style="display: none !important; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.5); z-index: 10000; align-items: center; justify-content: center;">
           <div style="background: white; border-radius: 8px; padding: 2rem; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
               <h3 style="margin: 0; font-size: 1.5rem; color: #1e293b;">Edit Keywords</h3>
@@ -27815,11 +27815,20 @@ Final Score: ${score}/100`;
             return;
           }
 
-          // Ensure modal is hidden initially
-          modal.style.display = 'none';
+          // Ensure modal is hidden initially - use !important to override any other styles
+          modal.style.setProperty('display', 'none', 'important');
+          
+          // Force close on any click outside or escape - emergency close
+          const forceClose = () => {
+            modal.style.setProperty('display', 'none', 'important');
+          };
+          
+          // Make forceClose available globally for emergency
+          window.forceCloseEditKeywordsModal = forceClose;
 
           function showModal() {
             if (modal) {
+              modal.style.removeProperty('display');
               modal.style.display = 'flex';
               loadKeywords();
             }
@@ -27828,6 +27837,7 @@ Final Score: ${score}/100`;
           function hideModal() {
             if (modal) {
               modal.style.display = 'none';
+              modal.style.setProperty('display', 'none', 'important');
               if (statusEl) statusEl.textContent = '';
               if (textarea) {
                 textarea.value = '';
@@ -27933,23 +27943,52 @@ Final Score: ${score}/100`;
             e.stopPropagation();
             showModal();
           });
-          closeBtn.addEventListener('click', hideModal);
-          cancelBtn.addEventListener('click', hideModal);
-          saveBtn.addEventListener('click', saveKeywords);
+          
+          // Close buttons - make sure they work
+          if (closeBtn) {
+            closeBtn.addEventListener('click', (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              hideModal();
+            });
+          }
+          
+          if (cancelBtn) {
+            cancelBtn.addEventListener('click', (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              hideModal();
+            });
+          }
+          
+          if (saveBtn) {
+            saveBtn.addEventListener('click', saveKeywords);
+          }
           
           // Close modal when clicking outside
           modal.addEventListener('click', (e) => {
             if (e.target === modal) {
+              e.preventDefault();
+              e.stopPropagation();
               hideModal();
             }
           });
 
-          // Close modal with Escape key
-          document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && modal && modal.style.display === 'flex') {
-              hideModal();
+          // Close modal with Escape key - make it work globally
+          const escapeHandler = (e) => {
+            if (e.key === 'Escape' && modal) {
+              const currentDisplay = window.getComputedStyle(modal).display;
+              if (currentDisplay === 'flex' || currentDisplay === 'block') {
+                e.preventDefault();
+                e.stopPropagation();
+                hideModal();
+              }
             }
-          });
+          };
+          document.addEventListener('keydown', escapeHandler);
+          
+          // Also add a global function to force close
+          window.closeEditKeywordsModal = hideModal;
         }
 
         // Initialize when DOM is ready
