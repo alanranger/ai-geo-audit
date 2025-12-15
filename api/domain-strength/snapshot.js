@@ -184,6 +184,53 @@ async function fetchExistingSnapshotRows(snapshotDate, engine, domains) {
   return out;
 }
 
+async function fetchExistingSnapshotRowsForMonth(monthStart, monthEnd, engine, domains) {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !supabaseKey) return new Set();
+  const list = Array.isArray(domains) ? domains : [];
+  if (list.length === 0) return new Set();
+
+  const out = new Set(); // Just track which domains have snapshots this month
+
+  // Chunk to avoid long URLs
+  const chunkSize = 100;
+  for (let i = 0; i < list.length; i += chunkSize) {
+    const chunk = list.slice(i, i + chunkSize);
+    // Format domain list for Supabase: (domain1,domain2,domain3)
+    const domainList = chunk.map(d => `"${d}"`).join(",");
+    const url =
+      `${supabaseUrl}/rest/v1/domain_strength_snapshots` +
+      `?snapshot_date=gte.${encodeURIComponent(monthStart)}` +
+      `&snapshot_date=lte.${encodeURIComponent(monthEnd)}` +
+      `&engine=eq.${encodeURIComponent(engine)}` +
+      `&domain=in.(${encodeURIComponent(domainList)})` +
+      `&select=domain` +
+      `&limit=5000`;
+
+    // eslint-disable-next-line no-await-in-loop
+    const resp = await fetch(url, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: supabaseKey,
+        Authorization: `Bearer ${supabaseKey}`,
+      },
+    });
+
+    if (!resp.ok) continue;
+    // eslint-disable-next-line no-await-in-loop
+    const rows = await resp.json();
+    if (!Array.isArray(rows)) continue;
+    for (const r of rows) {
+      const d = normalizeDomain(r?.domain);
+      if (d) out.add(d);
+    }
+  }
+
+  return out;
+}
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -226,11 +273,14 @@ export default async function handler(req, res) {
     }
     
     if (includePending) {
-      // Fetch pending domains (fetch more to account for ones that already have snapshots this month)
-      const pendingDomains = await dequeuePending({ engine, limit: pendingLimit * 3 });
+      // Fetch pending domains
+      const pendingDomains = await dequeuePending({ engine, limit: pendingLimit * 2 });
       
-      // Check which pending domains already have snapshots for this month
-      const pendingWithSnapshots = await fetchExistingSnapshotRows(snapshot_date, engine, pendingDomains);
+      // Check which pending domains already have snapshots for the current MONTH (not just today)
+      // This ensures cost control: each domain is only fetched once per calendar month
+      const monthStart = snapshot_date.slice(0, 7) + '-01'; // e.g., '2025-12-01'
+      const monthEnd = snapshot_date.slice(0, 7) + '-31'; // e.g., '2025-12-31'
+      const pendingWithSnapshots = await fetchExistingSnapshotRowsForMonth(monthStart, monthEnd, engine, pendingDomains);
       
       // Filter out pending domains that already have a snapshot this month (cost control)
       // Primary domain is always included regardless
