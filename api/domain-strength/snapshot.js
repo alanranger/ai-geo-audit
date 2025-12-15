@@ -301,6 +301,13 @@ export default async function handler(req, res) {
         
         const pendingWithSnapshots = await fetchExistingSnapshotRowsForMonth(monthStart, monthEnd, engine, pendingDomains);
         
+        // Clean up: Remove domains from pending queue that already have snapshots this month
+        // (They may have been processed in a previous run but not cleared)
+        if (pendingWithSnapshots.size > 0) {
+          const domainsToClean = Array.from(pendingWithSnapshots);
+          await clearPending(domainsToClean, engine);
+        }
+        
         // Filter out pending domains that already have a snapshot this month (cost control)
         // Primary domain is always included regardless
         const uniquePendingDomains = [];
