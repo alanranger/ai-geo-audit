@@ -64,15 +64,49 @@ export default async function handler(req, res) {
     }
 
     const auditRows = await auditResp.json();
+    let latestAudit;
+    
+    // If no audit exists, create a minimal one
     if (!Array.isArray(auditRows) || auditRows.length === 0) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'No audit results found. Please run an audit first.',
-        meta: { generatedAt: new Date().toISOString() },
+      const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+      const newAudit = {
+        property_url: propertyUrl,
+        audit_date: today,
+        ranking_ai_data: {
+          combinedRows: [],
+          summary: { totalKeywords: 0 },
+          lastRunTimestamp: null
+        }
+      };
+      
+      // Create new audit record
+      const createUrl = `${supabaseUrl}/rest/v1/audit_results`;
+      const createResp = await fetch(createUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: supabaseKey,
+          Authorization: `Bearer ${supabaseKey}`,
+          Prefer: 'return=representation',
+        },
+        body: JSON.stringify(newAudit),
       });
+      
+      if (!createResp.ok) {
+        const errorText = await createResp.text();
+        return res.status(createResp.status).json({
+          status: 'error',
+          message: 'Failed to create audit record',
+          details: errorText,
+          meta: { generatedAt: new Date().toISOString() },
+        });
+      }
+      
+      const created = await createResp.json();
+      latestAudit = Array.isArray(created) ? created[0] : created;
+    } else {
+      latestAudit = auditRows[0];
     }
-
-    const latestAudit = auditRows[0];
     const rankingAiData = latestAudit.ranking_ai_data || { combinedRows: [], summary: {} };
 
     // Update combinedRows to only include keywords from the new list
