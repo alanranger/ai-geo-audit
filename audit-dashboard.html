@@ -25686,8 +25686,35 @@ Final Score: ${score}/100`;
           const bandPill = renderDomainStrengthBandPill(latest.band);
           const label = selfItem.label || selfDomain;
 
+          // Format last fetched timestamp (prefer createdAt, fallback to snapshotDate)
+          let lastFetchedText = '—';
+          const timestampToUse = latest.createdAt || latest.snapshotDate;
+          if (timestampToUse) {
+            try {
+              const timestamp = new Date(timestampToUse);
+              if (!isNaN(timestamp.getTime())) {
+                lastFetchedText = timestamp.toLocaleString('en-GB', {
+                  year: 'numeric',
+                  month: 'short',
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit'
+                });
+              }
+            } catch (e) {
+              // If date parsing fails, use raw string
+              lastFetchedText = String(timestampToUse);
+            }
+          }
+
           card.innerHTML = `
-            <div style="font-weight:700; color:#0f172a; margin-bottom:0.35rem;">${label}</div>
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.35rem;">
+              <div style="font-weight:700; color:#0f172a;">${label}</div>
+              <div style="font-size: 0.75rem; color: #64748b; text-align: right;">
+                <div style="font-weight: 600; color: #475569; margin-bottom: 0.125rem;">Last Fetched</div>
+                <div>${lastFetchedText}</div>
+              </div>
+            </div>
             <div class="domain-strength-summary-top">
               <div class="domain-strength-summary-score">${formatDomainStrengthScore(latest.score)}</div>
               <div>${bandPill}</div>

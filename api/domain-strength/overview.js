@@ -59,7 +59,7 @@ export default async function handler(req, res) {
   const snapshotQueryUrl =
     `${supabaseUrl}/rest/v1/domain_strength_snapshots` +
     `?snapshot_date=gte.${startDate}` +
-    `&select=domain,engine,snapshot_date,score,band,organic_etv_raw,organic_keywords_total_raw,top3_keywords_raw,top10_keywords_raw` +
+    `&select=domain,engine,snapshot_date,score,band,organic_etv_raw,organic_keywords_total_raw,top3_keywords_raw,top10_keywords_raw,created_at` +
     `&order=domain.asc&order=engine.asc&order=snapshot_date.asc` +
     `&limit=10000`;
 
@@ -158,6 +158,7 @@ export default async function handler(req, res) {
       last && lastScore !== null
         ? {
             snapshotDate: String(last.snapshot_date || ""),
+            createdAt: String(last.created_at || ""),
             score: lastScore,
             band: String(last.band || ""),
             organicEtv: Number(last.organic_etv_raw || 0),
