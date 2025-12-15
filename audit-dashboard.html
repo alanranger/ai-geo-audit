@@ -25641,11 +25641,11 @@ Final Score: ${score}/100`;
       }
 
       async function renderDomainStrengthSection() {
-        console.log('[DomainStrength] renderDomainStrengthSection() called');
+        debugLog('[DomainStrength] renderDomainStrengthSection() called', 'info');
         const card = document.getElementById('domain-strength-summary-card');
         const tbody = document.getElementById('domain-strength-table-body');
         if (!tbody || !card) {
-          console.warn('[DomainStrength] Missing card or tbody element');
+          debugLog('[DomainStrength] Missing card or tbody element', 'warn');
           return;
         }
 
@@ -25654,9 +25654,9 @@ Final Score: ${score}/100`;
 
         let items = [];
         try {
-          console.log('[DomainStrength] Fetching domain strength overview...');
+          debugLog('[DomainStrength] Fetching domain strength overview...', 'info');
           items = await fetchDomainStrengthOverview();
-          console.log('[DomainStrength] Fetched items:', items.length);
+          debugLog(`[DomainStrength] Fetched ${items.length} items from API`, 'info');
         } catch (e) {
           const msg = e?.message || String(e);
           card.innerHTML = `<div style="color:#b91c1c;">Failed to load: ${msg}</div>`;
@@ -25680,23 +25680,19 @@ Final Score: ${score}/100`;
         safeDestroyDomainStrengthSparklines();
 
         const selfDomain = getSelfDomainForDomainStrength();
-        console.log('[DomainStrength] Self domain:', selfDomain);
+        debugLog(`[DomainStrength] Self domain: ${selfDomain}`, 'info');
         const selfItem = items.find((it) => String(it?.domain || '') === selfDomain) || null;
-        console.log('[DomainStrength] Self item found:', !!selfItem, selfItem ? {
-          domain: selfItem.domain,
-          hasLatest: !!selfItem.latest,
-          snapshotDate: selfItem.latest?.snapshotDate,
-          createdAt: selfItem.latest?.createdAt
-        } : null);
+        
+        if (selfItem && selfItem.latest) {
+          debugLog(`[DomainStrength] Self item found: domain=${selfItem.domain}, score=${selfItem.latest.score}, snapshotDate=${selfItem.latest.snapshotDate}, createdAt=${selfItem.latest.createdAt}`, 'info');
+        } else {
+          debugLog(`[DomainStrength] Self item NOT found for domain: ${selfDomain}`, 'warn');
+        }
 
         // Quick insight summary (your primary domain)
         if (selfItem && selfItem.latest) {
           const latest = selfItem.latest;
-          console.log('[DomainStrength] Latest data:', {
-            score: latest.score,
-            snapshotDate: latest.snapshotDate,
-            createdAt: latest.createdAt
-          });
+          debugLog(`[DomainStrength] Latest data: score=${latest.score}, snapshotDate=${latest.snapshotDate}, createdAt=${latest.createdAt}`, 'info');
           const delta = selfItem?.trend?.deltaLatest ?? null;
           const arrow = delta > 0.5 ? '↑' : (delta < -0.5 ? '↓' : '•');
           const cls = delta > 0.5 ? 'kpi-trend-up' : (delta < -0.5 ? 'kpi-trend-down' : 'kpi-trend-flat');
@@ -25862,16 +25858,16 @@ Final Score: ${score}/100`;
       }
 
       async function runDomainStrengthSnapshot() {
-        console.log('[DomainStrength] runDomainStrengthSnapshot() called');
+        debugLog('[DomainStrength] runDomainStrengthSnapshot() called', 'info');
         const statusEl = document.getElementById('domain-strength-run-status');
         const btn = document.getElementById('domain-strength-run-btn');
         const domains = getDomainStrengthDomainList(20);
 
-        console.log('[DomainStrength] Domains to snapshot:', domains);
+        debugLog(`[DomainStrength] Domains to snapshot: ${domains.length} domains`, 'info');
 
         if (!domains || domains.length === 0) {
           const msg = 'No domains available yet. Run "Ranking & AI check" first.';
-          console.warn('[DomainStrength]', msg);
+          debugLog(`[DomainStrength] ${msg}`, 'warn');
           if (statusEl) statusEl.textContent = msg;
           return;
         }
@@ -25884,8 +25880,8 @@ Final Score: ${score}/100`;
 
         try {
           const apiEndpoint = apiUrl('/api/domain-strength/snapshot');
-          console.log('[DomainStrength] Calling API:', apiEndpoint);
-          console.log('[DomainStrength] Request body:', { mode: 'run', domains });
+          debugLog(`[DomainStrength] Calling API: ${apiEndpoint}`, 'info');
+          debugLog(`[DomainStrength] Request: mode=run, domains=${domains.length}`, 'info');
           
           const resp = await fetch(apiEndpoint, {
             method: 'POST',
@@ -25893,32 +25889,28 @@ Final Score: ${score}/100`;
             body: JSON.stringify({ mode: 'run', domains })
           });
           
-          console.log('[DomainStrength] API response status:', resp.status, resp.statusText);
+          debugLog(`[DomainStrength] API response status: ${resp.status} ${resp.statusText}`, 'info');
           
           const json = await resp.json();
-          console.log('[DomainStrength] API response JSON:', json);
+          debugLog(`[DomainStrength] API response: status=${json?.status}, inserted=${json?.inserted}, snapshot_date=${json?.snapshot_date}`, 'info');
           
           if (json?.status !== 'ok') {
             const errorMsg = json?.message || 'Snapshot failed';
-            console.error('[DomainStrength] API returned error:', errorMsg);
+            debugLog(`[DomainStrength] API returned error: ${errorMsg}`, 'error');
             throw new Error(errorMsg);
           }
           
-          console.log('[DomainStrength] Snapshot successful:', {
-            inserted: json.inserted,
-            snapshot_date: json.snapshot_date,
-            domains_processed: json.domains_processed
-          });
+          debugLog(`[DomainStrength] ✓ Snapshot successful: ${json.inserted || 0} domains saved (date: ${json.snapshot_date})`, 'success');
           
           if (statusEl) statusEl.textContent = `✓ Snapshot saved for ${json.inserted || 0} domains (date: ${json.snapshot_date}).`;
           showStatus(`✓ Domain strength snapshot saved (${json.snapshot_date})`, 'success');
           
-          console.log('[DomainStrength] Refreshing domain strength section...');
+          debugLog('[DomainStrength] Refreshing domain strength section...', 'info');
           await renderDomainStrengthSection();
-          console.log('[DomainStrength] Domain strength section refreshed');
+          debugLog('[DomainStrength] ✓ Domain strength section refreshed', 'success');
         } catch (e) {
           const msg = e?.message || String(e);
-          console.error('[DomainStrength] Snapshot error:', e);
+          debugLog(`[DomainStrength] ✗ Snapshot error: ${msg}`, 'error');
           if (statusEl) statusEl.textContent = `✗ Snapshot failed: ${msg}`;
           showStatus(`✗ Domain strength snapshot failed: ${msg}`, 'error');
         } finally {

@@ -60,7 +60,7 @@ export default async function handler(req, res) {
     `${supabaseUrl}/rest/v1/domain_strength_snapshots` +
     `?snapshot_date=gte.${startDate}` +
     `&select=domain,engine,snapshot_date,score,band,organic_etv_raw,organic_keywords_total_raw,top3_keywords_raw,top10_keywords_raw,created_at` +
-    `&order=domain.asc&order=engine.asc&order=snapshot_date.asc` +
+    `&order=domain.asc&order=engine.asc&order=snapshot_date.asc&order=created_at.desc` +
     `&limit=10000`;
 
   const snapResp = await fetch(snapshotQueryUrl, {
@@ -134,9 +134,15 @@ export default async function handler(req, res) {
   const items = [];
   for (const [key, list] of grouped.entries()) {
     const [domain, engine] = key.split("||");
+    // Sort by snapshot_date first, then by created_at DESC to get latest entry for each date
     const sorted = list
       .slice()
-      .sort((a, b) => String(a.snapshot_date).localeCompare(String(b.snapshot_date)));
+      .sort((a, b) => {
+        const dateCompare = String(a.snapshot_date).localeCompare(String(b.snapshot_date));
+        if (dateCompare !== 0) return dateCompare;
+        // If same snapshot_date, sort by created_at DESC (newest first)
+        return String(b.created_at || '').localeCompare(String(a.created_at || ''));
+      });
 
     const points = sorted
       .map((r) => {
