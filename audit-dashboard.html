@@ -27875,6 +27875,21 @@ Final Score: ${score}/100`;
             }
             
             try {
+              // First try to get from localStorage as fallback
+              let keywordsFromStorage = [];
+              try {
+                const storedData = localStorage.getItem('rankingAiData');
+                if (storedData) {
+                  const parsed = JSON.parse(storedData);
+                  if (parsed.combinedRows && Array.isArray(parsed.combinedRows)) {
+                    keywordsFromStorage = [...new Set(parsed.combinedRows.map(r => r?.keyword).filter(Boolean))].sort();
+                    console.log('[Edit Keywords] Found', keywordsFromStorage.length, 'keywords in localStorage');
+                  }
+                }
+              } catch (e) {
+                console.log('[Edit Keywords] Could not read from localStorage:', e);
+              }
+              
               const apiEndpoint = apiUrl('/api/keywords/get');
               console.log('[Edit Keywords] Fetching from:', apiEndpoint);
               
@@ -27884,11 +27899,26 @@ Final Score: ${score}/100`;
               if (!resp.ok) {
                 const errorText = await resp.text();
                 console.error('[Edit Keywords] API error response:', errorText);
+                // Fallback to localStorage if API fails
+                if (keywordsFromStorage.length > 0) {
+                  console.log('[Edit Keywords] Using localStorage fallback due to API error');
+                  textarea.value = keywordsFromStorage.join('\n');
+                  textarea.disabled = false;
+                  textarea.style.color = '#1e293b';
+                  textarea.style.backgroundColor = '#ffffff';
+                  if (statusEl) {
+                    statusEl.textContent = `⚠ Loaded ${keywordsFromStorage.length} keywords from cache (API error: ${resp.status})`;
+                    statusEl.style.color = '#f59e0b';
+                    statusEl.style.fontWeight = '600';
+                  }
+                  return;
+                }
                 throw new Error(`HTTP ${resp.status}: ${errorText.substring(0, 100)}`);
               }
               
               const data = await resp.json();
               console.log('[Edit Keywords] Response data:', JSON.stringify(data, null, 2));
+              console.log('[Edit Keywords] Response meta reason:', data.meta?.reason);
               
               if (data.status === 'ok' && Array.isArray(data.keywords)) {
                 console.log('[Edit Keywords] Found', data.keywords.length, 'keywords');
@@ -27907,15 +27937,29 @@ Final Score: ${score}/100`;
                   }
                   console.log('[Edit Keywords] Keywords loaded successfully');
                 } else {
-                  console.log('[Edit Keywords] No keywords found in response');
-                  textarea.value = '';
-                  textarea.disabled = false;
-                  textarea.style.color = '#1e293b';
-                  textarea.style.backgroundColor = '#ffffff';
-                  if (statusEl) {
-                    statusEl.textContent = '⚠ No keywords found. You can add keywords below (one per line).';
-                    statusEl.style.color = '#f59e0b';
-                    statusEl.style.fontWeight = '600';
+                  console.log('[Edit Keywords] No keywords found in API response');
+                  // Try localStorage fallback
+                  if (keywordsFromStorage.length > 0) {
+                    console.log('[Edit Keywords] Using localStorage fallback (', keywordsFromStorage.length, 'keywords)');
+                    textarea.value = keywordsFromStorage.join('\n');
+                    textarea.disabled = false;
+                    textarea.style.color = '#1e293b';
+                    textarea.style.backgroundColor = '#ffffff';
+                    if (statusEl) {
+                      statusEl.textContent = `⚠ Loaded ${keywordsFromStorage.length} keywords from cache (not found in latest audit)`;
+                      statusEl.style.color = '#f59e0b';
+                      statusEl.style.fontWeight = '600';
+                    }
+                  } else {
+                    textarea.value = '';
+                    textarea.disabled = false;
+                    textarea.style.color = '#1e293b';
+                    textarea.style.backgroundColor = '#ffffff';
+                    if (statusEl) {
+                      statusEl.textContent = '⚠ No keywords found. You can add keywords below (one per line).';
+                      statusEl.style.color = '#f59e0b';
+                      statusEl.style.fontWeight = '600';
+                    }
                   }
                 }
               } else {
