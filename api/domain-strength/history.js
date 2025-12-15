@@ -91,32 +91,32 @@ export default async function handler(req, res) {
   const snapshotData = Array.isArray(rows) ? rows : [];
   
   // Step 4: Enqueue missing domains (domains requested but with no snapshots)
-  // Also auto-suggest domain_type for new domains
   if (domains.length > 0) {
     try {
       const domainsWithSnapshots = new Set(snapshotData.map(r => r.domain).filter(Boolean));
       const missingDomains = domains.filter(d => !domainsWithSnapshots.has(d));
       
       if (missingDomains.length > 0) {
-        // Import helpers
+        // Import enqueuePending helper
         const { enqueuePending } = await import('../../lib/domainStrength/domains.js');
-        const { createClient } = await import('@supabase/supabase-js');
-        const { ensureDomainTypeMapping } = await import('../../lib/domainTypeClassifier.js');
-        
-        // Enqueue for snapshot
         await enqueuePending(missingDomains, { engine: 'google', source: 'history-miss' });
         
-        // Auto-suggest domain_type for new domains (non-blocking)
-        if (supabaseUrl && supabaseKey) {
-          const supabase = createClient(supabaseUrl, supabaseKey);
-          for (const domain of missingDomains) {
-            try {
-              await ensureDomainTypeMapping(supabase, domain, 'history-miss');
-            } catch (classifyError) {
-              // Log but don't fail the request
-              console.error(`[History] Error classifying domain ${domain}:`, classifyError);
-            }
-          }
+        // Auto-classify missing domains (non-blocking)
+        try {
+          const { createClient } = await import('@supabase/supabase-js');
+          const { ensureDomainTypeMapping } = await import('../../lib/domainTypeClassifier.js');
+          const supabaseClient = createClient(supabaseUrl, supabaseKey, {
+            auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
+          });
+          
+          // Classify in parallel (non-blocking, don't await)
+          Promise.all(missingDomains.map(d => 
+            ensureDomainTypeMapping(supabaseClient, d, 'history-miss')
+              .catch(err => console.error(`[history] Error classifying ${d}:`, err))
+          )).catch(() => {}); // Swallow errors
+        } catch (classifyError) {
+          // Graceful: if classification fails, continue without it
+          console.error('Error auto-classifying missing domains:', classifyError);
         }
       }
     } catch (enqueueError) {
@@ -155,12 +155,11 @@ export default async function handler(req, res) {
             if (Array.isArray(metaRows)) {
               metaRows.forEach(r => {
                 if (r.domain) {
-                  // Prefer domain_type, fallback to segment for backward compatibility, then 'unmapped'
                   const domainType = r.domain_type || r.segment || 'unmapped';
                   domainMeta.set(r.domain, {
                     label: r.label || null,
                     domain_type: domainType,
-                    segment: domainType, // Keep segment for backward compatibility
+                    segment: domainType, // Backward compatibility
                   });
                 }
               });
@@ -179,8 +178,8 @@ export default async function handler(req, res) {
         return {
           ...row,
           label: meta.label,
-          domain_type: meta.domain_type || 'unmapped', // Use 'unmapped' as fallback, not 'other'
-          segment: meta.segment || meta.domain_type || 'unmapped', // Keep segment for backward compatibility
+          domain_type: meta.domain_type || 'unmapped',
+          segment: meta.segment || meta.domain_type || 'unmapped', // Use 'unmapped' as fallback, not 'other'
         };
       });
   

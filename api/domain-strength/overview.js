@@ -117,19 +117,17 @@ export default async function handler(req, res) {
   }
   
   // Also fetch from domain_strength_domains (new mapping table)
-  // Only fetch domains that actually appear in the snapshots
   try {
-    const uniqueSnapshotDomains = [...new Set(rows.map(r => normalizeDomain(r?.domain)).filter(Boolean))];
-    if (uniqueSnapshotDomains.length > 0) {
-      // Query in chunks to avoid URL length limits
+    const uniqueDomainsInSnapshots = [...new Set(rows.map(r => normalizeDomain(r.domain)).filter(Boolean))];
+    if (uniqueDomainsInSnapshots.length > 0) {
       const chunkSize = 100;
-      for (let i = 0; i < uniqueSnapshotDomains.length; i += chunkSize) {
-        const chunk = uniqueSnapshotDomains.slice(i, i + chunkSize);
+      for (let i = 0; i < uniqueDomainsInSnapshots.length; i += chunkSize) {
+        const chunk = uniqueDomainsInSnapshots.slice(i, i + chunkSize);
         const inList = `(${chunk.map(d => `"${d}"`).join(',')})`;
         const domainStrengthUrl =
           `${supabaseUrl}/rest/v1/domain_strength_domains` +
           `?domain=in.${encodeURIComponent(inList)}` +
-          `&select=domain,label,domain_type,segment`;
+          `&select=domain,label,domain_type,segment,is_competitor`;
         const dsResp = await fetch(domainStrengthUrl, {
           method: "GET",
           headers: {
@@ -150,8 +148,8 @@ export default async function handler(req, res) {
                 competitorMeta.set(d, {
                   label: c.label || d,
                   domain_type: domainType,
-                  segment: domainType, // Keep segment for backward compatibility
-                  isCompetitor: true,
+                  segment: domainType, // Backward compatibility
+                  isCompetitor: c.is_competitor === true,
                 });
               }
             });
@@ -232,8 +230,8 @@ export default async function handler(req, res) {
       searchEngine: engine,
       label: meta.label,
       domain_type: meta.domain_type || meta.segment || 'unmapped',
-      segment: meta.segment || meta.domain_type || 'unmapped', // Keep segment for backward compatibility
-      isCompetitor: meta.isCompetitor,
+      segment: meta.segment || meta.domain_type || 'unmapped',
+      isCompetitor: meta.isCompetitor || false,
       latest,
       trend: { points, deltaLatest },
     });
