@@ -21625,6 +21625,26 @@ Final Score: ${score}/100`;
                 debugLog(`  Found ${parsed.combinedRows.length} keywords in localStorage`, 'info');
                 // Normalize summary field names for compatibility
                 parsed.summary = normalizeSummaryFields(parsed.summary);
+                
+                // Re-classify pageType for localStorage rows (fixes stale pageType)
+                if (RankingAiModule && RankingAiModule.classifyPageTypeForKeyword && parsed.combinedRows) {
+                  parsed.combinedRows.forEach(row => {
+                    const bestUrl = row.best_url || row.bestUrl || null;
+                    if (bestUrl) {
+                      const newPageType = RankingAiModule.classifyPageTypeForKeyword(bestUrl);
+                      row.pageType = newPageType;
+                      if (row.classification) {
+                        row.classification.pageType = newPageType;
+                      }
+                    } else {
+                      row.pageType = 'Landing';
+                      if (row.classification) {
+                        row.classification.pageType = 'Landing';
+                      }
+                    }
+                  });
+                }
+                
                 // Store as fallback before checking Supabase
                 localStorageFallback = parsed;
                 // Always check Supabase if localStorage has fewer than 10 keywords (likely stale data)
@@ -21772,6 +21792,24 @@ Final Score: ${score}/100`;
         // If Supabase check failed or returned no data, fall back to localStorage if available
         if (localStorageFallback) {
           debugLog(`✓ Falling back to localStorage data (${localStorageFallback.combinedRows.length} keywords)`, 'success');
+          // Ensure localStorage fallback also has re-classified pageType
+          if (RankingAiModule && RankingAiModule.classifyPageTypeForKeyword && localStorageFallback.combinedRows) {
+            localStorageFallback.combinedRows.forEach(row => {
+              const bestUrl = row.best_url || row.bestUrl || null;
+              if (bestUrl) {
+                const newPageType = RankingAiModule.classifyPageTypeForKeyword(bestUrl);
+                row.pageType = newPageType;
+                if (row.classification) {
+                  row.classification.pageType = newPageType;
+                }
+              } else {
+                row.pageType = 'Landing';
+                if (row.classification) {
+                  row.classification.pageType = 'Landing';
+                }
+              }
+            });
+          }
           return localStorageFallback;
         }
       } catch (err) {
