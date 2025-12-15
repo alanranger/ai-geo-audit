@@ -25930,15 +25930,15 @@ Final Score: ${score}/100`;
         if (overlay) {
           overlay.classList.add('show');
         }
-        if (overlayStatus) {
-          overlayStatus.textContent = `Fetching data for ${domains.length} domains from DataForSEO...`;
-        }
+          if (overlayStatus) {
+            overlayStatus.textContent = `Fetching data for ${domains.length} core domains (+ pending domains from queue)...`;
+          }
 
         if (btn) {
           btn.disabled = true;
           btn.textContent = 'Running…';
         }
-        if (statusEl) statusEl.textContent = `Running snapshot for ${domains.length} domains…`;
+        if (statusEl) statusEl.textContent = `Running snapshot for ${domains.length} core domains (+ pending)...`;
 
         try {
           const apiEndpoint = apiUrl('/api/domain-strength/snapshot');
@@ -25946,7 +25946,7 @@ Final Score: ${score}/100`;
           debugLog(`[DomainStrength] Request: mode=run, domains=${domains.length}`, 'info');
           
           if (overlayStatus) {
-            overlayStatus.textContent = `Calling DataForSEO API for ${domains.length} domains...`;
+            overlayStatus.textContent = `Calling DataForSEO API (${domains.length} core + pending domains from queue)...`;
           }
           
           const resp = await fetch(apiEndpoint, {
@@ -25971,7 +25971,13 @@ Final Score: ${score}/100`;
             throw new Error(`API returned invalid JSON (status ${resp.status}). Response may be an error page.`);
           }
           
-          debugLog(`[DomainStrength] API response: status=${json?.status}, inserted=${json?.inserted}, snapshot_date=${json?.snapshot_date}`, 'info');
+          debugLog(`[DomainStrength] API response: status=${json?.status}, inserted=${json?.inserted}, snapshot_date=${json?.snapshot_date}, domains_processed=${json?.domains_processed}`, 'info');
+          
+          // Update overlay message with actual domain count from API (includes pending domains)
+          const actualDomainCount = json?.domains_processed || domains.length;
+          if (overlayStatus && actualDomainCount !== domains.length) {
+            overlayStatus.textContent = `Calling DataForSEO API for ${actualDomainCount} domains (${domains.length} core + ${actualDomainCount - domains.length} pending)...`;
+          }
           
           if (json?.status !== 'ok') {
             const errorMsg = json?.message || json?.details || 'Snapshot failed';
