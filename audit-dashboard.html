@@ -15169,8 +15169,14 @@ Final Score: ${score}/100`;
         // Store filtered rows for pagination and copy button
         window.moneyPagesPriorityFilteredRows = rows;
         
-        // Update dropdown counts
-        updateMoneyPagesTypeFilterCounts(sourcePages);
+        // Update dropdown counts - use base data (after min impressions, before type filter)
+        // Get base data for counting
+        const base = window.moneyPagePriorityData || [];
+        const authority = window.authorityActionRows || [];
+        const allRows = base.concat(authority);
+        // Apply min impressions filter for counting (but not type filter)
+        const pagesForCounting = allRows.filter(p => p.segmentType === 'authority' || (p.impressions || 0) >= minImpr);
+        updateMoneyPagesTypeFilterCounts(pagesForCounting);
         
         // Pagination logic
         const rowsPerPage = window.moneyPagesPriorityRowsPerPage || 10;
