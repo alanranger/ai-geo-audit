@@ -19338,10 +19338,11 @@ Final Score: ${score}/100`;
               
               // Check if we have real historical data for this date
               // Content/Schema doesn't require GSC data, so should always have values
+              // NOTE: 0 is a valid score, so check for null/undefined only
               const realScore = contentSchemaMap.get(pointDate);
               
-              if (realScore !== undefined && realScore !== null && realScore > 0) {
-                // We have real data for this date
+              if (realScore !== undefined && realScore !== null) {
+                // We have real data for this date (including 0, which is valid)
                 contentSchemaData.push(realScore);
                 contentSchemaDataEstimated.push(null); // No estimated value
                 debugLog(`Content/Schema: Added ${realScore} for ${pointDate} from Supabase`, 'info');
@@ -19357,7 +19358,8 @@ Final Score: ${score}/100`;
                 });
                 
                 // If no historical data found, use current score for latest audit date
-                if (latestAvailableContentSchema !== null && latestAvailableContentSchema !== undefined && latestAvailableContentSchema > 0) {
+                // NOTE: 0 is a valid score, so check for null/undefined only
+                if (latestAvailableContentSchema !== null && latestAvailableContentSchema !== undefined) {
                   contentSchemaData.push(latestAvailableContentSchema);
                   contentSchemaDataEstimated.push(null);
                   debugLog(`Content/Schema: Added ${latestAvailableContentSchema} for ${pointDate} from latest available (${latestAvailableDate})`, 'info');
@@ -19365,13 +19367,14 @@ Final Score: ${score}/100`;
                   // For latest audit date, try multiple sources
                   const savedAuditForContentSchema = loadAuditResultsSync();
                   const savedContentSchema = savedAuditForContentSchema?.scores?.contentSchema;
-                  const scoreToUse = (currentContentSchema !== null && currentContentSchema !== undefined && currentContentSchema > 0)
+                  // NOTE: 0 is a valid score, so check for null/undefined only
+                  const scoreToUse = (currentContentSchema !== null && currentContentSchema !== undefined)
                     ? currentContentSchema
-                    : (savedContentSchema !== null && savedContentSchema !== undefined && savedContentSchema > 0)
+                    : (savedContentSchema !== null && savedContentSchema !== undefined)
                       ? savedContentSchema
                       : null;
                   
-                  if (scoreToUse !== null) {
+                  if (scoreToUse !== null && scoreToUse !== undefined) {
                     contentSchemaData.push(scoreToUse);
                     contentSchemaDataEstimated.push(null);
                     debugLog(`Content/Schema: Added ${scoreToUse} for ${pointDate} from ${scoreToUse === currentContentSchema ? 'current audit' : 'saved audit'} (latest)`, 'info');
