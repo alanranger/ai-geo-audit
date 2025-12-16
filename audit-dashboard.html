@@ -9171,6 +9171,85 @@
 
     // Fetch real data from Google Search Console API using unified endpoint
     // Note: apiKey parameter kept for compatibility but not used (endpoint uses OAuth2)
+    // Fetch queryTotals for all keywords in ranking data (called after ranking scan completes)
+    async function fetchQueryTotalsForRankingKeywords(combinedRows, propertyUrl) {
+      if (!combinedRows || combinedRows.length === 0) {
+        debugLog('[fetchQueryTotalsForRankingKeywords] No keywords provided', 'warn');
+        return;
+      }
+      
+      try {
+        // Extract unique keywords from ranking data
+        const keywords = combinedRows.map(row => row.keyword).filter(k => k && k.trim());
+        if (keywords.length === 0) {
+          debugLog('[fetchQueryTotalsForRankingKeywords] No valid keywords found', 'warn');
+          return;
+        }
+        
+        debugLog(`[fetchQueryTotalsForRankingKeywords] Fetching queryTotals for ${keywords.length} keywords from ranking data`, 'info');
+        
+        // Calculate date range (last 28 days)
+        const endDate = new Date();
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - 28);
+        const formatDate = (date) => {
+          const year = date.getFullYear();
+          const month = String(date.getMonth() + 1).padStart(2, '0');
+          const day = String(date.getDate()).padStart(2, '0');
+          return `${year}-${month}-${day}`;
+        };
+        const startDateStr = formatDate(startDate);
+        const endDateStr = formatDate(endDate);
+        
+        // Call GSC API to fetch queryTotals for all keywords
+        const keywordsParam = `&keywords=${encodeURIComponent(JSON.stringify(keywords))}`;
+        const response = await fetch(apiUrl(`/api/aigeo/gsc-entity-metrics?property=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDateStr}${keywordsParam}`));
+        
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.message || errorData.error || 'Failed to fetch queryTotals');
+        }
+        
+        const gsc = await response.json();
+        if (gsc.status !== 'ok' || !gsc.data || !Array.isArray(gsc.data.queryTotals)) {
+          debugLog('[fetchQueryTotalsForRankingKeywords] No queryTotals returned from API', 'warn');
+          return;
+        }
+        
+        // Merge new queryTotals with existing saved audit data
+        const savedAudit = loadAuditResultsSync();
+        if (savedAudit && savedAudit.searchData) {
+          // Merge: combine existing queryTotals with new ones, avoiding duplicates
+          const existingQueryTotals = Array.isArray(savedAudit.searchData.queryTotals) ? savedAudit.searchData.queryTotals : [];
+          const existingQueries = new Set(existingQueryTotals.map(qt => qt.query?.toLowerCase().trim()));
+          
+          // Add new queryTotals that don't already exist
+          const newQueryTotals = gsc.data.queryTotals.filter(qt => {
+            const queryKey = qt.query?.toLowerCase().trim();
+            return queryKey && !existingQueries.has(queryKey);
+          });
+          
+          savedAudit.searchData.queryTotals = [...existingQueryTotals, ...newQueryTotals];
+          
+          // Save updated audit data back to localStorage
+          safeSetLocalStorage('last_audit_results', savedAudit);
+          debugLog(`[fetchQueryTotalsForRankingKeywords] Merged ${newQueryTotals.length} new queryTotals (total: ${savedAudit.searchData.queryTotals.length})`, 'success');
+        } else {
+          // No saved audit yet, create new structure
+          const newAuditData = {
+            searchData: {
+              queryTotals: gsc.data.queryTotals || []
+            }
+          };
+          safeSetLocalStorage('last_audit_results', newAuditData);
+          debugLog(`[fetchQueryTotalsForRankingKeywords] Created new audit data with ${gsc.data.queryTotals.length} queryTotals`, 'success');
+        }
+      } catch (error) {
+        debugLog(`[fetchQueryTotalsForRankingKeywords] Error: ${error.message}`, 'error');
+        throw error;
+      }
+    }
+
     async function fetchSearchConsoleData(apiKey, propertyUrl, days) {
       debugLog(`Fetching real GSC data for ${days} days...`, 'info');
       
@@ -24215,6 +24294,24 @@ Final Score: ${score}/100`;
         // Save to Supabase and localStorage
         await saveRankingAiData(combined, summary);
         
+        // Fetch queryTotals for all keywords in ranking data (not just TRACKED_KEYWORDS)
+        // This ensures table shows CTR/Impressions for all keywords, not just tracked ones
+        RankingAiProgressModal.updateProgress(96, 4);
+        RankingAiProgressModal.updateCounts(`Fetching GSC query totals for ${combined.length} keywords...`);
+        try {
+          // Get propertyUrl from localStorage (same as saveRankingAiData uses)
+          const propertyUrlForQueryTotals = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+          if (propertyUrlForQueryTotals) {
+            await fetchQueryTotalsForRankingKeywords(combined, propertyUrlForQueryTotals);
+            debugLog(`✓ Fetched queryTotals for ${combined.length} ranking keywords`, 'success');
+          } else {
+            debugLog(`⚠ Cannot fetch queryTotals: property URL not set`, 'warn');
+          }
+        } catch (queryTotalsErr) {
+          debugLog(`⚠ Error fetching queryTotals for ranking keywords: ${queryTotalsErr.message}`, 'warn');
+          // Don't fail the entire scan if queryTotals fetch fails
+        }
+        
         RankingAiProgressModal.updateProgress(98, 4);
         RankingAiProgressModal.updateCounts(`✓ Data saved successfully`);
         
@@ -26027,16 +26124,31 @@ Final Score: ${score}/100`;
     function getQueryTotalForKeyword(keyword) {
       try {
         const savedAudit = loadAuditResultsSync();
-        if (!savedAudit || !savedAudit.searchData || !Array.isArray(savedAudit.searchData.queryTotals)) {
+        if (!savedAudit || !savedAudit.searchData) {
+          debugLog(`[getQueryTotalForKeyword] No savedAudit or searchData for keyword: "${keyword}"`, 'warn');
+          return null;
+        }
+        if (!Array.isArray(savedAudit.searchData.queryTotals)) {
+          debugLog(`[getQueryTotalForKeyword] queryTotals is not an array for keyword: "${keyword}". Type: ${typeof savedAudit.searchData.queryTotals}, value: ${JSON.stringify(savedAudit.searchData.queryTotals)}`, 'warn');
+          return null;
+        }
+        if (savedAudit.searchData.queryTotals.length === 0) {
+          debugLog(`[getQueryTotalForKeyword] queryTotals array is empty for keyword: "${keyword}"`, 'warn');
           return null;
         }
         // Find matching query total (case-insensitive match)
+        const normalizedKeyword = keyword.toLowerCase().trim();
         const queryTotal = savedAudit.searchData.queryTotals.find(
-          qt => qt.query && qt.query.toLowerCase().trim() === keyword.toLowerCase().trim()
+          qt => qt.query && qt.query.toLowerCase().trim() === normalizedKeyword
         );
+        if (!queryTotal) {
+          // Debug: log available queries to help diagnose mismatch
+          const availableQueries = savedAudit.searchData.queryTotals.map(qt => qt.query).slice(0, 5);
+          debugLog(`[getQueryTotalForKeyword] No match for keyword: "${keyword}". Available queries (first 5): ${availableQueries.join(', ')}`, 'warn');
+        }
         return queryTotal || null;
       } catch (error) {
-        debugLog(`Error in getQueryTotalForKeyword: ${error.message}`, 'warn');
+        debugLog(`[getQueryTotalForKeyword] Error for keyword "${keyword}": ${error.message}`, 'warn');
         return null;
       }
     }
