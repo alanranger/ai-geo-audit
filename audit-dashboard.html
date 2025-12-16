@@ -19475,10 +19475,30 @@ Final Score: ${score}/100`;
             todayStr = today.toISOString().split('T')[0];
             const lastTimeseriesDate = timeseries.length > 0 ? timeseries[timeseries.length - 1].date : null;
             
+            // Determine actual last GSC data date from historical maps (not just timeseries array)
+            // This ensures dates with historical audit data are included even if not in timeseries
+            let actualLastGscDate = lastTimeseriesDate;
+            const allGscDates = new Set();
+            visibilityMap.forEach((score, date) => allGscDates.add(date));
+            authorityMap.forEach((score, date) => allGscDates.add(date));
+            brandOverlayMap.forEach((score, date) => allGscDates.add(date));
+            if (allGscDates.size > 0) {
+              const sortedDates = Array.from(allGscDates).sort();
+              const latestMapDate = sortedDates[sortedDates.length - 1];
+              // Use the later of: last timeseries date or latest date in historical maps
+              if (!actualLastGscDate || latestMapDate > actualLastGscDate) {
+                actualLastGscDate = latestMapDate;
+                debugLog(`Actual last GSC date determined from historical maps: ${actualLastGscDate} (timeseries had: ${lastTimeseriesDate})`, 'info');
+              }
+            }
+            
+            // Use actualLastGscDate instead of lastTimeseriesDate for GSC range checks
+            const lastGscDateForRange = actualLastGscDate || lastTimeseriesDate;
+            
             // Ensure latest audit date is included even if not in timeseries
-            // Add it to the chart if it's after the last timeseries date
-            if (latestAuditDateStr && lastTimeseriesDate && latestAuditDateStr > lastTimeseriesDate) {
-              debugLog(`Latest audit date (${latestAuditDateStr}) is after last GSC date (${lastTimeseriesDate}), will add to chart`, 'info');
+            // Add it to the chart if it's after the last GSC date
+            if (latestAuditDateStr && lastGscDateForRange && latestAuditDateStr > lastGscDateForRange) {
+              debugLog(`Latest audit date (${latestAuditDateStr}) is after last GSC date (${lastGscDateForRange}), will add to chart`, 'info');
             }
             
             // Check if we're missing recent dates (likely due to GSC delay)
@@ -19506,11 +19526,11 @@ Final Score: ${score}/100`;
               }
             }
             
-            if (lastTimeseriesDate) {
-              const lastDate = new Date(lastTimeseriesDate);
+            if (lastGscDateForRange) {
+              const lastDate = new Date(lastGscDateForRange);
               lastDate.setHours(0, 0, 0, 0);
               
-              debugLog(`Last GSC date: ${lastTimeseriesDate}, Today: ${todayStr}`, 'info');
+              debugLog(`Last GSC date: ${lastGscDateForRange} (from maps: ${actualLastGscDate}, from timeseries: ${lastTimeseriesDate}), Today: ${todayStr}`, 'info');
               debugLog(`Content/Schema map has ${contentSchemaMap.size} entries before filling missing dates`, 'info');
               debugLog(`Content/Schema map entries: ${Array.from(contentSchemaMap.entries()).map(([d, s]) => `${d}=${s}`).join(', ')}`, 'info');
               
@@ -19533,9 +19553,9 @@ Final Score: ${score}/100`;
                 
                 // For GSC-based pillars (Authority, Visibility), only use data from Supabase if it exists for that specific date
                 // These rely on GSC data being fetched and stored, so NO forward-filling
-                // CRITICAL: Only show data for dates <= lastTimeseriesDate (last GSC data date)
-                // Never show data for dates after lastTimeseriesDate, even if an audit was run on that date
-                const isDateWithinGscRange = lastTimeseriesDate && dateStr <= lastTimeseriesDate;
+                // CRITICAL: Only show data for dates <= lastGscDateForRange (last GSC data date from maps or timeseries)
+                // Never show data for dates after lastGscDateForRange, even if an audit was run on that date
+                const isDateWithinGscRange = lastGscDateForRange && dateStr <= lastGscDateForRange;
                 const historicalVisibility = visibilityMap.get(dateStr);
                 const historicalAuthority = authorityMap.get(dateStr);
                 
@@ -19547,7 +19567,7 @@ Final Score: ${score}/100`;
                   // No data for dates after last GSC data date - GSC-based metrics require real GSC data
                   visibilityData.push(null);
                   if (!isDateWithinGscRange) {
-                    debugLog(`No Visibility data for ${dateStr} (date is after last GSC data date: ${lastTimeseriesDate})`, 'info');
+                    debugLog(`No Visibility data for ${dateStr} (date is after last GSC data date: ${lastGscDateForRange})`, 'info');
                   } else {
                     debugLog(`No Visibility data for ${dateStr} (no historical audit data)`, 'info');
                   }
@@ -19561,7 +19581,7 @@ Final Score: ${score}/100`;
                   // No data for dates after last GSC data date - GSC-based metrics require real GSC data
                   authorityData.push(null);
                   if (!isDateWithinGscRange) {
-                    debugLog(`No Authority data for ${dateStr} (date is after last GSC data date: ${lastTimeseriesDate})`, 'info');
+                    debugLog(`No Authority data for ${dateStr} (date is after last GSC data date: ${lastGscDateForRange})`, 'info');
                   } else {
                     debugLog(`No Authority data for ${dateStr} (no historical audit data)`, 'info');
                   }
@@ -19642,9 +19662,9 @@ Final Score: ${score}/100`;
                   }
                 }
                 
-                // For Content/Schema, use latest audit score for dates after last timeseries date
+                // For Content/Schema, use latest audit score for dates after last GSC date
                 // This ensures we show the latest audit data instead of intermediate values
-                const isAfterLastTimeseries = lastTimeseriesDate && dateStr > lastTimeseriesDate;
+                const isAfterLastTimeseries = lastGscDateForRange && dateStr > lastGscDateForRange;
                 
                 if (isAfterLastTimeseries && dateStr <= latestAuditDateStr) {
                   // For dates after last timeseries but up to latest audit, use latest audit score (forward-fill)
@@ -19742,7 +19762,7 @@ Final Score: ${score}/100`;
                   // No data for dates after last GSC data date - Brand Overlay is GSC-based
                   brandOverlayData.push(null);
                   if (!isDateWithinGscRange) {
-                    debugLog(`No Brand Overlay data for ${dateStr} (date is after last GSC data date: ${lastTimeseriesDate})`, 'info');
+                    debugLog(`No Brand Overlay data for ${dateStr} (date is after last GSC data date: ${lastGscDateForRange})`, 'info');
                   } else {
                     debugLog(`No Brand Overlay data for ${dateStr} (no historical audit data)`, 'info');
                   }
