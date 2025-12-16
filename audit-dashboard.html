@@ -19531,11 +19531,12 @@ Final Score: ${score}/100`;
                 allDateObjects.push(dateObj);
                 allDates.push(dateObj.toLocaleDateString('en-GB', dateFormat));
                 
-                // For GSC-based pillars (Authority, Visibility), use current audit data if available
-                // Check if this is the latest audit date or recent date - if so, use current audit data
-                // Use latestAuditDateStr instead of todayStr to ensure we include the actual latest audit
+                // For GSC-based pillars (Authority, Visibility), use latest audit data for dates after last timeseries
+                // This ensures we show the latest audit data instead of missing/null values
+                const isAfterLastTimeseries = lastTimeseriesDate && dateStr > lastTimeseriesDate;
                 const isLatestAuditOrRecent = dateStr === latestAuditDateStr || (currentDate >= lastDate && currentDate <= today);
-                if (isLatestAuditOrRecent && savedAuditForTrend) {
+                
+                if ((isAfterLastTimeseries && dateStr <= latestAuditDateStr) || (isLatestAuditOrRecent && savedAuditForTrend)) {
                   // Use current audit data for Authority and Visibility
                   const currentSearchData = savedAuditForTrend?.searchData;
                   const currentScores = savedAuditForTrend?.scores;
