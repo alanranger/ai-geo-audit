@@ -6005,6 +6005,67 @@
     }
     
     // Fetch historical Content/Schema data from Supabase
+    // Forward-fill missing audit dates in history data (exclude last 3 days due to GSC lag)
+    function forwardFillHistoryData(history, excludeLastDays = 3) {
+      if (!history || history.length === 0) return history;
+      
+      // Sort by date
+      const sorted = [...history].sort((a, b) => new Date(a.date) - new Date(b.date));
+      
+      // Calculate cutoff date (exclude last N days)
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - excludeLastDays);
+      
+      // Track last known values for each metric
+      const lastValues = {};
+      
+      // Forward-fill missing values (but not for dates in the last N days)
+      return sorted.map(entry => {
+        const entryDate = new Date(entry.date);
+        const isRecent = entryDate >= cutoffDate;
+        
+        // List of metric keys to forward-fill
+        const metricKeys = [
+          'contentSchemaScore', 'visibilityScore', 'authorityScore', 'localEntityScore', 'serviceAreaScore',
+          'brandScore', 'moneyPagesBehaviourScore', 'shareOfImpressions', 'shareOfClicks', 'ctr',
+          'authorityBehaviourScore', 'authorityRankingScore', 'authorityBacklinkScore', 'authorityReviewScore'
+        ];
+        
+        const filled = { ...entry };
+        
+        for (const key of metricKeys) {
+          const value = entry[key];
+          
+          // Only forward-fill if:
+          // 1. Value is null/undefined AND
+          // 2. We have a last known value AND
+          // 3. This is NOT a recent date (within last N days)
+          if ((value == null || value === undefined) && lastValues[key] != null && !isRecent) {
+            filled[key] = lastValues[key];
+          } else if (value != null && value !== undefined) {
+            // Update last known value
+            lastValues[key] = value;
+          }
+        }
+        
+        // Handle nested objects (e.g., moneyPagesSummary)
+        if (entry.moneyPagesSummary) {
+          filled.moneyPagesSummary = { ...entry.moneyPagesSummary };
+          const summaryKeys = ['shareOfImpressions', 'shareOfClicks', 'ctr'];
+          for (const key of summaryKeys) {
+            const value = entry.moneyPagesSummary[key];
+            if ((value == null || value === undefined) && lastValues[`summary_${key}`] != null && !isRecent) {
+              filled.moneyPagesSummary[key] = lastValues[`summary_${key}`];
+            } else if (value != null && value !== undefined) {
+              lastValues[`summary_${key}`] = value;
+            }
+          }
+        }
+        
+        return filled;
+      });
+    }
+    
     async function fetchContentSchemaHistory(propertyUrl, startDate, endDate) {
       try {
         // Use window.apiUrl if available (for functions outside the main scope)
@@ -6024,7 +6085,9 @@
           const result = await response.json();
           if (result.status === 'ok' && result.data) {
             debugLog(`✓ Fetched ${result.count} historical Content/Schema records from Supabase`, 'success');
-            return result.data;
+            // Forward-fill missing audit dates (exclude last 3 days for GSC lag)
+            const filledData = forwardFillHistoryData(result.data, 3);
+            return filledData;
           }
         } else {
           // Read response body once as text, then try to parse as JSON to avoid "body stream already read" error
@@ -12670,10 +12733,10 @@ Final Score: ${score}/100`;
                 <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #475569;">
                   Sub-segment:
                   <select id="money-pages-filter-subsegment" style="padding: 0.4rem 0.6rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.85rem; background: white; cursor: pointer;">
-                    <option value="ALL" ${currentSubSegmentFilter === 'ALL' ? 'selected' : ''}>All sub-segments</option>
-                    <option value="PRODUCT" ${currentSubSegmentFilter === 'PRODUCT' ? 'selected' : ''}>Product Pages</option>
-                    <option value="EVENT" ${currentSubSegmentFilter === 'EVENT' ? 'selected' : ''}>Event Pages</option>
-                    <option value="LANDING" ${currentSubSegmentFilter === 'LANDING' ? 'selected' : ''}>Landing Pages</option>
+                    <option value="ALL" ${currentSubSegmentFilter === 'ALL' ? 'selected' : ''} id="money-subsegment-all">All sub-segments</option>
+                    <option value="PRODUCT" ${currentSubSegmentFilter === 'PRODUCT' ? 'selected' : ''} id="money-subsegment-product">Product Pages</option>
+                    <option value="EVENT" ${currentSubSegmentFilter === 'EVENT' ? 'selected' : ''} id="money-subsegment-event">Event Pages</option>
+                    <option value="LANDING" ${currentSubSegmentFilter === 'LANDING' ? 'selected' : ''} id="money-subsegment-landing">Landing Pages</option>
                   </select>
                 </label>
                 <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #475569;">
@@ -13075,6 +13138,9 @@ Final Score: ${score}/100`;
         if (window.moneyPagesMinImpressions === undefined) {
           window.moneyPagesMinImpressions = 0;
         }
+        
+        // Update sub-segment dropdown counts
+        updateMoneyPagesSubSegmentCounts(moneyPagesMetrics);
         
         // Function to apply filters and re-render ALL sections (table, chart, KPIs, summaries)
         const applyFiltersAndRender = () => {
@@ -15874,7 +15940,7 @@ Final Score: ${score}/100`;
                 </label>
                 <label style="display: flex; align-items: center; gap: 0.5rem;" title="Filter out pages with fewer impressions than this threshold. Helps focus on pages with meaningful search visibility.">
                   Min impressions:
-                  <input type="number" id="money-pages-min-impr" value="1000" min="0" step="100" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 4px; width: 120px;" title="Filter out pages with fewer impressions than this threshold. Helps focus on pages with meaningful search visibility.">
+                  <input type="number" id="money-pages-min-impr" value="10" min="0" step="10" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 4px; width: 120px;" title="Filter out pages with fewer impressions than this threshold. Helps focus on pages with meaningful search visibility.">
                 </label>
               </div>
 
