@@ -2996,8 +2996,8 @@
           <div class="card" style="background: rgba(204, 255, 255, 0.15); border-left: 4px solid #CCFFFF; padding: 1.5rem;">
             <h3 style="margin: 0 0 0.5rem 0; font-size: 1.1rem; font-weight: 700; color: #1e293b;">Keyword Priority – Impact & Difficulty</h3>
             <p style="margin: 0 0 1rem 0; font-size: 0.85rem; color: #64748b; line-height: 1.6;">
-              Uses demand and current rank to surface the highest-impact keywords to work on.
-              Impact is driven mainly by demand share and opportunity score. Difficulty reflects current rank bucket (page 1 vs page 2+).
+              Uses search volume share and current rank to surface the highest-impact keywords to work on.
+              Impact is driven mainly by search volume share (global, not filter-relative) and opportunity score. Difficulty reflects current rank bucket (page 1 vs page 2+).
             </p>
             <div id="ranking-keyword-priority-matrix" style="background: #f8fafc; padding: 1rem; border-radius: 8px;">
               <!-- 3x3 grid rendered by JS -->
@@ -3229,17 +3229,7 @@
                 </div>
 
                 <div class="filter-group">
-                  <label>Demand share:</label>
-                  <select id="ranking-filter-demand-share" class="filter-control">
-                    <option value="all">All</option>
-                    <option value="high">High (>30%)</option>
-                    <option value="medium">Medium (10-30%)</option>
-                    <option value="low">Low (<10%)</option>
-                  </select>
-                </div>
-
-                <div class="filter-group">
-                  <label>Opportunity score: <span title="Keyword opportunity score&#10;Combines three signals for this tracked keyword:&#10;• Demand share (how much search volume this query represents in your tracked set).&#10;• Classic ranking strength (page 1 vs page 2+ and current position).&#10;• AI usage (whether AI Overviews exist and if you're cited).&#10;Higher scores highlight the best &quot;bang-for-buck&quot; queries to improve first.&#10;&#10;Bands: Low <40 · Medium 40–69 · High ≥70" style="opacity: 0.6; cursor: help;">ℹ</span></label>
+                  <label>Opportunity score: <span title="Keyword opportunity score&#10;Combines three signals for this tracked keyword:&#10;• Search volume share (how much search volume this query represents in your tracked set - global, not filter-relative).&#10;• Classic ranking strength (page 1 vs page 2+ and current position).&#10;• AI usage (whether AI Overviews exist and if you're cited).&#10;Higher scores highlight the best &quot;bang-for-buck&quot; queries to improve first.&#10;&#10;Bands: Low <40 · Medium 40–69 · High ≥70" style="opacity: 0.6; cursor: help;">ℹ</span></label>
                   <select id="ranking-filter-opportunity" class="filter-control">
                     <option value="all">All</option>
                     <option value="high">High (≥ 70)</option>
@@ -3334,13 +3324,13 @@
                       <div>CTR <span class="sort-indicator"></span></div>
                       <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Click-through rate (CTR) for this keyword from Google Search Console data (last 30 days).">ℹ</div>
                     </th>
-                    <th data-sort="demand_share" class="sortable" title="Percentage of total search volume across all tracked keywords. High values indicate keywords with the most search demand.">
-                      <div>Demand share <span class="sort-indicator"></span></div>
-                      <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Percentage of total search volume across all tracked keywords. High values indicate keywords with the most search demand.">ℹ</div>
+                    <th data-sort="impressions30d" class="sortable" title="Impressions from Google Search Console, last 30 days (rolling).">
+                      <div>Impressions (30d) <span class="sort-indicator"></span></div>
+                      <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Impressions from Google Search Console, last 30 days (rolling).">ℹ</div>
                     </th>
-                    <th data-sort="opportunityScore" class="sortable" title="Keyword opportunity score&#10;Combines three signals for this tracked keyword:&#10;• Demand share (how much search volume this query represents in your tracked set).&#10;• Classic ranking strength (page 1 vs page 2+ and current position).&#10;• AI usage (whether AI Overviews exist and if you're cited).&#10;Higher scores highlight the best &quot;bang-for-buck&quot; queries to improve first.">
+                    <th data-sort="opportunityScore" class="sortable" title="Keyword opportunity score&#10;Combines three signals for this tracked keyword:&#10;• Search volume share (how much search volume this query represents in your tracked set - global, not filter-relative).&#10;• Classic ranking strength (page 1 vs page 2+ and current position).&#10;• AI usage (whether AI Overviews exist and if you're cited).&#10;Higher scores highlight the best &quot;bang-for-buck&quot; queries to improve first.">
                       <div>Opportunity score <span class="sort-indicator"></span></div>
-                      <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Keyword opportunity score&#10;Combines three signals for this tracked keyword:&#10;• Demand share (how much search volume this query represents in your tracked set).&#10;• Classic ranking strength (page 1 vs page 2+ and current position).&#10;• AI usage (whether AI Overviews exist and if you're cited).&#10;Higher scores highlight the best &quot;bang-for-buck&quot; queries to improve first.">ℹ</div>
+                      <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Keyword opportunity score&#10;Combines three signals for this tracked keyword:&#10;• Search volume share (how much search volume this query represents in your tracked set - global, not filter-relative).&#10;• Classic ranking strength (page 1 vs page 2+ and current position).&#10;• AI usage (whether AI Overviews exist and if you're cited).&#10;Higher scores highlight the best &quot;bang-for-buck&quot; queries to improve first.">ℹ</div>
                     </th>
                     <th title="Whether Google AI Overview is present in SERP results for this keyword.">
                       <div>AI Overview</div>
@@ -3851,7 +3841,43 @@
         state: () => ({ hasLoadedOnce, isLoading, combinedRows, summary }),
         setLoadedOnce: (value) => { hasLoadedOnce = value; },
         setLoading: (value) => { isLoading = value; },
-        setData: (rows, sum) => { combinedRows = rows; summary = sum; }
+        setData: (rows, sum) => { 
+          // Normalize rows: add segment_norm, segment_display, page_type_norm, page_type_display, impressions30d
+          // Use window references since functions may be defined later
+          const normSeg = window.normalizeSegment || ((input) => {
+            const s = (input ?? "").trim().toLowerCase();
+            return s.charAt(0).toUpperCase() + s.slice(1);
+          });
+          const segLabel = window.segmentLabel || ((s) => s);
+          const normPageType = window.normalizePageType || ((pt) => {
+            const k = (pt ?? "").trim().toLowerCase();
+            return k.charAt(0).toUpperCase() + k.slice(1);
+          });
+          const pageTypeLab = window.pageTypeLabel || ((pt) => {
+            const k = normPageType(pt);
+            return k.charAt(0).toUpperCase() + k.slice(1);
+          });
+          // Get impressions30d for each row using getGscMetricsForKeywordRow (which returns impressions)
+          const getGscMetrics = window.getGscMetricsForKeywordRow || (() => null);
+          combinedRows = rows.map(r => {
+            const segNorm = normSeg(r.segment);
+            const segDisplay = segLabel(r.segment);
+            const ptNorm = normPageType(r.pageType);
+            const ptDisplay = pageTypeLab(r.pageType);
+            // Get impressions30d from GSC data
+            const gscMetrics = getGscMetrics({ query: r.keyword, pageUrl: r.ranking_url || r.best_url });
+            const impressions30d = gscMetrics && gscMetrics.impressions != null ? gscMetrics.impressions : null;
+            return {
+              ...r,
+              segment_norm: segNorm,
+              segment_display: segDisplay,
+              page_type_norm: ptNorm,
+              page_type_display: ptDisplay,
+              impressions30d: impressions30d
+            };
+          });
+          summary = sum; 
+        }
       };
       console.log('[RankingAiModule] Module object created:', Object.keys(module));
       return module;
@@ -24298,7 +24324,6 @@ Final Score: ${score}/100`;
       rank: 'all',
       volume: 'all',
       ctr: 'all',
-      demandShare: 'all',
       opportunity: 'all',
       aiOverview: 'all',
       aiCitation: 'all',
@@ -25428,13 +25453,7 @@ Final Score: ${score}/100`;
           if (rankingFilterState.ctr === 'none' && ctr != null) return false;
         }
 
-        // Demand share filter
-        if (excludeFilter !== 'demandShare' && rankingFilterState.demandShare !== 'all') {
-          const demandShare = row.demand_share || 0;
-          if (rankingFilterState.demandShare === 'high' && demandShare <= 0.3) return false;
-          if (rankingFilterState.demandShare === 'medium' && (demandShare <= 0.1 || demandShare > 0.3)) return false;
-          if (rankingFilterState.demandShare === 'low' && demandShare > 0.1) return false;
-        }
+        // Demand share filter removed - replaced with Impressions (30d) column
 
         // Page type filter
         if (excludeFilter !== 'pageType' && rankingFilterState.pageType && rankingFilterState.pageType !== 'all') {
@@ -25541,9 +25560,9 @@ Final Score: ${score}/100`;
             aVal = (aCtr && aCtr.ctr != null) ? aCtr.ctr : -1; // Put nulls at end
             bVal = (bCtr && bCtr.ctr != null) ? bCtr.ctr : -1;
             break;
-          case 'demand_share':
-            aVal = a.demand_share ?? 0;
-            bVal = b.demand_share ?? 0;
+          case 'impressions30d':
+            aVal = a.impressions30d ?? -1; // Put nulls at end
+            bVal = b.impressions30d ?? -1;
             break;
           case 'opportunityScore':
             aVal = a.opportunityScore ?? -1; // Put nulls at end
@@ -25906,16 +25925,7 @@ Final Score: ${score}/100`;
       });
       updateSelectCounts('ranking-filter-ctr', ctrCounts);
 
-      // Demand share counts (excluding demand share filter)
-      const demandShareRows = applyRankingFilters(rows, 'demandShare');
-      const demandShareCounts = { all: demandShareRows.length, high: 0, medium: 0, low: 0 };
-      demandShareRows.forEach(r => {
-        const ds = r.demand_share || 0;
-        if (ds > 0.3) demandShareCounts.high++;
-        else if (ds > 0.1) demandShareCounts.medium++;
-        else demandShareCounts.low++;
-      });
-      updateSelectCounts('ranking-filter-demand-share', demandShareCounts);
+      // Demand share filter removed - replaced with Impressions (30d) column
 
       // Opportunity score counts (excluding opportunity filter)
       const oppRows = applyRankingFilters(rows, 'opportunity');
@@ -26036,19 +26046,9 @@ Final Score: ${score}/100`;
         renderPresetCriteriaChips();
       }
       
-      // Recalculate demand_share for filtered subset (so percentages add up to 100% for visible keywords)
-      const filteredTotalDemand = filteredRows.reduce((sum, r) => {
-        const vol = r.search_volume;
-        return sum + (vol && vol > 0 ? vol : 0);
-      }, 0);
-      
-      // Update demand_share for filtered rows
-      filteredRows.forEach(row => {
-        const searchVolume = row.search_volume;
-        row.demand_share = (searchVolume && searchVolume > 0 && filteredTotalDemand > 0) 
-          ? searchVolume / filteredTotalDemand 
-          : 0;
-      });
+      // Note: demand_share is no longer recalculated from filtered rows
+      // It remains as originally calculated from all tracked keywords (global-fixed)
+      // Used internally for opportunity score calculation only
       
       // Calculate visibility metrics from filtered subset
       const validRankingRows = filteredRows.filter(
@@ -26152,7 +26152,7 @@ Final Score: ${score}/100`;
       if (!sortedRows.length) {
         const tr = document.createElement("tr");
         const td = document.createElement("td");
-        td.colSpan = 12; // Updated: 12 columns (Keyword, Segment, Best rank, Search volume, CTR, Demand share, Opportunity score, AI Overview, AI citations, Classic Ranking URL, Page type, SERP features)
+        td.colSpan = 12; // Updated: 12 columns (Keyword, Segment, Best rank, Search volume, CTR, Impressions (30d), Opportunity score, AI Overview, AI citations, Classic Ranking URL, Page type, SERP features)
         td.className = "ranking-table-empty";
         td.textContent = filteredRows.length === 0 && combinedRows.length > 0
           ? "No rows match the current filters."
@@ -26256,24 +26256,16 @@ Final Score: ${score}/100`;
         }
         tr.appendChild(tdCtr);
 
-        // Demand share
-        const tdDemandShare = document.createElement("td");
-        const demandShare = row.demand_share || 0;
-        if (demandShare > 0) {
-          const percentage = (demandShare * 100).toFixed(1);
-          let shareClass = "ranking-badge-demand-share--low";
-          if (demandShare > 0.3) {
-            shareClass = "ranking-badge-demand-share--high";
-          } else if (demandShare > 0.1) {
-            shareClass = "ranking-badge-demand-share--med";
-          }
-          tdDemandShare.className = shareClass;
-          tdDemandShare.textContent = `${percentage}%`;
+        // Impressions (30d) - reuse gscMetrics from CTR cell above
+        const tdImpressions = document.createElement("td");
+        if (gscMetrics && gscMetrics.impressions != null && gscMetrics.impressions > 0) {
+          tdImpressions.textContent = gscMetrics.impressions.toLocaleString();
+          tdImpressions.style.color = '#1e293b';
         } else {
-          tdDemandShare.className = "ranking-badge-demand-share--none";
-          tdDemandShare.textContent = "—";
+          tdImpressions.textContent = "—";
+          tdImpressions.style.color = '#94a3b8';
         }
-        tr.appendChild(tdDemandShare);
+        tr.appendChild(tdImpressions);
 
         // Opportunity Score
         const tdOpportunity = document.createElement("td");
@@ -26532,7 +26524,7 @@ Final Score: ${score}/100`;
       if (oppScore != null) {
         html += `<p style="margin: 0 0 0.5rem 0; font-size: 1.1rem; font-weight: 700; color: ${oppColor}; line-height: 1.4;">`;
         html += `Keyword opportunity score: <span style="color: ${oppColor};">${oppScore}/100</span>`;
-        html += ` <span title="Keyword opportunity score&#10;Combines three signals for this tracked keyword:&#10;• Demand share (how much search volume this query represents in your tracked set).&#10;• Classic ranking strength (page 1 vs page 2+ and current position).&#10;• AI usage (whether AI Overviews exist and if you're cited).&#10;Higher scores highlight the best &quot;bang-for-buck&quot; queries to improve first." style="opacity: 0.6; cursor: help; font-size: 0.875rem;">ℹ</span>`;
+        html += ` <span title="Keyword opportunity score&#10;Combines three signals for this tracked keyword:&#10;• Search volume share (how much search volume this query represents in your tracked set - global, not filter-relative).&#10;• Classic ranking strength (page 1 vs page 2+ and current position).&#10;• AI usage (whether AI Overviews exist and if you're cited).&#10;Higher scores highlight the best &quot;bang-for-buck&quot; queries to improve first." style="opacity: 0.6; cursor: help; font-size: 0.875rem;">ℹ</span>`;
         html += `</p>`;
       }
       html += `<p style="margin: 0; font-size: 1.1rem; font-weight: 700; color: #1e293b; line-height: 1.4;">`;
@@ -28774,7 +28766,6 @@ Final Score: ${score}/100`;
         const rankFilter = document.getElementById("ranking-filter-rank");
         const volumeFilter = document.getElementById("ranking-filter-volume");
         const ctrFilter = document.getElementById("ranking-filter-ctr");
-        const demandShareFilter = document.getElementById("ranking-filter-demand-share");
         const aiOverviewFilter = document.getElementById("ranking-filter-ai-overview");
         const aiCitationFilter = document.getElementById("ranking-filter-ai-citation");
         const opportunityFilter = document.getElementById("ranking-filter-opportunity");
@@ -28790,7 +28781,6 @@ Final Score: ${score}/100`;
             { el: rankFilter, value: rankingFilterState.rank },
             { el: volumeFilter, value: rankingFilterState.volume },
             { el: ctrFilter, value: rankingFilterState.ctr },
-            { el: demandShareFilter, value: rankingFilterState.demandShare },
             { el: aiOverviewFilter, value: rankingFilterState.aiOverview },
             { el: aiCitationFilter, value: rankingFilterState.aiCitation },
             { el: opportunityFilter, value: rankingFilterState.opportunity },
@@ -28826,7 +28816,6 @@ Final Score: ${score}/100`;
           if (rankFilter) rankingFilterState.rank = rankFilter.value;
           if (volumeFilter) rankingFilterState.volume = volumeFilter.value;
           if (ctrFilter) rankingFilterState.ctr = ctrFilter.value;
-          if (demandShareFilter) rankingFilterState.demandShare = demandShareFilter.value;
           if (aiOverviewFilter) rankingFilterState.aiOverview = aiOverviewFilter.value;
           if (aiCitationFilter) rankingFilterState.aiCitation = aiCitationFilter.value;
           if (opportunityFilter) rankingFilterState.opportunity = opportunityFilter.value;
@@ -28884,7 +28873,6 @@ Final Score: ${score}/100`;
         if (rankFilter) rankFilter.addEventListener("change", updateFilters);
         if (volumeFilter) volumeFilter.addEventListener("change", updateFilters);
         if (ctrFilter) ctrFilter.addEventListener("change", updateFilters);
-        if (demandShareFilter) demandShareFilter.addEventListener("change", updateFilters);
         if (aiOverviewFilter) aiOverviewFilter.addEventListener("change", updateFilters);
         if (aiCitationFilter) aiCitationFilter.addEventListener("change", updateFilters);
         if (opportunityFilter) opportunityFilter.addEventListener("change", updateFilters);
@@ -28909,7 +28897,6 @@ Final Score: ${score}/100`;
               rank: 'all',
               volume: 'all',
               ctr: 'all',
-              demandShare: 'all',
               opportunity: 'all',
               aiOverview: 'all',
               aiCitation: 'all',
@@ -28925,7 +28912,6 @@ Final Score: ${score}/100`;
             if (rankFilter) rankFilter.value = 'all';
             if (volumeFilter) volumeFilter.value = 'all';
             if (ctrFilter) ctrFilter.value = 'all';
-            if (demandShareFilter) demandShareFilter.value = 'all';
             if (aiOverviewFilter) aiOverviewFilter.value = 'all';
             if (aiCitationFilter) aiCitationFilter.value = 'all';
             if (opportunityFilter) opportunityFilter.value = 'all';
@@ -28956,7 +28942,6 @@ Final Score: ${score}/100`;
           rank: 'all',
           volume: 'all',
           ctr: 'all',
-          demandShare: 'all',
           opportunity: 'all',
           minOpportunity: null,
           aiOverview: 'all',
@@ -29099,7 +29084,6 @@ Final Score: ${score}/100`;
           if (rankFilter) rankFilter.value = rankingFilterState.rank;
           if (volumeFilter) volumeFilter.value = rankingFilterState.volume;
           if (ctrFilter) ctrFilter.value = rankingFilterState.ctr;
-          if (demandShareFilter) demandShareFilter.value = rankingFilterState.demandShare;
           if (aiOverviewFilter) aiOverviewFilter.value = rankingFilterState.aiOverview;
           if (aiCitationFilter) aiCitationFilter.value = rankingFilterState.aiCitation;
           if (opportunityFilter) opportunityFilter.value = rankingFilterState.opportunity;
