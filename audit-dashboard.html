@@ -19658,53 +19658,93 @@ Final Score: ${score}/100`;
                   }
                 }
                 
-                // For Content/Schema, check if we have real data for this date
-                // This doesn't require GSC data, so should always have values up to today
-                const realScore = contentSchemaMap.get(dateStr);
-                if (realScore !== undefined && realScore !== null && realScore > 0) {
-                  // We have real data for this date
-                  contentSchemaData.push(realScore);
-                  contentSchemaDataEstimated.push(null);
-                  debugLog(`✓ Added Content/Schema score (${realScore}) for ${dateStr} from Supabase`, 'info');
-                } else {
-                  // For missing dates, use the most recent available score from the map
-                  let latestAvailableContentSchema = null;
-                  let latestAvailableDate = null;
-                  contentSchemaMap.forEach((score, mapDate) => {
-                    if (mapDate <= dateStr && (latestAvailableDate === null || mapDate > latestAvailableDate)) {
-                      latestAvailableDate = mapDate;
-                      latestAvailableContentSchema = score;
-                    }
-                  });
+                // For Content/Schema, use latest audit score for dates after last timeseries date
+                // This ensures we show the latest audit data instead of intermediate values
+                const isAfterLastTimeseries = lastTimeseriesDate && dateStr > lastTimeseriesDate;
+                
+                if (isAfterLastTimeseries && dateStr <= latestAuditDateStr) {
+                  // For dates after last timeseries but up to latest audit, use latest audit score (forward-fill)
+                  const savedAuditForContentSchema = loadAuditResultsSync();
+                  const savedContentSchema = savedAuditForContentSchema?.scores?.contentSchema;
+                  // NOTE: 0 is a valid score, so check for null/undefined only
+                  const scoreToUse = (currentContentSchema !== null && currentContentSchema !== undefined)
+                    ? currentContentSchema
+                    : (savedContentSchema !== null && savedContentSchema !== undefined)
+                      ? savedContentSchema
+                      : null;
                   
-                  // If no historical data found, use current score for today/latest audit
-                  if (latestAvailableContentSchema !== null && latestAvailableContentSchema !== undefined && latestAvailableContentSchema > 0) {
-                    contentSchemaData.push(latestAvailableContentSchema);
+                  if (scoreToUse !== null && scoreToUse !== undefined) {
+                    contentSchemaData.push(scoreToUse);
                     contentSchemaDataEstimated.push(null);
-                    debugLog(`✓ Added Content/Schema score (${latestAvailableContentSchema}) for ${dateStr} from latest available (${latestAvailableDate})`, 'info');
-                  } else if (dateStr === latestAuditDateStr || dateStr >= todayStr) {
-                    const savedAuditForContentSchema = loadAuditResultsSync();
-                    const savedContentSchema = savedAuditForContentSchema?.scores?.contentSchema;
-                    const scoreToUse = (currentContentSchema !== null && currentContentSchema !== undefined && currentContentSchema > 0)
-                      ? currentContentSchema
-                      : (savedContentSchema !== null && savedContentSchema !== undefined && savedContentSchema > 0)
-                        ? savedContentSchema
-                        : null;
-                    
-                    if (scoreToUse !== null) {
-                      contentSchemaData.push(scoreToUse);
+                    debugLog(`✓ Added Content/Schema score (${scoreToUse}) for ${dateStr} from latest audit (forward-filled from ${latestAuditDateStr})`, 'info');
+                  } else {
+                    // Fallback: use latest available from map
+                    let latestAvailableContentSchema = null;
+                    let latestAvailableDate = null;
+                    contentSchemaMap.forEach((score, mapDate) => {
+                      if (mapDate <= latestAuditDateStr && (latestAvailableDate === null || mapDate > latestAvailableDate)) {
+                        latestAvailableDate = mapDate;
+                        latestAvailableContentSchema = score;
+                      }
+                    });
+                    if (latestAvailableContentSchema !== null && latestAvailableContentSchema !== undefined) {
+                      contentSchemaData.push(latestAvailableContentSchema);
                       contentSchemaDataEstimated.push(null);
-                      debugLog(`✓ Added Content/Schema score (${scoreToUse}) for ${dateStr} from current/saved audit`, 'info');
+                      debugLog(`✓ Added Content/Schema score (${latestAvailableContentSchema}) for ${dateStr} from latest available (${latestAvailableDate})`, 'info');
                     } else {
                       contentSchemaData.push(null);
                       contentSchemaDataEstimated.push(null);
-                      debugLog(`No Content/Schema data for ${dateStr} (latest date but no score available)`, 'warn');
+                      debugLog(`No Content/Schema data for ${dateStr}`, 'warn');
                     }
-                  } else {
-                    // No real data - use null (don't show estimated)
-                    contentSchemaData.push(null);
+                  }
+                } else {
+                  // For dates within timeseries range, use actual database values
+                  const realScore = contentSchemaMap.get(dateStr);
+                  if (realScore !== undefined && realScore !== null) {
+                    // We have real data for this date (including 0, which is valid)
+                    contentSchemaData.push(realScore);
                     contentSchemaDataEstimated.push(null);
-                    debugLog(`No Content/Schema data for ${dateStr} (no historical or current data)`, 'info');
+                    debugLog(`✓ Added Content/Schema score (${realScore}) for ${dateStr} from Supabase`, 'info');
+                  } else {
+                    // For missing dates, use the most recent available score from the map
+                    let latestAvailableContentSchema = null;
+                    let latestAvailableDate = null;
+                    contentSchemaMap.forEach((score, mapDate) => {
+                      if (mapDate <= dateStr && (latestAvailableDate === null || mapDate > latestAvailableDate)) {
+                        latestAvailableDate = mapDate;
+                        latestAvailableContentSchema = score;
+                      }
+                    });
+                    
+                    // If no historical data found, use current score for today/latest audit
+                    if (latestAvailableContentSchema !== null && latestAvailableContentSchema !== undefined) {
+                      contentSchemaData.push(latestAvailableContentSchema);
+                      contentSchemaDataEstimated.push(null);
+                      debugLog(`✓ Added Content/Schema score (${latestAvailableContentSchema}) for ${dateStr} from latest available (${latestAvailableDate})`, 'info');
+                    } else if (dateStr === latestAuditDateStr || dateStr >= todayStr) {
+                      const savedAuditForContentSchema = loadAuditResultsSync();
+                      const savedContentSchema = savedAuditForContentSchema?.scores?.contentSchema;
+                      const scoreToUse = (currentContentSchema !== null && currentContentSchema !== undefined)
+                        ? currentContentSchema
+                        : (savedContentSchema !== null && savedContentSchema !== undefined)
+                          ? savedContentSchema
+                          : null;
+                      
+                      if (scoreToUse !== null && scoreToUse !== undefined) {
+                        contentSchemaData.push(scoreToUse);
+                        contentSchemaDataEstimated.push(null);
+                        debugLog(`✓ Added Content/Schema score (${scoreToUse}) for ${dateStr} from current/saved audit`, 'info');
+                      } else {
+                        contentSchemaData.push(null);
+                        contentSchemaDataEstimated.push(null);
+                        debugLog(`No Content/Schema data for ${dateStr} (latest date but no score available)`, 'warn');
+                      }
+                    } else {
+                      // No real data - use null (don't show estimated)
+                      contentSchemaData.push(null);
+                      contentSchemaDataEstimated.push(null);
+                      debugLog(`No Content/Schema data for ${dateStr} (no historical or current data)`, 'info');
+                    }
                   }
                 }
                 
