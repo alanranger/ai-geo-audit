@@ -5,6 +5,11 @@
  * Body: { keywords: string[] }
  */
 
+// Increase timeout for large keyword lists (Vercel Pro: 60s, Hobby: 10s)
+export const config = {
+  maxDuration: 30, // 30 seconds should be enough for keyword updates
+};
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -41,6 +46,9 @@ export default async function handler(req, res) {
         meta: { generatedAt: new Date().toISOString() },
       });
     }
+
+    // Log keyword count for debugging
+    console.log(`[Save Keywords] Processing ${keywords.length} keywords`);
 
     const propertyUrl = process.env.NEXT_PUBLIC_SITE_DOMAIN || process.env.SITE_DOMAIN || 'alanranger.com';
     
@@ -173,6 +181,16 @@ export default async function handler(req, res) {
       }
     };
 
+    // Check payload size before sending (Supabase has limits)
+    const payload = JSON.stringify({
+      ranking_ai_data: updatedRankingAiData
+    });
+    const payloadSizeMB = Buffer.byteLength(payload, 'utf8') / (1024 * 1024);
+    
+    if (payloadSizeMB > 4) {
+      console.warn(`[Save Keywords] Large payload: ${payloadSizeMB.toFixed(2)}MB. This may cause timeouts.`);
+    }
+
     // Update the audit_results record
     const updateUrl = `${supabaseUrl}/rest/v1/audit_results?id=eq.${latestAudit.id}`;
     const updateResp = await fetch(updateUrl, {
@@ -183,9 +201,7 @@ export default async function handler(req, res) {
         Authorization: `Bearer ${supabaseKey}`,
         Prefer: 'return=representation',
       },
-      body: JSON.stringify({
-        ranking_ai_data: updatedRankingAiData
-      }),
+      body: payload,
     });
 
     if (!updateResp.ok) {
