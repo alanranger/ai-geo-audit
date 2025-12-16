@@ -20191,6 +20191,28 @@ Final Score: ${score}/100`;
           // Hide full-screen loading overlay
           hideFullScreenLoading();
           
+          // Destroy existing chart if it exists (prevent "Canvas is already in use" error)
+          if (window.trendChart) {
+            try {
+              window.trendChart.destroy();
+              debugLog('✓ Destroyed existing trend chart before creating new one', 'info');
+            } catch (e) {
+              debugLog(`⚠ Error destroying existing trend chart: ${e.message}`, 'warn');
+            }
+            window.trendChart = null;
+          }
+          
+          // Also check if Chart.js has an instance registered for this canvas
+          try {
+            const existingChart = Chart.getChart(trendCtx);
+            if (existingChart) {
+              existingChart.destroy();
+              debugLog('✓ Destroyed Chart.js registered instance for trendChart canvas', 'info');
+            }
+          } catch (e) {
+            debugLog(`⚠ Error checking/destroying Chart.js instance: ${e.message}`, 'warn');
+          }
+          
           window.trendChart = new Chart(trendCtx, {
             type: 'line',
             data: {
