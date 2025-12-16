@@ -26179,6 +26179,14 @@ Final Score: ${score}/100`;
       });
     }
 
+    // Normalize keyword for matching (handles whitespace variations, case-insensitive)
+    function normalizeKeyword(s) {
+      return String(s || '')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')  // Replace multiple spaces with single space
+        .trim();
+    }
+
     // Helper function to get query-only totals for a keyword (PATCH A2)
     function getQueryTotalForKeyword(keyword) {
       try {
@@ -26195,15 +26203,15 @@ Final Score: ${score}/100`;
           debugLog(`[getQueryTotalForKeyword] queryTotals array is empty for keyword: "${keyword}"`, 'warn');
           return null;
         }
-        // Find matching query total (case-insensitive match)
-        const normalizedKeyword = keyword.toLowerCase().trim();
+        // Find matching query total using robust normalization
+        const target = normalizeKeyword(keyword);
         const queryTotal = savedAudit.searchData.queryTotals.find(
-          qt => qt.query && qt.query.toLowerCase().trim() === normalizedKeyword
+          qt => qt.query && normalizeKeyword(qt.query) === target
         );
         if (!queryTotal) {
           // Debug: log available queries to help diagnose mismatch
           const availableQueries = savedAudit.searchData.queryTotals.map(qt => qt.query).slice(0, 5);
-          debugLog(`[getQueryTotalForKeyword] No match for keyword: "${keyword}". Available queries (first 5): ${availableQueries.join(', ')}`, 'warn');
+          debugLog(`[getQueryTotalForKeyword] No match for keyword: "${keyword}" (normalized: "${target}"). Available queries (first 5): ${availableQueries.join(', ')}`, 'warn');
         }
         return queryTotal || null;
       } catch (error) {
@@ -26927,8 +26935,8 @@ Final Score: ${score}/100`;
           html += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">CTR is in line with expectations for this position. Further gains are more likely to come from improving rank (links and authority) than snippet tweaks alone.</p>`;
         }
       } else {
-        // No query-only data found for last 28 days
-        html += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">No query-only totals returned for this keyword in the last 28 days.</p>`;
+        // No query-only data found in saved queryTotals - will try fallback from Advanced section
+        html += `<div style="color: #64748b; font-size: 0.875rem; line-height: 1.5;" id="scorecard-ctr-fallback-${scorecardData.keyword.replace(/[^a-z0-9]/gi, '_')}">Loading query totals...</div>`;
       }
       html += `</div></div>`;
       
@@ -27386,6 +27394,69 @@ Final Score: ${score}/100`;
                 const pages = data.data.pages;
                 const bestUrl = scorecardData.ranking_url;
                 const normalizedBestUrl = bestUrl ? normalizeGscPageUrl(bestUrl) : null;
+                
+                // Compute query totals from pages breakdown (fallback if queryTotals missing)
+                const computedQueryTotal = pages.reduce((acc, page) => {
+                  acc.clicks += page.clicks || 0;
+                  acc.impressions += page.impressions || 0;
+                  acc.positionSum += (page.position || 0) * (page.impressions || 0);
+                  return acc;
+                }, { clicks: 0, impressions: 0, positionSum: 0 });
+                
+                const computedCtr = computedQueryTotal.impressions > 0 
+                  ? (computedQueryTotal.clicks / computedQueryTotal.impressions) * 100 
+                  : 0;
+                const computedAvgPosition = computedQueryTotal.impressions > 0
+                  ? computedQueryTotal.positionSum / computedQueryTotal.impressions
+                  : 0;
+                
+                // Update CTR & snippet tile with computed totals if queryTotals was missing
+                const ctrFallbackEl = document.getElementById(`scorecard-ctr-fallback-${scorecardData.keyword.replace(/[^a-z0-9]/gi, '_')}`);
+                if (ctrFallbackEl && computedQueryTotal.impressions > 0) {
+                  const positionBucket = getPositionBucket(scorecardData.best_rank_group);
+                  const ctrBenchmark = getCtrBenchmarkForPosition(positionBucket);
+                  const benchmarkPercent = (ctrBenchmark * 100).toFixed(2);
+                  
+                  let ctrPerformance = 'OK';
+                  let ctrPerformanceColor = '#f59e0b';
+                  let ctrPerformanceBg = '#fffbeb';
+                  if (computedCtr >= ctrBenchmark * 1.1) {
+                    ctrPerformance = 'Strong';
+                    ctrPerformanceColor = '#10b981';
+                    ctrPerformanceBg = '#f0fdf4';
+                  } else if (computedCtr < ctrBenchmark * 0.8) {
+                    ctrPerformance = 'Weak';
+                    ctrPerformanceColor = '#ef4444';
+                    ctrPerformanceBg = '#fef2f2';
+                  }
+                  
+                  let fallbackHtml = '';
+                  fallbackHtml += `<div style="margin-bottom: 0.75rem;">`;
+                  fallbackHtml += `<div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.5rem; font-size: 0.875rem;">`;
+                  fallbackHtml += `<span>CTR (last 28 days): <strong style="color: #1e293b;">${computedCtr.toFixed(2)}%</strong></span>`;
+                  fallbackHtml += `<span>·</span>`;
+                  fallbackHtml += `<span>Impressions: <strong style="color: #1e293b;">${computedQueryTotal.impressions.toLocaleString()}</strong></span>`;
+                  fallbackHtml += `<span>·</span>`;
+                  fallbackHtml += `<span>Clicks: <strong style="color: #1e293b;">${computedQueryTotal.clicks.toLocaleString()}</strong></span>`;
+                  fallbackHtml += `<span style="font-size: 0.75rem; color: #64748b;">(computed from pages breakdown)</span>`;
+                  fallbackHtml += `</div>`;
+                  fallbackHtml += `<div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.5rem; font-size: 0.875rem;">`;
+                  fallbackHtml += `<span>Expected CTR at this position: <strong style="color: #64748b;">${benchmarkPercent}%</strong> <span title="Heuristic benchmark based on rank position (not from GSC)." style="opacity: 0.6; cursor: help; font-size: 0.75rem;">ℹ</span></span>`;
+                  fallbackHtml += `</div>`;
+                  fallbackHtml += `<div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.75rem;">`;
+                  fallbackHtml += `<span style="font-size: 0.875rem;">CTR performance: <span style="padding: 0.25rem 0.5rem; border-radius: 4px; font-weight: 600; background: ${ctrPerformanceBg}; border-left: 3px solid ${ctrPerformanceColor}; color: #1e293b;">${ctrPerformance}</span></span>`;
+                  fallbackHtml += `</div>`;
+                  fallbackHtml += `</div>`;
+                  
+                  if (ctrPerformance === 'Weak') {
+                    fallbackHtml += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">CTR is weak for this position. Improving the snippet (title, meta description and rich results) should unlock more clicks for this keyword.</p>`;
+                  } else {
+                    fallbackHtml += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">CTR is in line with expectations for this position. Further gains are more likely to come from improving rank (links and authority) than snippet tweaks alone.</p>`;
+                  }
+                  
+                  ctrFallbackEl.innerHTML = fallbackHtml;
+                  debugLog(`[Scorecard] Used computed query totals from pages breakdown for keyword: "${scorecardData.keyword}"`, 'info');
+                }
                 
                 let pagesHtml = '';
                 if (pages.length === 0) {
