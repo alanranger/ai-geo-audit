@@ -138,12 +138,18 @@ export default async function handler(req, res) {
       }
       
       // New keyword - create minimal structure with intent-based segment classification
-      let classification = { segment: 'other', confidence: 0.5, reason: 'other: no matching intent signals' };
-      try {
-        const classifierModule = await import('../../lib/segment/classifyKeywordSegment.js');
-        classification = classifierModule.classifyKeywordSegment({ keyword: trimmed });
-      } catch (err) {
-        console.error('[Save Keywords] Error importing classifier, using fallback:', err.message);
+      // Use fallback classification to avoid slow imports for large keyword lists
+      // Classification will be updated on next Ranking & AI check
+      let classification = { segment: 'Other', confidence: 0.5, reason: 'other: no matching intent signals' };
+      
+      // Only try to classify if we have a small number of keywords (to avoid timeout)
+      if (keywords.length <= 50) {
+        try {
+          const classifierModule = await import('../../lib/segment/classifyKeywordSegment.js');
+          classification = classifierModule.classifyKeywordSegment({ keyword: trimmed });
+        } catch (err) {
+          console.error('[Save Keywords] Error importing classifier, using fallback:', err.message);
+        }
       }
       
       return {
