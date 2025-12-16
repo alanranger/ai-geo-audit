@@ -17104,52 +17104,55 @@ Final Score: ${score}/100`;
       const schemaAuditData = schemaAudit || saved?.schemaAudit;
       
       // Get last GSC data date from current data (for Authority, Visibility, and Brand & Entity)
-      // CRITICAL: Use the last timeseries date from Supabase, not the latest date from maps
-      // Maps may have dates after the last GSC timeseries date (from audits), but those aren't from actual GSC data
+      // CRITICAL: Always fetch fresh from Supabase to get the actual last timeseries date
+      // data.timeseries may be stale (from localStorage), so we can't rely on it for the Data Date
       let gscLastDate = null;
       
-      // First, try to get from current data timeseries (most accurate - actual GSC data)
-      if (data && data.timeseries && Array.isArray(data.timeseries) && data.timeseries.length > 0) {
-        const lastTimeseriesPoint = data.timeseries[data.timeseries.length - 1];
-        if (lastTimeseriesPoint && lastTimeseriesPoint.date) {
-          gscLastDate = lastTimeseriesPoint.date;
-          debugLog(`Using last GSC timeseries date from data: ${gscLastDate}`, 'info');
+      // Always fetch fresh from Supabase to ensure we have the latest date
+      const propertyUrl = document.getElementById('propertyUrl')?.value || data?.propertyUrl || '';
+      if (propertyUrl) {
+        try {
+          // Try window first (if renderTrendChart already ran and set it)
+          if (window.lastGscTimeseriesDate) {
+            gscLastDate = window.lastGscTimeseriesDate;
+            debugLog(`Using last GSC timeseries date from window: ${gscLastDate}`, 'info');
+          } else {
+            // Fetch from Supabase API to get the last timeseries date
+            const endDate = new Date().toISOString().split('T')[0];
+            const startDate = new Date();
+            startDate.setDate(startDate.getDate() - 30); // Last 30 days
+            const startDateStr = startDate.toISOString().split('T')[0];
+            
+            debugLog(`Fetching last GSC timeseries date from Supabase for Data Date...`, 'info');
+            const timeseriesResponse = await fetch(apiUrl(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDate}`));
+            if (timeseriesResponse.ok) {
+              const timeseriesData = await timeseriesResponse.json();
+              if (timeseriesData.status === 'ok' && timeseriesData.timeseries && Array.isArray(timeseriesData.timeseries) && timeseriesData.timeseries.length > 0) {
+                const lastPoint = timeseriesData.timeseries[timeseriesData.timeseries.length - 1];
+                if (lastPoint && lastPoint.date) {
+                  gscLastDate = lastPoint.date;
+                  debugLog(`✓ Using last GSC timeseries date from Supabase API: ${gscLastDate}`, 'success');
+                } else {
+                  debugLog(`⚠ Supabase timeseries response missing date in last point`, 'warn');
+                }
+              } else {
+                debugLog(`⚠ Supabase timeseries response missing data: status=${timeseriesData.status}, hasTimeseries=${!!timeseriesData.timeseries}`, 'warn');
+              }
+            } else {
+              debugLog(`⚠ Failed to fetch timeseries from Supabase: ${timeseriesResponse.status}`, 'warn');
+            }
+          }
+        } catch (e) {
+          debugLog(`Error fetching GSC date: ${e.message}`, 'warn');
         }
       }
       
-      // If not available, try to fetch fresh from Supabase
-      // CRITICAL: displayDashboard runs before renderTrendChart, so window.lastGscTimeseriesDate may not be set yet
-      // Fetch directly from Supabase to get the actual last timeseries date
-      if (!gscLastDate) {
-        const propertyUrl = document.getElementById('propertyUrl')?.value || data?.propertyUrl || '';
-        if (propertyUrl) {
-          try {
-            // Try window first (if renderTrendChart already ran)
-            if (window.lastGscTimeseriesDate) {
-              gscLastDate = window.lastGscTimeseriesDate;
-              debugLog(`Using last GSC timeseries date from window: ${gscLastDate}`, 'info');
-            } else {
-              // Fetch from Supabase API to get the last timeseries date
-              const endDate = new Date().toISOString().split('T')[0];
-              const startDate = new Date();
-              startDate.setDate(startDate.getDate() - 30); // Last 30 days
-              const startDateStr = startDate.toISOString().split('T')[0];
-              
-              const timeseriesResponse = await fetch(apiUrl(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDate}`));
-              if (timeseriesResponse.ok) {
-                const timeseriesData = await timeseriesResponse.json();
-                if (timeseriesData.status === 'ok' && timeseriesData.timeseries && Array.isArray(timeseriesData.timeseries) && timeseriesData.timeseries.length > 0) {
-                  const lastPoint = timeseriesData.timeseries[timeseriesData.timeseries.length - 1];
-                  if (lastPoint && lastPoint.date) {
-                    gscLastDate = lastPoint.date;
-                    debugLog(`Using last GSC timeseries date from Supabase API: ${gscLastDate}`, 'info');
-                  }
-                }
-              }
-            }
-          } catch (e) {
-            debugLog(`Error fetching GSC date: ${e.message}`, 'warn');
-          }
+      // Fallback to data.timeseries only if Supabase fetch failed
+      if (!gscLastDate && data && data.timeseries && Array.isArray(data.timeseries) && data.timeseries.length > 0) {
+        const lastTimeseriesPoint = data.timeseries[data.timeseries.length - 1];
+        if (lastTimeseriesPoint && lastTimeseriesPoint.date) {
+          gscLastDate = lastTimeseriesPoint.date;
+          debugLog(`Using last GSC timeseries date from data (fallback): ${gscLastDate}`, 'warn');
         }
       }
       
