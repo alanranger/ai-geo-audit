@@ -3155,13 +3155,13 @@
                 <button type="button" class="ranking-preset-btn" data-preset="all" style="padding: 0.5rem 1rem; font-size: 0.875rem; border: 1px solid #cbd5e1; border-radius: 6px; background: rgb(229, 255, 204); cursor: pointer; color: #475569; font-weight: 500; transition: all 0.2s; position: relative;" onmouseover="if (!this.classList.contains('preset-active')) { this.style.background='rgb(210, 240, 180)'; this.style.borderColor='#94a3b8'; }" onmouseout="if (!this.classList.contains('preset-active')) { this.style.background='rgb(229, 255, 204)'; this.style.borderColor='#cbd5e1'; }" title="Reset all filters and restore default sort">
                   All keywords
                 </button>
-                <button type="button" class="ranking-preset-btn" data-preset="high-impact-money" style="padding: 0.5rem 1rem; font-size: 0.875rem; border: 1px solid #cbd5e1; border-radius: 6px; background: rgb(229, 255, 204); cursor: pointer; color: #475569; font-weight: 500; transition: all 0.2s; position: relative;" onmouseover="if (!this.classList.contains('preset-active')) { this.style.background='rgb(210, 240, 180)'; this.style.borderColor='#94a3b8'; }" onmouseout="if (!this.classList.contains('preset-active')) { this.style.background='rgb(229, 255, 204)'; this.style.borderColor='#cbd5e1'; }" title="Segment: Money | Best rank: 11–20 | Search volume: High | Min opportunity: ≥ 65 | Sort: Opportunity ↓">
+                <button type="button" class="ranking-preset-btn" data-preset="high-impact-money" style="padding: 0.5rem 1rem; font-size: 0.875rem; border: 1px solid #cbd5e1; border-radius: 6px; background: rgb(229, 255, 204); cursor: pointer; color: #475569; font-weight: 500; transition: all 0.2s; position: relative;" onmouseover="if (!this.classList.contains('preset-active')) { this.style.background='rgb(210, 240, 180)'; this.style.borderColor='#94a3b8'; }" onmouseout="if (!this.classList.contains('preset-active')) { this.style.background='rgb(229, 255, 204)'; this.style.borderColor='#cbd5e1'; }" title="Segment: Money | Best rank: Not top 3 | Min opportunity: ≥ 65 | Sort: Opportunity ↓">
                   High-impact money
                 </button>
                 <button type="button" class="ranking-preset-btn" data-preset="ai-overview-not-cited" style="padding: 0.5rem 1rem; font-size: 0.875rem; border: 1px solid #cbd5e1; border-radius: 6px; background: rgb(229, 255, 204); cursor: pointer; color: #475569; font-weight: 500; transition: all 0.2s; position: relative;" onmouseover="if (!this.classList.contains('preset-active')) { this.style.background='rgb(210, 240, 180)'; this.style.borderColor='#94a3b8'; }" onmouseout="if (!this.classList.contains('preset-active')) { this.style.background='rgb(229, 255, 204)'; this.style.borderColor='#cbd5e1'; }" title="AI Overview: On | AI citation: Not cited | Min opportunity: ≥ 50 | Sort: Volume ↓">
                   AI Overview, not cited
                 </button>
-                <button type="button" class="ranking-preset-btn" data-preset="brand-safety" style="padding: 0.5rem 1rem; font-size: 0.875rem; border: 1px solid #cbd5e1; border-radius: 6px; background: rgb(229, 255, 204); cursor: pointer; color: #475569; font-weight: 500; transition: all 0.2s; position: relative;" onmouseover="if (!this.classList.contains('preset-active')) { this.style.background='rgb(210, 240, 180)'; this.style.borderColor='#94a3b8'; }" onmouseout="if (!this.classList.contains('preset-active')) { this.style.background='rgb(229, 255, 204)'; this.style.borderColor='#cbd5e1'; }" title="Segment: Brand | Best rank: Not top 3 | Sort: Rank ↑ (worst first)">
+                <button type="button" class="ranking-preset-btn" data-preset="brand-safety" style="padding: 0.5rem 1rem; font-size: 0.875rem; border: 1px solid #cbd5e1; border-radius: 6px; background: rgb(229, 255, 204); cursor: pointer; color: #475569; font-weight: 500; transition: all 0.2s; position: relative;" onmouseover="if (!this.classList.contains('preset-active')) { this.style.background='rgb(210, 240, 180)'; this.style.borderColor='#94a3b8'; }" onmouseout="if (!this.classList.contains('preset-active')) { this.style.background='rgb(229, 255, 204)'; this.style.borderColor='#cbd5e1'; }" title="Segment: Brand | Sort: Rank ↑ (worst first)">
                   Brand safety
                 </button>
                 <button type="button" class="ranking-preset-btn" data-preset="education-growth" style="padding: 0.5rem 1rem; font-size: 0.875rem; border: 1px solid #cbd5e1; border-radius: 6px; background: rgb(229, 255, 204); cursor: pointer; color: #475569; font-weight: 500; transition: all 0.2s; position: relative;" onmouseover="if (!this.classList.contains('preset-active')) { this.style.background='rgb(210, 240, 180)'; this.style.borderColor='#94a3b8'; }" onmouseout="if (!this.classList.contains('preset-active')) { this.style.background='rgb(229, 255, 204)'; this.style.borderColor='#cbd5e1'; }" title="Page type: Blog | Best rank: Not top 3 | Min opportunity: ≥ 30 | Sort: Opportunity ↓">
@@ -3851,7 +3851,48 @@
         state: () => ({ hasLoadedOnce, isLoading, combinedRows, summary }),
         setLoadedOnce: (value) => { hasLoadedOnce = value; },
         setLoading: (value) => { isLoading = value; },
-        setData: (rows, sum) => { combinedRows = rows; summary = sum; }
+        setData: (rows, sum) => { 
+          // Normalize rows: add segment_norm, segment_display, page_type_norm, page_type_display
+          // Use window references since functions may be defined later
+          const normSeg = window.normalizeSegment || ((input) => {
+            const s = (input ?? "").trim().toLowerCase();
+            if (s === "brand") return "brand";
+            if (s === "money") return "money";
+            if (s === "education") return "education";
+            return "other";
+          });
+          const segLabel = window.segmentLabel || ((seg) => {
+            const k = normSeg(seg);
+            return k.charAt(0).toUpperCase() + k.slice(1);
+          });
+          const normPageType = window.normalizePageType || ((input) => {
+            const pt = (input ?? "").trim();
+            if (pt === "GBP" || pt === "gbp") return "gbp";
+            if (pt === "Blog" || pt === "blog") return "blog";
+            if (pt === "Landing" || pt === "landing") return "landing";
+            if (pt === "Event" || pt === "event") return "event";
+            if (pt === "Product" || pt === "product") return "product";
+            return "other";
+          });
+          const pageTypeLab = window.pageTypeLabel || ((pt) => {
+            const k = normPageType(pt);
+            return k.charAt(0).toUpperCase() + k.slice(1);
+          });
+          combinedRows = rows.map(r => {
+            const segNorm = normSeg(r.segment);
+            const segDisplay = segLabel(r.segment);
+            const ptNorm = normPageType(r.pageType);
+            const ptDisplay = pageTypeLab(r.pageType);
+            return {
+              ...r,
+              segment_norm: segNorm,
+              segment_display: segDisplay,
+              page_type_norm: ptNorm,
+              page_type_display: ptDisplay
+            };
+          });
+          summary = sum; 
+        }
       };
       console.log('[RankingAiModule] Module object created:', Object.keys(module));
       return module;
@@ -25331,14 +25372,52 @@ Final Score: ${score}/100`;
       return r;
     }
 
+    // Canonical segment normalization helpers (make available globally)
+    function normalizeSegment(input) {
+      const s = (input ?? "").trim().toLowerCase();
+      if (s === "brand") return "brand";
+      if (s === "money") return "money";
+      if (s === "education") return "education";
+      return "other";
+    }
+
+    function segmentLabel(seg) {
+      const k = normalizeSegment(seg);
+      return k.charAt(0).toUpperCase() + k.slice(1); // Brand/Money/Education/Other
+    }
+
+    // Page type normalization helpers (make available globally)
+    function normalizePageType(input) {
+      const pt = (input ?? "").trim();
+      if (pt === "GBP" || pt === "gbp") return "gbp";
+      if (pt === "Blog" || pt === "blog") return "blog";
+      if (pt === "Landing" || pt === "landing") return "landing";
+      if (pt === "Event" || pt === "event") return "event";
+      if (pt === "Product" || pt === "product") return "product";
+      return "other";
+    }
+
+    function pageTypeLabel(pt) {
+      const k = normalizePageType(pt);
+      return k.charAt(0).toUpperCase() + k.slice(1); // Gbp/Blog/Landing/Event/Product/Other
+    }
+
+    // Make normalization functions available globally
+    if (typeof window !== 'undefined') {
+      window.normalizeSegment = normalizeSegment;
+      window.segmentLabel = segmentLabel;
+      window.normalizePageType = normalizePageType;
+      window.pageTypeLabel = pageTypeLabel;
+    }
+
     // Apply filters to rows
     function applyRankingFilters(rows, excludeFilter = null) {
       return rows.filter(row => {
-        // Segment filter (normalize to lowercase for comparison)
+        // Segment filter (use normalized segment for comparison)
         if (excludeFilter !== 'segment' && rankingFilterState.segment !== 'all') {
-          const rowSegment = (row.segment || '').toLowerCase();
-          const filterSegment = rankingFilterState.segment.toLowerCase();
-          if (rowSegment !== filterSegment) {
+          const rowSegmentNorm = row.segment_norm || normalizeSegment(row.segment);
+          const filterSegmentNorm = normalizeSegment(rankingFilterState.segment);
+          if (rowSegmentNorm !== filterSegmentNorm) {
             return false;
           }
         }
@@ -25389,10 +25468,11 @@ Final Score: ${score}/100`;
           if (rankingFilterState.demandShare === 'low' && demandShare > 0.1) return false;
         }
 
-        // Page type filter
+        // Page type filter (use normalized pageType for comparison)
         if (excludeFilter !== 'pageType' && rankingFilterState.pageType && rankingFilterState.pageType !== 'all') {
-          const rowPageType = row.pageType || 'Landing';
-          if (rowPageType !== rankingFilterState.pageType) {
+          const rowPageTypeNorm = row.page_type_norm || normalizePageType(row.pageType);
+          const filterPageTypeNorm = normalizePageType(rankingFilterState.pageType);
+          if (rowPageTypeNorm !== filterPageTypeNorm) {
             return false;
           }
         }
@@ -25807,12 +25887,12 @@ Final Score: ${score}/100`;
       if (!rows || rows.length === 0) return;
 
       // For each filter, calculate counts based on rows that match all OTHER filters
-      // Segment counts (excluding segment filter)
+      // Segment counts (excluding segment filter) - use normalized segment
       const segmentRows = applyRankingFilters(rows, 'segment');
       const segmentCounts = { all: segmentRows.length, brand: 0, money: 0, education: 0, other: 0 };
       segmentRows.forEach(r => {
-        const seg = (r.segment || '').toLowerCase();
-        if (segmentCounts.hasOwnProperty(seg)) segmentCounts[seg]++;
+        const segNorm = r.segment_norm || normalizeSegment(r.segment);
+        if (segmentCounts.hasOwnProperty(segNorm)) segmentCounts[segNorm]++;
         else segmentCounts.other++;
       });
       updateSelectCounts('ranking-filter-segment', segmentCounts);
@@ -25899,11 +25979,12 @@ Final Score: ${score}/100`;
       });
       updateSelectCounts('ranking-filter-ai-citation', aiCitationCounts);
 
-      // Page type counts (excluding page type filter)
+      // Page type counts (excluding page type filter) - use normalized pageType
       const pageTypeRows = applyRankingFilters(rows, 'pageType');
       const pageTypeCounts = { all: pageTypeRows.length, GBP: 0, Blog: 0, Landing: 0, Event: 0, Product: 0, Other: 0 };
       pageTypeRows.forEach(r => {
-        const pt = r.pageType || 'Landing';
+        const ptNorm = r.page_type_norm || normalizePageType(r.pageType);
+        const pt = pageTypeLabel(ptNorm); // Convert to display label for counts
         if (pageTypeCounts.hasOwnProperty(pt)) pageTypeCounts[pt]++;
         else pageTypeCounts.Other++;
       });
@@ -26135,17 +26216,18 @@ Final Score: ${score}/100`;
         tdKeyword.textContent = row.keyword;
         tr.appendChild(tdKeyword);
 
-        // Segment
+        // Segment (use normalized segment for display)
         const tdSegment = document.createElement("td");
         const segBadge = document.createElement("span");
-        const segLower = (row.segment || "").toLowerCase();
+        const segNorm = row.segment_norm || normalizeSegment(row.segment);
+        const segDisplay = row.segment_display || segmentLabel(row.segment);
         segBadge.className = "ranking-badge " + (
-          segLower === "money" ? "ranking-badge--segment-money" :
-          segLower === "education" ? "ranking-badge--segment-education" :
-          segLower === "brand" ? "ranking-badge--segment-brand" :
+          segNorm === "money" ? "ranking-badge--segment-money" :
+          segNorm === "education" ? "ranking-badge--segment-education" :
+          segNorm === "brand" ? "ranking-badge--segment-brand" :
           "ranking-badge--segment-general"
         );
-        segBadge.textContent = row.segment || "Other";
+        segBadge.textContent = segDisplay;
         tdSegment.appendChild(segBadge);
         tr.appendChild(tdSegment);
 
@@ -28931,8 +29013,7 @@ Final Score: ${score}/100`;
             filters: {
               ...DEFAULT_FILTERS,
               segment: 'money',
-              volume: 'high',
-              rank: '11-20',
+              rank: 'not-top3',
               minOpportunity: 65
             },
             sort: {
@@ -28957,8 +29038,7 @@ Final Score: ${score}/100`;
             label: 'Brand safety',
             filters: {
               ...DEFAULT_FILTERS,
-              segment: 'brand',
-              rank: 'not-top3'
+              segment: 'brand'
             },
             sort: {
               column: 'rank',
@@ -29100,9 +29180,9 @@ Final Score: ${score}/100`;
           const chips = [];
           
           if (rankingFilterState.segment !== 'all') {
-            const segmentLabel = rankingFilterState.segment.charAt(0).toUpperCase() + rankingFilterState.segment.slice(1);
+            const segmentLabelDisplay = segmentLabel(rankingFilterState.segment);
             chips.push({
-              label: `Segment: ${segmentLabel}`,
+              label: `Segment: ${segmentLabelDisplay}`,
               onRemove: () => {
                 rankingFilterState.segment = 'all';
                 const segmentFilter = document.getElementById("ranking-filter-segment");
