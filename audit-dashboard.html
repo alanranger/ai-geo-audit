@@ -15635,12 +15635,16 @@ Final Score: ${score}/100`;
           typeFilterEl.parentNode.replaceChild(newTypeFilter, typeFilterEl);
           minImprEl.parentNode.replaceChild(newMinImpr, minImprEl);
           
-          // Update counts initially when wiring up
+          // Update counts initially when wiring up (apply min impressions filter if set)
           const base = window.moneyPagePriorityData || [];
           const authority = window.authorityActionRows || [];
           const allRows = base.concat(authority);
           if (allRows && allRows.length > 0) {
-            updateMoneyPagesTypeFilterCounts(allRows);
+            // Get current min impressions value
+            const initialMinImpr = parseInt(newMinImpr.value, 10) || 0;
+            // Apply min impressions filter for counting
+            const pagesForCounting = allRows.filter(p => p.segmentType === 'authority' || (p.impressions || 0) >= initialMinImpr);
+            updateMoneyPagesTypeFilterCounts(pagesForCounting);
           }
           
           // Function to update matrix and table when filters change
@@ -15665,11 +15669,14 @@ Final Score: ${score}/100`;
             
             debugLog(`✓ Priority & Actions: Found ${allRows.length} rows (money + authority)`, 'success');
             
-            // Update dropdown counts
-            updateMoneyPagesTypeFilterCounts(allRows);
+            // Apply min impressions filter first (for counting purposes)
+            let pagesForCounting = allRows.filter(p => p.segmentType === 'authority' || (p.impressions || 0) >= minImpr);
             
-            // Apply filters
-            let filteredPages = allRows.filter(p => p.segmentType === 'authority' || (p.impressions || 0) >= minImpr);
+            // Update dropdown counts with filtered data (after min impressions filter)
+            updateMoneyPagesTypeFilterCounts(pagesForCounting);
+            
+            // Apply type filter to get final filtered pages
+            let filteredPages = pagesForCounting;
             if (typeFilter !== 'all') {
               filteredPages = filteredPages.filter(p => p.segmentType === typeFilter);
             }
@@ -17423,9 +17430,22 @@ Final Score: ${score}/100`;
             
             // Helper function to update summary strip, matrix, and table
             const updateMatrixAndTable = () => {
-              const filteredPages = getFilteredPages();
               const typeFilter = document.getElementById('money-pages-type-filter')?.value || 'all';
               const minImpr = Number(document.getElementById('money-pages-min-impr')?.value) || 0;
+              
+              // Get base data for counting (before type filter, but after min impressions)
+              const base = (window.moneyPagePriorityData || []).slice();
+              const authority = (window.authorityActionRows || []).slice();
+              const allRows = base.concat(authority);
+              
+              // Apply min impressions filter for counting (but not type filter)
+              const pagesForCounting = allRows.filter(p => p.segmentType === 'authority' || (p.impressions || 0) >= minImpr);
+              
+              // Update dropdown counts with filtered data (after min impressions, before type filter)
+              updateMoneyPagesTypeFilterCounts(pagesForCounting);
+              
+              // Now get fully filtered pages (with type filter applied)
+              const filteredPages = getFilteredPages();
               
               debugLog(`Money Pages Update: Filtered to ${filteredPages.length} pages (type: ${typeFilter}, minImpr: ${minImpr})`, 'info');
               
