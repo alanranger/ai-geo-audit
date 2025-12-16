@@ -24337,10 +24337,36 @@ Final Score: ${score}/100`;
         
         renderRankingAiTab();
 
+        // Update "Last run" timestamp from saved data (not a new Date() to ensure consistency)
         const lastRunEl = document.getElementById("ranking-ai-last-run");
         if (lastRunEl) {
-          const now = new Date();
-          lastRunEl.textContent = `Last run: ${now.toLocaleString()}`;
+          try {
+            // Read timestamp from the saved rankingAiData (just saved above)
+            const savedRankingData = localStorage.getItem('rankingAiData');
+            if (savedRankingData) {
+              const parsed = JSON.parse(savedRankingData);
+              if (parsed.timestamp) {
+                const date = new Date(parsed.timestamp);
+                lastRunEl.textContent = `Last run: ${date.toLocaleString()}`;
+                debugLog(`✓ Updated "Last run" timestamp from saved data: ${date.toLocaleString()}`, 'success');
+              } else {
+                // Fallback to current time if timestamp missing
+                const now = new Date();
+                lastRunEl.textContent = `Last run: ${now.toLocaleString()}`;
+                debugLog(`⚠ Saved rankingAiData missing timestamp, using current time`, 'warn');
+              }
+            } else {
+              // Fallback to current time if no saved data
+              const now = new Date();
+              lastRunEl.textContent = `Last run: ${now.toLocaleString()}`;
+              debugLog(`⚠ No saved rankingAiData found, using current time`, 'warn');
+            }
+          } catch (err) {
+            // Fallback to current time on error
+            const now = new Date();
+            lastRunEl.textContent = `Last run: ${now.toLocaleString()}`;
+            debugLog(`⚠ Error reading saved timestamp: ${err.message}, using current time`, 'warn');
+          }
         }
         debugLog(`✓ Ranking & AI data loaded: ${totalKeywords} keywords, ${withRank} with ranks, ${withAiOverview} with AI Overview`, 'success');
         
