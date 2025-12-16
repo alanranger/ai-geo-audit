@@ -19530,16 +19530,31 @@ Final Score: ${score}/100`;
             // GSC pillars will only show data up to lastGscDateForRange
             // Determine the last date that's already in the chart (from timeseries)
             const lastTimeseriesDateStr = timeseries.length > 0 ? timeseries[timeseries.length - 1].date : null;
-            const lastDateInChartStr = lastGscDateForRange || lastTimeseriesDateStr;
-            const targetDateStr = latestAuditDateStr || today.toISOString().split('T')[0];
             
-            debugLog(`Chart extension: lastDateInChart=${lastDateInChartStr}, targetDate=${targetDateStr}, latestAuditDateStr=${latestAuditDateStr}`, 'info');
+            // Find the latest date from all maps to ensure we don't miss any data
+            const allMapDates = new Set();
+            contentSchemaMap.forEach((score, date) => allMapDates.add(date));
+            localEntityMap.forEach((score, date) => allMapDates.add(date));
+            serviceAreaMap.forEach((score, date) => allMapDates.add(date));
+            visibilityMap.forEach((score, date) => allMapDates.add(date));
+            authorityMap.forEach((score, date) => allMapDates.add(date));
+            brandOverlayMap.forEach((score, date) => allMapDates.add(date));
+            const latestMapDateStr = allMapDates.size > 0 ? Array.from(allMapDates).sort().reverse()[0] : null;
+            
+            // Use the latest of: GSC date, timeseries date, or map dates
+            const lastDateInChartStr = lastGscDateForRange || latestMapDateStr || lastTimeseriesDateStr;
+            const targetDateStr = latestAuditDateStr || latestMapDateStr || today.toISOString().split('T')[0];
+            
+            debugLog(`Chart extension: lastDateInChart=${lastDateInChartStr}, targetDate=${targetDateStr}, latestAuditDateStr=${latestAuditDateStr}, latestMapDate=${latestMapDateStr}`, 'info');
             debugLog(`Last GSC date: ${lastGscDateForRange} (from maps: ${actualLastGscDate}, from timeseries: ${lastTimeseriesDate})`, 'info');
             debugLog(`Content/Schema map has ${contentSchemaMap.size} entries before filling missing dates`, 'info');
             debugLog(`Content/Schema map entries: ${Array.from(contentSchemaMap.entries()).map(([d, s]) => `${d}=${s}`).join(', ')}`, 'info');
             
             // Always fill dates from last date in chart to latest audit date
-            if (lastDateInChartStr && targetDateStr && lastDateInChartStr < targetDateStr) {
+            // Use string comparison to ensure we extend the chart
+            if (lastDateInChartStr && targetDateStr) {
+              const dateComparison = lastDateInChartStr.localeCompare(targetDateStr);
+              if (dateComparison < 0) {
               const lastDate = new Date(lastDateInChartStr);
               lastDate.setHours(0, 0, 0, 0);
               const currentDate = new Date(lastDate);
