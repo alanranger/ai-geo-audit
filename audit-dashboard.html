@@ -16267,18 +16267,26 @@ Final Score: ${score}/100`;
         });
         
         // Generate complete date range for last 30 days (up to GSC date)
-        const endDate = lastGscTimeseriesDate ? new Date(lastGscTimeseriesDate) : new Date();
+        const endDate = lastGscTimeseriesDate ? new Date(lastGscTimeseriesDate + 'T00:00:00') : new Date();
         const startDate = new Date(thirtyDaysAgo);
         const allDates = [];
         const currentDate = new Date(startDate);
         
+        // Ensure we're comparing dates correctly (set time to midnight)
+        endDate.setHours(0, 0, 0, 0);
+        startDate.setHours(0, 0, 0, 0);
+        currentDate.setHours(0, 0, 0, 0);
+        
         while (currentDate <= endDate) {
           const dateStr = currentDate.toISOString().split('T')[0];
           allDates.push(dateStr);
-          currentDate.setDate(currentDate.getDate() + 1);
+          const nextDate = new Date(currentDate);
+          nextDate.setDate(nextDate.getDate() + 1);
+          currentDate.setTime(nextDate.getTime());
         }
         
         debugLog(`Money Pages Trend: Generated ${allDates.length} dates in range (${allDates[0]} to ${allDates[allDates.length - 1]})`, 'info');
+        debugLog(`Money Pages Trend: Date range: startDate=${startDate.toISOString().split('T')[0]}, endDate=${endDate.toISOString().split('T')[0]}, thirtyDaysAgoStr=${thirtyDaysAgoStr}`, 'info');
         
         // Extract money pages trend data, filling in all dates
         const labels = [];
@@ -16333,6 +16341,8 @@ Final Score: ${score}/100`;
         });
         
         debugLog(`Money Pages Trend: Populated ${labels.length} dates with data (${clicksData.filter(v => v != null).length} clicks values, ${impressionsData.filter(v => v != null).length} impressions values)`, 'info');
+        debugLog(`Money Pages Trend: Sample data - First 5 dates: ${labels.slice(0, 5).join(', ')}, Last 5 dates: ${labels.slice(-5).join(', ')}`, 'info');
+        debugLog(`Money Pages Trend: Sample clicks - First 5: ${clicksData.slice(0, 5).map(v => v != null ? v : 'null').join(', ')}, Last 5: ${clicksData.slice(-5).map(v => v != null ? v : 'null').join(', ')}`, 'info');
         
         if (labels.length === 0) {
           debugLog('⚠ Money Pages trend chart: No valid data points after filtering', 'warn');
@@ -16400,7 +16410,8 @@ Final Score: ${score}/100`;
                 borderColor: '#2563eb',
                 backgroundColor: 'rgba(37, 99, 235, 0.1)',
                 yAxisID: 'y',
-                tension: 0.4
+                tension: 0.4,
+                spanGaps: true
               },
               {
                 label: 'Impressions',
@@ -16408,7 +16419,8 @@ Final Score: ${score}/100`;
                 borderColor: '#10b981',
                 backgroundColor: 'rgba(16, 185, 129, 0.1)',
                 yAxisID: 'y1',
-                tension: 0.4
+                tension: 0.4,
+                spanGaps: true
               },
               {
                 label: 'CTR (%)',
@@ -16416,7 +16428,8 @@ Final Score: ${score}/100`;
                 borderColor: '#f59e0b',
                 backgroundColor: 'rgba(245, 158, 11, 0.1)',
                 yAxisID: 'y2',
-                tension: 0.4
+                tension: 0.4,
+                spanGaps: true
               },
               {
                 label: 'Behaviour Score',
