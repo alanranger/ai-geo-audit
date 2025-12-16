@@ -19495,17 +19495,31 @@ Final Score: ${score}/100`;
             todayStr = today.toISOString().split('T')[0];
             const lastTimeseriesDate = timeseries.length > 0 ? timeseries[timeseries.length - 1].date : null;
             
-            // Determine actual last GSC data date from historical maps (not just timeseries array)
-            // This ensures dates with historical audit data are included even if not in timeseries
+            // Determine actual last GSC data date from historical maps
+            // CRITICAL: Only use dates from maps that are <= last timeseries date
+            // Never forward-fill GSC data - only use dates that have actual GSC data
             let actualLastGscDate = lastTimeseriesDate;
             const allGscDates = new Set();
-            visibilityMap.forEach((score, date) => allGscDates.add(date));
-            authorityMap.forEach((score, date) => allGscDates.add(date));
-            brandOverlayMap.forEach((score, date) => allGscDates.add(date));
+            visibilityMap.forEach((score, date) => {
+              // Only include dates that are <= last timeseries date (actual GSC data)
+              if (lastTimeseriesDate && date <= lastTimeseriesDate) {
+                allGscDates.add(date);
+              }
+            });
+            authorityMap.forEach((score, date) => {
+              if (lastTimeseriesDate && date <= lastTimeseriesDate) {
+                allGscDates.add(date);
+              }
+            });
+            brandOverlayMap.forEach((score, date) => {
+              if (lastTimeseriesDate && date <= lastTimeseriesDate) {
+                allGscDates.add(date);
+              }
+            });
             if (allGscDates.size > 0) {
               const sortedDates = Array.from(allGscDates).sort();
               const latestMapDate = sortedDates[sortedDates.length - 1];
-              // Use the later of: last timeseries date or latest date in historical maps
+              // Use the later of: last timeseries date or latest valid date in historical maps
               if (!actualLastGscDate || latestMapDate > actualLastGscDate) {
                 actualLastGscDate = latestMapDate;
                 debugLog(`Actual last GSC date determined from historical maps: ${actualLastGscDate} (timeseries had: ${lastTimeseriesDate})`, 'info');
@@ -19513,6 +19527,7 @@ Final Score: ${score}/100`;
             }
             
             // Use actualLastGscDate instead of lastTimeseriesDate for GSC range checks
+            // This is the definitive last GSC data date - never forward-fill beyond this
             const lastGscDateForRange = actualLastGscDate || lastTimeseriesDate;
             
             // Ensure latest audit date is included even if not in timeseries
