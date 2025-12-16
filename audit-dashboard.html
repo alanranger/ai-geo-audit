@@ -24014,16 +24014,45 @@ Final Score: ${score}/100`;
     function updateFilterCounts(rows) {
       if (!rows || rows.length === 0) return;
       
-      // Re-classify pageType for all rows before calculating counts (fixes stale data)
+      // Re-classify pageType for all rows before calculating counts (fixes stale data from Supabase)
       // This ensures Event/Product pages are correctly identified
+      // Only update pageType, don't mutate other fields
       rows.forEach(row => {
         const bestUrl = row.best_url || row.bestUrl || null;
-        if (bestUrl && typeof window.classifyUrlForRankingAi === 'function') {
-          const classification = window.classifyUrlForRankingAi(bestUrl, row.keyword || null);
-          row.pageType = classification.pageType;
+        if (bestUrl) {
+          let newPageType = row.pageType || 'Landing'; // Keep existing if classification fails
+          
+          if (typeof window.classifyUrlForRankingAi === 'function') {
+            try {
+              const classification = window.classifyUrlForRankingAi(bestUrl, row.keyword || null);
+              newPageType = classification.pageType;
+            } catch (e) {
+              // Fallback: Direct URL pattern matching if function fails
+              const urlLower = bestUrl.toLowerCase();
+              if (urlLower.includes('/beginners-photography-lessons') || 
+                  urlLower.includes('/photographic-workshops-near-me')) {
+                newPageType = 'Event';
+              } else if (urlLower.includes('/photo-workshops-uk') || 
+                         urlLower.includes('/photography-services-near-me')) {
+                newPageType = 'Product';
+              }
+            }
+          } else {
+            // Fallback: Direct URL pattern matching if function not available
+            const urlLower = bestUrl.toLowerCase();
+            if (urlLower.includes('/beginners-photography-lessons') || 
+                urlLower.includes('/photographic-workshops-near-me')) {
+              newPageType = 'Event';
+            } else if (urlLower.includes('/photo-workshops-uk') || 
+                       urlLower.includes('/photography-services-near-me')) {
+              newPageType = 'Product';
+            }
+          }
+          
+          // Only update pageType field, preserve all other data (including citations)
+          row.pageType = newPageType;
           if (row.classification) {
-            row.classification.pageType = classification.pageType;
-            row.classification.segment = classification.segment;
+            row.classification.pageType = newPageType;
           }
         }
       });
