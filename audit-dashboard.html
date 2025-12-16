@@ -21627,14 +21627,16 @@ Final Score: ${score}/100`;
                 parsed.summary = normalizeSummaryFields(parsed.summary);
                 
                 // Re-classify pageType for localStorage rows (fixes stale pageType)
-                if (RankingAiModule && RankingAiModule.classifyPageTypeForKeyword && parsed.combinedRows) {
+                // Use window.classifyUrlForRankingAi directly (available earlier than RankingAiModule)
+                if (typeof window.classifyUrlForRankingAi === 'function' && parsed.combinedRows) {
                   parsed.combinedRows.forEach(row => {
                     const bestUrl = row.best_url || row.bestUrl || null;
                     if (bestUrl) {
-                      const newPageType = RankingAiModule.classifyPageTypeForKeyword(bestUrl);
-                      row.pageType = newPageType;
+                      const classification = window.classifyUrlForRankingAi(bestUrl, row.keyword || null);
+                      row.pageType = classification.pageType;
                       if (row.classification) {
-                        row.classification.pageType = newPageType;
+                        row.classification.pageType = classification.pageType;
+                        row.classification.segment = classification.segment;
                       }
                     } else {
                       row.pageType = 'Landing';
@@ -21659,12 +21661,16 @@ Final Score: ${score}/100`;
                     const hoursDiff = (now - localTime) / (1000 * 60 * 60);
                     if (hoursDiff < 24) {
                       // Re-classify pageType before returning
-                      if (RankingAiModule && RankingAiModule.classifyPageTypeForKeyword && parsed.combinedRows) {
+                      if (typeof window.classifyUrlForRankingAi === 'function' && parsed.combinedRows) {
                         parsed.combinedRows.forEach(row => {
                           const bestUrl = row.best_url || row.bestUrl || null;
                           if (bestUrl) {
-                            row.pageType = RankingAiModule.classifyPageTypeForKeyword(bestUrl);
-                            if (row.classification) row.classification.pageType = row.pageType;
+                            const classification = window.classifyUrlForRankingAi(bestUrl, row.keyword || null);
+                            row.pageType = classification.pageType;
+                            if (row.classification) {
+                              row.classification.pageType = classification.pageType;
+                              row.classification.segment = classification.segment;
+                            }
                           } else {
                             row.pageType = 'Landing';
                             if (row.classification) row.classification.pageType = 'Landing';
@@ -21677,12 +21683,16 @@ Final Score: ${score}/100`;
                     }
                   } else {
                     // Re-classify pageType before returning
-                    if (RankingAiModule && RankingAiModule.classifyPageTypeForKeyword && parsed.combinedRows) {
+                    if (typeof window.classifyUrlForRankingAi === 'function' && parsed.combinedRows) {
                       parsed.combinedRows.forEach(row => {
                         const bestUrl = row.best_url || row.bestUrl || null;
                         if (bestUrl) {
-                          row.pageType = RankingAiModule.classifyPageTypeForKeyword(bestUrl);
-                          if (row.classification) row.classification.pageType = row.pageType;
+                          const classification = window.classifyUrlForRankingAi(bestUrl, row.keyword || null);
+                          row.pageType = classification.pageType;
+                          if (row.classification) {
+                            row.classification.pageType = classification.pageType;
+                            row.classification.segment = classification.segment;
+                          }
                         } else {
                           row.pageType = 'Landing';
                           if (row.classification) row.classification.pageType = 'Landing';
@@ -21741,19 +21751,22 @@ Final Score: ${score}/100`;
                 
                 // Re-classify pageType for all rows (fixes stale page_type from database)
                 // This ensures Event/Product pages are correctly identified
-                if (RankingAiModule && RankingAiModule.classifyPageTypeForKeyword) {
+                // Use window.classifyUrlForRankingAi directly (available earlier than RankingAiModule)
+                if (typeof window.classifyUrlForRankingAi === 'function') {
                   debugLog(`🔄 Re-classifying pageType for ${keywordCount} keywords...`, 'info');
                   let reclassifiedCount = 0;
                   combinedRows.forEach(row => {
                     const bestUrl = row.best_url || row.bestUrl || null;
                     if (bestUrl) {
-                      const newPageType = RankingAiModule.classifyPageTypeForKeyword(bestUrl);
+                      const classification = window.classifyUrlForRankingAi(bestUrl, row.keyword || null);
+                      const newPageType = classification.pageType;
                       const oldPageType = row.pageType || 'Landing';
                       if (newPageType !== oldPageType) {
                         row.pageType = newPageType;
                         // Also update classification object if it exists
                         if (row.classification) {
                           row.classification.pageType = newPageType;
+                          row.classification.segment = classification.segment;
                         }
                         reclassifiedCount++;
                       } else {
@@ -21761,6 +21774,7 @@ Final Score: ${score}/100`;
                         row.pageType = newPageType;
                         if (row.classification) {
                           row.classification.pageType = newPageType;
+                          row.classification.segment = classification.segment;
                         }
                       }
                     } else {
@@ -21777,7 +21791,8 @@ Final Score: ${score}/100`;
                     debugLog(`✓ Verified pageType for all ${keywordCount} keywords`, 'success');
                   }
                 } else {
-                  debugLog(`⚠ Cannot re-classify pageType: classifyPageTypeForKeyword not available`, 'warn');
+                  debugLog(`⚠ Cannot re-classify pageType: classifyUrlForRankingAi not available yet`, 'warn');
+                  debugLog(`  Will retry on next load or when module initializes`, 'info');
                 }
                 
                 // Normalize summary field names (convert snake_case to camelCase for compatibility)
@@ -21819,14 +21834,15 @@ Final Score: ${score}/100`;
         if (localStorageFallback) {
           debugLog(`✓ Falling back to localStorage data (${localStorageFallback.combinedRows.length} keywords)`, 'success');
           // Ensure localStorage fallback also has re-classified pageType
-          if (RankingAiModule && RankingAiModule.classifyPageTypeForKeyword && localStorageFallback.combinedRows) {
+          if (typeof window.classifyUrlForRankingAi === 'function' && localStorageFallback.combinedRows) {
             localStorageFallback.combinedRows.forEach(row => {
               const bestUrl = row.best_url || row.bestUrl || null;
               if (bestUrl) {
-                const newPageType = RankingAiModule.classifyPageTypeForKeyword(bestUrl);
-                row.pageType = newPageType;
+                const classification = window.classifyUrlForRankingAi(bestUrl, row.keyword || null);
+                row.pageType = classification.pageType;
                 if (row.classification) {
-                  row.classification.pageType = newPageType;
+                  row.classification.pageType = classification.pageType;
+                  row.classification.segment = classification.segment;
                 }
               } else {
                 row.pageType = 'Landing';
