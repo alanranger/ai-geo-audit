@@ -16263,8 +16263,13 @@ Final Score: ${score}/100`;
           const dateStr = record.date || record.audit_date || record.auditDate;
           if (dateStr) {
             historyMap.set(dateStr, record);
+            // Debug: log records with money pages data
+            if (record.moneySegmentMetrics || record.moneyPagesSummary) {
+              debugLog(`Money Pages Trend: Found record for ${dateStr} with data: clicks=${record.moneySegmentMetrics?.allMoney?.clicks || 'null'}, impressions=${record.moneySegmentMetrics?.allMoney?.impressions || 'null'}`, 'info');
+            }
           }
         });
+        debugLog(`Money Pages Trend: Created historyMap with ${historyMap.size} entries`, 'info');
         
         // Generate complete date range for last 30 days (up to GSC date)
         const endDate = lastGscTimeseriesDate ? new Date(lastGscTimeseriesDate + 'T00:00:00') : new Date();
@@ -16324,6 +16329,12 @@ Final Score: ${score}/100`;
             const clicks = allMoney.clicks || null;
             const impressions = allMoney.impressions || null;
             const ctr = summary.ctr ? summary.ctr * 100 : (allMoney.ctr ? allMoney.ctr * 100 : null);
+            
+            // Debug logging for Dec 14 specifically
+            if (dateStr === '2025-12-14') {
+              debugLog(`Money Pages Trend: Dec 14 extraction - record found: ${!!record}, segmentMetrics: ${!!segmentMetrics}, allMoney: ${!!allMoney}, clicks: ${clicks}, impressions: ${impressions}`, 'info');
+              debugLog(`Money Pages Trend: Dec 14 raw data - segmentMetrics: ${JSON.stringify(segmentMetrics)}, allMoney: ${JSON.stringify(allMoney)}`, 'info');
+            }
             
             // Track first available values (for backward-filling)
             if (firstClicks == null && clicks != null) firstClicks = clicks;
