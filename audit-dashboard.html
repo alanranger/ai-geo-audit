@@ -21626,17 +21626,53 @@ Final Score: ${score}/100`;
                 // Normalize summary field names for compatibility
                 parsed.summary = normalizeSummaryFields(parsed.summary);
                 
-                // Re-classify pageType for localStorage rows (fixes stale pageType)
-                // Use window.classifyUrlForRankingAi directly (available earlier than RankingAiModule)
-                if (typeof window.classifyUrlForRankingAi === 'function' && parsed.combinedRows) {
+                // ALWAYS re-classify pageType for localStorage rows (fixes stale pageType)
+                // Use fallback pattern matching if function not available
+                if (parsed.combinedRows) {
+                  let reclassifiedCount = 0;
                   parsed.combinedRows.forEach(row => {
                     const bestUrl = row.best_url || row.bestUrl || null;
+                    const oldPageType = row.pageType || 'Landing';
+                    let newPageType = 'Landing'; // Default
+                    
                     if (bestUrl) {
-                      const classification = window.classifyUrlForRankingAi(bestUrl, row.keyword || null);
-                      row.pageType = classification.pageType;
+                      // Use classifyUrlForRankingAi if available, otherwise use direct URL matching
+                      if (typeof window.classifyUrlForRankingAi === 'function') {
+                        const classification = window.classifyUrlForRankingAi(bestUrl, row.keyword || null);
+                        newPageType = classification.pageType;
+                      } else {
+                        // Fallback: Direct URL pattern matching
+                        const urlLower = bestUrl.toLowerCase();
+                        if (urlLower.includes('/beginners-photography-lessons') || 
+                            urlLower.includes('/photographic-workshops-near-me')) {
+                          newPageType = 'Event';
+                        } else if (urlLower.includes('/photo-workshops-uk') || 
+                                   urlLower.includes('/photography-services-near-me')) {
+                          newPageType = 'Product';
+                        } else if (urlLower.includes('/blog-on-photography/') || 
+                                   urlLower.includes('/blogs/')) {
+                          newPageType = 'Blog';
+                        } else if (urlLower.includes('/about-alan-ranger') || 
+                                   urlLower.includes('/contact') ||
+                                   urlLower.includes('/reviews') ||
+                                   urlLower.match(/^https?:\/\/[^\/]+\/?$/)) {
+                          newPageType = 'GBP';
+                        }
+                      }
+                      
+                      if (newPageType !== oldPageType) {
+                        row.pageType = newPageType;
+                        reclassifiedCount++;
+                      } else {
+                        row.pageType = newPageType;
+                      }
+                      
                       if (row.classification) {
-                        row.classification.pageType = classification.pageType;
-                        row.classification.segment = classification.segment;
+                        row.classification.pageType = newPageType;
+                        if (typeof window.classifyUrlForRankingAi === 'function') {
+                          const classification = window.classifyUrlForRankingAi(bestUrl, row.keyword || null);
+                          row.classification.segment = classification.segment;
+                        }
                       }
                     } else {
                       row.pageType = 'Landing';
@@ -21645,6 +21681,11 @@ Final Score: ${score}/100`;
                       }
                     }
                   });
+                  if (reclassifiedCount > 0) {
+                    debugLog(`✓ Re-classified ${reclassifiedCount} localStorage rows with updated pageType`, 'success');
+                    // Update localStorage with re-classified data
+                    localStorage.setItem('rankingAiData', JSON.stringify(parsed));
+                  }
                 }
                 
                 // Store as fallback before checking Supabase
@@ -21749,62 +21790,83 @@ Final Score: ${score}/100`;
                   });
                 }
                 
-                // Re-classify pageType for all rows (fixes stale page_type from database)
+                // ALWAYS re-classify pageType for all rows (fixes stale page_type from database)
                 // This ensures Event/Product pages are correctly identified
-                // Use window.classifyUrlForRankingAi directly (available earlier than RankingAiModule)
-                if (typeof window.classifyUrlForRankingAi === 'function') {
-                  debugLog(`🔄 Re-classifying pageType for ${keywordCount} keywords...`, 'info');
-                  let reclassifiedCount = 0;
-                  combinedRows.forEach(row => {
-                    const bestUrl = row.best_url || row.bestUrl || null;
-                    if (bestUrl) {
+                // Force re-classification on every load to ensure accuracy
+                debugLog(`🔄 Re-classifying pageType for ${keywordCount} keywords...`, 'info');
+                let reclassifiedCount = 0;
+                combinedRows.forEach(row => {
+                  const bestUrl = row.best_url || row.bestUrl || null;
+                  const oldPageType = row.pageType || 'Landing';
+                  let newPageType = 'Landing'; // Default
+                  
+                  if (bestUrl) {
+                    // Use classifyUrlForRankingAi if available, otherwise use direct URL matching
+                    if (typeof window.classifyUrlForRankingAi === 'function') {
                       const classification = window.classifyUrlForRankingAi(bestUrl, row.keyword || null);
-                      const newPageType = classification.pageType;
-                      const oldPageType = row.pageType || 'Landing';
-                      if (newPageType !== oldPageType) {
-                        row.pageType = newPageType;
-                        // Also update classification object if it exists
-                        if (row.classification) {
-                          row.classification.pageType = newPageType;
-                          row.classification.segment = classification.segment;
-                        }
-                        reclassifiedCount++;
-                      } else {
-                        // Ensure pageType is set even if unchanged
-                        row.pageType = newPageType;
-                        if (row.classification) {
-                          row.classification.pageType = newPageType;
-                          row.classification.segment = classification.segment;
-                        }
-                      }
+                      newPageType = classification.pageType;
                     } else {
-                      // No URL, default to Landing
-                      row.pageType = 'Landing';
-                      if (row.classification) {
-                        row.classification.pageType = 'Landing';
+                      // Fallback: Direct URL pattern matching
+                      const urlLower = bestUrl.toLowerCase();
+                      if (urlLower.includes('/beginners-photography-lessons') || 
+                          urlLower.includes('/photographic-workshops-near-me')) {
+                        newPageType = 'Event';
+                      } else if (urlLower.includes('/photo-workshops-uk') || 
+                                 urlLower.includes('/photography-services-near-me')) {
+                        newPageType = 'Product';
+                      } else if (urlLower.includes('/blog-on-photography/') || 
+                                 urlLower.includes('/blogs/')) {
+                        newPageType = 'Blog';
+                      } else if (urlLower.includes('/about-alan-ranger') || 
+                                 urlLower.includes('/contact') ||
+                                 urlLower.includes('/reviews') ||
+                                 urlLower.match(/^https?:\/\/[^\/]+\/?$/)) {
+                        newPageType = 'GBP';
                       }
                     }
-                  });
-                  if (reclassifiedCount > 0) {
-                    debugLog(`✓ Re-classified ${reclassifiedCount} keywords with updated pageType`, 'success');
+                    
+                    if (newPageType !== oldPageType) {
+                      row.pageType = newPageType;
+                      reclassifiedCount++;
+                    } else {
+                      // Ensure pageType is set even if unchanged
+                      row.pageType = newPageType;
+                    }
+                    
+                    // Also update classification object if it exists
+                    if (row.classification) {
+                      row.classification.pageType = newPageType;
+                      if (typeof window.classifyUrlForRankingAi === 'function') {
+                        const classification = window.classifyUrlForRankingAi(bestUrl, row.keyword || null);
+                        row.classification.segment = classification.segment;
+                      }
+                    }
                   } else {
-                    debugLog(`✓ Verified pageType for all ${keywordCount} keywords`, 'success');
+                    // No URL, default to Landing
+                    row.pageType = 'Landing';
+                    if (row.classification) {
+                      row.classification.pageType = 'Landing';
+                    }
                   }
+                });
+                if (reclassifiedCount > 0) {
+                  debugLog(`✓ Re-classified ${reclassifiedCount} keywords with updated pageType`, 'success');
                 } else {
-                  debugLog(`⚠ Cannot re-classify pageType: classifyUrlForRankingAi not available yet`, 'warn');
-                  debugLog(`  Will retry on next load or when module initializes`, 'info');
+                  debugLog(`✓ Verified pageType for all ${keywordCount} keywords`, 'success');
                 }
                 
                 // Normalize summary field names (convert snake_case to camelCase for compatibility)
                 const normalizedSummary = normalizeSummaryFields(json.data.rankingAiData.summary);
                 
                 // Also save to localStorage for faster access next time
+                // Save with re-classified pageType values
                 localStorage.setItem('rankingAiData', JSON.stringify({
                   combinedRows: combinedRows,
                   summary: normalizedSummary,
-                  timestamp: new Date().toISOString()
+                  timestamp: new Date().toISOString(),
+                  pageTypeVersion: '2.0' // Version marker to force re-classification on next load
                 }));
-                debugLog(`✓ Saved ${keywordCount} keywords to localStorage`, 'success');
+                debugLog(`✓ Saved ${keywordCount} keywords to localStorage with re-classified pageType`, 'success');
                 return { combinedRows, summary: normalizedSummary };
               } else {
                 debugLog('⚠ rankingAiData exists but missing combinedRows array', 'warn');
