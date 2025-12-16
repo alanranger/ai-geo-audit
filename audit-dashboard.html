@@ -19110,11 +19110,30 @@ Final Score: ${score}/100`;
                 const modeScore = historicalAuthorityBySegment[selectedMode].total || historicalAuthorityBySegment[selectedMode].score || historicalAuthorityBySegment[selectedMode];
                 authorityData.push(modeScore);
                 debugLog(`Using historical segmented Authority (${modeScore}) for ${pointDate} (mode: ${selectedMode})`, 'info');
-              } else if (isLatestAudit && authorityBySegment) {
-                // For latest audit date, use current segmented Authority scores (allows toggling between segments)
-                const modeScore = getAuthorityForMode(selectedMode);
-                authorityData.push(modeScore);
-                debugLog(`Using current Authority score (${modeScore}) for ${pointDate} (mode: ${selectedMode}, latest audit)`, 'info');
+              } else if (isLatestAudit) {
+                // For latest audit date, prioritize stored Authority score from current audit
+                const savedAuditForAuthority = loadAuditResultsSync();
+                const currentAuthority = savedAuditForAuthority?.scores?.authority;
+                let authorityScoreToUse = null;
+                
+                // Try to get Authority score based on selected mode
+                if (authorityBySegment) {
+                  authorityScoreToUse = getAuthorityForMode(selectedMode);
+                } else if (typeof currentAuthority === 'object' && currentAuthority !== null) {
+                  authorityScoreToUse = currentAuthority.score || currentAuthority;
+                } else if (typeof currentAuthority === 'number') {
+                  authorityScoreToUse = currentAuthority;
+                }
+                
+                if (authorityScoreToUse !== null && authorityScoreToUse !== undefined && authorityScoreToUse > 0) {
+                  authorityData.push(authorityScoreToUse);
+                  debugLog(`Using current stored Authority (${authorityScoreToUse}) for ${pointDate} (mode: ${selectedMode}, latest audit)`, 'info');
+                } else {
+                  // Fallback to calculated score if stored score not available
+                  const authScore = typeof pillarScores.authority === 'object' ? pillarScores.authority.score : pillarScores.authority;
+                  authorityData.push(authScore);
+                  debugLog(`Using calculated Authority (${authScore}) for ${pointDate} (stored score not available)`, 'info');
+                }
               } else if (historicalAuthority !== undefined && historicalAuthority !== null) {
                 // Fallback: use legacy historical Authority from Supabase (single value, not segmented)
                 authorityData.push(historicalAuthority);
@@ -19162,16 +19181,24 @@ Final Score: ${score}/100`;
                 }
               }
               
-              // Visibility data (check historical data from Supabase FIRST, then calculate only if missing and valid GSC data)
+              // Visibility data (check historical data from Supabase FIRST, then use current audit score, then calculate only if missing and valid GSC data)
               const historicalVisibility = visibilityMap.get(pointDate);
               if (historicalVisibility !== undefined && historicalVisibility !== null) {
                 // Use stored score from database (fast - no calculation needed)
                 visibilityData.push(historicalVisibility);
                 debugLog(`Using stored Visibility (${historicalVisibility}) for ${pointDate}`, 'info');
               } else if (isLatestAudit) {
-                // For latest audit date, use current Visibility score
-              visibilityData.push(pillarScores.visibility);
-                debugLog(`Using current Visibility (${pillarScores.visibility}) for ${pointDate}`, 'info');
+                // For latest audit date, prioritize stored Visibility score from current audit
+                const savedAuditForVisibility = loadAuditResultsSync();
+                const currentVisibility = savedAuditForVisibility?.scores?.visibility;
+                if (currentVisibility !== null && currentVisibility !== undefined && currentVisibility > 0) {
+                  visibilityData.push(currentVisibility);
+                  debugLog(`Using current stored Visibility (${currentVisibility}) for ${pointDate} (latest audit)`, 'info');
+                } else {
+                  // Fallback to calculated score if stored score not available
+                  visibilityData.push(pillarScores.visibility);
+                  debugLog(`Using calculated Visibility (${pillarScores.visibility}) for ${pointDate} (stored score not available)`, 'info');
+                }
               } else {
                 // For past dates: calculate from GSC data as fallback (only if stored score missing AND valid GSC data)
                 const hasValidGscData = point.position && point.position > 0 && point.ctr !== null && point.ctr >= 0;
