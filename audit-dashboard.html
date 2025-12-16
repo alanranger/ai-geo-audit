@@ -28421,6 +28421,51 @@ Final Score: ${score}/100`;
             }
           }
 
+          // CSV upload handler
+          const csvUpload = document.getElementById('csv-upload');
+          if (csvUpload) {
+            csvUpload.addEventListener('change', async (e) => {
+              const file = e.target.files[0];
+              if (!file) return;
+
+              try {
+                const text = await file.text();
+                // Parse CSV and populate textarea
+                const lines = text.split('\n');
+                const keywords = [];
+                for (const line of lines) {
+                  const trimmed = line.trim();
+                  if (!trimmed || trimmed.startsWith('#')) continue;
+                  const firstColumn = trimmed.includes(',') ? trimmed.split(',')[0].trim() : trimmed;
+                  if (firstColumn) keywords.push(firstColumn);
+                }
+
+                if (keywords.length === 0) {
+                  if (statusEl) {
+                    statusEl.textContent = 'No keywords found in CSV file';
+                    statusEl.style.color = '#dc2626';
+                  }
+                  return;
+                }
+
+                textarea.value = keywords.join('\n');
+                if (statusEl) {
+                  statusEl.textContent = `✓ Loaded ${keywords.length} keywords from CSV`;
+                  statusEl.style.color = '#10b981';
+                }
+
+                // Reset file input
+                e.target.value = '';
+              } catch (err) {
+                console.error('[Edit Keywords] CSV upload error:', err);
+                if (statusEl) {
+                  statusEl.textContent = 'Error reading CSV file: ' + err.message;
+                  statusEl.style.color = '#dc2626';
+                }
+              }
+            });
+          }
+
           // Only attach event listeners - modal should NOT open automatically
           openBtn.addEventListener('click', (e) => {
             e.preventDefault();

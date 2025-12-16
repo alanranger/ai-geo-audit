@@ -115,89 +115,165 @@ export default async function handler(req, res) {
     } else {
       latestAudit = auditRows[0];
     }
+    const auditDate = latestAudit.audit_date;
     const rankingAiData = latestAudit.ranking_ai_data || { combinedRows: [], summary: {} };
 
-    // Update combinedRows to only include keywords from the new list
-    // Preserve existing data for keywords that are still in the list
-    const existingRowsMap = new Map();
-    rankingAiData.combinedRows?.forEach(row => {
-      if (row.keyword) {
-        existingRowsMap.set(row.keyword, row);
-      }
+    // Get existing keywords from keyword_rankings table (more efficient than parsing JSON)
+    const existingKeywordsUrl = `${supabaseUrl}/rest/v1/keyword_rankings?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${auditDate}&select=keyword`;
+    const existingKeywordsResp = await fetch(existingKeywordsUrl, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: supabaseKey,
+        Authorization: `Bearer ${supabaseKey}`,
+      },
     });
 
-    // Create new combinedRows with updated keywords
-    const newCombinedRows = keywords.map(keyword => {
-      const trimmed = String(keyword).trim();
-      if (!trimmed) return null;
-      
-      // Use existing row data if available, otherwise create new structure
-      const existing = existingRowsMap.get(trimmed);
-      if (existing) {
-        return existing;
-      }
-      
-      // New keyword - create minimal structure with intent-based segment classification
-      // Use fallback classification to avoid slow imports for large keyword lists
-      // Classification will be updated on next Ranking & AI check
-      let classification = { segment: 'Other', confidence: 0.5, reason: 'other: no matching intent signals' };
-      
-      // Only try to classify if we have a small number of keywords (to avoid timeout)
-      if (keywords.length <= 50) {
-        try {
-          const classifierModule = await import('../../lib/segment/classifyKeywordSegment.js');
-          classification = classifierModule.classifyKeywordSegment({ keyword: trimmed });
-        } catch (err) {
-          console.error('[Save Keywords] Error importing classifier, using fallback:', err.message);
+    const existingKeywords = existingKeywordsResp.ok 
+      ? (await existingKeywordsResp.json()).map(r => r.keyword).filter(Boolean)
+      : [];
+
+    // Normalize new keywords
+    const newKeywords = keywords
+      .map(k => String(k).trim())
+      .filter(k => k.length > 0);
+
+    // Find keywords to add and remove
+    const keywordsToAdd = newKeywords.filter(k => !existingKeywords.includes(k));
+    const keywordsToRemove = existingKeywords.filter(k => !newKeywords.includes(k));
+
+    console.log(`[Save Keywords] Adding ${keywordsToAdd.length} keywords, removing ${keywordsToRemove.length} keywords`);
+
+    // Delete removed keywords from keyword_rankings table (batch delete)
+    if (keywordsToRemove.length > 0) {
+      // Delete in batches to avoid timeout
+      const batchSize = 50;
+      for (let i = 0; i < keywordsToRemove.length; i += batchSize) {
+        const batch = keywordsToRemove.slice(i, i + batchSize);
+        const deleteUrl = `${supabaseUrl}/rest/v1/keyword_rankings?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${auditDate}&keyword=in.(${batch.map(k => `"${k.replace(/"/g, '""')}"`).join(',')})`;
+        
+        const deleteResp = await fetch(deleteUrl, {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: supabaseKey,
+            Authorization: `Bearer ${supabaseKey}`,
+          },
+        });
+
+        if (!deleteResp.ok) {
+          console.warn(`[Save Keywords] Failed to delete batch ${i / batchSize + 1}: ${deleteResp.status}`);
         }
       }
-      
-      return {
-        keyword: trimmed,
-        segment: classification.segment,
-        segment_confidence: classification.confidence,
-        segment_reason: classification.reason,
-        segment_source: 'auto',
-        best_rank_group: null,
-        best_rank_absolute: null,
-        best_url: null,
-        best_title: trimmed,
-        has_ai_overview: false,
-        ai_total_citations: 0,
-        ai_alan_citations_count: 0,
-        ai_alan_citations: [],
-        ai_sample_citations: [],
-        serp_features: {
-          has_ai_overview: false,
-          has_local_pack: false,
-          has_featured_snippet: false,
-          has_people_also_ask: false
-        },
-        competitor_counts: {}
-      };
-    }).filter(Boolean);
-
-    // Update ranking_ai_data
-    const updatedRankingAiData = {
-      ...rankingAiData,
-      combinedRows: newCombinedRows,
-      summary: {
-        ...rankingAiData.summary,
-        totalKeywords: newCombinedRows.length
-      }
-    };
-
-    // Check payload size before sending (Supabase has limits)
-    const payload = JSON.stringify({
-      ranking_ai_data: updatedRankingAiData
-    });
-    const payloadSizeMB = Buffer.byteLength(payload, 'utf8') / (1024 * 1024);
-    
-    if (payloadSizeMB > 4) {
-      console.warn(`[Save Keywords] Large payload: ${payloadSizeMB.toFixed(2)}MB. This may cause timeouts.`);
     }
 
-    // Update the audit_results record
+    // Add new keywords to keyword_rankings table (batch insert)
+    if (keywordsToAdd.length > 0) {
+      // Get existing row data to preserve structure
+      const existingRowsMap = new Map();
+      rankingAiData.combinedRows?.forEach(row => {
+        if (row.keyword) {
+          existingRowsMap.set(row.keyword, row);
+        }
+      });
+
+      // Classify new keywords (skip for large lists to avoid timeout)
+      let classifierModule = null;
+      if (keywordsToAdd.length <= 50) {
+        try {
+          classifierModule = await import('../../lib/segment/classifyKeywordSegment.js');
+        } catch (err) {
+          console.warn('[Save Keywords] Could not load classifier, using fallback');
+        }
+      }
+
+      // Insert in batches
+      const batchSize = 50;
+      for (let i = 0; i < keywordsToAdd.length; i += batchSize) {
+        const batch = keywordsToAdd.slice(i, i + batchSize);
+        const newRows = batch.map(trimmed => {
+          // Use existing data if available, otherwise create new
+          const existing = existingRowsMap.get(trimmed);
+          if (existing) {
+            return {
+              property_url: propertyUrl,
+              audit_date: auditDate,
+              keyword: trimmed,
+              segment: existing.segment || 'Other',
+              segment_source: existing.segment_source || 'auto',
+              segment_confidence: existing.segment_confidence || 0.5,
+              segment_reason: existing.segment_reason || 'other: no matching intent signals',
+              page_type: existing.pageType || 'Landing',
+              best_rank_group: existing.best_rank_group,
+              best_rank_absolute: existing.best_rank_absolute,
+              best_url: existing.best_url,
+              best_title: existing.best_title || trimmed,
+              search_volume: existing.search_volume,
+              has_ai_overview: existing.has_ai_overview || false,
+              ai_total_citations: existing.ai_total_citations || 0,
+              ai_alan_citations_count: existing.ai_alan_citations_count || 0,
+            };
+          }
+
+          // New keyword - classify if possible
+          let classification = { segment: 'Other', confidence: 0.5, reason: 'other: no matching intent signals' };
+          if (classifierModule) {
+            try {
+              classification = classifierModule.classifyKeywordSegment({ keyword: trimmed });
+            } catch (err) {
+              // Use fallback
+            }
+          }
+
+          return {
+            property_url: propertyUrl,
+            audit_date: auditDate,
+            keyword: trimmed,
+            segment: classification.segment,
+            segment_source: 'auto',
+            segment_confidence: classification.confidence,
+            segment_reason: classification.reason,
+            page_type: 'Landing', // Will be updated on next Ranking & AI check
+            best_rank_group: null,
+            best_rank_absolute: null,
+            best_url: null,
+            best_title: trimmed,
+            search_volume: null,
+            has_ai_overview: false,
+            ai_total_citations: 0,
+            ai_alan_citations_count: 0,
+          };
+        });
+
+        const insertUrl = `${supabaseUrl}/rest/v1/keyword_rankings`;
+        const insertResp = await fetch(insertUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: supabaseKey,
+            Authorization: `Bearer ${supabaseKey}`,
+            Prefer: 'return=minimal',
+          },
+          body: JSON.stringify(newRows),
+        });
+
+        if (!insertResp.ok) {
+          const errorText = await insertResp.text();
+          console.error(`[Save Keywords] Failed to insert batch ${i / batchSize + 1}: ${errorText}`);
+        }
+      }
+    }
+
+    // Update audit_results with minimal ranking_ai_data (just keyword count)
+    // The full data will be rebuilt on next Ranking & AI check
+    const updatedRankingAiData = {
+      combinedRows: [], // Empty - will be rebuilt from keyword_rankings table
+      summary: {
+        totalKeywords: newKeywords.length
+      },
+      keywordsUpdated: new Date().toISOString()
+    };
+
     const updateUrl = `${supabaseUrl}/rest/v1/audit_results?id=eq.${latestAudit.id}`;
     const updateResp = await fetch(updateUrl, {
       method: 'PATCH',
@@ -205,9 +281,11 @@ export default async function handler(req, res) {
         'Content-Type': 'application/json',
         apikey: supabaseKey,
         Authorization: `Bearer ${supabaseKey}`,
-        Prefer: 'return=representation',
+        Prefer: 'return=minimal',
       },
-      body: payload,
+      body: JSON.stringify({
+        ranking_ai_data: updatedRankingAiData
+      }),
     });
 
     if (!updateResp.ok) {
