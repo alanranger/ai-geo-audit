@@ -32,7 +32,7 @@ export default async function handler(req, res) {
 
   try {
     // Parse parameters
-    const { property, startDate: startDateParam, endDate: endDateParam } = req.query;
+    const { property, startDate: startDateParam, endDate: endDateParam, keywords } = req.query;
     
     if (!property) {
       return res.status(400).json({
@@ -41,6 +41,21 @@ export default async function handler(req, res) {
         message: 'Missing required parameter: property',
         meta: { generatedAt: new Date().toISOString() }
       });
+    }
+    
+    // Parse keywords if provided (comma-separated or JSON array)
+    let keywordList = [];
+    if (keywords) {
+      try {
+        // Try parsing as JSON array first
+        keywordList = JSON.parse(keywords);
+        if (!Array.isArray(keywordList)) {
+          keywordList = [];
+        }
+      } catch {
+        // Fallback to comma-separated string
+        keywordList = keywords.split(',').map(k => k.trim()).filter(k => k.length > 0);
+      }
     }
     
     // Parse date range with defaults
@@ -479,6 +494,88 @@ export default async function handler(req, res) {
       }
     }
     
+    // 4c. Get query-only totals for tracked keywords (if keywords provided)
+    // Note: GSC API doesn't support OR filters, so we make individual calls per keyword
+    // This is slower but ensures we get data for all tracked keywords
+    const queryTotals = [];
+    if (keywordList.length > 0) {
+      console.log(`[GSC] Fetching query-only totals for ${keywordList.length} tracked keywords (individual calls)`);
+      
+      // Process keywords in parallel batches to avoid rate limits
+      const BATCH_SIZE = 10; // Process 10 keywords at a time
+      for (let i = 0; i < keywordList.length; i += BATCH_SIZE) {
+        const batch = keywordList.slice(i, i + BATCH_SIZE);
+        
+        // Process batch in parallel
+        const batchPromises = batch.map(async (keyword) => {
+          try {
+            const queryTotalsResponse = await fetch(searchConsoleUrl, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                startDate,
+                endDate,
+                dimensions: ['query'],
+                dimensionFilterGroups: [{
+                  filters: [{
+                    dimension: 'query',
+                    expression: keyword,
+                    operator: 'equals'
+                  }]
+                }],
+                rowLimit: 1, // Should only return one row for exact query match
+              }),
+            });
+            
+            if (queryTotalsResponse.ok) {
+              const queryTotalsData = await queryTotalsResponse.json();
+              if (queryTotalsData.rows && Array.isArray(queryTotalsData.rows) && queryTotalsData.rows.length > 0) {
+                const row = queryTotalsData.rows[0];
+                return {
+                  query: row.keys[0] || keyword,
+                  clicks: row.clicks || 0,
+                  impressions: row.impressions || 0,
+                  ctr: row.ctr ? row.ctr * 100 : 0, // Convert to percentage
+                  position: row.position || 0
+                };
+              }
+            }
+            // If no data returned, still return entry with zeros (keyword exists but no GSC data)
+            return {
+              query: keyword,
+              clicks: 0,
+              impressions: 0,
+              ctr: 0,
+              position: 0
+            };
+          } catch (err) {
+            console.error(`[GSC] Error fetching query total for "${keyword}":`, err.message);
+            // Return entry with zeros on error
+            return {
+              query: keyword,
+              clicks: 0,
+              impressions: 0,
+              ctr: 0,
+              position: 0
+            };
+          }
+        });
+        
+        const batchResults = await Promise.all(batchPromises);
+        queryTotals.push(...batchResults.filter(r => r !== null));
+        
+        // Small delay between batches to avoid rate limits
+        if (i + BATCH_SIZE < keywordList.length) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
+      
+      console.log(`[GSC] Fetched query-only totals for ${queryTotals.length} keywords`);
+    }
+    
     // 5. Get search appearance (SERP features)
     const appearanceResponse = await fetch(searchConsoleUrl, {
       method: 'POST',
@@ -529,6 +626,7 @@ export default async function handler(req, res) {
         topQueries,
         topPages,
         queryPages, // Query+page combinations for segmentation
+        queryTotals: queryTotals || [], // Query-only totals for tracked keywords
         searchAppearance
       },
       meta: {
@@ -538,6 +636,7 @@ export default async function handler(req, res) {
           topQueries: topQueries.length,
           topPages: topPages.length,
           queryPages: queryPages.length,
+          queryTotals: queryTotals.length,
           searchAppearance: searchAppearance.length
         }
       }

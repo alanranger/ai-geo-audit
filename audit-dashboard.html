@@ -3320,13 +3320,13 @@
                       <div>Search volume <span class="sort-indicator"></span></div>
                       <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Average monthly Google search volume for this keyword in the UK. Source: DataForSEO Labs – Keyword Overview.">ℹ</div>
                     </th>
-                    <th data-sort="ctr" class="sortable" title="Click-through rate (CTR) for this keyword from Google Search Console data (last 30 days).">
-                      <div>CTR <span class="sort-indicator"></span></div>
-                      <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Click-through rate (CTR) for this keyword from Google Search Console data (last 30 days).">ℹ</div>
+                    <th data-sort="ctr" class="sortable" title="Google Search Console. Query-only (keyword totals across all pages). Rolling last 30 days.">
+                      <div>CTR (30d) <span class="sort-indicator"></span></div>
+                      <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Google Search Console. Query-only (keyword totals across all pages). Rolling last 30 days.">ℹ</div>
                     </th>
-                    <th data-sort="impressions30d" class="sortable" title="Impressions from Google Search Console, last 30 days (rolling).">
+                    <th data-sort="impressions30d" class="sortable" title="Google Search Console. Query-only (keyword totals across all pages). Rolling last 30 days.">
                       <div>Impressions (30d) <span class="sort-indicator"></span></div>
-                      <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Impressions from Google Search Console, last 30 days (rolling).">ℹ</div>
+                      <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Google Search Console. Query-only (keyword totals across all pages). Rolling last 30 days.">ℹ</div>
                     </th>
                     <th data-sort="opportunityScore" class="sortable" title="Keyword opportunity score&#10;Combines three signals for this tracked keyword:&#10;• Search volume share (how much search volume this query represents in your tracked set - global, not filter-relative).&#10;• Classic ranking strength (page 1 vs page 2+ and current position).&#10;• AI usage (whether AI Overviews exist and if you're cited).&#10;Higher scores highlight the best &quot;bang-for-buck&quot; queries to improve first.">
                       <div>Opportunity score <span class="sort-indicator"></span></div>
@@ -9193,8 +9193,14 @@
       debugLog(`Date range: ${startDateStr} to ${endDateStr}`, 'info');
       
       try {
+        // Get tracked keywords for queryTotals fetching
+        const trackedKeywords = window.RankingAiModule?.TRACKED_KEYWORDS || [];
+        const keywordsParam = trackedKeywords.length > 0 
+          ? `&keywords=${encodeURIComponent(JSON.stringify(trackedKeywords))}`
+          : '';
+        
         // Call unified GSC entity metrics endpoint
-        const response = await fetch(apiUrl(`/api/aigeo/gsc-entity-metrics?property=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDateStr}`));
+        const response = await fetch(apiUrl(`/api/aigeo/gsc-entity-metrics?property=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDateStr}${keywordsParam}`));
 
         if (!response.ok) {
           const errorData = await response.json();
@@ -9226,6 +9232,13 @@
           debugLog('⚠ GSC API did not return queryPages data. Segmentation will use fallback calculation.', 'warn');
         }
         
+        // Log queryTotals availability
+        if (gsc.data.queryTotals && gsc.data.queryTotals.length > 0) {
+          debugLog(`✓ GSC API returned ${gsc.data.queryTotals.length} query-only totals for tracked keywords`, 'success');
+        } else {
+          debugLog('⚠ GSC API did not return queryTotals data. Table will show — for missing keywords.', 'warn');
+        }
+        
         // Return data in format expected by existing code
         const searchData = {
           totalClicks: gsc.data.overview.totalClicks || 0,
@@ -9234,6 +9247,7 @@
           ctr: gsc.data.overview.ctr || 0, // Already 0-100 from API
           topQueries: gsc.data.topQueries || [],
           queryPages: gsc.data.queryPages || [], // Query+page combinations for segmentation
+          queryTotals: gsc.data.queryTotals || [], // Query-only totals for tracked keywords (for table)
           timeseries: gsc.data.timeseries || [], // For trend chart
           dateRange: days,
           // Store full GSC response for trend chart access
@@ -26239,31 +26253,31 @@ Final Score: ${score}/100`;
         tdVolume.appendChild(volumeBadge);
         tr.appendChild(tdVolume);
 
-        // CTR - use unified helper, ensure impressions > 0
+        // CTR (30d) - query-only from queryTotals
         const tdCtr = document.createElement("td");
-        const gscMetrics = getGscMetricsForKeywordRow({
-          query: row.keyword,
-          pageUrl: row.ranking_url
-        });
-        // Only show CTR if impressions > 0 (CTR requires impressions)
-        if (gscMetrics && gscMetrics.impressions > 0 && gscMetrics.ctrDecimal != null) {
-          const ctrPercent = (gscMetrics.ctrDecimal * 100).toFixed(2);
+        const queryTotal = getQueryTotalForKeyword(row.keyword);
+        if (queryTotal && queryTotal.impressions > 0 && queryTotal.ctr != null) {
+          const ctrPercent = (queryTotal.ctr * 100).toFixed(2);
           tdCtr.textContent = `${ctrPercent}%`;
           tdCtr.style.color = '#1e293b';
+          tdCtr.title = "Google Search Console. Query-only (keyword totals across all pages). Rolling last 30 days.";
         } else {
           tdCtr.textContent = "—";
           tdCtr.style.color = '#94a3b8';
+          tdCtr.title = "No query totals returned for this keyword in the last 30 days.";
         }
         tr.appendChild(tdCtr);
 
-        // Impressions (30d) - reuse gscMetrics from CTR cell above
+        // Impressions (30d) - query-only from queryTotals
         const tdImpressions = document.createElement("td");
-        if (gscMetrics && gscMetrics.impressions != null && gscMetrics.impressions > 0) {
-          tdImpressions.textContent = gscMetrics.impressions.toLocaleString();
+        if (queryTotal && queryTotal.impressions != null && queryTotal.impressions > 0) {
+          tdImpressions.textContent = queryTotal.impressions.toLocaleString();
           tdImpressions.style.color = '#1e293b';
+          tdImpressions.title = "Google Search Console. Query-only (keyword totals across all pages). Rolling last 30 days.";
         } else {
           tdImpressions.textContent = "—";
           tdImpressions.style.color = '#94a3b8';
+          tdImpressions.title = "No query totals returned for this keyword in the last 30 days.";
         }
         tr.appendChild(tdImpressions);
 
@@ -26621,23 +26635,15 @@ Final Score: ${score}/100`;
       html += `</ul>`;
       html += `</div>`;
 
-      // 1. Demand and 2. Classic ranking - side by side with equal height/width/padding
+      // 1. Target page totals and 2. Classic ranking - side by side with equal height/width/padding
       html += `<div style="display: flex; gap: 1rem; margin-bottom: 1.0rem; align-items: stretch;">`;
       
-      // 1. Demand (left half)
+      // 1. Target page totals (left half) - page-only GSC data
       html += `<div class="scorecard-section" style="flex: 1 1 50%; min-width: 0; display: flex; flex-direction: column; height: 100%;">`;
-      html += `<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">1. Demand</h5>`;
-      html += `<div style="padding-left: 0.75rem;">`;
-      const volumeFormatted = scorecardData.search_volume != null ? scorecardData.search_volume.toLocaleString() : '—';
-      const volumeClass = scorecardData.demand_level === 'High' ? 'ranking-badge-volume--high' : 
-                         scorecardData.demand_level === 'Medium' ? 'ranking-badge-volume--med' : 
-                         'ranking-badge-volume--low';
-      html += `<div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.5rem; font-size: 0.875rem; line-height: 1.5;">`;
-      html += `<span>Search volume:</span> <span class="ranking-badge-volume ${volumeClass}">${volumeFormatted} ${scorecardData.demand_level}</span>`;
-      html += `</div>`;
-      html += `<div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.5rem; font-size: 0.875rem; line-height: 1.5;">`;
-      html += `<span>Demand share:</span> <strong style="color: #0284c7;">${(scorecardData.demand_share * 100).toFixed(1)}%</strong>`;
-      html += `</div></div></div>`;
+      html += `<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">1. Target page totals (GSC, 30d) <span title="Page-only totals for the best-ranking URL (DataForSEO). Includes all queries that brought impressions/clicks to this page." style="opacity: 0.6; cursor: help; font-size: 0.75rem;">ℹ</span></h5>`;
+      html += `<div style="padding-left: 0.75rem;" id="scorecard-page-totals-${scorecardData.keyword.replace(/[^a-z0-9]/gi, '_')}">`;
+      html += `<div style="color: #64748b; font-size: 0.875rem;">Loading page totals...</div>`;
+      html += `</div></div>`;
 
       // 2. Classic ranking (right half)
       html += `<div class="scorecard-section" style="flex: 1 1 50%; min-width: 0; display: flex; flex-direction: column; height: 100%;">`;
@@ -26671,22 +26677,20 @@ Final Score: ${score}/100`;
       
       html += `</div>`; // Close flex container
 
-      // 3. CTR & snippet
+      // 3. CTR & snippet (query-only)
       html += `<div class="scorecard-section">`;
-      html += `<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">3. CTR & snippet</h5>`;
+      html += `<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">3. CTR & snippet (GSC, 30d) <span title="Query-only totals for this keyword across all pages." style="opacity: 0.6; cursor: help; font-size: 0.75rem;">ℹ</span></h5>`;
       html += `<div style="padding-left: 0.75rem;">`;
       
-      // Get GSC metrics using unified helper
-      const gscMetrics = getGscMetricsForKeywordRow({
-        query: scorecardData.keyword,
-        pageUrl: scorecardData.ranking_url
-      });
+      // Get query-only totals from queryTotals
+      const queryTotal = getQueryTotalForKeyword(scorecardData.keyword);
       
       // Only show CTR if impressions > 0 (CTR requires impressions)
-      if (gscMetrics && gscMetrics.impressions > 0 && gscMetrics.ctrDecimal != null) {
-        // Real CTR data available
-        const ctrPercent = (gscMetrics.ctrDecimal * 100).toFixed(2);
-        const impressionsFormatted = gscMetrics.impressions.toLocaleString();
+      if (queryTotal && queryTotal.impressions > 0 && queryTotal.ctr != null) {
+        // Real CTR data available (query-only)
+        const ctrPercent = (queryTotal.ctr * 100).toFixed(2);
+        const impressionsFormatted = queryTotal.impressions.toLocaleString();
+        const clicksFormatted = queryTotal.clicks.toLocaleString();
         const positionBucket = getPositionBucket(scorecardData.best_rank_group);
         const ctrBenchmark = getCtrBenchmarkForPosition(positionBucket);
         const benchmarkPercent = (ctrBenchmark * 100).toFixed(2);
@@ -26695,11 +26699,11 @@ Final Score: ${score}/100`;
         let ctrPerformance = 'OK';
         let ctrPerformanceColor = '#f59e0b'; // Amber
         let ctrPerformanceBg = '#fffbeb';
-        if (gscMetrics.ctrDecimal >= ctrBenchmark * 1.1) {
+        if (queryTotal.ctr >= ctrBenchmark * 1.1) {
           ctrPerformance = 'Strong';
           ctrPerformanceColor = '#10b981'; // Green
           ctrPerformanceBg = '#f0fdf4';
-        } else if (gscMetrics.ctrDecimal < ctrBenchmark * 0.8) {
+        } else if (queryTotal.ctr < ctrBenchmark * 0.8) {
           ctrPerformance = 'Weak';
           ctrPerformanceColor = '#ef4444'; // Red
           ctrPerformanceBg = '#fef2f2';
@@ -26710,13 +26714,12 @@ Final Score: ${score}/100`;
         html += `<span>CTR (last 30 days): <strong style="color: #1e293b;">${ctrPercent}%</strong></span>`;
         html += `<span>·</span>`;
         html += `<span>Impressions: <strong style="color: #1e293b;">${impressionsFormatted}</strong></span>`;
-        if (gscMetrics.scope && gscMetrics.scope !== 'query+page') {
-          html += `<span>·</span>`;
-          html += `<span style="font-size: 0.75rem; color: #64748b;">(${gscMetrics.scope})</span>`;
-        }
+        html += `<span>·</span>`;
+        html += `<span>Clicks: <strong style="color: #1e293b;">${clicksFormatted}</strong></span>`;
+        html += `<span style="font-size: 0.75rem; color: #64748b;">(query-only)</span>`;
         html += `</div>`;
         html += `<div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.5rem; font-size: 0.875rem;">`;
-        html += `<span>Expected CTR at this position: <strong style="color: #64748b;">${benchmarkPercent}%</strong></span>`;
+        html += `<span>Expected CTR at this position: <strong style="color: #64748b;">${benchmarkPercent}%</strong> <span title="Heuristic benchmark based on rank position (not from GSC)." style="opacity: 0.6; cursor: help; font-size: 0.75rem;">ℹ</span></span>`;
         html += `</div>`;
         html += `<div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.75rem;">`;
         html += `<span style="font-size: 0.875rem;">CTR performance: <span style="padding: 0.25rem 0.5rem; border-radius: 4px; font-weight: 600; background: ${ctrPerformanceBg}; border-left: 3px solid ${ctrPerformanceColor}; color: #1e293b;">${ctrPerformance}</span></span>`;
@@ -26733,9 +26736,16 @@ Final Score: ${score}/100`;
           html += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">CTR is in line with expectations for this position. Further gains are more likely to come from improving rank (links and authority) than snippet tweaks alone.</p>`;
         }
       } else {
-        // No GSC data found for last 30 days
-        html += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">No GSC data found for last 30 days${gscMetrics && gscMetrics.scope ? ` (scope: ${gscMetrics.scope})` : ''}.</p>`;
+        // No query-only data found for last 30 days
+        html += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">No query-only totals returned for this keyword in the last 30 days.</p>`;
       }
+      html += `</div></div>`;
+      
+      // Advanced: Pages with impressions for this keyword (query→pages breakdown)
+      html += `<div class="scorecard-section" style="margin-top: 1rem;">`;
+      html += `<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">Advanced: Pages with impressions for this keyword (GSC) <span title="Pages with impressions for this keyword (GSC query→pages breakdown)." style="opacity: 0.6; cursor: help; font-size: 0.75rem;">ℹ</span></h5>`;
+      html += `<div style="padding-left: 0.75rem;" id="scorecard-query-pages-${scorecardData.keyword.replace(/[^a-z0-9]/gi, '_')}">`;
+      html += `<div style="color: #64748b; font-size: 0.875rem;">Loading pages breakdown...</div>`;
       html += `</div></div>`;
 
       // 4. Schema & rich results
@@ -27103,6 +27113,137 @@ Final Score: ${score}/100`;
       // Hide the separate summary element since it's now included in the main HTML
       const sumEl = document.getElementById("ranking-ai-detail-summary");
       if (sumEl) sumEl.style.display = 'none';
+      
+      // Fetch page totals and query→pages breakdown asynchronously
+      const pageTotalsEl = document.getElementById(`scorecard-page-totals-${scorecardData.keyword.replace(/[^a-z0-9]/gi, '_')}`);
+      const queryPagesEl = document.getElementById(`scorecard-query-pages-${scorecardData.keyword.replace(/[^a-z0-9]/gi, '_')}`);
+      
+      // Fetch page-only totals for best_url
+      if (pageTotalsEl && scorecardData.ranking_url) {
+        (async () => {
+          try {
+            const savedAudit = loadAuditResultsSync();
+            const propertyUrl = savedAudit?.propertyUrl || window.lastAuditPropertyUrl || 'https://www.alanranger.com';
+            
+            // Calculate date range (last 30 days)
+            const endDate = new Date();
+            const startDate = new Date();
+            startDate.setDate(startDate.getDate() - 30);
+            const formatDate = (date) => {
+              const year = date.getFullYear();
+              const month = String(date.getMonth() + 1).padStart(2, '0');
+              const day = String(date.getDate()).padStart(2, '0');
+              return `${year}-${month}-${day}`;
+            };
+            
+            const response = await fetch(apiUrl(`/api/aigeo/gsc-page-totals?property=${encodeURIComponent(propertyUrl)}&pageUrl=${encodeURIComponent(scorecardData.ranking_url)}&startDate=${formatDate(startDate)}&endDate=${formatDate(endDate)}`));
+            
+            if (response.ok) {
+              const data = await response.json();
+              if (data.status === 'ok' && data.data) {
+                const pageData = data.data;
+                let pageHtml = '';
+                pageHtml += `<div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.5rem; font-size: 0.875rem; line-height: 1.5;">`;
+                pageHtml += `<span>Clicks: <strong style="color: #1e293b;">${pageData.clicks.toLocaleString()}</strong></span>`;
+                pageHtml += `</div>`;
+                pageHtml += `<div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.5rem; font-size: 0.875rem; line-height: 1.5;">`;
+                pageHtml += `<span>Impressions: <strong style="color: #1e293b;">${pageData.impressions.toLocaleString()}</strong></span>`;
+                pageHtml += `</div>`;
+                pageHtml += `<div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.5rem; font-size: 0.875rem; line-height: 1.5;">`;
+                pageHtml += `<span>CTR: <strong style="color: #1e293b;">${(pageData.ctr).toFixed(2)}%</strong></span>`;
+                pageHtml += `</div>`;
+                pageHtml += `<div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.5rem; font-size: 0.875rem; line-height: 1.5;">`;
+                pageHtml += `<span>Avg position: <strong style="color: #1e293b;">${pageData.position.toFixed(1)}</strong></span>`;
+                pageHtml += `</div>`;
+                pageTotalsEl.innerHTML = pageHtml;
+              } else {
+                pageTotalsEl.innerHTML = `<div style="color: #64748b; font-size: 0.875rem;">No page totals returned for this URL in the last 30 days.</div>`;
+              }
+            } else {
+              pageTotalsEl.innerHTML = `<div style="color: #64748b; font-size: 0.875rem;">Unable to load page totals.</div>`;
+            }
+          } catch (err) {
+            console.error('Error fetching page totals:', err);
+            pageTotalsEl.innerHTML = `<div style="color: #64748b; font-size: 0.875rem;">Error loading page totals: ${err.message}</div>`;
+          }
+        })();
+      }
+      
+      // Fetch query→pages breakdown
+      if (queryPagesEl) {
+        (async () => {
+          try {
+            const savedAudit = loadAuditResultsSync();
+            const propertyUrl = savedAudit?.propertyUrl || window.lastAuditPropertyUrl || 'https://www.alanranger.com';
+            
+            // Calculate date range (last 30 days)
+            const endDate = new Date();
+            const startDate = new Date();
+            startDate.setDate(startDate.getDate() - 30);
+            const formatDate = (date) => {
+              const year = date.getFullYear();
+              const month = String(date.getMonth() + 1).padStart(2, '0');
+              const day = String(date.getDate()).padStart(2, '0');
+              return `${year}-${month}-${day}`;
+            };
+            
+            const response = await fetch(apiUrl(`/api/aigeo/gsc-query-pages?property=${encodeURIComponent(propertyUrl)}&query=${encodeURIComponent(scorecardData.keyword)}&startDate=${formatDate(startDate)}&endDate=${formatDate(endDate)}`));
+            
+            if (response.ok) {
+              const data = await response.json();
+              if (data.status === 'ok' && data.data && data.data.pages) {
+                const pages = data.data.pages;
+                const bestUrl = scorecardData.ranking_url;
+                const normalizedBestUrl = bestUrl ? normalizeGscPageUrl(bestUrl) : null;
+                
+                let pagesHtml = '';
+                if (pages.length === 0) {
+                  pagesHtml = `<div style="color: #64748b; font-size: 0.875rem;">No pages found with impressions for this keyword.</div>`;
+                } else {
+                  pagesHtml += `<table style="width: 100%; border-collapse: collapse; font-size: 0.875rem; margin-top: 0.5rem;">`;
+                  pagesHtml += `<thead><tr style="border-bottom: 1px solid #e5e7eb;">`;
+                  pagesHtml += `<th style="text-align: left; padding: 0.5rem; font-weight: 600; color: #374151;">Page URL</th>`;
+                  pagesHtml += `<th style="text-align: right; padding: 0.5rem; font-weight: 600; color: #374151;">Clicks</th>`;
+                  pagesHtml += `<th style="text-align: right; padding: 0.5rem; font-weight: 600; color: #374151;">Impressions</th>`;
+                  pagesHtml += `<th style="text-align: right; padding: 0.5rem; font-weight: 600; color: #374151;">CTR</th>`;
+                  pagesHtml += `<th style="text-align: right; padding: 0.5rem; font-weight: 600; color: #374151;">Position</th>`;
+                  pagesHtml += `</tr></thead><tbody>`;
+                  
+                  pages.forEach(page => {
+                    const normalizedPageUrl = normalizeGscPageUrl(page.page);
+                    const isBestUrl = normalizedBestUrl && normalizedPageUrl === normalizedBestUrl;
+                    const rowStyle = isBestUrl ? 'background: #fef3c7; border-left: 3px solid #f59e0b;' : '';
+                    
+                    pagesHtml += `<tr style="${rowStyle} border-bottom: 1px solid #e5e7eb;">`;
+                    pagesHtml += `<td style="padding: 0.5rem; word-break: break-word;">`;
+                    if (isBestUrl) {
+                      pagesHtml += `<strong style="color: #92400e;">${page.page}</strong> <span style="font-size: 0.75rem; color: #64748b;">(DataForSEO best URL)</span>`;
+                    } else {
+                      pagesHtml += page.page;
+                    }
+                    pagesHtml += `</td>`;
+                    pagesHtml += `<td style="text-align: right; padding: 0.5rem;">${page.clicks.toLocaleString()}</td>`;
+                    pagesHtml += `<td style="text-align: right; padding: 0.5rem;">${page.impressions.toLocaleString()}</td>`;
+                    pagesHtml += `<td style="text-align: right; padding: 0.5rem;">${(page.ctr).toFixed(2)}%</td>`;
+                    pagesHtml += `<td style="text-align: right; padding: 0.5rem;">${page.position.toFixed(1)}</td>`;
+                    pagesHtml += `</tr>`;
+                  });
+                  
+                  pagesHtml += `</tbody></table>`;
+                }
+                queryPagesEl.innerHTML = pagesHtml;
+              } else {
+                queryPagesEl.innerHTML = `<div style="color: #64748b; font-size: 0.875rem;">No pages found with impressions for this keyword.</div>`;
+              }
+            } else {
+              queryPagesEl.innerHTML = `<div style="color: #64748b; font-size: 0.875rem;">Unable to load pages breakdown.</div>`;
+            }
+          } catch (err) {
+            console.error('Error fetching query→pages breakdown:', err);
+            queryPagesEl.innerHTML = `<div style="color: #64748b; font-size: 0.875rem;">Error loading pages breakdown: ${err.message}</div>`;
+          }
+        })();
+      }
 
       // Update AI citations section in right panel
       const citationsEmpty = document.getElementById("ranking-ai-citations-empty");
