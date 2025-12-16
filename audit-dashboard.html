@@ -16555,7 +16555,21 @@ Final Score: ${score}/100`;
             
             const clicks = allMoney.clicks || null;
             const impressions = allMoney.impressions || null;
-            const ctr = summary.ctr ? summary.ctr * 100 : (allMoney.ctr ? allMoney.ctr * 100 : null);
+            // Calculate CTR directly from clicks/impressions for accuracy
+            // If clicks and impressions are available, calculate CTR as percentage
+            // Otherwise fall back to stored values (assuming they're in decimal format 0-1)
+            let ctr = null;
+            if (clicks != null && impressions != null && impressions > 0) {
+              ctr = (clicks / impressions) * 100;
+            } else if (summary.ctr != null) {
+              // summary.ctr might be decimal (0.015) or percentage (1.5)
+              // If > 1, assume it's already a percentage; otherwise multiply by 100
+              ctr = summary.ctr > 1 ? summary.ctr : summary.ctr * 100;
+            } else if (allMoney.ctr != null) {
+              // allMoney.ctr might be decimal (0.015) or percentage (1.5)
+              // If > 1, assume it's already a percentage; otherwise multiply by 100
+              ctr = allMoney.ctr > 1 ? allMoney.ctr : allMoney.ctr * 100;
+            }
             
             // Debug logging for Dec 14 specifically
             if (dateStr === '2025-12-14') {
