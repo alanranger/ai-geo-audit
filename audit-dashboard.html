@@ -14084,6 +14084,36 @@ Final Score: ${score}/100`;
         // Sort by date
         moneyHistory.sort((a, b) => new Date(a.date) - new Date(b.date));
         
+        // Forward-fill missing values: use last available value for each metric
+        let lastValues = {
+          behaviourScore: null,
+          shareOfImpressions: null,
+          shareOfClicks: null,
+          ctr: null
+        };
+        
+        for (const entry of moneyHistory) {
+          // Forward-fill missing values
+          if (entry.behaviourScore == null && lastValues.behaviourScore != null) {
+            entry.behaviourScore = lastValues.behaviourScore;
+          }
+          if (entry.shareOfImpressions == null && lastValues.shareOfImpressions != null) {
+            entry.shareOfImpressions = lastValues.shareOfImpressions;
+          }
+          if (entry.shareOfClicks == null && lastValues.shareOfClicks != null) {
+            entry.shareOfClicks = lastValues.shareOfClicks;
+          }
+          if (entry.ctr == null && lastValues.ctr != null) {
+            entry.ctr = lastValues.ctr;
+          }
+          
+          // Update last values if we have new ones
+          if (entry.behaviourScore != null) lastValues.behaviourScore = entry.behaviourScore;
+          if (entry.shareOfImpressions != null) lastValues.shareOfImpressions = entry.shareOfImpressions;
+          if (entry.shareOfClicks != null) lastValues.shareOfClicks = entry.shareOfClicks;
+          if (entry.ctr != null) lastValues.ctr = entry.ctr;
+        }
+        
         if (moneyHistory.length === 0) {
           debugLog('⚠ No money pages history data after filtering', 'warn');
           const cardBody = ctx.closest('.card-body');
@@ -14541,6 +14571,9 @@ Final Score: ${score}/100`;
         
         // Store filtered rows for pagination and copy button
         window.moneyPagesPriorityFilteredRows = rows;
+        
+        // Update dropdown counts
+        updateMoneyPagesTypeFilterCounts(sourcePages);
         
         // Pagination logic
         const rowsPerPage = window.moneyPagesPriorityRowsPerPage || 10;
@@ -15054,11 +15087,30 @@ Final Score: ${score}/100`;
           productPages: []
         };
 
+        // Forward-fill missing values: use last available value for each segment
+        let lastValues = {
+          allMoney: null,
+          landingPages: null,
+          eventPages: null,
+          productPages: null
+        };
+        
         for (const audit of last12Audits) {
           const m = audit.metrics;
           for (const key of Object.keys(segments)) {
             const seg = m[key] || null;
-            const v = seg ? seg[metricKey] : null;
+            let v = seg ? seg[metricKey] : null;
+            
+            // If value is null/missing, use last available value (forward-fill)
+            if (v == null && lastValues[key] != null) {
+              v = lastValues[key];
+            }
+            
+            // Update last value if we have a new one
+            if (v != null) {
+              lastValues[key] = v;
+            }
+            
             segments[key].push(v);
           }
         }
@@ -15813,11 +15865,11 @@ Final Score: ${score}/100`;
                 <label style="display: flex; align-items: center; gap: 0.5rem;" title="Filter money pages by segment type. Landing pages are collection/category pages, Event pages are workshop/event listings, Product pages are service/product offerings.">
                   Page type:
                   <select id="money-pages-type-filter" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 4px;" title="Filter money pages by segment type. Landing pages are collection/category pages, Event pages are workshop/event listings, Product pages are service/product offerings.">
-                    <option value="all">All money pages</option>
-                    <option value="authority">Authority</option>
-                    <option value="landing">Landing pages</option>
-                    <option value="event">Event pages</option>
-                    <option value="product">Product pages</option>
+                    <option value="all" id="money-pages-type-all">All money pages</option>
+                    <option value="authority" id="money-pages-type-authority">Authority</option>
+                    <option value="landing" id="money-pages-type-landing">Landing pages</option>
+                    <option value="event" id="money-pages-type-event">Event pages</option>
+                    <option value="product" id="money-pages-type-product">Product pages</option>
                   </select>
                 </label>
                 <label style="display: flex; align-items: center; gap: 0.5rem;" title="Filter out pages with fewer impressions than this threshold. Helps focus on pages with meaningful search visibility.">
