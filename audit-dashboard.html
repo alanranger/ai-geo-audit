@@ -21813,6 +21813,7 @@ Final Score: ${score}/100`;
                 // Force re-classification on every load to ensure accuracy
                 debugLog(`🔄 Re-classifying pageType for ${keywordCount} keywords...`, 'info');
                 let reclassifiedCount = 0;
+                const typeCounts = { Event: 0, Product: 0, Blog: 0, GBP: 0, Landing: 0, Other: 0 };
                 combinedRows.forEach(row => {
                   const bestUrl = row.best_url || row.bestUrl || null;
                   const oldPageType = row.pageType || 'Landing';
@@ -21846,10 +21847,14 @@ Final Score: ${score}/100`;
                     if (newPageType !== oldPageType) {
                       row.pageType = newPageType;
                       reclassifiedCount++;
+                      debugLog(`  Changed: "${row.keyword}" ${oldPageType} → ${newPageType} (${bestUrl.substring(0, 60)}...)`, 'info');
                     } else {
                       // Ensure pageType is set even if unchanged
                       row.pageType = newPageType;
                     }
+                    
+                    // Count by type
+                    typeCounts[newPageType] = (typeCounts[newPageType] || 0) + 1;
                     
                     // Also update classification object if it exists
                     if (row.classification) {
@@ -21862,11 +21867,13 @@ Final Score: ${score}/100`;
                   } else {
                     // No URL, default to Landing
                     row.pageType = 'Landing';
+                    typeCounts.Landing++;
                     if (row.classification) {
                       row.classification.pageType = 'Landing';
                     }
                   }
                 });
+                debugLog(`📊 PageType counts after re-classification: Event=${typeCounts.Event}, Product=${typeCounts.Product}, Blog=${typeCounts.Blog}, GBP=${typeCounts.GBP}, Landing=${typeCounts.Landing}, Other=${typeCounts.Other}`, 'info');
                 if (reclassifiedCount > 0) {
                   debugLog(`✓ Re-classified ${reclassifiedCount} keywords with updated pageType`, 'success');
                 } else {
