@@ -4095,10 +4095,20 @@
           if (typeof renderMoneyPagesSection === 'function' && saved && saved.scores && saved.scores.moneyPagesMetrics) {
             debugLog('Re-rendering Money Pages section', 'info');
             renderMoneyPagesSection(saved.scores.moneyPagesMetrics);
-          }
-
-          // Opportunity Mix: render after layout settles (Money tab activation can report 0x0)
-          if (saved && saved.scores && saved.scores.moneyPagesMetrics && typeof renderMoneyPagesCategoryChart === 'function') {
+            
+            // Wait for HTML structure to be created before rendering charts
+            setTimeout(() => {
+              // Opportunity Mix: render after layout settles (Money tab activation can report 0x0)
+              if (saved && saved.scores && saved.scores.moneyPagesMetrics && typeof renderMoneyPagesCategoryChart === 'function') {
+                requestAnimationFrame(() => {
+                  requestAnimationFrame(() => {
+                    renderMoneyPagesCategoryChart(saved.scores.moneyPagesMetrics, 0);
+                  });
+                });
+              }
+            }, 200); // Give renderMoneyPagesSection time to create HTML structure
+          } else if (saved && saved.scores && saved.scores.moneyPagesMetrics && typeof renderMoneyPagesCategoryChart === 'function') {
+            // If renderMoneyPagesSection wasn't called, still try to render charts (structure might already exist)
             requestAnimationFrame(() => {
               requestAnimationFrame(() => {
                 renderMoneyPagesCategoryChart(saved.scores.moneyPagesMetrics, 0);
@@ -4106,45 +4116,120 @@
             });
           }
           
-          const trendCanvas = document.getElementById('moneyPagesTrendChart');
-          if (trendCanvas && typeof renderMoneyPagesTrendChart === 'function') {
-            const propertyUrl = document.getElementById('propertyUrl')?.value;
-            if (propertyUrl) {
-              const endDate = new Date();
-              const startDate = new Date();
-              startDate.setFullYear(startDate.getFullYear() - 1);
-              const startDateStr = startDate.toISOString().split('T')[0];
-              const endDateStr = endDate.toISOString().split('T')[0];
+          // Render charts only when panel is visible and canvas has dimensions
+          // Wait a bit longer to ensure HTML structure is created
+          setTimeout(() => {
+            const renderMoneyCharts = () => {
+            const moneyPanel = document.querySelector('.aigeo-panel[data-panel="money"]');
+            const isPanelVisible = moneyPanel && moneyPanel.classList.contains('is-active') && 
+                                   window.getComputedStyle(moneyPanel).display !== 'none';
+            
+            if (!isPanelVisible) {
+              debugLog('⚠ Money Pages charts: Panel not visible yet, will retry', 'warn');
+              setTimeout(renderMoneyCharts, 200);
+              return;
+            }
+            
+            const trendCanvas = document.getElementById('moneyPagesTrendChart');
+            if (trendCanvas && typeof renderMoneyPagesTrendChart === 'function') {
+              const rect = trendCanvas.getBoundingClientRect();
+              if (rect.width === 0 || rect.height === 0) {
+                debugLog('⚠ Money Pages trend chart: Canvas has zero dimensions, will retry', 'warn');
+                setTimeout(renderMoneyCharts, 200);
+                return;
+              }
               
-              // Use apiUrl helper so this works both on Vercel and when opened locally (file://)
-              const urlHelper = window.apiUrl || ((path) => {
-                const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || !window.location.hostname;
-                const baseUrl = isLocal ? 'https://ai-geo-audit.vercel.app' : '';
-                const cleanPath = path.startsWith('/') ? path : `/${path}`;
-                return `${baseUrl}${cleanPath}`;
-              });
-              fetch(urlHelper(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDateStr}`))
-                .then(res => res.json())
-                .then(json => {
-                  if (json.status === 'ok' && json.data) {
-                    requestAnimationFrame(() => {
-                      requestAnimationFrame(() => renderMoneyPagesTrendChart(json.data));
-                    });
-                  }
-                })
-                .catch(err => debugLog(`Error fetching history for trend chart: ${err.message}`, 'warn'));
+              const propertyUrl = document.getElementById('propertyUrl')?.value;
+              if (propertyUrl) {
+                const endDate = new Date();
+                const startDate = new Date();
+                startDate.setFullYear(startDate.getFullYear() - 1);
+                const startDateStr = startDate.toISOString().split('T')[0];
+                const endDateStr = endDate.toISOString().split('T')[0];
+                
+                // Use apiUrl helper so this works both on Vercel and when opened locally (file://)
+                const urlHelper = window.apiUrl || ((path) => {
+                  const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || !window.location.hostname;
+                  const baseUrl = isLocal ? 'https://ai-geo-audit.vercel.app' : '';
+                  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+                  return `${baseUrl}${cleanPath}`;
+                });
+                fetch(urlHelper(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDateStr}`))
+                  .then(res => res.json())
+                  .then(json => {
+                    if (json.status === 'ok' && json.data) {
+                      // Extract last GSC timeseries date from API response if available
+                      if (json.timeseries && Array.isArray(json.timeseries) && json.timeseries.length > 0) {
+                        const timeseriesDates = json.timeseries
+                          .map(ts => ts.date)
+                          .filter(date => date)
+                          .sort()
+                          .reverse();
+                        if (timeseriesDates.length > 0) {
+                          window.lastGscTimeseriesDate = timeseriesDates[0];
+                          debugLog(`Money Pages Trend: Set last GSC timeseries date from API: ${window.lastGscTimeseriesDate}`, 'info');
+                        }
+                      }
+                      
+                      requestAnimationFrame(() => {
+                        requestAnimationFrame(() => {
+                          const canvas = document.getElementById('moneyPagesTrendChart');
+                          if (canvas) {
+                            const rect = canvas.getBoundingClientRect();
+                            if (rect.width > 0 && rect.height > 0) {
+                              renderMoneyPagesTrendChart(json.data);
+                            } else {
+                              debugLog('⚠ Money Pages trend chart: Canvas still has zero dimensions, retrying...', 'warn');
+                              setTimeout(() => renderMoneyCharts(), 200);
+                            }
+                          } else {
+                            debugLog('⚠ Money Pages trend chart: Canvas element not found', 'warn');
+                          }
+                        });
+                      });
+                    } else {
+                      debugLog(`⚠ Money Pages trend chart: API returned error or no data. Status: ${json.status}`, 'warn');
+                    }
+                  })
+                  .catch(err => {
+                    debugLog(`✗ Error fetching history for trend chart: ${err.message}`, 'error');
+                    console.error('Money Pages trend chart fetch error:', err);
+                  });
+              }
             }
-          }
-          
-          const sparklineCanvas = document.getElementById('money-kpi-sparkline');
-          if (sparklineCanvas && typeof loadAuditHistoryAndRenderKpis === 'function') {
-            const propertyUrl = document.getElementById('propertyUrl')?.value;
-            if (propertyUrl) {
-              requestAnimationFrame(() => {
-                requestAnimationFrame(() => loadAuditHistoryAndRenderKpis(propertyUrl));
-              });
+            
+            const sparklineCanvas = document.getElementById('money-kpi-sparkline');
+            if (sparklineCanvas && typeof loadAuditHistoryAndRenderKpis === 'function') {
+              const rect = sparklineCanvas.getBoundingClientRect();
+              if (rect.width === 0 || rect.height === 0) {
+                debugLog('⚠ Money KPI sparkline: Canvas has zero dimensions, will retry', 'warn');
+                setTimeout(renderMoneyCharts, 200);
+                return;
+              }
+              
+              const propertyUrl = document.getElementById('propertyUrl')?.value;
+              if (propertyUrl) {
+                requestAnimationFrame(() => {
+                  requestAnimationFrame(() => {
+                    const canvas = document.getElementById('money-kpi-sparkline');
+                    if (canvas) {
+                      const rect = canvas.getBoundingClientRect();
+                      if (rect.width > 0 && rect.height > 0) {
+                        loadAuditHistoryAndRenderKpis(propertyUrl);
+                      } else {
+                        debugLog('⚠ Money KPI sparkline: Canvas still has zero dimensions, retrying...', 'warn');
+                        setTimeout(() => renderMoneyCharts(), 200);
+                      }
+                    }
+                  });
+                });
+              }
             }
-          }
+            };
+            
+            // Start rendering charts with retry logic
+            renderMoneyCharts();
+          }, 300); // Wait 300ms to ensure HTML structure is created
           
           // Wire up KPI metric selector
           if (typeof window.wireMoneyKpiMetricSelector === 'function') {
@@ -13201,10 +13286,151 @@ Final Score: ${score}/100`;
       
       // Function to render Money Pages Performance section
       function renderMoneyPagesSection(moneyPagesMetrics) {
-        const section = document.getElementById('money-pages-section');
-        if (!section) {
-          debugLog('⚠ Money Pages section element not found', 'warn');
+        // Get or create the Money Pages panel
+        const moneyPanel = document.querySelector('.aigeo-panel[data-panel="money"]');
+        if (!moneyPanel) {
+          debugLog('⚠ Money Pages panel not found', 'warn');
           return;
+        }
+        
+        // Get or create the money-pages-section element
+        let section = document.getElementById('money-pages-section');
+        if (!section) {
+          debugLog('⚠ Money Pages section element not found, creating it...', 'warn');
+          // Create the Money Pages HTML structure if it doesn't exist
+          section = document.createElement('div');
+          section.id = 'money-pages-section';
+          section.style.display = 'block';
+          
+          // Create the full Money Pages HTML structure
+          section.innerHTML = `
+            <!-- Top-level filters -->
+            <div class="card" style="margin-bottom: 1.5rem;">
+              <div class="card-header">
+                <h3>Money Pages Filters</h3>
+              </div>
+              <div class="card-body" style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #475569;">
+                  Sub-segment:
+                  <select id="money-top-level-filter-subsegment" style="padding: 0.4rem 0.6rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.85rem; background: white; cursor: pointer;">
+                    <option value="ALL">All sub-segments</option>
+                    <option value="PRODUCT">Product Pages</option>
+                    <option value="EVENT">Event Pages</option>
+                    <option value="LANDING">Landing Pages</option>
+                  </select>
+                </label>
+                <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #475569;">
+                  Page type:
+                  <select id="money-pages-type-filter" style="padding: 0.4rem 0.6rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.85rem; background: white; cursor: pointer;">
+                    <option value="ALL">All types</option>
+                    <option value="LANDING">Landing Pages</option>
+                    <option value="EVENT">Event Pages</option>
+                    <option value="PRODUCT">Product Pages</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+            
+            <!-- Summary cards -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+              <div class="card" id="money-summary-click-share">
+                <div class="metric-label">Share of site clicks</div>
+                <div class="metric-value">—</div>
+                <div class="metric-sub">No data</div>
+              </div>
+              <div class="card" id="money-summary-ctr">
+                <div class="metric-label">CTR vs site</div>
+                <div class="metric-value">—</div>
+                <div class="metric-sub">No data</div>
+              </div>
+              <div class="card" id="money-summary-position">
+                <div class="metric-label">Average position</div>
+                <div class="metric-value">—</div>
+                <div class="metric-sub">No data</div>
+              </div>
+              <div class="card" id="money-summary-coverage">
+                <div class="metric-label">Money pages with impressions</div>
+                <div class="metric-value">0</div>
+                <div class="metric-sub">No data</div>
+              </div>
+            </div>
+            
+            <!-- Opportunity Mix Chart -->
+            <div class="card" id="money-pages-chart-row" style="margin-bottom: 1.5rem;">
+              <div class="card-header">
+                <h3>Opportunity Mix</h3>
+              </div>
+              <div class="card-body" style="text-align: center;">
+                <canvas id="money-pages-category-chart" style="max-width: 100%; height: auto;"></canvas>
+                <div id="money-pages-category-summary" style="margin-top: 1rem; font-size: 0.9rem; color: #64748b;"></div>
+                <div id="money-pages-category-breakdown" style="margin-top: 0.5rem;"></div>
+              </div>
+            </div>
+            
+            <!-- Performance Trends Chart -->
+            <div class="card" style="margin-bottom: 1.5rem;">
+              <div class="card-header">
+                <h3>Money Pages Performance Trends</h3>
+                <p style="font-size: 0.85rem; color: #64748b; margin: 0.5rem 0 0 0;">Tracks how money pages contribute to overall clicks and impressions, and how their behaviour score changes over time.</p>
+              </div>
+              <div class="card-body">
+                <canvas id="moneyPagesTrendChart"></canvas>
+                <p style="font-size: 0.75rem; color: #94a3b8; margin-top: 1rem; text-align: center;">Based on past audits stored in Supabase. Lines may be flat if only one audit has been completed.</p>
+              </div>
+            </div>
+            
+            <!-- KPI Tracker -->
+            <div class="card" style="margin-bottom: 1.5rem;">
+              <div class="card-header">
+                <h3>KPI Tracker</h3>
+              </div>
+              <div class="card-body">
+                <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #475569; margin-bottom: 1rem;">
+                  Metric:
+                  <select id="money-kpi-metric-selector" style="padding: 0.4rem 0.6rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.85rem; background: white; cursor: pointer;">
+                    <option value="ctr">CTR</option>
+                    <option value="clicks">Clicks</option>
+                    <option value="impressions">Impressions</option>
+                    <option value="behaviourScore">Behaviour Score</option>
+                  </select>
+                </label>
+                <canvas id="money-kpi-sparkline"></canvas>
+              </div>
+            </div>
+            
+            <!-- Priority Actions -->
+            <div class="card" style="margin-bottom: 1.5rem;">
+              <div class="card-header">
+                <h3>Priority Actions</h3>
+              </div>
+              <div class="card-body">
+                <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #475569; margin-bottom: 1rem;">
+                  Filter:
+                  <select id="money-priority-actions-filter" style="padding: 0.4rem 0.6rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.85rem; background: white; cursor: pointer;">
+                    <option value="ALL">All pages</option>
+                    <option value="LANDING">Landing Pages</option>
+                    <option value="EVENT">Event Pages</option>
+                    <option value="PRODUCT">Product Pages</option>
+                  </select>
+                </label>
+                <div id="money-priority-actions-list"></div>
+              </div>
+            </div>
+            
+            <!-- Money Pages Table -->
+            <div class="card">
+              <div class="card-header">
+                <h3>Money Pages Opportunity Table</h3>
+              </div>
+              <div class="card-body" id="money-pages-table-container">
+                <!-- Table will be inserted here by renderMoneyPagesTable -->
+              </div>
+            </div>
+          `;
+          
+          // Insert the section into the Money Pages panel
+          moneyPanel.appendChild(section);
+          debugLog('✓ Money Pages section HTML structure created', 'success');
         }
         
         // Always show section, even if no data (will show "No data" message)
@@ -15834,11 +16060,50 @@ Final Score: ${score}/100`;
             return;
           }
           
+          // Get the last GSC timeseries date (Money Pages metrics are GSC-derived, so should only show up to last GSC date)
+          let lastGscTimeseriesDate = null;
+          
+          // Try to get from window first (if renderTrendChart already ran and set it)
+          if (window.lastGscTimeseriesDate) {
+            lastGscTimeseriesDate = window.lastGscTimeseriesDate;
+            debugLog(`Money Pages KPI: Using last GSC timeseries date from window: ${lastGscTimeseriesDate}`, 'info');
+          } else {
+            // Extract from timeseries data in the API response
+            // The API response should include timeseries data with dates
+            if (json.timeseries && Array.isArray(json.timeseries) && json.timeseries.length > 0) {
+              // Get the latest date from timeseries (dates are in YYYY-MM-DD format)
+              const timeseriesDates = json.timeseries
+                .map(ts => ts.date)
+                .filter(date => date)
+                .sort()
+                .reverse();
+              if (timeseriesDates.length > 0) {
+                lastGscTimeseriesDate = timeseriesDates[0];
+                debugLog(`Money Pages KPI: Extracted last GSC timeseries date from API response: ${lastGscTimeseriesDate}`, 'info');
+              }
+            }
+          }
+          
+          // Filter history to only include dates up to the last GSC timeseries date
+          // Money Pages metrics (clicks, impressions, CTR, position) are GSC-derived, so should only show up to last GSC date
+          let filteredHistory = history;
+          if (lastGscTimeseriesDate) {
+            filteredHistory = history.filter(record => {
+              const recordDate = record.date || record.audit_date || record.auditDate;
+              if (!recordDate) return false;
+              // Compare dates as strings (YYYY-MM-DD format)
+              return recordDate.localeCompare(lastGscTimeseriesDate) <= 0;
+            });
+            debugLog(`Money Pages KPI: Filtered history from ${history.length} to ${filteredHistory.length} records (last GSC date: ${lastGscTimeseriesDate})`, 'info');
+          } else {
+            debugLog(`Money Pages KPI: No last GSC timeseries date found, using all history records`, 'warn');
+          }
+          
           // Check if any history records have moneySegmentMetrics (API returns camelCase)
-          const hasMetrics = history.some(record => record.moneySegmentMetrics);
+          const hasMetrics = filteredHistory.some(record => record.moneySegmentMetrics);
           if (!hasMetrics) {
-            debugLog(`⚠ Money Pages KPI Tracker: No moneySegmentMetrics in audit history. History length: ${history.length}`, 'warn');
-            debugLog(`⚠ Sample record keys: ${history.length > 0 ? Object.keys(history[0]).join(', ') : 'no records'}`, 'warn');
+            debugLog(`⚠ Money Pages KPI Tracker: No moneySegmentMetrics in audit history. History length: ${filteredHistory.length}`, 'warn');
+            debugLog(`⚠ Sample record keys: ${filteredHistory.length > 0 ? Object.keys(filteredHistory[0]).join(', ') : 'no records'}`, 'warn');
             const card = document.getElementById("money-pages-kpi-card");
             if (card) {
               const tableWrapper = card.querySelector('.table-wrapper');
@@ -15853,12 +16118,12 @@ Final Score: ${score}/100`;
             return;
           }
           
-          debugLog(`✓ Money Pages KPI Tracker: Found ${history.filter(r => r.moneySegmentMetrics).length} records with moneySegmentMetrics`, 'success');
-          debugLog(`✓ Money Pages KPI Tracker: Total history records: ${history.length}`, 'info');
+          debugLog(`✓ Money Pages KPI Tracker: Found ${filteredHistory.filter(r => r.moneySegmentMetrics).length} records with moneySegmentMetrics`, 'success');
+          debugLog(`✓ Money Pages KPI Tracker: Total history records: ${filteredHistory.length}`, 'info');
 
           const metricKey = document.getElementById("money-kpi-metric-select")?.value || "ctr";
           debugLog(`✓ Money Pages KPI Tracker: Using metricKey="${metricKey}"`, 'info');
-          const historyData = buildMoneyKpiHistory(history, metricKey);
+          const historyData = buildMoneyKpiHistory(filteredHistory, metricKey);
           debugLog(`✓ Money Pages KPI Tracker: Built history with ${historyData.labels.length} labels`, 'info');
           
           renderMoneyKpiTable(historyData, metricKey);
@@ -15896,12 +16161,19 @@ Final Score: ${score}/100`;
         
         // Destroy existing chart if it exists
         if (window.moneyPagesTrendChart) {
-          window.moneyPagesTrendChart.destroy();
+          try {
+            window.moneyPagesTrendChart.destroy();
+          } catch (e) {
+            // Ignore destroy errors
+          }
           window.moneyPagesTrendChart = null;
         }
         
         if (!history || !Array.isArray(history) || history.length === 0) {
           debugLog('⚠ Money Pages trend chart: No history data available', 'warn');
+          // Set canvas dimensions before drawing text
+          canvas.width = canvas.offsetWidth || 800;
+          canvas.height = canvas.offsetHeight || 400;
           const ctx = canvas.getContext('2d');
           ctx.clearRect(0, 0, canvas.width, canvas.height);
           ctx.font = '14px Arial';
@@ -15911,6 +16183,21 @@ Final Score: ${score}/100`;
           return;
         }
         
+        // Get the last GSC timeseries date (Money Pages metrics are GSC-derived)
+        let lastGscTimeseriesDate = window.lastGscTimeseriesDate || null;
+        
+        // Filter history to only include dates up to the last GSC timeseries date
+        let filteredHistory = history;
+        if (lastGscTimeseriesDate) {
+          filteredHistory = history.filter(record => {
+            const recordDate = record.date || record.audit_date || record.auditDate;
+            if (!recordDate) return false;
+            // Compare dates as strings (YYYY-MM-DD format)
+            return recordDate.localeCompare(lastGscTimeseriesDate) <= 0;
+          });
+          debugLog(`Money Pages Trend: Filtered history from ${history.length} to ${filteredHistory.length} records (last GSC date: ${lastGscTimeseriesDate})`, 'info');
+        }
+        
         // Extract money pages trend data from history
         const labels = [];
         const clicksData = [];
@@ -15918,26 +16205,73 @@ Final Score: ${score}/100`;
         const ctrData = [];
         const behaviourData = [];
         
-        history.forEach(record => {
-          if (record.auditDate) {
-            const date = new Date(record.auditDate);
-            labels.push(date.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' }));
-            
-            const metrics = record.moneySegmentMetrics || {};
-            clicksData.push(metrics.clicks || 0);
-            impressionsData.push(metrics.impressions || 0);
-            ctrData.push(metrics.ctr ? metrics.ctr * 100 : 0);
-            behaviourData.push(metrics.behaviourScore || null);
-          }
+        filteredHistory.forEach(record => {
+          // Handle both date formats: date, audit_date, auditDate
+          const dateStr = record.date || record.audit_date || record.auditDate;
+          if (!dateStr) return;
+          
+          const date = new Date(dateStr);
+          if (isNaN(date.getTime())) return;
+          
+          labels.push(date.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' }));
+          
+          // Get money pages summary data (shareOfImpressions, shareOfClicks, ctr)
+          const summary = record.moneyPagesSummary || {};
+          
+          // Get behaviour score
+          const behaviourScore = record.moneyPagesBehaviourScore || null;
+          
+          // For clicks and impressions, we need to calculate from share if available
+          // Or use moneySegmentMetrics if available
+          const segmentMetrics = record.moneySegmentMetrics || {};
+          const allMoney = segmentMetrics.allMoney || {};
+          
+          clicksData.push(allMoney.clicks || null);
+          impressionsData.push(allMoney.impressions || null);
+          ctrData.push(summary.ctr ? summary.ctr * 100 : (allMoney.ctr ? allMoney.ctr * 100 : null));
+          behaviourData.push(behaviourScore);
         });
         
         if (labels.length === 0) {
-          debugLog('⚠ Money Pages trend chart: No valid data points', 'warn');
+          debugLog('⚠ Money Pages trend chart: No valid data points after filtering', 'warn');
+          // Set canvas dimensions before drawing text
+          canvas.width = canvas.offsetWidth || 800;
+          canvas.height = canvas.offsetHeight || 400;
+          const ctx = canvas.getContext('2d');
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.font = '14px Arial';
+          ctx.fillStyle = '#64748b';
+          ctx.textAlign = 'center';
+          ctx.fillText('No trend data available. Run audits to build trend data.', canvas.width / 2, canvas.height / 2);
           return;
         }
         
-        const ctx = canvas.getContext('2d');
-        window.moneyPagesTrendChart = new Chart(ctx, {
+        // Ensure canvas has dimensions before creating chart
+        const parentContainer = canvas.parentElement;
+        if (parentContainer) {
+          const containerWidth = parentContainer.clientWidth || parentContainer.offsetWidth || 800;
+          if (canvas.width === 0 || canvas.height === 0) {
+            canvas.width = containerWidth;
+            canvas.height = 400;
+          }
+        } else {
+          if (canvas.width === 0 || canvas.height === 0) {
+            canvas.width = 800;
+            canvas.height = 400;
+          }
+        }
+        
+        debugLog(`Money Pages Trend Chart: Creating chart with ${labels.length} data points`, 'info');
+        debugLog(`Money Pages Trend Chart: Clicks data: ${clicksData.filter(v => v != null).length} values, Impressions: ${impressionsData.filter(v => v != null).length} values, CTR: ${ctrData.filter(v => v != null).length} values, Behaviour: ${behaviourData.filter(v => v != null).length} values`, 'info');
+        
+        try {
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            debugLog('⚠ Money Pages trend chart: Could not get canvas context', 'warn');
+            return;
+          }
+          
+          window.moneyPagesTrendChart = new Chart(ctx, {
           type: 'line',
           data: {
             labels: labels,
@@ -16069,6 +16403,19 @@ Final Score: ${score}/100`;
         });
         
         debugLog('✓ Money Pages trend chart rendered successfully', 'success');
+        } catch (error) {
+          debugLog(`✗ Error creating Money Pages trend chart: ${error.message}`, 'error');
+          console.error('Money Pages trend chart error:', error);
+          // Show error message on canvas
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.font = '14px Arial';
+            ctx.fillStyle = '#ef4444';
+            ctx.textAlign = 'center';
+            ctx.fillText(`Error rendering chart: ${error.message}`, canvas.width / 2, canvas.height / 2);
+          }
+        }
       }
       
       // Make functions globally available

@@ -20,11 +20,13 @@ const __dirname = dirname(__filename);
 dotenv.config({ path: join(__dirname, '..', '.env.local') });
 dotenv.config({ path: join(__dirname, '..', '.env') });
 
-const supabaseUrl = process.env.SUPABASE_URL;
+// Allow environment variables to be passed via command line or .env files
+const supabaseUrl = process.env.SUPABASE_URL || 'https://igzvwbvgvmzvvzoclufx.supabase.co';
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-if (!supabaseUrl || !supabaseKey) {
-  console.error('❌ SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set in .env.local or .env');
+if (!supabaseKey) {
+  console.error('❌ SUPABASE_SERVICE_ROLE_KEY must be set in .env.local, .env, or as environment variable');
+  console.error('   You can also pass it as: SUPABASE_SERVICE_ROLE_KEY=your_key npm run retag:segments');
   process.exit(1);
 }
 
