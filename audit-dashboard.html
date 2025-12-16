@@ -3163,9 +3163,6 @@
                 <button type="button" class="ranking-preset-btn" data-preset="local-visibility" style="padding: 0.5rem 1rem; font-size: 0.875rem; border: 1px solid #cbd5e1; border-radius: 6px; background: rgb(229, 255, 204); cursor: pointer; color: #475569; font-weight: 500; transition: all 0.2s; position: relative;" onmouseover="if (!this.classList.contains('preset-active')) { this.style.background='rgb(210, 240, 180)'; this.style.borderColor='#94a3b8'; }" onmouseout="if (!this.classList.contains('preset-active')) { this.style.background='rgb(229, 255, 204)'; this.style.borderColor='#cbd5e1'; }" title="Page type: GBP | Best rank: Not top 3 | Min opportunity: ≥ 30 | Sort: Opportunity ↓">
                   Local visibility
                 </button>
-                <button type="button" class="ranking-preset-btn" data-preset="top-10-opportunities" style="padding: 0.5rem 1rem; font-size: 0.875rem; border: 1px solid #cbd5e1; border-radius: 6px; background: rgb(229, 255, 204); cursor: pointer; color: #475569; font-weight: 500; transition: all 0.2s; position: relative;" onmouseover="if (!this.classList.contains('preset-active')) { this.style.background='rgb(210, 240, 180)'; this.style.borderColor='#94a3b8'; }" onmouseout="if (!this.classList.contains('preset-active')) { this.style.background='rgb(229, 255, 204)'; this.style.borderColor='#cbd5e1'; }" title="Best rank: Not top 3 | Min opportunity: ≥ 50 | Sort: Opportunity ↓">
-                  Top 10 opportunities
-                </button>
               </div>
               <!-- Criteria chips (shown when preset is active) -->
               <div id="ranking-preset-criteria-chips" style="display: none; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #e2e8f0;">
@@ -6378,8 +6375,6 @@
      * @returns {{segment: string, pageType: string}}
      */
     function classifyUrlForRankingAi(rawUrlOrPath, keyword = null) {
-      // Normalize URL to lowercase for consistent matching
-      const urlLower = (rawUrlOrPath || "").toLowerCase();
       const path = normalisePath(rawUrlOrPath);
       
       // Brand detection: check keyword first
@@ -6390,43 +6385,7 @@
         }
       }
       
-      // If URL is missing/blank, return Other
-      if (!rawUrlOrPath || !path) {
-        return { segment: "Other", pageType: "Other" };
-      }
-      
-      // STEP 1: Check Event pages FIRST (before Blog/GBP/Landing)
-      // Event if URL contains:
-      // - alanranger.com/beginners-photography-lessons/
-      // - alanranger.com/photographic-workshops-near-me
-      if (urlLower.includes('/beginners-photography-lessons') || 
-          urlLower.includes('/photographic-workshops-near-me')) {
-        return { segment: "Money", pageType: "Event" };
-      }
-      
-      // STEP 2: Check Product pages (before Blog/GBP/Landing)
-      // Product if URL contains:
-      // - alanranger.com/photo-workshops-uk/
-      // - alanranger.com/photography-services-near-me/
-      if (urlLower.includes('/photo-workshops-uk') || 
-          urlLower.includes('/photography-services-near-me')) {
-        return { segment: "Money", pageType: "Product" };
-      }
-      
-      // STEP 3: Check for Blog pages (Education segment)
-      if (path.startsWith('/blog-on-photography/') || path.startsWith('/blogs/')) {
-        return { segment: "Education", pageType: "Blog" };
-      }
-      
-      // STEP 4: Check for GBP/Home/About pages (Brand segment)
-      if (path === '/' || 
-          path === '/about-alan-ranger' || 
-          path.includes('/contact') ||
-          path.includes('/reviews')) {
-        return { segment: "Brand", pageType: "GBP" };
-      }
-      
-      // STEP 5: Use canonical page classification for remaining pages
+      // Use canonical page classification (same as Money Pages)
       // Try window.classifyMoneyPage first (if available), then fallback to local scope
       let isMoney = false;
       let segmentType = null;
@@ -6459,7 +6418,7 @@
         }
       }
       
-      // Determine pageType from canonical segmentType (for remaining pages)
+      // Determine pageType from canonical segmentType
       let pageType = "Landing"; // Default
       if (segmentType === "event") {
         pageType = "Event";
@@ -6467,19 +6426,26 @@
         pageType = "Product";
       } else if (segmentType === "landing" || segmentType === "all") {
         pageType = "Landing";
-      } else if (isMoney) {
-        // If it's a money page but segmentType wasn't set, default to Landing
-        pageType = "Landing";
-      } else {
-        // Not a money page, check if it's education or other
-        pageType = "Other";
       }
       
-      // Determine segment from pageType
+      // Check for Blog pages (Education segment)
+      if (path.startsWith('/blog-on-photography/') || path.startsWith('/blogs/')) {
+        pageType = "Blog";
+      }
+      
+      // Check for GBP/Home/About pages (Brand segment)
+      if (path === '/' || 
+          path === '/about-alan-ranger' || 
+          path.includes('/contact') ||
+          path.includes('/reviews')) {
+        pageType = "GBP";
+      }
+      
+      // Determine segment from pageType and canonical classification
       let segment = "Other"; // Default
       
       // Brand: home page, about, contact, reviews, or brand keywords
-      if (pageType === "GBP") {
+      if (pageType === "GBP" || path === '/' || path === '/about-alan-ranger') {
         segment = "Brand";
       }
       // Money: Landing, Event, or Product page types
@@ -21609,24 +21575,6 @@ Final Score: ${score}/100`;
           debugLog('⚠ Cannot load Ranking & AI data: property URL not set', 'warn');
           return null;
         }
-        
-        // Force clear localStorage if it doesn't have pageTypeVersion marker (stale data)
-        const localData = localStorage.getItem('rankingAiData');
-        if (localData && !forceCheckSupabase) {
-          try {
-            const parsed = JSON.parse(localData);
-            if (!parsed.pageTypeVersion) {
-              debugLog('🔄 Clearing stale localStorage data (missing pageTypeVersion)', 'info');
-              localStorage.removeItem('rankingAiData');
-              // Force Supabase check
-              forceCheckSupabase = true;
-            }
-          } catch (e) {
-            // Invalid data, clear it
-            localStorage.removeItem('rankingAiData');
-            forceCheckSupabase = true;
-          }
-        }
 
         // Store localStorage data as fallback (in case Supabase check fails)
         let localStorageFallback = null;
@@ -21643,69 +21591,6 @@ Final Score: ${score}/100`;
                 debugLog(`  Found ${parsed.combinedRows.length} keywords in localStorage`, 'info');
                 // Normalize summary field names for compatibility
                 parsed.summary = normalizeSummaryFields(parsed.summary);
-                
-                // ALWAYS re-classify pageType for localStorage rows (fixes stale pageType)
-                // Use fallback pattern matching if function not available
-                if (parsed.combinedRows) {
-                  let reclassifiedCount = 0;
-                  parsed.combinedRows.forEach(row => {
-                    const bestUrl = row.best_url || row.bestUrl || null;
-                    const oldPageType = row.pageType || 'Landing';
-                    let newPageType = 'Landing'; // Default
-                    
-                    if (bestUrl) {
-                      // Use classifyUrlForRankingAi if available, otherwise use direct URL matching
-                      if (typeof window.classifyUrlForRankingAi === 'function') {
-                        const classification = window.classifyUrlForRankingAi(bestUrl, row.keyword || null);
-                        newPageType = classification.pageType;
-                      } else {
-                        // Fallback: Direct URL pattern matching
-                        const urlLower = bestUrl.toLowerCase();
-                        if (urlLower.includes('/beginners-photography-lessons') || 
-                            urlLower.includes('/photographic-workshops-near-me')) {
-                          newPageType = 'Event';
-                        } else if (urlLower.includes('/photo-workshops-uk') || 
-                                   urlLower.includes('/photography-services-near-me')) {
-                          newPageType = 'Product';
-                        } else if (urlLower.includes('/blog-on-photography/') || 
-                                   urlLower.includes('/blogs/')) {
-                          newPageType = 'Blog';
-                        } else if (urlLower.includes('/about-alan-ranger') || 
-                                   urlLower.includes('/contact') ||
-                                   urlLower.includes('/reviews') ||
-                                   urlLower.match(/^https?:\/\/[^\/]+\/?$/)) {
-                          newPageType = 'GBP';
-                        }
-                      }
-                      
-                      if (newPageType !== oldPageType) {
-                        row.pageType = newPageType;
-                        reclassifiedCount++;
-                      } else {
-                        row.pageType = newPageType;
-                      }
-                      
-                      if (row.classification) {
-                        row.classification.pageType = newPageType;
-                        if (typeof window.classifyUrlForRankingAi === 'function') {
-                          const classification = window.classifyUrlForRankingAi(bestUrl, row.keyword || null);
-                          row.classification.segment = classification.segment;
-                        }
-                      }
-                    } else {
-                      row.pageType = 'Landing';
-                      if (row.classification) {
-                        row.classification.pageType = 'Landing';
-                      }
-                    }
-                  });
-                  if (reclassifiedCount > 0) {
-                    debugLog(`✓ Re-classified ${reclassifiedCount} localStorage rows with updated pageType`, 'success');
-                    // Update localStorage with re-classified data
-                    localStorage.setItem('rankingAiData', JSON.stringify(parsed));
-                  }
-                }
-                
                 // Store as fallback before checking Supabase
                 localStorageFallback = parsed;
                 // Always check Supabase if localStorage has fewer than 10 keywords (likely stale data)
@@ -21719,45 +21604,11 @@ Final Score: ${score}/100`;
                     const now = new Date();
                     const hoursDiff = (now - localTime) / (1000 * 60 * 60);
                     if (hoursDiff < 24) {
-                      // Re-classify pageType before returning
-                      if (typeof window.classifyUrlForRankingAi === 'function' && parsed.combinedRows) {
-                        parsed.combinedRows.forEach(row => {
-                          const bestUrl = row.best_url || row.bestUrl || null;
-                          if (bestUrl) {
-                            const classification = window.classifyUrlForRankingAi(bestUrl, row.keyword || null);
-                            row.pageType = classification.pageType;
-                            if (row.classification) {
-                              row.classification.pageType = classification.pageType;
-                              row.classification.segment = classification.segment;
-                            }
-                          } else {
-                            row.pageType = 'Landing';
-                            if (row.classification) row.classification.pageType = 'Landing';
-                          }
-                        });
-                      }
                       return parsed;
                     } else {
                       debugLog(`⚠ LocalStorage data is ${Math.round(hoursDiff)} hours old, checking Supabase for newer data...`, 'info');
                     }
                   } else {
-                    // Re-classify pageType before returning
-                    if (typeof window.classifyUrlForRankingAi === 'function' && parsed.combinedRows) {
-                      parsed.combinedRows.forEach(row => {
-                        const bestUrl = row.best_url || row.bestUrl || null;
-                        if (bestUrl) {
-                          const classification = window.classifyUrlForRankingAi(bestUrl, row.keyword || null);
-                          row.pageType = classification.pageType;
-                          if (row.classification) {
-                            row.classification.pageType = classification.pageType;
-                            row.classification.segment = classification.segment;
-                          }
-                        } else {
-                          row.pageType = 'Landing';
-                          if (row.classification) row.classification.pageType = 'Landing';
-                        }
-                      });
-                    }
                     return parsed;
                   }
                 }
@@ -21808,90 +21659,16 @@ Final Score: ${score}/100`;
                   });
                 }
                 
-                // ALWAYS re-classify pageType for all rows (fixes stale page_type from database)
-                // This ensures Event/Product pages are correctly identified
-                // Force re-classification on every load to ensure accuracy
-                debugLog(`🔄 Re-classifying pageType for ${keywordCount} keywords...`, 'info');
-                let reclassifiedCount = 0;
-                const typeCounts = { Event: 0, Product: 0, Blog: 0, GBP: 0, Landing: 0, Other: 0 };
-                combinedRows.forEach(row => {
-                  const bestUrl = row.best_url || row.bestUrl || null;
-                  const oldPageType = row.pageType || 'Landing';
-                  let newPageType = 'Landing'; // Default
-                  
-                  if (bestUrl) {
-                    // Use classifyUrlForRankingAi if available, otherwise use direct URL matching
-                    if (typeof window.classifyUrlForRankingAi === 'function') {
-                      const classification = window.classifyUrlForRankingAi(bestUrl, row.keyword || null);
-                      newPageType = classification.pageType;
-                    } else {
-                      // Fallback: Direct URL pattern matching
-                      const urlLower = bestUrl.toLowerCase();
-                      if (urlLower.includes('/beginners-photography-lessons') || 
-                          urlLower.includes('/photographic-workshops-near-me')) {
-                        newPageType = 'Event';
-                      } else if (urlLower.includes('/photo-workshops-uk') || 
-                                 urlLower.includes('/photography-services-near-me')) {
-                        newPageType = 'Product';
-                      } else if (urlLower.includes('/blog-on-photography/') || 
-                                 urlLower.includes('/blogs/')) {
-                        newPageType = 'Blog';
-                      } else if (urlLower.includes('/about-alan-ranger') || 
-                                 urlLower.includes('/contact') ||
-                                 urlLower.includes('/reviews') ||
-                                 urlLower.match(/^https?:\/\/[^\/]+\/?$/)) {
-                        newPageType = 'GBP';
-                      }
-                    }
-                    
-                    if (newPageType !== oldPageType) {
-                      row.pageType = newPageType;
-                      reclassifiedCount++;
-                      debugLog(`  Changed: "${row.keyword}" ${oldPageType} → ${newPageType} (${bestUrl.substring(0, 60)}...)`, 'info');
-                    } else {
-                      // Ensure pageType is set even if unchanged
-                      row.pageType = newPageType;
-                    }
-                    
-                    // Count by type
-                    typeCounts[newPageType] = (typeCounts[newPageType] || 0) + 1;
-                    
-                    // Also update classification object if it exists
-                    if (row.classification) {
-                      row.classification.pageType = newPageType;
-                      if (typeof window.classifyUrlForRankingAi === 'function') {
-                        const classification = window.classifyUrlForRankingAi(bestUrl, row.keyword || null);
-                        row.classification.segment = classification.segment;
-                      }
-                    }
-                  } else {
-                    // No URL, default to Landing
-                    row.pageType = 'Landing';
-                    typeCounts.Landing++;
-                    if (row.classification) {
-                      row.classification.pageType = 'Landing';
-                    }
-                  }
-                });
-                debugLog(`📊 PageType counts after re-classification: Event=${typeCounts.Event}, Product=${typeCounts.Product}, Blog=${typeCounts.Blog}, GBP=${typeCounts.GBP}, Landing=${typeCounts.Landing}, Other=${typeCounts.Other}`, 'info');
-                if (reclassifiedCount > 0) {
-                  debugLog(`✓ Re-classified ${reclassifiedCount} keywords with updated pageType`, 'success');
-                } else {
-                  debugLog(`✓ Verified pageType for all ${keywordCount} keywords`, 'success');
-                }
-                
                 // Normalize summary field names (convert snake_case to camelCase for compatibility)
                 const normalizedSummary = normalizeSummaryFields(json.data.rankingAiData.summary);
                 
                 // Also save to localStorage for faster access next time
-                // Save with re-classified pageType values
                 localStorage.setItem('rankingAiData', JSON.stringify({
                   combinedRows: combinedRows,
                   summary: normalizedSummary,
-                  timestamp: new Date().toISOString(),
-                  pageTypeVersion: '2.0' // Version marker to force re-classification on next load
+                  timestamp: new Date().toISOString()
                 }));
-                debugLog(`✓ Saved ${keywordCount} keywords to localStorage with re-classified pageType`, 'success');
+                debugLog(`✓ Saved ${keywordCount} keywords to localStorage`, 'success');
                 return { combinedRows, summary: normalizedSummary };
               } else {
                 debugLog('⚠ rankingAiData exists but missing combinedRows array', 'warn');
@@ -21920,25 +21697,6 @@ Final Score: ${score}/100`;
         // If Supabase check failed or returned no data, fall back to localStorage if available
         if (localStorageFallback) {
           debugLog(`✓ Falling back to localStorage data (${localStorageFallback.combinedRows.length} keywords)`, 'success');
-          // Ensure localStorage fallback also has re-classified pageType
-          if (typeof window.classifyUrlForRankingAi === 'function' && localStorageFallback.combinedRows) {
-            localStorageFallback.combinedRows.forEach(row => {
-              const bestUrl = row.best_url || row.bestUrl || null;
-              if (bestUrl) {
-                const classification = window.classifyUrlForRankingAi(bestUrl, row.keyword || null);
-                row.pageType = classification.pageType;
-                if (row.classification) {
-                  row.classification.pageType = classification.pageType;
-                  row.classification.segment = classification.segment;
-                }
-              } else {
-                row.pageType = 'Landing';
-                if (row.classification) {
-                  row.classification.pageType = 'Landing';
-                }
-              }
-            });
-          }
           return localStorageFallback;
         }
       } catch (err) {
@@ -24255,6 +24013,20 @@ Final Score: ${score}/100`;
     // Counts show how many items match each option given the current state of OTHER filters
     function updateFilterCounts(rows) {
       if (!rows || rows.length === 0) return;
+      
+      // Re-classify pageType for all rows before calculating counts (fixes stale data)
+      // This ensures Event/Product pages are correctly identified
+      rows.forEach(row => {
+        const bestUrl = row.best_url || row.bestUrl || null;
+        if (bestUrl && typeof window.classifyUrlForRankingAi === 'function') {
+          const classification = window.classifyUrlForRankingAi(bestUrl, row.keyword || null);
+          row.pageType = classification.pageType;
+          if (row.classification) {
+            row.classification.pageType = classification.pageType;
+            row.classification.segment = classification.segment;
+          }
+        }
+      });
 
       // For each filter, calculate counts based on rows that match all OTHER filters
       // Segment counts (excluding segment filter)
@@ -27435,18 +27207,6 @@ Final Score: ${score}/100`;
               pageType: 'GBP',
               rank: 'not-top3',
               minOpportunity: 30
-            },
-            sort: {
-              column: 'opportunityScore',
-              direction: 'desc'
-            }
-          },
-          'top-10-opportunities': {
-            label: 'Top 10 opportunities',
-            filters: {
-              ...DEFAULT_FILTERS,
-              rank: 'not-top3',
-              minOpportunity: 50
             },
             sort: {
               column: 'opportunityScore',
