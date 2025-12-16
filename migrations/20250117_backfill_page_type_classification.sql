@@ -42,7 +42,7 @@ WHERE
   AND page_type != 'Blog';
 
 -- Step 4: Update GBP pages (Brand segment)
--- Check for home page, about, contact, reviews
+-- Check for home page, about, contact, reviews (EXACT matches only, not all domain pages)
 UPDATE keyword_rankings
 SET 
   page_type = 'GBP',
@@ -50,19 +50,21 @@ SET
 WHERE 
   best_url IS NOT NULL
   AND (
-    -- Home page (exact match or just domain)
-    REPLACE(REPLACE(REPLACE(REPLACE(LOWER(best_url), 'https://', ''), 'http://', ''), 'www.', ''), '/', '') LIKE '%alanranger.com%'
-    OR best_url LIKE '%/about-alan-ranger%'
-    OR best_url LIKE '%/contact%'
-    OR best_url LIKE '%/reviews%'
+    -- Exact home page (domain only or domain/)
+    (best_url ~* '^https?://(www\.)?alanranger\.com/?(\?|$|#)') OR
+    best_url LIKE '%/about-alan-ranger%' OR
+    (best_url LIKE '%/contact%' AND NOT best_url LIKE '%/contact/%') OR
+    (best_url LIKE '%/reviews%' AND NOT best_url LIKE '%/reviews/%')
   )
   AND page_type != 'GBP'
-  -- Exclude Event/Product URLs that might match contact/reviews patterns
+  -- Exclude Event/Product/Blog URLs
   AND NOT (
     LOWER(best_url) LIKE '%/beginners-photography-lessons%' OR
     LOWER(best_url) LIKE '%/photographic-workshops-near-me%' OR
     LOWER(best_url) LIKE '%/photo-workshops-uk%' OR
-    LOWER(best_url) LIKE '%/photography-services-near-me%'
+    LOWER(best_url) LIKE '%/photography-services-near-me%' OR
+    best_url LIKE '%/blog-on-photography/%' OR
+    best_url LIKE '%/blogs/%'
   );
 
 -- Step 5: Update segment for Money pages (Landing, Event, Product should all be Money segment)
