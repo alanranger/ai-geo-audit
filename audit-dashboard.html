@@ -16257,39 +16257,82 @@ Final Score: ${score}/100`;
           debugLog(`Money Pages Trend: Filtered history from ${beforeFilter} to ${filteredHistory.length} records (last 30 days, no GSC date limit)`, 'info');
         }
         
-        // Extract money pages trend data from history
+        // Create a map of date -> record for quick lookup
+        const historyMap = new Map();
+        filteredHistory.forEach(record => {
+          const dateStr = record.date || record.audit_date || record.auditDate;
+          if (dateStr) {
+            historyMap.set(dateStr, record);
+          }
+        });
+        
+        // Generate complete date range for last 30 days (up to GSC date)
+        const endDate = lastGscTimeseriesDate ? new Date(lastGscTimeseriesDate) : new Date();
+        const startDate = new Date(thirtyDaysAgo);
+        const allDates = [];
+        const currentDate = new Date(startDate);
+        
+        while (currentDate <= endDate) {
+          const dateStr = currentDate.toISOString().split('T')[0];
+          allDates.push(dateStr);
+          currentDate.setDate(currentDate.getDate() + 1);
+        }
+        
+        debugLog(`Money Pages Trend: Generated ${allDates.length} dates in range (${allDates[0]} to ${allDates[allDates.length - 1]})`, 'info');
+        
+        // Extract money pages trend data, filling in all dates
         const labels = [];
         const clicksData = [];
         const impressionsData = [];
         const ctrData = [];
         const behaviourData = [];
         
-        filteredHistory.forEach(record => {
-          // Handle both date formats: date, audit_date, auditDate
-          const dateStr = record.date || record.audit_date || record.auditDate;
-          if (!dateStr) return;
-          
+        // Track last known values for forward-filling
+        let lastClicks = null;
+        let lastImpressions = null;
+        let lastCtr = null;
+        let lastBehaviour = null;
+        
+        allDates.forEach(dateStr => {
           const date = new Date(dateStr);
-          if (isNaN(date.getTime())) return;
-          
           labels.push(date.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' }));
           
-          // Get money pages summary data (shareOfImpressions, shareOfClicks, ctr)
-          const summary = record.moneyPagesSummary || {};
-          
-          // Get behaviour score
-          const behaviourScore = record.moneyPagesBehaviourScore || null;
-          
-          // For clicks and impressions, we need to calculate from share if available
-          // Or use moneySegmentMetrics if available
-          const segmentMetrics = record.moneySegmentMetrics || {};
-          const allMoney = segmentMetrics.allMoney || {};
-          
-          clicksData.push(allMoney.clicks || null);
-          impressionsData.push(allMoney.impressions || null);
-          ctrData.push(summary.ctr ? summary.ctr * 100 : (allMoney.ctr ? allMoney.ctr * 100 : null));
-          behaviourData.push(behaviourScore);
+          const record = historyMap.get(dateStr);
+          if (record) {
+            // Get money pages summary data (shareOfImpressions, shareOfClicks, ctr)
+            const summary = record.moneyPagesSummary || {};
+            
+            // Get behaviour score
+            const behaviourScore = record.moneyPagesBehaviourScore || null;
+            
+            // For clicks and impressions, use moneySegmentMetrics if available
+            const segmentMetrics = record.moneySegmentMetrics || {};
+            const allMoney = segmentMetrics.allMoney || {};
+            
+            const clicks = allMoney.clicks || null;
+            const impressions = allMoney.impressions || null;
+            const ctr = summary.ctr ? summary.ctr * 100 : (allMoney.ctr ? allMoney.ctr * 100 : null);
+            
+            // Update last known values
+            if (clicks != null) lastClicks = clicks;
+            if (impressions != null) lastImpressions = impressions;
+            if (ctr != null) lastCtr = ctr;
+            if (behaviourScore != null) lastBehaviour = behaviourScore;
+            
+            clicksData.push(clicks);
+            impressionsData.push(impressions);
+            ctrData.push(ctr);
+            behaviourData.push(behaviourScore);
+          } else {
+            // No audit data for this date - forward-fill from last known value
+            clicksData.push(lastClicks);
+            impressionsData.push(lastImpressions);
+            ctrData.push(lastCtr);
+            behaviourData.push(lastBehaviour);
+          }
         });
+        
+        debugLog(`Money Pages Trend: Populated ${labels.length} dates with data (${clicksData.filter(v => v != null).length} clicks values, ${impressionsData.filter(v => v != null).length} impressions values)`, 'info');
         
         if (labels.length === 0) {
           debugLog('⚠ Money Pages trend chart: No valid data points after filtering', 'warn');
