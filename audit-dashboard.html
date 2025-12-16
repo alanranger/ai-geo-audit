@@ -19531,27 +19531,72 @@ Final Score: ${score}/100`;
                 allDateObjects.push(dateObj);
                 allDates.push(dateObj.toLocaleDateString('en-GB', dateFormat));
                 
-                // For GSC-based pillars (Authority, Visibility), use latest audit data for dates after last timeseries
-                // This ensures we show the latest audit data instead of missing/null values
-                const isAfterLastTimeseries = lastTimeseriesDate && dateStr > lastTimeseriesDate;
-                const isLatestAuditOrRecent = dateStr === latestAuditDateStr || (currentDate >= lastDate && currentDate <= today);
+                // For GSC-based pillars (Authority, Visibility), check historical data from Supabase first
+                // Then forward-fill from latest available, or use current audit for latest audit date
+                const historicalVisibility = visibilityMap.get(dateStr);
+                const historicalAuthority = authorityMap.get(dateStr);
                 
-                if ((isAfterLastTimeseries && dateStr <= latestAuditDateStr) || (isLatestAuditOrRecent && savedAuditForTrend)) {
-                  // Use current audit data for Authority and Visibility
-                  const currentSearchData = savedAuditForTrend?.searchData;
-                  const currentScores = savedAuditForTrend?.scores;
+                // Visibility: use historical data, or latest available, or current score for latest audit date
+                if (historicalVisibility !== undefined && historicalVisibility !== null) {
+                  visibilityData.push(historicalVisibility);
+                  debugLog(`✓ Added Visibility score (${historicalVisibility}) for ${dateStr} from Supabase`, 'info');
+                } else {
+                  // For missing dates, use the most recent available score from the map
+                  let latestAvailableVisibility = null;
+                  let latestAvailableDate = null;
+                  visibilityMap.forEach((score, mapDate) => {
+                    if (mapDate <= dateStr && (latestAvailableDate === null || mapDate > latestAvailableDate)) {
+                      latestAvailableDate = mapDate;
+                      latestAvailableVisibility = score;
+                    }
+                  });
                   
-                  if (currentSearchData) {
-                    // Calculate Visibility from current position
-                    const currentPosition = currentSearchData.averagePosition || 40;
-                    const clampedPos = Math.max(1, Math.min(40, currentPosition));
-                    const scale = (clampedPos - 1) / 39;
-                    const posScore = 100 - scale * 90;
-                    const visibility = clampScore(posScore);
-                    visibilityData.push(visibility);
-                    debugLog(`✓ Added Visibility score (${visibility}) for ${dateStr} from current audit`, 'info');
-                    
-                    // Calculate Authority from current audit scores using selected mode
+                  // If no historical data found, use current score for latest audit date
+                  if (latestAvailableVisibility !== null && latestAvailableVisibility !== undefined) {
+                    visibilityData.push(latestAvailableVisibility);
+                    debugLog(`✓ Added Visibility score (${latestAvailableVisibility}) for ${dateStr} from latest available (${latestAvailableDate})`, 'info');
+                  } else if (dateStr === latestAuditDateStr && savedAuditForTrend) {
+                    // For latest audit date, calculate from current audit data
+                    const currentSearchData = savedAuditForTrend?.searchData;
+                    if (currentSearchData) {
+                      const currentPosition = currentSearchData.averagePosition || 40;
+                      const clampedPos = Math.max(1, Math.min(40, currentPosition));
+                      const scale = (clampedPos - 1) / 39;
+                      const posScore = 100 - scale * 90;
+                      const visibility = clampScore(posScore);
+                      visibilityData.push(visibility);
+                      debugLog(`✓ Added Visibility score (${visibility}) for ${dateStr} from current audit`, 'info');
+                    } else {
+                      visibilityData.push(null);
+                      debugLog(`No Visibility data for ${dateStr}`, 'warn');
+                    }
+                  } else {
+                    visibilityData.push(null);
+                    debugLog(`No Visibility data for ${dateStr} (no historical or current data)`, 'info');
+                  }
+                }
+                
+                // Authority: use historical data, or latest available, or current score for latest audit date
+                if (historicalAuthority !== undefined && historicalAuthority !== null) {
+                  authorityData.push(historicalAuthority);
+                  debugLog(`✓ Added Authority score (${historicalAuthority}) for ${dateStr} from Supabase`, 'info');
+                } else {
+                  // For missing dates, use the most recent available score from the map
+                  let latestAvailableAuthority = null;
+                  let latestAvailableDate = null;
+                  authorityMap.forEach((score, mapDate) => {
+                    if (mapDate <= dateStr && (latestAvailableDate === null || mapDate > latestAvailableDate)) {
+                      latestAvailableDate = mapDate;
+                      latestAvailableAuthority = score;
+                    }
+                  });
+                  
+                  // If no historical data found, use current score for latest audit date
+                  if (latestAvailableAuthority !== null && latestAvailableAuthority !== undefined) {
+                    authorityData.push(latestAvailableAuthority);
+                    debugLog(`✓ Added Authority score (${latestAvailableAuthority}) for ${dateStr} from latest available (${latestAvailableDate})`, 'info');
+                  } else if (dateStr === latestAuditDateStr && savedAuditForTrend) {
+                    // For latest audit date, use current audit scores using selected mode
                     const selectedMode = window.trendAuthorityMode || 'all';
                     const currentAuthority = getAuthorityForMode(selectedMode);
                     if (currentAuthority !== null && currentAuthority !== undefined) {
@@ -19559,28 +19604,29 @@ Final Score: ${score}/100`;
                       debugLog(`✓ Added Authority score (${currentAuthority}) for ${dateStr} from current audit (mode: ${selectedMode})`, 'info');
                     } else {
                       // Fallback: calculate Authority from current data
-                      const pillarScores = calculatePillarFromMetrics(
-                        currentPosition,
-                        currentSearchData.ctr || 0,
-                        dateStr,
-                        currentTopQueries,
-                        currentBacklinkMetrics,
-                        currentLocalSignals,
-                        currentSiteReviews
-                      );
-                      const authScore = typeof pillarScores.authority === 'object' ? pillarScores.authority.score : pillarScores.authority;
-                      authorityData.push(authScore);
-                      debugLog(`✓ Calculated Authority score (${authScore}) for ${dateStr} from current audit data`, 'info');
+                      const currentSearchData = savedAuditForTrend?.searchData;
+                      if (currentSearchData) {
+                        const pillarScores = calculatePillarFromMetrics(
+                          currentSearchData.averagePosition || 40,
+                          currentSearchData.ctr || 0,
+                          dateStr,
+                          currentTopQueries,
+                          currentBacklinkMetrics,
+                          currentLocalSignals,
+                          currentSiteReviews
+                        );
+                        const authScore = typeof pillarScores.authority === 'object' ? pillarScores.authority.score : pillarScores.authority;
+                        authorityData.push(authScore);
+                        debugLog(`✓ Calculated Authority score (${authScore}) for ${dateStr} from current audit data`, 'info');
+                      } else {
+                        authorityData.push(null);
+                        debugLog(`No Authority data for ${dateStr}`, 'warn');
+                      }
                     }
                   } else {
-                    // No current search data - use null
                     authorityData.push(null);
-                    visibilityData.push(null);
+                    debugLog(`No Authority data for ${dateStr} (no historical or current data)`, 'info');
                   }
-                } else {
-                  // Not today/recent - no data yet due to GSC delay
-                  authorityData.push(null);
-                  visibilityData.push(null);
                 }
                 
                 // For Local Entity and Service Area, check if we have historical data from Supabase
