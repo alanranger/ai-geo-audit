@@ -4130,11 +4130,13 @@
               return;
             }
             
-            const trendCanvas = document.getElementById('moneyPagesTrendChart');
-            if (trendCanvas && typeof renderMoneyPagesTrendChart === 'function') {
-              const rect = trendCanvas.getBoundingClientRect();
-              if (rect.width === 0 || rect.height === 0) {
-                debugLog('⚠ Money Pages trend chart: Canvas has zero dimensions, will retry', 'warn');
+            const volumeCanvas = document.getElementById('moneyPagesVolumeChart');
+            const rateCanvas = document.getElementById('moneyPagesRateChart');
+            if ((volumeCanvas || rateCanvas) && typeof renderMoneyPagesTrendChart === 'function') {
+              const volumeRect = volumeCanvas ? volumeCanvas.getBoundingClientRect() : { width: 0, height: 0 };
+              const rateRect = rateCanvas ? rateCanvas.getBoundingClientRect() : { width: 0, height: 0 };
+              if ((volumeRect.width === 0 || volumeRect.height === 0) && (rateRect.width === 0 || rateRect.height === 0)) {
+                debugLog('⚠ Money Pages trend charts: Canvases have zero dimensions, will retry', 'warn');
                 setTimeout(renderMoneyCharts, 200);
                 return;
               }
@@ -4177,21 +4179,26 @@
                       
                       requestAnimationFrame(() => {
                         requestAnimationFrame(() => {
-                          const canvas = document.getElementById('moneyPagesTrendChart');
-                          if (canvas) {
-                            const rect = canvas.getBoundingClientRect();
-                            debugLog(`Money Pages Trend: Canvas dimensions: ${rect.width}x${rect.height}, offset: ${canvas.offsetWidth}x${canvas.offsetHeight}`, 'info');
-                            if (rect.width > 0 && rect.height > 0) {
+                          const volumeCanvas = document.getElementById('moneyPagesVolumeChart');
+                          const rateCanvas = document.getElementById('moneyPagesRateChart');
+                          if (volumeCanvas && rateCanvas) {
+                            const volumeRect = volumeCanvas.getBoundingClientRect();
+                            const rateRect = rateCanvas.getBoundingClientRect();
+                            debugLog(`Money Pages Trend: Canvas dimensions - Volume: ${volumeRect.width}x${volumeRect.height}, Rate: ${rateRect.width}x${rateRect.height}`, 'info');
+                            if (volumeRect.width > 0 && volumeRect.height > 0 && rateRect.width > 0 && rateRect.height > 0) {
                               debugLog(`Money Pages Trend: Calling renderMoneyPagesTrendChart with ${json.data.length} records`, 'info');
                               renderMoneyPagesTrendChart(json.data);
                             } else {
-                              debugLog('⚠ Money Pages trend chart: Canvas still has zero dimensions, retrying...', 'warn');
+                              debugLog('⚠ Money Pages trend charts: Canvases still have zero dimensions, retrying...', 'warn');
                               // Set explicit dimensions and retry
-                              canvas.width = canvas.offsetWidth || canvas.parentElement?.clientWidth || 800;
-                              canvas.height = canvas.offsetHeight || 400;
+                              [volumeCanvas, rateCanvas].forEach(canvas => {
+                                canvas.width = canvas.offsetWidth || canvas.parentElement?.clientWidth || 800;
+                                canvas.height = canvas.offsetHeight || 300;
+                              });
                               setTimeout(() => {
-                                const rect2 = canvas.getBoundingClientRect();
-                                if (rect2.width > 0 && rect2.height > 0) {
+                                const volumeRect2 = volumeCanvas.getBoundingClientRect();
+                                const rateRect2 = rateCanvas.getBoundingClientRect();
+                                if (volumeRect2.width > 0 && volumeRect2.height > 0 && rateRect2.width > 0 && rateRect2.height > 0) {
                                   renderMoneyPagesTrendChart(json.data);
                                 } else {
                                   setTimeout(() => renderMoneyCharts(), 200);
@@ -4199,7 +4206,7 @@
                               }, 100);
                             }
                           } else {
-                            debugLog('⚠ Money Pages trend chart: Canvas element not found', 'warn');
+                            debugLog('⚠ Money Pages trend charts: Canvas elements not found', 'warn');
                           }
                         });
                       });
@@ -13383,14 +13390,21 @@ Final Score: ${score}/100`;
               </div>
             </div>
             
-            <!-- Performance Trends Chart -->
+            <!-- Performance Trends Charts -->
             <div class="card" style="margin-bottom: 1.5rem;">
               <div class="card-header">
                 <h3>Money Pages Performance Trends</h3>
                 <p style="font-size: 0.85rem; color: #64748b; margin: 0.5rem 0 0 0;">Tracks how money pages contribute to overall clicks and impressions, and how their behaviour score changes over time.</p>
               </div>
               <div class="card-body">
-                <canvas id="moneyPagesTrendChart"></canvas>
+                <div style="margin-bottom: 2rem;">
+                  <h4 style="font-size: 0.95rem; font-weight: 600; color: #1e293b; margin-bottom: 0.5rem;">Volume Metrics</h4>
+                  <canvas id="moneyPagesVolumeChart"></canvas>
+                </div>
+                <div>
+                  <h4 style="font-size: 0.95rem; font-weight: 600; color: #1e293b; margin-bottom: 0.5rem;">Rate & Score Metrics</h4>
+                  <canvas id="moneyPagesRateChart"></canvas>
+                </div>
                 <p style="font-size: 0.75rem; color: #94a3b8; margin-top: 1rem; text-align: center;">Based on past audits stored in Supabase. Lines may be flat if only one audit has been completed.</p>
               </div>
             </div>
@@ -16175,35 +16189,49 @@ Final Score: ${score}/100`;
         }, 200);
       }
       
-      // Render Money Pages Performance Trends chart
+      // Render Money Pages Performance Trends charts (split into Volume and Rate charts)
       function renderMoneyPagesTrendChart(history) {
-        const canvas = document.getElementById('moneyPagesTrendChart');
-        if (!canvas) {
-          debugLog('⚠ Money Pages trend chart canvas not found', 'warn');
+        const volumeCanvas = document.getElementById('moneyPagesVolumeChart');
+        const rateCanvas = document.getElementById('moneyPagesRateChart');
+        
+        if (!volumeCanvas || !rateCanvas) {
+          debugLog('⚠ Money Pages trend chart canvas(es) not found', 'warn');
           return;
         }
         
-        // Destroy existing chart if it exists
-        if (window.moneyPagesTrendChart) {
+        // Destroy existing charts if they exist
+        if (window.moneyPagesVolumeChart) {
           try {
-            window.moneyPagesTrendChart.destroy();
+            window.moneyPagesVolumeChart.destroy();
           } catch (e) {
             // Ignore destroy errors
           }
-          window.moneyPagesTrendChart = null;
+          window.moneyPagesVolumeChart = null;
+        }
+        if (window.moneyPagesRateChart) {
+          try {
+            window.moneyPagesRateChart.destroy();
+          } catch (e) {
+            // Ignore destroy errors
+          }
+          window.moneyPagesRateChart = null;
         }
         
         if (!history || !Array.isArray(history) || history.length === 0) {
           debugLog('⚠ Money Pages trend chart: No history data available', 'warn');
           // Set canvas dimensions before drawing text
-          canvas.width = canvas.offsetWidth || 800;
-          canvas.height = canvas.offsetHeight || 400;
-          const ctx = canvas.getContext('2d');
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          ctx.font = '14px Arial';
-          ctx.fillStyle = '#64748b';
-          ctx.textAlign = 'center';
-          ctx.fillText('No trend data available. Run audits to build trend data.', canvas.width / 2, canvas.height / 2);
+          [volumeCanvas, rateCanvas].forEach(canvas => {
+            if (canvas) {
+              canvas.width = canvas.offsetWidth || 800;
+              canvas.height = canvas.offsetHeight || 400;
+              const ctx = canvas.getContext('2d');
+              ctx.clearRect(0, 0, canvas.width, canvas.height);
+              ctx.font = '14px Arial';
+              ctx.fillStyle = '#64748b';
+              ctx.textAlign = 'center';
+              ctx.fillText('No trend data available. Run audits to build trend data.', canvas.width / 2, canvas.height / 2);
+            }
+          });
           return;
         }
         
@@ -16391,20 +16419,24 @@ Final Score: ${score}/100`;
           return;
         }
         
-        // Ensure canvas has dimensions before creating chart
-        const parentContainer = canvas.parentElement;
-        if (parentContainer) {
-          const containerWidth = parentContainer.clientWidth || parentContainer.offsetWidth || 800;
-          if (canvas.width === 0 || canvas.height === 0) {
-            canvas.width = containerWidth;
-            canvas.height = 400;
+        // Ensure canvases have dimensions before creating charts
+        [volumeCanvas, rateCanvas].forEach(canvas => {
+          if (canvas) {
+            const parentContainer = canvas.parentElement;
+            if (parentContainer) {
+              const containerWidth = parentContainer.clientWidth || parentContainer.offsetWidth || 800;
+              if (canvas.width === 0 || canvas.height === 0) {
+                canvas.width = containerWidth;
+                canvas.height = 300;
+              }
+            } else {
+              if (canvas.width === 0 || canvas.height === 0) {
+                canvas.width = 800;
+                canvas.height = 300;
+              }
+            }
           }
-        } else {
-          if (canvas.width === 0 || canvas.height === 0) {
-            canvas.width = 800;
-            canvas.height = 400;
-          }
-        }
+        });
         
         debugLog(`Money Pages Trend Chart: Creating chart with ${labels.length} data points`, 'info');
         debugLog(`Money Pages Trend Chart: Clicks data: ${clicksData.filter(v => v != null).length} values, Impressions: ${impressionsData.filter(v => v != null).length} values, CTR: ${ctrData.filter(v => v != null).length} values, Behaviour: ${behaviourData.filter(v => v != null).length} values`, 'info');
@@ -16413,175 +16445,239 @@ Final Score: ${score}/100`;
         // Check if Chart.js is available
         if (typeof Chart === 'undefined') {
           debugLog('⚠ Money Pages trend chart: Chart.js not loaded', 'warn');
-          canvas.width = canvas.offsetWidth || 800;
-          canvas.height = canvas.offsetHeight || 400;
-          const ctx = canvas.getContext('2d');
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          ctx.font = '14px Arial';
-          ctx.fillStyle = '#ef4444';
-          ctx.textAlign = 'center';
-          ctx.fillText('Chart.js library not loaded', canvas.width / 2, canvas.height / 2);
+          [volumeCanvas, rateCanvas].forEach(canvas => {
+            if (canvas) {
+              canvas.width = canvas.offsetWidth || 800;
+              canvas.height = canvas.offsetHeight || 300;
+              const ctx = canvas.getContext('2d');
+              ctx.clearRect(0, 0, canvas.width, canvas.height);
+              ctx.font = '14px Arial';
+              ctx.fillStyle = '#ef4444';
+              ctx.textAlign = 'center';
+              ctx.fillText('Chart.js library not loaded', canvas.width / 2, canvas.height / 2);
+            }
+          });
           return;
         }
         
         try {
-          const ctx = canvas.getContext('2d');
-          if (!ctx) {
+          const volumeCtx = volumeCanvas.getContext('2d');
+          const rateCtx = rateCanvas.getContext('2d');
+          
+          if (!volumeCtx || !rateCtx) {
             debugLog('⚠ Money Pages trend chart: Could not get canvas context', 'warn');
             return;
           }
           
-          debugLog(`Money Pages Trend Chart: Creating Chart.js instance...`, 'info');
-          window.moneyPagesTrendChart = new Chart(ctx, {
-          type: 'line',
-          data: {
-            labels: labels,
-            datasets: [
-              {
-                label: 'Clicks',
-                data: clicksData,
-                borderColor: '#2563eb',
-                backgroundColor: 'rgba(37, 99, 235, 0.1)',
-                yAxisID: 'y',
-                tension: 0.4,
-                spanGaps: true
-              },
-              {
-                label: 'Impressions',
-                data: impressionsData,
-                borderColor: '#10b981',
-                backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                yAxisID: 'y1',
-                tension: 0.4,
-                spanGaps: true
-              },
-              {
-                label: 'CTR (%)',
-                data: ctrData,
-                borderColor: '#f59e0b',
-                backgroundColor: 'rgba(245, 158, 11, 0.1)',
-                yAxisID: 'y2',
-                tension: 0.4,
-                spanGaps: true
-              },
-              {
-                label: 'Behaviour Score',
-                data: behaviourData,
-                borderColor: '#8b5cf6',
-                backgroundColor: 'rgba(139, 92, 246, 0.1)',
-                yAxisID: 'y2',
-                tension: 0.4,
-                spanGaps: true
-              }
-            ]
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: {
-              mode: 'index',
-              intersect: false
+          debugLog(`Money Pages Trend Chart: Creating two Chart.js instances (Volume and Rate)...`, 'info');
+          
+          // Chart 1: Volume Metrics (Clicks + Impressions)
+          window.moneyPagesVolumeChart = new Chart(volumeCtx, {
+            type: 'line',
+            data: {
+              labels: labels,
+              datasets: [
+                {
+                  label: 'Clicks',
+                  data: clicksData,
+                  borderColor: '#2563eb',
+                  backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                  yAxisID: 'y',
+                  tension: 0.4,
+                  spanGaps: true
+                },
+                {
+                  label: 'Impressions',
+                  data: impressionsData,
+                  borderColor: '#10b981',
+                  backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                  yAxisID: 'y1',
+                  tension: 0.4,
+                  spanGaps: true
+                }
+              ]
             },
-            plugins: {
-              legend: {
-                display: true,
-                position: 'top'
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              interaction: {
+                mode: 'index',
+                intersect: false
               },
-              tooltip: {
-                callbacks: {
-                  label: function(context) {
-                    let label = context.dataset.label || '';
-                    if (label) {
-                      label += ': ';
+              plugins: {
+                legend: {
+                  display: true,
+                  position: 'top'
+                },
+                tooltip: {
+                  callbacks: {
+                    label: function(context) {
+                      let label = context.dataset.label || '';
+                      if (label) {
+                        label += ': ';
+                      }
+                      label += context.parsed.y.toLocaleString();
+                      return label;
                     }
-                    const value = context.parsed.y;
-                    if (context.dataset.label === 'CTR (%)' || context.dataset.label === 'Behaviour Score') {
-                      label += value.toFixed(1);
-                      if (context.dataset.label === 'CTR (%)') label += '%';
-                    } else {
-                      label += value.toLocaleString();
+                  }
+                }
+              },
+              scales: {
+                x: {
+                  display: true,
+                  title: {
+                    display: true,
+                    text: 'Audit Date'
+                  }
+                },
+                y: {
+                  type: 'linear',
+                  display: true,
+                  position: 'left',
+                  title: {
+                    display: true,
+                    text: 'Clicks'
+                  },
+                  ticks: {
+                    callback: function(value) {
+                      return value.toLocaleString();
                     }
-                    return label;
                   }
-                }
-              }
-            },
-            scales: {
-              x: {
-                display: true,
-                title: {
+                },
+                y1: {
+                  type: 'linear',
                   display: true,
-                  text: 'Audit Date'
-                }
-              },
-              y: {
-                type: 'linear',
-                display: true,
-                position: 'left',
-                title: {
-                  display: true,
-                  text: 'Clicks'
-                },
-                min: 100,
-                max: 500,
-                ticks: {
-                  stepSize: 50,
-                  callback: function(value) {
-                    return value.toLocaleString();
-                  }
-                }
-              },
-              y1: {
-                type: 'linear',
-                display: true,
-                position: 'right',
-                title: {
-                  display: true,
-                  text: 'Impressions'
-                },
-                grid: {
-                  drawOnChartArea: false
-                },
-                ticks: {
-                  callback: function(value) {
-                    return value.toLocaleString();
-                  }
-                }
-              },
-              y2: {
-                type: 'linear',
-                display: true,
-                position: 'right',
-                title: {
-                  display: true,
-                  text: 'CTR / Behaviour Score'
-                },
-                grid: {
-                  drawOnChartArea: false
-                },
-                ticks: {
-                  callback: function(value) {
-                    return value.toFixed(1);
+                  position: 'right',
+                  title: {
+                    display: true,
+                    text: 'Impressions'
+                  },
+                  grid: {
+                    drawOnChartArea: false
+                  },
+                  ticks: {
+                    callback: function(value) {
+                      return value.toLocaleString();
+                    }
                   }
                 }
               }
             }
-          }
-        });
-        
-        debugLog('✓ Money Pages trend chart rendered successfully', 'success');
+          });
+          
+          // Chart 2: Rate & Score Metrics (CTR + Behaviour Score)
+          window.moneyPagesRateChart = new Chart(rateCtx, {
+            type: 'line',
+            data: {
+              labels: labels,
+              datasets: [
+                {
+                  label: 'CTR (%)',
+                  data: ctrData,
+                  borderColor: '#f59e0b',
+                  backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                  yAxisID: 'y',
+                  tension: 0.4,
+                  spanGaps: true
+                },
+                {
+                  label: 'Behaviour Score',
+                  data: behaviourData,
+                  borderColor: '#8b5cf6',
+                  backgroundColor: 'rgba(139, 92, 246, 0.1)',
+                  yAxisID: 'y1',
+                  tension: 0.4,
+                  spanGaps: true
+                }
+              ]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              interaction: {
+                mode: 'index',
+                intersect: false
+              },
+              plugins: {
+                legend: {
+                  display: true,
+                  position: 'top'
+                },
+                tooltip: {
+                  callbacks: {
+                    label: function(context) {
+                      let label = context.dataset.label || '';
+                      if (label) {
+                        label += ': ';
+                      }
+                      const value = context.parsed.y;
+                      label += value.toFixed(1);
+                      if (context.dataset.label === 'CTR (%)') label += '%';
+                      return label;
+                    }
+                  }
+                }
+              },
+              scales: {
+                x: {
+                  display: true,
+                  title: {
+                    display: true,
+                    text: 'Audit Date'
+                  }
+                },
+                y: {
+                  type: 'linear',
+                  display: true,
+                  position: 'left',
+                  title: {
+                    display: true,
+                    text: 'CTR (%)'
+                  },
+                  ticks: {
+                    callback: function(value) {
+                      return value.toFixed(1) + '%';
+                    }
+                  }
+                },
+                y1: {
+                  type: 'linear',
+                  display: true,
+                  position: 'right',
+                  title: {
+                    display: true,
+                    text: 'Behaviour Score'
+                  },
+                  grid: {
+                    drawOnChartArea: false
+                  },
+                  ticks: {
+                    callback: function(value) {
+                      return value.toFixed(1);
+                    }
+                  }
+                }
+              }
+            }
+          });
+          
+          debugLog('✓ Money Pages trend charts rendered successfully', 'success');
         } catch (error) {
-          debugLog(`✗ Error creating Money Pages trend chart: ${error.message}`, 'error');
+          debugLog(`✗ Error creating Money Pages trend charts: ${error.message}`, 'error');
           debugLog(`Money Pages trend chart error details: ${error.stack || error.toString()}`, 'error');
-          // Show error message on canvas
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.font = '14px Arial';
-            ctx.fillStyle = '#ef4444';
-            ctx.textAlign = 'center';
-            ctx.fillText(`Error rendering chart: ${error.message}`, canvas.width / 2, canvas.height / 2);
-          }
+          // Show error message on canvases
+          [volumeCanvas, rateCanvas].forEach(canvas => {
+            if (canvas) {
+              const ctx = canvas.getContext('2d');
+              if (ctx) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.font = '14px Arial';
+                ctx.fillStyle = '#ef4444';
+                ctx.textAlign = 'center';
+                ctx.fillText(`Error rendering chart: ${error.message}`, canvas.width / 2, canvas.height / 2);
+              }
+            }
+          });
         }
       }
       
