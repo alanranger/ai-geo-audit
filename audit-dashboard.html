@@ -19528,46 +19528,24 @@ Final Score: ${score}/100`;
             
             // Always extend chart to latestAuditDateStr (or today) for non-GSC pillars
             // GSC pillars will only show data up to lastGscDateForRange
-            const lastDateForChart = lastGscDateForRange || (timeseries.length > 0 ? new Date(timeseries[timeseries.length - 1].date) : null);
+            // Determine the last date that's already in the chart (from timeseries)
+            const lastTimeseriesDateStr = timeseries.length > 0 ? timeseries[timeseries.length - 1].date : null;
+            const lastDateInChartStr = lastGscDateForRange || lastTimeseriesDateStr;
             const targetDateStr = latestAuditDateStr || today.toISOString().split('T')[0];
             
-            if (lastDateForChart) {
-              const lastDate = new Date(lastDateForChart);
+            debugLog(`Chart extension: lastDateInChart=${lastDateInChartStr}, targetDate=${targetDateStr}, latestAuditDateStr=${latestAuditDateStr}`, 'info');
+            debugLog(`Last GSC date: ${lastGscDateForRange} (from maps: ${actualLastGscDate}, from timeseries: ${lastTimeseriesDate})`, 'info');
+            debugLog(`Content/Schema map has ${contentSchemaMap.size} entries before filling missing dates`, 'info');
+            debugLog(`Content/Schema map entries: ${Array.from(contentSchemaMap.entries()).map(([d, s]) => `${d}=${s}`).join(', ')}`, 'info');
+            
+            // Always fill dates from last date in chart to latest audit date
+            if (lastDateInChartStr && targetDateStr && lastDateInChartStr < targetDateStr) {
+              const lastDate = new Date(lastDateInChartStr);
               lastDate.setHours(0, 0, 0, 0);
-              
-              debugLog(`Last GSC date: ${lastGscDateForRange} (from maps: ${actualLastGscDate}, from timeseries: ${lastTimeseriesDate}), Today: ${todayStr}`, 'info');
-              debugLog(`Content/Schema map has ${contentSchemaMap.size} entries before filling missing dates`, 'info');
-              debugLog(`Content/Schema map entries: ${Array.from(contentSchemaMap.entries()).map(([d, s]) => `${d}=${s}`).join(', ')}`, 'info');
-              
-              // Add all missing dates from day after last date to latest audit date
               const currentDate = new Date(lastDate);
               currentDate.setDate(currentDate.getDate() + 1); // Start from day after last date
               
               debugLog(`Filling missing dates from ${currentDate.toISOString().split('T')[0]} to ${targetDateStr} (latest audit: ${latestAuditDateStr})`, 'info');
-            } else if (latestAuditDateStr) {
-              // No timeseries data, but we have a latest audit date - add it to the chart
-              const targetDateObj = new Date(latestAuditDateStr);
-              allDateObjects.push(targetDateObj);
-              allDates.push(targetDateObj.toLocaleDateString('en-GB', dateFormat));
-              
-              // Add null data for all pillars for this date (will be filled by other logic)
-              visibilityData.push(null);
-              authorityData.push(null);
-              localEntityData.push(null);
-              serviceAreaData.push(null);
-              contentSchemaData.push(null);
-              contentSchemaDataEstimated.push(null);
-              brandOverlayData.push(null);
-              
-              debugLog(`Added latest audit date ${latestAuditDateStr} to chart (no timeseries data)`, 'info');
-            }
-            
-            // Fill dates between last date and latest audit date
-            if (lastDateForChart) {
-              const lastDate = new Date(lastDateForChart);
-              lastDate.setHours(0, 0, 0, 0);
-              const currentDate = new Date(lastDate);
-              currentDate.setDate(currentDate.getDate() + 1);
               
               while (currentDate.toISOString().split('T')[0] <= targetDateStr) {
                 const dateStr = currentDate.toISOString().split('T')[0];
@@ -19798,10 +19776,13 @@ Final Score: ${score}/100`;
               }
               
               debugLog(`Filled missing dates: added ${allDateObjects.length - timeseries.length} additional dates`, 'info');
-              debugLog(`Chart date range: ${allDates[0]} to ${allDates[allDates.length - 1]} (${allDates.length} total dates)`, 'info');
-              debugLog(`Latest audit date: ${latestAuditDateStr}`, 'info');
-              debugLog(`Chart labels (first 5, last 5): ${allDates.slice(0, 5).join(', ')} ... ${allDates.slice(-5).join(', ')}`, 'info');
-            } else if (timeseries.length === 0) {
+            }
+            
+            debugLog(`Chart date range: ${allDates[0]} to ${allDates[allDates.length - 1]} (${allDates.length} total dates)`, 'info');
+            debugLog(`Latest audit date: ${latestAuditDateStr}`, 'info');
+            debugLog(`Chart labels (first 5, last 5): ${allDates.slice(0, 5).join(', ')} ... ${allDates.slice(-5).join(', ')}`, 'info');
+            
+            if (timeseries.length === 0) {
               // No timeseries data at all - just add latest audit date or today
               const targetDateStr = latestAuditDateStr || todayStr;
               const targetDateObj = new Date(targetDateStr);
