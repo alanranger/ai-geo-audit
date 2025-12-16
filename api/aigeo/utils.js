@@ -12,12 +12,12 @@
 export function parseDateRange(req, accountForGSCDelay = false) {
   const { startDate, endDate } = req.query;
   
-  // Default to last 30 days if not provided
+  // Default to last 28 days if not provided (matches GSC UI standard)
   const end = endDate ? new Date(endDate) : new Date();
   const start = startDate ? new Date(startDate) : new Date();
   
   if (!startDate) {
-    start.setDate(start.getDate() - 30);
+    start.setDate(start.getDate() - 28);
   }
   
   // Google Search Console data is typically delayed by 2-3 days
