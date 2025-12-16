@@ -16212,25 +16212,49 @@ Final Score: ${score}/100`;
         
         debugLog(`Money Pages Trend Chart: Starting with ${history.length} history records, lastGscTimeseriesDate: ${lastGscTimeseriesDate}`, 'info');
         
-        // Filter history to only include dates up to the last GSC timeseries date
+        // Calculate the cutoff date for last 30 days
+        // Use the last GSC date if available, otherwise use today
+        const cutoffDate = lastGscTimeseriesDate ? new Date(lastGscTimeseriesDate) : new Date();
+        const thirtyDaysAgo = new Date(cutoffDate);
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
+        
+        debugLog(`Money Pages Trend Chart: Showing last 30 days up to ${cutoffDate.toISOString().split('T')[0]} (from ${thirtyDaysAgoStr})`, 'info');
+        
+        // Filter history to only include:
+        // 1. Dates up to the last GSC timeseries date
+        // 2. Dates within the last 30 days
         let filteredHistory = history;
         if (lastGscTimeseriesDate) {
           const beforeFilter = history.length;
           filteredHistory = history.filter(record => {
             const recordDate = record.date || record.audit_date || record.auditDate;
             if (!recordDate) return false;
-            // Compare dates as strings (YYYY-MM-DD format)
-            const comparison = recordDate.localeCompare(lastGscTimeseriesDate);
-            const include = comparison <= 0;
+            
+            // Check if date is within last 30 days
+            const isWithin30Days = recordDate.localeCompare(thirtyDaysAgoStr) >= 0;
+            
+            // Check if date is up to last GSC date
+            const isUpToGscDate = recordDate.localeCompare(lastGscTimeseriesDate) <= 0;
+            
+            const include = isWithin30Days && isUpToGscDate;
             if (!include) {
-              debugLog(`Money Pages Trend: Excluding record with date ${recordDate} (last GSC date: ${lastGscTimeseriesDate})`, 'info');
+              debugLog(`Money Pages Trend: Excluding record with date ${recordDate} (30-day cutoff: ${thirtyDaysAgoStr}, last GSC date: ${lastGscTimeseriesDate})`, 'info');
             }
             return include;
           });
-          debugLog(`Money Pages Trend: Filtered history from ${beforeFilter} to ${filteredHistory.length} records (last GSC date: ${lastGscTimeseriesDate})`, 'info');
+          debugLog(`Money Pages Trend: Filtered history from ${beforeFilter} to ${filteredHistory.length} records (last 30 days up to GSC date: ${lastGscTimeseriesDate})`, 'info');
           debugLog(`Money Pages Trend: Filtered dates: ${filteredHistory.map(r => r.date || r.audit_date || r.auditDate).join(', ')}`, 'info');
         } else {
-          debugLog(`Money Pages Trend: No last GSC timeseries date found, using all history records`, 'warn');
+          // If no GSC date, just filter by last 30 days
+          const beforeFilter = history.length;
+          filteredHistory = history.filter(record => {
+            const recordDate = record.date || record.audit_date || record.auditDate;
+            if (!recordDate) return false;
+            const isWithin30Days = recordDate.localeCompare(thirtyDaysAgoStr) >= 0;
+            return isWithin30Days;
+          });
+          debugLog(`Money Pages Trend: Filtered history from ${beforeFilter} to ${filteredHistory.length} records (last 30 days, no GSC date limit)`, 'info');
         }
         
         // Extract money pages trend data from history
