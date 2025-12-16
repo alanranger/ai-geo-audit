@@ -19533,71 +19533,38 @@ Final Score: ${score}/100`;
                 
                 // For GSC-based pillars (Authority, Visibility), only use data from Supabase if it exists for that specific date
                 // These rely on GSC data being fetched and stored, so NO forward-filling
-                // Only use current audit data for the latest audit date
+                // CRITICAL: Only show data for dates <= lastTimeseriesDate (last GSC data date)
+                // Never show data for dates after lastTimeseriesDate, even if an audit was run on that date
+                const isDateWithinGscRange = lastTimeseriesDate && dateStr <= lastTimeseriesDate;
                 const historicalVisibility = visibilityMap.get(dateStr);
                 const historicalAuthority = authorityMap.get(dateStr);
                 
-                // Visibility: use historical data from Supabase if available, or current audit for latest audit date only
-                if (historicalVisibility !== undefined && historicalVisibility !== null) {
+                // Visibility: only use historical data from Supabase if date is within GSC data range
+                if (isDateWithinGscRange && historicalVisibility !== undefined && historicalVisibility !== null) {
                   visibilityData.push(historicalVisibility);
                   debugLog(`✓ Added Visibility score (${historicalVisibility}) for ${dateStr} from Supabase`, 'info');
-                } else if (dateStr === latestAuditDateStr && savedAuditForTrend) {
-                  // Only for latest audit date, calculate from current audit data
-                  const currentSearchData = savedAuditForTrend?.searchData;
-                  if (currentSearchData) {
-                    const currentPosition = currentSearchData.averagePosition || 40;
-                    const clampedPos = Math.max(1, Math.min(40, currentPosition));
-                    const scale = (clampedPos - 1) / 39;
-                    const posScore = 100 - scale * 90;
-                    const visibility = clampScore(posScore);
-                    visibilityData.push(visibility);
-                    debugLog(`✓ Added Visibility score (${visibility}) for ${dateStr} from current audit`, 'info');
-                  } else {
-                    visibilityData.push(null);
-                    debugLog(`No Visibility data for ${dateStr}`, 'warn');
-                  }
                 } else {
-                  // No historical data and not latest audit date - no forward-filling for GSC-based metrics
+                  // No data for dates after last GSC data date - GSC-based metrics require real GSC data
                   visibilityData.push(null);
-                  debugLog(`No Visibility data for ${dateStr} (no historical audit data)`, 'info');
+                  if (!isDateWithinGscRange) {
+                    debugLog(`No Visibility data for ${dateStr} (date is after last GSC data date: ${lastTimeseriesDate})`, 'info');
+                  } else {
+                    debugLog(`No Visibility data for ${dateStr} (no historical audit data)`, 'info');
+                  }
                 }
                 
-                // Authority: use historical data from Supabase if available, or current audit for latest audit date only
-                if (historicalAuthority !== undefined && historicalAuthority !== null) {
+                // Authority: only use historical data from Supabase if date is within GSC data range
+                if (isDateWithinGscRange && historicalAuthority !== undefined && historicalAuthority !== null) {
                   authorityData.push(historicalAuthority);
                   debugLog(`✓ Added Authority score (${historicalAuthority}) for ${dateStr} from Supabase`, 'info');
-                } else if (dateStr === latestAuditDateStr && savedAuditForTrend) {
-                  // Only for latest audit date, use current audit scores using selected mode
-                  const selectedMode = window.trendAuthorityMode || 'all';
-                  const currentAuthority = getAuthorityForMode(selectedMode);
-                  if (currentAuthority !== null && currentAuthority !== undefined) {
-                    authorityData.push(currentAuthority);
-                    debugLog(`✓ Added Authority score (${currentAuthority}) for ${dateStr} from current audit (mode: ${selectedMode})`, 'info');
-                  } else {
-                    // Fallback: calculate Authority from current data
-                    const currentSearchData = savedAuditForTrend?.searchData;
-                    if (currentSearchData) {
-                      const pillarScores = calculatePillarFromMetrics(
-                        currentSearchData.averagePosition || 40,
-                        currentSearchData.ctr || 0,
-                        dateStr,
-                        currentTopQueries,
-                        currentBacklinkMetrics,
-                        currentLocalSignals,
-                        currentSiteReviews
-                      );
-                      const authScore = typeof pillarScores.authority === 'object' ? pillarScores.authority.score : pillarScores.authority;
-                      authorityData.push(authScore);
-                      debugLog(`✓ Calculated Authority score (${authScore}) for ${dateStr} from current audit data`, 'info');
-                    } else {
-                      authorityData.push(null);
-                      debugLog(`No Authority data for ${dateStr}`, 'warn');
-                    }
-                  }
                 } else {
-                  // No historical data and not latest audit date - no forward-filling for GSC-based metrics
+                  // No data for dates after last GSC data date - GSC-based metrics require real GSC data
                   authorityData.push(null);
-                  debugLog(`No Authority data for ${dateStr} (no historical audit data)`, 'info');
+                  if (!isDateWithinGscRange) {
+                    debugLog(`No Authority data for ${dateStr} (date is after last GSC data date: ${lastTimeseriesDate})`, 'info');
+                  } else {
+                    debugLog(`No Authority data for ${dateStr} (no historical audit data)`, 'info');
+                  }
                 }
                 
                 // For Local Entity and Service Area, check if we have historical data from Supabase
@@ -19766,17 +19733,19 @@ Final Score: ${score}/100`;
                 }
                 
                 // Brand Overlay data (check historical data from Supabase)
+                // Brand Overlay is GSC-based, so only show data for dates <= lastTimeseriesDate
                 const historicalBrandOverlay = brandOverlayMap.get(dateStr);
-                if (historicalBrandOverlay !== undefined && historicalBrandOverlay !== null) {
+                if (isDateWithinGscRange && historicalBrandOverlay !== undefined && historicalBrandOverlay !== null) {
                   brandOverlayData.push(historicalBrandOverlay);
                   debugLog(`✓ Added Brand Overlay score (${historicalBrandOverlay}) for ${dateStr} from Supabase`, 'info');
-                } else if (dateStr === latestAuditDateStr && currentBrandOverlay !== null) {
-                  // For latest audit date, use current Brand Overlay score if available
-                  brandOverlayData.push(currentBrandOverlay);
-                  debugLog(`✓ Added Brand Overlay score (${currentBrandOverlay}) for ${dateStr} from current audit`, 'info');
                 } else {
+                  // No data for dates after last GSC data date - Brand Overlay is GSC-based
                   brandOverlayData.push(null);
-                  debugLog(`No Brand Overlay data for ${dateStr}`, 'info');
+                  if (!isDateWithinGscRange) {
+                    debugLog(`No Brand Overlay data for ${dateStr} (date is after last GSC data date: ${lastTimeseriesDate})`, 'info');
+                  } else {
+                    debugLog(`No Brand Overlay data for ${dateStr} (no historical audit data)`, 'info');
+                  }
                 }
                 
                 // Move to next day
