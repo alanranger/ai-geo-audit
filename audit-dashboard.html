@@ -15047,8 +15047,46 @@ Final Score: ${score}/100`;
         const filteredRows = filteredMetrics?.rows || [];
         const queryPages = window.currentQueryPages || null;
 
-        // Update dropdown counts
+        // Update dropdown counts (both table and top-level filters)
         updateMoneyPagesSubSegmentCounts(moneyPagesMetrics);
+        
+        // Also update top-level filter dropdown counts
+        const topLevelFilterEl = document.getElementById('money-top-level-filter-subsegment');
+        if (topLevelFilterEl && moneyPagesMetrics && moneyPagesMetrics.rows) {
+          const rows = moneyPagesMetrics.rows || [];
+          const counts = {
+            ALL: rows.length,
+            PRODUCT: 0,
+            EVENT: 0,
+            LANDING: 0
+          };
+          
+          rows.forEach(row => {
+            const subSegment = row.subSegment || row.segmentType || 'LANDING';
+            if (subSegment === 'PRODUCT' || subSegment === 'product') {
+              counts.PRODUCT++;
+            } else if (subSegment === 'EVENT' || subSegment === 'event') {
+              counts.EVENT++;
+            } else if (subSegment === 'LANDING' || subSegment === 'landing') {
+              counts.LANDING++;
+            }
+          });
+          
+          // Update top-level filter options
+          const options = topLevelFilterEl.querySelectorAll('option');
+          options.forEach(opt => {
+            const value = opt.value;
+            if (value === 'ALL') {
+              opt.textContent = `All sub-segments (${counts.ALL})`;
+            } else if (value === 'PRODUCT') {
+              opt.textContent = `Product Pages (${counts.PRODUCT})`;
+            } else if (value === 'EVENT') {
+              opt.textContent = `Event Pages (${counts.EVENT})`;
+            } else if (value === 'LANDING') {
+              opt.textContent = `Landing Pages (${counts.LANDING})`;
+            }
+          });
+        }
 
         if (typeof renderMoneyPagesBehaviourKpis === 'function') {
           const behaviour = (queryPages && typeof window.computeMoneyPagesBehaviour === 'function')
