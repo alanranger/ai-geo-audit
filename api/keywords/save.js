@@ -189,11 +189,24 @@ export default async function handler(req, res) {
     });
 
     if (!updateResp.ok) {
-      const errorText = await updateResp.text();
-      return res.status(updateResp.status).json({
+      let errorText = 'Unknown error';
+      try {
+        errorText = await updateResp.text();
+        // Try to parse as JSON if possible
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorText = errorJson.message || errorJson.error || errorText;
+        } catch {
+          // Keep as plain text if not JSON
+        }
+      } catch (textErr) {
+        errorText = `HTTP ${updateResp.status}: ${updateResp.statusText}`;
+      }
+      
+      return res.status(updateResp.status >= 400 && updateResp.status < 600 ? updateResp.status : 500).json({
         status: 'error',
         message: 'Failed to update keywords',
-        details: errorText,
+        details: errorText.substring(0, 500), // Limit length
         meta: { generatedAt: new Date().toISOString() },
       });
     }
@@ -207,11 +220,23 @@ export default async function handler(req, res) {
 
   } catch (e) {
     console.error('[Save Keywords] Error:', e);
-    return res.status(500).json({
-      status: 'error',
-      message: e.message || 'Internal server error',
-      meta: { generatedAt: new Date().toISOString() },
-    });
+    // Ensure we always return JSON, even on unexpected errors
+    try {
+      return res.status(500).json({
+        status: 'error',
+        message: e.message || 'Internal server error',
+        details: e.stack ? e.stack.substring(0, 500) : undefined,
+        meta: { generatedAt: new Date().toISOString() },
+      });
+    } catch (jsonErr) {
+      // Fallback if JSON.stringify fails
+      res.status(500).setHeader('Content-Type', 'application/json');
+      return res.end(JSON.stringify({
+        status: 'error',
+        message: 'Internal server error',
+        meta: { generatedAt: new Date().toISOString() },
+      }));
+    }
   }
 }
 

@@ -28385,7 +28385,17 @@ Final Score: ${score}/100`;
                 body: JSON.stringify({ keywords })
               });
 
-              const data = await resp.json();
+              // Check if response is JSON before parsing
+              const contentType = resp.headers.get('content-type');
+              let data;
+              
+              if (contentType && contentType.includes('application/json')) {
+                data = await resp.json();
+              } else {
+                // Non-JSON response (likely an error page or plain text)
+                const errorText = await resp.text();
+                throw new Error(`Server returned non-JSON response (${resp.status}): ${errorText.substring(0, 200)}`);
+              }
               
               if (resp.ok && data.status === 'ok') {
                 if (statusEl) {
@@ -28398,9 +28408,10 @@ Final Score: ${score}/100`;
                   hideModal();
                 }, 2000);
               } else {
-                throw new Error(data.message || 'Failed to save keywords');
+                throw new Error(data.message || data.details || 'Failed to save keywords');
               }
             } catch (err) {
+              console.error('[Edit Keywords] Save error:', err);
               if (statusEl) {
                 statusEl.textContent = 'Error saving keywords: ' + err.message;
                 statusEl.style.color = '#dc2626';
