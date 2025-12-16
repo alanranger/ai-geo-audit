@@ -23396,6 +23396,12 @@ Final Score: ${score}/100`;
                 
                 // Normalize summary field names for compatibility
                 parsed.summary = normalizeSummaryFields(parsed.summary);
+                // Cache queryPages if available in localStorage data
+                const savedAudit = loadAuditResultsSync();
+                if (savedAudit && savedAudit.searchData && savedAudit.searchData.queryPages) {
+                  window.cachedQueryPages = savedAudit.searchData.queryPages;
+                  debugLog(`✓ Cached ${savedAudit.searchData.queryPages.length} queryPages from localStorage`, 'info');
+                }
                 // Store as fallback before checking Supabase
                 localStorageFallback = parsed;
                 // Always check Supabase if localStorage has fewer than 10 keywords (likely stale data)
@@ -23436,6 +23442,16 @@ Final Score: ${score}/100`;
           debugLog(`📊 Response has rankingAiData: ${!!json.data?.rankingAiData}`, 'info');
           
           if (json.status === 'ok' && json.data) {
+            // Cache queryPages data for getCtrMetricsForKeyword to use
+            if (json.data.query_pages && Array.isArray(json.data.query_pages) && json.data.query_pages.length > 0) {
+              window.cachedQueryPages = json.data.query_pages;
+              debugLog(`✓ Cached ${json.data.query_pages.length} queryPages from Supabase for impressions lookup`, 'success');
+            } else if (json.data.queryPages && Array.isArray(json.data.queryPages) && json.data.queryPages.length > 0) {
+              // Handle camelCase variant
+              window.cachedQueryPages = json.data.queryPages;
+              debugLog(`✓ Cached ${json.data.queryPages.length} queryPages from Supabase for impressions lookup`, 'success');
+            }
+            
             if (json.data.rankingAiData) {
               if (json.data.rankingAiData.combinedRows) {
                 const keywordCount = json.data.rankingAiData.combinedRows.length;
@@ -24724,22 +24740,21 @@ Final Score: ${score}/100`;
      */
     function getCtrMetricsForKeyword(key) {
       try {
-        // Get audit data from localStorage using loadAuditResultsSync
-        const savedAudit = loadAuditResultsSync();
-        if (!savedAudit) {
-          debugLog('[CTR Metrics] No saved audit found in localStorage', 'warn');
+        // First try: Use cached queryPages if available (set when ranking data is loaded)
+        let queryPages = window.cachedQueryPages || null;
+        
+        // Second try: Get audit data from localStorage using loadAuditResultsSync
+        if (!queryPages || !Array.isArray(queryPages) || queryPages.length === 0) {
+          const savedAudit = loadAuditResultsSync();
+          if (savedAudit && savedAudit.searchData && savedAudit.searchData.queryPages) {
+            queryPages = savedAudit.searchData.queryPages || [];
+          }
+        }
+        
+        if (!queryPages || !Array.isArray(queryPages) || queryPages.length === 0) {
+          debugLog('[CTR Metrics] No queryPages data available from cache or localStorage', 'warn');
           return null;
         }
-        if (!savedAudit.searchData) {
-          debugLog('[CTR Metrics] No searchData in saved audit', 'warn');
-          return null;
-        }
-        if (!savedAudit.searchData.queryPages) {
-          debugLog('[CTR Metrics] No queryPages in searchData. Available keys: ' + Object.keys(savedAudit.searchData || {}).join(', '), 'warn');
-          return null;
-        }
-
-        const queryPages = savedAudit.searchData.queryPages || [];
         if (!Array.isArray(queryPages) || queryPages.length === 0) {
           return null;
         }
