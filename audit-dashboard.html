@@ -18695,12 +18695,45 @@ Final Score: ${score}/100`;
         chartDateObjects = mockDateObjects;
         debugLog('Creating new Chart instance for trend chart...', 'info');
         try {
-          // Use real timeseries data from GSC API
-          const timeseries = data.timeseries || [];
-          debugLog(`Using ${timeseries.length} timeseries data points from GSC API`, 'info');
+          // CRITICAL FIX: Always fetch fresh timeseries from Supabase instead of using stale data.timeseries
+          // This ensures we have the latest GSC data, not just what was saved during the last audit
+          let timeseries = [];
+          const propertyUrl = document.getElementById('propertyUrl')?.value || data?.propertyUrl || '';
+          if (propertyUrl) {
+            try {
+              const endDate = new Date().toISOString().split('T')[0];
+              const startDate = new Date();
+              startDate.setDate(startDate.getDate() - dateRange); // Use chart's date range
+              const startDateStr = startDate.toISOString().split('T')[0];
+              
+              debugLog(`Fetching fresh timeseries from Supabase for date range: ${startDateStr} to ${endDate}`, 'info');
+              const timeseriesResponse = await fetch(apiUrl(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDate}`));
+              if (timeseriesResponse.ok) {
+                const timeseriesData = await timeseriesResponse.json();
+                if (timeseriesData.status === 'ok' && timeseriesData.timeseries && Array.isArray(timeseriesData.timeseries)) {
+                  timeseries = timeseriesData.timeseries;
+                  debugLog(`✓ Fetched ${timeseries.length} fresh timeseries data points from Supabase (last date: ${timeseries.length > 0 ? timeseries[timeseries.length - 1].date : 'none'})`, 'success');
+                } else {
+                  debugLog(`⚠ Supabase timeseries response missing data, falling back to data.timeseries`, 'warn');
+                  timeseries = data.timeseries || [];
+                }
+              } else {
+                debugLog(`⚠ Failed to fetch timeseries from Supabase (${timeseriesResponse.status}), falling back to data.timeseries`, 'warn');
+                timeseries = data.timeseries || [];
+              }
+            } catch (fetchError) {
+              debugLog(`⚠ Error fetching fresh timeseries: ${fetchError.message}, falling back to data.timeseries`, 'warn');
+              timeseries = data.timeseries || [];
+            }
+          } else {
+            debugLog(`⚠ No property URL found, using data.timeseries`, 'warn');
+            timeseries = data.timeseries || [];
+          }
+          
+          debugLog(`Using ${timeseries.length} timeseries data points (last date: ${timeseries.length > 0 ? timeseries[timeseries.length - 1].date : 'none'})`, 'info');
           
           // Check if we have data
-          if (!data || !data.timeseries || data.timeseries.length === 0) {
+          if (!timeseries || timeseries.length === 0) {
             debugLog('⚠ No timeseries data available. Chart will show mock data. Run a new audit to get real GSC historical data.', 'warn');
             // Show message to user (only if message doesn't already exist)
             const trendCanvas = document.getElementById('trendChart');
@@ -19495,40 +19528,47 @@ Final Score: ${score}/100`;
             todayStr = today.toISOString().split('T')[0];
             const lastTimeseriesDate = timeseries.length > 0 ? timeseries[timeseries.length - 1].date : null;
             
-            // Determine actual last GSC data date from historical maps
-            // CRITICAL: Only use dates from maps that are <= last timeseries date
-            // Never forward-fill GSC data - only use dates that have actual GSC data
-            let actualLastGscDate = lastTimeseriesDate;
+            // Determine actual last GSC data date from ALL sources (timeseries + historical maps)
+            // CRITICAL FIX: Use maximum date from both timeseries AND maps (don't filter maps by timeseries date)
+            // This ensures we show all available GSC-derived data, not just what's in the timeseries array
             const allGscDates = new Set();
+            
+            // Add all dates from timeseries (actual GSC API data)
+            timeseries.forEach(point => {
+              if (point.date) {
+                allGscDates.add(point.date);
+              }
+            });
+            
+            // Add all dates from historical maps (GSC-derived scores from audit_results)
+            // These may include dates that aren't in timeseries yet (e.g., from recent audits)
             visibilityMap.forEach((score, date) => {
-              // Only include dates that are <= last timeseries date (actual GSC data)
-              if (lastTimeseriesDate && date <= lastTimeseriesDate) {
+              if (date && score !== null && score !== undefined) {
                 allGscDates.add(date);
               }
             });
             authorityMap.forEach((score, date) => {
-              if (lastTimeseriesDate && date <= lastTimeseriesDate) {
+              if (date && score !== null && score !== undefined) {
                 allGscDates.add(date);
               }
             });
             brandOverlayMap.forEach((score, date) => {
-              if (lastTimeseriesDate && date <= lastTimeseriesDate) {
+              if (date && score !== null && score !== undefined) {
                 allGscDates.add(date);
               }
             });
+            
+            // Find the latest date from all sources
+            let lastGscDateForRange = lastTimeseriesDate; // Default to timeseries date
             if (allGscDates.size > 0) {
               const sortedDates = Array.from(allGscDates).sort();
-              const latestMapDate = sortedDates[sortedDates.length - 1];
-              // Use the later of: last timeseries date or latest valid date in historical maps
-              if (!actualLastGscDate || latestMapDate > actualLastGscDate) {
-                actualLastGscDate = latestMapDate;
-                debugLog(`Actual last GSC date determined from historical maps: ${actualLastGscDate} (timeseries had: ${lastTimeseriesDate})`, 'info');
-              }
+              const latestDate = sortedDates[sortedDates.length - 1];
+              lastGscDateForRange = latestDate;
+              debugLog(`Last GSC date determined from all sources: ${lastGscDateForRange} (timeseries: ${lastTimeseriesDate}, maps: ${sortedDates.length} dates)`, 'info');
+              debugLog(`GSC date range: ${sortedDates[0]} to ${latestDate}`, 'info');
+            } else {
+              debugLog(`No GSC dates found in timeseries or maps, using lastTimeseriesDate: ${lastGscDateForRange}`, 'warn');
             }
-            
-            // Use actualLastGscDate instead of lastTimeseriesDate for GSC range checks
-            // This is the definitive last GSC data date - never forward-fill beyond this
-            const lastGscDateForRange = actualLastGscDate || lastTimeseriesDate;
             
             // Ensure latest audit date is included even if not in timeseries
             // Add it to the chart if it's after the last GSC date
