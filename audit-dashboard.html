@@ -19528,10 +19528,11 @@ Final Score: ${score}/100`;
             
             // Always extend chart to latestAuditDateStr (or today) for non-GSC pillars
             // GSC pillars will only show data up to lastGscDateForRange
-            // Determine the last date that's already in the chart (from timeseries)
+            // CRITICAL: Use the last date from the timeseries array (what's already in the chart)
+            // NOT from the maps, because the maps may have dates that aren't in the chart yet
             const lastTimeseriesDateStr = timeseries.length > 0 ? timeseries[timeseries.length - 1].date : null;
             
-            // Find the latest date from all maps to ensure we don't miss any data
+            // Find the latest date from all maps for fallback/validation
             const allMapDates = new Set();
             contentSchemaMap.forEach((score, date) => allMapDates.add(date));
             localEntityMap.forEach((score, date) => allMapDates.add(date));
@@ -19541,8 +19542,9 @@ Final Score: ${score}/100`;
             brandOverlayMap.forEach((score, date) => allMapDates.add(date));
             const latestMapDateStr = allMapDates.size > 0 ? Array.from(allMapDates).sort().reverse()[0] : null;
             
-            // Use the latest of: GSC date, timeseries date, or map dates
-            const lastDateInChartStr = lastGscDateForRange || latestMapDateStr || lastTimeseriesDateStr;
+            // Use the last date from timeseries (what's already in the chart) as the starting point
+            // This ensures we fill dates from the last timeseries date to the latest audit date
+            const lastDateInChartStr = lastTimeseriesDateStr || (timeseries.length === 0 && latestMapDateStr ? latestMapDateStr : null);
             const targetDateStr = latestAuditDateStr || latestMapDateStr || today.toISOString().split('T')[0];
             
             debugLog(`Chart extension: lastDateInChart=${lastDateInChartStr}, targetDate=${targetDateStr}, latestAuditDateStr=${latestAuditDateStr}, latestMapDate=${latestMapDateStr}`, 'info');
