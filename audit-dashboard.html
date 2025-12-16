@@ -6037,13 +6037,13 @@
           const value = entry[key];
           
           // Only forward-fill if:
-          // 1. Value is null/undefined AND
+          // 1. Value is null/undefined (NOT 0, as 0 is a valid score) AND
           // 2. We have a last known value AND
           // 3. This is NOT a recent date (within last N days)
           if ((value == null || value === undefined) && lastValues[key] != null && !isRecent) {
             filled[key] = lastValues[key];
           } else if (value != null && value !== undefined) {
-            // Update last known value
+            // Update last known value (including 0, as it's a valid score)
             lastValues[key] = value;
           }
         }
@@ -8026,10 +8026,15 @@
         if (schemaAudit && schemaAudit.status === 'ok' && schemaAudit.data && schemaAudit.data.pages) {
           schemaAudit.data.pages.forEach(page => {
             if (page.url) {
-              // hasSchema is true if page has inline schema OR inherited schema
-              schemaLookup.set(page.url, page.hasSchema || page.hasInheritedSchema || false);
+              // Normalize URL for matching (handles trailing slashes, query params, etc.)
+              const normalizedUrl = normalizeUrlForMatching(page.url);
+              // Store both original and normalized for lookup flexibility
+              const hasSchema = page.hasSchema || page.hasInheritedSchema || false;
+              schemaLookup.set(page.url, hasSchema);
+              schemaLookup.set(normalizedUrl, hasSchema); // Also store normalized version
               // Store schema types array
               schemaTypesLookup.set(page.url, page.schemaTypes || []);
+              schemaTypesLookup.set(normalizedUrl, page.schemaTypes || []); // Also store normalized version
             }
           });
         }
@@ -8066,9 +8071,11 @@
           const title = metadata.title || null;
           const metaDescription = metadata.metaDescription || null;
           
-          // Check if schema exists for this page
-          const hasSchema = schemaLookup.has(url) ? schemaLookup.get(url) : null;
-          const schemaTypes = schemaTypesLookup.get(url) || [];
+          // Check if schema exists for this page (normalize URL for matching)
+          const normalizedUrl = normalizeUrlForMatching(url);
+          const hasSchema = schemaLookup.has(url) ? schemaLookup.get(url) : 
+                          schemaLookup.has(normalizedUrl) ? schemaLookup.get(normalizedUrl) : null;
+          const schemaTypes = schemaTypesLookup.get(url) || schemaTypesLookup.get(normalizedUrl) || [];
           
           // Classify opportunity
           const { category, categoryLabel, categoryColor, recommendation } =
@@ -13182,10 +13189,13 @@ Final Score: ${score}/100`;
             
             debugLog(`🔄 Filter change: filteredBehaviour calculated: ${!!filteredBehaviour}, impressions: ${filteredBehaviour?.impressions || 0}`, 'info');
             
-            // Update all sections
-            renderMoneyPagesBehaviourKpis(filteredBehaviour, filteredMetrics, queryPages);
-            updateMoneyPagesSummaryMetrics(moneyPagesMetrics); // Pass original metrics so function can apply filters internally
-            updateMoneyPagesChartSummary(filteredMetrics);
+          // Update all sections
+          renderMoneyPagesBehaviourKpis(filteredBehaviour, filteredMetrics, queryPages);
+          updateMoneyPagesSummaryMetrics(moneyPagesMetrics); // Pass original metrics so function can apply filters internally
+          updateMoneyPagesChartSummary(filteredMetrics);
+          
+          // Update dropdown counts after filtering
+          updateMoneyPagesSubSegmentCounts(moneyPagesMetrics);
           }, 100);
         };
         
@@ -14953,6 +14963,9 @@ Final Score: ${score}/100`;
         const filteredRows = filteredMetrics?.rows || [];
         const queryPages = window.currentQueryPages || null;
 
+        // Update dropdown counts
+        updateMoneyPagesSubSegmentCounts(moneyPagesMetrics);
+
         if (typeof renderMoneyPagesBehaviourKpis === 'function') {
           const behaviour = (queryPages && typeof window.computeMoneyPagesBehaviour === 'function')
             ? window.computeMoneyPagesBehaviour(queryPages, filteredRows, true)
@@ -15027,6 +15040,10 @@ Final Score: ${score}/100`;
             const typeFilter = newTypeFilter.value || 'all';
             const minImpr = parseInt(newMinImpr.value, 10) || 0;
             
+            // Store filter state globally
+            window.moneyPagesTypeFilter = typeFilter;
+            window.moneyPagesMinImpr = minImpr;
+            
             debugLog(`🔄 Priority & Actions filter changed: type=${typeFilter}, minImpr=${minImpr}`, 'info');
             
             // Get current data
@@ -15039,6 +15056,9 @@ Final Score: ${score}/100`;
             }
             
             debugLog(`✓ Priority & Actions: Found ${allRows.length} rows (money + authority)`, 'success');
+            
+            // Update dropdown counts
+            updateMoneyPagesTypeFilterCounts(allRows);
             
             // Apply filters
             let filteredPages = allRows.filter(p => p.segmentType === 'authority' || (p.impressions || 0) >= minImpr);
