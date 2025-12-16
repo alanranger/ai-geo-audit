@@ -19528,9 +19528,10 @@ Final Score: ${score}/100`;
             todayStr = today.toISOString().split('T')[0];
             const lastTimeseriesDate = timeseries.length > 0 ? timeseries[timeseries.length - 1].date : null;
             
-            // Determine actual last GSC data date from ALL sources (timeseries + historical maps)
-            // CRITICAL FIX: Use maximum date from both timeseries AND maps (don't filter maps by timeseries date)
-            // This ensures we show all available GSC-derived data, not just what's in the timeseries array
+            // Determine actual last GSC data date
+            // CRITICAL: Only use dates from maps that are <= lastTimeseriesDate (actual GSC data)
+            // Never forward-fill GSC data beyond the last actual GSC timeseries date
+            // Maps may have dates after lastTimeseriesDate (from audits), but those aren't from actual GSC data
             const allGscDates = new Set();
             
             // Add all dates from timeseries (actual GSC API data)
@@ -19540,34 +19541,41 @@ Final Score: ${score}/100`;
               }
             });
             
-            // Add all dates from historical maps (GSC-derived scores from audit_results)
-            // These may include dates that aren't in timeseries yet (e.g., from recent audits)
-            visibilityMap.forEach((score, date) => {
-              if (date && score !== null && score !== undefined) {
-                allGscDates.add(date);
-              }
-            });
-            authorityMap.forEach((score, date) => {
-              if (date && score !== null && score !== undefined) {
-                allGscDates.add(date);
-              }
-            });
-            brandOverlayMap.forEach((score, date) => {
-              if (date && score !== null && score !== undefined) {
-                allGscDates.add(date);
-              }
-            });
+            // Add dates from historical maps ONLY if they're <= lastTimeseriesDate
+            // This ensures we only use GSC-derived scores that are based on actual GSC data
+            if (lastTimeseriesDate) {
+              visibilityMap.forEach((score, date) => {
+                if (date && date <= lastTimeseriesDate && score !== null && score !== undefined) {
+                  allGscDates.add(date);
+                }
+              });
+              authorityMap.forEach((score, date) => {
+                if (date && date <= lastTimeseriesDate && score !== null && score !== undefined) {
+                  allGscDates.add(date);
+                }
+              });
+              brandOverlayMap.forEach((score, date) => {
+                if (date && date <= lastTimeseriesDate && score !== null && score !== undefined) {
+                  allGscDates.add(date);
+                }
+              });
+            }
             
-            // Find the latest date from all sources
-            let lastGscDateForRange = lastTimeseriesDate; // Default to timeseries date
+            // Use the latest date from timeseries OR valid map dates (all <= lastTimeseriesDate)
+            // This is the definitive last GSC data date - never forward-fill beyond this
+            let lastGscDateForRange = lastTimeseriesDate; // Default to timeseries date (most accurate)
             if (allGscDates.size > 0) {
               const sortedDates = Array.from(allGscDates).sort();
               const latestDate = sortedDates[sortedDates.length - 1];
-              lastGscDateForRange = latestDate;
-              debugLog(`Last GSC date determined from all sources: ${lastGscDateForRange} (timeseries: ${lastTimeseriesDate}, maps: ${sortedDates.length} dates)`, 'info');
-              debugLog(`GSC date range: ${sortedDates[0]} to ${latestDate}`, 'info');
+              // Use the later of: lastTimeseriesDate or latest valid map date
+              // But latestDate should never be > lastTimeseriesDate due to filtering above
+              lastGscDateForRange = latestDate > lastTimeseriesDate ? lastTimeseriesDate : latestDate;
+              debugLog(`Last GSC date: ${lastGscDateForRange} (timeseries: ${lastTimeseriesDate}, valid map dates: ${sortedDates.length})`, 'info');
+              if (sortedDates.length > 0) {
+                debugLog(`GSC date range: ${sortedDates[0]} to ${lastGscDateForRange}`, 'info');
+              }
             } else {
-              debugLog(`No GSC dates found in timeseries or maps, using lastTimeseriesDate: ${lastGscDateForRange}`, 'warn');
+              debugLog(`No GSC dates found, using lastTimeseriesDate: ${lastGscDateForRange}`, 'warn');
             }
             
             // Ensure latest audit date is included even if not in timeseries
