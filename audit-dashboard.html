@@ -6375,6 +6375,8 @@
      * @returns {{segment: string, pageType: string}}
      */
     function classifyUrlForRankingAi(rawUrlOrPath, keyword = null) {
+      // Normalize URL to lowercase for consistent matching
+      const urlLower = (rawUrlOrPath || "").toLowerCase();
       const path = normalisePath(rawUrlOrPath);
       
       // Brand detection: check keyword first
@@ -6385,15 +6387,49 @@
         }
       }
       
-      // Use canonical page classification (same as Money Pages)
+      // If URL is missing/blank, return Other
+      if (!rawUrlOrPath || !path) {
+        return { segment: "Other", pageType: "Other" };
+      }
+      
+      // STEP 1: Check Event pages FIRST (before Blog/GBP/Landing)
+      // Event if URL contains:
+      // - alanranger.com/beginners-photography-lessons/
+      // - alanranger.com/photographic-workshops-near-me
+      if (urlLower.includes('/beginners-photography-lessons') ||
+          urlLower.includes('/photographic-workshops-near-me')) {
+        return { segment: "Money", pageType: "Event" };
+      }
+      
+      // STEP 2: Check Product pages (before Blog/GBP/Landing)
+      // Product if URL contains:
+      // - alanranger.com/photo-workshops-uk/
+      // - alanranger.com/photography-services-near-me/
+      if (urlLower.includes('/photo-workshops-uk') ||
+          urlLower.includes('/photography-services-near-me')) {
+        return { segment: "Money", pageType: "Product" };
+      }
+      
+      // STEP 3: Check for Blog pages (Education segment)
+      if (path.startsWith('/blog-on-photography/') || path.startsWith('/blogs/')) {
+        return { segment: "Education", pageType: "Blog" };
+      }
+      
+      // STEP 4: Check for GBP/Home/About pages (Brand segment)
+      if (path === '/' ||
+          path === '/about-alan-ranger' ||
+          path.includes('/contact') ||
+          path.includes('/reviews')) {
+        return { segment: "Brand", pageType: "GBP" };
+      }
+      
+      // STEP 5: Use canonical page classification for remaining pages
       // Try window.classifyMoneyPage first (if available), then fallback to local scope
       let isMoney = false;
       let segmentType = null;
       
-      // Try to use classifyMoneyPage if available (defined later in Money Pages section)
-      // Fallback to classifyPageSegment if not available yet
-      const classifyMoneyPageFn = (typeof window !== 'undefined' && window.classifyMoneyPage) 
-        ? window.classifyMoneyPage 
+      const classifyMoneyPageFn = (typeof window !== 'undefined' && window.classifyMoneyPage)
+        ? window.classifyMoneyPage
         : (typeof classifyMoneyPage !== 'undefined' ? classifyMoneyPage : null);
       
       if (classifyMoneyPageFn) {
@@ -6402,23 +6438,20 @@
           isMoney = result.isMoney;
           segmentType = result.segmentType;
         } catch (e) {
-          // If classifyMoneyPage fails, fall back to direct classification
           const segment = classifyPageSegment(rawUrlOrPath);
           isMoney = segment === PageSegment.MONEY;
           segmentType = isMoney ? 'landing' : null;
         }
       } else {
-        // Fallback: use classifyPageSegment directly (this is fine - same logic)
         const segment = classifyPageSegment(rawUrlOrPath);
         isMoney = segment === PageSegment.MONEY;
         segmentType = isMoney ? 'landing' : null;
-        // Only log warning in debug mode to reduce noise
         if (window.DEBUG_MODE) {
           debugLog('⚠ classifyMoneyPage not available, using fallback classification', 'warn');
         }
       }
       
-      // Determine pageType from canonical segmentType
+      // Determine pageType from canonical segmentType (for remaining pages)
       let pageType = "Landing"; // Default
       if (segmentType === "event") {
         pageType = "Event";
@@ -6426,19 +6459,10 @@
         pageType = "Product";
       } else if (segmentType === "landing" || segmentType === "all") {
         pageType = "Landing";
-      }
-      
-      // Check for Blog pages (Education segment)
-      if (path.startsWith('/blog-on-photography/') || path.startsWith('/blogs/')) {
-        pageType = "Blog";
-      }
-      
-      // Check for GBP/Home/About pages (Brand segment)
-      if (path === '/' || 
-          path === '/about-alan-ranger' || 
-          path.includes('/contact') ||
-          path.includes('/reviews')) {
-        pageType = "GBP";
+      } else if (isMoney) {
+        pageType = "Landing";
+      } else {
+        pageType = "Other";
       }
       
       // Determine segment from pageType and canonical classification
@@ -24013,49 +24037,6 @@ Final Score: ${score}/100`;
     // Counts show how many items match each option given the current state of OTHER filters
     function updateFilterCounts(rows) {
       if (!rows || rows.length === 0) return;
-      
-      // Re-classify pageType for all rows before calculating counts (fixes stale data from Supabase)
-      // This ensures Event/Product pages are correctly identified
-      // Only update pageType, don't mutate other fields
-      rows.forEach(row => {
-        const bestUrl = row.best_url || row.bestUrl || null;
-        if (bestUrl) {
-          let newPageType = row.pageType || 'Landing'; // Keep existing if classification fails
-          
-          if (typeof window.classifyUrlForRankingAi === 'function') {
-            try {
-              const classification = window.classifyUrlForRankingAi(bestUrl, row.keyword || null);
-              newPageType = classification.pageType;
-            } catch (e) {
-              // Fallback: Direct URL pattern matching if function fails
-              const urlLower = bestUrl.toLowerCase();
-              if (urlLower.includes('/beginners-photography-lessons') || 
-                  urlLower.includes('/photographic-workshops-near-me')) {
-                newPageType = 'Event';
-              } else if (urlLower.includes('/photo-workshops-uk') || 
-                         urlLower.includes('/photography-services-near-me')) {
-                newPageType = 'Product';
-              }
-            }
-          } else {
-            // Fallback: Direct URL pattern matching if function not available
-            const urlLower = bestUrl.toLowerCase();
-            if (urlLower.includes('/beginners-photography-lessons') || 
-                urlLower.includes('/photographic-workshops-near-me')) {
-              newPageType = 'Event';
-            } else if (urlLower.includes('/photo-workshops-uk') || 
-                       urlLower.includes('/photography-services-near-me')) {
-              newPageType = 'Product';
-            }
-          }
-          
-          // Only update pageType field, preserve all other data (including citations)
-          row.pageType = newPageType;
-          if (row.classification) {
-            row.classification.pageType = newPageType;
-          }
-        }
-      });
 
       // For each filter, calculate counts based on rows that match all OTHER filters
       // Segment counts (excluding segment filter)
