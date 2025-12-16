@@ -271,6 +271,16 @@ export default async function handler(req, res) {
       // Date range used for this audit
       date_range: ensureNumber(searchData?.dateRange) || null,
       
+      // GSC query-only totals for tracked keywords (PATCH A2)
+      query_totals: (() => {
+        const qt = searchData?.queryTotals;
+        if (Array.isArray(qt) && qt.length > 0) {
+          console.log('[Save Audit] Saving queryTotals:', qt.length, 'keywords');
+          return qt;
+        }
+        return null;
+      })(),
+      
       // Pillar Scores
       visibility_score: ensureNumber(scores?.visibility),
       // Authority score: extract numeric score from object structure if needed

@@ -615,6 +615,31 @@ export default async function handler(req, res) {
           }
           return null;
         })(),
+        // Query-only totals for tracked keywords (PATCH A2)
+        queryTotals: (() => {
+          const qt = record.query_totals;
+          if (!qt) return null;
+          let parsed;
+          if (typeof qt === 'string') {
+            try {
+              parsed = JSON.parse(qt);
+            } catch (e) {
+              console.warn('[get-latest-audit] Failed to parse query_totals JSON:', e.message);
+              return null;
+            }
+          } else {
+            parsed = qt;
+          }
+          if (Array.isArray(parsed)) {
+            // Truncate to 200 items (should be enough for tracked keywords)
+            if (parsed.length > 200) {
+              console.warn(`[get-latest-audit] Truncating queryTotals from ${parsed.length} to 200 immediately`);
+              return parsed.slice(0, 200);
+            }
+            return parsed;
+          }
+          return null;
+        })(),
         // Date range used for this audit
         dateRange: record.date_range || null,
         // Property URL

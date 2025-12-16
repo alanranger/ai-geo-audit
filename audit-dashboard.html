@@ -26023,6 +26023,24 @@ Final Score: ${score}/100`;
       });
     }
 
+    // Helper function to get query-only totals for a keyword (PATCH A2)
+    function getQueryTotalForKeyword(keyword) {
+      try {
+        const savedAudit = loadAuditResultsSync();
+        if (!savedAudit || !savedAudit.searchData || !Array.isArray(savedAudit.searchData.queryTotals)) {
+          return null;
+        }
+        // Find matching query total (case-insensitive match)
+        const queryTotal = savedAudit.searchData.queryTotals.find(
+          qt => qt.query && qt.query.toLowerCase().trim() === keyword.toLowerCase().trim()
+        );
+        return queryTotal || null;
+      } catch (error) {
+        debugLog(`Error in getQueryTotalForKeyword: ${error.message}`, 'warn');
+        return null;
+      }
+    }
+
     function renderRankingAiTab() {
       debugLog('📊 renderRankingAiTab() called', 'info');
       const { combinedRows, summary } = RankingAiModule.state();
@@ -26257,7 +26275,8 @@ Final Score: ${score}/100`;
         const tdCtr = document.createElement("td");
         const queryTotal = getQueryTotalForKeyword(row.keyword);
         if (queryTotal && queryTotal.impressions > 0 && queryTotal.ctr != null) {
-          const ctrPercent = (queryTotal.ctr * 100).toFixed(2);
+          // queryTotal.ctr is already a percentage (0-100) from API, not a decimal
+          const ctrPercent = queryTotal.ctr.toFixed(2);
           tdCtr.textContent = `${ctrPercent}%`;
           tdCtr.style.color = '#1e293b';
           tdCtr.title = "Google Search Console. Query-only (keyword totals across all pages). Rolling last 30 days.";
@@ -26688,7 +26707,8 @@ Final Score: ${score}/100`;
       // Only show CTR if impressions > 0 (CTR requires impressions)
       if (queryTotal && queryTotal.impressions > 0 && queryTotal.ctr != null) {
         // Real CTR data available (query-only)
-        const ctrPercent = (queryTotal.ctr * 100).toFixed(2);
+        // queryTotal.ctr is already a percentage (0-100) from API, not a decimal
+        const ctrPercent = queryTotal.ctr.toFixed(2);
         const impressionsFormatted = queryTotal.impressions.toLocaleString();
         const clicksFormatted = queryTotal.clicks.toLocaleString();
         const positionBucket = getPositionBucket(scorecardData.best_rank_group);
