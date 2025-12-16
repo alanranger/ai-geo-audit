@@ -13080,6 +13080,90 @@ Final Score: ${score}/100`;
            </div>`;
       }
       
+      // Update sub-segment dropdown counts
+      function updateMoneyPagesSubSegmentCounts(moneyPagesMetrics) {
+        if (!moneyPagesMetrics || !moneyPagesMetrics.rows) return;
+        
+        const rows = moneyPagesMetrics.rows || [];
+        
+        // Count by sub-segment
+        const counts = {
+          ALL: rows.length,
+          PRODUCT: 0,
+          EVENT: 0,
+          LANDING: 0
+        };
+        
+        rows.forEach(row => {
+          const subSegment = row.subSegment || row.segmentType || 'LANDING';
+          if (subSegment === 'PRODUCT' || subSegment === 'product') {
+            counts.PRODUCT++;
+          } else if (subSegment === 'EVENT' || subSegment === 'event') {
+            counts.EVENT++;
+          } else if (subSegment === 'LANDING' || subSegment === 'landing') {
+            counts.LANDING++;
+          }
+        });
+        
+        // Update dropdown options with counts
+        const allOption = document.getElementById('money-subsegment-all');
+        const productOption = document.getElementById('money-subsegment-product');
+        const eventOption = document.getElementById('money-subsegment-event');
+        const landingOption = document.getElementById('money-subsegment-landing');
+        
+        if (allOption) allOption.textContent = `All sub-segments (${counts.ALL})`;
+        if (productOption) productOption.textContent = `Product Pages (${counts.PRODUCT})`;
+        if (eventOption) eventOption.textContent = `Event Pages (${counts.EVENT})`;
+        if (landingOption) landingOption.textContent = `Landing Pages (${counts.LANDING})`;
+      }
+      
+      // Update type filter dropdown counts (for Priority & Actions)
+      function updateMoneyPagesTypeFilterCounts(sourcePages) {
+        if (!sourcePages || !Array.isArray(sourcePages)) return;
+        
+        // Count by segment type
+        const counts = {
+          all: sourcePages.length,
+          authority: 0,
+          landing: 0,
+          event: 0,
+          product: 0
+        };
+        
+        sourcePages.forEach(page => {
+          const segmentType = page.segmentType || 'landing';
+          if (segmentType === 'authority') {
+            counts.authority++;
+          } else if (segmentType === 'landing') {
+            counts.landing++;
+          } else if (segmentType === 'event') {
+            counts.event++;
+          } else if (segmentType === 'product') {
+            counts.product++;
+          }
+        });
+        
+        // Update dropdown options with counts
+        const typeFilterEl = document.getElementById('money-pages-type-filter');
+        if (typeFilterEl) {
+          const options = typeFilterEl.querySelectorAll('option');
+          options.forEach(opt => {
+            const value = opt.value;
+            if (value === 'all') {
+              opt.textContent = `All money pages (${counts.all})`;
+            } else if (value === 'authority') {
+              opt.textContent = `Authority (${counts.authority})`;
+            } else if (value === 'landing') {
+              opt.textContent = `Landing pages (${counts.landing})`;
+            } else if (value === 'event') {
+              opt.textContent = `Event pages (${counts.event})`;
+            } else if (value === 'product') {
+              opt.textContent = `Product pages (${counts.product})`;
+            }
+          });
+        }
+      }
+      
       // Function to render Money Pages Performance section
       function renderMoneyPagesSection(moneyPagesMetrics) {
         const section = document.getElementById('money-pages-section');
