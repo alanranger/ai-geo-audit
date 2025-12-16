@@ -13402,11 +13402,15 @@ Final Score: ${score}/100`;
               <div class="card-body">
                 <div style="margin-bottom: 2rem;">
                   <h4 style="font-size: 0.95rem; font-weight: 600; color: #1e293b; margin-bottom: 0.5rem;">Volume Metrics</h4>
-                  <canvas id="moneyPagesVolumeChart"></canvas>
+                  <div style="position: relative; height: 300px;">
+                    <canvas id="moneyPagesVolumeChart"></canvas>
+                  </div>
                 </div>
                 <div>
                   <h4 style="font-size: 0.95rem; font-weight: 600; color: #1e293b; margin-bottom: 0.5rem;">Rate & Score Metrics</h4>
-                  <canvas id="moneyPagesRateChart"></canvas>
+                  <div style="position: relative; height: 300px;">
+                    <canvas id="moneyPagesRateChart"></canvas>
+                  </div>
                 </div>
                 <p style="font-size: 0.75rem; color: #94a3b8; margin-top: 1rem; text-align: center;">Based on past audits stored in Supabase. Lines may be flat if only one audit has been completed.</p>
               </div>
@@ -16210,9 +16214,13 @@ Final Score: ${score}/100`;
         }
         
         // Destroy existing charts if they exist
+        // Also check if charts are already being rendered to prevent loops
         if (window.moneyPagesVolumeChart) {
           try {
-            window.moneyPagesVolumeChart.destroy();
+            // Check if chart is still valid before destroying
+            if (window.moneyPagesVolumeChart.canvas && window.moneyPagesVolumeChart.canvas.id === 'moneyPagesVolumeChart') {
+              window.moneyPagesVolumeChart.destroy();
+            }
           } catch (e) {
             // Ignore destroy errors
           }
@@ -16220,12 +16228,22 @@ Final Score: ${score}/100`;
         }
         if (window.moneyPagesRateChart) {
           try {
-            window.moneyPagesRateChart.destroy();
+            // Check if chart is still valid before destroying
+            if (window.moneyPagesRateChart.canvas && window.moneyPagesRateChart.canvas.id === 'moneyPagesRateChart') {
+              window.moneyPagesRateChart.destroy();
+            }
           } catch (e) {
             // Ignore destroy errors
           }
           window.moneyPagesRateChart = null;
         }
+        
+        // Prevent re-rendering if charts are already being created
+        if (window.moneyPagesChartsRendering) {
+          debugLog('⚠ Money Pages charts already rendering, skipping...', 'warn');
+          return;
+        }
+        window.moneyPagesChartsRendering = true;
         
         if (!history || !Array.isArray(history) || history.length === 0) {
           debugLog('⚠ Money Pages trend chart: No history data available', 'warn');
@@ -16430,19 +16448,15 @@ Final Score: ${score}/100`;
         }
         
         // Ensure canvases have dimensions before creating charts
+        // Use parent container dimensions (Chart.js will handle responsive sizing)
         [volumeCanvas, rateCanvas].forEach(canvas => {
           if (canvas) {
             const parentContainer = canvas.parentElement;
             if (parentContainer) {
-              const containerWidth = parentContainer.clientWidth || parentContainer.offsetWidth || 800;
-              if (canvas.width === 0 || canvas.height === 0) {
-                canvas.width = containerWidth;
-                canvas.height = 300;
-              }
-            } else {
-              if (canvas.width === 0 || canvas.height === 0) {
-                canvas.width = 800;
-                canvas.height = 300;
+              // Don't set canvas.width/height directly - let Chart.js handle it
+              // Just ensure the parent has a height
+              if (!parentContainer.style.height) {
+                parentContainer.style.height = '300px';
               }
             }
           }
@@ -16509,7 +16523,8 @@ Final Score: ${score}/100`;
             },
             options: {
               responsive: true,
-              maintainAspectRatio: false,
+              maintainAspectRatio: true,
+              aspectRatio: 2.5,
               interaction: {
                 mode: 'index',
                 intersect: false
@@ -16603,7 +16618,8 @@ Final Score: ${score}/100`;
             },
             options: {
               responsive: true,
-              maintainAspectRatio: false,
+              maintainAspectRatio: true,
+              aspectRatio: 2.5,
               interaction: {
                 mode: 'index',
                 intersect: false
@@ -16672,7 +16688,9 @@ Final Score: ${score}/100`;
           });
           
           debugLog('✓ Money Pages trend charts rendered successfully', 'success');
+          window.moneyPagesChartsRendering = false;
         } catch (error) {
+          window.moneyPagesChartsRendering = false;
           debugLog(`✗ Error creating Money Pages trend charts: ${error.message}`, 'error');
           debugLog(`Money Pages trend chart error details: ${error.stack || error.toString()}`, 'error');
           // Show error message on canvases
