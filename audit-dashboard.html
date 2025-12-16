@@ -21613,6 +21613,30 @@ Final Score: ${score}/100`;
               if (parsed.combinedRows && parsed.summary) {
                 debugLog('✓ Ranking & AI data found in localStorage', 'success');
                 debugLog(`  Found ${parsed.combinedRows.length} keywords in localStorage`, 'info');
+                
+                // Re-classify pageType for all rows (fixes stale values)
+                if (typeof window.classifyUrlForRankingAi === 'function') {
+                  let reclassifiedCount = 0;
+                  parsed.combinedRows.forEach(row => {
+                    const bestUrl = row.best_url || row.bestUrl || null;
+                    if (bestUrl) {
+                      const oldPageType = row.pageType || 'Landing';
+                      const classification = window.classifyUrlForRankingAi(bestUrl, row.keyword || null);
+                      const newPageType = classification.pageType;
+                      if (newPageType !== oldPageType) {
+                        row.pageType = newPageType;
+                        if (classification.segment && classification.segment !== row.segment) {
+                          row.segment = classification.segment;
+                        }
+                        reclassifiedCount++;
+                      }
+                    }
+                  });
+                  if (reclassifiedCount > 0) {
+                    debugLog(`✓ Re-classified pageType for ${reclassifiedCount} keywords from localStorage`, 'info');
+                  }
+                }
+                
                 // Normalize summary field names for compatibility
                 parsed.summary = normalizeSummaryFields(parsed.summary);
                 // Store as fallback before checking Supabase
@@ -21665,6 +21689,32 @@ Final Score: ${score}/100`;
                 
                 // Compute opportunity scores if missing (for older data)
                 const combinedRows = json.data.rankingAiData.combinedRows;
+                
+                // Re-classify pageType for all rows (fixes stale database values)
+                // This ensures Event/Product pages are correctly identified even if DB has old values
+                if (typeof window.classifyUrlForRankingAi === 'function') {
+                  let reclassifiedCount = 0;
+                  combinedRows.forEach(row => {
+                    const bestUrl = row.best_url || row.bestUrl || null;
+                    if (bestUrl) {
+                      const oldPageType = row.pageType || 'Landing';
+                      const classification = window.classifyUrlForRankingAi(bestUrl, row.keyword || null);
+                      const newPageType = classification.pageType;
+                      if (newPageType !== oldPageType) {
+                        row.pageType = newPageType;
+                        // Also update segment if it changed
+                        if (classification.segment && classification.segment !== row.segment) {
+                          row.segment = classification.segment;
+                        }
+                        reclassifiedCount++;
+                      }
+                    }
+                  });
+                  if (reclassifiedCount > 0) {
+                    debugLog(`✓ Re-classified pageType for ${reclassifiedCount} keywords (fixed stale DB values)`, 'info');
+                  }
+                }
+                
                 const needsOpportunityScore = combinedRows.some(r => r.opportunityScore == null);
                 if (needsOpportunityScore) {
                   debugLog(`⚠ Computing opportunity scores for ${keywordCount} keywords (missing from Supabase)`, 'info');
