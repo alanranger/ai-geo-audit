@@ -16295,7 +16295,11 @@ Final Score: ${score}/100`;
         const ctrData = [];
         const behaviourData = [];
         
-        // Track last known values for forward-filling
+        // Track first available values (for backward-filling) and last known values (for forward-filling)
+        let firstClicks = null;
+        let firstImpressions = null;
+        let firstCtr = null;
+        let firstBehaviour = null;
         let lastClicks = null;
         let lastImpressions = null;
         let lastCtr = null;
@@ -16321,6 +16325,12 @@ Final Score: ${score}/100`;
             const impressions = allMoney.impressions || null;
             const ctr = summary.ctr ? summary.ctr * 100 : (allMoney.ctr ? allMoney.ctr * 100 : null);
             
+            // Track first available values (for backward-filling)
+            if (firstClicks == null && clicks != null) firstClicks = clicks;
+            if (firstImpressions == null && impressions != null) firstImpressions = impressions;
+            if (firstCtr == null && ctr != null) firstCtr = ctr;
+            if (firstBehaviour == null && behaviourScore != null) firstBehaviour = behaviourScore;
+            
             // Update last known values
             if (clicks != null) lastClicks = clicks;
             if (impressions != null) lastImpressions = impressions;
@@ -16339,6 +16349,18 @@ Final Score: ${score}/100`;
             behaviourData.push(lastBehaviour);
           }
         });
+        
+        // Backward-fill from first available value
+        // This ensures dates before the first data point also get filled
+        if (firstClicks != null || firstImpressions != null || firstCtr != null || firstBehaviour != null) {
+          for (let i = 0; i < clicksData.length; i++) {
+            if (clicksData[i] == null && firstClicks != null) clicksData[i] = firstClicks;
+            if (impressionsData[i] == null && firstImpressions != null) impressionsData[i] = firstImpressions;
+            if (ctrData[i] == null && firstCtr != null) ctrData[i] = firstCtr;
+            if (behaviourData[i] == null && firstBehaviour != null) behaviourData[i] = firstBehaviour;
+          }
+          debugLog(`Money Pages Trend: Backward-filled from first values (clicks: ${firstClicks}, impressions: ${firstImpressions}, ctr: ${firstCtr}, behaviour: ${firstBehaviour})`, 'info');
+        }
         
         debugLog(`Money Pages Trend: Populated ${labels.length} dates with data (${clicksData.filter(v => v != null).length} clicks values, ${impressionsData.filter(v => v != null).length} impressions values)`, 'info');
         debugLog(`Money Pages Trend: Sample data - First 5 dates: ${labels.slice(0, 5).join(', ')}, Last 5 dates: ${labels.slice(-5).join(', ')}`, 'info');
