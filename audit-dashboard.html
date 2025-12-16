@@ -6602,9 +6602,10 @@
      * @returns {{segment: string, pageType: string}}
      */
     function classifyUrlForRankingAi(rawUrlOrPath, keyword = null) {
-      // Normalize URL to lowercase for consistent matching
-      const urlLower = (rawUrlOrPath || "").toLowerCase();
-      const path = normalisePath(rawUrlOrPath);
+      // Normalize URL first (strip query params, hash, trailing slashes)
+      const normalizedUrl = normalizeUrlForMatching(rawUrlOrPath);
+      const urlLower = normalizedUrl.toLowerCase();
+      const path = normalisePath(normalizedUrl);
       
       // Brand detection: check keyword first
       if (keyword) {
@@ -6620,18 +6621,18 @@
       }
       
       // STEP 1: Check Event pages FIRST (before Blog/GBP/Landing)
-      // Event if URL contains:
-      // - alanranger.com/beginners-photography-lessons/
-      // - alanranger.com/photographic-workshops-near-me
+      // Event if URL path contains either:
+      // - /beginners-photography-lessons/
+      // - /photographic-workshops-near-me
       if (urlLower.includes('/beginners-photography-lessons') ||
           urlLower.includes('/photographic-workshops-near-me')) {
         return { segment: "Money", pageType: "Event" };
       }
       
       // STEP 2: Check Product pages (before Blog/GBP/Landing)
-      // Product if URL contains:
-      // - alanranger.com/photo-workshops-uk/
-      // - alanranger.com/photography-services-near-me/
+      // Product if URL path contains either:
+      // - /photo-workshops-uk/
+      // - /photography-services-near-me/
       if (urlLower.includes('/photo-workshops-uk') ||
           urlLower.includes('/photography-services-near-me')) {
         return { segment: "Money", pageType: "Product" };
@@ -25388,18 +25389,33 @@ Final Score: ${score}/100`;
 
     // Page type normalization helpers (make available globally)
     function normalizePageType(input) {
-      const pt = (input ?? "").trim();
-      if (pt === "GBP" || pt === "gbp") return "gbp";
-      if (pt === "Blog" || pt === "blog") return "blog";
-      if (pt === "Landing" || pt === "landing") return "landing";
-      if (pt === "Event" || pt === "event") return "event";
-      if (pt === "Product" || pt === "product") return "product";
+      const s = (input ?? "").trim();
+      if (!s) return "other";
+      
+      const lower = s.toLowerCase();
+      
+      // Handle GBP variations (case-insensitive, including "GMB" and "google business")
+      if (lower === "gbp" || lower === "gmb" || lower.includes("google business")) return "gbp";
+      
+      // Handle other page types (case-insensitive)
+      if (lower === "blog") return "blog";
+      if (lower === "landing") return "landing";
+      if (lower === "event") return "event";
+      if (lower === "product") return "product";
+      if (lower === "other") return "other";
+      
+      // Defensive: if some rows store "GBP" already (mixed case), handle it
+      if (s.toUpperCase() === "GBP") return "gbp";
+      
       return "other";
     }
 
     function pageTypeLabel(pt) {
       const k = normalizePageType(pt);
-      return k.charAt(0).toUpperCase() + k.slice(1); // Gbp/Blog/Landing/Event/Product/Other
+      // Special case: GBP should be all uppercase, not "Gbp"
+      if (k === "gbp") return "GBP";
+      // All others: Title Case (first letter uppercase, rest lowercase)
+      return k.charAt(0).toUpperCase() + k.slice(1); // Blog/Landing/Event/Product/Other
     }
 
     // Make normalization functions available globally
@@ -26366,19 +26382,20 @@ Final Score: ${score}/100`;
         }
         tr.appendChild(tdUrl);
 
-        // Page type
+        // Page type (use normalized display value for consistent formatting)
         const tdType = document.createElement("td");
-        const pageType = row.pageType || "Landing";
+        const pageTypeDisplay = row.page_type_display || pageTypeLabel(normalizePageType(row.pageType)) || "Landing";
+        const pageTypeNorm = row.page_type_norm || normalizePageType(row.pageType);
         const typeBadge = document.createElement("span");
-        // Use similar styling to Money Pages matrix
+        // Use similar styling to Money Pages matrix (use normalized key for class matching)
         let typeClass = "ranking-badge-page-type";
-        if (pageType === "Event") typeClass += " ranking-badge-page-type--event";
-        else if (pageType === "Product") typeClass += " ranking-badge-page-type--product";
-        else if (pageType === "Blog") typeClass += " ranking-badge-page-type--blog";
-        else if (pageType === "GBP") typeClass += " ranking-badge-page-type--gbp";
+        if (pageTypeNorm === "event") typeClass += " ranking-badge-page-type--event";
+        else if (pageTypeNorm === "product") typeClass += " ranking-badge-page-type--product";
+        else if (pageTypeNorm === "blog") typeClass += " ranking-badge-page-type--blog";
+        else if (pageTypeNorm === "gbp") typeClass += " ranking-badge-page-type--gbp";
         else typeClass += " ranking-badge-page-type--landing";
         typeBadge.className = typeClass;
-        typeBadge.textContent = pageType;
+        typeBadge.textContent = pageTypeDisplay; // Use display label (e.g., "GBP" not "Gbp")
         tdType.appendChild(typeBadge);
         tr.appendChild(tdType);
 
