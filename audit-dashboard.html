@@ -3170,6 +3170,9 @@
                 <button type="button" class="ranking-preset-btn" data-preset="local-visibility" style="padding: 0.5rem 1rem; font-size: 0.875rem; border: 1px solid #cbd5e1; border-radius: 6px; background: rgb(229, 255, 204); cursor: pointer; color: #475569; font-weight: 500; transition: all 0.2s; position: relative;" onmouseover="if (!this.classList.contains('preset-active')) { this.style.background='rgb(210, 240, 180)'; this.style.borderColor='#94a3b8'; }" onmouseout="if (!this.classList.contains('preset-active')) { this.style.background='rgb(229, 255, 204)'; this.style.borderColor='#cbd5e1'; }" title="Page type: GBP | Best rank: Not top 3 | Min opportunity: ≥ 30 | Sort: Opportunity ↓">
                   Local visibility
                 </button>
+                <button type="button" class="ranking-preset-btn" data-preset="top-10-opportunities" style="padding: 0.5rem 1rem; font-size: 0.875rem; border: 1px solid #cbd5e1; border-radius: 6px; background: rgb(229, 255, 204); cursor: pointer; color: #475569; font-weight: 500; transition: all 0.2s; position: relative;" onmouseover="if (!this.classList.contains('preset-active')) { this.style.background='rgb(210, 240, 180)'; this.style.borderColor='#94a3b8'; }" onmouseout="if (!this.classList.contains('preset-active')) { this.style.background='rgb(229, 255, 204)'; this.style.borderColor='#cbd5e1'; }" title="Best rank: Not top 3 | Min opportunity: ≥ 50 | Sort: Opportunity ↓ | Shows top 10 results">
+                  Top 10 opportunities
+                </button>
               </div>
               <!-- Criteria chips (shown when preset is active) -->
               <div id="ranking-preset-criteria-chips" style="display: none; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #e2e8f0;">
@@ -27279,6 +27282,19 @@ Final Score: ${score}/100`;
               column: 'opportunityScore',
               direction: 'desc'
             }
+          },
+          'top-10-opportunities': {
+            label: 'Top 10 opportunities',
+            filters: {
+              ...DEFAULT_FILTERS,
+              rank: 'not-top3',
+              minOpportunity: 50
+            },
+            sort: {
+              column: 'opportunityScore',
+              direction: 'desc'
+            },
+            rowsPerPage: 10
           }
         };
 
@@ -27304,6 +27320,15 @@ Final Score: ${score}/100`;
           // HARD RESET: Apply preset filters (don't merge with existing state)
           rankingFilterState = { ...preset.filters };
           rankingSortState = { ...preset.sort };
+
+          // Set rows per page if specified in preset
+          if (preset.rowsPerPage) {
+            const rowsPerPageSelect = document.getElementById('ranking-rows-per-page');
+            if (rowsPerPageSelect) {
+              rowsPerPageSelect.value = preset.rowsPerPage;
+              rankingRowsPerPage = preset.rowsPerPage;
+            }
+          }
 
           // Set active preset (null for 'all')
           activePreset = presetKey === 'all' ? null : presetKey;
