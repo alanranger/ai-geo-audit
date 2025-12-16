@@ -10208,22 +10208,52 @@
             });
           }
           const foundationTypes = ['Organization', 'Person', 'WebSite', 'BreadcrumbList'];
-          const allTypes = new Set();
-          if (schemaData.allDetectedTypes && Array.isArray(schemaData.allDetectedTypes)) {
-            schemaData.allDetectedTypes.forEach(type => {
-              if (type) allTypes.add(type);
-            });
-          } else if (schemaData.schemaTypes && Array.isArray(schemaData.schemaTypes)) {
-            schemaData.schemaTypes.forEach(item => {
-              if (item.type) allTypes.add(item.type);
-            });
+          // PRIORITY: Use foundation object first (most reliable source) - same logic as Content/Schema card
+          let foundationPresent = 0;
+          if (schemaData.foundation && typeof schemaData.foundation === 'object') {
+            // Use foundation object directly - count how many are true (same as Content/Schema card)
+            foundationPresent = foundationTypes.filter(type => schemaData.foundation[type] === true).length;
+          } else {
+            // Fallback: check allDetectedTypes or schemaTypes
+            const allTypes = new Set();
+            if (schemaData.allDetectedTypes && Array.isArray(schemaData.allDetectedTypes)) {
+              schemaData.allDetectedTypes.forEach(type => {
+                if (type) allTypes.add(type);
+              });
+            } else if (schemaData.schemaTypes && Array.isArray(schemaData.schemaTypes)) {
+              schemaData.schemaTypes.forEach(item => {
+                if (item && typeof item === 'object' && item.type) {
+                  allTypes.add(item.type);
+                } else if (typeof item === 'string') {
+                  allTypes.add(item);
+                }
+              });
+            }
+            foundationPresent = foundationTypes.filter(type => allTypes.has(type)).length;
           }
-          const foundationPresent = foundationTypes.filter(type => allTypes.has(type)).length;
+          
           if (foundationPresent < 4) {
+            // Determine missing types based on which data structure was used
+            const missingTypes = schemaData.foundation && typeof schemaData.foundation === 'object'
+              ? foundationTypes.filter(t => schemaData.foundation[t] !== true)
+              : foundationTypes.filter(t => {
+                  // Fallback: check allTypes set if foundation object not available
+                  const allTypes = new Set();
+                  if (schemaData.allDetectedTypes && Array.isArray(schemaData.allDetectedTypes)) {
+                    schemaData.allDetectedTypes.forEach(type => { if (type) allTypes.add(type); });
+                  } else if (schemaData.schemaTypes && Array.isArray(schemaData.schemaTypes)) {
+                    schemaData.schemaTypes.forEach(item => {
+                      if (item && typeof item === 'object' && item.type) allTypes.add(item.type);
+                      else if (typeof item === 'string') allTypes.add(item);
+                    });
+                  }
+                  return !allTypes.has(t);
+                });
+            
             priorities.push({
               pillar: 'Content',
               severity: 'high',
-              message: `Add missing foundation schemas: ${foundationTypes.filter(t => !allTypes.has(t)).join(', ')}`,
+              message: `Add missing foundation schemas: ${missingTypes.join(', ')}`,
               link: '#pillarCards'
             });
           }
