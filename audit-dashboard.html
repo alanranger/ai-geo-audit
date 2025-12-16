@@ -4146,6 +4146,11 @@
             }
           }
           
+          // Wire up KPI metric selector
+          if (typeof window.wireMoneyKpiMetricSelector === 'function') {
+            window.wireMoneyKpiMetricSelector();
+          }
+          
           if (typeof window.wireTopLevelFilter === 'function') {
             window.wireTopLevelFilter();
           }
@@ -15158,6 +15163,44 @@ Final Score: ${score}/100`;
           const currentSubSeg = window.moneyPagesSubSegmentFilter || 'ALL';
           newFilter.value = currentSubSeg;
           
+          // Update counts when first wiring up
+          const moneyPagesMetrics = window.currentMoneyPagesMetrics || window.moneyPagesMetrics;
+          if (moneyPagesMetrics && moneyPagesMetrics.rows) {
+            const rows = moneyPagesMetrics.rows || [];
+            const counts = {
+              ALL: rows.length,
+              PRODUCT: 0,
+              EVENT: 0,
+              LANDING: 0
+            };
+            
+            rows.forEach(row => {
+              const subSegment = row.subSegment || row.segmentType || 'LANDING';
+              if (subSegment === 'PRODUCT' || subSegment === 'product') {
+                counts.PRODUCT++;
+              } else if (subSegment === 'EVENT' || subSegment === 'event') {
+                counts.EVENT++;
+              } else if (subSegment === 'LANDING' || subSegment === 'landing') {
+                counts.LANDING++;
+              }
+            });
+            
+            // Update top-level filter options with counts
+            const options = newFilter.querySelectorAll('option');
+            options.forEach(opt => {
+              const value = opt.value;
+              if (value === 'ALL') {
+                opt.textContent = `All sub-segments (${counts.ALL})`;
+              } else if (value === 'PRODUCT') {
+                opt.textContent = `Product Pages (${counts.PRODUCT})`;
+              } else if (value === 'EVENT') {
+                opt.textContent = `Event Pages (${counts.EVENT})`;
+              } else if (value === 'LANDING') {
+                opt.textContent = `Landing Pages (${counts.LANDING})`;
+              }
+            });
+          }
+          
           debugLog(`✓ Top-level filter found and initialized to: ${currentSubSeg}`, 'success');
           
           // When top-level filter changes, update all sections
@@ -15189,6 +15232,14 @@ Final Score: ${score}/100`;
           const newMinImpr = minImprEl.cloneNode(true);
           typeFilterEl.parentNode.replaceChild(newTypeFilter, typeFilterEl);
           minImprEl.parentNode.replaceChild(newMinImpr, minImprEl);
+          
+          // Update counts initially when wiring up
+          const base = window.moneyPagePriorityData || [];
+          const authority = window.authorityActionRows || [];
+          const allRows = base.concat(authority);
+          if (allRows && allRows.length > 0) {
+            updateMoneyPagesTypeFilterCounts(allRows);
+          }
           
           // Function to update matrix and table when filters change
           const updatePriorityActions = () => {
@@ -15816,6 +15867,213 @@ Final Score: ${score}/100`;
           debugLog(`⚠ Error loading KPI history: ${error.message}`, 'warn');
         }
       }
+      
+      // Wire up KPI metric selector to reload on change
+      function wireMoneyKpiMetricSelector() {
+        setTimeout(() => {
+          const metricSelect = document.getElementById('money-kpi-metric-select');
+          if (metricSelect) {
+            const newSelect = metricSelect.cloneNode(true);
+            metricSelect.parentNode.replaceChild(newSelect, metricSelect);
+            newSelect.addEventListener('change', () => {
+              const propertyUrl = document.getElementById('propertyUrl')?.value;
+              if (propertyUrl) {
+                loadAuditHistoryAndRenderKpis(propertyUrl);
+              }
+            });
+            debugLog('✓ Money KPI metric selector wired up', 'success');
+          }
+        }, 200);
+      }
+      
+      // Render Money Pages Performance Trends chart
+      function renderMoneyPagesTrendChart(history) {
+        const canvas = document.getElementById('moneyPagesTrendChart');
+        if (!canvas) {
+          debugLog('⚠ Money Pages trend chart canvas not found', 'warn');
+          return;
+        }
+        
+        // Destroy existing chart if it exists
+        if (window.moneyPagesTrendChart) {
+          window.moneyPagesTrendChart.destroy();
+          window.moneyPagesTrendChart = null;
+        }
+        
+        if (!history || !Array.isArray(history) || history.length === 0) {
+          debugLog('⚠ Money Pages trend chart: No history data available', 'warn');
+          const ctx = canvas.getContext('2d');
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.font = '14px Arial';
+          ctx.fillStyle = '#64748b';
+          ctx.textAlign = 'center';
+          ctx.fillText('No trend data available. Run audits to build trend data.', canvas.width / 2, canvas.height / 2);
+          return;
+        }
+        
+        // Extract money pages trend data from history
+        const labels = [];
+        const clicksData = [];
+        const impressionsData = [];
+        const ctrData = [];
+        const behaviourData = [];
+        
+        history.forEach(record => {
+          if (record.auditDate) {
+            const date = new Date(record.auditDate);
+            labels.push(date.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' }));
+            
+            const metrics = record.moneySegmentMetrics || {};
+            clicksData.push(metrics.clicks || 0);
+            impressionsData.push(metrics.impressions || 0);
+            ctrData.push(metrics.ctr ? metrics.ctr * 100 : 0);
+            behaviourData.push(metrics.behaviourScore || null);
+          }
+        });
+        
+        if (labels.length === 0) {
+          debugLog('⚠ Money Pages trend chart: No valid data points', 'warn');
+          return;
+        }
+        
+        const ctx = canvas.getContext('2d');
+        window.moneyPagesTrendChart = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: labels,
+            datasets: [
+              {
+                label: 'Clicks',
+                data: clicksData,
+                borderColor: '#2563eb',
+                backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                yAxisID: 'y',
+                tension: 0.4
+              },
+              {
+                label: 'Impressions',
+                data: impressionsData,
+                borderColor: '#10b981',
+                backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                yAxisID: 'y1',
+                tension: 0.4
+              },
+              {
+                label: 'CTR (%)',
+                data: ctrData,
+                borderColor: '#f59e0b',
+                backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                yAxisID: 'y2',
+                tension: 0.4
+              },
+              {
+                label: 'Behaviour Score',
+                data: behaviourData,
+                borderColor: '#8b5cf6',
+                backgroundColor: 'rgba(139, 92, 246, 0.1)',
+                yAxisID: 'y2',
+                tension: 0.4,
+                spanGaps: true
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+              mode: 'index',
+              intersect: false
+            },
+            plugins: {
+              legend: {
+                display: true,
+                position: 'top'
+              },
+              tooltip: {
+                callbacks: {
+                  label: function(context) {
+                    let label = context.dataset.label || '';
+                    if (label) {
+                      label += ': ';
+                    }
+                    const value = context.parsed.y;
+                    if (context.dataset.label === 'CTR (%)' || context.dataset.label === 'Behaviour Score') {
+                      label += value.toFixed(1);
+                      if (context.dataset.label === 'CTR (%)') label += '%';
+                    } else {
+                      label += value.toLocaleString();
+                    }
+                    return label;
+                  }
+                }
+              }
+            },
+            scales: {
+              x: {
+                display: true,
+                title: {
+                  display: true,
+                  text: 'Audit Date'
+                }
+              },
+              y: {
+                type: 'linear',
+                display: true,
+                position: 'left',
+                title: {
+                  display: true,
+                  text: 'Clicks'
+                },
+                ticks: {
+                  callback: function(value) {
+                    return value.toLocaleString();
+                  }
+                }
+              },
+              y1: {
+                type: 'linear',
+                display: true,
+                position: 'right',
+                title: {
+                  display: true,
+                  text: 'Impressions'
+                },
+                grid: {
+                  drawOnChartArea: false
+                },
+                ticks: {
+                  callback: function(value) {
+                    return value.toLocaleString();
+                  }
+                }
+              },
+              y2: {
+                type: 'linear',
+                display: true,
+                position: 'right',
+                title: {
+                  display: true,
+                  text: 'CTR / Behaviour Score'
+                },
+                grid: {
+                  drawOnChartArea: false
+                },
+                ticks: {
+                  callback: function(value) {
+                    return value.toFixed(1);
+                  }
+                }
+              }
+            }
+          }
+        });
+        
+        debugLog('✓ Money Pages trend chart rendered successfully', 'success');
+      }
+      
+      // Make functions globally available
+      window.renderMoneyPagesTrendChart = renderMoneyPagesTrendChart;
+      window.wireMoneyKpiMetricSelector = wireMoneyKpiMetricSelector;
       
       // Recalculate behaviour for filtered sub-segment
       function recalculateMoneyPagesBehaviour(moneyPagesMetrics, queryPages, subSegmentFilter) {
