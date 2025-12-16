@@ -500,6 +500,9 @@ export default async function handler(req, res) {
     const queryTotals = [];
     if (keywordList.length > 0) {
       console.log(`[GSC] Fetching query-only totals for ${keywordList.length} tracked keywords (individual calls)`);
+    } else {
+      console.warn(`[GSC] No keywords provided - queryTotals will be empty. Table will show "—" for CTR/Impressions.`);
+    }
       
       // Process keywords in parallel batches to avoid rate limits
       const BATCH_SIZE = 10; // Process 10 keywords at a time
