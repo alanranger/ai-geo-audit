@@ -17088,22 +17088,34 @@ Final Score: ${score}/100`;
       }
       
       // If not available, try to fetch fresh from Supabase
+      // CRITICAL: displayDashboard runs before renderTrendChart, so window.lastGscTimeseriesDate may not be set yet
+      // Fetch directly from Supabase to get the actual last timeseries date
       if (!gscLastDate) {
         const propertyUrl = document.getElementById('propertyUrl')?.value || data?.propertyUrl || '';
         if (propertyUrl) {
           try {
-            // Fetch last timeseries date from Supabase synchronously (quick query)
-            const endDate = new Date().toISOString().split('T')[0];
-            const startDate = new Date();
-            startDate.setDate(startDate.getDate() - 30); // Last 30 days
-            const startDateStr = startDate.toISOString().split('T')[0];
-            
-            // Use fetch with async/await pattern, but we'll make it synchronous for this use case
-            // Actually, we can't make it truly synchronous, so we'll use a fallback approach
-            // Check if window has the last timeseries date from renderTrendChart
+            // Try window first (if renderTrendChart already ran)
             if (window.lastGscTimeseriesDate) {
               gscLastDate = window.lastGscTimeseriesDate;
               debugLog(`Using last GSC timeseries date from window: ${gscLastDate}`, 'info');
+            } else {
+              // Fetch from Supabase API to get the last timeseries date
+              const endDate = new Date().toISOString().split('T')[0];
+              const startDate = new Date();
+              startDate.setDate(startDate.getDate() - 30); // Last 30 days
+              const startDateStr = startDate.toISOString().split('T')[0];
+              
+              const timeseriesResponse = await fetch(apiUrl(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDate}`));
+              if (timeseriesResponse.ok) {
+                const timeseriesData = await timeseriesResponse.json();
+                if (timeseriesData.status === 'ok' && timeseriesData.timeseries && Array.isArray(timeseriesData.timeseries) && timeseriesData.timeseries.length > 0) {
+                  const lastPoint = timeseriesData.timeseries[timeseriesData.timeseries.length - 1];
+                  if (lastPoint && lastPoint.date) {
+                    gscLastDate = lastPoint.date;
+                    debugLog(`Using last GSC timeseries date from Supabase API: ${gscLastDate}`, 'info');
+                  }
+                }
+              }
             }
           } catch (e) {
             debugLog(`Error fetching GSC date: ${e.message}`, 'warn');
@@ -20233,6 +20245,16 @@ Final Score: ${score}/100`;
               buildPill('Content/Schema', contentSchemaTrend),
               buildPill('Brand & Entity', brandOverlayTrend)
             ].join('');
+            
+            // Add note explaining trend calculation
+            const trendNote = trendSummaryRow.nextElementSibling;
+            if (!trendNote || !trendNote.classList.contains('trend-calculation-note')) {
+              const noteDiv = document.createElement('div');
+              noteDiv.className = 'trend-calculation-note';
+              noteDiv.style.cssText = 'font-size: 0.75rem; color: #64748b; margin-top: 0.5rem; font-style: italic;';
+              noteDiv.textContent = 'Percentage changes are calculated from the first date to the last date in the selected range.';
+              trendSummaryRow.parentElement.insertBefore(noteDiv, trendSummaryRow.nextSibling);
+            }
           }
           
           // Plugin to make year transition labels bold
