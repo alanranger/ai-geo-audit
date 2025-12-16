@@ -17074,8 +17074,22 @@ Final Score: ${score}/100`;
       const schemaAuditData = schemaAudit || saved?.schemaAudit;
       
       // Get last GSC data date from current data (for Authority, Visibility, and Brand & Entity)
+      // CRITICAL: Use the latest date from historical maps if available (more accurate than current data)
       let gscLastDate = null;
-      if (data) {
+      
+      // First, try to get from global visibility/authority maps (set by renderTrendChart)
+      if (window.visibilityMap && window.visibilityMap.size > 0) {
+        const visibilityDates = Array.from(window.visibilityMap.keys()).sort();
+        gscLastDate = visibilityDates[visibilityDates.length - 1];
+        debugLog(`Using last GSC date from visibilityMap: ${gscLastDate}`, 'info');
+      } else if (window.authorityMap && window.authorityMap.size > 0) {
+        const authorityDates = Array.from(window.authorityMap.keys()).sort();
+        gscLastDate = authorityDates[authorityDates.length - 1];
+        debugLog(`Using last GSC date from authorityMap: ${gscLastDate}`, 'info');
+      }
+      
+      // Fallback to current data timeseries
+      if (!gscLastDate && data) {
         // Try timeseries first (most accurate)
         if (data.timeseries && Array.isArray(data.timeseries) && data.timeseries.length > 0) {
           const lastTimeseriesPoint = data.timeseries[data.timeseries.length - 1];
@@ -18710,6 +18724,7 @@ Final Score: ${score}/100`;
           let chartDateObjects = []; // Store Date objects for period detection
           
           // Declare maps in outer scope so they're accessible everywhere
+          // Also make them global so displayDashboard can access them for Data Date display
           let contentSchemaHistory = [];
           let contentSchemaMap = new Map();
           let localEntityMap = new Map();
@@ -18718,6 +18733,11 @@ Final Score: ${score}/100`;
           let authorityBySegmentMap = new Map(); // Store historical segmented Authority scores from Supabase (new: {all, nonEducation, money})
           let visibilityMap = new Map(); // Store historical Visibility scores from Supabase
           let brandOverlayMap = new Map(); // Store historical Brand Overlay scores from Supabase
+          
+          // Make maps global for access by displayDashboard
+          window.visibilityMap = visibilityMap;
+          window.authorityMap = authorityMap;
+          window.brandOverlayMap = brandOverlayMap;
           const currentContentSchema = scores.contentSchema || 0;
           const currentBrandOverlay = scores.brandOverlay?.score || null;
           
