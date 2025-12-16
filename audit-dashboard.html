@@ -4169,18 +4169,34 @@
                           window.lastGscTimeseriesDate = timeseriesDates[0];
                           debugLog(`Money Pages Trend: Set last GSC timeseries date from API: ${window.lastGscTimeseriesDate}`, 'info');
                         }
+                      } else {
+                        debugLog(`Money Pages Trend: No timeseries data in API response`, 'warn');
                       }
+                      
+                      debugLog(`Money Pages Trend: About to render chart with ${json.data ? json.data.length : 0} history records`, 'info');
                       
                       requestAnimationFrame(() => {
                         requestAnimationFrame(() => {
                           const canvas = document.getElementById('moneyPagesTrendChart');
                           if (canvas) {
                             const rect = canvas.getBoundingClientRect();
+                            debugLog(`Money Pages Trend: Canvas dimensions: ${rect.width}x${rect.height}, offset: ${canvas.offsetWidth}x${canvas.offsetHeight}`, 'info');
                             if (rect.width > 0 && rect.height > 0) {
+                              debugLog(`Money Pages Trend: Calling renderMoneyPagesTrendChart with ${json.data.length} records`, 'info');
                               renderMoneyPagesTrendChart(json.data);
                             } else {
                               debugLog('⚠ Money Pages trend chart: Canvas still has zero dimensions, retrying...', 'warn');
-                              setTimeout(() => renderMoneyCharts(), 200);
+                              // Set explicit dimensions and retry
+                              canvas.width = canvas.offsetWidth || canvas.parentElement?.clientWidth || 800;
+                              canvas.height = canvas.offsetHeight || 400;
+                              setTimeout(() => {
+                                const rect2 = canvas.getBoundingClientRect();
+                                if (rect2.width > 0 && rect2.height > 0) {
+                                  renderMoneyPagesTrendChart(json.data);
+                                } else {
+                                  setTimeout(() => renderMoneyCharts(), 200);
+                                }
+                              }, 100);
                             }
                           } else {
                             debugLog('⚠ Money Pages trend chart: Canvas element not found', 'warn');
@@ -16079,6 +16095,7 @@ Final Score: ${score}/100`;
                 .reverse();
               if (timeseriesDates.length > 0) {
                 lastGscTimeseriesDate = timeseriesDates[0];
+                window.lastGscTimeseriesDate = lastGscTimeseriesDate; // Store globally
                 debugLog(`Money Pages KPI: Extracted last GSC timeseries date from API response: ${lastGscTimeseriesDate}`, 'info');
               }
             }
@@ -16088,13 +16105,20 @@ Final Score: ${score}/100`;
           // Money Pages metrics (clicks, impressions, CTR, position) are GSC-derived, so should only show up to last GSC date
           let filteredHistory = history;
           if (lastGscTimeseriesDate) {
+            const beforeFilter = history.length;
             filteredHistory = history.filter(record => {
               const recordDate = record.date || record.audit_date || record.auditDate;
               if (!recordDate) return false;
               // Compare dates as strings (YYYY-MM-DD format)
-              return recordDate.localeCompare(lastGscTimeseriesDate) <= 0;
+              const comparison = recordDate.localeCompare(lastGscTimeseriesDate);
+              const include = comparison <= 0;
+              if (!include) {
+                debugLog(`Money Pages KPI: Excluding record with date ${recordDate} (last GSC date: ${lastGscTimeseriesDate})`, 'info');
+              }
+              return include;
             });
-            debugLog(`Money Pages KPI: Filtered history from ${history.length} to ${filteredHistory.length} records (last GSC date: ${lastGscTimeseriesDate})`, 'info');
+            debugLog(`Money Pages KPI: Filtered history from ${beforeFilter} to ${filteredHistory.length} records (last GSC date: ${lastGscTimeseriesDate})`, 'info');
+            debugLog(`Money Pages KPI: Filtered dates: ${filteredHistory.map(r => r.date || r.audit_date || r.auditDate).join(', ')}`, 'info');
           } else {
             debugLog(`Money Pages KPI: No last GSC timeseries date found, using all history records`, 'warn');
           }
@@ -16186,16 +16210,27 @@ Final Score: ${score}/100`;
         // Get the last GSC timeseries date (Money Pages metrics are GSC-derived)
         let lastGscTimeseriesDate = window.lastGscTimeseriesDate || null;
         
+        debugLog(`Money Pages Trend Chart: Starting with ${history.length} history records, lastGscTimeseriesDate: ${lastGscTimeseriesDate}`, 'info');
+        
         // Filter history to only include dates up to the last GSC timeseries date
         let filteredHistory = history;
         if (lastGscTimeseriesDate) {
+          const beforeFilter = history.length;
           filteredHistory = history.filter(record => {
             const recordDate = record.date || record.audit_date || record.auditDate;
             if (!recordDate) return false;
             // Compare dates as strings (YYYY-MM-DD format)
-            return recordDate.localeCompare(lastGscTimeseriesDate) <= 0;
+            const comparison = recordDate.localeCompare(lastGscTimeseriesDate);
+            const include = comparison <= 0;
+            if (!include) {
+              debugLog(`Money Pages Trend: Excluding record with date ${recordDate} (last GSC date: ${lastGscTimeseriesDate})`, 'info');
+            }
+            return include;
           });
-          debugLog(`Money Pages Trend: Filtered history from ${history.length} to ${filteredHistory.length} records (last GSC date: ${lastGscTimeseriesDate})`, 'info');
+          debugLog(`Money Pages Trend: Filtered history from ${beforeFilter} to ${filteredHistory.length} records (last GSC date: ${lastGscTimeseriesDate})`, 'info');
+          debugLog(`Money Pages Trend: Filtered dates: ${filteredHistory.map(r => r.date || r.audit_date || r.auditDate).join(', ')}`, 'info');
+        } else {
+          debugLog(`Money Pages Trend: No last GSC timeseries date found, using all history records`, 'warn');
         }
         
         // Extract money pages trend data from history
@@ -16263,6 +16298,21 @@ Final Score: ${score}/100`;
         
         debugLog(`Money Pages Trend Chart: Creating chart with ${labels.length} data points`, 'info');
         debugLog(`Money Pages Trend Chart: Clicks data: ${clicksData.filter(v => v != null).length} values, Impressions: ${impressionsData.filter(v => v != null).length} values, CTR: ${ctrData.filter(v => v != null).length} values, Behaviour: ${behaviourData.filter(v => v != null).length} values`, 'info');
+        debugLog(`Money Pages Trend Chart: Labels: ${labels.join(', ')}`, 'info');
+        
+        // Check if Chart.js is available
+        if (typeof Chart === 'undefined') {
+          debugLog('⚠ Money Pages trend chart: Chart.js not loaded', 'warn');
+          canvas.width = canvas.offsetWidth || 800;
+          canvas.height = canvas.offsetHeight || 400;
+          const ctx = canvas.getContext('2d');
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.font = '14px Arial';
+          ctx.fillStyle = '#ef4444';
+          ctx.textAlign = 'center';
+          ctx.fillText('Chart.js library not loaded', canvas.width / 2, canvas.height / 2);
+          return;
+        }
         
         try {
           const ctx = canvas.getContext('2d');
@@ -16271,6 +16321,7 @@ Final Score: ${score}/100`;
             return;
           }
           
+          debugLog(`Money Pages Trend Chart: Creating Chart.js instance...`, 'info');
           window.moneyPagesTrendChart = new Chart(ctx, {
           type: 'line',
           data: {
