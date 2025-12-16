@@ -2,6 +2,73 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2025-12-16] - v1.6.0 - Money Pages UI Improvements & Branding Update
+
+### Added
+- **Money Pages Performance Trends Split Charts**: Split single chart into two side-by-side charts
+  - Volume Metrics Chart: Clicks and Impressions (similar scales)
+  - Rate & Score Metrics Chart: CTR (%) and Behaviour Score (similar scales)
+  - Resolves Y-axis scaling issues with 4 series on different scales
+  - Each chart has fixed height container (300px) to prevent auto-scaling loops
+- **Enhanced CTR Y-Axis Precision**: Improved granularity for Rate & Score Metrics chart
+  - stepSize set to 0.02 (shows 1.40%, 1.42%, 1.44%, etc.)
+  - Labels display 2 decimal places (1.65% instead of 1.6%)
+  - Makes small day-to-day CTR changes clearly visible
+  - Tooltip precision matches axis (2 decimal places)
+
+### Changed
+- **Branding Update**: Replaced "AIO" with "GAIO" throughout UI
+  - Main header: "GAIO (Generative AI Optimization) Audit Dashboard"
+  - Subtitle: "Automated GAIO Performance Tracking & Optimisation"
+  - All user-facing text, tooltips, and descriptions updated
+  - Internal variable names preserved for compatibility
+- **Money Pages Section Layout**: Reorganized section order
+  - KPI Tracker (last 12 audits) now appears above Priority & Actions section
+  - KPI Tracker chart and table displayed side-by-side (50/50 split)
+  - Performance Trends charts displayed side-by-side (50/50 split)
+- **CTR Calculation**: Now calculated directly from clicks/impressions for accuracy
+  - Ensures plotted value matches actual calculated CTR
+  - Fallback to stored values with smart detection (decimal vs percentage format)
+  - Fixes tooltip/plotting mismatch issues
+
+### Fixed
+- **Dropdown Counts Persistence**: Fixed counts vanishing after filter selection
+  - Counts now calculated from base data (after min impressions, before type filter)
+  - Counts persist correctly when type filter changes
+  - `renderMoneyPagesTable` now uses base data for counting instead of filtered data
+- **Money Pages Filter Counts**: Fixed counts not updating when filters change
+  - Counts update correctly when min impressions filter changes
+  - Counts update correctly when type filter changes
+  - Initial load respects min impressions filter value
+- **CTR Plotting Accuracy**: Fixed CTR values not plotting at correct Y-axis position
+  - Tooltip precision increased to 2 decimal places (matches axis)
+  - Direct calculation from clicks/impressions ensures accuracy
+  - Resolves issue where 1.50% appeared closer to 1.45% on axis
+- **Chart Auto-Scaling Loop**: Fixed infinite Y-axis expansion
+  - Added fixed-height containers (300px) for all charts
+  - Set `maintainAspectRatio: true` with `aspectRatio: 2.5`
+  - Removed manual canvas width/height settings
+  - Added rendering guards to prevent simultaneous re-renders
+- **Money Pages Section Restoration**: Restored complete HTML structure
+  - All sub-sections, styling, and formatting preserved
+  - KPI Tracker table restored and positioned correctly
+  - Background and panel formatting maintained
+  - Only change: Performance Trends split from 1 chart to 2 side-by-side charts
+
+### Technical Details
+- **Chart Configuration**: 
+  - Volume chart: Clicks (min: 100, max: 500, stepSize: 50) and Impressions
+  - Rate chart: CTR (stepSize: 0.02, 2 decimal places) and Behaviour Score
+  - Both charts use fixed-height containers to prevent resizing loops
+- **Filter Count Logic**: 
+  - Counts calculated from `window.moneyPagePriorityData` + `window.authorityActionRows`
+  - Min impressions filter applied before counting
+  - Type filter NOT applied when counting (shows all available types)
+- **CTR Data Extraction**:
+  - Primary: Calculate from `(clicks / impressions) * 100` when available
+  - Fallback: Use `summary.ctr` or `allMoney.ctr` with smart format detection
+  - Handles both decimal (0.015) and percentage (1.5) formats
+
 ## [2025-12-17] - v1.5.0 - Intent-Based Keyword Segmentation & Preset Refactor
 
 ### Added
