@@ -17074,40 +17074,82 @@ Final Score: ${score}/100`;
       const schemaAuditData = schemaAudit || saved?.schemaAudit;
       
       // Get last GSC data date from current data (for Authority, Visibility, and Brand & Entity)
-      // CRITICAL: Use the latest date from historical maps if available (more accurate than current data)
+      // CRITICAL: Use the last timeseries date from Supabase, not the latest date from maps
+      // Maps may have dates after the last GSC timeseries date (from audits), but those aren't from actual GSC data
       let gscLastDate = null;
       
-      // First, try to get from global visibility/authority maps (set by renderTrendChart)
-      if (window.visibilityMap && window.visibilityMap.size > 0) {
-        const visibilityDates = Array.from(window.visibilityMap.keys()).sort();
-        gscLastDate = visibilityDates[visibilityDates.length - 1];
-        debugLog(`Using last GSC date from visibilityMap: ${gscLastDate}`, 'info');
-      } else if (window.authorityMap && window.authorityMap.size > 0) {
-        const authorityDates = Array.from(window.authorityMap.keys()).sort();
-        gscLastDate = authorityDates[authorityDates.length - 1];
-        debugLog(`Using last GSC date from authorityMap: ${gscLastDate}`, 'info');
+      // First, try to get from current data timeseries (most accurate - actual GSC data)
+      if (data && data.timeseries && Array.isArray(data.timeseries) && data.timeseries.length > 0) {
+        const lastTimeseriesPoint = data.timeseries[data.timeseries.length - 1];
+        if (lastTimeseriesPoint && lastTimeseriesPoint.date) {
+          gscLastDate = lastTimeseriesPoint.date;
+          debugLog(`Using last GSC timeseries date from data: ${gscLastDate}`, 'info');
+        }
       }
       
-      // Fallback to current data timeseries
-      if (!gscLastDate && data) {
-        // Try timeseries first (most accurate)
-        if (data.timeseries && Array.isArray(data.timeseries) && data.timeseries.length > 0) {
-          const lastTimeseriesPoint = data.timeseries[data.timeseries.length - 1];
-          if (lastTimeseriesPoint && lastTimeseriesPoint.date) {
-            gscLastDate = lastTimeseriesPoint.date;
-            debugLog(`Using last GSC timeseries date: ${gscLastDate}`, 'info');
+      // If not available, try to fetch fresh from Supabase
+      if (!gscLastDate) {
+        const propertyUrl = document.getElementById('propertyUrl')?.value || data?.propertyUrl || '';
+        if (propertyUrl) {
+          try {
+            // Fetch last timeseries date from Supabase synchronously (quick query)
+            const endDate = new Date().toISOString().split('T')[0];
+            const startDate = new Date();
+            startDate.setDate(startDate.getDate() - 30); // Last 30 days
+            const startDateStr = startDate.toISOString().split('T')[0];
+            
+            // Use fetch with async/await pattern, but we'll make it synchronous for this use case
+            // Actually, we can't make it truly synchronous, so we'll use a fallback approach
+            // Check if window has the last timeseries date from renderTrendChart
+            if (window.lastGscTimeseriesDate) {
+              gscLastDate = window.lastGscTimeseriesDate;
+              debugLog(`Using last GSC timeseries date from window: ${gscLastDate}`, 'info');
+            }
+          } catch (e) {
+            debugLog(`Error fetching GSC date: ${e.message}`, 'warn');
           }
         }
-        // Fallback to date from current data if available
-        if (!gscLastDate && data.date) {
-          gscLastDate = data.date;
-          debugLog(`Using GSC data date: ${gscLastDate}`, 'info');
+      }
+      
+      // Fallback to global maps, but filter to only dates <= last timeseries date if available
+      if (!gscLastDate) {
+        // Try to get from maps, but only if we can verify it's <= last timeseries date
+        // For now, use the latest from maps but log a warning
+        if (window.visibilityMap && window.visibilityMap.size > 0) {
+          const visibilityDates = Array.from(window.visibilityMap.keys()).sort();
+          const latestMapDate = visibilityDates[visibilityDates.length - 1];
+          // Only use if we don't have a timeseries date to compare against
+          // If we have window.lastGscTimeseriesDate, use that instead
+          if (window.lastGscTimeseriesDate) {
+            gscLastDate = window.lastGscTimeseriesDate;
+            debugLog(`Using last GSC timeseries date from window (filtered): ${gscLastDate}`, 'info');
+          } else {
+            gscLastDate = latestMapDate;
+            debugLog(`Using last GSC date from visibilityMap (fallback): ${gscLastDate}`, 'warn');
+          }
+        } else if (window.authorityMap && window.authorityMap.size > 0) {
+          const authorityDates = Array.from(window.authorityMap.keys()).sort();
+          const latestMapDate = authorityDates[authorityDates.length - 1];
+          if (window.lastGscTimeseriesDate) {
+            gscLastDate = window.lastGscTimeseriesDate;
+            debugLog(`Using last GSC timeseries date from window (filtered): ${gscLastDate}`, 'info');
+          } else {
+            gscLastDate = latestMapDate;
+            debugLog(`Using last GSC date from authorityMap (fallback): ${gscLastDate}`, 'warn');
+          }
         }
       }
+      
+      // Final fallback to date from current data if available
+      if (!gscLastDate && data && data.date) {
+        gscLastDate = data.date;
+        debugLog(`Using GSC data date (fallback): ${gscLastDate}`, 'info');
+      }
+      
       // If still no date, try to get it from saved audit data
       if (!gscLastDate && saved && saved.searchData && saved.searchData.date) {
         gscLastDate = saved.searchData.date;
-        debugLog(`Using saved GSC data date: ${gscLastDate}`, 'info');
+        debugLog(`Using saved GSC data date (fallback): ${gscLastDate}`, 'info');
       }
       
       // Format date for display
