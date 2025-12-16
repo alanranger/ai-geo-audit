@@ -15957,12 +15957,35 @@ Final Score: ${score}/100`;
           { key: "productPages", label: "Product", values: segments.productPages, color: "#ef4444" }
         ];
 
+        // Prevent re-rendering if chart already exists and is valid
+        if (moneyKpiChart && moneyKpiChart.canvas && moneyKpiChart.canvas.id === 'money-kpi-sparkline') {
+          // Chart already exists and is valid, don't recreate it
+          debugLog('⚠ Money KPI sparkline: Chart already exists, skipping re-render', 'warn');
+          return;
+        }
+
         if (moneyKpiChart) {
-          moneyKpiChart.destroy();
+          try {
+            moneyKpiChart.destroy();
+          } catch (e) {
+            // Ignore destroy errors
+          }
+          moneyKpiChart = null;
         }
 
         // Ensure we have at least 2 points for line chart, or show points only
         const minPoints = labels.length === 1 ? 1 : 2;
+        
+        // Calculate Y-axis bounds to prevent infinite expansion
+        const allValues = segments.allMoney.concat(
+          segments.landingPages || [],
+          segments.eventPages || [],
+          segments.productPages || []
+        ).filter(v => v != null && !isNaN(v));
+        
+        const minValue = allValues.length > 0 ? Math.min(...allValues) : 0;
+        const maxValue = allValues.length > 0 ? Math.max(...allValues) : 100;
+        const padding = Math.max((maxValue - minValue) * 0.1, 1); // 10% padding, minimum 1
         
         moneyKpiChart = new Chart(ctx, {
           type: "line",
@@ -16023,6 +16046,8 @@ Final Score: ${score}/100`;
                         metricKey === 'clicks' ? 'Clicks' :
                         (metricKey ? metricKey.charAt(0).toUpperCase() + metricKey.slice(1) : 'Value')
                 },
+                min: Math.max(0, minValue - padding),
+                max: maxValue + padding,
                 ticks: {
                   callback: function(value) {
                     const v = typeof value === 'number' ? value : parseFloat(value);
