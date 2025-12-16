@@ -21609,6 +21609,24 @@ Final Score: ${score}/100`;
           debugLog('⚠ Cannot load Ranking & AI data: property URL not set', 'warn');
           return null;
         }
+        
+        // Force clear localStorage if it doesn't have pageTypeVersion marker (stale data)
+        const localData = localStorage.getItem('rankingAiData');
+        if (localData && !forceCheckSupabase) {
+          try {
+            const parsed = JSON.parse(localData);
+            if (!parsed.pageTypeVersion) {
+              debugLog('🔄 Clearing stale localStorage data (missing pageTypeVersion)', 'info');
+              localStorage.removeItem('rankingAiData');
+              // Force Supabase check
+              forceCheckSupabase = true;
+            }
+          } catch (e) {
+            // Invalid data, clear it
+            localStorage.removeItem('rankingAiData');
+            forceCheckSupabase = true;
+          }
+        }
 
         // Store localStorage data as fallback (in case Supabase check fails)
         let localStorageFallback = null;
