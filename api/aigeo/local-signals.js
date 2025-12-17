@@ -92,9 +92,9 @@ export default async function handler(req, res) {
     console.log('[Local Signals] Fetching locations for account:', accountName);
     
     // Business Profile API readMask - use valid field names
-    // Note: primaryPhone might not be a valid field, and phoneNumbers might need to be requested differently
-    // Include rating and reviewCount in readMask to get review data directly
-    const locationsUrl = `https://mybusinessbusinessinformation.googleapis.com/v1/${accountName}/locations?readMask=name,title,storefrontAddress,websiteUri,phoneNumbers,serviceArea,rating,reviewCount`;
+    // Note: rating and reviewCount are NOT available in the locations LIST endpoint
+    // They can only be fetched from individual location DETAIL endpoints
+    const locationsUrl = `https://mybusinessbusinessinformation.googleapis.com/v1/${accountName}/locations?readMask=name,title,storefrontAddress,websiteUri,phoneNumbers,serviceArea`;
     console.log('[Local Signals] Locations URL:', locationsUrl);
     
     const locationsResponse = await fetch(locationsUrl, {
