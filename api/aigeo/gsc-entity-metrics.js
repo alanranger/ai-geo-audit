@@ -60,7 +60,7 @@ export default async function handler(req, res) {
     
     // Use standardized 28-day window (matching GSC UI)
     // If explicit dates provided, use them; otherwise use 28-day window ending yesterday
-    const { startDate: startDateParam, endDate: endDateParam } = req.query;
+    // Note: startDateParam and endDateParam are already extracted from req.query on line 35
     let { startDate, endDate } = startDateParam && endDateParam 
       ? parseDateRange(req) 
       : getGscDateRange({ daysBack: 28, endOffsetDays: 1 });
