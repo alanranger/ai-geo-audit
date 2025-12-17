@@ -16778,22 +16778,23 @@ Final Score: ${score}/100`;
         const range = maxValue - minValue;
         const padding = range > 0 ? Math.max(range * 0.1, range * 0.05) : (maxValue > 0 ? maxValue * 0.1 : 0.01);
         
-        moneyKpiChart = new Chart(ctx, {
-          type: "line",
-          data: {
-            labels,
-            datasets: datasets.map(d => ({
-              label: d.label,
-              data: d.values,
-              fill: false,
-              tension: labels.length > 1 ? 0.3 : 0, // No tension for single point
-              pointRadius: labels.length === 1 ? 5 : 3, // Larger point for single data point
-              pointHoverRadius: 6,
-              borderWidth: 2,
-              borderColor: d.color,
-              backgroundColor: d.color
-            }))
-          },
+        try {
+          moneyKpiChart = new Chart(ctx, {
+            type: "line",
+            data: {
+              labels,
+              datasets: datasets.map(d => ({
+                label: d.label,
+                data: d.values,
+                fill: false,
+                tension: labels.length > 1 ? 0.3 : 0, // No tension for single point
+                pointRadius: labels.length === 1 ? 5 : 3, // Larger point for single data point
+                pointHoverRadius: 6,
+                borderWidth: 2,
+                borderColor: d.color,
+                backgroundColor: d.color
+              }))
+            },
           options: {
             responsive: true,
             maintainAspectRatio: true,
@@ -16873,6 +16874,15 @@ Final Score: ${score}/100`;
             }
           }
         });
+        debugLog(`✓ Money KPI sparkline chart created successfully with ${labels.length} data points`, 'success');
+        } catch (error) {
+          debugLog(`✗ Error creating Money KPI sparkline chart: ${error.message}`, 'error');
+          debugLog(`Error stack: ${error.stack}`, 'error');
+          const wrapper = ctx.closest('.sparkline-wrapper');
+          if (wrapper) {
+            wrapper.innerHTML = `<div style="padding: 2rem; text-align: center; color: #ef4444;">Error rendering chart: ${error.message}</div>`;
+          }
+        }
       }
       
       /**
@@ -17300,6 +17310,56 @@ Final Score: ${score}/100`;
           }
           debugLog(`Money Pages Trend: Backward-filled from first values (clicks: ${firstClicks}, impressions: ${firstImpressions}, ctr: ${firstCtr}, behaviour: ${firstBehaviour})`, 'info');
         }
+        
+        // Normalize outliers: values > 2x or < 0.5x the average of surrounding values
+        const normalizeOutliers = (dataArray, arrayName) => {
+          const normalized = [...dataArray];
+          let normalizedCount = 0;
+          for (let i = 1; i < normalized.length - 1; i++) {
+            const current = normalized[i];
+            if (current == null) continue;
+            
+            // Find previous and next valid values
+            let prev = null, next = null;
+            for (let j = i - 1; j >= 0 && prev == null; j--) {
+              if (normalized[j] != null) prev = normalized[j];
+            }
+            for (let j = i + 1; j < normalized.length && next == null; j++) {
+              if (normalized[j] != null) next = normalized[j];
+            }
+            
+            // If we have both prev and next, check if current is an outlier (> 2x or < 0.5x average)
+            if (prev != null && next != null) {
+              const avg = (prev + next) / 2;
+              if (avg > 0) {
+                const ratio = current / avg;
+                if (ratio > 2.0 || ratio < 0.5) {
+                  normalized[i] = avg;
+                  normalizedCount++;
+                  debugLog(`Money Pages Trend: Normalized ${arrayName} outlier at ${labels[i]}: ${current.toFixed(2)} -> ${avg.toFixed(2)} (ratio: ${ratio.toFixed(2)})`, 'info');
+                }
+              }
+            } else if (prev != null && current / prev > 2.0) {
+              normalized[i] = prev;
+              normalizedCount++;
+              debugLog(`Money Pages Trend: Normalized ${arrayName} outlier at ${labels[i]}: ${current.toFixed(2)} -> ${prev.toFixed(2)} (only prev)`, 'info');
+            } else if (next != null && current / next > 2.0) {
+              normalized[i] = next;
+              normalizedCount++;
+              debugLog(`Money Pages Trend: Normalized ${arrayName} outlier at ${labels[i]}: ${current.toFixed(2)} -> ${next.toFixed(2)} (only next)`, 'info');
+            }
+          }
+          if (normalizedCount > 0) {
+            debugLog(`Money Pages Trend: Normalized ${normalizedCount} outlier(s) in ${arrayName}`, 'info');
+          }
+          return normalized;
+        };
+        
+        // Apply normalization to all metrics
+        clicksData = normalizeOutliers(clicksData, 'clicks');
+        impressionsData = normalizeOutliers(impressionsData, 'impressions');
+        ctrData = normalizeOutliers(ctrData, 'ctr');
+        behaviourData = normalizeOutliers(behaviourData, 'behaviour');
         
         debugLog(`Money Pages Trend: Populated ${labels.length} dates with data (${clicksData.filter(v => v != null).length} clicks values, ${impressionsData.filter(v => v != null).length} impressions values)`, 'info');
         debugLog(`Money Pages Trend: Sample data - First 5 dates: ${labels.slice(0, 5).join(', ')}, Last 5 dates: ${labels.slice(-5).join(', ')}`, 'info');
