@@ -875,7 +875,18 @@ export default async function handler(req, res) {
           };
         })()
       } : null,
-      localSignals: (record.local_entity_score !== null || record.service_area_score !== null || record.locations || record.gbp_rating !== null || record.gbp_review_count !== null) ? {
+      localSignals: (() => {
+        const shouldCreate = record.local_entity_score !== null || record.service_area_score !== null || record.locations || record.gbp_rating !== null || record.gbp_review_count !== null;
+        console.log('[get-latest-audit] localSignals condition check:', {
+          local_entity_score: record.local_entity_score,
+          service_area_score: record.service_area_score,
+          has_locations: !!record.locations,
+          gbp_rating: record.gbp_rating,
+          gbp_review_count: record.gbp_review_count,
+          shouldCreate
+        });
+        return shouldCreate;
+      })() ? {
         status: 'ok',
         data: {
           localEntityScore: record.local_entity_score,
@@ -911,8 +922,16 @@ export default async function handler(req, res) {
             return Array.isArray(loc) ? loc : [];
           })(),
           localBusinessSchemaPages: record.local_business_schema_pages || 0,
-          gbpRating: record.gbp_rating !== null && record.gbp_rating !== undefined ? parseFloat(record.gbp_rating) : null,
-          gbpReviewCount: record.gbp_review_count !== null && record.gbp_review_count !== undefined ? parseInt(record.gbp_review_count) : null
+          gbpRating: (() => {
+            const val = record.gbp_rating !== null && record.gbp_rating !== undefined ? parseFloat(record.gbp_rating) : null;
+            console.log('[get-latest-audit] gbpRating extraction:', { raw: record.gbp_rating, parsed: val });
+            return val;
+          })(),
+          gbpReviewCount: (() => {
+            const val = record.gbp_review_count !== null && record.gbp_review_count !== undefined ? parseInt(record.gbp_review_count) : null;
+            console.log('[get-latest-audit] gbpReviewCount extraction:', { raw: record.gbp_review_count, parsed: val });
+            return val;
+          })()
         }
       } : null,
       dateRange: 30, // Default - this isn't stored in Supabase
