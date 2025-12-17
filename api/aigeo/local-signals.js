@@ -561,18 +561,19 @@ export default async function handler(req, res) {
               allKeys: Object.keys(loc).filter(k => k.toLowerCase().includes('phone'))
             }
           };
-        }),
-        accountName: account?.accountName || null,
-        accountType: account?.type || null,
-        notes: `Fetched ${locations.length} location(s) from Google Business Profile. Service areas: ${serviceAreas.length}.`,
-        _debug: {
-          originalLocationsCount: locations.length,
-          locationsToProcessCount: locationsToProcess.length,
-          locationsResponseStatus: locationsResponseStatus,
-          hasNextPageToken: !!nextPageToken,
-          locationNames: locationsToProcess.map(loc => loc.name || loc.title || 'unnamed')
-        }
-      };
+        })
+      },
+      accountName: account?.accountName || account?.name || null,
+      accountType: account?.type || null,
+      notes: `Fetched ${locations.length} location(s) from Google Business Profile. Service areas: ${serviceAreas.length}.`,
+      _debug: {
+        originalLocationsCount: locations.length,
+        locationsToProcessCount: locationsToProcess.length,
+        locationsResponseStatus: locationsResponseStatus,
+        hasNextPageToken: !!nextPageToken,
+        locationNames: locationsToProcess.map(loc => loc.name || loc.title || 'unnamed')
+      }
+    };
       
       return res.status(200).json({
         ...responseData,
