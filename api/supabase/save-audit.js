@@ -673,18 +673,18 @@ export default async function handler(req, res) {
 
     // Calculate money_segment_metrics per-date for the last 28 days using current audit's moneyPagePriorityData
     // This ensures all dates in the GSC window have proper metrics, even if the audit was partial
-    // Uses timeseries data from current audit, or falls back to gsc_timeseries table
+    // ALWAYS use gsc_timeseries table to get complete 28-day data (not just current audit's timeseries)
     if (moneySegmentMetrics && moneyPagePriorityData && !isPartialUpdate) {
       try {
-        let timeseries = Array.isArray(searchData?.timeseries) ? searchData.timeseries : [];
         const allMoney = moneySegmentMetrics.allMoney || {};
         
         // Check if current metrics are valid (not all zeros)
         const hasValidMetrics = allMoney.clicks > 0 || allMoney.impressions > 0;
         
-        // If no timeseries in current audit, fetch from gsc_timeseries table
-        if (hasValidMetrics && timeseries.length === 0) {
-          console.log('[Supabase Save] No timeseries in current audit, fetching from gsc_timeseries table...');
+        // ALWAYS fetch from gsc_timeseries table to ensure we have all dates in the last 28 days
+        // (current audit's timeseries might not include all historical dates)
+        if (hasValidMetrics) {
+          console.log('[Supabase Save] Fetching timeseries from gsc_timeseries table for last 28 days...');
           const currentDate = new Date(auditDate);
           const twentyEightDaysAgo = new Date(currentDate);
           twentyEightDaysAgo.setDate(twentyEightDaysAgo.getDate() - 28);
@@ -700,6 +700,7 @@ export default async function handler(req, res) {
             }
           });
           
+          let timeseries = [];
           if (timeseriesResponse.ok) {
             const timeseriesData = await timeseriesResponse.json();
             timeseries = timeseriesData.map(t => ({
@@ -709,9 +710,10 @@ export default async function handler(req, res) {
               ctr: t.ctr || 0,
               position: t.position || 0
             }));
-            console.log(`[Supabase Save] Fetched ${timeseries.length} dates from gsc_timeseries table`);
+            console.log(`[Supabase Save] Fetched ${timeseries.length} dates from gsc_timeseries table (${startDateStr} to ${auditDate})`);
+          } else {
+            console.warn('[Supabase Save] Failed to fetch from gsc_timeseries table, will skip per-date calculation');
           }
-        }
         
         if (hasValidMetrics && timeseries.length > 0) {
           // Calculate total site-wide metrics for the current audit date from timeseries
