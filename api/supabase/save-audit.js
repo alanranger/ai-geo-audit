@@ -671,6 +671,90 @@ export default async function handler(req, res) {
       console.log('[Supabase Save] ✓ Successfully inserted new audit results');
     }
 
+    // Backfill invalid money_segment_metrics for historical dates (last 28 days)
+    // If current audit has valid metrics, use them to fix historical dates with all-zero metrics
+    if (moneySegmentMetrics && !isPartialUpdate) {
+      try {
+        const currentDate = new Date(auditDate);
+        const twentyEightDaysAgo = new Date(currentDate);
+        twentyEightDaysAgo.setDate(twentyEightDaysAgo.getDate() - 28);
+        const startDateStr = twentyEightDaysAgo.toISOString().split('T')[0];
+        
+        // Check if current metrics are valid (not all zeros)
+        const allMoney = moneySegmentMetrics.allMoney || {};
+        const hasValidMetrics = allMoney.clicks > 0 || allMoney.impressions > 0;
+        
+        if (hasValidMetrics) {
+          console.log(`[Supabase Save] Backfilling money_segment_metrics for historical dates from ${startDateStr} to ${auditDate}`);
+          
+          // Fetch all audit dates in the last 28 days
+          const historyQuery = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=gte.${startDateStr}&audit_date=lte.${auditDate}&select=audit_date,money_segment_metrics&order=audit_date.asc`;
+          const historyResponse = await fetch(historyQuery, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': supabaseKey,
+              'Authorization': `Bearer ${supabaseKey}`
+            }
+          });
+          
+          if (historyResponse.ok) {
+            const historyRecords = await historyResponse.json();
+            const updates = [];
+            
+            for (const record of historyRecords) {
+              // Skip current audit date (already saved)
+              if (record.audit_date === auditDate) continue;
+              
+              // Check if metrics are invalid (null, undefined, or all zeros)
+              let metrics = record.money_segment_metrics;
+              if (typeof metrics === 'string') {
+                try {
+                  metrics = JSON.parse(metrics);
+                } catch (e) {
+                  metrics = null;
+                }
+              }
+              
+              const isInvalid = !metrics || 
+                (metrics.allMoney && metrics.allMoney.clicks === 0 && metrics.allMoney.impressions === 0) ||
+                (!metrics.allMoney);
+              
+              if (isInvalid) {
+                updates.push({
+                  audit_date: record.audit_date,
+                  money_segment_metrics: moneySegmentMetrics
+                });
+              }
+            }
+            
+            // Batch update invalid records
+            if (updates.length > 0) {
+              console.log(`[Supabase Save] Updating ${updates.length} historical audit(s) with valid money_segment_metrics`);
+              for (const update of updates) {
+                const updateUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${update.audit_date}`;
+                await fetch(updateUrl, {
+                  method: 'PATCH',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'apikey': supabaseKey,
+                    'Authorization': `Bearer ${supabaseKey}`
+                  },
+                  body: JSON.stringify({
+                    money_segment_metrics: ensureJson(update.money_segment_metrics)
+                  })
+                });
+              }
+              console.log(`[Supabase Save] ✓ Backfilled money_segment_metrics for ${updates.length} historical date(s)`);
+            }
+          }
+        }
+      } catch (backfillError) {
+        // Don't fail the entire save if backfill fails
+        console.warn('[Supabase Save] ⚠ Error during backfill (non-critical):', backfillError.message);
+      }
+    }
+
     // Save individual keyword rows to keyword_rankings table if rankingAiData is provided
     if (rankingAiData && rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
       try {
