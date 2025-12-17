@@ -17311,56 +17311,6 @@ Final Score: ${score}/100`;
           debugLog(`Money Pages Trend: Backward-filled from first values (clicks: ${firstClicks}, impressions: ${firstImpressions}, ctr: ${firstCtr}, behaviour: ${firstBehaviour})`, 'info');
         }
         
-        // Normalize outliers: values > 2x or < 0.5x the average of surrounding values
-        const normalizeOutliers = (dataArray, arrayName) => {
-          const normalized = [...dataArray];
-          let normalizedCount = 0;
-          for (let i = 1; i < normalized.length - 1; i++) {
-            const current = normalized[i];
-            if (current == null) continue;
-            
-            // Find previous and next valid values
-            let prev = null, next = null;
-            for (let j = i - 1; j >= 0 && prev == null; j--) {
-              if (normalized[j] != null) prev = normalized[j];
-            }
-            for (let j = i + 1; j < normalized.length && next == null; j++) {
-              if (normalized[j] != null) next = normalized[j];
-            }
-            
-            // If we have both prev and next, check if current is an outlier (> 2x or < 0.5x average)
-            if (prev != null && next != null) {
-              const avg = (prev + next) / 2;
-              if (avg > 0) {
-                const ratio = current / avg;
-                if (ratio > 2.0 || ratio < 0.5) {
-                  normalized[i] = avg;
-                  normalizedCount++;
-                  debugLog(`Money Pages Trend: Normalized ${arrayName} outlier at ${labels[i]}: ${current.toFixed(2)} -> ${avg.toFixed(2)} (ratio: ${ratio.toFixed(2)})`, 'info');
-                }
-              }
-            } else if (prev != null && current / prev > 2.0) {
-              normalized[i] = prev;
-              normalizedCount++;
-              debugLog(`Money Pages Trend: Normalized ${arrayName} outlier at ${labels[i]}: ${current.toFixed(2)} -> ${prev.toFixed(2)} (only prev)`, 'info');
-            } else if (next != null && current / next > 2.0) {
-              normalized[i] = next;
-              normalizedCount++;
-              debugLog(`Money Pages Trend: Normalized ${arrayName} outlier at ${labels[i]}: ${current.toFixed(2)} -> ${next.toFixed(2)} (only next)`, 'info');
-            }
-          }
-          if (normalizedCount > 0) {
-            debugLog(`Money Pages Trend: Normalized ${normalizedCount} outlier(s) in ${arrayName}`, 'info');
-          }
-          return normalized;
-        };
-        
-        // Apply normalization to all metrics
-        clicksData = normalizeOutliers(clicksData, 'clicks');
-        impressionsData = normalizeOutliers(impressionsData, 'impressions');
-        ctrData = normalizeOutliers(ctrData, 'ctr');
-        behaviourData = normalizeOutliers(behaviourData, 'behaviour');
-        
         debugLog(`Money Pages Trend: Populated ${labels.length} dates with data (${clicksData.filter(v => v != null).length} clicks values, ${impressionsData.filter(v => v != null).length} impressions values)`, 'info');
         debugLog(`Money Pages Trend: Sample data - First 5 dates: ${labels.slice(0, 5).join(', ')}, Last 5 dates: ${labels.slice(-5).join(', ')}`, 'info');
         debugLog(`Money Pages Trend: Sample clicks - First 5: ${clicksData.slice(0, 5).map(v => v != null ? v : 'null').join(', ')}, Last 5: ${clicksData.slice(-5).map(v => v != null ? v : 'null').join(', ')}`, 'info');
