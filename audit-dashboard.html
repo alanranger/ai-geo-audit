@@ -5890,6 +5890,13 @@
         
         // Fetch local signals (Business Profile data doesn't change with date range, but fetch to ensure it's fresh)
         let localSignals = savedAudit.localSignals || null;
+        
+        // Normalize cached localSignals structure if needed (handle old format where it might just be {data: {...}})
+        if (localSignals && localSignals.data && !localSignals.status) {
+          debugLog(`[Local Signals] Normalizing cached data structure - wrapping in status/data format`, 'info');
+          localSignals = { status: 'ok', data: localSignals.data || localSignals };
+        }
+        
         try {
           const localSignalsResponse = await fetch(apiUrl(`/api/aigeo/local-signals?property=${encodeURIComponent(propertyUrl)}`));
           if (localSignalsResponse.ok) {
@@ -5911,6 +5918,11 @@
           }
         } catch (localSignalsError) {
           debugLog(`⚠ Local signals error: ${localSignalsError.message}, using cached data if available`, 'warn');
+        }
+        
+        // Final normalization - ensure localSignals always has the correct structure
+        if (localSignals && localSignals.data && !localSignals.status) {
+          localSignals = { status: 'ok', data: localSignals.data || localSignals };
         }
         
         // Recalculate pillar scores based on new GSC data
