@@ -488,6 +488,19 @@ export default async function handler(req, res) {
     // This is a placeholder - would need to scan the website for LocalBusiness schema
     const localBusinessSchemaPages = 0; // TODO: Implement schema scanning
     
+    // Final logging before response
+    const finalLocations = locationsToProcess.length > 0 ? locationsToProcess : locations;
+    console.log('[Local Signals] ===== FINAL SUMMARY =====');
+    console.log('[Local Signals] Original locations count:', locations.length);
+    console.log('[Local Signals] Processed locations count:', locationsToProcess.length);
+    console.log('[Local Signals] Final locations to return:', finalLocations.length);
+    console.log('[Local Signals] Service areas count:', serviceAreas.length);
+    console.log('[Local Signals] NAP data count:', napData.length);
+    console.log('[Local Signals] Knowledge panel detected (based on locations.length > 0):', locations.length > 0);
+    if (finalLocations.length > 0) {
+      console.log('[Local Signals] First location name:', finalLocations[0].name || finalLocations[0].title || 'unnamed');
+    }
+    
     return res.status(200).json({
       status: 'ok',
       source: 'local-signals',
@@ -500,7 +513,8 @@ export default async function handler(req, res) {
         // GBP Rating and Review Count (for Review Score calculation)
         gbpRating: gbpRating !== null ? parseFloat(gbpRating) : null,
         gbpReviewCount: gbpReviewCount !== null ? parseInt(gbpReviewCount) : null,
-        locations: (locationsToProcess.length > 0 ? locationsToProcess : locations).map(loc => {
+        // Return locations - use processed locations if available, otherwise use original
+        locations: finalLocations.map(loc => {
           // Extract phone number with all possible formats
           let phone = null;
           if (loc.phoneNumbers) {
