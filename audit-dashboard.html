@@ -28643,10 +28643,13 @@ Final Score: ${score}/100`;
             debugLog(`📊 Found ${rankingData.length} keywords from RankingAiModule state`, 'info');
           }
           
-          // Fallback: try to get from localStorage
+          // Fallback: try to get from localStorage (check both possible keys)
           if (!rankingData || rankingData.length === 0) {
             try {
-              const storedData = localStorage.getItem('ranking_ai_data');
+              let storedData = localStorage.getItem('rankingAiData'); // Primary key
+              if (!storedData) {
+                storedData = localStorage.getItem('ranking_ai_data'); // Alternative key
+              }
               if (storedData) {
                 const parsed = JSON.parse(storedData);
                 if (parsed && parsed.combinedRows && Array.isArray(parsed.combinedRows)) {
@@ -28664,6 +28667,26 @@ Final Score: ${score}/100`;
             if (savedAudit.keywordRankings && Array.isArray(savedAudit.keywordRankings)) {
               rankingData = savedAudit.keywordRankings;
               debugLog(`📊 Found ${rankingData.length} keywords from saved audit`, 'info');
+            }
+          }
+          
+          // Final fallback: fetch keywords directly from Supabase
+          if (!rankingData || rankingData.length === 0) {
+            debugLog('⚠ No ranking keywords in UI state, fetching from Supabase...', 'info');
+            try {
+              const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+              if (propertyUrl) {
+                const supabaseResponse = await fetch(apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}`));
+                if (supabaseResponse.ok) {
+                  const supabaseData = await supabaseResponse.json();
+                  if (supabaseData.status === 'ok' && supabaseData.data?.rankingAiData?.combinedRows) {
+                    rankingData = supabaseData.data.rankingAiData.combinedRows;
+                    debugLog(`✓ Fetched ${rankingData.length} keywords directly from Supabase`, 'success');
+                  }
+                }
+              }
+            } catch (supabaseErr) {
+              debugLog(`⚠ Failed to fetch keywords from Supabase: ${supabaseErr.message}`, 'warn');
             }
           }
           
