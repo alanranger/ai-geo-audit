@@ -875,7 +875,7 @@ export default async function handler(req, res) {
           };
         })()
       } : null,
-      localSignals: (record.local_entity_score !== null || record.service_area_score !== null || record.locations) ? {
+      localSignals: (record.local_entity_score !== null || record.service_area_score !== null || record.locations || record.gbp_rating !== null || record.gbp_review_count !== null) ? {
         status: 'ok',
         data: {
           localEntityScore: record.local_entity_score,
