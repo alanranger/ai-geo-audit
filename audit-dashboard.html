@@ -5628,6 +5628,7 @@
       let auditData = null;
       let localStorageData = null;
       let hasMoneyPagesData = false;
+      let hasQueryTotals = false;
       
       // First, try localStorage
       try {
@@ -5638,8 +5639,16 @@
           
           // Check if localStorage data has critical Money Pages data
           hasMoneyPagesData = !!(localStorageData?.scores?.moneyPagesMetrics || localStorageData?.moneyPagesMetrics);
+          // Also check if queryTotals are present (needed for CTR/Impressions columns)
+          hasQueryTotals = !!(localStorageData?.searchData?.queryTotals && Array.isArray(localStorageData.searchData.queryTotals) && localStorageData.searchData.queryTotals.length > 0);
+          
           if (hasMoneyPagesData) {
             debugLog(`✓ localStorage has moneyPagesMetrics: ${localStorageData?.scores?.moneyPagesMetrics?.rows?.length || localStorageData?.moneyPagesMetrics?.rows?.length || 0} rows`, 'success');
+            if (!hasQueryTotals) {
+              debugLog(`⚠ localStorage missing queryTotals (${localStorageData?.searchData?.queryTotals?.length || 0} items), will try Supabase...`, 'warn');
+            } else {
+              debugLog(`✓ localStorage has queryTotals: ${localStorageData.searchData.queryTotals.length} keywords`, 'success');
+            }
             // Don't return yet: we still want to confirm "Last Audit" against Supabase
             auditData = localStorageData;
           } else {
@@ -5710,14 +5719,39 @@
           // Non-fatal
         }
 
-        // Only fetch full Supabase payload when localStorage is missing critical data
-        if (!hasMoneyPagesData) {
-          debugLog('⚠ Fetching from Supabase (localStorage empty or incomplete)...', 'info');
+        // Fetch full Supabase payload when localStorage is missing critical data (moneyPagesMetrics or queryTotals)
+        if (!hasMoneyPagesData || !hasQueryTotals) {
+          const missingData = [];
+          if (!hasMoneyPagesData) missingData.push('moneyPagesMetrics');
+          if (!hasQueryTotals) missingData.push('queryTotals');
+          debugLog(`⚠ Fetching from Supabase (localStorage missing: ${missingData.join(', ')})...`, 'info');
           const supabaseData = await fetchLatestAuditFromSupabase(propertyUrl);
           if (supabaseData) {
             debugLog('✓ Audit results loaded from Supabase', 'success');
-            debugLog(`✓ Supabase data structure: scores.moneyPagesMetrics=${!!supabaseData?.scores?.moneyPagesMetrics}, moneyPagesMetrics=${!!supabaseData?.moneyPagesMetrics}`, 'info');
-            // Store in localStorage for future use
+            debugLog(`✓ Supabase data structure: scores.moneyPagesMetrics=${!!supabaseData?.scores?.moneyPagesMetrics}, moneyPagesMetrics=${!!supabaseData?.moneyPagesMetrics}, queryTotals=${supabaseData?.searchData?.queryTotals?.length || 0} keywords`, 'info');
+            
+            // Merge Supabase data with localStorage data if localStorage has some data
+            if (localStorageData && hasMoneyPagesData) {
+              // Merge queryTotals from Supabase into existing localStorage data
+              if (supabaseData.searchData && supabaseData.searchData.queryTotals) {
+                localStorageData.searchData = localStorageData.searchData || {};
+                localStorageData.searchData.queryTotals = supabaseData.searchData.queryTotals;
+                debugLog(`✓ Merged queryTotals from Supabase into localStorage data`, 'success');
+                try {
+                  safeSetLocalStorage('last_audit_results', localStorageData);
+                  debugLog('✓ Updated localStorage with merged queryTotals', 'success');
+                } catch (storageError) {
+                  debugLog(`⚠ Could not update localStorage: ${storageError.message}`, 'warn');
+                }
+                // Update timestamp display
+                if (supabaseData.timestamp) {
+                  updateAuditTimestamp(supabaseData.timestamp);
+                }
+                return localStorageData;
+              }
+            }
+            
+            // Store in localStorage for future use (full Supabase data)
             try {
               safeSetLocalStorage('last_audit_results', supabaseData);
               debugLog('✓ Stored Supabase data in localStorage for future use', 'success');
