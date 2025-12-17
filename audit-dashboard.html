@@ -5894,16 +5894,18 @@
           const localSignalsResponse = await fetch(apiUrl(`/api/aigeo/local-signals?property=${encodeURIComponent(propertyUrl)}`));
           if (localSignalsResponse.ok) {
             const freshLocalSignals = await localSignalsResponse.json();
+            debugLog(`[Local Signals API] Response received - status: ${freshLocalSignals.status}, has data: ${!!freshLocalSignals.data}, locations count: ${freshLocalSignals.data?.locations?.length || 0}, structure keys: ${Object.keys(freshLocalSignals).join(', ')}`, 'info');
+            
             // Only use fresh data if it's successful AND has actual data (not an error response)
             if (freshLocalSignals.status === 'ok' && freshLocalSignals.data && 
                 (freshLocalSignals.data.locations?.length > 0 || freshLocalSignals.data.napConsistencyScore !== null)) {
               localSignals = freshLocalSignals;
-              debugLog('✓ Local signals data fetched successfully', 'success');
+              debugLog(`✓ Local signals data fetched successfully - Locations: ${freshLocalSignals.data.locations?.length || 0}, Service Areas: ${freshLocalSignals.data.serviceAreas?.length || 0}, NAP: ${freshLocalSignals.data.napConsistencyScore}`, 'success');
             } else if (freshLocalSignals.status === 'error') {
               debugLog(`⚠ Local signals API error: ${freshLocalSignals.error?.message || 'Unknown error'}, keeping cached data`, 'warn');
               // Keep using cached data - don't overwrite with error response
             } else {
-              debugLog('⚠ Local signals API returned empty data, keeping cached data', 'warn');
+              debugLog(`⚠ Local signals API returned empty data (status: ${freshLocalSignals.status}, locations: ${freshLocalSignals.data?.locations?.length || 0}), keeping cached data`, 'warn');
               // Keep using cached data - don't overwrite with empty response
             }
           }
