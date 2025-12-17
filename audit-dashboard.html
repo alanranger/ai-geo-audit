@@ -17216,6 +17216,23 @@ Final Score: ${score}/100`;
           
           const record = historyMap.get(dateStr);
           if (record) {
+            // Skip partial audits or audits with all-zero metrics (like Dec 15)
+            // Check if this is a partial audit or has invalid zero data
+            const isPartial = record.isPartial === true;
+            const segmentMetrics = record.moneySegmentMetrics || {};
+            const allMoney = segmentMetrics.allMoney || {};
+            const hasZeroMetrics = (allMoney.clicks === 0 && allMoney.impressions === 0 && allMoney.ctr === 0);
+            
+            // If partial audit or has all zeros, skip this record and forward-fill from last known value
+            if (isPartial || hasZeroMetrics) {
+              debugLog(`Money Pages Trend: Skipping ${dateStr} (isPartial=${isPartial}, hasZeroMetrics=${hasZeroMetrics}), forward-filling`, 'info');
+              clicksData.push(lastClicks);
+              impressionsData.push(lastImpressions);
+              ctrData.push(lastCtr);
+              behaviourData.push(lastBehaviour);
+              continue;
+            }
+            
             // Get money pages summary data (shareOfImpressions, shareOfClicks, ctr)
             const summary = record.moneyPagesSummary || {};
             
@@ -17223,9 +17240,6 @@ Final Score: ${score}/100`;
             const behaviourScore = record.moneyPagesBehaviourScore || null;
             
             // For clicks and impressions, use moneySegmentMetrics if available
-            const segmentMetrics = record.moneySegmentMetrics || {};
-            const allMoney = segmentMetrics.allMoney || {};
-            
             const clicks = allMoney.clicks || null;
             const impressions = allMoney.impressions || null;
             // Calculate CTR directly from clicks/impressions for accuracy
