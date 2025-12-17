@@ -24277,6 +24277,14 @@ Final Score: ${score}/100`;
                   if (saveResponse.ok) {
                     debugLog(`✓ Saved queryTotals to Supabase (${queryTotals.length} keywords)`, 'success');
                     
+                    // CRITICAL: Also update localStorage so loadAuditResultsSync() can find the data
+                    try {
+                      safeSetLocalStorage('last_audit_results', savedAudit);
+                      debugLog(`✓ Updated localStorage with queryTotals`, 'success');
+                    } catch (localStorageErr) {
+                      debugLog(`⚠ Failed to update localStorage: ${localStorageErr.message}`, 'warn');
+                    }
+                    
                     // Update audit date pill to reflect new scan
                     updateAuditTimestamp(new Date().toISOString());
                   } else {
@@ -24299,6 +24307,20 @@ Final Score: ${score}/100`;
                   
                   if (saveResponse.ok) {
                     debugLog(`✓ Created new audit record with queryTotals (${queryTotals.length} keywords)`, 'success');
+                    
+                    // CRITICAL: Also save to localStorage so loadAuditResultsSync() can find the data
+                    try {
+                      const newAuditData = {
+                        searchData: { queryTotals: queryTotals },
+                        timestamp: new Date().toISOString(),
+                        propertyUrl: propertyUrl
+                      };
+                      safeSetLocalStorage('last_audit_results', newAuditData);
+                      debugLog(`✓ Saved new audit record to localStorage with queryTotals`, 'success');
+                    } catch (localStorageErr) {
+                      debugLog(`⚠ Failed to save to localStorage: ${localStorageErr.message}`, 'warn');
+                    }
+                    
                     updateAuditTimestamp(new Date().toISOString());
                   } else {
                     const errorText = await saveResponse.text();
@@ -26142,12 +26164,16 @@ Final Score: ${score}/100`;
       try {
         const savedAudit = loadAuditResultsSync();
         if (!savedAudit || !savedAudit.searchData || !Array.isArray(savedAudit.searchData.queryTotals)) {
+          debugLog(`getQueryTotalForKeyword: No queryTotals found for "${keyword}" - savedAudit=${!!savedAudit}, searchData=${!!savedAudit?.searchData}, queryTotals array=${Array.isArray(savedAudit?.searchData?.queryTotals)}, length=${savedAudit?.searchData?.queryTotals?.length || 0}`, 'warn');
           return null;
         }
         // Find matching query total (case-insensitive match)
         const queryTotal = savedAudit.searchData.queryTotals.find(
           qt => qt.query && qt.query.toLowerCase().trim() === keyword.toLowerCase().trim()
         );
+        if (!queryTotal) {
+          debugLog(`getQueryTotalForKeyword: No match found for "${keyword}" in ${savedAudit.searchData.queryTotals.length} queryTotals`, 'warn');
+        }
         return queryTotal || null;
       } catch (error) {
         debugLog(`Error in getQueryTotalForKeyword: ${error.message}`, 'warn');
