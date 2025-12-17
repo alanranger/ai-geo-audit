@@ -392,6 +392,8 @@ export default async function handler(req, res) {
       knowledge_panel_detected: localSignals?.data?.knowledgePanelDetected === true ? true : (localSignals?.data?.knowledgePanelDetected === false ? false : null),
       service_areas: Array.isArray(localSignals?.data?.serviceAreas) ? localSignals.data.serviceAreas : null, // Array of service area objects
       locations: Array.isArray(localSignals?.data?.locations) ? localSignals.data.locations : null, // Array of location objects
+      gbp_rating: localSignals?.data?.gbpRating !== null && localSignals?.data?.gbpRating !== undefined ? parseFloat(localSignals.data.gbpRating) : null,
+      gbp_review_count: localSignals?.data?.gbpReviewCount !== null && localSignals?.data?.gbpReviewCount !== undefined ? parseInt(localSignals.data.gbpReviewCount) : null,
       
       // Partial write flags (set below after validation)
       is_partial: false,

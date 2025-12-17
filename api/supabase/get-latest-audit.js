@@ -910,7 +910,9 @@ export default async function handler(req, res) {
             }
             return Array.isArray(loc) ? loc : [];
           })(),
-          localBusinessSchemaPages: record.local_business_schema_pages || 0
+          localBusinessSchemaPages: record.local_business_schema_pages || 0,
+          gbpRating: record.gbp_rating !== null && record.gbp_rating !== undefined ? parseFloat(record.gbp_rating) : null,
+          gbpReviewCount: record.gbp_review_count !== null && record.gbp_review_count !== undefined ? parseInt(record.gbp_review_count) : null
         }
       } : null,
       dateRange: 30, // Default - this isn't stored in Supabase
