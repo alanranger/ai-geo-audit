@@ -875,7 +875,7 @@ export default async function handler(req, res) {
           };
         })()
       } : null,
-      localSignals: (record.local_entity_score !== null || record.service_area_score !== null || record.locations) ? {
+      localSignals: (record.local_entity_score !== null || record.service_area_score !== null) ? {
         status: 'ok',
         data: {
           localEntityScore: record.local_entity_score,
@@ -883,7 +883,8 @@ export default async function handler(req, res) {
           napConsistencyScore: record.nap_consistency_score,
           knowledgePanelDetected: record.knowledge_panel_detected,
           serviceAreas: record.service_areas || [],
-          locations: record.locations || [],
+          // Note: locations column doesn't exist in database yet - will be fetched fresh from API
+          locations: [], // Will be populated from fresh API call during audit
           localBusinessSchemaPages: record.local_business_schema_pages || 0
         }
       } : null,
