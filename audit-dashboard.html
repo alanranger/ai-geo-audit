@@ -4207,8 +4207,9 @@
             const segDisplay = segLabel(r.segment);
             const ptNorm = normPageType(r.pageType);
             const ptDisplay = pageTypeLab(r.pageType);
-            // Get impressions30d from GSC data
-            const gscMetrics = getGscMetrics({ query: r.keyword, pageUrl: r.ranking_url || r.best_url });
+            // Get impressions30d from GSC data - use canonical targetUrl
+            const pageUrlForGsc = r.targetUrl || r.ranking_url || r.best_url || '';
+            const gscMetrics = getGscMetrics({ query: r.keyword, pageUrl: pageUrlForGsc });
             const impressions30d = gscMetrics && gscMetrics.impressions != null ? gscMetrics.impressions : null;
             return {
               ...r,
@@ -6899,6 +6900,27 @@
       SUPPORT: 'support',
       SYSTEM: 'system'
     };
+    
+    /**
+     * Canonicalize URL - removes query params, fragments, normalizes trailing slashes
+     * Returns full URL with origin and path only (no query/hash)
+     * @param {string} raw - Raw URL (may contain query params, fragments)
+     * @returns {string} Canonical URL
+     */
+    function canonicalizeUrl(raw) {
+      if (!raw) return "";
+      
+      try {
+        const u = raw.startsWith("http") ? new URL(raw) : new URL(raw, "https://www.alanranger.com");
+        let path = u.pathname || "/";
+        if (path.length > 1) path = path.replace(/\/+$/, "");
+        return `${u.origin}${path}`;
+      } catch {
+        const noHash = raw.split("#")[0];
+        const noQuery = noHash.split("?")[0];
+        return (noQuery.replace(/\/+$/, "") || raw).trim();
+      }
+    }
     
     function normalisePath(rawUrlOrPath) {
       try {
@@ -24514,13 +24536,19 @@ Final Score: ${score}/100`;
             debugLog(`[DEBUG] Keyword "${row.keyword}": search_volume=${searchVolume}, demand_share=${(demandShare * 100).toFixed(1)}%, segment=${segment}, pageType=${pageType}`, 'info');
           }
 
+          // Canonicalize URL - store both raw and canonical
+          const rawTargetUrl = bestUrl || "";
+          const canonicalTargetUrl = canonicalizeUrl(rawTargetUrl);
+          
           return {
             keyword: row.keyword,
             segment: segment, // Keep capitalized: Brand/Money/Education/Other
             pageType,
             best_rank_group: row.best_rank_group,
             best_rank_absolute: row.best_rank_absolute,
-            best_url: bestUrl,
+            best_url: bestUrl, // Keep raw for backward compatibility
+            rawTargetUrl: rawTargetUrl, // Explicit raw URL
+            targetUrl: canonicalTargetUrl, // Canonical URL (single source of truth)
             best_title: row.best_title || "",
             // Use SERP response's has_ai_overview (from DataForSEO) as primary source,
             // fallback to AI API response if SERP doesn't have it
@@ -25184,7 +25212,10 @@ Final Score: ${score}/100`;
         local_pack_present_any: row.local_pack_present_any === true || (row.serp_features && row.serp_features.local_pack === true),
         paa_present_any: row.paa_present_any === true || (row.serp_features && row.serp_features.people_also_ask === true),
         featured_snippet_present_any: row.featured_snippet_present_any === true || (row.serp_features && row.serp_features.featured_snippet === true),
-        ranking_url: row.best_url || '',
+        // Canonicalize URL - store both raw and canonical
+        rawTargetUrl: row.rawTargetUrl || row.best_url || '',
+        targetUrl: row.targetUrl || (row.best_url ? canonicalizeUrl(row.best_url) : ''),
+        ranking_url: row.targetUrl || (row.best_url ? canonicalizeUrl(row.best_url) : ''), // Use canonical for ranking_url
         page_type: row.pageType || 'Landing',
         
         // Derived fields
@@ -26047,7 +26078,9 @@ Final Score: ${score}/100`;
 
         // CTR filter
         if (excludeFilter !== 'ctr' && rankingFilterState.ctr !== 'all') {
-          const ctrMetrics = getCtrMetricsForKeyword({ keyword: row.keyword, url: row.ranking_url });
+          // Use canonical targetUrl for CTR metrics
+          const urlForCtr = row.targetUrl || row.ranking_url || '';
+          const ctrMetrics = getCtrMetricsForKeyword({ keyword: row.keyword, url: urlForCtr });
           const ctr = ctrMetrics && ctrMetrics.ctr != null ? (ctrMetrics.ctr * 100) : null;
           if (rankingFilterState.ctr === 'high' && (ctr == null || ctr < 5)) return false;
           if (rankingFilterState.ctr === 'medium' && (ctr == null || ctr < 2 || ctr >= 5)) return false;
@@ -27011,7 +27044,7 @@ Final Score: ${score}/100`;
         const tdUrl = document.createElement("td");
         if (row.best_url) {
           const a = document.createElement("a");
-          a.href = row.best_url;
+          a.href = row.targetUrl || row.ranking_url || row.best_url || '';
           a.target = "_blank";
           a.rel = "noopener noreferrer";
           a.textContent = row.best_title || row.best_url;
@@ -27241,8 +27274,10 @@ Final Score: ${score}/100`;
       html += `<div style="background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border-left: 6px solid #f59e0b; padding: 1.25rem 1.5rem; margin-bottom: 1rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);">`;
       html += `<h4 style="font-size: 1.75rem; font-weight: 800; color: #92400e; margin: 0; letter-spacing: 0.02em; line-height: 1.2;">${scorecardData.keyword}</h4>`;
       html += `</div>`;
-      if (scorecardData.ranking_url) {
-        html += `<p style="margin: 0.25rem 0; font-size: 0.875rem;"><a href="${scorecardData.ranking_url}" target="_blank" rel="noopener noreferrer" style="color: #0284c7; text-decoration: none;">${scorecardData.ranking_url}</a></p>`;
+      // Use canonical targetUrl for display
+      const displayUrl = scorecardData.targetUrl || scorecardData.ranking_url || '';
+      if (displayUrl) {
+        html += `<p style="margin: 0.25rem 0; font-size: 0.875rem;"><a href="${displayUrl}" target="_blank" rel="noopener noreferrer" style="color: #0284c7; text-decoration: none;">${displayUrl}</a></p>`;
       }
       html += `<div style="display: flex; gap: 1rem; margin-top: 0.5rem; flex-wrap: wrap;">`;
       html += `<span class="ranking-badge ${scorecardData.segment === 'money' ? 'ranking-badge--segment-money' : scorecardData.segment === 'education' ? 'ranking-badge--segment-education' : scorecardData.segment === 'brand' ? 'ranking-badge--segment-brand' : 'ranking-badge--segment-general'}" style="font-size: 0.875rem;">${scorecardData.segment || 'Other'}</span>`;
@@ -27324,11 +27359,11 @@ Final Score: ${score}/100`;
       // 1. Target page totals (left half) - page-only GSC data
       html += `<div class="scorecard-section" style="flex: 1 1 50%; min-width: 0; display: flex; flex-direction: column; height: 100%;">`;
       html += `<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">1. Target page totals (GSC, ${GSC_WINDOW_DAYS}d) <span title="All queries to this page, last ${GSC_WINDOW_DAYS} days (matches GSC Pages tab with no query filter)." style="opacity: 0.6; cursor: help; font-size: 0.75rem;">ℹ</span></h5>`;
-      // Display target page URL (clickable) - clean URL by removing query params and fragments
-      const canonicalUrl = scorecardData.ranking_url || scorecardData.best_url || '';
+      // Display target page URL (clickable) - use canonical targetUrl
+      const canonicalUrl = scorecardData.targetUrl || scorecardData.ranking_url || '';
       if (canonicalUrl) {
-        // Clean URL: remove query parameters (after ?) and fragments (after #)
-        const cleanUrl = canonicalUrl.split('?')[0].split('#')[0];
+        // URL is already canonicalized, just use it directly
+        const cleanUrl = canonicalUrl;
         html += `<div style="margin-bottom: 0.75rem; padding-left: 0.75rem;">`;
         html += `<div style="font-size: 0.8125rem; color: #64748b; margin-bottom: 0.25rem;">Target page (all queries):</div>`;
         html += `<a href="${canonicalUrl}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8125rem; color: #2563eb; text-decoration: underline; word-break: break-all; display: inline-block; max-width: 100%;" title="Open target page in new tab">${cleanUrl}</a>`;
@@ -27823,7 +27858,9 @@ Final Score: ${score}/100`;
             // Calculate date range using centralized helper (last 28 days, ending yesterday - matches GSC UI)
             const { startDate, endDate } = getGscDateRange(GSC_WINDOW_DAYS, 1);
             
-            const response = await fetch(apiUrl(`/api/aigeo/gsc-page-totals?property=${encodeURIComponent(propertyUrl)}&pageUrl=${encodeURIComponent(scorecardData.ranking_url)}&startDate=${startDate}&endDate=${endDate}`));
+            // Use canonical targetUrl for GSC page filter
+            const pageUrlForGsc = scorecardData.targetUrl || scorecardData.ranking_url || '';
+            const response = await fetch(apiUrl(`/api/aigeo/gsc-page-totals?property=${encodeURIComponent(propertyUrl)}&pageUrl=${encodeURIComponent(pageUrlForGsc)}&startDate=${startDate}&endDate=${endDate}`));
             
             if (response.ok) {
               const data = await response.json();
@@ -27872,7 +27909,8 @@ Final Score: ${score}/100`;
               const data = await response.json();
               if (data.status === 'ok' && data.data && data.data.pages) {
                 const pages = data.data.pages;
-                const bestUrl = scorecardData.ranking_url;
+                // Use canonical targetUrl for matching
+                const bestUrl = scorecardData.targetUrl || scorecardData.ranking_url || '';
                 const normalizedBestUrl = bestUrl ? normalizeGscPageUrl(bestUrl) : null;
                 
                 let pagesHtml = '';
