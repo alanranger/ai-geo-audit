@@ -3320,13 +3320,13 @@
                       <div>Search volume <span class="sort-indicator"></span></div>
                       <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Average monthly Google search volume for this keyword in the UK. Source: DataForSEO Labs – Keyword Overview.">ℹ</div>
                     </th>
-                    <th data-sort="ctr" class="sortable" title="GSC query-only CTR for this keyword (all pages).">
-                      <div>CTR (28d) <span class="sort-indicator"></span></div>
-                      <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="GSC query-only CTR for this keyword (all pages).">ℹ</div>
+                    <th data-sort="ctr" class="sortable" title="Google Search Console. Query-only (keyword totals across all pages). Rolling last 30 days.">
+                      <div>CTR (30d) <span class="sort-indicator"></span></div>
+                      <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Google Search Console. Query-only (keyword totals across all pages). Rolling last 30 days.">ℹ</div>
                     </th>
-                    <th data-sort="impressions30d" class="sortable" title="Google Search Console. Query-only (keyword totals across all pages). Rolling last 28 days.">
-                      <div>Impressions (28d) <span class="sort-indicator"></span></div>
-                      <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Google Search Console. Query-only (keyword totals across all pages). Rolling last 28 days.">ℹ</div>
+                    <th data-sort="impressions30d" class="sortable" title="Google Search Console. Query-only (keyword totals across all pages). Rolling last 30 days.">
+                      <div>Impressions (30d) <span class="sort-indicator"></span></div>
+                      <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Google Search Console. Query-only (keyword totals across all pages). Rolling last 30 days.">ℹ</div>
                     </th>
                     <th data-sort="opportunityScore" class="sortable" title="Keyword opportunity score&#10;Combines three signals for this tracked keyword:&#10;• Search volume share (how much search volume this query represents in your tracked set - global, not filter-relative).&#10;• Classic ranking strength (page 1 vs page 2+ and current position).&#10;• AI usage (whether AI Overviews exist and if you're cited).&#10;Higher scores highlight the best &quot;bang-for-buck&quot; queries to improve first.">
                       <div>Opportunity score <span class="sort-indicator"></span></div>
@@ -4047,13 +4047,16 @@
               const lastRunEl = document.getElementById("ranking-ai-last-run");
               if (lastRunEl && storedData.timestamp) {
                 const date = new Date(storedData.timestamp);
-                // Format as GMT/UTC: "DD MMM YYYY, HH:MM GMT"
-                const gmtDate = date.toISOString().split('T')[0]; // YYYY-MM-DD
-                const gmtTime = date.toISOString().split('T')[1].split('.')[0]; // HH:MM:SS
-                const [year, month, day] = gmtDate.split('-');
+                // Format in GMT/UTC: "DD MMM YYYY, HH:MM:SS GMT"
+                const day = String(date.getUTCDate()).padStart(2, '0');
                 const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-                const formattedDate = `${day} ${monthNames[parseInt(month) - 1]} ${year}, ${gmtTime} GMT`;
-                lastRunEl.textContent = `Last run: ${formattedDate}`;
+                const month = monthNames[date.getUTCMonth()];
+                const year = date.getUTCFullYear();
+                const hours = String(date.getUTCHours()).padStart(2, '0');
+                const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+                const seconds = String(date.getUTCSeconds()).padStart(2, '0');
+                const formatted = `${day} ${month} ${year}, ${hours}:${minutes}:${seconds} GMT`;
+                lastRunEl.textContent = `Last run: ${formatted}`;
               }
             }
           } else {
@@ -5358,7 +5361,7 @@
     // Save audit results to localStorage
     function saveAuditResults(scores, searchData, snippetReadiness, schemaAudit, localSignals = null, siteReviews = null, backlinkMetrics = null, preserveTimestamp = false) {
       try {
-        const dateRange = parseInt(document.getElementById('dateRange')?.value) || 28;
+        const dateRange = parseInt(document.getElementById('dateRange')?.value) || 30;
         // Get property URL from input field or from searchData
         const propertyUrl = document.getElementById('propertyUrl')?.value || 
                            searchData?.propertyUrl || 
@@ -5767,13 +5770,15 @@
       
       if (timestamp) {
         const date = new Date(timestamp);
-        const formatted = date.toLocaleString('en-GB', {
-          day: '2-digit',
-          month: 'short',
-          year: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit'
-        });
+        // Format in GMT/UTC: "DD MMM YYYY, HH:MM:SS GMT"
+        const day = String(date.getUTCDate()).padStart(2, '0');
+        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const month = monthNames[date.getUTCMonth()];
+        const year = date.getUTCFullYear();
+        const hours = String(date.getUTCHours()).padStart(2, '0');
+        const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+        const seconds = String(date.getUTCSeconds()).padStart(2, '0');
+        const formatted = `${day} ${month} ${year}, ${hours}:${minutes}:${seconds} GMT`;
         
         if (timestampElement) {
           timestampElement.textContent = formatted;
@@ -9177,141 +9182,6 @@
 
     // Fetch real data from Google Search Console API using unified endpoint
     // Note: apiKey parameter kept for compatibility but not used (endpoint uses OAuth2)
-    // Fetch queryTotals for all keywords in ranking data (called after ranking scan completes)
-    async function fetchQueryTotalsForRankingKeywords(combinedRows, propertyUrl) {
-      if (!combinedRows || combinedRows.length === 0) {
-        debugLog('[fetchQueryTotalsForRankingKeywords] No keywords provided', 'warn');
-        return;
-      }
-      
-      try {
-        // Extract unique keywords from ranking data
-        const keywords = combinedRows.map(row => row.keyword).filter(k => k && k.trim());
-        if (keywords.length === 0) {
-          debugLog('[fetchQueryTotalsForRankingKeywords] No valid keywords found', 'warn');
-          return;
-        }
-        
-        debugLog(`[fetchQueryTotalsForRankingKeywords] Fetching queryTotals for ${keywords.length} keywords from ranking data`, 'info');
-        
-        // Calculate date range (last 28 days)
-        const endDate = new Date();
-        const startDate = new Date();
-        startDate.setDate(startDate.getDate() - 28);
-        const formatDate = (date) => {
-          const year = date.getFullYear();
-          const month = String(date.getMonth() + 1).padStart(2, '0');
-          const day = String(date.getDate()).padStart(2, '0');
-          return `${year}-${month}-${day}`;
-        };
-        const startDateStr = formatDate(startDate);
-        const endDateStr = formatDate(endDate);
-        
-        // Call GSC API to fetch queryTotals for all keywords
-        const keywordsParam = `&keywords=${encodeURIComponent(JSON.stringify(keywords))}`;
-        const response = await fetch(apiUrl(`/api/aigeo/gsc-entity-metrics?property=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDateStr}${keywordsParam}`));
-        
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.message || errorData.error || 'Failed to fetch queryTotals');
-        }
-        
-        const gsc = await response.json();
-        if (gsc.status !== 'ok' || !gsc.data || !Array.isArray(gsc.data.queryTotals)) {
-          debugLog('[fetchQueryTotalsForRankingKeywords] No queryTotals returned from API', 'warn');
-          return;
-        }
-        
-        // Merge new queryTotals with existing saved audit data
-        const savedAudit = loadAuditResultsSync();
-        if (savedAudit && savedAudit.searchData) {
-          // Merge: combine existing queryTotals with new ones, avoiding duplicates
-          const existingQueryTotals = Array.isArray(savedAudit.searchData.queryTotals) ? savedAudit.searchData.queryTotals : [];
-          const existingQueries = new Set(existingQueryTotals.map(qt => qt.query?.toLowerCase().trim()));
-          
-          // Add new queryTotals that don't already exist
-          const newQueryTotals = gsc.data.queryTotals.filter(qt => {
-            const queryKey = qt.query?.toLowerCase().trim();
-            return queryKey && !existingQueries.has(queryKey);
-          });
-          
-          savedAudit.searchData.queryTotals = [...existingQueryTotals, ...newQueryTotals];
-          
-          // Save updated audit data back to localStorage
-          safeSetLocalStorage('last_audit_results', savedAudit);
-          debugLog(`[fetchQueryTotalsForRankingKeywords] Merged ${newQueryTotals.length} new queryTotals (total: ${savedAudit.searchData.queryTotals.length})`, 'success');
-          
-          // CRITICAL: Also save to Supabase so queryTotals persists across page loads
-          // Note: This will create/update a partial audit record (only query_totals field)
-          // A full audit run later will populate other fields without losing query_totals
-          try {
-            const auditDate = new Date().toISOString().split('T')[0];
-            const saveResponse = await fetch(apiUrl('/api/supabase/save-audit'), {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                propertyUrl: propertyUrl,
-                auditDate: auditDate,
-                searchData: savedAudit.searchData // Contains queryTotals + any other existing searchData fields
-              })
-            });
-            
-            if (saveResponse.ok) {
-              debugLog(`[fetchQueryTotalsForRankingKeywords] ✓ Saved queryTotals to Supabase (${savedAudit.searchData.queryTotals.length} keywords)`, 'success');
-              
-              // Update audit date pill to reflect new scan
-              updateAuditTimestamp(new Date().toISOString());
-            } else {
-              const errorText = await saveResponse.text();
-              debugLog(`[fetchQueryTotalsForRankingKeywords] ⚠ Failed to save queryTotals to Supabase: ${saveResponse.status} - ${errorText}`, 'warn');
-            }
-          } catch (saveErr) {
-            debugLog(`[fetchQueryTotalsForRankingKeywords] ⚠ Error saving queryTotals to Supabase: ${saveErr.message}`, 'warn');
-          }
-        } else {
-          // No saved audit yet, create new structure
-          const newAuditData = {
-            searchData: {
-              queryTotals: gsc.data.queryTotals || [],
-              propertyUrl: propertyUrl
-            },
-            timestamp: new Date().toISOString()
-          };
-          safeSetLocalStorage('last_audit_results', newAuditData);
-          debugLog(`[fetchQueryTotalsForRankingKeywords] Created new audit data with ${gsc.data.queryTotals.length} queryTotals`, 'success');
-          
-          // CRITICAL: Also save to Supabase (new record case - use save-audit endpoint)
-          try {
-            const auditDate = new Date().toISOString().split('T')[0];
-            const saveResponse = await fetch(apiUrl('/api/supabase/save-audit'), {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                propertyUrl: propertyUrl,
-                auditDate: auditDate,
-                searchData: newAuditData.searchData
-              })
-            });
-            
-            if (saveResponse.ok) {
-              debugLog(`[fetchQueryTotalsForRankingKeywords] ✓ Saved new queryTotals to Supabase (${gsc.data.queryTotals.length} keywords)`, 'success');
-              
-              // Update audit date pill
-              updateAuditTimestamp(newAuditData.timestamp);
-            } else {
-              const errorText = await saveResponse.text();
-              debugLog(`[fetchQueryTotalsForRankingKeywords] ⚠ Failed to save new queryTotals to Supabase: ${saveResponse.status} - ${errorText}`, 'warn');
-            }
-          } catch (saveErr) {
-            debugLog(`[fetchQueryTotalsForRankingKeywords] ⚠ Error saving new queryTotals to Supabase: ${saveErr.message}`, 'warn');
-          }
-        }
-      } catch (error) {
-        debugLog(`[fetchQueryTotalsForRankingKeywords] Error: ${error.message}`, 'error');
-        throw error;
-      }
-    }
-
     async function fetchSearchConsoleData(apiKey, propertyUrl, days) {
       debugLog(`Fetching real GSC data for ${days} days...`, 'info');
       
@@ -23729,14 +23599,17 @@ Final Score: ${score}/100`;
           const lastRunEl = document.getElementById("ranking-ai-last-run");
           if (lastRunEl && storedData.timestamp) {
             const date = new Date(storedData.timestamp);
-            // Format as GMT/UTC: "DD MMM YYYY, HH:MM GMT"
-            const gmtDate = date.toISOString().split('T')[0]; // YYYY-MM-DD
-            const gmtTime = date.toISOString().split('T')[1].split('.')[0]; // HH:MM:SS
-            const [year, month, day] = gmtDate.split('-');
+            // Format in GMT/UTC: "DD MMM YYYY, HH:MM:SS GMT"
+            const day = String(date.getUTCDate()).padStart(2, '0');
             const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-            const formattedDate = `${day} ${monthNames[parseInt(month) - 1]} ${year}, ${gmtTime} GMT`;
-            lastRunEl.textContent = `Last run: ${formattedDate}`;
-            debugLog(`✓ Updated last run timestamp: ${formattedDate}`, 'info');
+            const month = monthNames[date.getUTCMonth()];
+            const year = date.getUTCFullYear();
+            const hours = String(date.getUTCHours()).padStart(2, '0');
+            const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+            const seconds = String(date.getUTCSeconds()).padStart(2, '0');
+            const formatted = `${day} ${month} ${year}, ${hours}:${minutes}:${seconds} GMT`;
+            lastRunEl.textContent = `Last run: ${formatted}`;
+            debugLog(`✓ Updated last run timestamp: ${formatted}`, 'info');
           }
           debugLog(`✓ Ranking & AI data loaded from storage (${storedData.combinedRows.length} keywords)`, 'success');
           return;
@@ -24362,21 +24235,88 @@ Final Score: ${score}/100`;
         // Save to Supabase and localStorage
         await saveRankingAiData(combined, summary);
         
-        // Fetch queryTotals for all keywords in ranking data (not just TRACKED_KEYWORDS)
-        // This ensures table shows CTR/Impressions for all keywords, not just tracked ones
+        // CRITICAL: Fetch and save queryTotals for all ranking keywords
         RankingAiProgressModal.updateProgress(96, 4);
         RankingAiProgressModal.updateCounts(`Fetching GSC query totals for ${combined.length} keywords...`);
+        debugLog(`📊 Fetching queryTotals for ${combined.length} ranking keywords...`, 'info');
+        
         try {
-          // Get propertyUrl from localStorage (same as saveRankingAiData uses)
-          const propertyUrlForQueryTotals = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
-          if (propertyUrlForQueryTotals) {
-            await fetchQueryTotalsForRankingKeywords(combined, propertyUrlForQueryTotals);
-            debugLog(`✓ Fetched queryTotals for ${combined.length} ranking keywords`, 'success');
+          const allKeywords = combined.map(r => r.keyword).filter(k => k && k.trim());
+          if (allKeywords.length > 0) {
+            const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+            const dateRange = parseInt(localStorage.getItem('gsc_date_range') || '28');
+            
+            // Fetch queryTotals from GSC API
+            const keywordsParam = encodeURIComponent(JSON.stringify(allKeywords));
+            const gscResponse = await fetch(apiUrl(`/api/aigeo/gsc-entity-metrics?keywords=${keywordsParam}&days=${dateRange}`));
+            
+            if (gscResponse.ok) {
+              const gscData = await gscResponse.json();
+              if (gscData.status === 'ok' && gscData.data && Array.isArray(gscData.data.queryTotals)) {
+                const queryTotals = gscData.data.queryTotals;
+                debugLog(`✓ Fetched queryTotals for ${queryTotals.length} keywords from GSC`, 'success');
+                
+                // Load existing audit data
+                const savedAudit = loadAuditResultsSync();
+                if (savedAudit && savedAudit.searchData) {
+                  // Merge queryTotals into searchData
+                  savedAudit.searchData.queryTotals = queryTotals;
+                  
+                  // Save to Supabase
+                  const auditDate = new Date().toISOString().split('T')[0];
+                  const saveResponse = await fetch(apiUrl('/api/supabase/save-audit'), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      propertyUrl: propertyUrl,
+                      auditDate: auditDate,
+                      searchData: savedAudit.searchData // Include updated searchData with queryTotals
+                    })
+                  });
+                  
+                  if (saveResponse.ok) {
+                    debugLog(`✓ Saved queryTotals to Supabase (${queryTotals.length} keywords)`, 'success');
+                    
+                    // Update audit date pill to reflect new scan
+                    updateAuditTimestamp(new Date().toISOString());
+                  } else {
+                    const errorText = await saveResponse.text();
+                    debugLog(`⚠ Failed to save queryTotals to Supabase: ${saveResponse.status} - ${errorText}`, 'warn');
+                  }
+                } else {
+                  debugLog(`⚠ No existing audit data found, creating new audit record with queryTotals...`, 'warn');
+                  // Create new audit record with queryTotals
+                  const auditDate = new Date().toISOString().split('T')[0];
+                  const saveResponse = await fetch(apiUrl('/api/supabase/save-audit'), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      propertyUrl: propertyUrl,
+                      auditDate: auditDate,
+                      searchData: { queryTotals: queryTotals }
+                    })
+                  });
+                  
+                  if (saveResponse.ok) {
+                    debugLog(`✓ Created new audit record with queryTotals (${queryTotals.length} keywords)`, 'success');
+                    updateAuditTimestamp(new Date().toISOString());
+                  } else {
+                    const errorText = await saveResponse.text();
+                    debugLog(`⚠ Failed to create audit record with queryTotals: ${saveResponse.status} - ${errorText}`, 'warn');
+                  }
+                }
+              } else {
+                debugLog(`⚠ GSC API did not return queryTotals data`, 'warn');
+              }
+            } else {
+              const errorText = await gscResponse.text();
+              debugLog(`⚠ Failed to fetch queryTotals from GSC: ${gscResponse.status} - ${errorText}`, 'warn');
+            }
           } else {
-            debugLog(`⚠ Cannot fetch queryTotals: property URL not set`, 'warn');
+            debugLog(`⚠ No keywords to fetch queryTotals for`, 'warn');
           }
         } catch (queryTotalsErr) {
-          debugLog(`⚠ Error fetching queryTotals for ranking keywords: ${queryTotalsErr.message}`, 'warn');
+          debugLog(`✗ Error fetching/saving queryTotals: ${queryTotalsErr.message}`, 'error');
           // Don't fail the entire scan if queryTotals fetch fails
         }
         
@@ -24405,57 +24345,19 @@ Final Score: ${score}/100`;
         
         renderRankingAiTab();
 
-        // Update "Last run" timestamp from saved data (not a new Date() to ensure consistency)
         const lastRunEl = document.getElementById("ranking-ai-last-run");
         if (lastRunEl) {
-          try {
-            // Read timestamp from the saved rankingAiData (just saved above)
-            const savedRankingData = localStorage.getItem('rankingAiData');
-            if (savedRankingData) {
-              const parsed = JSON.parse(savedRankingData);
-              if (parsed.timestamp) {
-                const date = new Date(parsed.timestamp);
-                // Format as GMT/UTC: "DD MMM YYYY, HH:MM GMT"
-                const gmtDate = date.toISOString().split('T')[0]; // YYYY-MM-DD
-                const gmtTime = date.toISOString().split('T')[1].split('.')[0]; // HH:MM:SS
-                const [year, month, day] = gmtDate.split('-');
-                const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-                const formattedDate = `${day} ${monthNames[parseInt(month) - 1]} ${year}, ${gmtTime} GMT`;
-                lastRunEl.textContent = `Last run: ${formattedDate}`;
-                debugLog(`✓ Updated "Last run" timestamp from saved data: ${formattedDate}`, 'success');
-              } else {
-                // Fallback to current time if timestamp missing
-                const now = new Date();
-                const gmtDate = now.toISOString().split('T')[0];
-                const gmtTime = now.toISOString().split('T')[1].split('.')[0];
-                const [year, month, day] = gmtDate.split('-');
-                const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-                const formattedDate = `${day} ${monthNames[parseInt(month) - 1]} ${year}, ${gmtTime} GMT`;
-                lastRunEl.textContent = `Last run: ${formattedDate}`;
-                debugLog(`⚠ Saved rankingAiData missing timestamp, using current time`, 'warn');
-              }
-            } else {
-              // Fallback to current time if no saved data
-              const now = new Date();
-              const gmtDate = now.toISOString().split('T')[0];
-              const gmtTime = now.toISOString().split('T')[1].split('.')[0];
-              const [year, month, day] = gmtDate.split('-');
-              const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-              const formattedDate = `${day} ${monthNames[parseInt(month) - 1]} ${year}, ${gmtTime} GMT`;
-              lastRunEl.textContent = `Last run: ${formattedDate}`;
-              debugLog(`⚠ No saved rankingAiData found, using current time`, 'warn');
-            }
-          } catch (err) {
-            // Fallback to current time on error
-            const now = new Date();
-            const gmtDate = now.toISOString().split('T')[0];
-            const gmtTime = now.toISOString().split('T')[1].split('.')[0];
-            const [year, month, day] = gmtDate.split('-');
-            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-            const formattedDate = `${day} ${monthNames[parseInt(month) - 1]} ${year}, ${gmtTime} GMT`;
-            lastRunEl.textContent = `Last run: ${formattedDate}`;
-            debugLog(`⚠ Error reading saved timestamp: ${err.message}, using current time`, 'warn');
-          }
+          const now = new Date();
+          // Format in GMT/UTC: "DD MMM YYYY, HH:MM:SS GMT"
+          const day = String(now.getUTCDate()).padStart(2, '0');
+          const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+          const month = monthNames[now.getUTCMonth()];
+          const year = now.getUTCFullYear();
+          const hours = String(now.getUTCHours()).padStart(2, '0');
+          const minutes = String(now.getUTCMinutes()).padStart(2, '0');
+          const seconds = String(now.getUTCSeconds()).padStart(2, '0');
+          const formatted = `${day} ${month} ${year}, ${hours}:${minutes}:${seconds} GMT`;
+          lastRunEl.textContent = `Last run: ${formatted}`;
         }
         debugLog(`✓ Ranking & AI data loaded: ${totalKeywords} keywords, ${withRank} with ranks, ${withAiOverview} with AI Overview`, 'success');
         
@@ -26235,43 +26137,20 @@ Final Score: ${score}/100`;
       });
     }
 
-    // Normalize keyword for matching (handles whitespace variations, case-insensitive)
-    function normalizeKeyword(s) {
-      return String(s || '')
-        .toLowerCase()
-        .replace(/\s+/g, ' ')  // Replace multiple spaces with single space
-        .trim();
-    }
-
     // Helper function to get query-only totals for a keyword (PATCH A2)
     function getQueryTotalForKeyword(keyword) {
       try {
         const savedAudit = loadAuditResultsSync();
-        if (!savedAudit || !savedAudit.searchData) {
-          debugLog(`[getQueryTotalForKeyword] No savedAudit or searchData for keyword: "${keyword}"`, 'warn');
+        if (!savedAudit || !savedAudit.searchData || !Array.isArray(savedAudit.searchData.queryTotals)) {
           return null;
         }
-        if (!Array.isArray(savedAudit.searchData.queryTotals)) {
-          debugLog(`[getQueryTotalForKeyword] queryTotals is not an array for keyword: "${keyword}". Type: ${typeof savedAudit.searchData.queryTotals}, value: ${JSON.stringify(savedAudit.searchData.queryTotals)}`, 'warn');
-          return null;
-        }
-        if (savedAudit.searchData.queryTotals.length === 0) {
-          debugLog(`[getQueryTotalForKeyword] queryTotals array is empty for keyword: "${keyword}"`, 'warn');
-          return null;
-        }
-        // Find matching query total using robust normalization
-        const target = normalizeKeyword(keyword);
+        // Find matching query total (case-insensitive match)
         const queryTotal = savedAudit.searchData.queryTotals.find(
-          qt => qt.query && normalizeKeyword(qt.query) === target
+          qt => qt.query && qt.query.toLowerCase().trim() === keyword.toLowerCase().trim()
         );
-        if (!queryTotal) {
-          // Debug: log available queries to help diagnose mismatch
-          const availableQueries = savedAudit.searchData.queryTotals.map(qt => qt.query).slice(0, 5);
-          debugLog(`[getQueryTotalForKeyword] No match for keyword: "${keyword}" (normalized: "${target}"). Available queries (first 5): ${availableQueries.join(', ')}`, 'warn');
-        }
         return queryTotal || null;
       } catch (error) {
-        debugLog(`[getQueryTotalForKeyword] Error for keyword "${keyword}": ${error.message}`, 'warn');
+        debugLog(`Error in getQueryTotalForKeyword: ${error.message}`, 'warn');
         return null;
       }
     }
@@ -26514,11 +26393,11 @@ Final Score: ${score}/100`;
           const ctrPercent = queryTotal.ctr.toFixed(2);
           tdCtr.textContent = `${ctrPercent}%`;
           tdCtr.style.color = '#1e293b';
-              tdCtr.title = "GSC query-only CTR for this keyword (all pages).";
+          tdCtr.title = "Google Search Console. Query-only (keyword totals across all pages). Rolling last 30 days.";
         } else {
           tdCtr.textContent = "—";
           tdCtr.style.color = '#94a3b8';
-              tdCtr.title = "No query totals returned for this keyword in the last 28 days.";
+          tdCtr.title = "No query totals returned for this keyword in the last 30 days.";
         }
         tr.appendChild(tdCtr);
 
@@ -26527,11 +26406,11 @@ Final Score: ${score}/100`;
         if (queryTotal && queryTotal.impressions != null && queryTotal.impressions > 0) {
           tdImpressions.textContent = queryTotal.impressions.toLocaleString();
           tdImpressions.style.color = '#1e293b';
-          tdImpressions.title = "Google Search Console. Query-only (keyword totals across all pages). Rolling last 28 days.";
+          tdImpressions.title = "Google Search Console. Query-only (keyword totals across all pages). Rolling last 30 days.";
         } else {
           tdImpressions.textContent = "—";
           tdImpressions.style.color = '#94a3b8';
-              tdImpressions.title = "GSC query-only. Impressions for this keyword across all pages (last 28 days).";
+          tdImpressions.title = "No query totals returned for this keyword in the last 30 days.";
         }
         tr.appendChild(tdImpressions);
 
@@ -26894,7 +26773,7 @@ Final Score: ${score}/100`;
       
       // 1. Target page totals (left half) - page-only GSC data
       html += `<div class="scorecard-section" style="flex: 1 1 50%; min-width: 0; display: flex; flex-direction: column; height: 100%;">`;
-      html += `<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">1. Target page totals (GSC, 28d) <span title="Page-only totals for this page across all queries (not limited to this keyword)." style="opacity: 0.6; cursor: help; font-size: 0.75rem;">ℹ</span></h5>`;
+      html += `<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">1. Target page totals (GSC, 30d) <span title="Page-only totals for the best-ranking URL (DataForSEO). Includes all queries that brought impressions/clicks to this page." style="opacity: 0.6; cursor: help; font-size: 0.75rem;">ℹ</span></h5>`;
       html += `<div style="padding-left: 0.75rem;" id="scorecard-page-totals-${scorecardData.keyword.replace(/[^a-z0-9]/gi, '_')}">`;
       html += `<div style="color: #64748b; font-size: 0.875rem;">Loading page totals...</div>`;
       html += `</div></div>`;
@@ -26933,7 +26812,7 @@ Final Score: ${score}/100`;
 
       // 3. CTR & snippet (query-only)
       html += `<div class="scorecard-section">`;
-      html += `<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">3. CTR & snippet (GSC, 28d) <span title="Query-only totals for this keyword across all pages." style="opacity: 0.6; cursor: help; font-size: 0.75rem;">ℹ</span></h5>`;
+      html += `<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">3. CTR & snippet (GSC, 30d) <span title="Query-only totals for this keyword across all pages." style="opacity: 0.6; cursor: help; font-size: 0.75rem;">ℹ</span></h5>`;
       html += `<div style="padding-left: 0.75rem;">`;
       
       // Get query-only totals from queryTotals
@@ -26966,7 +26845,7 @@ Final Score: ${score}/100`;
         
         html += `<div style="margin-bottom: 0.75rem;">`;
         html += `<div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.5rem; font-size: 0.875rem;">`;
-        html += `<span>CTR (last 28 days): <strong style="color: #1e293b;">${ctrPercent}%</strong></span>`;
+        html += `<span>CTR (last 30 days): <strong style="color: #1e293b;">${ctrPercent}%</strong></span>`;
         html += `<span>·</span>`;
         html += `<span>Impressions: <strong style="color: #1e293b;">${impressionsFormatted}</strong></span>`;
         html += `<span>·</span>`;
@@ -26991,14 +26870,14 @@ Final Score: ${score}/100`;
           html += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">CTR is in line with expectations for this position. Further gains are more likely to come from improving rank (links and authority) than snippet tweaks alone.</p>`;
         }
       } else {
-        // No query-only data found in saved queryTotals - will try fallback from Advanced section
-        html += `<div style="color: #64748b; font-size: 0.875rem; line-height: 1.5;" id="scorecard-ctr-fallback-${scorecardData.keyword.replace(/[^a-z0-9]/gi, '_')}">Loading query totals...</div>`;
+        // No query-only data found for last 30 days
+        html += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">No query-only totals returned for this keyword in the last 30 days.</p>`;
       }
       html += `</div></div>`;
       
       // Advanced: Pages with impressions for this keyword (query→pages breakdown)
       html += `<div class="scorecard-section" style="margin-top: 1rem;">`;
-      html += `<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">Advanced: Pages with impressions for this keyword (GSC, 28d) <span title="Query→pages breakdown: which pages received impressions for this keyword." style="opacity: 0.6; cursor: help; font-size: 0.75rem;">ℹ</span></h5>`;
+      html += `<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">Advanced: Pages with impressions for this keyword (GSC) <span title="Pages with impressions for this keyword (GSC query→pages breakdown)." style="opacity: 0.6; cursor: help; font-size: 0.75rem;">ℹ</span></h5>`;
       html += `<div style="padding-left: 0.75rem;" id="scorecard-query-pages-${scorecardData.keyword.replace(/[^a-z0-9]/gi, '_')}">`;
       html += `<div style="color: #64748b; font-size: 0.875rem;">Loading pages breakdown...</div>`;
       html += `</div></div>`;
@@ -27380,10 +27259,10 @@ Final Score: ${score}/100`;
             const savedAudit = loadAuditResultsSync();
             const propertyUrl = savedAudit?.propertyUrl || window.lastAuditPropertyUrl || 'https://www.alanranger.com';
             
-            // Calculate date range (last 28 days - matches GSC UI standard)
+            // Calculate date range (last 30 days)
             const endDate = new Date();
             const startDate = new Date();
-            startDate.setDate(startDate.getDate() - 28);
+            startDate.setDate(startDate.getDate() - 30);
             const formatDate = (date) => {
               const year = date.getFullYear();
               const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -27412,7 +27291,7 @@ Final Score: ${score}/100`;
                 pageHtml += `</div>`;
                 pageTotalsEl.innerHTML = pageHtml;
               } else {
-                pageTotalsEl.innerHTML = `<div style="color: #64748b; font-size: 0.875rem;">No page totals returned for this URL in the last 28 days.</div>`;
+                pageTotalsEl.innerHTML = `<div style="color: #64748b; font-size: 0.875rem;">No page totals returned for this URL in the last 30 days.</div>`;
               }
             } else {
               pageTotalsEl.innerHTML = `<div style="color: #64748b; font-size: 0.875rem;">Unable to load page totals.</div>`;
@@ -27431,10 +27310,10 @@ Final Score: ${score}/100`;
             const savedAudit = loadAuditResultsSync();
             const propertyUrl = savedAudit?.propertyUrl || window.lastAuditPropertyUrl || 'https://www.alanranger.com';
             
-            // Calculate date range (last 28 days - matches GSC UI standard)
+            // Calculate date range (last 30 days)
             const endDate = new Date();
             const startDate = new Date();
-            startDate.setDate(startDate.getDate() - 28);
+            startDate.setDate(startDate.getDate() - 30);
             const formatDate = (date) => {
               const year = date.getFullYear();
               const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -27450,69 +27329,6 @@ Final Score: ${score}/100`;
                 const pages = data.data.pages;
                 const bestUrl = scorecardData.ranking_url;
                 const normalizedBestUrl = bestUrl ? normalizeGscPageUrl(bestUrl) : null;
-                
-                // Compute query totals from pages breakdown (fallback if queryTotals missing)
-                const computedQueryTotal = pages.reduce((acc, page) => {
-                  acc.clicks += page.clicks || 0;
-                  acc.impressions += page.impressions || 0;
-                  acc.positionSum += (page.position || 0) * (page.impressions || 0);
-                  return acc;
-                }, { clicks: 0, impressions: 0, positionSum: 0 });
-                
-                const computedCtr = computedQueryTotal.impressions > 0 
-                  ? (computedQueryTotal.clicks / computedQueryTotal.impressions) * 100 
-                  : 0;
-                const computedAvgPosition = computedQueryTotal.impressions > 0
-                  ? computedQueryTotal.positionSum / computedQueryTotal.impressions
-                  : 0;
-                
-                // Update CTR & snippet tile with computed totals if queryTotals was missing
-                const ctrFallbackEl = document.getElementById(`scorecard-ctr-fallback-${scorecardData.keyword.replace(/[^a-z0-9]/gi, '_')}`);
-                if (ctrFallbackEl && computedQueryTotal.impressions > 0) {
-                  const positionBucket = getPositionBucket(scorecardData.best_rank_group);
-                  const ctrBenchmark = getCtrBenchmarkForPosition(positionBucket);
-                  const benchmarkPercent = (ctrBenchmark * 100).toFixed(2);
-                  
-                  let ctrPerformance = 'OK';
-                  let ctrPerformanceColor = '#f59e0b';
-                  let ctrPerformanceBg = '#fffbeb';
-                  if (computedCtr >= ctrBenchmark * 1.1) {
-                    ctrPerformance = 'Strong';
-                    ctrPerformanceColor = '#10b981';
-                    ctrPerformanceBg = '#f0fdf4';
-                  } else if (computedCtr < ctrBenchmark * 0.8) {
-                    ctrPerformance = 'Weak';
-                    ctrPerformanceColor = '#ef4444';
-                    ctrPerformanceBg = '#fef2f2';
-                  }
-                  
-                  let fallbackHtml = '';
-                  fallbackHtml += `<div style="margin-bottom: 0.75rem;">`;
-                  fallbackHtml += `<div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.5rem; font-size: 0.875rem;">`;
-                  fallbackHtml += `<span>CTR (last 28 days): <strong style="color: #1e293b;">${computedCtr.toFixed(2)}%</strong></span>`;
-                  fallbackHtml += `<span>·</span>`;
-                  fallbackHtml += `<span>Impressions: <strong style="color: #1e293b;">${computedQueryTotal.impressions.toLocaleString()}</strong></span>`;
-                  fallbackHtml += `<span>·</span>`;
-                  fallbackHtml += `<span>Clicks: <strong style="color: #1e293b;">${computedQueryTotal.clicks.toLocaleString()}</strong></span>`;
-                  fallbackHtml += `<span style="font-size: 0.75rem; color: #64748b;">(computed from pages breakdown)</span>`;
-                  fallbackHtml += `</div>`;
-                  fallbackHtml += `<div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.5rem; font-size: 0.875rem;">`;
-                  fallbackHtml += `<span>Expected CTR at this position: <strong style="color: #64748b;">${benchmarkPercent}%</strong> <span title="Heuristic benchmark based on rank position (not from GSC)." style="opacity: 0.6; cursor: help; font-size: 0.75rem;">ℹ</span></span>`;
-                  fallbackHtml += `</div>`;
-                  fallbackHtml += `<div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.75rem;">`;
-                  fallbackHtml += `<span style="font-size: 0.875rem;">CTR performance: <span style="padding: 0.25rem 0.5rem; border-radius: 4px; font-weight: 600; background: ${ctrPerformanceBg}; border-left: 3px solid ${ctrPerformanceColor}; color: #1e293b;">${ctrPerformance}</span></span>`;
-                  fallbackHtml += `</div>`;
-                  fallbackHtml += `</div>`;
-                  
-                  if (ctrPerformance === 'Weak') {
-                    fallbackHtml += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">CTR is weak for this position. Improving the snippet (title, meta description and rich results) should unlock more clicks for this keyword.</p>`;
-                  } else {
-                    fallbackHtml += `<p style="color: #64748b; font-size: 0.875rem; line-height: 1.5;">CTR is in line with expectations for this position. Further gains are more likely to come from improving rank (links and authority) than snippet tweaks alone.</p>`;
-                  }
-                  
-                  ctrFallbackEl.innerHTML = fallbackHtml;
-                  debugLog(`[Scorecard] Used computed query totals from pages breakdown for keyword: "${scorecardData.keyword}"`, 'info');
-                }
                 
                 let pagesHtml = '';
                 if (pages.length === 0) {
