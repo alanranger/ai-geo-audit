@@ -372,11 +372,40 @@ export default async function handler(req, res) {
       console.error('[Local Signals] Error response:', errorText);
       
       // Try to parse error for better logging
+      let errorData = null;
       try {
-        const errorData = JSON.parse(errorText);
+        errorData = JSON.parse(errorText);
         console.error('[Local Signals] Parsed error:', JSON.stringify(errorData, null, 2));
       } catch (e) {
         console.error('[Local Signals] Error text (not JSON):', errorText);
+      }
+      
+      // If it's a 403 permission error, return error status so frontend knows to keep cached data
+      if (locationsResponse.status === 403) {
+        const isScopeError = errorData?.error?.details?.some(d => d.reason === 'ACCESS_TOKEN_SCOPE_INSUFFICIENT');
+        if (isScopeError) {
+          return res.status(200).json({
+            status: 'error',
+            source: 'local-signals',
+            params: { property },
+            error: {
+              code: 'INSUFFICIENT_SCOPES',
+              message: 'OAuth token missing required scope. Please regenerate refresh token with business.manage scope.',
+              details: errorData
+            },
+            data: {
+              localBusinessSchemaPages: 0,
+              napConsistencyScore: null,
+              knowledgePanelDetected: false,
+              serviceAreas: [],
+              locations: [],
+              gbpRating: null,
+              gbpReviewCount: null,
+              notes: 'API call failed due to insufficient OAuth scopes. Using cached data if available.'
+            },
+            meta: { generatedAt: new Date().toISOString() }
+          });
+        }
       }
     }
     
