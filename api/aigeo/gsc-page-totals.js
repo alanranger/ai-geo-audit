@@ -5,11 +5,12 @@
  * Used for scorecard "Target page totals" tile
  */
 
-import { getGSCAccessToken, normalizePropertyUrl, parseDateRange } from './utils.js';
+import { getGSCAccessToken, normalizePropertyUrl, parseDateRange, getGscDateRange } from './utils.js';
 
 /**
- * Normalize page URL for GSC matching - strips query params, fragments, ensures canonical format
+ * Normalize page URL for matching - strips query params, fragments, ensures canonical format
  * Must match the normalization used in audit-dashboard.html
+ * This is used for client-side matching after fetching all pages from GSC
  */
 function normalizeGscPageUrl(url) {
   if (!url || typeof url !== 'string') return '';
@@ -38,6 +39,47 @@ function normalizeGscPageUrl(url) {
   } catch (e) {
     // If URL parsing fails, use manually cleaned URL
     return cleanUrl.toLowerCase().replace(/\/$/, '').trim() || '/';
+  }
+}
+
+/**
+ * Simple in-memory cache for page totals (10 minute TTL)
+ * Key: `${property}:${normalizedPageUrl}:${startDate}:${endDate}`
+ */
+const pageTotalsCache = new Map();
+const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+function getCacheKey(property, normalizedPageUrl, startDate, endDate) {
+  return `${property}:${normalizedPageUrl}:${startDate}:${endDate}`;
+}
+
+function getCachedResult(cacheKey) {
+  const cached = pageTotalsCache.get(cacheKey);
+  if (!cached) return null;
+  
+  const age = Date.now() - cached.timestamp;
+  if (age > CACHE_TTL_MS) {
+    pageTotalsCache.delete(cacheKey);
+    return null;
+  }
+  
+  return cached.data;
+}
+
+function setCachedResult(cacheKey, data) {
+  pageTotalsCache.set(cacheKey, {
+    data,
+    timestamp: Date.now()
+  });
+  
+  // Clean up old entries periodically (keep cache size reasonable)
+  if (pageTotalsCache.size > 1000) {
+    const now = Date.now();
+    for (const [key, value] of pageTotalsCache.entries()) {
+      if (now - value.timestamp > CACHE_TTL_MS) {
+        pageTotalsCache.delete(key);
+      }
+    }
   }
 }
 
@@ -84,20 +126,42 @@ export default async function handler(req, res) {
       });
     }
     
-    // Parse date range with defaults
-    const { startDate, endDate } = parseDateRange(req);
+    // Use standardized 28-day window (matching GSC UI)
+    // If explicit dates provided, use them; otherwise use 28-day window ending yesterday
+    let { startDate, endDate } = startDateParam && endDateParam 
+      ? parseDateRange(req) 
+      : getGscDateRange({ daysBack: 28, endOffsetDays: 1 });
     
     // Normalize property URL
     const siteUrl = normalizePropertyUrl(property);
     
-    // Normalize page URL for GSC matching
+    // Normalize page URL for matching (client-side comparison)
     const normalizedPageUrl = normalizeGscPageUrl(pageUrl);
+    
+    // Check cache first
+    const cacheKey = getCacheKey(siteUrl, normalizedPageUrl, startDate, endDate);
+    const cached = getCachedResult(cacheKey);
+    if (cached) {
+      return res.status(200).json({
+        status: 'ok',
+        source: 'gsc-page-totals',
+        params: { property: siteUrl, pageUrl, normalizedPageUrl, startDate, endDate },
+        data: cached.result,
+        debug: cached.debug,
+        meta: {
+          generatedAt: new Date().toISOString(),
+          cached: true
+        }
+      });
+    }
     
     // Get access token
     const accessToken = await getGSCAccessToken();
     const searchConsoleUrl = `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`;
     
-    // Fetch page-only totals
+    // OPTION 1: Fetch ALL pages without filter, then match client-side
+    // This is more reliable than trying to match exact URLs in the filter
+    // GSC may store URLs with different formats (www vs non-www, trailing slash, etc.)
     const pageResponse = await fetch(searchConsoleUrl, {
       method: 'POST',
       headers: {
@@ -108,14 +172,7 @@ export default async function handler(req, res) {
         startDate,
         endDate,
         dimensions: ['page'],
-        dimensionFilterGroups: [{
-          filters: [{
-            dimension: 'page',
-            expression: normalizedPageUrl,
-            operator: 'equals'
-          }]
-        }],
-        rowLimit: 1, // Should only return one row for exact page match
+        rowLimit: 5000, // Fetch up to 5000 pages, then match client-side
       }),
     });
     
@@ -131,7 +188,25 @@ export default async function handler(req, res) {
     
     const pageData = await pageResponse.json();
     
-    // Extract metrics from response
+    // Find matching page by comparing normalized URLs
+    let matchedRow = null;
+    let matchedRowPage = null;
+    
+    if (pageData.rows && Array.isArray(pageData.rows)) {
+      for (const row of pageData.rows) {
+        const rowPage = row.keys[0] || '';
+        const normalizedRowPage = normalizeGscPageUrl(rowPage);
+        
+        // Match using normalized paths
+        if (normalizedRowPage === normalizedPageUrl) {
+          matchedRow = row;
+          matchedRowPage = rowPage;
+          break;
+        }
+      }
+    }
+    
+    // Extract metrics from matched row
     let result = {
       page: normalizedPageUrl,
       clicks: 0,
@@ -140,22 +215,35 @@ export default async function handler(req, res) {
       position: 0
     };
     
-    if (pageData.rows && Array.isArray(pageData.rows) && pageData.rows.length > 0) {
-      const row = pageData.rows[0];
+    if (matchedRow) {
       result = {
-        page: row.keys[0] || normalizedPageUrl,
-        clicks: row.clicks || 0,
-        impressions: row.impressions || 0,
-        ctr: row.ctr ? row.ctr * 100 : 0, // Convert to percentage
-        position: row.position || 0
+        page: matchedRowPage || normalizedPageUrl,
+        clicks: matchedRow.clicks || 0,
+        impressions: matchedRow.impressions || 0,
+        ctr: matchedRow.ctr ? matchedRow.ctr * 100 : 0, // Convert to percentage
+        position: matchedRow.position || 0
       };
     }
+    
+    // Debug info
+    const debug = {
+      propertyUsed: siteUrl,
+      requestedPage: pageUrl,
+      normalizedRequestedPage: normalizedPageUrl,
+      matchedRowPage: matchedRowPage || null,
+      totalPagesFetched: pageData.rows?.length || 0,
+      matchFound: !!matchedRow
+    };
+    
+    // Cache the result
+    setCachedResult(cacheKey, { result, debug });
     
     return res.status(200).json({
       status: 'ok',
       source: 'gsc-page-totals',
-      params: { property, pageUrl: normalizedPageUrl, startDate, endDate },
+      params: { property: siteUrl, pageUrl, normalizedPageUrl, startDate, endDate },
       data: result,
+      debug,
       meta: {
         generatedAt: new Date().toISOString()
       }

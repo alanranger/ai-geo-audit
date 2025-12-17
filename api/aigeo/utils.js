@@ -4,6 +4,40 @@
  */
 
 /**
+ * Get GSC date range for last 28 days (matching GSC UI behavior)
+ * Uses yesterday as end date (GSC UI typically shows data up to yesterday, not today)
+ * @param {Object} options - Configuration options
+ * @param {number} options.daysBack - Number of days to look back (default: 28)
+ * @param {number} options.endOffsetDays - Days to subtract from today for end date (default: 1 = yesterday)
+ * @returns {Object} { startDate, endDate, label } as ISO strings (YYYY-MM-DD) and label string
+ */
+export function getGscDateRange({ daysBack = 28, endOffsetDays = 1 } = {}) {
+  // End date = yesterday (matches GSC UI behavior - today is often partial)
+  const end = new Date();
+  end.setDate(end.getDate() - endOffsetDays);
+  end.setHours(0, 0, 0, 0);
+  
+  // Start date = end date - (daysBack - 1) days (inclusive range)
+  const start = new Date(end);
+  start.setDate(start.getDate() - (daysBack - 1));
+  start.setHours(0, 0, 0, 0);
+  
+  // Format as YYYY-MM-DD
+  const formatDate = (date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+  
+  return {
+    startDate: formatDate(start),
+    endDate: formatDate(end),
+    label: `${daysBack}d`
+  };
+}
+
+/**
  * Parse date range from request query with defaults
  * @param {Object} req - Request object
  * @param {boolean} accountForGSCDelay - If true, subtract 2 days from endDate to account for GSC data delay (default: false)

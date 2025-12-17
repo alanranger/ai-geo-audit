@@ -7,7 +7,7 @@
  * This is a pure data endpoint - no scoring or pillar calculations.
  */
 
-import { getGSCAccessToken, normalizePropertyUrl, parseDateRange } from './utils.js';
+import { getGSCAccessToken, normalizePropertyUrl, parseDateRange, getGscDateRange } from './utils.js';
 
 export default async function handler(req, res) {
   // Set CORS headers
@@ -58,10 +58,12 @@ export default async function handler(req, res) {
       }
     }
     
-    // Parse date range with defaults
-    // Note: GSC data is typically delayed by 2-3 days, but we still request up to today
-    // GSC will return whatever data it has available
-    const { startDate, endDate } = parseDateRange(req);
+    // Use standardized 28-day window (matching GSC UI)
+    // If explicit dates provided, use them; otherwise use 28-day window ending yesterday
+    const { startDate: startDateParam, endDate: endDateParam } = req.query;
+    let { startDate, endDate } = startDateParam && endDateParam 
+      ? parseDateRange(req) 
+      : getGscDateRange({ daysBack: 28, endOffsetDays: 1 });
     
     // Normalize property URL
     const siteUrl = normalizePropertyUrl(property);
