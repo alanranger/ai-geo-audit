@@ -308,53 +308,58 @@ export default async function handler(req, res) {
               
               // Fallback: Try the old Reviews API endpoint (deprecated but might still work)
               if ((gbpRating === null || gbpReviewCount === null) && firstLocation.name) {
-                const reviewsUrl = `https://mybusiness.googleapis.com/v4/${firstLocation.name}/reviews`;
-                console.log('[Local Signals] Attempting fallback to old Reviews API endpoint:', reviewsUrl);
-              
-                const reviewsResponse = await fetch(reviewsUrl, {
-                  method: 'GET',
-                  headers: {
-                    'Authorization': `Bearer ${accessToken}`,
-                    'Content-Type': 'application/json',
-                  },
-                });
-              
-                console.log('[Local Signals] Reviews API response status:', reviewsResponse.status);
-              
-                if (reviewsResponse.ok) {
-                  const reviewsData = await reviewsResponse.json();
-                  console.log('[Local Signals] Reviews API response:', JSON.stringify(reviewsData, null, 2));
-                  
-                  // Extract rating and review count from reviews response
-                  // The structure might be: { reviews: [...], averageRating: X, totalReviewCount: Y }
-                  if (reviewsData.averageRating !== undefined) {
-                    gbpRating = reviewsData.averageRating;
-                    console.log('[Local Signals] Extracted rating from Reviews API:', gbpRating);
-                  }
-                  if (reviewsData.totalReviewCount !== undefined) {
-                    gbpReviewCount = reviewsData.totalReviewCount;
-                    console.log('[Local Signals] Extracted review count from Reviews API:', gbpReviewCount);
-                  } else if (reviewsData.reviews && Array.isArray(reviewsData.reviews)) {
-                    // If we have the reviews array, calculate from it
-                    gbpReviewCount = reviewsData.reviews.length;
-                    console.log('[Local Signals] Calculated review count from reviews array:', gbpReviewCount);
-                    if (reviewsData.reviews.length > 0) {
-                      const sumRating = reviewsData.reviews.reduce((sum, review) => sum + (review.starRating || review.rating || 0), 0);
-                      gbpRating = sumRating / reviewsData.reviews.length;
-                      console.log('[Local Signals] Calculated average rating from reviews array:', gbpRating);
+                try {
+                  const reviewsUrl = `https://mybusiness.googleapis.com/v4/${firstLocation.name}/reviews`;
+                  console.log('[Local Signals] Attempting fallback to old Reviews API endpoint:', reviewsUrl);
+                
+                  const reviewsResponse = await fetch(reviewsUrl, {
+                    method: 'GET',
+                    headers: {
+                      'Authorization': `Bearer ${accessToken}`,
+                      'Content-Type': 'application/json',
+                    },
+                  });
+                
+                  console.log('[Local Signals] Reviews API response status:', reviewsResponse.status);
+                
+                  if (reviewsResponse.ok) {
+                    const reviewsData = await reviewsResponse.json();
+                    console.log('[Local Signals] Reviews API response:', JSON.stringify(reviewsData, null, 2));
+                    
+                    // Extract rating and review count from reviews response
+                    // The structure might be: { reviews: [...], averageRating: X, totalReviewCount: Y }
+                    if (reviewsData.averageRating !== undefined) {
+                      gbpRating = reviewsData.averageRating;
+                      console.log('[Local Signals] Extracted rating from Reviews API:', gbpRating);
+                    }
+                    if (reviewsData.totalReviewCount !== undefined) {
+                      gbpReviewCount = reviewsData.totalReviewCount;
+                      console.log('[Local Signals] Extracted review count from Reviews API:', gbpReviewCount);
+                    } else if (reviewsData.reviews && Array.isArray(reviewsData.reviews)) {
+                      // If we have the reviews array, calculate from it
+                      gbpReviewCount = reviewsData.reviews.length;
+                      console.log('[Local Signals] Calculated review count from reviews array:', gbpReviewCount);
+                      if (reviewsData.reviews.length > 0) {
+                        const sumRating = reviewsData.reviews.reduce((sum, review) => sum + (review.starRating || review.rating || 0), 0);
+                        gbpRating = sumRating / reviewsData.reviews.length;
+                        console.log('[Local Signals] Calculated average rating from reviews array:', gbpRating);
+                      }
+                    } else {
+                      console.log('[Local Signals] Reviews API response does not contain rating/review count data');
                     }
                   } else {
-                    console.log('[Local Signals] Reviews API response does not contain rating/review count data');
+                    const errorText = await reviewsResponse.text();
+                    console.log('[Local Signals] Reviews API response error:', reviewsResponse.status, errorText);
+                    // Don't assume it's a scope problem - log the actual error for debugging
                   }
-                } else {
-                  const errorText = await reviewsResponse.text();
-                  console.log('[Local Signals] Reviews API response error:', reviewsResponse.status, errorText);
-                  // Don't assume it's a scope problem - log the actual error for debugging
+                } catch (error) {
+                  console.warn('[Local Signals] Error fetching reviews from Reviews API:', error.message);
+                  console.warn('[Local Signals] Error stack:', error.stack);
                 }
-              } catch (error) {
-                console.warn('[Local Signals] Error fetching reviews from Reviews API:', error.message);
-                console.warn('[Local Signals] Error stack:', error.stack);
               }
+            } catch (error) {
+              console.warn('[Local Signals] Error fetching location detail with reviews:', error.message);
+              console.warn('[Local Signals] Error stack:', error.stack);
             }
           }
           
