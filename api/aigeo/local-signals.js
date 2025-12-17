@@ -112,6 +112,7 @@ export default async function handler(req, res) {
     let locationsToProcess = []; // Initialize to avoid undefined errors
     let gbpRating = null; // Declare at top level so fallback can access it
     let gbpReviewCount = null; // Declare at top level so fallback can access it
+    let nextPageToken = null; // Declare at top level for pagination and debug info
     
     if (locationsResponse.ok) {
       const locationsData = await locationsResponse.json();
@@ -135,7 +136,7 @@ export default async function handler(req, res) {
       console.log('[Local Signals] Found', locations.length, 'locations');
       
       // Check for pagination
-      let nextPageToken = locationsData.nextPageToken;
+      nextPageToken = locationsData.nextPageToken;
       if (nextPageToken) {
         console.log('[Local Signals] ⚠️ Response has nextPageToken - locations are paginated!');
         console.log('[Local Signals] nextPageToken:', nextPageToken);
