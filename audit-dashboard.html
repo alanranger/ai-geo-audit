@@ -11757,17 +11757,22 @@ Final Score: ${score}/100`;
           let gbpReviewCount = null;
           
           if (localSignals) {
-            debugLog(`[Authority Card] Local signals status: ${localSignals.status}, has data: ${!!localSignals.data}`, 'info');
-            if (localSignals.status === 'ok' && localSignals.data) {
-              gbpRating = localSignals.data.gbpRating !== null && localSignals.data.gbpRating !== undefined 
-                ? localSignals.data.gbpRating 
+            // Handle both direct data structure and wrapped response structure
+            const signalsStatus = localSignals.status;
+            const signalsData = localSignals.data || (localSignals.locations !== undefined ? localSignals : null);
+            
+            debugLog(`[Authority Card] Local signals status: ${signalsStatus}, has data: ${!!signalsData}, structure: ${JSON.stringify(Object.keys(localSignals))}`, 'info');
+            
+            if (signalsStatus === 'ok' && signalsData) {
+              gbpRating = signalsData.gbpRating !== null && signalsData.gbpRating !== undefined 
+                ? signalsData.gbpRating 
                 : null;
-              gbpReviewCount = localSignals.data.gbpReviewCount !== null && localSignals.data.gbpReviewCount !== undefined 
-                ? localSignals.data.gbpReviewCount 
+              gbpReviewCount = signalsData.gbpReviewCount !== null && signalsData.gbpReviewCount !== undefined 
+                ? signalsData.gbpReviewCount 
                 : null;
               debugLog(`[Authority Card] GBP data extracted: rating=${gbpRating}, count=${gbpReviewCount}`, 'info');
             } else {
-              debugLog(`[Authority Card] Local signals not OK or missing data. Status: ${localSignals.status}, data keys: ${localSignals.data ? Object.keys(localSignals.data).join(', ') : 'no data'}`, 'warn');
+              debugLog(`[Authority Card] Local signals not OK or missing data. Status: ${signalsStatus}, data keys: ${signalsData ? Object.keys(signalsData).join(', ') : 'no data'}, full object keys: ${Object.keys(localSignals).join(', ')}`, 'warn');
             }
           } else {
             debugLog(`[Authority Card] No localSignals available`, 'warn');
