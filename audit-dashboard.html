@@ -10356,6 +10356,11 @@
     
     // Display dashboard
     async function displayDashboard(scores, data, snippetReadiness = 0, schemaAudit = null, localSignals = null) {
+      // Normalize localSignals structure if needed (handle old format where it might just be {data: {...}})
+      if (localSignals && localSignals.data && !localSignals.status) {
+        debugLog(`[displayDashboard] Normalizing localSignals structure - wrapping in status/data format`, 'info');
+        localSignals = { status: 'ok', data: localSignals.data || localSignals };
+      }
       // Update timestamp if this is a fresh display
       const saved = await loadAuditResults();
       if (saved && saved.timestamp) {
