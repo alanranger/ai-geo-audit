@@ -391,6 +391,7 @@ export default async function handler(req, res) {
       nap_consistency_score: ensureNumber(localSignals?.data?.napConsistencyScore),
       knowledge_panel_detected: localSignals?.data?.knowledgePanelDetected === true ? true : (localSignals?.data?.knowledgePanelDetected === false ? false : null),
       service_areas: Array.isArray(localSignals?.data?.serviceAreas) ? localSignals.data.serviceAreas : null, // Array of service area objects
+      locations: Array.isArray(localSignals?.data?.locations) ? localSignals.data.locations : null, // Array of location objects
       
       // Partial write flags (set below after validation)
       is_partial: false,

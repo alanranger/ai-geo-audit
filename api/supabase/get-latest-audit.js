@@ -875,13 +875,15 @@ export default async function handler(req, res) {
           };
         })()
       } : null,
-      localSignals: (record.local_entity_score !== null || record.service_area_score !== null) ? {
+      localSignals: (record.local_entity_score !== null || record.service_area_score !== null || record.locations) ? {
+        status: 'ok',
         data: {
           localEntityScore: record.local_entity_score,
           serviceAreaScore: record.service_area_score,
           napConsistencyScore: record.nap_consistency_score,
           knowledgePanelDetected: record.knowledge_panel_detected,
           serviceAreas: record.service_areas || [],
+          locations: record.locations || [],
           localBusinessSchemaPages: record.local_business_schema_pages || 0
         }
       } : null,
