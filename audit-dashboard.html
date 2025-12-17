@@ -4071,18 +4071,27 @@
           // This ensures CTR/Impressions columns are populated even if loadAuditResults() completes after initial render
           (async () => {
             try {
+              debugLog(`📊 Checking for queryTotals after initial render...`, 'info');
               const savedAudit = await loadAuditResults();
+              debugLog(`📊 loadAuditResults() completed - savedAudit=${!!savedAudit}, searchData=${!!savedAudit?.searchData}, queryTotals=${savedAudit?.searchData?.queryTotals?.length || 0}`, savedAudit?.searchData?.queryTotals?.length > 0 ? 'success' : 'warn');
               if (savedAudit && savedAudit.searchData && Array.isArray(savedAudit.searchData.queryTotals) && savedAudit.searchData.queryTotals.length > 0) {
                 debugLog(`✓ queryTotals loaded (${savedAudit.searchData.queryTotals.length} keywords), re-rendering table to show CTR/Impressions`, 'success');
                 // Re-render the table to show CTR/Impressions data
                 if (typeof renderRankingAiTab === 'function') {
                   renderRankingAiTab();
+                  debugLog(`✓ Table re-rendered with queryTotals data`, 'success');
+                } else {
+                  debugLog(`⚠ renderRankingAiTab function not found`, 'warn');
                 }
               } else {
-                debugLog(`⚠ No queryTotals found in savedAudit - searchData=${!!savedAudit?.searchData}, queryTotals=${savedAudit?.searchData?.queryTotals?.length || 0}`, 'warn');
+                debugLog(`⚠ No queryTotals found in savedAudit - searchData=${!!savedAudit?.searchData}, queryTotals type=${typeof savedAudit?.searchData?.queryTotals}, length=${savedAudit?.searchData?.queryTotals?.length || 0}`, 'warn');
+                if (savedAudit && savedAudit.searchData) {
+                  debugLog(`⚠ searchData keys: ${Object.keys(savedAudit.searchData).join(', ')}`, 'warn');
+                }
               }
             } catch (err) {
-              debugLog(`⚠ Error loading queryTotals for re-render: ${err.message}`, 'warn');
+              debugLog(`⚠ Error loading queryTotals for re-render: ${err.message}`, 'error');
+              debugLog(`⚠ Error stack: ${err.stack}`, 'error');
             }
           })();
           
@@ -5745,10 +5754,22 @@
           if (!hasMoneyPagesData) missingData.push('moneyPagesMetrics');
           if (!hasQueryTotals) missingData.push('queryTotals');
           debugLog(`⚠ Fetching from Supabase (localStorage missing: ${missingData.join(', ')})...`, 'info');
+          debugLog(`📊 Calling fetchLatestAuditFromSupabase(${propertyUrl})...`, 'info');
           const supabaseData = await fetchLatestAuditFromSupabase(propertyUrl);
+          debugLog(`📊 fetchLatestAuditFromSupabase returned: ${supabaseData ? 'data' : 'null/undefined'}`, supabaseData ? 'success' : 'warn');
           if (supabaseData) {
             debugLog('✓ Audit results loaded from Supabase', 'success');
-            debugLog(`✓ Supabase data structure: scores.moneyPagesMetrics=${!!supabaseData?.scores?.moneyPagesMetrics}, moneyPagesMetrics=${!!supabaseData?.moneyPagesMetrics}, queryTotals=${supabaseData?.searchData?.queryTotals?.length || 0} keywords`, 'info');
+            debugLog(`✓ Supabase data structure: scores.moneyPagesMetrics=${!!supabaseData?.scores?.moneyPagesMetrics}, moneyPagesMetrics=${!!supabaseData?.moneyPagesMetrics}, searchData=${!!supabaseData?.searchData}, queryTotals=${supabaseData?.searchData?.queryTotals?.length || 0} keywords`, 'info');
+            if (supabaseData.searchData) {
+              debugLog(`✓ Supabase searchData keys: ${Object.keys(supabaseData.searchData).join(', ')}`, 'info');
+              if (supabaseData.searchData.queryTotals) {
+                debugLog(`✓ Supabase queryTotals type: ${Array.isArray(supabaseData.searchData.queryTotals) ? 'array' : typeof supabaseData.searchData.queryTotals}, length: ${Array.isArray(supabaseData.searchData.queryTotals) ? supabaseData.searchData.queryTotals.length : 'N/A'}`, 'success');
+              } else {
+                debugLog(`⚠ Supabase searchData exists but queryTotals is missing/null`, 'warn');
+              }
+            } else {
+              debugLog(`⚠ Supabase data exists but searchData is missing/null`, 'warn');
+            }
             
             // Merge Supabase data with localStorage data if localStorage has some data
             if (localStorageData && hasMoneyPagesData) {
@@ -5784,8 +5805,11 @@
             }
             return supabaseData;
           } else {
-            debugLog('⚠ No audit data found in Supabase, using localStorage data as fallback', 'warn');
+            debugLog('⚠ No audit data found in Supabase (fetchLatestAuditFromSupabase returned null/undefined), using localStorage data as fallback', 'warn');
+            debugLog(`⚠ This could mean: 1) No audit exists in Supabase for ${propertyUrl}, 2) API call failed, 3) API returned error status`, 'warn');
           }
+        } else {
+          debugLog(`✓ Skipping Supabase fetch - localStorage has all required data (moneyPagesMetrics=${hasMoneyPagesData}, queryTotals=${hasQueryTotals})`, 'info');
         }
       } else {
         debugLog('⚠ Cannot fetch from Supabase: property URL not set, using localStorage data as fallback', 'warn');
@@ -6293,20 +6317,21 @@
             const filledData = forwardFillHistoryData(result.data, 3);
             return filledData;
           }
-        } else {
-          // Read response body once as text, then try to parse as JSON to avoid "body stream already read" error
-          try {
-            const responseText = await response.text();
+          } else {
+            // Read response body once as text, then try to parse as JSON to avoid "body stream already read" error
+            debugLog(`⚠ Supabase API returned non-OK status: ${response.status} ${response.statusText}`, 'warn');
             try {
-              const error = JSON.parse(responseText);
-              debugLog(`⚠ Could not fetch from Supabase: ${error.message || 'Unknown error'}`, 'warn');
-            } catch (parseError) {
-              debugLog(`⚠ Could not fetch from Supabase: ${responseText || 'Unknown error'}`, 'warn');
+              const responseText = await response.text();
+              try {
+                const error = JSON.parse(responseText);
+                debugLog(`⚠ Supabase API error: ${error.message || 'Unknown error'}`, 'warn');
+              } catch (parseError) {
+                debugLog(`⚠ Supabase API error (non-JSON): ${responseText || 'Unknown error'}`, 'warn');
+              }
+            } catch (textError) {
+              debugLog(`⚠ Could not read Supabase error response: ${textError.message}`, 'warn');
             }
-          } catch (textError) {
-            debugLog(`⚠ Could not fetch from Supabase: HTTP ${response.status}`, 'warn');
           }
-        }
       } catch (error) {
         debugLog(`⚠ Supabase fetch error: ${error.message}`, 'warn');
       }
@@ -6378,6 +6403,7 @@
           
           if (response.ok) {
             const result = await response.json();
+            debugLog(`📊 Supabase API response: status=${result.status}, hasData=${!!result.data}`, result.status === 'ok' && result.data ? 'success' : 'warn');
             if (result.status === 'ok' && result.data) {
               debugLog(`✓ Found latest audit from Supabase: ${result.data.auditDate || 'unknown date'}`, 'success');
               // Debug: Check what moneyPagesMetrics structure we got
@@ -6388,6 +6414,14 @@
                 debugLog(`✓ Supabase moneyPagesMetrics has ${rows.length} rows`, 'success');
               } else {
                 debugLog(`⚠ Supabase data missing moneyPagesMetrics!`, 'warn');
+              }
+              // Debug: Check queryTotals in response
+              const hasQueryTotals = !!(result.data?.searchData?.queryTotals && Array.isArray(result.data.searchData.queryTotals));
+              debugLog(`📊 Supabase queryTotals check: hasSearchData=${!!result.data?.searchData}, hasQueryTotals=${hasQueryTotals}, length=${result.data?.searchData?.queryTotals?.length || 0}`, hasQueryTotals ? 'success' : 'warn');
+              if (result.data.searchData) {
+                debugLog(`📊 Supabase searchData keys: ${Object.keys(result.data.searchData).join(', ')}`, 'info');
+              } else {
+                debugLog(`⚠ Supabase data missing searchData!`, 'warn');
               }
               // Ensure timestamp is set from Supabase data (use timestamp if available, otherwise construct from auditDate)
               if (result.data.timestamp) {
@@ -6409,7 +6443,7 @@
               }
               return result.data;
             } else {
-              debugLog('⚠ No audit found in Supabase', 'warn');
+              debugLog(`⚠ No audit found in Supabase - result.status=${result.status}, hasData=${!!result.data}, error=${result.message || 'none'}`, 'warn');
               // Return minimal data if available, otherwise null
               if (minimalData) {
                 debugLog(`⚠ Returning minimal data (timestamp + scores) as fallback`, 'info');
