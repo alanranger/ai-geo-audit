@@ -26251,16 +26251,54 @@ Final Score: ${score}/100`;
     function getQueryTotalForKeyword(keyword) {
       try {
         const savedAudit = loadAuditResultsSync();
-        if (!savedAudit || !savedAudit.searchData || !Array.isArray(savedAudit.searchData.queryTotals)) {
-          debugLog(`getQueryTotalForKeyword: No queryTotals found for "${keyword}" - savedAudit=${!!savedAudit}, searchData=${!!savedAudit?.searchData}, queryTotals array=${Array.isArray(savedAudit?.searchData?.queryTotals)}, length=${savedAudit?.searchData?.queryTotals?.length || 0}`, 'warn');
+        if (!savedAudit || !savedAudit.searchData) {
+          debugLog(`getQueryTotalForKeyword: No queryTotals found for "${keyword}" - savedAudit=${!!savedAudit}, searchData=${!!savedAudit?.searchData}`, 'warn');
           return null;
         }
+        
+        // CRITICAL: Check if queryTotals exists and handle object vs array
+        let queryTotals = savedAudit.searchData.queryTotals;
+        if (!queryTotals) {
+          debugLog(`getQueryTotalForKeyword: No queryTotals found for "${keyword}" - queryTotals is null/undefined`, 'warn');
+          return null;
+        }
+        
+        // If queryTotals is an object instead of an array, try to convert it
+        if (typeof queryTotals === 'object' && !Array.isArray(queryTotals)) {
+          debugLog(`getQueryTotalForKeyword: queryTotals is an object, not an array. Type: ${typeof queryTotals}, keys: ${Object.keys(queryTotals).join(', ')}`, 'warn');
+          // Try to extract array from object
+          if (Object.keys(queryTotals).every(key => !isNaN(parseInt(key)))) {
+            // Array-like object with numeric keys
+            queryTotals = Object.values(queryTotals);
+            debugLog(`getQueryTotalForKeyword: Converted array-like object to array (${queryTotals.length} items)`, 'info');
+          } else {
+            // Check if there's an array property inside the object
+            for (const key in queryTotals) {
+              if (Array.isArray(queryTotals[key])) {
+                queryTotals = queryTotals[key];
+                debugLog(`getQueryTotalForKeyword: Extracted array from object at key '${key}' (${queryTotals.length} items)`, 'info');
+                break;
+              }
+            }
+          }
+        }
+        
+        if (!Array.isArray(queryTotals)) {
+          debugLog(`getQueryTotalForKeyword: queryTotals is still not an array after conversion attempt. Type: ${typeof queryTotals}`, 'warn');
+          return null;
+        }
+        
+        if (queryTotals.length === 0) {
+          debugLog(`getQueryTotalForKeyword: queryTotals array is empty`, 'warn');
+          return null;
+        }
+        
         // Find matching query total (case-insensitive match)
-        const queryTotal = savedAudit.searchData.queryTotals.find(
+        const queryTotal = queryTotals.find(
           qt => qt.query && qt.query.toLowerCase().trim() === keyword.toLowerCase().trim()
         );
         if (!queryTotal) {
-          debugLog(`getQueryTotalForKeyword: No match found for "${keyword}" in ${savedAudit.searchData.queryTotals.length} queryTotals`, 'warn');
+          debugLog(`getQueryTotalForKeyword: No match found for "${keyword}" in ${queryTotals.length} queryTotals`, 'warn');
         }
         return queryTotal || null;
       } catch (error) {
