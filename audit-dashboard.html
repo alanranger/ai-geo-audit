@@ -24350,8 +24350,19 @@ Final Score: ${score}/100`;
                   // Merge queryTotals into searchData
                   savedAudit.searchData.queryTotals = queryTotals;
                   
+                  // CRITICAL: Use the SAME audit_date as the existing audit, not today's date
+                  // This ensures queryTotals are saved to the same audit record
+                  let auditDate = new Date().toISOString().split('T')[0]; // Fallback to today
+                  if (savedAudit.timestamp) {
+                    try {
+                      auditDate = new Date(savedAudit.timestamp).toISOString().split('T')[0];
+                      debugLog(`📊 Using existing audit date for queryTotals: ${auditDate}`, 'info');
+                    } catch (e) {
+                      debugLog(`⚠ Failed to parse saved audit timestamp, using today's date`, 'warn');
+                    }
+                  }
+                  
                   // Save to Supabase
-                  const auditDate = new Date().toISOString().split('T')[0];
                   const saveResponse = await fetch(apiUrl('/api/supabase/save-audit'), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -24363,7 +24374,7 @@ Final Score: ${score}/100`;
                   });
                   
                   if (saveResponse.ok) {
-                    debugLog(`✓ Saved queryTotals to Supabase (${queryTotals.length} keywords)`, 'success');
+                    debugLog(`✓ Saved queryTotals to Supabase (${queryTotals.length} keywords) for audit_date: ${auditDate}`, 'success');
                     
                     // CRITICAL: Also update localStorage so loadAuditResultsSync() can find the data
                     try {
