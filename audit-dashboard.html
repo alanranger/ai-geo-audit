@@ -27192,7 +27192,7 @@ Final Score: ${score}/100`;
       
       // Add derived summary sentence
       const summarySentence = generateKeywordSummary(scorecardData);
-      html += `<p style="margin: 0.5rem 0 0 0; font-size: 0.875rem; font-weight: 400; color: #3d3d3d; line-height: 1.6;">${summarySentence}</p>`;
+      html += `<p style="margin: 0.5rem 0 0 0; font-size: 0.875rem; font-weight: 400; color: #64748b; line-height: 1.5;">${summarySentence}</p>`;
       html += `</div>`;
 
       // Keyword & URL header - Keyword as prominent nameplate
@@ -27227,7 +27227,7 @@ Final Score: ${score}/100`;
                       row.segment === "education" ? "Education content" :
                       row.segment === "brand" ? "Brand query" : "General / other";
       metaParts.push(`Segment: ${segLabel}`);
-      html += `<p style="margin: 0.5rem 0 0 0; font-size: 0.875rem; color: #64748b; line-height: 1.5;">${metaParts.join(" • ")}</p>`;
+      html += `<p style="margin: 0.5rem 0 0 0; font-size: 0.875rem; color: #3d3d3d; line-height: 1.6; font-weight: 400;">${metaParts.join(" • ")}</p>`;
       html += `</div>`;
 
       // Priority & Next Actions (moved to top, before Demand and Classic ranking)
@@ -27846,7 +27846,20 @@ Final Score: ${score}/100`;
                 if (pages.length === 0) {
                   pagesHtml = `<div style="color: #3d3d3d; font-size: 0.875rem; font-weight: 400;">No pages found with impressions for this keyword.</div>`;
                 } else {
-                  pagesHtml += `<table style="width: 100%; border-collapse: collapse; font-size: 0.8125rem; margin-top: 0.5rem;">`;
+                  // Separate best URL from other pages
+                  const bestUrlPage = pages.find(page => {
+                    const normalizedPageUrl = normalizeGscPageUrl(page.page);
+                    return normalizedBestUrl && normalizedPageUrl === normalizedBestUrl;
+                  });
+                  const otherPages = pages.filter(page => {
+                    const normalizedPageUrl = normalizeGscPageUrl(page.page);
+                    return !normalizedBestUrl || normalizedPageUrl !== normalizedBestUrl;
+                  });
+                  
+                  const tableId = `query-pages-table-${scorecardData.keyword.replace(/[^a-z0-9]/gi, '_')}`;
+                  const collapsedRowsId = `query-pages-collapsed-${scorecardData.keyword.replace(/[^a-z0-9]/gi, '_')}`;
+                  
+                  pagesHtml += `<table style="width: 100%; border-collapse: collapse; font-size: 0.875rem; margin-top: 0.5rem;" id="${tableId}">`;
                   pagesHtml += `<thead><tr style="border-bottom: 1px solid #e5e7eb;">`;
                   pagesHtml += `<th style="text-align: left; padding: 0.5rem; font-weight: 600; color: #374151;">Page URL</th>`;
                   pagesHtml += `<th style="text-align: right; padding: 0.5rem; font-weight: 600; color: #374151;">Clicks</th>`;
@@ -27855,27 +27868,48 @@ Final Score: ${score}/100`;
                   pagesHtml += `<th style="text-align: right; padding: 0.5rem; font-weight: 600; color: #374151;">Position</th>`;
                   pagesHtml += `</tr></thead><tbody>`;
                   
-                  pages.forEach(page => {
-                    const normalizedPageUrl = normalizeGscPageUrl(page.page);
-                    const isBestUrl = normalizedBestUrl && normalizedPageUrl === normalizedBestUrl;
-                    const rowStyle = isBestUrl ? 'background: #fef3c7; border-left: 3px solid #f59e0b;' : '';
-                    
-                    pagesHtml += `<tr style="${rowStyle} border-bottom: 1px solid #e5e7eb;">`;
+                  // Always show best URL row (yellow highlighted)
+                  if (bestUrlPage) {
+                    pagesHtml += `<tr style="background: #fef3c7; border-left: 3px solid #f59e0b; border-bottom: 1px solid #e5e7eb;">`;
                     pagesHtml += `<td style="padding: 0.5rem; word-break: break-word;">`;
-                    if (isBestUrl) {
-                      pagesHtml += `<strong style="color: #92400e;">${page.page}</strong> <span style="font-size: 0.75rem; color: #64748b;">(DataForSEO best URL)</span>`;
-                    } else {
-                      pagesHtml += page.page;
-                    }
+                    pagesHtml += `<strong style="color: #92400e;">${bestUrlPage.page}</strong> <span style="font-size: 0.75rem; color: #64748b;">(DataForSEO best URL)</span>`;
                     pagesHtml += `</td>`;
-                    pagesHtml += `<td style="text-align: right; padding: 0.5rem;">${page.clicks.toLocaleString()}</td>`;
-                    pagesHtml += `<td style="text-align: right; padding: 0.5rem;">${page.impressions.toLocaleString()}</td>`;
-                    pagesHtml += `<td style="text-align: right; padding: 0.5rem;">${(page.ctr).toFixed(2)}%</td>`;
-                    pagesHtml += `<td style="text-align: right; padding: 0.5rem;">${page.position.toFixed(1)}</td>`;
+                    pagesHtml += `<td style="text-align: right; padding: 0.5rem;">${bestUrlPage.clicks.toLocaleString()}</td>`;
+                    pagesHtml += `<td style="text-align: right; padding: 0.5rem;">${bestUrlPage.impressions.toLocaleString()}</td>`;
+                    pagesHtml += `<td style="text-align: right; padding: 0.5rem;">${(bestUrlPage.ctr).toFixed(1)}%</td>`;
+                    pagesHtml += `<td style="text-align: right; padding: 0.5rem;">${Math.round(bestUrlPage.position)}</td>`;
                     pagesHtml += `</tr>`;
-                  });
+                  }
                   
-                  pagesHtml += `</tbody></table>`;
+                  // Collapsible section for other pages
+                  if (otherPages.length > 0) {
+                    pagesHtml += `</tbody></table>`;
+                    pagesHtml += `<div style="margin-top: 0.5rem;">`;
+                    pagesHtml += `<button onclick="const el = document.getElementById('${collapsedRowsId}'); el.style.display = el.style.display === 'none' ? 'table' : 'none'; this.textContent = el.style.display === 'none' ? 'Show ' + ${otherPages.length} + ' other page' + (${otherPages.length} !== 1 ? 's' : '') : 'Hide other pages';" style="background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 4px; padding: 0.375rem 0.75rem; font-size: 0.875rem; color: #3d3d3d; cursor: pointer; font-weight: 400;">Show ${otherPages.length} other page${otherPages.length !== 1 ? 's' : ''}</button>`;
+                    pagesHtml += `</div>`;
+                    pagesHtml += `<table style="width: 100%; border-collapse: collapse; font-size: 0.875rem; margin-top: 0.5rem; display: none;" id="${collapsedRowsId}">`;
+                    pagesHtml += `<thead><tr style="border-bottom: 1px solid #e5e7eb;">`;
+                    pagesHtml += `<th style="text-align: left; padding: 0.5rem; font-weight: 600; color: #374151;">Page URL</th>`;
+                    pagesHtml += `<th style="text-align: right; padding: 0.5rem; font-weight: 600; color: #374151;">Clicks</th>`;
+                    pagesHtml += `<th style="text-align: right; padding: 0.5rem; font-weight: 600; color: #374151;">Impressions</th>`;
+                    pagesHtml += `<th style="text-align: right; padding: 0.5rem; font-weight: 600; color: #374151;">CTR</th>`;
+                    pagesHtml += `<th style="text-align: right; padding: 0.5rem; font-weight: 600; color: #374151;">Position</th>`;
+                    pagesHtml += `</tr></thead><tbody>`;
+                    
+                    otherPages.forEach(page => {
+                      pagesHtml += `<tr style="border-bottom: 1px solid #e5e7eb;">`;
+                      pagesHtml += `<td style="padding: 0.5rem; word-break: break-word; color: #3d3d3d;">${page.page}</td>`;
+                      pagesHtml += `<td style="text-align: right; padding: 0.5rem; color: #3d3d3d;">${page.clicks.toLocaleString()}</td>`;
+                      pagesHtml += `<td style="text-align: right; padding: 0.5rem; color: #3d3d3d;">${page.impressions.toLocaleString()}</td>`;
+                      pagesHtml += `<td style="text-align: right; padding: 0.5rem; color: #3d3d3d;">${(page.ctr).toFixed(1)}%</td>`;
+                      pagesHtml += `<td style="text-align: right; padding: 0.5rem; color: #3d3d3d;">${Math.round(page.position)}</td>`;
+                      pagesHtml += `</tr>`;
+                    });
+                    
+                    pagesHtml += `</tbody></table>`;
+                  } else {
+                    pagesHtml += `</tbody></table>`;
+                  }
                 }
                 queryPagesEl.innerHTML = pagesHtml;
               } else {
