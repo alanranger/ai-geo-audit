@@ -552,6 +552,49 @@ export default async function handler(req, res) {
       perKeyword.push(...batchResults);
     }
     
+    // Retry fetching search_volume for keywords that didn't get it in the initial batch
+    // This handles cases where DataForSEO's batch API might miss some keywords
+    const missingVolumeKeywords = perKeyword.filter(k => k.search_volume === null || k.search_volume === undefined);
+    if (missingVolumeKeywords.length > 0) {
+      console.log(`[Handler] Retrying search_volume fetch for ${missingVolumeKeywords.length} keywords that didn't get volume data`);
+      const retryKeywords = missingVolumeKeywords.map(k => k.keyword);
+      const retryVolumeMap = await fetchKeywordOverview(retryKeywords, auth);
+      
+      // Update perKeyword with retry results
+      for (const item of perKeyword) {
+        if (item.search_volume === null || item.search_volume === undefined) {
+          const normalizedKw = normalizeKeyword(item.keyword);
+          const retryVolumeData = retryVolumeMap[normalizedKw];
+          
+          if (retryVolumeData !== undefined && retryVolumeData.search_volume !== undefined) {
+            item.search_volume = retryVolumeData.search_volume;
+            item.search_volume_trend = retryVolumeData.monthly_searches;
+            console.log(`[Handler] ✓ Retry successful for "${item.keyword}" → search_volume: ${item.search_volume}`);
+          } else {
+            // Try alternative normalizations (e.g., with/without extra spaces)
+            const altNormalizations = [
+              item.keyword.toLowerCase().trim(),
+              item.keyword.toLowerCase().trim().replace(/\s+/g, ' '),
+              item.keyword.toLowerCase().trim().replace(/\s{2,}/g, ' ')
+            ];
+            
+            for (const altNorm of altNormalizations) {
+              if (retryVolumeMap[altNorm] !== undefined && retryVolumeMap[altNorm].search_volume !== undefined) {
+                item.search_volume = retryVolumeMap[altNorm].search_volume;
+                item.search_volume_trend = retryVolumeMap[altNorm].monthly_searches;
+                console.log(`[Handler] ✓ Retry successful for "${item.keyword}" (alt normalization "${altNorm}") → search_volume: ${item.search_volume}`);
+                break;
+              }
+            }
+            
+            if (item.search_volume === null || item.search_volume === undefined) {
+              console.log(`[Handler] ✗ Retry failed for "${item.keyword}" - DataForSEO may not have search volume data for this keyword`);
+            }
+          }
+        }
+      }
+    }
+    
     // Log final per-keyword payload summary
     console.log(`[Handler] Final per-keyword payload summary:`);
     perKeyword.forEach((item, idx) => {
