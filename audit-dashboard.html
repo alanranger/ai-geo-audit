@@ -16806,6 +16806,24 @@ Final Score: ${score}/100`;
                 title: {
                   display: true,
                   text: 'Month'
+                },
+                ticks: {
+                  maxRotation: 45,
+                  minRotation: 45,
+                  autoSkip: true,
+                  maxTicksLimit: 12,
+                  callback: function(value, index) {
+                    // Return shorter date format to prevent overflow
+                    const label = this.getLabelForValue(value);
+                    if (label && label.length > 10) {
+                      // If label is too long, use shorter format (e.g., "12-15" instead of "2025-12-15")
+                      const parts = label.split('-');
+                      if (parts.length >= 3) {
+                        return `${parts[1]}-${parts[2]}`;
+                      }
+                    }
+                    return label;
+                  }
                 }
               },
               y: { 
@@ -17073,12 +17091,19 @@ Final Score: ${score}/100`;
         // Filter history to only include:
         // 1. Dates up to the last GSC timeseries date
         // 2. Dates within the last 30 days
+        // 3. EXCLUDE partial audits (isPartial=true) to prevent unnatural spikes
         let filteredHistory = history;
         if (lastGscTimeseriesDate) {
           const beforeFilter = history.length;
           filteredHistory = history.filter(record => {
             const recordDate = record.date || record.audit_date || record.auditDate;
             if (!recordDate) return false;
+            
+            // Exclude partial audits - they can have incomplete/incorrect data
+            if (record.isPartial === true) {
+              debugLog(`Money Pages Trend: Excluding partial audit ${recordDate} to prevent spikes`, 'info');
+              return false;
+            }
             
             // Check if date is within last 30 days
             const isWithin30Days = recordDate.localeCompare(thirtyDaysAgoStr) >= 0;
@@ -17092,18 +17117,25 @@ Final Score: ${score}/100`;
             }
             return include;
           });
-          debugLog(`Money Pages Trend: Filtered history from ${beforeFilter} to ${filteredHistory.length} records (last 30 days up to GSC date: ${lastGscTimeseriesDate})`, 'info');
+          debugLog(`Money Pages Trend: Filtered history from ${beforeFilter} to ${filteredHistory.length} records (last 30 days up to GSC date: ${lastGscTimeseriesDate}, excluding partial audits)`, 'info');
           debugLog(`Money Pages Trend: Filtered dates: ${filteredHistory.map(r => r.date || r.audit_date || r.auditDate).join(', ')}`, 'info');
         } else {
-          // If no GSC date, just filter by last 30 days
+          // If no GSC date, just filter by last 30 days and exclude partial audits
           const beforeFilter = history.length;
           filteredHistory = history.filter(record => {
             const recordDate = record.date || record.audit_date || record.auditDate;
             if (!recordDate) return false;
+            
+            // Exclude partial audits - they can have incomplete/incorrect data
+            if (record.isPartial === true) {
+              debugLog(`Money Pages Trend: Excluding partial audit ${recordDate} to prevent spikes`, 'info');
+              return false;
+            }
+            
             const isWithin30Days = recordDate.localeCompare(thirtyDaysAgoStr) >= 0;
             return isWithin30Days;
           });
-          debugLog(`Money Pages Trend: Filtered history from ${beforeFilter} to ${filteredHistory.length} records (last 30 days, no GSC date limit)`, 'info');
+          debugLog(`Money Pages Trend: Filtered history from ${beforeFilter} to ${filteredHistory.length} records (last 30 days, no GSC date limit, excluding partial audits)`, 'info');
         }
         
         // Create a map of date -> record for quick lookup
@@ -17360,6 +17392,12 @@ Final Score: ${score}/100`;
                   title: {
                     display: true,
                     text: 'Audit Date'
+                  },
+                  ticks: {
+                    maxRotation: 45,
+                    minRotation: 45,
+                    autoSkip: true,
+                    maxTicksLimit: 15
                   }
                 },
                 y: {
@@ -17461,6 +17499,12 @@ Final Score: ${score}/100`;
                   title: {
                     display: true,
                     text: 'Audit Date'
+                  },
+                  ticks: {
+                    maxRotation: 45,
+                    minRotation: 45,
+                    autoSkip: true,
+                    maxTicksLimit: 15
                   }
                 },
                 y: {
