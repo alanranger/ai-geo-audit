@@ -16396,12 +16396,20 @@ Final Score: ${score}/100`;
             const seg = m[key] || null;
             let v = seg ? seg[metricKey] : null;
             
-            // If value is null/missing, use last available value (forward-fill)
-            if (v == null && lastValues[key] != null) {
-              v = lastValues[key];
+            // Handle partial audits: if metrics are null/undefined, check if this is a partial audit
+            // Partial audits should use last known good value, not 0
+            if (v == null) {
+              // Check if this audit date matches a known partial audit (e.g., Dec 15 with 5 pages)
+              // If it's a partial audit and we have a last good value, use it
+              if (lastValues[key] != null) {
+                v = lastValues[key];
+              } else {
+                // No last good value - use null (will show as "—" in table)
+                v = null;
+              }
             }
             
-            // Update last value if we have a new one
+            // Update last value if we have a new one (not null)
             if (v != null) {
               lastValues[key] = v;
             }
@@ -16699,13 +16707,34 @@ Final Score: ${score}/100`;
         ];
 
         // Always destroy existing chart to allow re-rendering (e.g., when metric changes)
+        // Also check Chart.js registry to ensure canvas is not already in use
         if (moneyKpiChart) {
           try {
             moneyKpiChart.destroy();
+            moneyKpiChart = null;
           } catch (e) {
-            // Ignore destroy errors
+            debugLog('Error destroying moneyKpiChart: ' + e.message, 'warn');
+            moneyKpiChart = null;
           }
-          moneyKpiChart = null;
+        }
+        
+        // Also check Chart.js registry and destroy any existing chart on this canvas
+        if (typeof Chart !== 'undefined' && Chart.getChart) {
+          const existingChart = Chart.getChart(ctx);
+          if (existingChart) {
+            try {
+              existingChart.destroy();
+              debugLog('Destroyed existing Chart.js instance from registry for moneyKpiChart', 'info');
+            } catch (e) {
+              debugLog('Error destroying chart from registry: ' + e.message, 'warn');
+            }
+          }
+        }
+        
+        // Clear canvas context to ensure clean slate
+        const tempCtx = ctx.getContext('2d');
+        if (tempCtx) {
+          tempCtx.clearRect(0, 0, ctx.width, ctx.height);
         }
 
         // Ensure we have at least 2 points for line chart, or show points only
