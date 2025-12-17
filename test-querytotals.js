@@ -256,8 +256,43 @@ async function runTest() {
   log('='.repeat(60), 'cyan');
   
   try {
-    // Get audit date (use today's date)
-    const auditDate = new Date().toISOString().split('T')[0];
+    // First, try to get the latest audit date from Supabase
+    let auditDate = null;
+    let hasExistingAudit = false;
+    try {
+      log('   Checking for existing audit record...', 'blue');
+      const checkUrl = `${BASE_URL}/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(TEST_PROPERTY_URL)}&minimal=true`;
+      const checkResponse = await fetch(checkUrl);
+      if (checkResponse.ok) {
+        const checkData = await checkResponse.json();
+        if (checkData.status === 'ok' && checkData.data && checkData.data.auditDate) {
+          auditDate = checkData.data.auditDate;
+          hasExistingAudit = true;
+          logSuccess(`Found existing audit record for date: ${auditDate}`);
+        } else {
+          logWarning(`No existing audit found for property: ${TEST_PROPERTY_URL}`);
+          log(`   This test requires an existing full audit to test queryTotals partial updates.`, 'yellow');
+          log(`   Please run a full audit from the UI first, then run this test again.`, 'yellow');
+        }
+      } else {
+        const errorText = await checkResponse.text();
+        logWarning(`Failed to check for existing audit: HTTP ${checkResponse.status}`);
+        log(`   Response: ${errorText.substring(0, 200)}`, 'yellow');
+      }
+    } catch (checkError) {
+      logWarning(`Could not check for existing audit: ${checkError.message}`);
+    }
+    
+    if (!hasExistingAudit) {
+      log('\n' + '='.repeat(60), 'yellow');
+      logError('TEST SKIPPED: No existing audit record found.');
+      log('   This test verifies that queryTotals can be saved as a partial update to an existing audit.', 'yellow');
+      log('   To run this test:', 'yellow');
+      log('   1. Run a full audit from the UI for the test property', 'yellow');
+      log(`   2. Then run this test again: node test-querytotals.js`, 'yellow');
+      log('='.repeat(60), 'yellow');
+      process.exit(0);
+    }
     
     // Step 1: Try to fetch queryTotals, fallback to mock data if it fails
     let queryTotals;
