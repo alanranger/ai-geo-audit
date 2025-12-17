@@ -503,7 +503,9 @@ export default async function handler(req, res) {
       console.log('[Local Signals] First location name:', finalLocations[0].name || finalLocations[0].title || 'unnamed');
     }
     
-    return res.status(200).json({
+    // Build response object with error handling to prevent crashes
+    try {
+      return res.status(200).json({
       status: 'ok',
       source: 'local-signals',
       params: { property },
