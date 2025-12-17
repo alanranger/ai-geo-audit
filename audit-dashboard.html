@@ -3697,7 +3697,39 @@
         }
         
         // Get keywords from ranking data
-        const rankingData = window.RankingAiModule?.getData?.() || [];
+        let rankingData = [];
+        
+        // Try to get from RankingAiModule state first
+        if (window.RankingAiModule && typeof window.RankingAiModule.state === 'function') {
+          const state = window.RankingAiModule.state();
+          rankingData = state.combinedRows || [];
+          debugLog(`📊 Found ${rankingData.length} keywords from RankingAiModule state`, 'info');
+        }
+        
+        // Fallback: try to get from localStorage
+        if (!rankingData || rankingData.length === 0) {
+          try {
+            const storedData = localStorage.getItem('ranking_ai_data');
+            if (storedData) {
+              const parsed = JSON.parse(storedData);
+              if (parsed && parsed.combinedRows && Array.isArray(parsed.combinedRows)) {
+                rankingData = parsed.combinedRows;
+                debugLog(`📊 Found ${rankingData.length} keywords from localStorage`, 'info');
+              }
+            }
+          } catch (e) {
+            debugLog(`⚠ Failed to parse ranking data from localStorage: ${e.message}`, 'warn');
+          }
+        }
+        
+        // Fallback: try to get from saved audit's keyword_rankings
+        if (!rankingData || rankingData.length === 0) {
+          if (savedAudit.keywordRankings && Array.isArray(savedAudit.keywordRankings)) {
+            rankingData = savedAudit.keywordRankings;
+            debugLog(`📊 Found ${rankingData.length} keywords from saved audit`, 'info');
+          }
+        }
+        
         if (!rankingData || rankingData.length === 0) {
           debugLog('⚠ No ranking keywords found. Please run the ranking scan first.', 'warn');
           return;
@@ -28382,7 +28414,39 @@ Final Score: ${score}/100`;
           }
           
           // Get keywords from existing ranking data
-          const rankingData = window.RankingAiModule?.getData?.() || [];
+          let rankingData = [];
+          
+          // Try to get from RankingAiModule state first
+          if (window.RankingAiModule && typeof window.RankingAiModule.state === 'function') {
+            const state = window.RankingAiModule.state();
+            rankingData = state.combinedRows || [];
+            debugLog(`📊 Found ${rankingData.length} keywords from RankingAiModule state`, 'info');
+          }
+          
+          // Fallback: try to get from localStorage
+          if (!rankingData || rankingData.length === 0) {
+            try {
+              const storedData = localStorage.getItem('ranking_ai_data');
+              if (storedData) {
+                const parsed = JSON.parse(storedData);
+                if (parsed && parsed.combinedRows && Array.isArray(parsed.combinedRows)) {
+                  rankingData = parsed.combinedRows;
+                  debugLog(`📊 Found ${rankingData.length} keywords from localStorage`, 'info');
+                }
+              }
+            } catch (e) {
+              debugLog(`⚠ Failed to parse ranking data from localStorage: ${e.message}`, 'warn');
+            }
+          }
+          
+          // Fallback: try to get from saved audit's keyword_rankings
+          if (!rankingData || rankingData.length === 0) {
+            if (savedAudit.keywordRankings && Array.isArray(savedAudit.keywordRankings)) {
+              rankingData = savedAudit.keywordRankings;
+              debugLog(`📊 Found ${rankingData.length} keywords from saved audit`, 'info');
+            }
+          }
+          
           if (!rankingData || rankingData.length === 0) {
             debugLog('⚠ No ranking keywords found. Please run the ranking scan first.', 'warn');
             alert('No ranking keywords found. Please run the ranking scan first.');
