@@ -9667,7 +9667,27 @@
         const response = await fetch(apiUrl(`/api/aigeo/gsc-entity-metrics?property=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDateStr}${keywordsParam}`));
 
         if (!response.ok) {
-          const errorData = await response.json();
+          // Try to parse as JSON, but handle non-JSON error responses
+          let errorData = null;
+          const contentType = response.headers.get('content-type') || '';
+          try {
+            if (contentType.includes('application/json')) {
+              errorData = await response.json();
+            } else {
+              // Response is not JSON (likely HTML error page)
+              const errorText = await response.text();
+              debugLog(`✗ GSC API returned non-JSON error (HTTP ${response.status}): ${errorText.substring(0, 200)}`, 'error');
+              throw new Error(`Server error (HTTP ${response.status}): ${errorText.substring(0, 100)}...`);
+            }
+          } catch (parseError) {
+            // If JSON parsing fails, use the parse error or create a generic error
+            if (parseError.message && !parseError.message.includes('Server error')) {
+              debugLog(`✗ Failed to parse error response: ${parseError.message}`, 'error');
+              throw new Error(`Server error (HTTP ${response.status}): Unable to parse error response. The API may be experiencing issues.`);
+            }
+            throw parseError;
+          }
+          
           debugLog(`✗ GSC API error: ${errorData.message || errorData.error}`, 'error');
           if (errorData.details) {
             debugLog(`Details: ${errorData.details}`, 'error');
