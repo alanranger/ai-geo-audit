@@ -3323,13 +3323,13 @@
                       <div>Search volume <span class="sort-indicator"></span></div>
                       <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Average monthly Google search volume for this keyword in the UK. Source: DataForSEO Labs – Keyword Overview.">ℹ</div>
                     </th>
-                    <th data-sort="ctr" class="sortable" title="Google Search Console. Query-only (keyword totals across all pages). Last 28 days.">
-                      <div>CTR (28d) <span class="sort-indicator"></span></div>
-                      <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Google Search Console. Query-only (keyword totals across all pages). Last 28 days (matches GSC UI).">ℹ</div>
+                    <th data-sort="ctr" class="sortable" title="Google Search Console. Query-only (keyword totals across all pages). Last ${GSC_WINDOW_DAYS} days.">
+                      <div>CTR (${GSC_WINDOW_DAYS}d) <span class="sort-indicator"></span></div>
+                      <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Google Search Console. Query-only (keyword totals across all pages). Last ${GSC_WINDOW_DAYS} days (matches GSC UI).">ℹ</div>
                     </th>
-                    <th data-sort="impressions30d" class="sortable" title="Google Search Console. Query-only (keyword totals across all pages). Last 28 days.">
-                      <div>Impressions (28d) <span class="sort-indicator"></span></div>
-                      <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Google Search Console. Query-only (keyword totals across all pages). Last 28 days (matches GSC UI).">ℹ</div>
+                    <th data-sort="impressions30d" class="sortable" title="Google Search Console. Query-only (keyword totals across all pages). Last ${GSC_WINDOW_DAYS} days.">
+                      <div>Impressions (${GSC_WINDOW_DAYS}d) <span class="sort-indicator"></span></div>
+                      <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Google Search Console. Query-only (keyword totals across all pages). Last ${GSC_WINDOW_DAYS} days (matches GSC UI).">ℹ</div>
                     </th>
                     <th data-sort="opportunityScore" class="sortable" title="Keyword opportunity score&#10;Combines three signals for this tracked keyword:&#10;• Search volume share (how much search volume this query represents in your tracked set - global, not filter-relative).&#10;• Classic ranking strength (page 1 vs page 2+ and current position).&#10;• AI usage (whether AI Overviews exist and if you're cited).&#10;Higher scores highlight the best &quot;bang-for-buck&quot; queries to improve first.">
                       <div>Opportunity score <span class="sort-indicator"></span></div>
@@ -3458,7 +3458,10 @@
                 <h5>Your cited pages</h5>
                 <ul id="ranking-ai-detail-our-pages" class="ranking-ai-detail-list"></ul>
 
-                <h5>Other cited domains</h5>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                  <h5 style="margin: 0;">Other cited domains</h5>
+                  <button id="backfill-domain-ranks-btn" onclick="backfillMissingDomainRanks()" style="padding: 0.375rem 0.75rem; font-size: 0.75rem; background: #2563eb; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;" title="Fetch Domain Rank for domains currently showing '—'">Backfill Missing Ranks</button>
+                </div>
                 <div style="overflow-x: auto; margin-top: 0.5rem; max-width: 100%;">
                   <table id="ranking-ai-detail-competitors-table" style="width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 0.8rem;">
                     <thead>
@@ -3652,6 +3655,43 @@
         return `${API_BASE_URL}${cleanPath}`;
       };
     })();
+    
+    // ======================
+    // GSC Date Range Configuration
+    // ======================
+    // Centralized constant for GSC window (matches GSC UI default)
+    const GSC_WINDOW_DAYS = 28;
+    
+    /**
+     * Get GSC date range helper (matches backend utils.js getGscDateRange)
+     * @param {number} daysBack - Number of days to look back (default: GSC_WINDOW_DAYS)
+     * @param {number} endOffsetDays - Days to subtract from today for end date (default: 1 = yesterday)
+     * @returns {Object} { startDate, endDate } as ISO strings (YYYY-MM-DD)
+     */
+    function getGscDateRange(daysBack = GSC_WINDOW_DAYS, endOffsetDays = 1) {
+      // End date = yesterday (matches GSC UI behavior - today is often partial)
+      const end = new Date();
+      end.setDate(end.getDate() - endOffsetDays);
+      end.setHours(0, 0, 0, 0);
+      
+      // Start date = end date - (daysBack - 1) days (inclusive range)
+      const start = new Date(end);
+      start.setDate(start.getDate() - (daysBack - 1));
+      start.setHours(0, 0, 0, 0);
+      
+      // Format as YYYY-MM-DD
+      const formatDate = (date) => {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      };
+      
+      return {
+        startDate: formatDate(start),
+        endDate: formatDate(end)
+      };
+    }
     
     function safeSetLocalStorage(key, value) {
       try {
@@ -26903,11 +26943,11 @@ Final Score: ${score}/100`;
           const ctrPercent = queryTotal.ctr.toFixed(1);
           tdCtr.textContent = `${ctrPercent}%`;
           tdCtr.style.color = '#1e293b';
-          tdCtr.title = "Google Search Console. Query-only (keyword totals across all pages). Last 28 days (matches GSC UI).";
+          tdCtr.title = `Google Search Console. Query-only (keyword totals across all pages). Last ${GSC_WINDOW_DAYS} days (matches GSC UI).`;
         } else {
           tdCtr.textContent = "—";
           tdCtr.style.color = '#94a3b8';
-          tdCtr.title = "No query totals returned for this keyword in the last 28 days.";
+          tdCtr.title = `No query totals returned for this keyword in the last ${GSC_WINDOW_DAYS} days.`;
         }
         tr.appendChild(tdCtr);
 
@@ -26916,11 +26956,11 @@ Final Score: ${score}/100`;
         if (queryTotal && queryTotal.impressions != null && queryTotal.impressions > 0) {
           tdImpressions.textContent = queryTotal.impressions.toLocaleString();
           tdImpressions.style.color = '#1e293b';
-          tdImpressions.title = "Google Search Console. Query-only (keyword totals across all pages). Last 28 days (matches GSC UI).";
+          tdImpressions.title = `Google Search Console. Query-only (keyword totals across all pages). Last ${GSC_WINDOW_DAYS} days (matches GSC UI).`;
         } else {
           tdImpressions.textContent = "—";
           tdImpressions.style.color = '#94a3b8';
-          tdImpressions.title = "No query totals returned for this keyword in the last 28 days.";
+          tdImpressions.title = `No query totals returned for this keyword in the last ${GSC_WINDOW_DAYS} days.`;
         }
         tr.appendChild(tdImpressions);
 
@@ -27283,7 +27323,16 @@ Final Score: ${score}/100`;
       
       // 1. Target page totals (left half) - page-only GSC data
       html += `<div class="scorecard-section" style="flex: 1 1 50%; min-width: 0; display: flex; flex-direction: column; height: 100%;">`;
-      html += `<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">1. Target page totals (GSC, 28d) <span title="All queries to this page, last 28 days (matches GSC Pages tab with no query filter)." style="opacity: 0.6; cursor: help; font-size: 0.75rem;">ℹ</span></h5>`;
+      html += `<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">1. Target page totals (GSC, ${GSC_WINDOW_DAYS}d) <span title="All queries to this page, last ${GSC_WINDOW_DAYS} days (matches GSC Pages tab with no query filter)." style="opacity: 0.6; cursor: help; font-size: 0.75rem;">ℹ</span></h5>`;
+      // Display target page URL (clickable)
+      const canonicalUrl = scorecardData.ranking_url || scorecardData.best_url || '';
+      if (canonicalUrl) {
+        html += `<div style="margin-bottom: 0.75rem; padding-left: 0.75rem;">`;
+        html += `<div style="font-size: 0.8125rem; color: #64748b; margin-bottom: 0.25rem;">Target page (all queries):</div>`;
+        html += `<a href="${canonicalUrl}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8125rem; color: #2563eb; text-decoration: underline; word-break: break-all; display: inline-block; max-width: 100%;" title="Open target page in new tab">${canonicalUrl}</a>`;
+        html += `<div style="font-size: 0.75rem; color: #94a3b8; margin-top: 0.25rem;" title="Totals for this page across all search queries (not just this keyword).">ℹ Totals for this page across all search queries (not just this keyword).</div>`;
+        html += `</div>`;
+      }
       html += `<div style="padding-left: 0.75rem;" id="scorecard-page-totals-${scorecardData.keyword.replace(/[^a-z0-9]/gi, '_')}">`;
       html += `<div style="color: #3d3d3d; font-size: 0.875rem; font-weight: 400;">Loading page totals...</div>`;
       html += `</div></div>`;
@@ -27322,7 +27371,7 @@ Final Score: ${score}/100`;
 
       // 3. CTR & snippet (query-only)
       html += `<div class="scorecard-section">`;
-      html += `<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">3. CTR & snippet (GSC, 28d) <span title="Query-only totals for this keyword (matches GSC Queries tab)." style="opacity: 0.6; cursor: help; font-size: 0.75rem;">ℹ</span></h5>`;
+      html += `<h5 style="font-size: 0.95rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">3. CTR & snippet (GSC, ${GSC_WINDOW_DAYS}d) <span title="Query-only totals for this keyword (matches GSC Queries tab)." style="opacity: 0.6; cursor: help; font-size: 0.75rem;">ℹ</span></h5>`;
       html += `<div style="padding-left: 0.75rem;">`;
       
       // Get query-only totals from queryTotals
@@ -27355,7 +27404,7 @@ Final Score: ${score}/100`;
         
         html += `<div style="margin-bottom: 0.75rem;">`;
         html += `<div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.5rem; font-size: 0.875rem; color: #3d3d3d; font-weight: 400;">`;
-        html += `<span>CTR (last 28 days): <strong style="color: #1e293b;">${ctrPercent}%</strong></span>`;
+        html += `<span>CTR (last ${GSC_WINDOW_DAYS} days): <strong style="color: #1e293b;">${ctrPercent}%</strong></span>`;
         html += `<span>·</span>`;
         html += `<span>Impressions: <strong style="color: #1e293b;">${impressionsFormatted}</strong></span>`;
         html += `<span>·</span>`;
@@ -27381,7 +27430,7 @@ Final Score: ${score}/100`;
         }
       } else {
         // No query-only data found for last 28 days
-        html += `<p style="color: #3d3d3d; font-size: 0.875rem; line-height: 1.6; font-weight: 400;">No query-only totals returned for this keyword in the last 28 days.</p>`;
+        html += `<p style="color: #3d3d3d; font-size: 0.875rem; line-height: 1.6; font-weight: 400;">No query-only totals returned for this keyword in the last ${GSC_WINDOW_DAYS} days.</p>`;
       }
       html += `</div></div>`;
       
@@ -27769,19 +27818,10 @@ Final Score: ${score}/100`;
             const savedAudit = loadAuditResultsSync();
             const propertyUrl = savedAudit?.propertyUrl || window.lastAuditPropertyUrl || 'https://www.alanranger.com';
             
-            // Calculate date range (last 28 days, ending yesterday - matches GSC UI)
-            const endDate = new Date();
-            endDate.setDate(endDate.getDate() - 1); // Yesterday (GSC UI typically shows data up to yesterday)
-            const startDate = new Date(endDate);
-            startDate.setDate(startDate.getDate() - 27); // 28 days total (inclusive)
-            const formatDate = (date) => {
-              const year = date.getFullYear();
-              const month = String(date.getMonth() + 1).padStart(2, '0');
-              const day = String(date.getDate()).padStart(2, '0');
-              return `${year}-${month}-${day}`;
-            };
+            // Calculate date range using centralized helper (last 28 days, ending yesterday - matches GSC UI)
+            const { startDate, endDate } = getGscDateRange(GSC_WINDOW_DAYS, 1);
             
-            const response = await fetch(apiUrl(`/api/aigeo/gsc-page-totals?property=${encodeURIComponent(propertyUrl)}&pageUrl=${encodeURIComponent(scorecardData.ranking_url)}&startDate=${formatDate(startDate)}&endDate=${formatDate(endDate)}`));
+            const response = await fetch(apiUrl(`/api/aigeo/gsc-page-totals?property=${encodeURIComponent(propertyUrl)}&pageUrl=${encodeURIComponent(scorecardData.ranking_url)}&startDate=${startDate}&endDate=${endDate}`));
             
             if (response.ok) {
               const data = await response.json();
@@ -27802,7 +27842,7 @@ Final Score: ${score}/100`;
                 pageHtml += `</div>`;
                 pageTotalsEl.innerHTML = pageHtml;
               } else {
-                pageTotalsEl.innerHTML = `<div style="color: #64748b; font-size: 0.875rem;">No page totals returned for this URL in the last 30 days.</div>`;
+                pageTotalsEl.innerHTML = `<div style="color: #64748b; font-size: 0.875rem;">No page totals returned for this URL in the last ${GSC_WINDOW_DAYS} days.</div>`;
               }
             } else {
               pageTotalsEl.innerHTML = `<div style="color: #64748b; font-size: 0.875rem;">Unable to load page totals.</div>`;
@@ -27821,19 +27861,10 @@ Final Score: ${score}/100`;
             const savedAudit = loadAuditResultsSync();
             const propertyUrl = savedAudit?.propertyUrl || window.lastAuditPropertyUrl || 'https://www.alanranger.com';
             
-            // Calculate date range (last 28 days, ending yesterday - matches GSC UI)
-            const endDate = new Date();
-            endDate.setDate(endDate.getDate() - 1); // Yesterday (GSC UI typically shows data up to yesterday)
-            const startDate = new Date(endDate);
-            startDate.setDate(startDate.getDate() - 27); // 28 days total (inclusive)
-            const formatDate = (date) => {
-              const year = date.getFullYear();
-              const month = String(date.getMonth() + 1).padStart(2, '0');
-              const day = String(date.getDate()).padStart(2, '0');
-              return `${year}-${month}-${day}`;
-            };
+            // Calculate date range using centralized helper (last 28 days, ending yesterday - matches GSC UI)
+            const { startDate, endDate } = getGscDateRange(GSC_WINDOW_DAYS, 1);
             
-            const response = await fetch(apiUrl(`/api/aigeo/gsc-query-pages?property=${encodeURIComponent(propertyUrl)}&query=${encodeURIComponent(scorecardData.keyword)}&startDate=${formatDate(startDate)}&endDate=${formatDate(endDate)}`));
+            const response = await fetch(apiUrl(`/api/aigeo/gsc-query-pages?property=${encodeURIComponent(propertyUrl)}&query=${encodeURIComponent(scorecardData.keyword)}&startDate=${startDate}&endDate=${endDate}`));
             
             if (response.ok) {
               const data = await response.json();
@@ -28316,6 +28347,146 @@ Final Score: ${score}/100`;
       }
 
       return out;
+    }
+
+    /**
+     * Backfill missing Domain Ranks for domains currently showing "—"
+     * Collects domains from "Other cited domains" table and competitor tables that have missing ranks
+     */
+    async function backfillMissingDomainRanks() {
+      const btn = document.getElementById('backfill-domain-ranks-btn');
+      if (!btn) return;
+      
+      // Disable button and show loading state
+      const originalText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Backfilling...';
+      btn.style.opacity = '0.6';
+      btn.style.cursor = 'not-allowed';
+      
+      try {
+        // Collect domains with missing ranks from "Other cited domains" table
+        const compTbody = document.getElementById('ranking-ai-detail-competitors-body');
+        const missingDomains = new Set();
+        
+        if (compTbody) {
+          const rankCells = compTbody.querySelectorAll('td[data-domain]');
+          rankCells.forEach(cell => {
+            // Check if cell shows "—" (missing rank)
+            const cellText = cell.textContent.trim();
+            if (cellText === '—' || cellText === '') {
+              const domain = cell.dataset.domain;
+              if (domain) {
+                const normalized = normalizeDomainForStrength(domain);
+                if (normalized) {
+                  missingDomains.add(normalized);
+                }
+              }
+            }
+          });
+        }
+        
+        // Also check competitor tables in main ranking view
+        const competitorTbody = document.getElementById('ranking-ai-competitors-body');
+        if (competitorTbody) {
+          const competitorCells = competitorTbody.querySelectorAll('td[data-domain]');
+          competitorCells.forEach(cell => {
+            const cellText = cell.textContent.trim();
+            if (cellText === '—' || cellText === '') {
+              const domain = cell.dataset.domain;
+              if (domain) {
+                const normalized = normalizeDomainForStrength(domain);
+                if (normalized) {
+                  missingDomains.add(normalized);
+                }
+              }
+            }
+          });
+        }
+        
+        const domainsToBackfill = Array.from(missingDomains);
+        
+        if (domainsToBackfill.length === 0) {
+          alert('No domains with missing ranks found. All domains already have Domain Rank values.');
+          return;
+        }
+        
+        debugLog(`🔄 Backfilling Domain Rank for ${domainsToBackfill.length} domains: ${domainsToBackfill.slice(0, 10).join(', ')}${domainsToBackfill.length > 10 ? '...' : ''}`, 'info');
+        
+        // Call backfill API
+        const adminToken = localStorage.getItem('admin_token') || '';
+        const response = await fetch(apiUrl('/api/domain-strength/backfill'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-admin-token': adminToken
+          },
+          body: JSON.stringify({
+            mode: 'list',
+            domains: domainsToBackfill,
+            maxNewDomains: domainsToBackfill.length,
+            dryRun: false,
+            source: 'ui-backfill'
+          })
+        });
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Backfill failed: ${errorText}`);
+        }
+        
+        const result = await response.json();
+        
+        if (result.status === 'ok') {
+          debugLog(`✅ Backfill complete: ${result.processed} processed, ${result.skipped_existing} skipped, ${result.errors?.length || 0} errors`, 'success');
+          
+          // Clear domain strength cache for backfilled domains
+          domainsToBackfill.forEach(d => {
+            __domainStrengthLatestCache.delete(d);
+          });
+          
+          // Refresh domain rank cells
+          if (compTbody) {
+            const rankCells = compTbody.querySelectorAll('td[data-domain]');
+            const domains = Array.from(rankCells).map(cell => normalizeDomainForStrength(cell.dataset.domain || '')).filter(Boolean);
+            if (domains.length > 0) {
+              const strengthByDomain = await fetchLatestDomainStrengthForDomains(domains);
+              rankCells.forEach(cell => {
+                const d = normalizeDomainForStrength(cell.dataset.domain || '');
+                const strength = strengthByDomain[d] || null;
+                cell.innerHTML = renderDomainRankCellHtml(strength);
+              });
+            }
+          }
+          
+          // Also refresh competitor table if visible
+          if (competitorTbody) {
+            const competitorCells = competitorTbody.querySelectorAll('td[data-domain]');
+            const competitorDomains = Array.from(competitorCells).map(cell => normalizeDomainForStrength(cell.dataset.domain || '')).filter(Boolean);
+            if (competitorDomains.length > 0) {
+              const strengthByDomain = await fetchLatestDomainStrengthForDomains(competitorDomains);
+              competitorCells.forEach(cell => {
+                const d = normalizeDomainForStrength(cell.dataset.domain || '');
+                const strength = strengthByDomain[d] || null;
+                cell.innerHTML = renderDomainRankCellHtml(strength);
+              });
+            }
+          }
+          
+          alert(`Domain Rank backfill complete!\n\nProcessed: ${result.processed}\nSkipped (already exist): ${result.skipped_existing}\nErrors: ${result.errors?.length || 0}`);
+        } else {
+          throw new Error(result.message || 'Backfill failed');
+        }
+      } catch (err) {
+        debugLog(`✗ Domain Rank backfill error: ${err.message}`, 'error');
+        alert(`Failed to backfill Domain Ranks: ${err.message}`);
+      } finally {
+        // Restore button state
+        btn.disabled = false;
+        btn.textContent = originalText;
+        btn.style.opacity = '1';
+        btn.style.cursor = 'pointer';
+      }
     }
 
     function renderRankingAiCompetitors(rows) {
