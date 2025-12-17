@@ -671,87 +671,183 @@ export default async function handler(req, res) {
       console.log('[Supabase Save] ✓ Successfully inserted new audit results');
     }
 
-    // Backfill invalid money_segment_metrics for historical dates (last 28 days)
-    // If current audit has valid metrics, use them to fix historical dates with all-zero metrics
-    if (moneySegmentMetrics && !isPartialUpdate) {
+    // Calculate money_segment_metrics per-date for the last 28 days using current audit's moneyPagePriorityData
+    // This ensures all dates in the GSC window have proper metrics, even if the audit was partial
+    if (moneySegmentMetrics && moneyPagePriorityData && searchData?.timeseries && !isPartialUpdate) {
       try {
-        const currentDate = new Date(auditDate);
-        const twentyEightDaysAgo = new Date(currentDate);
-        twentyEightDaysAgo.setDate(twentyEightDaysAgo.getDate() - 28);
-        const startDateStr = twentyEightDaysAgo.toISOString().split('T')[0];
+        const timeseries = Array.isArray(searchData.timeseries) ? searchData.timeseries : [];
+        const allMoney = moneySegmentMetrics.allMoney || {};
         
         // Check if current metrics are valid (not all zeros)
-        const allMoney = moneySegmentMetrics.allMoney || {};
         const hasValidMetrics = allMoney.clicks > 0 || allMoney.impressions > 0;
         
-        if (hasValidMetrics) {
-          console.log(`[Supabase Save] Backfilling money_segment_metrics for historical dates from ${startDateStr} to ${auditDate}`);
-          
-          // Fetch all audit dates in the last 28 days
-          const historyQuery = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=gte.${startDateStr}&audit_date=lte.${auditDate}&select=audit_date,money_segment_metrics&order=audit_date.asc`;
-          const historyResponse = await fetch(historyQuery, {
-            method: 'GET',
-            headers: {
-              'Content-Type': 'application/json',
-              'apikey': supabaseKey,
-              'Authorization': `Bearer ${supabaseKey}`
-            }
+        if (hasValidMetrics && timeseries.length > 0) {
+          // Calculate total site-wide metrics for the current audit date from timeseries
+          const currentDateData = timeseries.find(t => {
+            const tsDate = t.date ? (t.date.split('T')[0]) : null;
+            return tsDate === auditDate;
           });
           
-          if (historyResponse.ok) {
-            const historyRecords = await historyResponse.json();
-            const updates = [];
+          if (currentDateData && currentDateData.clicks > 0) {
+            // Calculate proportion of money pages from current audit
+            const moneyClicksProportion = allMoney.clicks / currentDateData.clicks;
+            const moneyImpressionsProportion = allMoney.impressions / currentDateData.impressions;
             
-            for (const record of historyRecords) {
-              // Skip current audit date (already saved)
-              if (record.audit_date === auditDate) continue;
+            // Calculate segment proportions from current metrics
+            const segmentProportions = {
+              allMoney: { clicks: 1.0, impressions: 1.0 },
+              landingPages: {
+                clicks: (moneySegmentMetrics.landingPages?.clicks || 0) / allMoney.clicks,
+                impressions: (moneySegmentMetrics.landingPages?.impressions || 0) / allMoney.impressions
+              },
+              eventPages: {
+                clicks: (moneySegmentMetrics.eventPages?.clicks || 0) / allMoney.clicks,
+                impressions: (moneySegmentMetrics.eventPages?.impressions || 0) / allMoney.impressions
+              },
+              productPages: {
+                clicks: (moneySegmentMetrics.productPages?.clicks || 0) / allMoney.clicks,
+                impressions: (moneySegmentMetrics.productPages?.impressions || 0) / allMoney.impressions
+              }
+            };
+            
+            console.log(`[Supabase Save] Calculating per-date money_segment_metrics for ${timeseries.length} dates using proportions`);
+            console.log(`[Supabase Save] Money pages proportion: ${(moneyClicksProportion * 100).toFixed(1)}% clicks, ${(moneyImpressionsProportion * 100).toFixed(1)}% impressions`);
+            
+            // Get all audit dates in the timeseries range
+            const timeseriesDates = timeseries.map(t => t.date ? t.date.split('T')[0] : null).filter(Boolean);
+            const minDate = timeseriesDates.length > 0 ? timeseriesDates[0] : null;
+            const maxDate = timeseriesDates.length > 0 ? timeseriesDates[timeseriesDates.length - 1] : null;
+            
+            if (minDate && maxDate) {
+              // Fetch all audit dates in the timeseries range
+              const historyQuery = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=gte.${minDate}&audit_date=lte.${maxDate}&select=audit_date,money_segment_metrics&order=audit_date.asc`;
+              const historyResponse = await fetch(historyQuery, {
+                method: 'GET',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'apikey': supabaseKey,
+                  'Authorization': `Bearer ${supabaseKey}`
+                }
+              });
               
-              // Check if metrics are invalid (null, undefined, or all zeros)
-              let metrics = record.money_segment_metrics;
-              if (typeof metrics === 'string') {
-                try {
-                  metrics = JSON.parse(metrics);
-                } catch (e) {
-                  metrics = null;
+              if (historyResponse.ok) {
+                const historyRecords = await historyResponse.json();
+                const historyMap = new Map(historyRecords.map(r => [r.audit_date, r]));
+                const updates = [];
+                
+                // Calculate metrics for each date in timeseries
+                for (const tsPoint of timeseries) {
+                  const tsDate = tsPoint.date ? tsPoint.date.split('T')[0] : null;
+                  if (!tsDate) continue;
+                  
+                  // Skip current audit date (already saved with full calculation)
+                  if (tsDate === auditDate) continue;
+                  
+                  // Check if this date needs updating (missing or all zeros)
+                  const existingRecord = historyMap.get(tsDate);
+                  let needsUpdate = false;
+                  
+                  if (!existingRecord) {
+                    // No audit record for this date - skip (can't create audit records without full audit)
+                    continue;
+                  }
+                  
+                  let existingMetrics = existingRecord.money_segment_metrics;
+                  if (typeof existingMetrics === 'string') {
+                    try {
+                      existingMetrics = JSON.parse(existingMetrics);
+                    } catch (e) {
+                      existingMetrics = null;
+                    }
+                  }
+                  
+                  const isInvalid = !existingMetrics || 
+                    (existingMetrics.allMoney && existingMetrics.allMoney.clicks === 0 && existingMetrics.allMoney.impressions === 0) ||
+                    (!existingMetrics.allMoney);
+                  
+                  if (isInvalid && tsPoint.clicks > 0) {
+                    // Calculate money page metrics for this date using proportions
+                    const dateMoneyClicks = Math.round(tsPoint.clicks * moneyClicksProportion);
+                    const dateMoneyImpressions = Math.round(tsPoint.impressions * moneyImpressionsProportion);
+                    const dateMoneyCtr = dateMoneyImpressions > 0 ? dateMoneyClicks / dateMoneyImpressions : 0;
+                    
+                    // Calculate segment metrics using proportions
+                    const calculatedMetrics = {
+                      allMoney: {
+                        clicks: dateMoneyClicks,
+                        impressions: dateMoneyImpressions,
+                        ctr: dateMoneyCtr,
+                        avgPosition: allMoney.avgPosition || 0, // Use current audit's avg position
+                        behaviourScore: allMoney.behaviourScore || 0
+                      },
+                      landingPages: {
+                        clicks: Math.round(dateMoneyClicks * segmentProportions.landingPages.clicks),
+                        impressions: Math.round(dateMoneyImpressions * segmentProportions.landingPages.impressions),
+                        ctr: 0,
+                        avgPosition: moneySegmentMetrics.landingPages?.avgPosition || 0,
+                        behaviourScore: moneySegmentMetrics.landingPages?.behaviourScore || 0
+                      },
+                      eventPages: {
+                        clicks: Math.round(dateMoneyClicks * segmentProportions.eventPages.clicks),
+                        impressions: Math.round(dateMoneyImpressions * segmentProportions.eventPages.impressions),
+                        ctr: 0,
+                        avgPosition: moneySegmentMetrics.eventPages?.avgPosition || 0,
+                        behaviourScore: moneySegmentMetrics.eventPages?.behaviourScore || 0
+                      },
+                      productPages: {
+                        clicks: Math.round(dateMoneyClicks * segmentProportions.productPages.clicks),
+                        impressions: Math.round(dateMoneyImpressions * segmentProportions.productPages.impressions),
+                        ctr: 0,
+                        avgPosition: moneySegmentMetrics.productPages?.avgPosition || 0,
+                        behaviourScore: moneySegmentMetrics.productPages?.behaviourScore || 0
+                      }
+                    };
+                    
+                    // Calculate CTRs for segments
+                    if (calculatedMetrics.landingPages.impressions > 0) {
+                      calculatedMetrics.landingPages.ctr = calculatedMetrics.landingPages.clicks / calculatedMetrics.landingPages.impressions;
+                    }
+                    if (calculatedMetrics.eventPages.impressions > 0) {
+                      calculatedMetrics.eventPages.ctr = calculatedMetrics.eventPages.clicks / calculatedMetrics.eventPages.impressions;
+                    }
+                    if (calculatedMetrics.productPages.impressions > 0) {
+                      calculatedMetrics.productPages.ctr = calculatedMetrics.productPages.clicks / calculatedMetrics.productPages.impressions;
+                    }
+                    
+                    updates.push({
+                      audit_date: tsDate,
+                      money_segment_metrics: calculatedMetrics
+                    });
+                  }
+                }
+                
+                // Batch update records
+                if (updates.length > 0) {
+                  console.log(`[Supabase Save] Updating ${updates.length} audit date(s) with calculated money_segment_metrics from timeseries`);
+                  for (const update of updates) {
+                    const updateUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${update.audit_date}`;
+                    await fetch(updateUrl, {
+                      method: 'PATCH',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        'apikey': supabaseKey,
+                        'Authorization': `Bearer ${supabaseKey}`
+                      },
+                      body: JSON.stringify({
+                        money_segment_metrics: ensureJson(update.money_segment_metrics)
+                      })
+                    });
+                  }
+                  console.log(`[Supabase Save] ✓ Calculated and saved money_segment_metrics for ${updates.length} date(s) from timeseries data`);
                 }
               }
-              
-              const isInvalid = !metrics || 
-                (metrics.allMoney && metrics.allMoney.clicks === 0 && metrics.allMoney.impressions === 0) ||
-                (!metrics.allMoney);
-              
-              if (isInvalid) {
-                updates.push({
-                  audit_date: record.audit_date,
-                  money_segment_metrics: moneySegmentMetrics
-                });
-              }
-            }
-            
-            // Batch update invalid records
-            if (updates.length > 0) {
-              console.log(`[Supabase Save] Updating ${updates.length} historical audit(s) with valid money_segment_metrics`);
-              for (const update of updates) {
-                const updateUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${update.audit_date}`;
-                await fetch(updateUrl, {
-                  method: 'PATCH',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'apikey': supabaseKey,
-                    'Authorization': `Bearer ${supabaseKey}`
-                  },
-                  body: JSON.stringify({
-                    money_segment_metrics: ensureJson(update.money_segment_metrics)
-                  })
-                });
-              }
-              console.log(`[Supabase Save] ✓ Backfilled money_segment_metrics for ${updates.length} historical date(s)`);
             }
           }
         }
       } catch (backfillError) {
-        // Don't fail the entire save if backfill fails
-        console.warn('[Supabase Save] ⚠ Error during backfill (non-critical):', backfillError.message);
+        // Don't fail the entire save if calculation fails
+        console.warn('[Supabase Save] ⚠ Error during per-date calculation (non-critical):', backfillError.message);
+        console.warn('[Supabase Save] Stack:', backfillError.stack);
       }
     }
 
