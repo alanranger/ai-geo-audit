@@ -20791,6 +20791,45 @@ Final Score: ${score}/100`;
                   return dateA.localeCompare(dateB);
                 });
                 
+                // CRITICAL: Validate and smooth Authority scores
+                // Backlink scores can drop to 0 if CSV isn't loaded, causing Authority to fluctuate wildly
+                // Use last known good backlink score if current one is suspiciously low
+                let lastGoodBacklinkScore = null;
+                contentSchemaHistory.forEach(record => {
+                  const backlinkScore = record.authorityBacklinkScore || record.authority_backlink_score;
+                  if (backlinkScore !== null && backlinkScore !== undefined && backlinkScore > 0) {
+                    lastGoodBacklinkScore = backlinkScore;
+                  } else if (lastGoodBacklinkScore !== null && backlinkScore === 0) {
+                    // Backlink score dropped to 0 - likely CSV not loaded, use last good value
+                    record._useLastGoodBacklink = true;
+                    record._lastGoodBacklinkScore = lastGoodBacklinkScore;
+                    debugLog(`[Authority Validation] ⚠️ Backlink score is 0 for ${record.date}, using last good value (${lastGoodBacklinkScore})`, 'warn');
+                  }
+                });
+                
+                // Recalculate Authority scores with smoothed backlink data
+                contentSchemaHistory.forEach(record => {
+                  if (record._useLastGoodBacklink && record.authorityScore !== null && record.authorityScore !== undefined) {
+                    const behaviour = record.authorityBehaviourScore || record.authority_behaviour_score || 0;
+                    const ranking = record.authorityRankingScore || record.authority_ranking_score || 0;
+                    const backlinks = record._lastGoodBacklinkScore || 0;
+                    const reviews = record.authorityReviewScore || record.authority_review_score || 0;
+                    
+                    // Recalculate Authority with smoothed backlink score
+                    const recalculated = Math.round(
+                      0.4 * behaviour +
+                      0.2 * ranking +
+                      0.2 * backlinks +
+                      0.2 * reviews
+                    );
+                    
+                    if (recalculated !== record.authorityScore) {
+                      debugLog(`[Authority Validation] Recalculated Authority for ${record.date}: ${record.authorityScore} → ${recalculated} (using last good backlink score ${backlinks})`, 'info');
+                      record._recalculatedAuthorityScore = recalculated; // Store separately, don't overwrite original
+                    }
+                  }
+                });
+                
                 // Create maps of dates to scores from Supabase
                 // Normalize dates to YYYY-MM-DD format (Supabase might return with timezone)
                 // latestAuditDate is already tracked from the deduplication loop above
@@ -20867,9 +20906,18 @@ Final Score: ${score}/100`;
                       }
                     }
                     // Authority data (use stored Authority score if available, calculated with new formula)
+                    // CRITICAL: Use recalculated Authority score if backlink smoothing was applied
                     if (record.authorityScore !== null && record.authorityScore !== undefined) {
-                      authorityMap.set(normalizedDate, record.authorityScore);
-                      debugLog(`Mapped Authority: ${normalizedDate} = ${record.authorityScore}`, 'info');
+                      // Use recalculated score if available (from backlink smoothing)
+                      const authorityScoreToUse = record._recalculatedAuthorityScore !== undefined 
+                        ? record._recalculatedAuthorityScore 
+                        : record.authorityScore;
+                      authorityMap.set(normalizedDate, authorityScoreToUse);
+                      if (record._recalculatedAuthorityScore !== undefined) {
+                        debugLog(`Mapped Authority (smoothed): ${normalizedDate} = ${authorityScoreToUse} (was ${record.authorityScore})`, 'info');
+                      } else {
+                        debugLog(`Mapped Authority: ${normalizedDate} = ${authorityScoreToUse}`, 'info');
+                      }
                     }
                     // Segmented Authority data (new: store segmented scores for historical tracking)
                     if (record.authorityBySegment !== null && record.authorityBySegment !== undefined) {
