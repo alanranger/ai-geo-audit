@@ -882,8 +882,34 @@ export default async function handler(req, res) {
           serviceAreaScore: record.service_area_score,
           napConsistencyScore: record.nap_consistency_score,
           knowledgePanelDetected: record.knowledge_panel_detected,
-          serviceAreas: record.service_areas || [],
-          locations: record.locations || [],
+          serviceAreas: (() => {
+            const sa = record.service_areas;
+            if (!sa) return [];
+            if (typeof sa === 'string') {
+              try {
+                return JSON.parse(sa);
+              } catch (e) {
+                console.warn('[get-latest-audit] Failed to parse service_areas JSON:', e.message);
+                return [];
+              }
+            }
+            return Array.isArray(sa) ? sa : [];
+          })(),
+          locations: (() => {
+            const loc = record.locations;
+            if (!loc) return [];
+            // Parse if stored as JSON string (Supabase JSONB may return as string)
+            if (typeof loc === 'string') {
+              try {
+                const parsed = JSON.parse(loc);
+                return Array.isArray(parsed) ? parsed : [];
+              } catch (e) {
+                console.warn('[get-latest-audit] Failed to parse locations JSON:', e.message);
+                return [];
+              }
+            }
+            return Array.isArray(loc) ? loc : [];
+          })(),
           localBusinessSchemaPages: record.local_business_schema_pages || 0
         }
       } : null,
