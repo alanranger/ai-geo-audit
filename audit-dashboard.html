@@ -16359,13 +16359,14 @@ Final Score: ${score}/100`;
           if (!dateStr) continue;
           const date = new Date(dateStr);
           if (Number.isNaN(date.getTime())) continue;
-          // API returns camelCase: moneySegmentMetrics (not snake_case)
-          if (!row.moneySegmentMetrics) continue;
+          // Include ALL audits, even if they don't have moneySegmentMetrics
+          // We'll use forward-fill to populate missing values from last known good value
           
           validAudits.push({
             date: date,
             dateStr: dateStr,
-            metrics: row.moneySegmentMetrics
+            metrics: row.moneySegmentMetrics || null, // Allow null for partial audits
+            isPartial: row.isPartial || false
           });
         }
         
@@ -16397,23 +16398,23 @@ Final Score: ${score}/100`;
         for (const audit of last12Audits) {
           const m = audit.metrics;
           for (const key of Object.keys(segments)) {
-            const seg = m[key] || null;
-            let v = seg ? seg[metricKey] : null;
+            let v = null;
             
-            // Handle partial audits: if metrics are null/undefined, check if this is a partial audit
-            // Partial audits should use last known good value, not 0
-            if (v == null) {
-              // Check if this audit date matches a known partial audit (e.g., Dec 15 with 5 pages)
-              // If it's a partial audit and we have a last good value, use it
-              if (lastValues[key] != null) {
-                v = lastValues[key];
-              } else {
-                // No last good value - use null (will show as "—" in table)
-                v = null;
-              }
+            // Try to get value from metrics if available
+            if (m && m[key]) {
+              v = m[key][metricKey] != null ? m[key][metricKey] : null;
+            }
+            
+            // Forward-fill: if value is null/missing, use last known good value
+            // This handles partial audits (like Dec 13/15) that don't have moneySegmentMetrics
+            // but should show the last known good value instead of 0.0 or null
+            if (v == null && lastValues[key] != null) {
+              v = lastValues[key];
+              debugLog(`[KPI Tracker] Forward-filling ${key}.${metricKey} for ${audit.dateStr} with last good value: ${lastValues[key]}`, 'info');
             }
             
             // Update last value if we have a new one (not null)
+            // This ensures we always track the most recent valid value for forward-filling
             if (v != null) {
               lastValues[key] = v;
             }
