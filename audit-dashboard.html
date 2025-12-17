@@ -23801,9 +23801,18 @@ Final Score: ${score}/100`;
                 parsed.summary = normalizeSummaryFields(parsed.summary);
                 // Store as fallback before checking Supabase
                 localStorageFallback = parsed;
+                
+                // Check if localStorage data is missing search_volume (indicates stale data)
+                const keywordsMissingVolume = parsed.combinedRows.filter(r => r.search_volume == null || r.search_volume === undefined).length;
+                const hasMissingVolume = keywordsMissingVolume > 0;
+                
                 // Always check Supabase if localStorage has fewer than 10 keywords (likely stale data)
                 if (parsed.combinedRows.length < 10) {
                   debugLog(`⚠ LocalStorage has only ${parsed.combinedRows.length} keywords, checking Supabase for more...`, 'info');
+                  // Continue to Supabase check below
+                } else if (hasMissingVolume) {
+                  // Check Supabase if localStorage data is missing search_volume
+                  debugLog(`⚠ LocalStorage data is missing search_volume for ${keywordsMissingVolume}/${parsed.combinedRows.length} keywords, checking Supabase...`, 'info');
                   // Continue to Supabase check below
                 } else {
                   // Check if data is recent (within last 24 hours) - if older, check Supabase
@@ -28746,10 +28755,32 @@ Final Score: ${score}/100`;
             debugLog(`⚠ Failed to update localStorage: ${localStorageErr.message}`, 'warn');
           }
           
-          // Re-render the table to show updated CTR/Impressions
+          // CRITICAL: Reload ranking data from Supabase to get latest search_volume values
+          // The UI might be showing old localStorage data that doesn't have search_volume
+          debugLog('🔄 Reloading ranking data from Supabase to get latest search_volume...', 'info');
+          try {
+            const refreshedRankingData = await loadRankingAiDataFromStorage(true); // Force Supabase check
+            if (refreshedRankingData && refreshedRankingData.combinedRows) {
+              const mod = window.RankingAiModule;
+              if (mod && typeof mod.setData === 'function') {
+                const normalizedSummary = normalizeSummaryFields(refreshedRankingData.summary);
+                mod.setData(refreshedRankingData.combinedRows, normalizedSummary);
+                debugLog(`✓ Reloaded ${refreshedRankingData.combinedRows.length} keywords from Supabase with latest search_volume`, 'success');
+                
+                // Check how many keywords now have search_volume
+                const keywordsWithVolume = refreshedRankingData.combinedRows.filter(r => r.search_volume != null && r.search_volume !== undefined).length;
+                debugLog(`  Keywords with search_volume: ${keywordsWithVolume}/${refreshedRankingData.combinedRows.length}`, 'info');
+              }
+            }
+          } catch (reloadErr) {
+            debugLog(`⚠ Failed to reload ranking data from Supabase: ${reloadErr.message}`, 'warn');
+            // Continue anyway - at least GSC data was refreshed
+          }
+          
+          // Re-render the table to show updated CTR/Impressions and search_volume
           if (typeof renderRankingAiTab === 'function') {
             renderRankingAiTab();
-            debugLog('✓ Table re-rendered with updated GSC data', 'success');
+            debugLog('✓ Table re-rendered with updated GSC data and search_volume', 'success');
           }
           
           // Update last run timestamp
