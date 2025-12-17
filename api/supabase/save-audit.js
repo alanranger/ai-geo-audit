@@ -399,8 +399,17 @@ export default async function handler(req, res) {
       updated_at: new Date().toISOString()
     };
 
+    // CRITICAL: Check for partial updates BEFORE guardrail check
+    // Partial updates (e.g., only queryTotals) should be allowed even without other data
+    const isPartialUpdate = !scores && !schemaAudit && searchData && searchData.queryTotals;
+    const hasQueryTotalsOnly = isPartialUpdate && 
+      auditRecord.query_totals !== null && 
+      Array.isArray(auditRecord.query_totals) && 
+      auditRecord.query_totals.length > 0;
+
     // ---- Guardrails: prevent writing "null audits" and mark partials ----
     // We consider a write "invalid" (reject) if it contains no meaningful audit payload.
+    // EXCEPTION: Allow partial updates that only contain query_totals (for updating existing audits)
     const hasAnyPillarScore = [
       auditRecord.visibility_score,
       auditRecord.authority_score,
@@ -413,9 +422,11 @@ export default async function handler(req, res) {
       auditRecord.schema_pages_detail !== null ||
       auditRecord.query_pages !== null ||
       auditRecord.gsc_timeseries !== null ||
-      auditRecord.top_queries !== null;
+      auditRecord.top_queries !== null ||
+      (auditRecord.query_totals !== null && Array.isArray(auditRecord.query_totals) && auditRecord.query_totals.length > 0);
 
-    if (!hasAnyPillarScore && !hasAnyHeavyPayload) {
+    // Allow partial updates with query_totals only (for updating existing audits)
+    if (!hasAnyPillarScore && !hasAnyHeavyPayload && !hasQueryTotalsOnly) {
       console.warn('[Supabase Save] ✗ Rejecting audit write: no scores and no payload (would create null audit row)');
       return res.status(400).json({
         status: 'error',
@@ -482,6 +493,24 @@ export default async function handler(req, res) {
     // This ensures only ONE record per (property_url, audit_date) combination
     // The UNIQUE constraint on (property_url, audit_date) prevents duplicates
     
+    // CRITICAL: When doing a partial update (e.g., only queryTotals), only send non-null fields
+    // to prevent overwriting existing data with null values
+    // (isPartialUpdate was already determined above)
+    let updatePayload = auditRecord;
+    
+    if (isPartialUpdate) {
+      // Only include fields that are being updated (non-null)
+      updatePayload = {
+        property_url: auditRecord.property_url,
+        audit_date: auditRecord.audit_date
+      };
+      // Only add query_totals if it's actually an array with data
+      if (auditRecord.query_totals && Array.isArray(auditRecord.query_totals) && auditRecord.query_totals.length > 0) {
+        updatePayload.query_totals = auditRecord.query_totals;
+      }
+      console.log('[Supabase Save] ⚠ Partial update detected - only updating query_totals to prevent data loss');
+    }
+    
     // First, try to update existing record
     const updateResponse = await fetch(`${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${auditDate}`, {
       method: 'PATCH',
@@ -491,7 +520,7 @@ export default async function handler(req, res) {
         'Authorization': `Bearer ${supabaseKey}`,
         'Prefer': 'return=representation'
       },
-      body: JSON.stringify(auditRecord)
+      body: JSON.stringify(updatePayload)
     });
     
     let response = updateResponse;
@@ -521,7 +550,17 @@ export default async function handler(req, res) {
           meta: { generatedAt: new Date().toISOString() }
         });
       } else {
-        // No existing record found, need to INSERT
+        // No existing record found
+        if (isPartialUpdate) {
+          // For partial updates, don't create a new record if it doesn't exist
+          console.log('[Supabase Save] ⚠ Partial update: No existing record found, skipping INSERT (queryTotals can only be added to existing audits)');
+          return res.status(404).json({
+            status: 'error',
+            message: 'Cannot save queryTotals: No existing audit record found. Please run a full audit first.',
+            meta: { generatedAt: new Date().toISOString() }
+          });
+        }
+        // For full audits, proceed with INSERT
         console.log('[Supabase Save] No existing record found, inserting new record...');
         response = await fetch(`${supabaseUrl}/rest/v1/audit_results`, {
           method: 'POST',
@@ -535,7 +574,17 @@ export default async function handler(req, res) {
         });
       }
     } else if (updateResponse.status === 404 || updateResponse.status === 400) {
-      // Record doesn't exist, insert new one
+      // Record doesn't exist
+      if (isPartialUpdate) {
+        // For partial updates, don't create a new record if it doesn't exist
+        console.log('[Supabase Save] ⚠ Partial update: Record not found, skipping INSERT (queryTotals can only be added to existing audits)');
+        return res.status(404).json({
+          status: 'error',
+          message: 'Cannot save queryTotals: No existing audit record found. Please run a full audit first.',
+          meta: { generatedAt: new Date().toISOString() }
+        });
+      }
+      // For full audits, proceed with INSERT
       console.log('[Supabase Save] Record not found, inserting new record...');
       response = await fetch(`${supabaseUrl}/rest/v1/audit_results`, {
         method: 'POST',

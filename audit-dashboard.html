@@ -3684,6 +3684,96 @@
     // Placeholder - will be replaced by actual function when script loads
     // This is a fallback used only if no external Money Pages module is wired.
     // It returns empty metrics so the UI can show "No data" rather than crash.
+    // Manual function to fetch and save queryTotals (for debugging/fixing missing data)
+    window.fetchQueryTotalsManually = async function() {
+      try {
+        const savedAudit = loadAuditResultsSync();
+        if (!savedAudit || !savedAudit.searchData) {
+          debugLog('⚠ No audit data found in localStorage. Please run a full audit first.', 'warn');
+          return;
+        }
+        
+        // Get keywords from ranking data
+        const rankingData = window.RankingAiModule?.getData?.() || [];
+        if (!rankingData || rankingData.length === 0) {
+          debugLog('⚠ No ranking keywords found. Please run the ranking scan first.', 'warn');
+          return;
+        }
+        
+        const allKeywords = rankingData.map(r => r.keyword).filter(k => k && k.trim());
+        if (allKeywords.length === 0) {
+          debugLog('⚠ No valid keywords found in ranking data.', 'warn');
+          return;
+        }
+        
+        debugLog(`📊 Manually fetching queryTotals for ${allKeywords.length} keywords...`, 'info');
+        const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+        const dateRange = parseInt(localStorage.getItem('gsc_date_range') || '28');
+        
+        // Fetch queryTotals from GSC API
+        const keywordsParam = encodeURIComponent(JSON.stringify(allKeywords));
+        const gscResponse = await fetch(apiUrl(`/api/aigeo/gsc-entity-metrics?keywords=${keywordsParam}&days=${dateRange}`));
+        
+        if (gscResponse.ok) {
+          const gscData = await gscResponse.json();
+          if (gscData.status === 'ok' && gscData.data && Array.isArray(gscData.data.queryTotals)) {
+            const queryTotals = gscData.data.queryTotals;
+            debugLog(`✓ Fetched queryTotals for ${queryTotals.length} keywords from GSC`, 'success');
+            
+            // Merge queryTotals into searchData
+            savedAudit.searchData.queryTotals = queryTotals;
+            
+            // Use the SAME audit_date as the existing audit
+            let auditDate = new Date().toISOString().split('T')[0];
+            if (savedAudit.timestamp) {
+              try {
+                auditDate = new Date(savedAudit.timestamp).toISOString().split('T')[0];
+              } catch (e) {
+                // Use today as fallback
+              }
+            }
+            
+            // Save to Supabase
+            const saveResponse = await fetch(apiUrl('/api/supabase/save-audit'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                propertyUrl: propertyUrl,
+                auditDate: auditDate,
+                searchData: savedAudit.searchData
+              })
+            });
+            
+            if (saveResponse.ok) {
+              debugLog(`✓ Saved queryTotals to Supabase (${queryTotals.length} keywords)`, 'success');
+              
+              // Update localStorage
+              try {
+                safeSetLocalStorage('last_audit_results', savedAudit);
+                debugLog(`✓ Updated localStorage with queryTotals`, 'success');
+              } catch (localStorageErr) {
+                debugLog(`⚠ Failed to update localStorage: ${localStorageErr.message}`, 'warn');
+              }
+              
+              // Re-render the table to show the new data
+              renderRankingAiTab();
+              debugLog('✓ Table re-rendered with queryTotals data', 'success');
+            } else {
+              const errorText = await saveResponse.text();
+              debugLog(`⚠ Failed to save queryTotals to Supabase: ${saveResponse.status} - ${errorText}`, 'warn');
+            }
+          } else {
+            debugLog(`⚠ GSC API did not return queryTotals data`, 'warn');
+          }
+        } else {
+          const errorText = await gscResponse.text();
+          debugLog(`⚠ Failed to fetch queryTotals from GSC: ${gscResponse.status} - ${errorText}`, 'warn');
+        }
+      } catch (error) {
+        debugLog(`✗ Error manually fetching queryTotals: ${error.message}`, 'error');
+      }
+    };
+    
     window.buildMoneyPageMetrics = function(topPages, schemaAudit) {
       console.warn('[Money Pages] ⚠️ buildMoneyPageMetrics placeholder called - full implementation not loaded yet. This is a fallback to prevent crashes. The UI will show "No data" until the full implementation loads.');
       // Return empty array as fallback so UI can gracefully handle missing data

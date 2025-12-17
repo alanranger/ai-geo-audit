@@ -415,3 +415,6 @@ CTR = (clicks / impressions) * 100
 
 
 
+
+
+

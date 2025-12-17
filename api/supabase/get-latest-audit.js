@@ -619,7 +619,6 @@ export default async function handler(req, res) {
         queryTotals: (() => {
           const qt = record.query_totals;
           if (!qt) {
-            console.log('[get-latest-audit] query_totals is null/undefined');
             return null;
           }
           let parsed;
@@ -633,33 +632,33 @@ export default async function handler(req, res) {
           } else {
             parsed = qt;
           }
-          console.log(`[get-latest-audit] query_totals type: ${typeof parsed}, isArray: ${Array.isArray(parsed)}, value: ${JSON.stringify(parsed).substring(0, 100)}`);
+          
+          // Handle empty objects - return null instead of trying to convert
+          if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) && Object.keys(parsed).length === 0) {
+            return null;
+          }
+          
           if (Array.isArray(parsed)) {
             // Truncate to 200 items (should be enough for tracked keywords)
             if (parsed.length > 200) {
               console.warn(`[get-latest-audit] Truncating queryTotals from ${parsed.length} to 200 immediately`);
               return parsed.slice(0, 200);
             }
-            console.log(`[get-latest-audit] Returning queryTotals array with ${parsed.length} items`);
             return parsed;
           }
           // If it's an object, try to convert it to an array
           if (typeof parsed === 'object' && parsed !== null) {
-            console.warn(`[get-latest-audit] query_totals is an object, not an array. Keys: ${Object.keys(parsed).join(', ')}`);
             // If it's an object with numeric keys, it might be an array-like object
             if (Object.keys(parsed).every(key => !isNaN(parseInt(key)))) {
-              console.warn(`[get-latest-audit] Converting array-like object to array`);
               return Object.values(parsed);
             }
             // If it's an object with a single array property, extract it
             for (const key in parsed) {
               if (Array.isArray(parsed[key])) {
-                console.warn(`[get-latest-audit] Found array in object at key '${key}', extracting it`);
                 return parsed[key];
               }
             }
           }
-          console.warn(`[get-latest-audit] query_totals is not an array and cannot be converted, returning null`);
           return null;
         })(),
         // Date range used for this audit

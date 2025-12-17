@@ -8,10 +8,10 @@
 import { getGSCAccessToken, normalizePropertyUrl, parseDateRange } from './utils.js';
 
 /**
- * Normalize page URL path for client-side matching - strips query params, fragments, returns pathname
- * Used for comparing URLs in frontend (e.g., matching DataForSEO best_url to GSC pages)
+ * Normalize page URL for GSC matching - strips query params, fragments, ensures canonical format
+ * Must match the normalization used in audit-dashboard.html
  */
-function normalizeGscPagePath(url) {
+function normalizeGscPageUrl(url) {
   if (!url || typeof url !== 'string') return '';
   
   let cleanUrl = url.trim();
@@ -38,52 +38,6 @@ function normalizeGscPagePath(url) {
   } catch (e) {
     // If URL parsing fails, use manually cleaned URL
     return cleanUrl.toLowerCase().replace(/\/$/, '').trim() || '/';
-  }
-}
-
-/**
- * Build canonical full URL for GSC API page filter
- * GSC API requires full canonical URL (https://www.alanranger.com/...), not just pathname
- * @param {string} url - Input URL (can be absolute or relative)
- * @param {string} propertyUrl - Property URL from request (e.g., https://www.alanranger.com)
- * @returns {string} Full canonical URL for GSC API filter
- */
-function canonicalGscPageUrl(url, propertyUrl) {
-  if (!url || typeof url !== 'string') return '';
-  
-  let cleanUrl = url.trim();
-  
-  // Strip query parameters (srsltid, utm_*, gclid, fbclid, etc.) and fragments
-  cleanUrl = cleanUrl.split('?')[0].split('#')[0];
-  
-  try {
-    // If already absolute URL, parse and return canonical form
-    if (cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://')) {
-      const urlObj = new URL(cleanUrl);
-      // Return full URL with normalized pathname (no trailing slash, lowercase)
-      const pathname = urlObj.pathname.toLowerCase().replace(/\/$/, '') || '/';
-      return `${urlObj.protocol}//${urlObj.host}${pathname}`;
-    }
-    
-    // If relative URL, use propertyUrl as base
-    const baseUrl = normalizePropertyUrl(propertyUrl);
-    const baseUrlObj = new URL(baseUrl);
-    // Normalize pathname (no trailing slash, lowercase)
-    const pathname = cleanUrl.startsWith('/') 
-      ? cleanUrl.toLowerCase().replace(/\/$/, '') || '/'
-      : '/' + cleanUrl.toLowerCase().replace(/\/$/, '');
-    
-    return `${baseUrlObj.protocol}//${baseUrlObj.host}${pathname}`;
-  } catch (e) {
-    // Fallback: try to construct from propertyUrl + cleanUrl
-    try {
-      const baseUrl = normalizePropertyUrl(propertyUrl);
-      const pathname = cleanUrl.startsWith('/') ? cleanUrl : '/' + cleanUrl;
-      return `${baseUrl}${pathname}`.toLowerCase().replace(/\/$/, '') || `${baseUrl}/`;
-    } catch (e2) {
-      console.error('[canonicalGscPageUrl] Error constructing URL:', e2);
-      return '';
-    }
   }
 }
 
@@ -136,23 +90,14 @@ export default async function handler(req, res) {
     // Normalize property URL
     const siteUrl = normalizePropertyUrl(property);
     
-    // Build canonical full URL for GSC API filter (GSC requires full URL, not pathname)
-    const canonicalPageUrl = canonicalGscPageUrl(pageUrl, property);
-    
-    if (!canonicalPageUrl) {
-      return res.status(400).json({
-        status: 'error',
-        source: 'gsc-page-totals',
-        message: 'Invalid pageUrl: could not construct canonical URL',
-        meta: { generatedAt: new Date().toISOString() }
-      });
-    }
+    // Normalize page URL for GSC matching
+    const normalizedPageUrl = normalizeGscPageUrl(pageUrl);
     
     // Get access token
     const accessToken = await getGSCAccessToken();
     const searchConsoleUrl = `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`;
     
-    // Fetch page-only totals using full canonical URL
+    // Fetch page-only totals
     const pageResponse = await fetch(searchConsoleUrl, {
       method: 'POST',
       headers: {
@@ -166,7 +111,7 @@ export default async function handler(req, res) {
         dimensionFilterGroups: [{
           filters: [{
             dimension: 'page',
-            expression: canonicalPageUrl, // Full canonical URL (e.g., https://www.alanranger.com/free-online-photography-course)
+            expression: normalizedPageUrl,
             operator: 'equals'
           }]
         }],
@@ -187,10 +132,8 @@ export default async function handler(req, res) {
     const pageData = await pageResponse.json();
     
     // Extract metrics from response
-    // Note: GSC returns the page URL in row.keys[0], which may differ slightly from our canonical URL
-    // Use normalizeGscPagePath for client-side matching, but return the actual GSC URL in response
     let result = {
-      page: canonicalPageUrl, // Return canonical URL we used for filtering
+      page: normalizedPageUrl,
       clicks: 0,
       impressions: 0,
       ctr: 0,
@@ -200,7 +143,7 @@ export default async function handler(req, res) {
     if (pageData.rows && Array.isArray(pageData.rows) && pageData.rows.length > 0) {
       const row = pageData.rows[0];
       result = {
-        page: row.keys[0] || canonicalPageUrl, // GSC may return slightly different URL format
+        page: row.keys[0] || normalizedPageUrl,
         clicks: row.clicks || 0,
         impressions: row.impressions || 0,
         ctr: row.ctr ? row.ctr * 100 : 0, // Convert to percentage
@@ -211,7 +154,7 @@ export default async function handler(req, res) {
     return res.status(200).json({
       status: 'ok',
       source: 'gsc-page-totals',
-      params: { property, pageUrl: canonicalPageUrl, startDate, endDate },
+      params: { property, pageUrl: normalizedPageUrl, startDate, endDate },
       data: result,
       meta: {
         generatedAt: new Date().toISOString()
