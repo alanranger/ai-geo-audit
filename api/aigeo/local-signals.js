@@ -116,13 +116,29 @@ export default async function handler(req, res) {
     if (locationsResponse.ok) {
       const locationsData = await locationsResponse.json();
       console.log('[Local Signals] Locations response data:', JSON.stringify(locationsData, null, 2));
-      locations = locationsData.locations || [];
+      
+      // Check for locations in various possible response structures
+      locations = locationsData.locations || locationsData.location || [];
+      
+      // If locations is not an array, try to extract it
+      if (!Array.isArray(locations)) {
+        if (locationsData.locations && Array.isArray(locationsData.locations)) {
+          locations = locationsData.locations;
+        } else if (locationsData.location && Array.isArray(locationsData.location)) {
+          locations = locationsData.location;
+        } else {
+          console.warn('[Local Signals] Locations data is not an array:', typeof locations, locations);
+          locations = [];
+        }
+      }
+      
       console.log('[Local Signals] Found', locations.length, 'locations');
       
       // If no locations found, log warning with full response for debugging
       if (locations.length === 0) {
         console.warn('[Local Signals] ⚠️ No locations returned from API. Full response:', JSON.stringify(locationsData, null, 2));
-        console.warn('[Local Signals] This could mean: 1) Account has no locations set up, 2) API permissions issue, 3) Account name format incorrect');
+        console.warn('[Local Signals] Response keys:', Object.keys(locationsData));
+        console.warn('[Local Signals] This could mean: 1) Account has no locations set up, 2) API permissions issue, 3) Account name format incorrect, 4) Locations are paginated and need pageToken');
       }
       
       // Fetch detailed information for each location (phone numbers might be in details)
@@ -173,11 +189,22 @@ export default async function handler(req, res) {
       }
       
       // Use detailed location data if available, otherwise use basic
-      locationsToProcess = locationDetails.length > 0 ? locationDetails : locations;
+      // IMPORTANT: Always ensure we have locations - if detail fetch failed, use original locations
+      if (locationDetails.length > 0) {
+        locationsToProcess = locationDetails;
+      } else if (locations.length > 0) {
+        // If detail fetch failed but we have basic locations, use those
+        locationsToProcess = locations;
+        console.warn('[Local Signals] Using basic location data (detail fetch failed or returned no data)');
+      } else {
+        locationsToProcess = [];
+      }
       
       // Debug: Log location data to see what we're getting
       if (locationsToProcess.length > 0) {
         console.log('[Local Signals] First location data (full):', JSON.stringify(locationsToProcess[0], null, 2));
+      } else {
+        console.warn('[Local Signals] ⚠️ No locations to process. Original locations count:', locations.length, 'Detail locations count:', locationDetails.length);
       }
       
       // Extract rating and review count from location details
@@ -408,7 +435,7 @@ export default async function handler(req, res) {
         // GBP Rating and Review Count (for Review Score calculation)
         gbpRating: gbpRating !== null ? parseFloat(gbpRating) : null,
         gbpReviewCount: gbpReviewCount !== null ? parseInt(gbpReviewCount) : null,
-        locations: locationsToProcess.map(loc => {
+        locations: (locationsToProcess.length > 0 ? locationsToProcess : locations).map(loc => {
           // Extract phone number with all possible formats
           let phone = null;
           if (loc.phoneNumbers) {
