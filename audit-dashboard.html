@@ -16441,6 +16441,47 @@ Final Score: ${score}/100`;
             segments[key].push(v);
           }
         }
+        
+        // Apply outlier smoothing to each segment
+        const smoothOutliers = (dataArray) => {
+          const smoothed = [...dataArray];
+          for (let i = 1; i < smoothed.length - 1; i++) {
+            const current = smoothed[i];
+            if (current == null) continue;
+            
+            // Find previous and next valid values
+            let prev = null, next = null;
+            for (let j = i - 1; j >= 0 && prev == null; j--) {
+              if (smoothed[j] != null) prev = smoothed[j];
+            }
+            for (let j = i + 1; j < smoothed.length && next == null; j++) {
+              if (smoothed[j] != null) next = smoothed[j];
+            }
+            
+            // If we have both prev and next, check if current is an outlier
+            if (prev != null && next != null) {
+              const avg = (prev + next) / 2;
+              const ratio = current / avg;
+              // If current is > 1.5x or < 0.67x the average, it's an outlier
+              if (ratio > 1.5 || ratio < 0.67) {
+                debugLog(`[KPI Tracker] Smoothing outlier at index ${i} (${labels[i]}): ${current} -> ${avg.toFixed(2)} (ratio: ${ratio.toFixed(2)})`, 'info');
+                smoothed[i] = avg;
+              }
+            } else if (prev != null && current / prev > 1.5) {
+              debugLog(`[KPI Tracker] Smoothing outlier at index ${i} (${labels[i]}): ${current} -> ${prev}`, 'info');
+              smoothed[i] = prev;
+            } else if (next != null && current / next > 1.5) {
+              debugLog(`[KPI Tracker] Smoothing outlier at index ${i} (${labels[i]}): ${current} -> ${next}`, 'info');
+              smoothed[i] = next;
+            }
+          }
+          return smoothed;
+        };
+        
+        // Smooth all segments
+        for (const key of Object.keys(segments)) {
+          segments[key] = smoothOutliers(segments[key]);
+        }
 
         return { labels, segments };
       }
@@ -17300,6 +17341,51 @@ Final Score: ${score}/100`;
           }
           debugLog(`Money Pages Trend: Backward-filled from first values (clicks: ${firstClicks}, impressions: ${firstImpressions}, ctr: ${firstCtr}, behaviour: ${firstBehaviour})`, 'info');
         }
+        
+        // Outlier detection and smoothing to normalize spikes
+        // Detect and smooth values that are > 1.5x or < 0.67x the average of surrounding values
+        const smoothOutliers = (dataArray) => {
+          const smoothed = [...dataArray];
+          for (let i = 1; i < smoothed.length - 1; i++) {
+            const current = smoothed[i];
+            if (current == null) continue;
+            
+            // Find previous and next valid values
+            let prev = null, next = null;
+            for (let j = i - 1; j >= 0 && prev == null; j--) {
+              if (smoothed[j] != null) prev = smoothed[j];
+            }
+            for (let j = i + 1; j < smoothed.length && next == null; j++) {
+              if (smoothed[j] != null) next = smoothed[j];
+            }
+            
+            // If we have both prev and next, check if current is an outlier
+            if (prev != null && next != null) {
+              const avg = (prev + next) / 2;
+              const ratio = current / avg;
+              // If current is > 1.5x or < 0.67x the average, it's an outlier
+              if (ratio > 1.5 || ratio < 0.67) {
+                debugLog(`Money Pages Trend: Smoothing outlier at index ${i} (${labels[i]}): ${current} -> ${avg.toFixed(2)} (ratio: ${ratio.toFixed(2)})`, 'info');
+                smoothed[i] = avg;
+              }
+            } else if (prev != null && current / prev > 1.5) {
+              // Only prev available, check if current is > 1.5x prev
+              debugLog(`Money Pages Trend: Smoothing outlier at index ${i} (${labels[i]}): ${current} -> ${prev} (only prev available)`, 'info');
+              smoothed[i] = prev;
+            } else if (next != null && current / next > 1.5) {
+              // Only next available, check if current is > 1.5x next
+              debugLog(`Money Pages Trend: Smoothing outlier at index ${i} (${labels[i]}): ${current} -> ${next} (only next available)`, 'info');
+              smoothed[i] = next;
+            }
+          }
+          return smoothed;
+        };
+        
+        // Apply smoothing to all metrics
+        clicksData = smoothOutliers(clicksData);
+        impressionsData = smoothOutliers(impressionsData);
+        ctrData = smoothOutliers(ctrData);
+        behaviourData = smoothOutliers(behaviourData);
         
         debugLog(`Money Pages Trend: Populated ${labels.length} dates with data (${clicksData.filter(v => v != null).length} clicks values, ${impressionsData.filter(v => v != null).length} impressions values)`, 'info');
         debugLog(`Money Pages Trend: Sample data - First 5 dates: ${labels.slice(0, 5).join(', ')}, Last 5 dates: ${labels.slice(-5).join(', ')}`, 'info');
