@@ -6123,75 +6123,41 @@
           // Non-fatal
         }
 
-        // Check if localSignals is missing or doesn't have locations/serviceAreas/GBP data
-        const hasLocalSignals = !!(localStorageData?.localSignals?.data?.locations?.length > 0 || localStorageData?.localSignals?.data?.serviceAreas?.length > 0);
-        const hasGBPData = !!(localStorageData?.localSignals?.data?.gbpRating !== null && localStorageData?.localSignals?.data?.gbpRating !== undefined) || 
-                           !!(localStorageData?.localSignals?.data?.gbpReviewCount !== null && localStorageData?.localSignals?.data?.gbpReviewCount !== undefined);
+        // ALWAYS fetch from Supabase as the source of truth
+        debugLog(`📊 Always fetching from Supabase (source of truth)...`, 'info');
+        debugLog(`📊 Calling fetchLatestAuditFromSupabase(${propertyUrl})...`, 'info');
+        const supabaseData = await fetchLatestAuditFromSupabase(propertyUrl);
+        debugLog(`📊 fetchLatestAuditFromSupabase returned: ${supabaseData ? 'data' : 'null/undefined'}`, supabaseData ? 'success' : 'warn');
         
-        // Fetch full Supabase payload when localStorage is missing critical data (moneyPagesMetrics, queryTotals, localSignals, or GBP data)
-        if (!hasMoneyPagesData || !hasQueryTotals || !hasLocalSignals || !hasGBPData) {
-          const missingData = [];
-          if (!hasMoneyPagesData) missingData.push('moneyPagesMetrics');
-          if (!hasQueryTotals) missingData.push('queryTotals');
-          if (!hasLocalSignals) missingData.push('localSignals (locations/serviceAreas)');
-          if (!hasGBPData) missingData.push('GBP data (rating/review count)');
-          debugLog(`⚠ Fetching from Supabase (localStorage missing: ${missingData.join(', ')})...`, 'info');
-          debugLog(`📊 Calling fetchLatestAuditFromSupabase(${propertyUrl})...`, 'info');
-          const supabaseData = await fetchLatestAuditFromSupabase(propertyUrl);
-          debugLog(`📊 fetchLatestAuditFromSupabase returned: ${supabaseData ? 'data' : 'null/undefined'}`, supabaseData ? 'success' : 'warn');
-          if (supabaseData) {
-            debugLog('✓ Audit results loaded from Supabase', 'success');
-            debugLog(`✓ Supabase data structure: scores.moneyPagesMetrics=${!!supabaseData?.scores?.moneyPagesMetrics}, moneyPagesMetrics=${!!supabaseData?.moneyPagesMetrics}, searchData=${!!supabaseData?.searchData}, queryTotals=${supabaseData?.searchData?.queryTotals?.length || 0} keywords`, 'info');
-            if (supabaseData.searchData) {
-              debugLog(`✓ Supabase searchData keys: ${Object.keys(supabaseData.searchData).join(', ')}`, 'info');
-              if (supabaseData.searchData.queryTotals) {
-                debugLog(`✓ Supabase queryTotals type: ${Array.isArray(supabaseData.searchData.queryTotals) ? 'array' : typeof supabaseData.searchData.queryTotals}, length: ${Array.isArray(supabaseData.searchData.queryTotals) ? supabaseData.searchData.queryTotals.length : 'N/A'}`, 'success');
-              } else {
-                debugLog(`⚠ Supabase searchData exists but queryTotals is missing/null`, 'warn');
-              }
+        if (supabaseData) {
+          debugLog('✓ Audit results loaded from Supabase', 'success');
+          debugLog(`✓ Supabase data structure: scores.moneyPagesMetrics=${!!supabaseData?.scores?.moneyPagesMetrics}, moneyPagesMetrics=${!!supabaseData?.moneyPagesMetrics}, searchData=${!!supabaseData?.searchData}, queryTotals=${supabaseData?.searchData?.queryTotals?.length || 0} keywords`, 'info');
+          if (supabaseData.searchData) {
+            debugLog(`✓ Supabase searchData keys: ${Object.keys(supabaseData.searchData).join(', ')}`, 'info');
+            if (supabaseData.searchData.queryTotals) {
+              debugLog(`✓ Supabase queryTotals type: ${Array.isArray(supabaseData.searchData.queryTotals) ? 'array' : typeof supabaseData.searchData.queryTotals}, length: ${Array.isArray(supabaseData.searchData.queryTotals) ? supabaseData.searchData.queryTotals.length : 'N/A'}`, 'success');
             } else {
-              debugLog(`⚠ Supabase data exists but searchData is missing/null`, 'warn');
+              debugLog(`⚠ Supabase searchData exists but queryTotals is missing/null`, 'warn');
             }
-            
-            // Merge Supabase data with localStorage data if localStorage has some data
-            if (localStorageData && hasMoneyPagesData) {
-              // Merge queryTotals from Supabase into existing localStorage data
-              if (supabaseData.searchData && supabaseData.searchData.queryTotals) {
-                localStorageData.searchData = localStorageData.searchData || {};
-                localStorageData.searchData.queryTotals = supabaseData.searchData.queryTotals;
-                debugLog(`✓ Merged queryTotals from Supabase into localStorage data`, 'success');
-                try {
-                  safeSetLocalStorage('last_audit_results', localStorageData);
-                  debugLog('✓ Updated localStorage with merged queryTotals', 'success');
-                } catch (storageError) {
-                  debugLog(`⚠ Could not update localStorage: ${storageError.message}`, 'warn');
-                }
-                // Update timestamp display
-                if (supabaseData.timestamp) {
-                  updateAuditTimestamp(supabaseData.timestamp);
-                }
-                return localStorageData;
-              }
-            }
-            
-            // Store in localStorage for future use (full Supabase data)
-            try {
-              safeSetLocalStorage('last_audit_results', supabaseData);
-              debugLog('✓ Stored Supabase data in localStorage for future use', 'success');
-              // Update timestamp display
-              if (supabaseData.timestamp) {
-                updateAuditTimestamp(supabaseData.timestamp);
-              }
-            } catch (storageError) {
-              debugLog(`⚠ Could not store Supabase data in localStorage: ${storageError.message}`, 'warn');
-            }
-            return supabaseData;
           } else {
-            debugLog('⚠ No audit data found in Supabase (fetchLatestAuditFromSupabase returned null/undefined), using localStorage data as fallback', 'warn');
-            debugLog(`⚠ This could mean: 1) No audit exists in Supabase for ${propertyUrl}, 2) API call failed, 3) API returned error status`, 'warn');
+            debugLog(`⚠ Supabase data exists but searchData is missing/null`, 'warn');
           }
+          
+          // Store in localStorage for offline/cache purposes (but Supabase is always source of truth)
+          try {
+            safeSetLocalStorage('last_audit_results', supabaseData);
+            debugLog('✓ Stored Supabase data in localStorage for caching', 'success');
+            // Update timestamp display
+            if (supabaseData.timestamp) {
+              updateAuditTimestamp(supabaseData.timestamp);
+            }
+          } catch (storageError) {
+            debugLog(`⚠ Could not store Supabase data in localStorage: ${storageError.message}`, 'warn');
+          }
+          return supabaseData;
         } else {
-          debugLog(`✓ Skipping Supabase fetch - localStorage has all required data (moneyPagesMetrics=${hasMoneyPagesData}, queryTotals=${hasQueryTotals})`, 'info');
+          debugLog('⚠ No audit data found in Supabase (fetchLatestAuditFromSupabase returned null/undefined), using localStorage data as fallback', 'warn');
+          debugLog(`⚠ This could mean: 1) No audit exists in Supabase for ${propertyUrl}, 2) API call failed, 3) API returned error status`, 'warn');
         }
       } else {
         debugLog('⚠ Cannot fetch from Supabase: property URL not set, using localStorage data as fallback', 'warn');
