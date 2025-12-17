@@ -4475,11 +4475,18 @@
         })();
       } else if (panelId === 'overview') {
         setTimeout(async () => {
-          const saved = loadAuditResultsSync();
+          // Use async loadAuditResults to ensure we get latest data from Supabase (including localSignals with locations)
+          const saved = await loadAuditResults();
           if (saved && saved.scores && saved.searchData) {
             const trendCanvas = document.getElementById('trendChart');
             if (trendCanvas && typeof displayDashboard === 'function') {
               debugLog('Re-rendering Score Trends chart for Overview tab', 'info');
+              // DEBUG: Log localSignals structure when loading Overview tab
+              if (saved.localSignals) {
+                debugLog(`[Overview Tab] localSignals structure: status=${saved.localSignals.status}, hasData=${!!saved.localSignals.data}, hasLocations=${!!saved.localSignals.data?.locations}, locationsCount=${saved.localSignals.data?.locations?.length || 0}`, 'info');
+              } else {
+                debugLog(`[Overview Tab] ⚠️ localSignals is missing from saved audit data`, 'warn');
+              }
               try {
                 await displayDashboard(saved.scores, saved.searchData, saved.snippetReadiness || 0, saved.schemaAudit || null, saved.localSignals || null);
               } catch (err) {
@@ -6116,11 +6123,15 @@
           // Non-fatal
         }
 
-        // Fetch full Supabase payload when localStorage is missing critical data (moneyPagesMetrics or queryTotals)
-        if (!hasMoneyPagesData || !hasQueryTotals) {
+        // Check if localSignals is missing or doesn't have locations/serviceAreas
+        const hasLocalSignals = !!(localStorageData?.localSignals?.data?.locations?.length > 0 || localStorageData?.localSignals?.data?.serviceAreas?.length > 0);
+        
+        // Fetch full Supabase payload when localStorage is missing critical data (moneyPagesMetrics, queryTotals, or localSignals)
+        if (!hasMoneyPagesData || !hasQueryTotals || !hasLocalSignals) {
           const missingData = [];
           if (!hasMoneyPagesData) missingData.push('moneyPagesMetrics');
           if (!hasQueryTotals) missingData.push('queryTotals');
+          if (!hasLocalSignals) missingData.push('localSignals (locations/serviceAreas)');
           debugLog(`⚠ Fetching from Supabase (localStorage missing: ${missingData.join(', ')})...`, 'info');
           debugLog(`📊 Calling fetchLatestAuditFromSupabase(${propertyUrl})...`, 'info');
           const supabaseData = await fetchLatestAuditFromSupabase(propertyUrl);
@@ -10397,6 +10408,18 @@
       // Check both localSignals and localSignalsSnapshot (different storage formats)
       const currentLocalSignals = localSignals || (saved && (saved.localSignals || saved.localSignalsSnapshot)) || null;
       
+      // DEBUG: Log currentLocalSignals structure
+      if (currentLocalSignals) {
+        debugLog(`[displayDashboard] currentLocalSignals structure: status=${currentLocalSignals.status}, hasData=${!!currentLocalSignals.data}, hasLocations=${!!currentLocalSignals.data?.locations}, locationsCount=${currentLocalSignals.data?.locations?.length || 0}`, 'info');
+        if (currentLocalSignals.data && currentLocalSignals.data.locations) {
+          debugLog(`[displayDashboard] currentLocalSignals.data.locations type: ${typeof currentLocalSignals.data.locations}, isArray: ${Array.isArray(currentLocalSignals.data.locations)}, length: ${currentLocalSignals.data.locations.length}`, 'info');
+        } else {
+          debugLog(`[displayDashboard] ⚠️ currentLocalSignals.data.locations is missing!`, 'warn');
+        }
+      } else {
+        debugLog(`[displayDashboard] ⚠️ currentLocalSignals is null!`, 'warn');
+      }
+      
       // Restore Money Pages Priority Matrix data from localStorage
       // If not available, try to rebuild from saved data
       if (saved && saved.moneyPagePriorityData && Array.isArray(saved.moneyPagePriorityData) && saved.moneyPagePriorityData.length > 0) {
@@ -11503,7 +11526,11 @@ Final Score: ${score}/100`;
           : null;
         
         // DEBUG: Log local signals status for pillar cards
-        debugLog(`[Pillar Cards] Local signals in definitions: hasLocalSignals=${pillarHasLocalSignals}, currentLocalSignals=${JSON.stringify(pillarLocalSignals ? {status: pillarLocalSignals.status, hasData: !!pillarLocalSignals.data} : null)}`, 'info');
+        debugLog(`[Pillar Cards] Local signals in definitions: hasLocalSignals=${pillarHasLocalSignals}, currentLocalSignals=${JSON.stringify(pillarLocalSignals ? {status: pillarLocalSignals.status, hasData: !!pillarLocalSignals.data, hasLocations: !!pillarLocalSignals.data?.locations, locationsCount: pillarLocalSignals.data?.locations?.length || 0} : null)}`, 'info');
+        if (pillarLocalSignals && pillarLocalSignals.data) {
+          debugLog(`[Pillar Cards] pillarLocalSignals.data keys: ${Object.keys(pillarLocalSignals.data).join(', ')}`, 'info');
+          debugLog(`[Pillar Cards] pillarLocalSignals.data.locations type: ${typeof pillarLocalSignals.data.locations}, isArray: ${Array.isArray(pillarLocalSignals.data.locations)}, length: ${pillarLocalSignals.data.locations?.length || 0}`, 'info');
+        }
         
         let localEntityDesc, serviceAreaDesc;
         if (pillarHasLocalSignals && pillarLocalSignalsData) {
@@ -12243,6 +12270,14 @@ Final Score: ${score}/100`;
               }
             }, 0);
           } else if (key === 'localEntity' && pillarHasLocalSignals && pillarLocalSignalsData) {
+            // DEBUG: Log locations data structure
+            debugLog(`[Local Entity Card] pillarLocalSignalsData keys: ${Object.keys(pillarLocalSignalsData).join(', ')}`, 'info');
+            debugLog(`[Local Entity Card] locations type: ${typeof pillarLocalSignalsData.locations}, isArray: ${Array.isArray(pillarLocalSignalsData.locations)}, length: ${pillarLocalSignalsData.locations?.length || 0}`, 'info');
+            if (pillarLocalSignalsData.locations && pillarLocalSignalsData.locations.length > 0) {
+              debugLog(`[Local Entity Card] First location: ${JSON.stringify(pillarLocalSignalsData.locations[0]).substring(0, 200)}`, 'info');
+            } else {
+              debugLog(`[Local Entity Card] ⚠️ locations is missing or empty!`, 'warn');
+            }
             const napScore = pillarLocalSignalsData.napConsistencyScore || 0;
             const knowledgePanelScore = pillarLocalSignalsData.knowledgePanelDetected ? 100 : 0;
             const locationsScore = (pillarLocalSignalsData.locations?.length || 0) > 0 ? 100 : 0;
