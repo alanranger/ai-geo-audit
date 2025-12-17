@@ -9242,6 +9242,8 @@
           debugLog(`[fetchQueryTotalsForRankingKeywords] Merged ${newQueryTotals.length} new queryTotals (total: ${savedAudit.searchData.queryTotals.length})`, 'success');
           
           // CRITICAL: Also save to Supabase so queryTotals persists across page loads
+          // Note: This will create/update a partial audit record (only query_totals field)
+          // A full audit run later will populate other fields without losing query_totals
           try {
             const auditDate = new Date().toISOString().split('T')[0];
             const saveResponse = await fetch(apiUrl('/api/supabase/save-audit'), {
@@ -9250,7 +9252,7 @@
               body: JSON.stringify({
                 propertyUrl: propertyUrl,
                 auditDate: auditDate,
-                searchData: savedAudit.searchData // Include updated searchData with queryTotals
+                searchData: savedAudit.searchData // Contains queryTotals + any other existing searchData fields
               })
             });
             
@@ -9278,7 +9280,7 @@
           safeSetLocalStorage('last_audit_results', newAuditData);
           debugLog(`[fetchQueryTotalsForRankingKeywords] Created new audit data with ${gsc.data.queryTotals.length} queryTotals`, 'success');
           
-          // CRITICAL: Also save to Supabase
+          // CRITICAL: Also save to Supabase (new record case - use save-audit endpoint)
           try {
             const auditDate = new Date().toISOString().split('T')[0];
             const saveResponse = await fetch(apiUrl('/api/supabase/save-audit'), {
