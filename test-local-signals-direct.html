@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Test Local Signals API</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; max-width: 1200px; margin: 0 auto; }
+    button { padding: 10px 20px; font-size: 16px; margin: 10px 0; }
+    pre { background: #f5f5f5; padding: 15px; border-radius: 4px; overflow-x: auto; }
+    .success { color: green; }
+    .error { color: red; }
+    .info { color: blue; }
+  </style>
+</head>
+<body>
+  <h1>Test Local Signals API</h1>
+  <p>This will test the API directly without running a full audit.</p>
+  
+  <button onclick="testAPI()">Test Local Signals API</button>
+  
+  <div id="result"></div>
+  
+  <script>
+    async function testAPI() {
+      const resultDiv = document.getElementById('result');
+      resultDiv.innerHTML = '<p class="info">Testing API...</p>';
+      
+      try {
+        // Get the API URL - adjust this to match your deployment
+        const apiUrl = window.location.origin.includes('localhost') 
+          ? 'http://localhost:3000' 
+          : window.location.origin;
+        
+        const response = await fetch(`${apiUrl}/api/aigeo/local-signals?property=${encodeURIComponent('https://www.alanranger.com')}`);
+        
+        const data = await response.json();
+        
+        let html = '<h2>API Response:</h2>';
+        html += `<p><strong>Status:</strong> ${response.status}</p>`;
+        html += `<p><strong>Response Status:</strong> ${data.status}</p>`;
+        
+        if (data.status === 'ok' && data.data) {
+          html += `<p class="success"><strong>✓ API returned successfully</strong></p>`;
+          html += `<p><strong>Locations Count:</strong> ${data.data.locations?.length || 0}</p>`;
+          html += `<p><strong>Service Areas Count:</strong> ${data.data.serviceAreas?.length || 0}</p>`;
+          html += `<p><strong>NAP Consistency Score:</strong> ${data.data.napConsistencyScore || 'null'}</p>`;
+          html += `<p><strong>Knowledge Panel Detected:</strong> ${data.data.knowledgePanelDetected ? 'Yes' : 'No'}</p>`;
+          
+          if (data.data.locations && data.data.locations.length > 0) {
+            html += `<p class="success"><strong>✓ Locations found!</strong></p>`;
+            html += '<h3>Location Details:</h3>';
+            data.data.locations.forEach((loc, idx) => {
+              html += `<div style="margin: 10px 0; padding: 10px; background: #e8f5e9; border-radius: 4px;">`;
+              html += `<strong>Location ${idx + 1}:</strong><br>`;
+              html += `Name: ${loc.name || 'N/A'}<br>`;
+              html += `Address: ${loc.address ? JSON.stringify(loc.address) : 'N/A'}<br>`;
+              html += `Phone: ${loc.phone || 'N/A'}<br>`;
+              html += `Website: ${loc.website || 'N/A'}`;
+              html += `</div>`;
+            });
+          } else {
+            html += `<p class="error"><strong>✗ No locations returned</strong></p>`;
+          }
+        } else if (data.status === 'error') {
+          html += `<p class="error"><strong>✗ API returned error:</strong> ${data.error?.message || 'Unknown error'}</p>`;
+        } else {
+          html += `<p class="error"><strong>✗ Unexpected response structure</strong></p>`;
+        }
+        
+        html += '<h3>Full Response:</h3>';
+        html += `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+        
+        resultDiv.innerHTML = html;
+      } catch (error) {
+        resultDiv.innerHTML = `<p class="error">Error: ${error.message}</p><pre>${error.stack}</pre>`;
+      }
+    }
+  </script>
+</body>
+</html>
+
