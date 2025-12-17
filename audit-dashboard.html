@@ -18814,6 +18814,56 @@ Final Score: ${score}/100`;
       // Define schemaAuditData in scope accessible to scorecard table
       const schemaAuditData = schemaAudit || saved?.schemaAudit;
       
+      // Fetch historical scores for the last date in chart range to ensure scorecard matches chart
+      // This fixes the issue where scorecard shows latest audit score but chart shows historical score
+      let historicalScoresForLastDate = {};
+      const propertyUrlForHistorical = document.getElementById('propertyUrl')?.value || data?.propertyUrl || propertyUrl || '';
+      if (propertyUrlForHistorical) {
+        try {
+          // Get the last date from timeseries or maps
+          let lastChartDate = null;
+          if (data && data.timeseries && Array.isArray(data.timeseries) && data.timeseries.length > 0) {
+            lastChartDate = data.timeseries[data.timeseries.length - 1].date;
+          } else if (window.lastGscTimeseriesDate) {
+            lastChartDate = window.lastGscTimeseriesDate;
+          } else if (window.authorityMap && window.authorityMap.size > 0) {
+            const authorityDates = Array.from(window.authorityMap.keys()).sort();
+            lastChartDate = authorityDates[authorityDates.length - 1];
+          }
+          
+          if (lastChartDate) {
+            debugLog(`[Scorecard] Fetching historical scores for last chart date: ${lastChartDate}`, 'info');
+            const historicalResponse = await fetch(apiUrl(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrlForHistorical)}&startDate=${lastChartDate}&endDate=${lastChartDate}`));
+            if (historicalResponse.ok) {
+              const historicalData = await historicalResponse.json();
+              if (historicalData.status === 'ok' && historicalData.data && Array.isArray(historicalData.data) && historicalData.data.length > 0) {
+                // Get the latest audit for this date (in case of multiple audits per day)
+                const auditsForDate = historicalData.data.filter(r => r.date === lastChartDate);
+                if (auditsForDate.length > 0) {
+                  // Sort by timestamp/updated_at to get the latest
+                  auditsForDate.sort((a, b) => {
+                    const aTime = a.updated_at || a.timestamp || 0;
+                    const bTime = b.updated_at || b.timestamp || 0;
+                    return bTime - aTime;
+                  });
+                  const latestAudit = auditsForDate[0];
+                  historicalScoresForLastDate = {
+                    authority: latestAudit.authorityScore,
+                    contentSchema: latestAudit.contentSchemaScore,
+                    localEntity: latestAudit.localEntityScore,
+                    serviceArea: latestAudit.serviceAreaScore,
+                    visibility: latestAudit.visibilityScore
+                  };
+                  debugLog(`[Scorecard] Found historical scores for ${lastChartDate}: Authority=${historicalScoresForLastDate.authority}, Content/Schema=${historicalScoresForLastDate.contentSchema}`, 'info');
+                }
+              }
+            }
+          }
+        } catch (e) {
+          debugLog(`[Scorecard] Error fetching historical scores: ${e.message}`, 'warn');
+        }
+      }
+      
       // Get last GSC data date from current data (for Authority, Visibility, and Brand & Entity)
       // CRITICAL: Always fetch fresh from Supabase to get the actual last timeseries date
       // data.timeseries may be stale (from localStorage), so we can't rely on it for the Data Date
@@ -18970,6 +19020,53 @@ Final Score: ${score}/100`;
                 // Insert Brand row after Authority if it exists
                 if (brandRowIndex >= 0 && brandOverlay) {
                   orderedPillars.splice(brandRowIndex + 1, 0, ['brandOverlay', brandOverlay.score || 0]);
+                }
+                
+                // Use historical scores for the last date in chart range (if available)
+                // This ensures scorecard matches what's shown in the trend chart
+                // Priority: 1) Fetched historical scores, 2) Window maps, 3) Current scores
+                const lastChartDate = window.latestAuditDateStr || window.lastGscTimeseriesDate || 
+                  (data && data.timeseries && data.timeseries.length > 0 ? data.timeseries[data.timeseries.length - 1].date : null);
+                
+                if (lastChartDate) {
+                  // Override scores with historical values if available
+                  orderedPillars.forEach(([key, currentScore], idx) => {
+                    let historicalScore = null;
+                    
+                    // First, try fetched historical scores
+                    if (key === 'authority' && historicalScoresForLastDate.authority !== null && historicalScoresForLastDate.authority !== undefined) {
+                      historicalScore = historicalScoresForLastDate.authority;
+                    } else if (key === 'contentSchema' && historicalScoresForLastDate.contentSchema !== null && historicalScoresForLastDate.contentSchema !== undefined) {
+                      historicalScore = historicalScoresForLastDate.contentSchema;
+                    } else if (key === 'localEntity' && historicalScoresForLastDate.localEntity !== null && historicalScoresForLastDate.localEntity !== undefined) {
+                      historicalScore = historicalScoresForLastDate.localEntity;
+                    } else if (key === 'serviceArea' && historicalScoresForLastDate.serviceArea !== null && historicalScoresForLastDate.serviceArea !== undefined) {
+                      historicalScore = historicalScoresForLastDate.serviceArea;
+                    } else if (key === 'visibility' && historicalScoresForLastDate.visibility !== null && historicalScoresForLastDate.visibility !== undefined) {
+                      historicalScore = historicalScoresForLastDate.visibility;
+                    }
+                    // Fallback to window maps if fetched scores not available
+                    else if (key === 'authority' && window.authorityMap && window.authorityMap.has(lastChartDate)) {
+                      historicalScore = window.authorityMap.get(lastChartDate);
+                    } else if (key === 'contentSchema' && window.contentSchemaMap && window.contentSchemaMap.has(lastChartDate)) {
+                      historicalScore = window.contentSchemaMap.get(lastChartDate);
+                    } else if (key === 'localEntity' && window.localEntityMap && window.localEntityMap.has(lastChartDate)) {
+                      historicalScore = window.localEntityMap.get(lastChartDate);
+                    } else if (key === 'serviceArea' && window.serviceAreaMap && window.serviceAreaMap.has(lastChartDate)) {
+                      historicalScore = window.serviceAreaMap.get(lastChartDate);
+                    } else if (key === 'visibility' && window.visibilityMap && window.visibilityMap.has(lastChartDate)) {
+                      historicalScore = window.visibilityMap.get(lastChartDate);
+                    }
+                    
+                    if (historicalScore !== null && historicalScore !== undefined) {
+                      orderedPillars[idx][1] = historicalScore;
+                      debugLog(`[Scorecard] Using historical ${key} score (${historicalScore}) for ${lastChartDate} instead of current (${currentScore})`, 'info');
+                    } else {
+                      debugLog(`[Scorecard] No historical ${key} score found for ${lastChartDate}, using current (${currentScore})`, 'info');
+                    }
+                  });
+                } else {
+                  debugLog(`[Scorecard] No last chart date available, using current audit scores`, 'info');
                 }
                 
                 return orderedPillars;
@@ -19595,8 +19692,11 @@ Final Score: ${score}/100`;
             <span style="color: #f59e0b; font-weight: 600;">Amber (40-69)</span> = Needs improvement, 
             <span style="color: #ef4444; font-weight: 600;">Red (0-39)</span> = Critical issues
           </p>
-          <p style="margin: 0; font-size: 0.9rem; color: #555; line-height: 1.6;">
+          <p style="margin: 0; font-size: 0.9rem; color: #555; line-height: 1.6; margin-bottom: 0.5rem;">
             <strong>Weighting:</strong> Pillars are weighted by their importance for AI search systems. Authority (30%) and Content/Schema (25%) are most critical, as AI relies heavily on E-A-T signals and structured data. Visibility (20%) reflects how AI learns from existing performance, while Local Entity (15%) and Service Area (10%) are less critical for AI-powered results. Brand & Entity is treated as an overlay metric – it does not change the GAIO score but influences how AI systems attribute your content and build summaries.
+          </p>
+          <p style="margin: 0; font-size: 0.85rem; color: #666; line-height: 1.6; font-style: italic;">
+            <strong>Note:</strong> Scores shown are for the last date in the trend chart range. If different audits were run on different days with different page counts or data scopes, scores may vary even if the underlying content didn't change. The "Data Date" column shows when the data was collected for each pillar.
           </p>
         </div>
       `;
@@ -20632,9 +20732,76 @@ Final Score: ${score}/100`;
                 debugLog(`Deduplicated ${contentSchemaHistory.length} audits to ${deduplicatedHistory.length} unique dates (removed ${contentSchemaHistory.length - deduplicatedHistory.length} duplicate dates)`, 'info');
                 contentSchemaHistory = deduplicatedHistory;
                 
+                // CRITICAL: Validate audits for partial/failed data (for non-GSC pillars only)
+                // Detect audits with suspiciously low page counts compared to recent audits
+                // This prevents using partial audit data for Content/Schema and Local Entity/Service Area
+                const validateAuditQuality = (records) => {
+                  if (records.length === 0) return records;
+                  
+                  // Sort by date to find baseline
+                  const sortedRecords = [...records].sort((a, b) => {
+                    const dateA = a.date ? (typeof a.date === 'string' ? a.date.split('T')[0] : String(a.date).split('T')[0]) : '';
+                    const dateB = b.date ? (typeof b.date === 'string' ? b.date.split('T')[0] : String(b.date).split('T')[0]) : '';
+                    return dateA.localeCompare(dateB);
+                  });
+                  
+                  // Find the median page count from recent audits (last 10 audits or all if < 10)
+                  const recentAudits = sortedRecords.slice(-10);
+                  const pageCounts = recentAudits
+                    .map(r => r.schemaTotalPages || r.schema_total_pages || 0)
+                    .filter(count => count > 0)
+                    .sort((a, b) => a - b);
+                  
+                  if (pageCounts.length === 0) {
+                    debugLog(`[Audit Validation] No page count data available, skipping validation`, 'info');
+                    return records;
+                  }
+                  
+                  // Use median as baseline (more robust than mean for outliers)
+                  const medianPageCount = pageCounts[Math.floor(pageCounts.length / 2)];
+                  const minAcceptablePages = Math.max(10, medianPageCount * 0.1); // At least 10% of median, minimum 10 pages
+                  
+                  debugLog(`[Audit Validation] Median page count: ${medianPageCount}, Minimum acceptable: ${minAcceptablePages}`, 'info');
+                  
+                  // Mark records with suspiciously low page counts
+                  const validatedRecords = records.map(record => {
+                    const pageCount = record.schemaTotalPages || record.schema_total_pages || 0;
+                    const isSuspicious = pageCount > 0 && pageCount < minAcceptablePages;
+                    
+                    if (isSuspicious) {
+                      debugLog(`[Audit Validation] ⚠️ Marking audit ${record.date} as suspicious: ${pageCount} pages (expected ~${medianPageCount})`, 'warn');
+                      record._isPartialAudit = true;
+                      record._partialReason = `Low page count: ${pageCount} pages (expected ~${medianPageCount})`;
+                    }
+                    
+                    return record;
+                  });
+                  
+                  return validatedRecords;
+                };
+                
+                // Validate audit quality
+                contentSchemaHistory = validateAuditQuality(contentSchemaHistory);
+                
+                // CRITICAL: Sort by date to ensure chronological processing
+                // This ensures we always have a "last good value" to fall back to for partial audits
+                contentSchemaHistory.sort((a, b) => {
+                  const dateA = a.date ? (typeof a.date === 'string' ? a.date.split('T')[0] : String(a.date).split('T')[0]) : '';
+                  const dateB = b.date ? (typeof b.date === 'string' ? b.date.split('T')[0] : String(b.date).split('T')[0]) : '';
+                  return dateA.localeCompare(dateB);
+                });
+                
                 // Create maps of dates to scores from Supabase
                 // Normalize dates to YYYY-MM-DD format (Supabase might return with timezone)
                 // latestAuditDate is already tracked from the deduplication loop above
+                // CRITICAL: Skip partial audits for non-GSC pillars (Content/Schema, Local Entity, Service Area)
+                let lastGoodContentSchema = null;
+                let lastGoodContentSchemaDate = null;
+                let lastGoodLocalEntity = null;
+                let lastGoodLocalEntityDate = null;
+                let lastGoodServiceArea = null;
+                let lastGoodServiceAreaDate = null;
+                
                 contentSchemaHistory.forEach(record => {
                   // Ensure date is in YYYY-MM-DD format (strip time if present)
                   // Handle both date strings and Date objects
@@ -20655,19 +20822,49 @@ Final Score: ${score}/100`;
                       latestAuditDate = normalizedDate;
                       latestAuditDateStr = normalizedDate;
                     }
-                    // Content/Schema data
+                    // Content/Schema data - SKIP if partial audit
                     if (record.contentSchemaScore !== null && record.contentSchemaScore !== undefined) {
-                      contentSchemaMap.set(normalizedDate, record.contentSchemaScore);
-                      debugLog(`Mapped Content/Schema: ${normalizedDate} = ${record.contentSchemaScore}`, 'info');
+                      if (record._isPartialAudit) {
+                        debugLog(`[Audit Validation] ⚠️ Skipping Content/Schema for ${normalizedDate} (partial audit: ${record._partialReason}), using last good value (${lastGoodContentSchema} from ${lastGoodContentSchemaDate || 'none'})`, 'warn');
+                        // Use last good value instead
+                        if (lastGoodContentSchema !== null && lastGoodContentSchema !== undefined) {
+                          contentSchemaMap.set(normalizedDate, lastGoodContentSchema);
+                        }
+                      } else {
+                        contentSchemaMap.set(normalizedDate, record.contentSchemaScore);
+                        lastGoodContentSchema = record.contentSchemaScore;
+                        lastGoodContentSchemaDate = normalizedDate;
+                        debugLog(`Mapped Content/Schema: ${normalizedDate} = ${record.contentSchemaScore}`, 'info');
+                      }
                     }
-                    // Business Profile data (Local Entity and Service Area)
+                    // Business Profile data (Local Entity and Service Area) - SKIP if partial audit
                     if (record.localEntityScore !== null && record.localEntityScore !== undefined) {
-                      localEntityMap.set(normalizedDate, record.localEntityScore);
-                      debugLog(`Mapped Local Entity: ${normalizedDate} = ${record.localEntityScore}`, 'info');
+                      if (record._isPartialAudit) {
+                        debugLog(`[Audit Validation] ⚠️ Skipping Local Entity for ${normalizedDate} (partial audit: ${record._partialReason}), using last good value (${lastGoodLocalEntity} from ${lastGoodLocalEntityDate || 'none'})`, 'warn');
+                        // Use last good value instead
+                        if (lastGoodLocalEntity !== null && lastGoodLocalEntity !== undefined) {
+                          localEntityMap.set(normalizedDate, lastGoodLocalEntity);
+                        }
+                      } else {
+                        localEntityMap.set(normalizedDate, record.localEntityScore);
+                        lastGoodLocalEntity = record.localEntityScore;
+                        lastGoodLocalEntityDate = normalizedDate;
+                        debugLog(`Mapped Local Entity: ${normalizedDate} = ${record.localEntityScore}`, 'info');
+                      }
                     }
                     if (record.serviceAreaScore !== null && record.serviceAreaScore !== undefined) {
-                      serviceAreaMap.set(normalizedDate, record.serviceAreaScore);
-                      debugLog(`Mapped Service Area: ${normalizedDate} = ${record.serviceAreaScore}`, 'info');
+                      if (record._isPartialAudit) {
+                        debugLog(`[Audit Validation] ⚠️ Skipping Service Area for ${normalizedDate} (partial audit: ${record._partialReason}), using last good value (${lastGoodServiceArea} from ${lastGoodServiceAreaDate || 'none'})`, 'warn');
+                        // Use last good value instead
+                        if (lastGoodServiceArea !== null && lastGoodServiceArea !== undefined) {
+                          serviceAreaMap.set(normalizedDate, lastGoodServiceArea);
+                        }
+                      } else {
+                        serviceAreaMap.set(normalizedDate, record.serviceAreaScore);
+                        lastGoodServiceArea = record.serviceAreaScore;
+                        lastGoodServiceAreaDate = normalizedDate;
+                        debugLog(`Mapped Service Area: ${normalizedDate} = ${record.serviceAreaScore}`, 'info');
+                      }
                     }
                     // Authority data (use stored Authority score if available, calculated with new formula)
                     if (record.authorityScore !== null && record.authorityScore !== undefined) {
