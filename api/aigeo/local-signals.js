@@ -562,8 +562,8 @@ export default async function handler(req, res) {
             }
           };
         }),
-        accountName: account.accountName,
-        accountType: account.type,
+        accountName: account?.accountName || null,
+        accountType: account?.type || null,
         notes: `Fetched ${locations.length} location(s) from Google Business Profile. Service areas: ${serviceAreas.length}.`,
         _debug: {
           originalLocationsCount: locations.length,
