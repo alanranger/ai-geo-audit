@@ -4066,6 +4066,26 @@
               renderRankingAiTab();
             }
           }
+          
+          // CRITICAL: After initial render, check if queryTotals are available and re-render if needed
+          // This ensures CTR/Impressions columns are populated even if loadAuditResults() completes after initial render
+          (async () => {
+            try {
+              const savedAudit = await loadAuditResults();
+              if (savedAudit && savedAudit.searchData && Array.isArray(savedAudit.searchData.queryTotals) && savedAudit.searchData.queryTotals.length > 0) {
+                debugLog(`✓ queryTotals loaded (${savedAudit.searchData.queryTotals.length} keywords), re-rendering table to show CTR/Impressions`, 'success');
+                // Re-render the table to show CTR/Impressions data
+                if (typeof renderRankingAiTab === 'function') {
+                  renderRankingAiTab();
+                }
+              } else {
+                debugLog(`⚠ No queryTotals found in savedAudit - searchData=${!!savedAudit?.searchData}, queryTotals=${savedAudit?.searchData?.queryTotals?.length || 0}`, 'warn');
+              }
+            } catch (err) {
+              debugLog(`⚠ Error loading queryTotals for re-render: ${err.message}`, 'warn');
+            }
+          })();
+          
           // Wire up filters and sorting after render
           setTimeout(() => {
             // Fix DOM structure after render
