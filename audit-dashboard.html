@@ -6123,15 +6123,18 @@
           // Non-fatal
         }
 
-        // Check if localSignals is missing or doesn't have locations/serviceAreas
+        // Check if localSignals is missing or doesn't have locations/serviceAreas/GBP data
         const hasLocalSignals = !!(localStorageData?.localSignals?.data?.locations?.length > 0 || localStorageData?.localSignals?.data?.serviceAreas?.length > 0);
+        const hasGBPData = !!(localStorageData?.localSignals?.data?.gbpRating !== null && localStorageData?.localSignals?.data?.gbpRating !== undefined) || 
+                           !!(localStorageData?.localSignals?.data?.gbpReviewCount !== null && localStorageData?.localSignals?.data?.gbpReviewCount !== undefined);
         
-        // Fetch full Supabase payload when localStorage is missing critical data (moneyPagesMetrics, queryTotals, or localSignals)
-        if (!hasMoneyPagesData || !hasQueryTotals || !hasLocalSignals) {
+        // Fetch full Supabase payload when localStorage is missing critical data (moneyPagesMetrics, queryTotals, localSignals, or GBP data)
+        if (!hasMoneyPagesData || !hasQueryTotals || !hasLocalSignals || !hasGBPData) {
           const missingData = [];
           if (!hasMoneyPagesData) missingData.push('moneyPagesMetrics');
           if (!hasQueryTotals) missingData.push('queryTotals');
           if (!hasLocalSignals) missingData.push('localSignals (locations/serviceAreas)');
+          if (!hasGBPData) missingData.push('GBP data (rating/review count)');
           debugLog(`⚠ Fetching from Supabase (localStorage missing: ${missingData.join(', ')})...`, 'info');
           debugLog(`📊 Calling fetchLatestAuditFromSupabase(${propertyUrl})...`, 'info');
           const supabaseData = await fetchLatestAuditFromSupabase(propertyUrl);
