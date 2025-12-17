@@ -93,7 +93,8 @@ export default async function handler(req, res) {
     
     // Business Profile API readMask - use valid field names
     // Note: primaryPhone might not be a valid field, and phoneNumbers might need to be requested differently
-    const locationsUrl = `https://mybusinessbusinessinformation.googleapis.com/v1/${accountName}/locations?readMask=name,title,storefrontAddress,websiteUri,phoneNumbers,serviceArea`;
+    // Include rating and reviewCount in readMask to get review data directly
+    const locationsUrl = `https://mybusinessbusinessinformation.googleapis.com/v1/${accountName}/locations?readMask=name,title,storefrontAddress,websiteUri,phoneNumbers,serviceArea,rating,reviewCount`;
     console.log('[Local Signals] Locations URL:', locationsUrl);
     
     const locationsResponse = await fetch(locationsUrl, {
@@ -272,12 +273,12 @@ export default async function handler(req, res) {
           // If not found in detail, try fetching from the Reviews API endpoint
           if ((gbpRating === null || gbpReviewCount === null) && firstLocation.name) {
             try {
-              // Use the proper accounts.locations.reviews endpoint
-              // Format: accounts/{account}/locations/{location}/reviews
-              const reviewsUrl = `https://mybusiness.googleapis.com/v4/${firstLocation.name}/reviews`;
-              console.log('[Local Signals] Attempting to fetch reviews from proper endpoint:', reviewsUrl);
+              // Use the Business Profile API v1 endpoint for location details with reviews
+              // The rating and reviewCount should be in the location detail, but if not, try fetching full detail
+              const locationDetailUrl = `https://mybusinessbusinessinformation.googleapis.com/v1/${firstLocation.name}?readMask=name,title,rating,reviewCount`;
+              console.log('[Local Signals] Attempting to fetch location detail with reviews:', locationDetailUrl);
               
-              const reviewsResponse = await fetch(reviewsUrl, {
+              const locationDetailResponse = await fetch(locationDetailUrl, {
                 method: 'GET',
                 headers: {
                   'Authorization': `Bearer ${accessToken}`,
@@ -285,41 +286,75 @@ export default async function handler(req, res) {
                 },
               });
               
-              console.log('[Local Signals] Reviews API response status:', reviewsResponse.status);
+              console.log('[Local Signals] Location detail response status:', locationDetailResponse.status);
               
-              if (reviewsResponse.ok) {
-                const reviewsData = await reviewsResponse.json();
-                console.log('[Local Signals] Reviews API response:', JSON.stringify(reviewsData, null, 2));
+              if (locationDetailResponse.ok) {
+                const locationDetail = await locationDetailResponse.json();
+                console.log('[Local Signals] Location detail response:', JSON.stringify(locationDetail, null, 2));
                 
-                // Extract rating and review count from reviews response
-                // The structure might be: { reviews: [...], averageRating: X, totalReviewCount: Y }
-                if (reviewsData.averageRating !== undefined) {
-                  gbpRating = reviewsData.averageRating;
-                  console.log('[Local Signals] Extracted rating from Reviews API:', gbpRating);
+                // Extract rating and review count from location detail
+                if (locationDetail.rating !== undefined && locationDetail.rating !== null) {
+                  gbpRating = parseFloat(locationDetail.rating);
+                  console.log('[Local Signals] Extracted rating from location detail:', gbpRating);
                 }
-                if (reviewsData.totalReviewCount !== undefined) {
-                  gbpReviewCount = reviewsData.totalReviewCount;
-                  console.log('[Local Signals] Extracted review count from Reviews API:', gbpReviewCount);
-                } else if (reviewsData.reviews && Array.isArray(reviewsData.reviews)) {
-                  // If we have the reviews array, calculate from it
-                  gbpReviewCount = reviewsData.reviews.length;
-                  console.log('[Local Signals] Calculated review count from reviews array:', gbpReviewCount);
-                  if (reviewsData.reviews.length > 0) {
-                    const sumRating = reviewsData.reviews.reduce((sum, review) => sum + (review.starRating || review.rating || 0), 0);
-                    gbpRating = sumRating / reviewsData.reviews.length;
-                    console.log('[Local Signals] Calculated average rating from reviews array:', gbpRating);
-                  }
-                } else {
-                  console.log('[Local Signals] Reviews API response does not contain rating/review count data');
+                if (locationDetail.reviewCount !== undefined && locationDetail.reviewCount !== null) {
+                  gbpReviewCount = parseInt(locationDetail.reviewCount);
+                  console.log('[Local Signals] Extracted review count from location detail:', gbpReviewCount);
                 }
               } else {
-                const errorText = await reviewsResponse.text();
-                console.log('[Local Signals] Reviews API response error:', reviewsResponse.status, errorText);
-                // Don't assume it's a scope problem - log the actual error for debugging
+                const errorText = await locationDetailResponse.text();
+                console.log('[Local Signals] Location detail response error:', locationDetailResponse.status, errorText);
               }
-            } catch (error) {
-              console.warn('[Local Signals] Error fetching reviews from Reviews API:', error.message);
-              console.warn('[Local Signals] Error stack:', error.stack);
+              
+              // Fallback: Try the old Reviews API endpoint (deprecated but might still work)
+              if ((gbpRating === null || gbpReviewCount === null) && firstLocation.name) {
+                const reviewsUrl = `https://mybusiness.googleapis.com/v4/${firstLocation.name}/reviews`;
+                console.log('[Local Signals] Attempting fallback to old Reviews API endpoint:', reviewsUrl);
+              
+                const reviewsResponse = await fetch(reviewsUrl, {
+                  method: 'GET',
+                  headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'Content-Type': 'application/json',
+                  },
+                });
+              
+                console.log('[Local Signals] Reviews API response status:', reviewsResponse.status);
+              
+                if (reviewsResponse.ok) {
+                  const reviewsData = await reviewsResponse.json();
+                  console.log('[Local Signals] Reviews API response:', JSON.stringify(reviewsData, null, 2));
+                  
+                  // Extract rating and review count from reviews response
+                  // The structure might be: { reviews: [...], averageRating: X, totalReviewCount: Y }
+                  if (reviewsData.averageRating !== undefined) {
+                    gbpRating = reviewsData.averageRating;
+                    console.log('[Local Signals] Extracted rating from Reviews API:', gbpRating);
+                  }
+                  if (reviewsData.totalReviewCount !== undefined) {
+                    gbpReviewCount = reviewsData.totalReviewCount;
+                    console.log('[Local Signals] Extracted review count from Reviews API:', gbpReviewCount);
+                  } else if (reviewsData.reviews && Array.isArray(reviewsData.reviews)) {
+                    // If we have the reviews array, calculate from it
+                    gbpReviewCount = reviewsData.reviews.length;
+                    console.log('[Local Signals] Calculated review count from reviews array:', gbpReviewCount);
+                    if (reviewsData.reviews.length > 0) {
+                      const sumRating = reviewsData.reviews.reduce((sum, review) => sum + (review.starRating || review.rating || 0), 0);
+                      gbpRating = sumRating / reviewsData.reviews.length;
+                      console.log('[Local Signals] Calculated average rating from reviews array:', gbpRating);
+                    }
+                  } else {
+                    console.log('[Local Signals] Reviews API response does not contain rating/review count data');
+                  }
+                } else {
+                  const errorText = await reviewsResponse.text();
+                  console.log('[Local Signals] Reviews API response error:', reviewsResponse.status, errorText);
+                  // Don't assume it's a scope problem - log the actual error for debugging
+                }
+              } catch (error) {
+                console.warn('[Local Signals] Error fetching reviews from Reviews API:', error.message);
+                console.warn('[Local Signals] Error stack:', error.stack);
+              }
             }
           }
           
