@@ -9240,15 +9240,69 @@
           // Save updated audit data back to localStorage
           safeSetLocalStorage('last_audit_results', savedAudit);
           debugLog(`[fetchQueryTotalsForRankingKeywords] Merged ${newQueryTotals.length} new queryTotals (total: ${savedAudit.searchData.queryTotals.length})`, 'success');
+          
+          // CRITICAL: Also save to Supabase so queryTotals persists across page loads
+          try {
+            const auditDate = new Date().toISOString().split('T')[0];
+            const saveResponse = await fetch(apiUrl('/api/supabase/save-audit'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                propertyUrl: propertyUrl,
+                auditDate: auditDate,
+                searchData: savedAudit.searchData // Include updated searchData with queryTotals
+              })
+            });
+            
+            if (saveResponse.ok) {
+              debugLog(`[fetchQueryTotalsForRankingKeywords] ✓ Saved queryTotals to Supabase (${savedAudit.searchData.queryTotals.length} keywords)`, 'success');
+              
+              // Update audit date pill to reflect new scan
+              updateAuditTimestamp(new Date().toISOString());
+            } else {
+              const errorText = await saveResponse.text();
+              debugLog(`[fetchQueryTotalsForRankingKeywords] ⚠ Failed to save queryTotals to Supabase: ${saveResponse.status} - ${errorText}`, 'warn');
+            }
+          } catch (saveErr) {
+            debugLog(`[fetchQueryTotalsForRankingKeywords] ⚠ Error saving queryTotals to Supabase: ${saveErr.message}`, 'warn');
+          }
         } else {
           // No saved audit yet, create new structure
           const newAuditData = {
             searchData: {
-              queryTotals: gsc.data.queryTotals || []
-            }
+              queryTotals: gsc.data.queryTotals || [],
+              propertyUrl: propertyUrl
+            },
+            timestamp: new Date().toISOString()
           };
           safeSetLocalStorage('last_audit_results', newAuditData);
           debugLog(`[fetchQueryTotalsForRankingKeywords] Created new audit data with ${gsc.data.queryTotals.length} queryTotals`, 'success');
+          
+          // CRITICAL: Also save to Supabase
+          try {
+            const auditDate = new Date().toISOString().split('T')[0];
+            const saveResponse = await fetch(apiUrl('/api/supabase/save-audit'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                propertyUrl: propertyUrl,
+                auditDate: auditDate,
+                searchData: newAuditData.searchData
+              })
+            });
+            
+            if (saveResponse.ok) {
+              debugLog(`[fetchQueryTotalsForRankingKeywords] ✓ Saved new queryTotals to Supabase (${gsc.data.queryTotals.length} keywords)`, 'success');
+              
+              // Update audit date pill
+              updateAuditTimestamp(newAuditData.timestamp);
+            } else {
+              const errorText = await saveResponse.text();
+              debugLog(`[fetchQueryTotalsForRankingKeywords] ⚠ Failed to save new queryTotals to Supabase: ${saveResponse.status} - ${errorText}`, 'warn');
+            }
+          } catch (saveErr) {
+            debugLog(`[fetchQueryTotalsForRankingKeywords] ⚠ Error saving new queryTotals to Supabase: ${saveErr.message}`, 'warn');
+          }
         }
       } catch (error) {
         debugLog(`[fetchQueryTotalsForRankingKeywords] Error: ${error.message}`, 'error');
