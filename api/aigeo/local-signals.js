@@ -134,11 +134,47 @@ export default async function handler(req, res) {
       
       console.log('[Local Signals] Found', locations.length, 'locations');
       
+      // Check for pagination
+      let nextPageToken = locationsData.nextPageToken;
+      if (nextPageToken) {
+        console.log('[Local Signals] ⚠️ Response has nextPageToken - locations are paginated!');
+        console.log('[Local Signals] nextPageToken:', nextPageToken);
+        console.log('[Local Signals] Fetching additional pages...');
+        
+        // Fetch all pages
+        while (nextPageToken) {
+          const paginatedUrl = `${locationsUrl}&pageToken=${encodeURIComponent(nextPageToken)}`;
+          console.log('[Local Signals] Fetching page:', paginatedUrl);
+          
+          const paginatedResponse = await fetch(paginatedUrl, {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+            },
+          });
+          
+          if (paginatedResponse.ok) {
+            const paginatedData = await paginatedResponse.json();
+            const additionalLocations = paginatedData.locations || [];
+            console.log('[Local Signals] Found', additionalLocations.length, 'additional locations on this page');
+            locations = locations.concat(additionalLocations);
+            nextPageToken = paginatedData.nextPageToken;
+          } else {
+            const errorText = await paginatedResponse.text();
+            console.error('[Local Signals] Failed to fetch paginated locations:', paginatedResponse.status, errorText);
+            nextPageToken = null; // Stop pagination on error
+          }
+        }
+        
+        console.log('[Local Signals] Total locations after pagination:', locations.length);
+      }
+      
       // If no locations found, log warning with full response for debugging
       if (locations.length === 0) {
         console.warn('[Local Signals] ⚠️ No locations returned from API. Full response:', JSON.stringify(locationsData, null, 2));
         console.warn('[Local Signals] Response keys:', Object.keys(locationsData));
-        console.warn('[Local Signals] This could mean: 1) Account has no locations set up, 2) API permissions issue, 3) Account name format incorrect, 4) Locations are paginated and need pageToken');
+        console.warn('[Local Signals] This could mean: 1) Account has no locations set up, 2) API permissions issue, 3) Account name format incorrect');
       }
       
       // Fetch detailed information for each location (phone numbers might be in details)
@@ -510,7 +546,14 @@ export default async function handler(req, res) {
         }),
         accountName: account.accountName,
         accountType: account.type,
-        notes: `Fetched ${locations.length} location(s) from Google Business Profile. Service areas: ${serviceAreas.length}.`
+        notes: `Fetched ${locations.length} location(s) from Google Business Profile. Service areas: ${serviceAreas.length}.`,
+        _debug: {
+          originalLocationsCount: locations.length,
+          locationsToProcessCount: locationsToProcess.length,
+          locationsResponseStatus: locationsResponse?.status,
+          hasNextPageToken: !!nextPageToken,
+          locationNames: locationsToProcess.map(loc => loc.name || loc.title || 'unnamed')
+        }
       },
       meta: { generatedAt: new Date().toISOString() }
     });
