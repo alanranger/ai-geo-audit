@@ -2846,6 +2846,9 @@
             <button id="ranking-ai-refresh" class="btn btn-secondary" type="button">
               Run ranking &amp; AI check
             </button>
+            <button id="ranking-gsc-refresh" class="btn btn-secondary" type="button" style="background: #10b981; color: white; border: 1px solid #10b981; font-weight: 600; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer;" title="Refresh CTR & Impressions from Google Search Console (no API costs)">
+              Refresh GSC Data
+            </button>
             <button id="edit-keywords-btn" class="btn btn-secondary" type="button" style="background: #2563eb; color: white; border: 1px solid #2563eb; font-weight: 600; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer;">
               Edit Keywords
             </button>
@@ -3712,7 +3715,8 @@
         
         // Fetch queryTotals from GSC API
         const keywordsParam = encodeURIComponent(JSON.stringify(allKeywords));
-        const gscResponse = await fetch(apiUrl(`/api/aigeo/gsc-entity-metrics?keywords=${keywordsParam}&days=${dateRange}`));
+        const propertyParam = encodeURIComponent(propertyUrl);
+        const gscResponse = await fetch(apiUrl(`/api/aigeo/gsc-entity-metrics?property=${propertyParam}&keywords=${keywordsParam}&days=${dateRange}`));
         
         if (gscResponse.ok) {
           const gscData = await gscResponse.json();
@@ -24426,7 +24430,8 @@ Final Score: ${score}/100`;
             
             // Fetch queryTotals from GSC API
             const keywordsParam = encodeURIComponent(JSON.stringify(allKeywords));
-            const gscResponse = await fetch(apiUrl(`/api/aigeo/gsc-entity-metrics?keywords=${keywordsParam}&days=${dateRange}`));
+            const propertyParam = encodeURIComponent(propertyUrl);
+            const gscResponse = await fetch(apiUrl(`/api/aigeo/gsc-entity-metrics?property=${propertyParam}&keywords=${keywordsParam}&days=${dateRange}`));
             
             if (gscResponse.ok) {
               const gscData = await gscResponse.json();
@@ -28363,6 +28368,128 @@ Final Score: ${score}/100`;
       });
     })();
 
+      // Function to refresh only GSC queryTotals (CTR/Impressions) without running full audit
+      window.refreshGSCDataOnly = async function refreshGSCDataOnly() {
+        try {
+          debugLog('🔄 Refreshing GSC data only (CTR & Impressions)...', 'info');
+          
+          // Get existing audit data
+          const savedAudit = loadAuditResultsSync();
+          if (!savedAudit || !savedAudit.searchData) {
+            debugLog('⚠ No audit data found. Please run a full audit first.', 'warn');
+            alert('No audit data found. Please run a full audit first.');
+            return;
+          }
+          
+          // Get keywords from existing ranking data
+          const rankingData = window.RankingAiModule?.getData?.() || [];
+          if (!rankingData || rankingData.length === 0) {
+            debugLog('⚠ No ranking keywords found. Please run the ranking scan first.', 'warn');
+            alert('No ranking keywords found. Please run the ranking scan first.');
+            return;
+          }
+          
+          const allKeywords = rankingData.map(r => r.keyword).filter(k => k && k.trim());
+          if (allKeywords.length === 0) {
+            debugLog('⚠ No valid keywords found.', 'warn');
+            alert('No valid keywords found.');
+            return;
+          }
+          
+          debugLog(`📊 Fetching GSC queryTotals for ${allKeywords.length} keywords...`, 'info');
+          
+          const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+          if (!propertyUrl) {
+            debugLog('⚠ No property URL found.', 'warn');
+            alert('No property URL found. Please configure GSC settings first.');
+            return;
+          }
+          
+          const dateRange = parseInt(localStorage.getItem('gsc_date_range') || '28');
+          
+          // Fetch queryTotals from GSC API
+          const keywordsParam = encodeURIComponent(JSON.stringify(allKeywords));
+          const propertyParam = encodeURIComponent(propertyUrl);
+          const gscResponse = await fetch(apiUrl(`/api/aigeo/gsc-entity-metrics?property=${propertyParam}&keywords=${keywordsParam}&days=${dateRange}`));
+          
+          if (!gscResponse.ok) {
+            const errorText = await gscResponse.text();
+            debugLog(`✗ Failed to fetch queryTotals from GSC: ${gscResponse.status} - ${errorText}`, 'error');
+            alert(`Failed to fetch GSC data: ${gscResponse.status}`);
+            return;
+          }
+          
+          const gscData = await gscResponse.json();
+          if (gscData.status !== 'ok' || !gscData.data || !Array.isArray(gscData.data.queryTotals)) {
+            debugLog(`⚠ GSC API did not return queryTotals data`, 'warn');
+            alert('GSC API did not return queryTotals data.');
+            return;
+          }
+          
+          const queryTotals = gscData.data.queryTotals;
+          debugLog(`✓ Fetched queryTotals for ${queryTotals.length} keywords from GSC`, 'success');
+          
+          // Merge queryTotals into searchData
+          savedAudit.searchData.queryTotals = queryTotals;
+          
+          // Use the SAME audit_date as the existing audit
+          let auditDate = new Date().toISOString().split('T')[0];
+          if (savedAudit.timestamp) {
+            try {
+              auditDate = new Date(savedAudit.timestamp).toISOString().split('T')[0];
+              debugLog(`📊 Using existing audit date for queryTotals: ${auditDate}`, 'info');
+            } catch (e) {
+              debugLog(`⚠ Failed to parse saved audit timestamp, using today's date`, 'warn');
+            }
+          }
+          
+          // Save to Supabase
+          const saveResponse = await fetch(apiUrl('/api/supabase/save-audit'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              propertyUrl: propertyUrl,
+              auditDate: auditDate,
+              searchData: savedAudit.searchData
+            })
+          });
+          
+          if (!saveResponse.ok) {
+            const errorText = await saveResponse.text();
+            debugLog(`✗ Failed to save queryTotals to Supabase: ${saveResponse.status} - ${errorText}`, 'error');
+            alert(`Failed to save to Supabase: ${saveResponse.status}`);
+            return;
+          }
+          
+          debugLog(`✓ Saved queryTotals to Supabase (${queryTotals.length} keywords) for audit_date: ${auditDate}`, 'success');
+          
+          // Update localStorage
+          try {
+            safeSetLocalStorage('last_audit_results', savedAudit);
+            debugLog(`✓ Updated localStorage with queryTotals`, 'success');
+          } catch (localStorageErr) {
+            debugLog(`⚠ Failed to update localStorage: ${localStorageErr.message}`, 'warn');
+          }
+          
+          // Re-render the table to show updated CTR/Impressions
+          if (typeof renderRankingAiTab === 'function') {
+            renderRankingAiTab();
+            debugLog('✓ Table re-rendered with updated GSC data', 'success');
+          }
+          
+          // Update last run timestamp
+          updateAuditTimestamp(new Date().toISOString());
+          
+          debugLog('✓ GSC data refresh completed successfully!', 'success');
+          alert(`Successfully refreshed GSC data for ${queryTotals.length} keywords!`);
+          
+        } catch (error) {
+          debugLog(`✗ Error refreshing GSC data: ${error.message}`, 'error');
+          console.error('GSC refresh error:', error);
+          alert(`Error refreshing GSC data: ${error.message}`);
+        }
+      }
+
       // Manual refresh button for Ranking & AI
       function wireRankingAiButton() {
         const refreshBtn = document.getElementById("ranking-ai-refresh");
@@ -28410,6 +28537,53 @@ Final Score: ${score}/100`;
           debugLog('✓ Ranking & AI button wired up', 'success');
         } else {
           debugLog('⚠ Ranking & AI button not found', 'warn');
+        }
+        
+        // Wire up GSC refresh button
+        const gscRefreshBtn = document.getElementById("ranking-gsc-refresh");
+        if (gscRefreshBtn) {
+          // Remove existing listener by cloning
+          const newGscBtn = gscRefreshBtn.cloneNode(true);
+          gscRefreshBtn.parentNode.replaceChild(newGscBtn, gscRefreshBtn);
+          
+          newGscBtn.addEventListener("click", async () => {
+            debugLog('🔄 GSC refresh button clicked', 'info');
+            
+            // Update UI immediately to show progress
+            const lastRunEl = document.getElementById("ranking-ai-last-run");
+            if (lastRunEl) {
+              lastRunEl.textContent = "Refreshing GSC data...";
+            }
+            newGscBtn.disabled = true;
+            newGscBtn.textContent = "Refreshing...";
+            
+            try {
+              await window.refreshGSCDataOnly();
+            } catch (err) {
+              debugLog(`✗ Error refreshing GSC data: ${err.message}`, 'error');
+              console.error('GSC refresh button error:', err);
+              if (lastRunEl) {
+                lastRunEl.textContent = `Error: ${err.message}`;
+              }
+            } finally {
+              newGscBtn.disabled = false;
+              newGscBtn.textContent = "Refresh GSC Data";
+              if (lastRunEl) {
+                const now = new Date();
+                const day = String(now.getUTCDate()).padStart(2, '0');
+                const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                const month = monthNames[now.getUTCMonth()];
+                const year = now.getUTCFullYear();
+                const hours = String(now.getUTCHours()).padStart(2, '0');
+                const minutes = String(now.getUTCMinutes()).padStart(2, '0');
+                const seconds = String(now.getUTCSeconds()).padStart(2, '0');
+                lastRunEl.textContent = `Last refreshed: ${day} ${month} ${year}, ${hours}:${minutes}:${seconds} GMT`;
+              }
+            }
+          });
+          debugLog('✓ GSC refresh button wired up', 'success');
+        } else {
+          debugLog('⚠ GSC refresh button not found', 'warn');
         }
       }
 
