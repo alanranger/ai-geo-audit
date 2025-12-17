@@ -3687,6 +3687,106 @@
     // Placeholder - will be replaced by actual function when script loads
     // This is a fallback used only if no external Money Pages module is wired.
     // It returns empty metrics so the UI can show "No data" rather than crash.
+    // Diagnostic function to check keyword matching issues
+    window.diagnoseKeywordMatching = function() {
+      try {
+        const savedAudit = loadAuditResultsSync();
+        if (!savedAudit || !savedAudit.searchData) {
+          debugLog('⚠ No audit data found. Cannot diagnose keyword matching.', 'warn');
+          return;
+        }
+        
+        // Get keywords from ranking data
+        let rankingData = [];
+        if (window.RankingAiModule && typeof window.RankingAiModule.state === 'function') {
+          const state = window.RankingAiModule.state();
+          rankingData = state.combinedRows || [];
+        }
+        
+        if (!rankingData || rankingData.length === 0) {
+          debugLog('⚠ No ranking keywords found. Cannot diagnose.', 'warn');
+          return;
+        }
+        
+        const allKeywords = rankingData.map(r => r.keyword).filter(k => k && k.trim());
+        const queryTotals = savedAudit.searchData.queryTotals || [];
+        
+        debugLog(`📊 Diagnostic: Checking ${allKeywords.length} keywords against ${queryTotals.length} queryTotals`, 'info');
+        
+        // Find keywords that don't have matching queryTotals
+        const missingKeywords = [];
+        const matchedKeywords = [];
+        const zeroImpressionKeywords = [];
+        
+        allKeywords.forEach(keyword => {
+          const normalizedKeyword = normalizeKeywordForMatching(keyword);
+          const queryTotal = queryTotals.find(
+            qt => {
+              if (!qt.query) return false;
+              const normalizedQuery = normalizeKeywordForMatching(qt.query);
+              return normalizedQuery === normalizedKeyword || 
+                     normalizedQuery.includes(normalizedKeyword) || 
+                     normalizedKeyword.includes(normalizedQuery);
+            }
+          );
+          
+          if (!queryTotal) {
+            missingKeywords.push(keyword);
+          } else {
+            matchedKeywords.push(keyword);
+            if (queryTotal.impressions === 0 || queryTotal.impressions == null) {
+              zeroImpressionKeywords.push({ keyword, query: queryTotal.query, impressions: queryTotal.impressions });
+            }
+          }
+        });
+        
+        debugLog(`✓ Matched: ${matchedKeywords.length} keywords`, 'success');
+        debugLog(`⚠ Missing: ${missingKeywords.length} keywords`, missingKeywords.length > 0 ? 'warn' : 'info');
+        if (missingKeywords.length > 0) {
+          debugLog(`Missing keywords: ${missingKeywords.slice(0, 20).join(', ')}${missingKeywords.length > 20 ? ` ... (${missingKeywords.length - 20} more)` : ''}`, 'warn');
+        }
+        
+        debugLog(`📊 Zero impressions: ${zeroImpressionKeywords.length} keywords`, zeroImpressionKeywords.length > 0 ? 'info' : 'success');
+        if (zeroImpressionKeywords.length > 0) {
+          const sample = zeroImpressionKeywords.slice(0, 10).map(z => `${z.keyword} (query: "${z.query}", impressions: ${z.impressions})`).join(', ');
+          debugLog(`Sample zero-impression keywords: ${sample}${zeroImpressionKeywords.length > 10 ? '...' : ''}`, 'info');
+        }
+        
+        // Check for queries in queryTotals that don't match any keywords (orphaned queries)
+        const queryTotalQueries = queryTotals.map(qt => normalizeKeywordForMatching(qt.query || ''));
+        const orphanedQueries = queryTotals.filter(qt => {
+          const normalizedQuery = normalizeKeywordForMatching(qt.query || '');
+          return !allKeywords.some(k => {
+            const normalizedKeyword = normalizeKeywordForMatching(k);
+            return normalizedQuery === normalizedKeyword || 
+                   normalizedQuery.includes(normalizedKeyword) || 
+                   normalizedKeyword.includes(normalizedQuery);
+          });
+        });
+        
+        if (orphanedQueries.length > 0) {
+          debugLog(`⚠ Found ${orphanedQueries.length} orphaned queries in queryTotals (don't match any keywords)`, 'warn');
+          const sample = orphanedQueries.slice(0, 10).map(qt => qt.query || '(no query)').join(', ');
+          debugLog(`Sample orphaned queries: ${sample}${orphanedQueries.length > 10 ? '...' : ''}`, 'warn');
+        }
+        
+        return {
+          totalKeywords: allKeywords.length,
+          totalQueryTotals: queryTotals.length,
+          matched: matchedKeywords.length,
+          missing: missingKeywords.length,
+          missingKeywords: missingKeywords,
+          zeroImpression: zeroImpressionKeywords.length,
+          zeroImpressionKeywords: zeroImpressionKeywords,
+          orphaned: orphanedQueries.length,
+          orphanedQueries: orphanedQueries
+        };
+      } catch (error) {
+        debugLog(`✗ Error diagnosing keyword matching: ${error.message}`, 'error');
+        return null;
+      }
+    };
+    
     // Manual function to fetch and save queryTotals (for debugging/fixing missing data)
     window.fetchQueryTotalsManually = async function() {
       try {
@@ -26386,6 +26486,13 @@ Final Score: ${score}/100`;
     }
 
     // Helper function to get query-only totals for a keyword (PATCH A2)
+    // Helper function to normalize keywords for matching
+    function normalizeKeywordForMatching(keyword) {
+      if (!keyword) return '';
+      // Normalize: lowercase, trim, collapse multiple spaces to single space
+      return keyword.toLowerCase().trim().replace(/\s+/g, ' ');
+    }
+    
     function getQueryTotalForKeyword(keyword) {
       try {
         const savedAudit = loadAuditResultsSync();
@@ -26431,13 +26538,40 @@ Final Score: ${score}/100`;
           return null;
         }
         
-        // Find matching query total (case-insensitive match)
-        const queryTotal = queryTotals.find(
-          qt => qt.query && qt.query.toLowerCase().trim() === keyword.toLowerCase().trim()
+        // Normalize the search keyword
+        const normalizedKeyword = normalizeKeywordForMatching(keyword);
+        
+        // Try exact match first (normalized)
+        let queryTotal = queryTotals.find(
+          qt => qt.query && normalizeKeywordForMatching(qt.query) === normalizedKeyword
         );
+        
+        // If no exact match, try fuzzy matching (check if keyword is contained in query or vice versa)
         if (!queryTotal) {
-          debugLog(`getQueryTotalForKeyword: No match found for "${keyword}" in ${queryTotals.length} queryTotals`, 'warn');
+          queryTotal = queryTotals.find(
+            qt => {
+              if (!qt.query) return false;
+              const normalizedQuery = normalizeKeywordForMatching(qt.query);
+              // Check if normalized keyword is contained in normalized query or vice versa
+              return normalizedQuery === normalizedKeyword || 
+                     normalizedQuery.includes(normalizedKeyword) || 
+                     normalizedKeyword.includes(normalizedQuery);
+            }
+          );
         }
+        
+        if (!queryTotal) {
+          // Enhanced debugging: show sample queries from queryTotals to help diagnose mismatches
+          const sampleQueries = queryTotals.slice(0, 10).map(qt => qt.query || '(no query)').join(', ');
+          debugLog(`getQueryTotalForKeyword: No match found for "${keyword}" (normalized: "${normalizedKeyword}") in ${queryTotals.length} queryTotals. Sample queries: ${sampleQueries}${queryTotals.length > 10 ? '...' : ''}`, 'warn');
+          
+          // Also check if there are any queries with zero impressions (these might be the missing ones)
+          const zeroImpressionQueries = queryTotals.filter(qt => qt.impressions === 0 || qt.impressions == null).slice(0, 5).map(qt => qt.query || '(no query)').join(', ');
+          if (zeroImpressionQueries) {
+            debugLog(`getQueryTotalForKeyword: Found ${queryTotals.filter(qt => qt.impressions === 0 || qt.impressions == null).length} queries with zero impressions. Sample: ${zeroImpressionQueries}`, 'info');
+          }
+        }
+        
         return queryTotal || null;
       } catch (error) {
         debugLog(`Error in getQueryTotalForKeyword: ${error.message}`, 'warn');

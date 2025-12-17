@@ -534,8 +534,11 @@ export default async function handler(req, res) {
               const queryTotalsData = await queryTotalsResponse.json();
               if (queryTotalsData.rows && Array.isArray(queryTotalsData.rows) && queryTotalsData.rows.length > 0) {
                 const row = queryTotalsData.rows[0];
+                // CRITICAL: Always use the requested keyword, not the one returned from GSC
+                // This ensures consistency when matching keywords later
+                // GSC might return a normalized version of the query, but we want to match against the original keyword
                 return {
-                  query: row.keys[0] || keyword,
+                  query: keyword, // Use requested keyword, not row.keys[0]
                   clicks: row.clicks || 0,
                   impressions: row.impressions || 0,
                   ctr: row.ctr ? row.ctr * 100 : 0, // Convert to percentage
@@ -544,6 +547,7 @@ export default async function handler(req, res) {
               }
             }
             // If no data returned, still return entry with zeros (keyword exists but no GSC data)
+            // This ensures all keywords have an entry in queryTotals, even if they have zero impressions
             return {
               query: keyword,
               clicks: 0,
