@@ -113,6 +113,7 @@ export default async function handler(req, res) {
     let gbpRating = null; // Declare at top level so fallback can access it
     let gbpReviewCount = null; // Declare at top level so fallback can access it
     let nextPageToken = null; // Declare at top level for pagination and debug info
+    let locationsResponseStatus = locationsResponse.status; // Store status for debug info
     
     if (locationsResponse.ok) {
       const locationsData = await locationsResponse.json();
@@ -565,7 +566,7 @@ export default async function handler(req, res) {
         _debug: {
           originalLocationsCount: locations.length,
           locationsToProcessCount: locationsToProcess.length,
-          locationsResponseStatus: locationsResponse?.status,
+          locationsResponseStatus: locationsResponseStatus,
           hasNextPageToken: !!nextPageToken,
           locationNames: locationsToProcess.map(loc => loc.name || loc.title || 'unnamed')
         }
