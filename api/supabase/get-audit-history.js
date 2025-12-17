@@ -51,7 +51,13 @@ export default async function handler(req, res) {
     // Build query URL with select fields
     // Phase 3: Include money pages fields for trend tracking
     // Phase: Money Pages Priority Matrix - include segment metrics for KPI tracker
-    let queryUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&is_partial=eq.false&order=audit_date.asc&select=audit_date,content_schema_score,visibility_score,authority_score,local_entity_score,service_area_score,brand_score,ai_summary_score,money_pages_behaviour_score,money_pages_summary,money_segment_metrics,schema_total_pages,schema_pages_with_schema,schema_coverage`;
+    // NOTE: Include partial audits that have money_segment_metrics (GSC data) since partial audits
+    // can still have valid GSC data (CTR, impressions, clicks, position) even if page crawl was incomplete
+    let queryUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.asc&select=audit_date,content_schema_score,visibility_score,authority_score,local_entity_score,service_area_score,brand_score,ai_summary_score,money_pages_behaviour_score,money_pages_summary,money_segment_metrics,schema_total_pages,schema_pages_with_schema,schema_coverage,is_partial`;
+    
+    // Filter: Include non-partial audits OR partial audits that have money_segment_metrics
+    // This ensures we get GSC data even for partial audits (like Dec 15 with 5 pages but valid GSC data)
+    queryUrl += `&or=(is_partial.eq.false,and(is_partial.eq.true,money_segment_metrics.not.is.null))`;
     
     if (startDate) {
       queryUrl += `&audit_date=gte.${startDate}`;
@@ -152,7 +158,22 @@ export default async function handler(req, res) {
       moneyPagesBehaviourScore: record.money_pages_behaviour_score || null,
       moneyPagesSummary: record.money_pages_summary || null,
       // Phase: Money Pages Priority Matrix - segment metrics for KPI tracker
-      moneySegmentMetrics: record.money_segment_metrics || null
+      // Parse JSON if stored as string (Supabase JSONB may return as string)
+      moneySegmentMetrics: (() => {
+        const metrics = record.money_segment_metrics;
+        if (!metrics) return null;
+        if (typeof metrics === 'string') {
+          try {
+            return JSON.parse(metrics);
+          } catch (e) {
+            console.warn('[get-audit-history] Failed to parse money_segment_metrics JSON:', e.message);
+            return null;
+          }
+        }
+        return metrics;
+      })(),
+      // Include is_partial flag for client-side filtering if needed
+      isPartial: record.is_partial || false
     }));
 
     return res.status(200).json({
