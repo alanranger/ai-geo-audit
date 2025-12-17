@@ -3687,7 +3687,7 @@
     // Placeholder - will be replaced by actual function when script loads
     // This is a fallback used only if no external Money Pages module is wired.
     // It returns empty metrics so the UI can show "No data" rather than crash.
-    // Diagnostic function to check keyword matching issues
+    // Diagnostic function to check keyword matching issues AND missing search volume
     window.diagnoseKeywordMatching = function() {
       try {
         const savedAudit = loadAuditResultsSync();
@@ -3711,11 +3711,33 @@
         const allKeywords = rankingData.map(r => r.keyword).filter(k => k && k.trim());
         const queryTotals = savedAudit.searchData.queryTotals || [];
         
-        debugLog(`📊 Diagnostic: Checking ${allKeywords.length} keywords against ${queryTotals.length} queryTotals`, 'info');
+        debugLog(`📊 Diagnostic: Checking ${allKeywords.length} keywords`, 'info');
         
-        // Find keywords that don't have matching queryTotals
-        const missingKeywords = [];
-        const matchedKeywords = [];
+        // CRITICAL: Check for missing search_volume (this is what the UI shows as "—")
+        const missingSearchVolume = [];
+        const hasSearchVolume = [];
+        
+        rankingData.forEach(row => {
+          const searchVolume = row.search_volume;
+          // IMPORTANT: Only treat as missing if null/undefined, not if 0 (0 is a valid value)
+          if (searchVolume == null || searchVolume === undefined) {
+            missingSearchVolume.push({ keyword: row.keyword, search_volume: searchVolume });
+          } else {
+            hasSearchVolume.push({ keyword: row.keyword, search_volume: searchVolume });
+          }
+        });
+        
+        debugLog(`📊 Search Volume Analysis:`, 'info');
+        debugLog(`  ✓ Has search volume: ${hasSearchVolume.length} keywords`, 'success');
+        debugLog(`  ⚠ Missing search volume: ${missingSearchVolume.length} keywords`, missingSearchVolume.length > 0 ? 'warn' : 'success');
+        if (missingSearchVolume.length > 0) {
+          const missingList = missingSearchVolume.slice(0, 20).map(m => m.keyword).join(', ');
+          debugLog(`  Missing search volume keywords: ${missingList}${missingSearchVolume.length > 20 ? ` ... (${missingSearchVolume.length - 20} more)` : ''}`, 'warn');
+        }
+        
+        // Also check queryTotals matching (for impressions/CTR)
+        const missingQueryTotals = [];
+        const matchedQueryTotals = [];
         const zeroImpressionKeywords = [];
         
         allKeywords.forEach(keyword => {
@@ -3731,19 +3753,20 @@
           );
           
           if (!queryTotal) {
-            missingKeywords.push(keyword);
+            missingQueryTotals.push(keyword);
           } else {
-            matchedKeywords.push(keyword);
+            matchedQueryTotals.push(keyword);
             if (queryTotal.impressions === 0 || queryTotal.impressions == null) {
               zeroImpressionKeywords.push({ keyword, query: queryTotal.query, impressions: queryTotal.impressions });
             }
           }
         });
         
-        debugLog(`✓ Matched: ${matchedKeywords.length} keywords`, 'success');
-        debugLog(`⚠ Missing: ${missingKeywords.length} keywords`, missingKeywords.length > 0 ? 'warn' : 'info');
-        if (missingKeywords.length > 0) {
-          debugLog(`Missing keywords: ${missingKeywords.slice(0, 20).join(', ')}${missingKeywords.length > 20 ? ` ... (${missingKeywords.length - 20} more)` : ''}`, 'warn');
+        debugLog(`📊 QueryTotals Analysis (for impressions/CTR):`, 'info');
+        debugLog(`  ✓ Matched: ${matchedQueryTotals.length} keywords`, 'success');
+        debugLog(`  ⚠ Missing: ${missingQueryTotals.length} keywords`, missingQueryTotals.length > 0 ? 'warn' : 'info');
+        if (missingQueryTotals.length > 0) {
+          debugLog(`  Missing queryTotals: ${missingQueryTotals.slice(0, 20).join(', ')}${missingQueryTotals.length > 20 ? ` ... (${missingQueryTotals.length - 20} more)` : ''}`, 'warn');
         }
         
         debugLog(`📊 Zero impressions: ${zeroImpressionKeywords.length} keywords`, zeroImpressionKeywords.length > 0 ? 'info' : 'success');
@@ -3753,7 +3776,6 @@
         }
         
         // Check for queries in queryTotals that don't match any keywords (orphaned queries)
-        const queryTotalQueries = queryTotals.map(qt => normalizeKeywordForMatching(qt.query || ''));
         const orphanedQueries = queryTotals.filter(qt => {
           const normalizedQuery = normalizeKeywordForMatching(qt.query || '');
           return !allKeywords.some(k => {
@@ -3773,9 +3795,14 @@
         return {
           totalKeywords: allKeywords.length,
           totalQueryTotals: queryTotals.length,
-          matched: matchedKeywords.length,
-          missing: missingKeywords.length,
-          missingKeywords: missingKeywords,
+          // Search volume analysis (what UI shows as "—")
+          missingSearchVolume: missingSearchVolume.length,
+          missingSearchVolumeKeywords: missingSearchVolume,
+          hasSearchVolume: hasSearchVolume.length,
+          // QueryTotals analysis (for impressions/CTR)
+          matched: matchedQueryTotals.length,
+          missing: missingQueryTotals.length,
+          missingKeywords: missingQueryTotals,
           zeroImpression: zeroImpressionKeywords.length,
           zeroImpressionKeywords: zeroImpressionKeywords,
           orphaned: orphanedQueries.length,
@@ -3783,6 +3810,56 @@
         };
       } catch (error) {
         debugLog(`✗ Error diagnosing keyword matching: ${error.message}`, 'error');
+        return null;
+      }
+    };
+    
+    // Function to check Supabase database for missing search volume
+    window.checkSupabaseSearchVolume = async function() {
+      try {
+        const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+        if (!propertyUrl) {
+          debugLog('⚠ No property URL found. Cannot query Supabase.', 'warn');
+          return;
+        }
+        
+        debugLog(`📊 Querying Supabase for missing search volume...`, 'info');
+        
+        const response = await fetch(apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}`));
+        if (!response.ok) {
+          const errorText = await response.text();
+          debugLog(`⚠ Failed to fetch from Supabase: ${response.status} - ${errorText}`, 'warn');
+          return;
+        }
+        
+        const data = await response.json();
+        if (data.status !== 'ok' || !data.data || !data.data.rankingAiData || !data.data.rankingAiData.combinedRows) {
+          debugLog('⚠ No ranking data found in Supabase response', 'warn');
+          return;
+        }
+        
+        const keywords = data.data.rankingAiData.combinedRows || [];
+        const missingSearchVolume = keywords.filter(k => k.search_volume == null || k.search_volume === undefined);
+        const hasSearchVolume = keywords.filter(k => k.search_volume != null && k.search_volume !== undefined);
+        
+        debugLog(`📊 Supabase Search Volume Analysis:`, 'info');
+        debugLog(`  Total keywords in DB: ${keywords.length}`, 'info');
+        debugLog(`  ✓ Has search volume: ${hasSearchVolume.length} keywords`, 'success');
+        debugLog(`  ⚠ Missing search volume: ${missingSearchVolume.length} keywords`, missingSearchVolume.length > 0 ? 'warn' : 'success');
+        
+        if (missingSearchVolume.length > 0) {
+          const missingList = missingSearchVolume.slice(0, 30).map(k => k.keyword).join(', ');
+          debugLog(`  Missing search volume keywords: ${missingList}${missingSearchVolume.length > 30 ? ` ... (${missingSearchVolume.length - 30} more)` : ''}`, 'warn');
+        }
+        
+        return {
+          total: keywords.length,
+          hasSearchVolume: hasSearchVolume.length,
+          missingSearchVolume: missingSearchVolume.length,
+          missingKeywords: missingSearchVolume.map(k => k.keyword)
+        };
+      } catch (error) {
+        debugLog(`✗ Error checking Supabase: ${error.message}`, 'error');
         return null;
       }
     };
