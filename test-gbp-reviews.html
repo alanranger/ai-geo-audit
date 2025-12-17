@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GBP Reviews API Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-top: 0;
+        }
+        .section {
+            margin: 2rem 0;
+            padding: 1.5rem;
+            background: #f9f9f9;
+            border-radius: 4px;
+            border-left: 4px solid #3b82f6;
+        }
+        .section h2 {
+            margin-top: 0;
+            color: #1e40af;
+        }
+        button {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 4px;
+            font-size: 1rem;
+            cursor: pointer;
+            margin: 0.5rem 0.5rem 0.5rem 0;
+        }
+        button:hover {
+            background: #2563eb;
+        }
+        button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+        .result {
+            margin-top: 1rem;
+            padding: 1rem;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .success {
+            background: #d1fae5;
+            border: 1px solid #10b981;
+            color: #065f46;
+        }
+        .error {
+            background: #fee2e2;
+            border: 1px solid #ef4444;
+            color: #991b1b;
+        }
+        .info {
+            background: #dbeafe;
+            border: 1px solid #3b82f6;
+            color: #1e40af;
+        }
+        .warning {
+            background: #fef3c7;
+            border: 1px solid #f59e0b;
+            color: #92400e;
+        }
+        label {
+            display: block;
+            margin: 0.5rem 0;
+            font-weight: 500;
+        }
+        input {
+            width: 100%;
+            padding: 0.5rem;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            font-size: 1rem;
+            box-sizing: border-box;
+        }
+        .env-note {
+            background: #fef3c7;
+            padding: 1rem;
+            border-radius: 4px;
+            margin: 1rem 0;
+            border-left: 4px solid #f59e0b;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 GBP Reviews API Test</h1>
+        
+        <div class="env-note">
+            <strong>Note:</strong> This test uses the Vercel API endpoint which has access to environment variables.
+            The test will call <code>/api/aigeo/local-signals</code> which uses <code>process.env.GOOGLE_REFRESH_TOKEN</code>,
+            <code>process.env.GOOGLE_CLIENT_ID</code>, and <code>process.env.GOOGLE_CLIENT_SECRET</code> from Vercel.
+        </div>
+
+        <div class="section">
+            <h2>Test Configuration</h2>
+            <label>
+                Property URL:
+                <input type="text" id="propertyUrl" value="https://www.alanranger.com" placeholder="https://www.alanranger.com">
+            </label>
+            <label>
+                API Base URL (Vercel):
+                <input type="text" id="apiBaseUrl" value="https://ai-geo-audit.vercel.app" placeholder="https://ai-geo-audit.vercel.app">
+            </label>
+            <button onclick="testGBPReviews()">Test GBP Reviews Fetch</button>
+            <button onclick="testFullLocalSignals()">Test Full Local Signals API</button>
+        </div>
+
+        <div class="section">
+            <h2>Test Results</h2>
+            <div id="results"></div>
+        </div>
+    </div>
+
+    <script>
+        function getApiUrl() {
+            const baseUrl = document.getElementById('apiBaseUrl').value.trim();
+            return baseUrl.replace(/\/$/, ''); // Remove trailing slash
+        }
+
+        function getPropertyUrl() {
+            return document.getElementById('propertyUrl').value.trim();
+        }
+
+        function log(message, type = 'info') {
+            const resultsDiv = document.getElementById('results');
+            const resultDiv = document.createElement('div');
+            resultDiv.className = `result ${type}`;
+            resultDiv.textContent = message;
+            resultsDiv.appendChild(resultDiv);
+            resultsDiv.scrollTop = resultsDiv.scrollHeight;
+        }
+
+        function clearResults() {
+            document.getElementById('results').innerHTML = '';
+        }
+
+        async function testGBPReviews() {
+            clearResults();
+            const apiUrl = getApiUrl();
+            const propertyUrl = getPropertyUrl();
+            
+            log(`Testing GBP Reviews API...`, 'info');
+            log(`API URL: ${apiUrl}/api/aigeo/local-signals`, 'info');
+            log(`Property: ${propertyUrl}`, 'info');
+            log('', 'info');
+
+            try {
+                const startTime = Date.now();
+                const response = await fetch(`${apiUrl}/api/aigeo/local-signals?property=${encodeURIComponent(propertyUrl)}`);
+                const endTime = Date.now();
+                const duration = endTime - startTime;
+
+                log(`Response Status: ${response.status} ${response.statusText}`, response.ok ? 'success' : 'error');
+                log(`Response Time: ${duration}ms`, 'info');
+                log('', 'info');
+
+                const data = await response.json();
+                
+                if (response.ok && data.status === 'ok') {
+                    log('✅ API Response: SUCCESS', 'success');
+                    log('', 'info');
+                    
+                    // Check GBP reviews data
+                    const gbpRating = data.data?.gbpRating;
+                    const gbpReviewCount = data.data?.gbpReviewCount;
+                    
+                    log('GBP Reviews Data:', 'info');
+                    log(`  Rating: ${gbpRating !== null && gbpRating !== undefined ? gbpRating : 'NULL/N/A'}`, gbpRating ? 'success' : 'error');
+                    log(`  Review Count: ${gbpReviewCount !== null && gbpReviewCount !== undefined ? gbpReviewCount : 'NULL/N/A'}`, gbpReviewCount ? 'success' : 'error');
+                    log('', 'info');
+                    
+                    if (gbpRating && gbpReviewCount) {
+                        log('✅ GBP Reviews: FOUND', 'success');
+                        log(`   Rating: ${gbpRating}/5`, 'success');
+                        log(`   Reviews: ${gbpReviewCount}`, 'success');
+                    } else {
+                        log('❌ GBP Reviews: MISSING', 'error');
+                        log('   This indicates the API is not fetching GBP reviews correctly.', 'error');
+                        log('   Check API logs for errors.', 'error');
+                    }
+                    
+                    // Show other data
+                    log('', 'info');
+                    log('Other Local Signals Data:', 'info');
+                    log(`  Locations: ${data.data?.locations?.length || 0}`, 'info');
+                    log(`  Service Areas: ${data.data?.serviceAreas?.length || 0}`, 'info');
+                    log(`  NAP Consistency: ${data.data?.napConsistencyScore || 'N/A'}`, 'info');
+                    log(`  Knowledge Panel: ${data.data?.knowledgePanelDetected ? 'Yes' : 'No'}`, 'info');
+                    
+                } else {
+                    log('❌ API Response: ERROR', 'error');
+                    log(`Status: ${data.status || 'unknown'}`, 'error');
+                    log(`Message: ${data.message || 'No message'}`, 'error');
+                    
+                    if (data.error) {
+                        log('', 'error');
+                        log('Error Details:', 'error');
+                        log(JSON.stringify(data.error, null, 2), 'error');
+                    }
+                }
+                
+                log('', 'info');
+                log('Full Response:', 'info');
+                log(JSON.stringify(data, null, 2), 'info');
+                
+            } catch (error) {
+                log('❌ Test Failed', 'error');
+                log(`Error: ${error.message}`, 'error');
+                log(`Stack: ${error.stack}`, 'error');
+            }
+        }
+
+        async function testFullLocalSignals() {
+            clearResults();
+            const apiUrl = getApiUrl();
+            const propertyUrl = getPropertyUrl();
+            
+            log(`Testing Full Local Signals API...`, 'info');
+            log(`This will show all data returned by the API.`, 'info');
+            log('', 'info');
+
+            try {
+                const response = await fetch(`${apiUrl}/api/aigeo/local-signals?property=${encodeURIComponent(propertyUrl)}`);
+                const data = await response.json();
+                
+                if (response.ok && data.status === 'ok') {
+                    log('✅ Full API Response:', 'success');
+                    log(JSON.stringify(data, null, 2), 'info');
+                } else {
+                    log('❌ API Error:', 'error');
+                    log(JSON.stringify(data, null, 2), 'error');
+                }
+            } catch (error) {
+                log('❌ Test Failed', 'error');
+                log(`Error: ${error.message}`, 'error');
+            }
+        }
+    </script>
+</body>
+</html>
+

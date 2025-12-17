@@ -185,9 +185,9 @@ export default async function handler(req, res) {
       for (const location of locations) {
         try {
           // Get full location details with specific fields (readMask=* is not valid, use specific field names)
-          // Request all commonly used fields explicitly
-          const locationDetailUrl = `https://mybusinessbusinessinformation.googleapis.com/v1/${location.name}?readMask=name,title,storefrontAddress,websiteUri,phoneNumbers,serviceArea,primaryPhone,primaryCategory,moreHours`;
-          console.log('[Local Signals] Fetching location details:', locationDetailUrl);
+          // Request all commonly used fields explicitly, including rating and reviewCount for reviews
+          const locationDetailUrl = `https://mybusinessbusinessinformation.googleapis.com/v1/${location.name}?readMask=name,title,storefrontAddress,websiteUri,phoneNumbers,serviceArea,primaryPhone,primaryCategory,moreHours,rating,reviewCount`;
+          console.log('[Local Signals] Fetching location details with reviews:', locationDetailUrl);
           
           const detailResponse = await fetch(locationDetailUrl, {
             method: 'GET',
