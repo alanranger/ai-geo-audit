@@ -673,13 +673,45 @@ export default async function handler(req, res) {
 
     // Calculate money_segment_metrics per-date for the last 28 days using current audit's moneyPagePriorityData
     // This ensures all dates in the GSC window have proper metrics, even if the audit was partial
-    if (moneySegmentMetrics && moneyPagePriorityData && searchData?.timeseries && !isPartialUpdate) {
+    // Uses timeseries data from current audit, or falls back to gsc_timeseries table
+    if (moneySegmentMetrics && moneyPagePriorityData && !isPartialUpdate) {
       try {
-        const timeseries = Array.isArray(searchData.timeseries) ? searchData.timeseries : [];
+        let timeseries = Array.isArray(searchData?.timeseries) ? searchData.timeseries : [];
         const allMoney = moneySegmentMetrics.allMoney || {};
         
         // Check if current metrics are valid (not all zeros)
         const hasValidMetrics = allMoney.clicks > 0 || allMoney.impressions > 0;
+        
+        // If no timeseries in current audit, fetch from gsc_timeseries table
+        if (hasValidMetrics && timeseries.length === 0) {
+          console.log('[Supabase Save] No timeseries in current audit, fetching from gsc_timeseries table...');
+          const currentDate = new Date(auditDate);
+          const twentyEightDaysAgo = new Date(currentDate);
+          twentyEightDaysAgo.setDate(twentyEightDaysAgo.getDate() - 28);
+          const startDateStr = twentyEightDaysAgo.toISOString().split('T')[0];
+          
+          const timeseriesQuery = `${supabaseUrl}/rest/v1/gsc_timeseries?property_url=eq.${encodeURIComponent(propertyUrl)}&date=gte.${startDateStr}&date=lte.${auditDate}&select=date,clicks,impressions,ctr,position&order=date.asc`;
+          const timeseriesResponse = await fetch(timeseriesQuery, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': supabaseKey,
+              'Authorization': `Bearer ${supabaseKey}`
+            }
+          });
+          
+          if (timeseriesResponse.ok) {
+            const timeseriesData = await timeseriesResponse.json();
+            timeseries = timeseriesData.map(t => ({
+              date: t.date,
+              clicks: t.clicks || 0,
+              impressions: t.impressions || 0,
+              ctr: t.ctr || 0,
+              position: t.position || 0
+            }));
+            console.log(`[Supabase Save] Fetched ${timeseries.length} dates from gsc_timeseries table`);
+          }
+        }
         
         if (hasValidMetrics && timeseries.length > 0) {
           // Calculate total site-wide metrics for the current audit date from timeseries
