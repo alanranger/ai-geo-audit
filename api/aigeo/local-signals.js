@@ -505,7 +505,7 @@ export default async function handler(req, res) {
     
     // Build response object with error handling to prevent crashes
     try {
-      return res.status(200).json({
+      const responseData = {
       status: 'ok',
       source: 'local-signals',
       params: { property },
@@ -572,9 +572,38 @@ export default async function handler(req, res) {
           hasNextPageToken: !!nextPageToken,
           locationNames: locationsToProcess.map(loc => loc.name || loc.title || 'unnamed')
         }
-      },
-      meta: { generatedAt: new Date().toISOString() }
-    });
+      };
+      
+      return res.status(200).json({
+        ...responseData,
+        meta: { generatedAt: new Date().toISOString() }
+      });
+    } catch (responseError) {
+      // If building response fails, return a minimal response with the locations we have
+      console.error('[Local Signals] Error building response object:', responseError);
+      console.log('[Local Signals] Returning minimal response with locations:', finalLocations.length);
+      return res.status(200).json({
+        status: 'ok',
+        source: 'local-signals',
+        params: { property },
+        data: {
+          localBusinessSchemaPages: 0,
+          napConsistencyScore: napConsistencyScore,
+          knowledgePanelDetected: locations.length > 0,
+          serviceAreas: serviceAreas,
+          locations: finalLocations.map(loc => ({
+            name: loc.title || loc.name,
+            address: loc.storefrontAddress,
+            phone: loc.phoneNumbers?.primaryPhone || loc.primaryPhone || null,
+            website: loc.websiteUri
+          })),
+          gbpRating: gbpRating !== null ? parseFloat(gbpRating) : null,
+          gbpReviewCount: gbpReviewCount !== null ? parseInt(gbpReviewCount) : null
+        },
+        meta: { generatedAt: new Date().toISOString() },
+        _warning: 'Response building had errors, returned minimal format'
+      });
+    }
     
   } catch (error) {
     console.error('[Local Signals] Error in local-signals handler:', error);
