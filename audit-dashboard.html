@@ -6106,18 +6106,9 @@
       if (objectiveBadgeEl) {
         // Use goal_state from task (from goal status view) - this is the source of truth
         // Debug logging to understand what's happening
-        console.log('[Optimisation Badge Debug]', {
-          taskId: task.id,
-          goal_state: task.goal_state,
-          objective_delta: task.objective_delta,
-          objective_target_delta: task.objective_target_delta,
-          objective_target_value: task.objective_target_value,
-          objective_direction: task.objective_direction,
-          progress_delta: progress?.objective_delta,
-          progress_baseline: progress?.baseline_value,
-          progress_latest: progress?.latest_value,
-          progress_state: progress?.objective_state
-        });
+        if (typeof debugLog === 'function') {
+          debugLog(`[Optimisation Badge] Task ${task.id}: goal_state=${task.goal_state}, objective_delta=${task.objective_delta}, target=${task.objective_target_delta || task.objective_target_value}, direction=${task.objective_direction}`, 'info');
+        }
         let state = task.goal_state;
         
         // If goal_state is not available, determine from objective fields
@@ -6152,14 +6143,18 @@
                 : delta >= target;
               
               if (!meetsTarget) {
-                console.log('[Optimisation] Overriding met state: delta', delta, 'target', target, 'direction', direction);
+                if (typeof debugLog === 'function') {
+                  debugLog(`[Optimisation] Overriding 'met' state to 'on_track': delta=${delta}, target=${target}, direction=${direction}`, 'warn');
+                }
                 state = 'on_track';
               }
             } else {
               // If we can't get delta but baseline equals latest, it's definitely not met
               if (progress && progress.baseline_value != null && progress.latest_value != null) {
                 if (progress.baseline_value === progress.latest_value) {
-                  console.log('[Optimisation] Overriding met state: baseline equals latest, delta is 0');
+                  if (typeof debugLog === 'function') {
+                    debugLog(`[Optimisation] Overriding 'met' state to 'on_track': baseline equals latest (delta=0)`, 'warn');
+                  }
                   state = 'on_track';
                 }
               }
@@ -6738,7 +6733,18 @@
             document.getElementById('optimisation-event-note').value = '';
             await loadOptimisationTaskEvents(taskId);
             await window.loadAllOptimisationTasks();
+            
+            // If it was a measurement event, refresh the modal to update badge with fresh goal_state
+            if (eventType === 'measurement') {
+              if (typeof debugLog === 'function') {
+                debugLog(`[Optimisation] Measurement added, refreshing modal to update badge state`, 'info');
+              }
+              await openOptimisationTaskDrawer(taskId);
+            }
           } catch (error) {
+            if (typeof debugLog === 'function') {
+              debugLog(`[Optimisation] Error adding event: ${error.message}`, 'error');
+            }
             console.error('[Optimisation Module] Error adding event:', error);
             alert('Failed to add event: ' + error.message);
           }
