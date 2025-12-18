@@ -6098,8 +6098,14 @@
       // Update progress badge (use goal_state from task if available, otherwise from progress)
       const objectiveBadgeEl = document.getElementById('optimisation-drawer-objective-badge');
       if (objectiveBadgeEl) {
-        // Determine state: check goal_state first, then progress, then check if objective exists
-        let state = task.goal_state || (progress && progress.objective_state);
+        // Determine state: prioritize goal_state from goal status view (uses 'met'), 
+        // fall back to progress.objective_state (uses 'achieved'), then check if objective exists
+        let state = task.goal_state;
+        
+        // If goal_state is not available, use progress.objective_state but map 'achieved' to 'met'
+        if (!state && progress && progress.objective_state) {
+          state = progress.objective_state === 'achieved' ? 'met' : progress.objective_state;
+        }
         
         // If no state but objective is set, check if we have baseline metrics
         if (!state && (task.objective_metric || task.objective_kpi)) {

@@ -179,8 +179,8 @@ select
         else false
       end
     ) then 'overdue'
-    -- achieved: objective condition met
-    when (
+    -- achieved: objective condition met (only if latest_value is different from baseline)
+    when cp.latest_metrics is not null and cp.latest_metrics != cp.baseline_metrics and (
       case
         when cp.objective_direction in ('increase', 'at_least') then
           (cp.latest_value is not null and cp.baseline_value is not null and cp.latest_value >= cp.baseline_value + coalesce(cp.objective_target_value, 0))
