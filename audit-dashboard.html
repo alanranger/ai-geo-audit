@@ -5264,18 +5264,57 @@
 
     // Open task drawer (B3, B4)
     window.openOptimisationTaskDrawer = async function openOptimisationTaskDrawer(taskId) {
+      console.log('[Optimisation Drawer] Opening drawer for task ID:', taskId);
       const drawer = document.getElementById('optimisation-task-drawer');
       const backdrop = document.getElementById('optimisation-task-drawer-backdrop');
-      if (!drawer || !backdrop) return;
+      
+      if (!drawer) {
+        console.error('[Optimisation Drawer] Drawer element not found');
+        alert('Drawer element not found. Please refresh the page.');
+        return;
+      }
+      
+      if (!backdrop) {
+        console.error('[Optimisation Drawer] Backdrop element not found');
+        alert('Backdrop element not found. Please refresh the page.');
+        return;
+      }
+
+      if (!window.optimisationModuleState) {
+        window.optimisationModuleState = { allTasks: [], filteredTasks: [], activeTab: 'active', currentTaskId: null };
+      }
 
       window.optimisationModuleState.currentTaskId = taskId;
       
       // Find task
-      const task = window.optimisationModuleState.allTasks.find(t => t.id === taskId);
+      console.log('[Optimisation Drawer] Looking for task in allTasks:', {
+        taskId,
+        allTasksCount: window.optimisationModuleState.allTasks.length,
+        availableIds: window.optimisationModuleState.allTasks.map(t => t.id)
+      });
+      
+      let task = window.optimisationModuleState.allTasks.find(t => t.id === taskId);
+      
+      // If task not found, try loading tasks
+      if (!task && window.optimisationModuleState.allTasks.length === 0) {
+        console.log('[Optimisation Drawer] Tasks not loaded, loading now...');
+        if (typeof window.loadAllOptimisationTasks === 'function') {
+          await window.loadAllOptimisationTasks();
+          task = window.optimisationModuleState.allTasks.find(t => t.id === taskId);
+        }
+      }
+      
       if (!task) {
-        alert('Task not found');
+        console.error('[Optimisation Drawer] Task not found:', {
+          searchedId: taskId,
+          availableIds: window.optimisationModuleState.allTasks.map(t => t.id),
+          allTasks: window.optimisationModuleState.allTasks
+        });
+        alert(`Task not found (ID: ${taskId}). Please try refreshing the page or check the console for details.`);
         return;
       }
+      
+      console.log('[Optimisation Drawer] Found task:', task);
 
       // Populate header
       document.getElementById('optimisation-drawer-keyword').textContent = task.keyword_text || '';
@@ -29950,7 +29989,6 @@ Final Score: ${score}/100`;
             e.stopPropagation();
             e.preventDefault();
             console.log('[Optimisation] Manage button clicked', { status, row, taskType });
-            alert('Manage button clicked - check console for details');
             
             if (!window.hasAdminKey()) {
               alert('Admin key required. Please set your admin key in the "Optimisation Tracking Security" section.');
