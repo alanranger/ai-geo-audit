@@ -4173,41 +4173,64 @@
       }
 
       try {
+        const headers = window.getOptimisationHeaders();
+        console.log('[Optimisation] Updating status:', { taskId, newStatus, oldStatus, hasAdminKey: !!headers['x-arp-admin-key'] });
+        
         const response = await fetch(apiUrl(`/api/optimisation/task/${taskId}`), {
           method: 'PATCH',
-          headers: window.getOptimisationHeaders(),
+          headers: headers,
           body: JSON.stringify({
             status: newStatus
           })
         });
 
+        console.log('[Optimisation] Response status:', response.status, response.statusText);
+        console.log('[Optimisation] Response headers:', Object.fromEntries(response.headers.entries()));
+
         if (!response.ok) {
-          let errorMessage = 'Failed to update status';
-          // Clone response to read body multiple times if needed
+          // Clone response BEFORE reading to allow multiple reads
           const responseClone = response.clone();
+          let errorMessage = 'Failed to update status';
+          
           try {
-            const contentType = response.headers.get('content-type');
-            if (contentType && contentType.includes('application/json')) {
-              const errorData = await response.json();
-              errorMessage = errorData.error || errorData.message || errorMessage;
-            } else {
-              const errorText = await responseClone.text();
-              if (errorText) errorMessage = errorText;
-            }
+            // Try to read as JSON first (most APIs return JSON)
+            const errorData = await response.json();
+            errorMessage = errorData.error || errorData.message || errorMessage;
+            console.error('[Optimisation] API error response:', errorData);
           } catch (e) {
-            // If all else fails, try to get text from clone
+            // If JSON parsing fails, try text from clone
             try {
               const errorText = await responseClone.text();
-              if (errorText) errorMessage = errorText;
+              if (errorText) {
+                // Try to parse as JSON if it looks like JSON
+                try {
+                  const parsed = JSON.parse(errorText);
+                  errorMessage = parsed.error || parsed.message || errorText;
+                } catch (parseError) {
+                  errorMessage = errorText.substring(0, 200); // Limit length
+                }
+              }
+              console.error('[Optimisation] API error text:', errorText.substring(0, 200));
             } catch (e2) {
-              // Ignore - use default error message
+              console.error('[Optimisation] Failed to read error response:', e2);
             }
           }
+          
           if (response.status === 401) {
             errorMessage = 'Unauthorized - admin key missing or invalid. Please set your admin key in the configuration section.';
+          } else if (response.status === 404) {
+            errorMessage = 'Task not found. It may have been deleted.';
+          } else if (response.status === 403) {
+            errorMessage = 'Forbidden - you do not have permission to update this task.';
+          } else if (response.status === 500) {
+            errorMessage = `Server error (${response.status}): ${errorMessage}`;
           }
           throw new Error(errorMessage);
         }
+        
+        // Read successful response
+        const result = await response.json();
+        console.log('[Optimisation] Status update successful:', result);
 
         // Refresh and close
         await window.fetchOptimisationStatuses([{
@@ -4356,41 +4379,63 @@
       const taskId = modal.dataset.taskId;
 
       try {
+        const headers = window.getOptimisationHeaders();
+        console.log('[Optimisation] Stopping tracking:', { taskId, hasAdminKey: !!headers['x-arp-admin-key'] });
+        
         const response = await fetch(apiUrl(`/api/optimisation/task/${taskId}`), {
           method: 'PATCH',
-          headers: window.getOptimisationHeaders(),
+          headers: headers,
           body: JSON.stringify({
             status: 'cancelled'
           })
         });
 
+        console.log('[Optimisation] Response status:', response.status, response.statusText);
+
         if (!response.ok) {
-          let errorMessage = 'Failed to stop tracking';
-          // Clone response to read body multiple times if needed
+          // Clone response BEFORE reading to allow multiple reads
           const responseClone = response.clone();
+          let errorMessage = 'Failed to stop tracking';
+          
           try {
-            const contentType = response.headers.get('content-type');
-            if (contentType && contentType.includes('application/json')) {
-              const errorData = await response.json();
-              errorMessage = errorData.error || errorData.message || errorMessage;
-            } else {
-              const errorText = await responseClone.text();
-              if (errorText) errorMessage = errorText;
-            }
+            // Try to read as JSON first (most APIs return JSON)
+            const errorData = await response.json();
+            errorMessage = errorData.error || errorData.message || errorMessage;
+            console.error('[Optimisation] API error response:', errorData);
           } catch (e) {
-            // If all else fails, try to get text from clone
+            // If JSON parsing fails, try text from clone
             try {
               const errorText = await responseClone.text();
-              if (errorText) errorMessage = errorText;
+              if (errorText) {
+                // Try to parse as JSON if it looks like JSON
+                try {
+                  const parsed = JSON.parse(errorText);
+                  errorMessage = parsed.error || parsed.message || errorText;
+                } catch (parseError) {
+                  errorMessage = errorText.substring(0, 200); // Limit length
+                }
+              }
+              console.error('[Optimisation] API error text:', errorText.substring(0, 200));
             } catch (e2) {
-              // Ignore - use default error message
+              console.error('[Optimisation] Failed to read error response:', e2);
             }
           }
+          
           if (response.status === 401) {
             errorMessage = 'Unauthorized - admin key missing or invalid. Please set your admin key in the configuration section.';
+          } else if (response.status === 404) {
+            errorMessage = 'Task not found. It may have been deleted.';
+          } else if (response.status === 403) {
+            errorMessage = 'Forbidden - you do not have permission to update this task.';
+          } else if (response.status === 500) {
+            errorMessage = `Server error (${response.status}): ${errorMessage}`;
           }
           throw new Error(errorMessage);
         }
+        
+        // Read successful response
+        const result = await response.json();
+        console.log('[Optimisation] Stop tracking successful:', result);
 
         // Refresh and close
         await window.fetchOptimisationStatuses([{
