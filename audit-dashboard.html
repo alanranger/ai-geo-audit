@@ -4297,10 +4297,18 @@
       if (rowDataStr) {
         try {
           const rowData = JSON.parse(rowDataStr);
+          
+          // Get queryTotal data for clicks, impressions, and CTR
+          let queryTotal = null;
+          if (typeof getQueryTotalForKeyword === 'function') {
+            queryTotal = getQueryTotalForKeyword(keyword);
+          }
+          
           baselineMetrics = {
-            gsc_clicks_28d: rowData.gsc_clicks_28d || rowData.clicks_28d || null,
-            gsc_impressions_28d: rowData.gsc_impressions_28d || rowData.impressions_28d || null,
-            gsc_ctr_28d: rowData.gsc_ctr_28d || rowData.ctr_28d || null,
+            gsc_clicks_28d: queryTotal?.clicks || rowData.gsc_clicks_28d || rowData.clicks_28d || null,
+            gsc_impressions_28d: queryTotal?.impressions || rowData.gsc_impressions_28d || rowData.impressions_28d || null,
+            // queryTotal.ctr is a percentage (0-100), convert to decimal for storage
+            gsc_ctr_28d: queryTotal?.ctr != null ? (queryTotal.ctr / 100) : (rowData.gsc_ctr_28d || rowData.ctr_28d || null),
             current_rank: rowData.best_rank_group || rowData.current_rank || null,
             opportunity_score: rowData.opportunityScore || null,
             ai_overview: rowData.has_ai_overview || false,
@@ -4339,8 +4347,16 @@
           throw new Error(error || 'Failed to create task');
         }
 
+        const result = await response.json();
+        const createdTask = result.task;
+        
         // Refresh status cache
         await window.fetchOptimisationStatuses([{ keyword, best_url: targetUrl }]);
+        
+        // Reload all tasks so the new task is available for the drawer
+        if (typeof window.loadAllOptimisationTasks === 'function') {
+          await window.loadAllOptimisationTasks();
+        }
         
         // Close modal
         modal.style.display = 'none';
@@ -5460,8 +5476,8 @@
       // Find task
       let task = window.optimisationModuleState.allTasks.find(t => t.id === taskId);
       
-      // If task not found, try loading tasks
-      if (!task && window.optimisationModuleState.allTasks.length === 0) {
+      // If task not found, try loading tasks (even if array isn't empty - task might be newly created)
+      if (!task) {
         if (typeof window.loadAllOptimisationTasks === 'function') {
           await window.loadAllOptimisationTasks();
           task = window.optimisationModuleState.allTasks.find(t => t.id === taskId);
