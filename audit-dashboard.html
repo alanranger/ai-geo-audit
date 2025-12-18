@@ -6131,43 +6131,52 @@
           debugLog(`[Optimisation Badge] WARNING: progress.objective_state="${progress.objective_state}" differs from goal_state="${state}". Using goal_state.`, 'warn');
         }
         
-        // Final validation: if state is 'met', verify delta actually meets target
-        // This is a safety check in case the database view hasn't been updated yet
-        if (state === 'met') {
-          const target = task.objective_target_delta != null ? task.objective_target_delta : 
-            (task.objective_target_value != null ? task.objective_target_value : null);
-          
-          if (target != null && target > 0) {
-            // Get delta from task (from goal status view) or calculate from progress
-            let delta = task.objective_delta;
-            if (delta === null || delta === undefined) {
-              if (progress && progress.latest_value != null && progress.baseline_value != null) {
-                delta = progress.latest_value - progress.baseline_value;
-              }
+        // ALWAYS validate state using actual delta vs target - don't trust database views
+        // This ensures badge matches reality regardless of which view is used
+        const target = task.objective_target_delta != null ? task.objective_target_delta : 
+          (task.objective_target_value != null ? task.objective_target_value : null);
+        
+        if (target != null && target > 0 && (task.objective_metric || task.objective_kpi)) {
+          // Get delta from task (from goal status view) or calculate from progress
+          let delta = task.objective_delta;
+          if (delta === null || delta === undefined) {
+            if (progress && progress.latest_value != null && progress.baseline_value != null) {
+              delta = progress.latest_value - progress.baseline_value;
             }
+          }
+          
+          // If we have delta, validate it against target
+          if (delta !== null && delta !== undefined) {
+            const direction = task.objective_direction || 'increase';
+            const meetsTarget = direction === 'decrease' 
+              ? delta <= (target * -1)
+              : delta >= target;
             
-            // Validate: for increase, delta must be >= target; for decrease, delta must be <= -target
-            if (delta !== null && delta !== undefined) {
-              const direction = task.objective_direction || 'increase';
-              const meetsTarget = direction === 'decrease' 
-                ? delta <= (target * -1)
-                : delta >= target;
-              
-              if (!meetsTarget) {
+            // Override state based on actual delta, not database view
+            if (meetsTarget) {
+              if (state !== 'met' && state !== 'achieved') {
                 if (typeof debugLog === 'function') {
-                  debugLog(`[Optimisation] Overriding 'met' state to 'on_track': delta=${delta}, target=${target}, direction=${direction}`, 'warn');
+                  debugLog(`[Optimisation Badge] Overriding state "${state}" to 'met': delta=${delta} meets target=${target}`, 'info');
+                }
+                state = 'met';
+              }
+            } else {
+              // Delta doesn't meet target - can't be 'met' or 'achieved'
+              if (state === 'met' || state === 'achieved') {
+                if (typeof debugLog === 'function') {
+                  debugLog(`[Optimisation Badge] Overriding '${state}' to 'on_track': delta=${delta} does NOT meet target=${target} (direction=${direction})`, 'warn');
                 }
                 state = 'on_track';
               }
-            } else {
-              // If we can't get delta but baseline equals latest, it's definitely not met
-              if (progress && progress.baseline_value != null && progress.latest_value != null) {
-                if (progress.baseline_value === progress.latest_value) {
-                  if (typeof debugLog === 'function') {
-                    debugLog(`[Optimisation] Overriding 'met' state to 'on_track': baseline equals latest (delta=0)`, 'warn');
-                  }
-                  state = 'on_track';
+            }
+          } else if (progress && progress.baseline_value != null && progress.latest_value != null) {
+            // If baseline equals latest, delta is 0 - can't be met
+            if (progress.baseline_value === progress.latest_value) {
+              if (state === 'met' || state === 'achieved') {
+                if (typeof debugLog === 'function') {
+                  debugLog(`[Optimisation Badge] Overriding '${state}' to 'on_track': baseline equals latest (delta=0)`, 'warn');
                 }
+                state = 'on_track';
               }
             }
           }
