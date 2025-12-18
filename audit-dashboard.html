@@ -16348,23 +16348,20 @@ Final Score: ${score}/100`;
        * @param {string} metricKey - 'ctr', 'impressions', 'clicks', or 'avgPosition'
        * @returns {{ labels: string[], segments: Record<string, number[]> }}
        */
-      function buildMoneyKpiHistory(history, metricKey) {
+      function buildMoneyKpiHistory(history, metricKey, timeseries = [], latestMoneySegmentMetrics = null, latestMoneyPagePriorityData = []) {
         // Use last 28 days (matching Performance Trends charts) with 8 weekly date points (28 days / 4 = 7 weeks)
-        // Get the last GSC timeseries date (same logic as Performance Trends)
-        let lastGscTimeseriesDate = window.lastGscTimeseriesDate || null;
-        
-        // If not set, find the latest date with actual GSC metrics
-        if (!lastGscTimeseriesDate && history.length > 0) {
-          const recordsWithMetrics = history
-            .filter(r => r.moneySegmentMetrics && !r.isPartial)
-            .map(r => r.date || r.audit_date || r.auditDate)
-            .filter(Boolean)
-            .sort()
-            .reverse();
-          
-          if (recordsWithMetrics.length > 0) {
-            lastGscTimeseriesDate = recordsWithMetrics[0];
+        // Get the last GSC timeseries date from actual timeseries data
+        let lastGscTimeseriesDate = null;
+        if (timeseries.length > 0) {
+          const timeseriesDates = timeseries.map(ts => ts.date).filter(Boolean).sort().reverse();
+          if (timeseriesDates.length > 0) {
+            lastGscTimeseriesDate = timeseriesDates[0];
           }
+        }
+        
+        // Fallback to window value if timeseries not provided
+        if (!lastGscTimeseriesDate) {
+          lastGscTimeseriesDate = window.lastGscTimeseriesDate || null;
         }
         
         // Calculate 28-day range ending at last GSC date (inclusive of end date, so go back 27 days)
@@ -16394,23 +16391,47 @@ Final Score: ${score}/100`;
           datePoints[datePoints.length - 1] = endDate.toISOString().split('T')[0];
         }
         
-        // Create a map of date -> record for quick lookup
-        const historyMap = new Map();
-        for (const row of history) {
-          const dateStr = row.date || row.audit_date || row.auditDate;
-          if (!dateStr) continue;
-          const date = new Date(dateStr);
-          if (Number.isNaN(date.getTime())) continue;
-          
-          // Only include dates within the 28-day range and up to last GSC date
-          if (dateStr.localeCompare(startDate.toISOString().split('T')[0]) >= 0 &&
-              (!lastGscTimeseriesDate || dateStr.localeCompare(lastGscTimeseriesDate) <= 0)) {
-            historyMap.set(dateStr, {
-              date: date,
-              dateStr: dateStr,
-              metrics: row.moneySegmentMetrics || null,
-              isPartial: row.isPartial || false
-            });
+        // Create a map of date -> timeseries data for quick lookup
+        const timeseriesMap = new Map();
+        if (timeseries.length > 0) {
+          for (const ts of timeseries) {
+            if (ts.date) {
+              timeseriesMap.set(ts.date, ts);
+            }
+          }
+        }
+        
+        // Calculate money page proportions from latest audit's metrics
+        let moneyClicksProportion = 0;
+        let moneyImpressionsProportion = 0;
+        let segmentProportions = {
+          landingPages: { clicks: 0, impressions: 0 },
+          eventPages: { clicks: 0, impressions: 0 },
+          productPages: { clicks: 0, impressions: 0 }
+        };
+        
+        if (latestMoneySegmentMetrics && latestMoneySegmentMetrics.allMoney) {
+          const allMoney = latestMoneySegmentMetrics.allMoney;
+          // Get total site clicks/impressions from latest audit date's timeseries
+          const latestAuditDate = history.length > 0 ? (history[history.length - 1].date || history[history.length - 1].audit_date) : null;
+          if (latestAuditDate) {
+            const latestTs = timeseriesMap.get(latestAuditDate);
+            if (latestTs && latestTs.clicks > 0 && latestTs.impressions > 0) {
+              moneyClicksProportion = allMoney.clicks / latestTs.clicks;
+              moneyImpressionsProportion = allMoney.impressions / latestTs.impressions;
+              
+              // Calculate segment proportions
+              if (allMoney.clicks > 0) {
+                segmentProportions.landingPages.clicks = (latestMoneySegmentMetrics.landingPages?.clicks || 0) / allMoney.clicks;
+                segmentProportions.eventPages.clicks = (latestMoneySegmentMetrics.eventPages?.clicks || 0) / allMoney.clicks;
+                segmentProportions.productPages.clicks = (latestMoneySegmentMetrics.productPages?.clicks || 0) / allMoney.clicks;
+              }
+              if (allMoney.impressions > 0) {
+                segmentProportions.landingPages.impressions = (latestMoneySegmentMetrics.landingPages?.impressions || 0) / allMoney.impressions;
+                segmentProportions.eventPages.impressions = (latestMoneySegmentMetrics.eventPages?.impressions || 0) / allMoney.impressions;
+                segmentProportions.productPages.impressions = (latestMoneySegmentMetrics.productPages?.impressions || 0) / allMoney.impressions;
+              }
+            }
           }
         }
         
@@ -16426,99 +16447,52 @@ Final Score: ${score}/100`;
           eventPages: [],
           productPages: []
         };
-
-        // Forward-fill missing values: use last available value for each segment
-        let lastValues = {
-          allMoney: null,
-          landingPages: null,
-          eventPages: null,
-          productPages: null
-        };
         
-        // First, find the first available audit record (for backward-filling the first point)
-        let firstAvailableAudit = null;
-        let firstAvailableDate = null;
-        for (const [dateStr, record] of historyMap.entries()) {
-          if (record.metrics && !record.isPartial) {
-            firstAvailableDate = dateStr;
-            firstAvailableAudit = record;
-            break;
-          }
-        }
-        
-        // Process each of the 8 weekly date points
+        // Process each of the 8 weekly date points - calculate from actual GSC timeseries data
         for (const datePoint of datePoints) {
-          // Find the closest audit record for this date (or exact match)
-          let audit = historyMap.get(datePoint);
+          const ts = timeseriesMap.get(datePoint);
           
-          // If no exact match, find the closest date before this point
-          if (!audit) {
-            const datePointDate = new Date(datePoint + 'T00:00:00');
-            let closestDate = null;
-            let closestDiff = Infinity;
-            
-            for (const [dateStr, record] of historyMap.entries()) {
-              const recordDate = new Date(dateStr + 'T00:00:00');
-              if (recordDate <= datePointDate) {
-                const diff = datePointDate - recordDate;
-                if (diff < closestDiff) {
-                  closestDiff = diff;
-                  closestDate = dateStr;
-                }
-              }
-            }
-            
-            if (closestDate) {
-              audit = historyMap.get(closestDate);
-            }
-          }
-          
-          // If still no audit found and this is the first point, use the first available audit (backward-fill)
-          if (!audit && datePoint === datePoints[0] && firstAvailableAudit) {
-            audit = firstAvailableAudit;
-            debugLog(`[KPI Tracker] First date point ${datePoint} has no data, backward-filling from first available audit ${firstAvailableDate}`, 'info');
-          }
-          
-          const m = audit ? audit.metrics : null;
           for (const key of Object.keys(segments)) {
             let v = null;
             
-            // Try to get value from metrics if available
-            if (m && m[key]) {
-              v = m[key][metricKey] != null ? m[key][metricKey] : null;
-            }
-            
-            // Check if value is zero (which indicates bad data for partial audits)
-            // For CTR, clicks, impressions: zero is invalid (should use last good value)
-            // For avgPosition: zero might be valid, but if all metrics are zero, it's likely bad data
-            const isZeroValue = v === 0 || v === 0.0;
-            const hasOtherNonZeroMetrics = m && m[key] && (
-              (m[key].clicks && m[key].clicks > 0) ||
-              (m[key].impressions && m[key].impressions > 0) ||
-              (m[key].ctr && m[key].ctr > 0)
-            );
-            
-            // If value is zero and there are no other non-zero metrics, treat as bad data
-            // This handles Dec 15 which has all zeros in money_segment_metrics
-            if (isZeroValue && !hasOtherNonZeroMetrics && lastValues[key] != null) {
-              v = lastValues[key];
-              debugLog(`[KPI Tracker] Forward-filling ${key}.${metricKey} for ${datePoint} (was 0, using last good value: ${lastValues[key]})`, 'info');
-            }
-            
-            // Forward-fill: if value is null/missing, use last known good value
-            // This handles partial audits that don't have moneySegmentMetrics
-            if (v == null && lastValues[key] != null) {
-              v = lastValues[key];
-              debugLog(`[KPI Tracker] Forward-filling ${key}.${metricKey} for ${datePoint} with last good value: ${lastValues[key]}`, 'info');
-            }
-            
-            // Update last value if we have a new one (not null and not zero for non-position metrics)
-            // For position, zero might be valid, but we'll still update if it's non-null
-            if (v != null) {
-              // Only update last value if it's not a zero value (unless it's position and we have no other data)
-              if (!isZeroValue || (metricKey === 'avgPosition' && lastValues[key] == null)) {
-                lastValues[key] = v;
+            if (ts && ts.clicks > 0 && ts.impressions > 0 && moneyClicksProportion > 0 && moneyImpressionsProportion > 0) {
+              // Calculate metrics from actual GSC timeseries data using proportions
+              if (key === 'allMoney') {
+                const moneyClicks = Math.round(ts.clicks * moneyClicksProportion);
+                const moneyImpressions = Math.round(ts.impressions * moneyImpressionsProportion);
+                
+                if (metricKey === 'clicks') {
+                  v = moneyClicks;
+                } else if (metricKey === 'impressions') {
+                  v = moneyImpressions;
+                } else if (metricKey === 'ctr') {
+                  v = moneyImpressions > 0 ? (moneyClicks / moneyImpressions) * 100 : 0;
+                } else if (metricKey === 'avgPosition') {
+                  // Use latest audit's avgPosition (position doesn't change much day-to-day)
+                  v = latestMoneySegmentMetrics?.allMoney?.avgPosition || null;
+                } else if (metricKey === 'behaviourScore') {
+                  v = latestMoneySegmentMetrics?.allMoney?.behaviourScore || null;
+                }
+              } else {
+                // Calculate segment metrics
+                const segmentClicks = Math.round(ts.clicks * moneyClicksProportion * segmentProportions[key].clicks);
+                const segmentImpressions = Math.round(ts.impressions * moneyImpressionsProportion * segmentProportions[key].impressions);
+                
+                if (metricKey === 'clicks') {
+                  v = segmentClicks;
+                } else if (metricKey === 'impressions') {
+                  v = segmentImpressions;
+                } else if (metricKey === 'ctr') {
+                  v = segmentImpressions > 0 ? (segmentClicks / segmentImpressions) * 100 : 0;
+                } else if (metricKey === 'avgPosition') {
+                  v = latestMoneySegmentMetrics?.[key]?.avgPosition || null;
+                } else if (metricKey === 'behaviourScore') {
+                  v = latestMoneySegmentMetrics?.[key]?.behaviourScore || null;
+                }
               }
+            } else if (ts && metricKey === 'avgPosition') {
+              // For position, use latest audit's value (position is relatively stable)
+              v = latestMoneySegmentMetrics?.[key]?.avgPosition || null;
             }
             
             segments[key].push(v);
@@ -17094,9 +17068,18 @@ Final Score: ${score}/100`;
           debugLog(`✓ Money Pages KPI Tracker: Found ${filteredHistory.filter(r => r.moneySegmentMetrics).length} records with moneySegmentMetrics`, 'success');
           debugLog(`✓ Money Pages KPI Tracker: Total history records: ${filteredHistory.length}`, 'info');
 
+          // Get timeseries data from API response (actual GSC data for all dates)
+          const timeseries = json.timeseries || [];
+          debugLog(`✓ Money Pages KPI Tracker: Using ${timeseries.length} timeseries data points from GSC`, 'info');
+          
+          // Get latest audit's moneyPagePriorityData for proportions
+          const latestAudit = filteredHistory.length > 0 ? filteredHistory[filteredHistory.length - 1] : null;
+          const latestMoneyPagePriorityData = latestAudit?.moneyPagePriorityData || window.moneyPagePriorityData || [];
+          const latestMoneySegmentMetrics = latestAudit?.moneySegmentMetrics || null;
+          
           const metricKey = document.getElementById("money-kpi-metric-select")?.value || "ctr";
           debugLog(`✓ Money Pages KPI Tracker: Using metricKey="${metricKey}"`, 'info');
-          const historyData = buildMoneyKpiHistory(filteredHistory, metricKey);
+          const historyData = buildMoneyKpiHistory(filteredHistory, metricKey, timeseries, latestMoneySegmentMetrics, latestMoneyPagePriorityData);
           debugLog(`✓ Money Pages KPI Tracker: Built history with ${historyData.labels.length} labels`, 'info');
           
           renderMoneyKpiTable(historyData, metricKey);
