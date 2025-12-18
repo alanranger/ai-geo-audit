@@ -6107,6 +6107,20 @@
           state = progress.objective_state === 'achieved' ? 'met' : progress.objective_state;
         }
         
+        // Validate 'met' or 'achieved' state: check if delta actually meets target
+        if ((state === 'met' || state === 'achieved') && progress && task.objective_target_delta != null) {
+          const delta = progress.objective_delta != null ? progress.objective_delta : 
+            (progress.latest_value != null && progress.baseline_value != null ? 
+              progress.latest_value - progress.baseline_value : 0);
+          const target = task.objective_target_delta != null ? task.objective_target_delta : 
+            (task.objective_target_value != null ? task.objective_target_value : null);
+          
+          // If delta doesn't meet target, change to 'on_track'
+          if (target != null && delta < target) {
+            state = 'on_track';
+          }
+        }
+        
         // If no state but objective is set, check if we have baseline metrics
         if (!state && (task.objective_metric || task.objective_kpi)) {
           // Check if baseline_metrics exists (from view) or if we have any measurement
