@@ -33417,19 +33417,15 @@ Final Score: ${score}/100`;
           `;
         }
 
-        // Sort competitors by strength score (highest to lowest)
-        const sortedCompetitors = sortDomainStrengthRows(competitorItems);
-        // Reverse if needed to get highest first (default sort is usually asc, we want desc for score)
-        if (domainStrengthSortState.column === 'score' && domainStrengthSortState.direction === 'asc') {
-          sortedCompetitors.reverse();
-        } else if (domainStrengthSortState.column !== 'score') {
-          // For non-score sorts, sort by score desc as secondary sort
-          sortedCompetitors.sort((a, b) => {
-            const aScore = a?.latest?.score ?? 0;
-            const bScore = b?.latest?.score ?? 0;
-            return bScore - aScore; // Descending
-          });
-        }
+        // Sort competitors by strength score (highest to lowest) - ALWAYS by score desc
+        // This ensures competitors are shown in order of strength (highest first)
+        const sortedCompetitors = [...competitorItems].sort((a, b) => {
+          const aScore = typeof a?.latest?.score === 'number' ? a.latest.score : (parseFloat(a?.latest?.score) || 0);
+          const bScore = typeof b?.latest?.score === 'number' ? b.latest.score : (parseFloat(b?.latest?.score) || 0);
+          return bScore - aScore; // Descending - highest score first
+        });
+        
+        console.log('[DomainStrength] Competitors found:', sortedCompetitors.length, 'sorted by strength score (highest first)');
 
         // Build final sorted array: your site first, then top competitors
         let sorted = [];
