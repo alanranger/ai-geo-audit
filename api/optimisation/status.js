@@ -4,6 +4,7 @@
 export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
+import { requireAdmin } from '../../lib/api/requireAdmin.js';
 
 const need = (k) => {
   const v = process.env[k];
@@ -19,6 +20,11 @@ const sendJSON = (res, status, obj) => {
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return sendJSON(res, 405, { error: 'Method not allowed' });
+  }
+
+  // Admin key gate
+  if (!requireAdmin(req, res, sendJSON)) {
+    return; // Response already sent
   }
 
   try {

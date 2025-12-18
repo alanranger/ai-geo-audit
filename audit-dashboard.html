@@ -2443,6 +2443,89 @@
       </div>
     </div>
 
+    <!-- Admin Key Configuration (Phase A - Security) -->
+    <div class="config-panel" style="margin-top: 2rem;">
+      <h2>Optimisation Tracking Security</h2>
+      <div class="info-box" style="background: #e0f2fe; border-left: 4px solid #0284c7; padding: 1rem; margin-bottom: 1rem; border-radius: 4px;">
+        <p style="margin: 0; font-size: 0.9rem; color: #0c4a6e;">
+          <strong>Admin Key Required:</strong> Set your admin key to enable optimisation tracking actions (Track, Manage, Cycle). 
+          The key is stored in your browser session and sent with API requests.
+        </p>
+      </div>
+      <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin-bottom: 1rem;">
+        <input 
+          type="password" 
+          id="admin-key-input" 
+          placeholder="Enter admin key (32+ characters)" 
+          style="flex: 1; min-width: 300px; padding: 0.75rem; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 0.9rem; font-family: monospace;"
+          value=""
+        />
+        <button 
+          class="btn" 
+          onclick="saveAdminKey()" 
+          title="Save admin key to session storage. Required for optimisation tracking actions."
+        >
+          Save Admin Key
+        </button>
+        <button 
+          class="btn btn-secondary" 
+          onclick="clearAdminKeyUI()" 
+          title="Clear admin key from session storage."
+        >
+          Clear
+        </button>
+      </div>
+      <div id="admin-key-status" style="font-size: 0.85rem; color: #64748b; margin-top: 0.5rem;"></div>
+      <script>
+        // Admin key UI functions
+        function saveAdminKey() {
+          const input = document.getElementById('admin-key-input');
+          const key = input.value.trim();
+          if (!key) {
+            alert('Please enter an admin key');
+            return;
+          }
+          if (key.length < 32) {
+            if (!confirm('Admin key should be at least 32 characters. Save anyway?')) {
+              return;
+            }
+          }
+          window.setAdminKey(key);
+          updateAdminKeyStatus();
+          input.value = ''; // Clear input for security
+          alert('Admin key saved to session storage');
+        }
+
+        function clearAdminKeyUI() {
+          if (confirm('Clear admin key? Optimisation tracking actions will be disabled.')) {
+            window.clearAdminKey();
+            document.getElementById('admin-key-input').value = '';
+            updateAdminKeyStatus();
+          }
+        }
+
+        function updateAdminKeyStatus() {
+          const statusEl = document.getElementById('admin-key-status');
+          if (!statusEl) return;
+          
+          const hasKey = window.hasAdminKey();
+          if (hasKey) {
+            const key = window.getAdminKey();
+            statusEl.innerHTML = `<span style="color: #10b981;">✓ Admin key set</span> (${key.length} characters, stored in session)`;
+          } else {
+            statusEl.innerHTML = '<span style="color: #ef4444;">⚠ Admin key not set — tracking actions disabled</span>';
+          }
+        }
+
+        // Update status on load
+        if (typeof window !== 'undefined' && document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', updateAdminKeyStatus);
+        } else {
+          updateAdminKeyStatus();
+        }
+      </script>
+    </div>
+
     <div class="config-panel" style="margin-top: 2rem;">
       <h2>Reporting</h2>
       <div class="info-box" style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 1rem; margin-bottom: 1rem; border-radius: 4px;">
@@ -3678,6 +3761,36 @@
       return cleaned;
     };
 
+    // Admin key utilities (Phase A - Security)
+    window.getAdminKey = function getAdminKey() {
+      if (typeof window === "undefined") return "";
+      return sessionStorage.getItem("arp_admin_key") || "";
+    };
+
+    window.setAdminKey = function setAdminKey(key) {
+      if (typeof window === "undefined") return;
+      sessionStorage.setItem("arp_admin_key", key);
+    };
+
+    window.hasAdminKey = function hasAdminKey() {
+      return window.getAdminKey().length > 0;
+    };
+
+    window.clearAdminKey = function clearAdminKey() {
+      if (typeof window === "undefined") return;
+      sessionStorage.removeItem("arp_admin_key");
+    };
+
+    // Helper to build headers with admin key
+    window.getOptimisationHeaders = function getOptimisationHeaders() {
+      const headers = { 'Content-Type': 'application/json' };
+      const adminKey = window.getAdminKey();
+      if (adminKey) {
+        headers['x-arp-admin-key'] = adminKey;
+      }
+      return headers;
+    };
+
     // Cache for optimisation status (keyed by keyword_key::target_url_clean::task_type)
     window.optimisationStatusCache = new Map();
 
@@ -3708,7 +3821,7 @@
         // Fetch from API endpoint (we'll create this)
         const response = await fetch(apiUrl('/api/optimisation/status'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: window.getOptimisationHeaders(),
           body: JSON.stringify({
             keyword_keys: Array.from(keywordKeys),
             url_keys: Array.from(urlKeys)
@@ -3797,7 +3910,7 @@
       try {
         const response = await fetch(apiUrl('/api/optimisation/task'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: window.getOptimisationHeaders(),
           body: JSON.stringify({
             keyword_text: keyword,
             target_url: targetUrl,
@@ -3809,6 +3922,9 @@
         });
 
         if (!response.ok) {
+          if (response.status === 401) {
+            throw new Error('Unauthorized - admin key missing or invalid. Please set your admin key in the configuration section.');
+          }
           const error = await response.text();
           throw new Error(error || 'Failed to create task');
         }
@@ -3880,7 +3996,7 @@
       try {
         const response = await fetch(apiUrl(`/api/optimisation/task/${taskId}`), {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: window.getOptimisationHeaders(),
           body: JSON.stringify({
             status: newStatus
           })
@@ -3929,6 +4045,9 @@
         });
 
         if (!response.ok) {
+          if (response.status === 401) {
+            throw new Error('Unauthorized - admin key missing or invalid. Please set your admin key in the configuration section.');
+          }
           throw new Error('Failed to start new cycle');
         }
 
@@ -3966,7 +4085,7 @@
       try {
         const response = await fetch(apiUrl(`/api/optimisation/task/${taskId}`), {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: window.getOptimisationHeaders(),
           body: JSON.stringify({
             status: 'cancelled'
           })
@@ -28173,8 +28292,18 @@ Final Score: ${score}/100`;
           trackBtn.style.padding = "0.25rem 0.5rem";
           trackBtn.style.fontSize = "0.75rem";
           trackBtn.textContent = "Track";
+          if (!window.hasAdminKey()) {
+            trackBtn.disabled = true;
+            trackBtn.title = "Admin key required - set your admin key in the configuration section";
+            trackBtn.style.opacity = "0.5";
+            trackBtn.style.cursor = "not-allowed";
+          }
           trackBtn.onclick = (e) => {
             e.stopPropagation();
+            if (!window.hasAdminKey()) {
+              alert('Admin key required. Please set your admin key in the "Optimisation Tracking Security" section.');
+              return;
+            }
             window.openTrackKeywordModal(row, taskType);
           };
           tdOptimisation.appendChild(trackBtn);
@@ -28230,8 +28359,18 @@ Final Score: ${score}/100`;
           manageBtn.style.padding = "0.25rem 0.5rem";
           manageBtn.style.fontSize = "0.75rem";
           manageBtn.textContent = "Manage";
+          if (!window.hasAdminKey()) {
+            manageBtn.disabled = true;
+            manageBtn.title = "Admin key required - set your admin key in the configuration section";
+            manageBtn.style.opacity = "0.5";
+            manageBtn.style.cursor = "not-allowed";
+          }
           manageBtn.onclick = (e) => {
             e.stopPropagation();
+            if (!window.hasAdminKey()) {
+              alert('Admin key required. Please set your admin key in the "Optimisation Tracking Security" section.');
+              return;
+            }
             window.openManageOptimisationModal(row, status, taskType);
           };
           tdOptimisation.appendChild(manageBtn);
