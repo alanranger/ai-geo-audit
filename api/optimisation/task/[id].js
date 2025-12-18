@@ -15,7 +15,7 @@ const need = (k) => {
 const sendJSON = (res, status, obj) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'PATCH, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'PATCH, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-arp-admin-key');
   res.status(status).send(JSON.stringify(obj));
 };
@@ -24,18 +24,60 @@ export default async function handler(req, res) {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'PATCH, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'PATCH, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-arp-admin-key');
     return res.status(200).end();
   }
 
-  if (req.method !== 'PATCH') {
-    return sendJSON(res, 405, { error: `Method not allowed. Received: ${req.method}, Expected: PATCH` });
-  }
-
-  // Admin key gate
+  // Admin key gate (for all methods)
   if (!requireAdmin(req, res, sendJSON)) {
     return; // Response already sent
+  }
+
+  // Handle DELETE (hard delete)
+  if (req.method === 'DELETE') {
+    try {
+      const { id } = req.query;
+      if (!id) {
+        return sendJSON(res, 400, { error: 'Task ID required' });
+      }
+
+      const supabase = createClient(
+        need('SUPABASE_URL'),
+        need('SUPABASE_SERVICE_ROLE_KEY')
+      );
+
+      // Delete all events first (foreign key constraint)
+      const { error: eventsError } = await supabase
+        .from('optimisation_task_events')
+        .delete()
+        .eq('task_id', id);
+
+      if (eventsError) {
+        console.error('[Optimisation Task] Delete events error:', eventsError);
+        return sendJSON(res, 500, { error: eventsError.message });
+      }
+
+      // Delete the task
+      const { error: taskError } = await supabase
+        .from('optimisation_tasks')
+        .delete()
+        .eq('id', id);
+
+      if (taskError) {
+        console.error('[Optimisation Task] Delete task error:', taskError);
+        return sendJSON(res, 500, { error: taskError.message });
+      }
+
+      return sendJSON(res, 200, { message: 'Task deleted successfully' });
+    } catch (error) {
+      console.error('[Optimisation Task] Delete error:', error);
+      return sendJSON(res, 500, { error: error.message || 'Internal server error' });
+    }
+  }
+
+  if (req.method !== 'PATCH') {
+    return sendJSON(res, 405, { error: `Method not allowed. Received: ${req.method}, Expected: PATCH or DELETE` });
   }
 
   try {
@@ -117,16 +159,16 @@ export default async function handler(req, res) {
     let task = currentTask;
     if (Object.keys(updates).length > 0) {
       const { data: updatedTask, error: updateError } = await supabase
-        .from('optimisation_tasks')
-        .update(updates)
-        .eq('id', id)
-        .select()
-        .single();
+      .from('optimisation_tasks')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
 
-      if (updateError) {
-        console.error('[Optimisation Task] Update error:', updateError);
-        return sendJSON(res, 500, { error: updateError.message });
-      }
+    if (updateError) {
+      console.error('[Optimisation Task] Update error:', updateError);
+      return sendJSON(res, 500, { error: updateError.message });
+    }
       task = updatedTask;
     }
 

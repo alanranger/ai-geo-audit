@@ -3781,7 +3781,7 @@
             <h2>Optimisation Tracking</h2>
             <p>Track and manage keyword optimisation tasks across your site. Monitor progress, cycles, and outcomes.</p>
           </div>
-          <button id="optimisation-bulk-update-btn" class="btn" style="padding: 0.75rem 1.5rem; font-size: 0.95rem; white-space: nowrap;" title="Fetches the latest 28-day metrics and stores a new measurement snapshot (idempotent within 5 minutes).">
+          <button id="optimisation-bulk-update-btn" class="btn" style="padding: 0.75rem 1.5rem; font-size: 0.95rem; white-space: nowrap;" title="Captures the latest metrics for every active task (creates a measurement entry).">
             📊 Update All Tasks with Latest Data
           </button>
         </div>
@@ -3806,7 +3806,7 @@
           </div>
         </div>
 
-        <!-- Goal Rollup Badges (Phase B) - Clickable Filters -->
+        <!-- Goal Rollup Badges (Phase B) -->
         <div class="optimisation-goal-rollups" style="display: flex; gap: 0.75rem; margin: 1rem 0; flex-wrap: wrap; align-items: center;">
           <div style="font-weight: 600; color: #475569; margin-right: 0.5rem;">Objectives:</div>
           <span id="optimisation-goal-filter-not-set" class="ranking-badge ranking-badge--segment-general" style="padding: 0.5rem 1rem; cursor: pointer;" title="Tasks with no objective set (no KPI, target, or timeframe defined). Click to filter.">
@@ -3862,7 +3862,7 @@
           </select>
           <input type="text" id="optimisation-filter-keyword" placeholder="Filter by keyword..." style="padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px; flex: 1; min-width: 200px;">
           <input type="text" id="optimisation-filter-url" placeholder="Filter by URL..." style="padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px; flex: 1; min-width: 200px;">
-          <button id="optimisation-filter-needs-update" class="btn btn-secondary" style="padding: 0.5rem 1rem;" title="Shows tasks with no measurement, or last measurement older than 30 days.">Needs Update</button>
+          <button id="optimisation-filter-needs-update" class="btn btn-secondary" style="padding: 0.5rem 1rem;" title="Show tasks that need measurement update (no measurement or older than 30 days).">Needs Update</button>
           <button id="optimisation-clear-filters" class="btn btn-secondary" style="padding: 0.5rem 1rem;">Clear Filters</button>
         </div>
 
@@ -3968,8 +3968,8 @@
           
           <!-- Cancel Task, Delete Task, and Title (moved to header area) -->
           <div style="padding: 0.75rem 1.5rem; border-bottom: 1px solid #eee; background: #fff5f5; display: flex; gap: 0.5rem; align-items: center;">
-            <button id="optimisation-cancel-task-btn" class="btn" style="background: #ef4444; color: white; border: 1px solid #ef4444; padding: 0.5rem 1rem; font-size: 0.875rem;" title="Stops tracking (keeps history). You can Track again later.">Cancel Task</button>
-            <button id="optimisation-delete-task-btn" class="btn" style="background: #991b1b; color: white; border: 1px solid #991b1b; padding: 0.5rem 1rem; font-size: 0.875rem;" title="Permanently deletes the task and its timeline. Use with care.">Delete Task</button>
+            <button id="optimisation-cancel-task-btn" class="btn" style="background: #ef4444; color: white; border: 1px solid #ef4444; padding: 0.5rem 1rem; font-size: 0.875rem;" title="Stop tracking (keeps history).">Cancel Task</button>
+            <button id="optimisation-delete-task-btn" class="btn" style="background: #991b1b; color: white; border: 1px solid #991b1b; padding: 0.5rem 1rem; font-size: 0.875rem;" title="Permanently remove task and events (cannot be undone).">Delete Task</button>
             <div style="flex: 1; display: flex; align-items: center; gap: 0.5rem; margin-left: 1rem;">
               <strong style="white-space: nowrap;">Title:</strong>
               <input type="text" id="optimisation-drawer-title" style="flex: 1; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px; font-size: 0.875rem; color: #1e293b;" placeholder="Enter task title...">
@@ -4114,7 +4114,7 @@
                 <!-- Start New Cycle -->
                 <div style="padding: 0.75rem; background: #f8f9fa; border-radius: 4px;">
                   <h4 style="margin-bottom: 0.75rem; font-size: 0.95rem;">Start New Cycle</h4>
-                  <button id="optimisation-start-cycle-btn" class="btn btn-secondary" style="width: 100%; padding: 0.5rem; font-size: 0.875rem;" title="Begins a new optimisation cycle while keeping history.">Start New Cycle</button>
+                  <button id="optimisation-start-cycle-btn" class="btn btn-secondary" style="width: 100%; padding: 0.5rem; font-size: 0.875rem;" title="Begins a new optimisation attempt while preserving history from previous cycles.">Start New Cycle</button>
                 </div>
 
                 <!-- Add Event Form -->
@@ -5332,15 +5332,16 @@
       }
     };
 
-    // Delete task (set status to 'deleted')
+    // Delete task (hard delete - removes task and all events)
     window.deleteTask = async function deleteTask() {
-      const modal = document.getElementById('optimisation-manage-modal');
-      const drawerTaskId = window.optimisationModuleState?.currentTaskId;
-      const modalTaskId = modal?.dataset.taskId;
-      const taskId = drawerTaskId || modalTaskId;
+      const taskId = window.optimisationModuleState?.currentTaskId;
       
       if (!taskId) {
-        console.warn('[Optimisation] No task ID found in modal or drawer');
+        console.warn('[Optimisation] No task ID found');
+        return;
+      }
+
+      if (!confirm('Permanently delete this task and all its events? This cannot be undone.')) {
         return;
       }
 
@@ -5349,11 +5350,8 @@
         console.log('[Optimisation] Deleting task:', { taskId, hasAdminKey: !!headers['x-arp-admin-key'] });
         
         const response = await fetch(apiUrl(`/api/optimisation/task/${taskId}`), {
-          method: 'PATCH',
-          headers: headers,
-          body: JSON.stringify({
-            status: 'deleted'
-          })
+          method: 'DELETE',
+          headers: headers
         });
 
         console.log('[Optimisation] Response status:', response.status, response.statusText);
@@ -5400,22 +5398,23 @@
         const result = await response.json();
         console.log('[Optimisation] Delete task successful:', result);
 
+        // Close the modal/drawer
+        const drawer = document.getElementById('optimisation-task-drawer');
+        if (drawer) {
+          drawer.style.display = 'none';
+        }
+
         // Clear the cache to force refresh
         if (window.optimisationStatusCache) {
           window.optimisationStatusCache.clear();
         }
 
-        // Refresh data
-        if (modal && modal.dataset.rowKeyword) {
-          await window.fetchOptimisationStatuses([{
-            keyword: modal.dataset.rowKeyword,
-            best_url: modal.dataset.rowUrl
-          }]);
-        }
-        
-        // Refresh all tasks if drawer is open
-        if (window.optimisationModuleState?.currentTaskId) {
-          await window.loadAllOptimisationTasks();
+        // Refresh Optimisation Tracking table
+        await window.loadAllOptimisationTasks();
+
+        // Refresh Ranking & AI table to show "Not tracked"
+        if (typeof window.renderRankingAiTab === 'function') {
+          await window.renderRankingAiTab();
         }
       } catch (error) {
         console.error('[Optimisation] Error deleting task:', error);
@@ -5775,7 +5774,7 @@
           <td style="font-size: 0.85rem;">${goalHtml}</td>
           <td style="display: flex; gap: 0.25rem; align-items: center;">
             <button class="btn btn-secondary" onclick="event.stopPropagation(); openOptimisationTaskDrawer('${task.id}');" style="padding: 0.25rem 0.75rem; font-size: 0.875rem;">Open</button>
-            <button class="btn btn-small" onclick="event.stopPropagation(); updateTaskLatest('${task.id}');" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;" title="Capture a new 'Latest' measurement for this task.">Update</button>
+            <button class="btn btn-small" onclick="event.stopPropagation(); updateTaskLatest('${task.id}');" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;" title="Capture latest metrics for this task.">Update</button>
           </td>
         `;
 
@@ -6734,16 +6733,6 @@
             (t.target_url || '').toLowerCase().includes(url)
           );
         }
-        
-        // Objective status filter
-        if (window.optimisationModuleState.activeObjectiveFilter) {
-          const filterState = window.optimisationModuleState.activeObjectiveFilter;
-          if (filterState === 'not_set') {
-            filtered = filtered.filter(t => !t.goal_state || t.goal_state === 'not_set');
-          } else {
-            filtered = filtered.filter(t => t.goal_state === filterState);
-          }
-        }
 
         window.optimisationModuleState.filteredTasks = filtered;
         // Reset pagination when filters change
@@ -6966,8 +6955,10 @@
       const deleteTaskBtn = document.getElementById('optimisation-delete-task-btn');
       if (deleteTaskBtn) {
         deleteTaskBtn.addEventListener('click', async () => {
-          if (!confirm('Delete this task? It will be marked as deleted. You can start a new cycle by clicking Track in the Ranking & AI table.')) {
-            return;
+          try {
+            await window.deleteTask();
+          } catch (error) {
+            alert('Failed to delete task: ' + error.message);
           }
 
           const taskId = window.optimisationModuleState.currentTaskId;
@@ -7330,7 +7321,7 @@
           if (!currentMetrics) {
             failCount++;
             errors.push(`${task.keyword_text}: No data found`);
-            continue;
+            return;
           }
 
             // Create measurement
@@ -31754,24 +31745,23 @@ Final Score: ${score}/100`;
           };
           tdOptimisation.appendChild(trackBtn);
         } else {
-          // Tracked - check if status is 'deleted', 'done', or 'cancelled', show Track button instead of Manage
-          if (status.status === 'deleted' || status.status === 'done' || status.status === 'cancelled') {
-            // Show Track button to create next cycle
-            const notTrackedBadge = document.createElement("span");
-            notTrackedBadge.className = "ranking-badge ranking-badge--segment-general";
-            notTrackedBadge.style.marginRight = "0.5rem";
+          // Tracked - check if status is 'done' or 'cancelled', show Track again button
+          // Note: 'deleted' should never appear - if task is deleted, it won't exist in status map
+          if (status.status === 'done' || status.status === 'cancelled') {
+            // Show status pill + Track again button
+            const statusBadge = document.createElement("span");
+            statusBadge.className = "ranking-badge ranking-badge--segment-general";
+            statusBadge.style.marginRight = "0.5rem";
             const statusLabels = {
               'done': 'Done',
-              'deleted': 'Deleted',
               'cancelled': 'Cancelled'
             };
-            notTrackedBadge.textContent = statusLabels[status.status] || status.status;
+            statusBadge.textContent = statusLabels[status.status] || status.status;
             const statusTooltips = {
               'done': 'Cycle completed; start a new cycle if optimising again.',
-              'deleted': 'Task deleted; click Track to start a new cycle.',
               'cancelled': 'Tracking stopped; you can start a new cycle later.'
             };
-            notTrackedBadge.title = statusTooltips[status.status] || 'Click Track to start a new cycle.';
+            statusBadge.title = statusTooltips[status.status] || 'Click Track again to start a new cycle.';
             tdOptimisation.appendChild(notTrackedBadge);
             
             const trackBtn = document.createElement("button");
@@ -31811,8 +31801,7 @@ Final Score: ${score}/100`;
             'monitoring': 'Monitoring',
             'done': 'Done',
             'paused': 'Paused',
-            'cancelled': 'Cancelled',
-            'deleted': 'Deleted'
+            'cancelled': 'Cancelled'
           }[status.status] || status.status;
           
           // Use existing badge classes based on status
@@ -31858,8 +31847,7 @@ Final Score: ${score}/100`;
             'monitoring': 'Changes shipped—monitor metrics.',
             'done': 'Cycle completed; start a new cycle if optimising again.',
             'paused': 'Tracking stopped; you can start a new cycle later.',
-            'cancelled': 'Tracking stopped; you can start a new cycle later.',
-            'deleted': 'Task deleted; click Track to start a new cycle.'
+            'cancelled': 'Tracking stopped; you can start a new cycle later.'
           };
           statusBadge.title = statusTooltips[status.status] || `Status: ${statusText}`;
           
