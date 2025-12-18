@@ -2536,6 +2536,12 @@
           const statusEl = document.getElementById('admin-key-status');
           if (!statusEl) return;
           
+          // Check if admin key functions are available
+          if (typeof window.hasAdminKey !== 'function') {
+            // Functions not loaded yet, skip update
+            return;
+          }
+          
           const hasKey = window.hasAdminKey();
           if (hasKey) {
             const key = window.getAdminKey();
@@ -2545,11 +2551,20 @@
           }
         }
 
-        // Update status on load
+        // Update status on load - wait for admin key functions to be defined
+        function tryUpdateAdminKeyStatus() {
+          if (typeof window.hasAdminKey === 'function') {
+            updateAdminKeyStatus();
+          } else {
+            // Retry after a short delay if functions aren't loaded yet
+            setTimeout(tryUpdateAdminKeyStatus, 100);
+          }
+        }
+        
         if (typeof window !== 'undefined' && document.readyState === 'loading') {
-          document.addEventListener('DOMContentLoaded', updateAdminKeyStatus);
+          document.addEventListener('DOMContentLoaded', tryUpdateAdminKeyStatus);
         } else {
-          updateAdminKeyStatus();
+          tryUpdateAdminKeyStatus();
         }
       </script>
     </div>
@@ -3820,12 +3835,6 @@
       if (typeof window === "undefined") return;
       sessionStorage.removeItem("arp_admin_key");
     };
-
-    // Trigger admin key status update now that functions are defined
-    if (typeof updateAdminKeyStatus === 'function') {
-      // Use setTimeout to ensure DOM is ready
-      setTimeout(updateAdminKeyStatus, 0);
-    }
 
     // Helper to build headers with admin key
     window.getOptimisationHeaders = function getOptimisationHeaders() {
