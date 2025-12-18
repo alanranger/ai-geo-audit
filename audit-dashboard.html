@@ -4953,6 +4953,11 @@
         const result = await response.json();
         console.log('[Optimisation] Delete task successful:', result);
 
+        // Clear the cache to force refresh
+        if (window.optimisationStatusCache) {
+          window.optimisationStatusCache.clear();
+        }
+
         // Refresh data
         if (modal && modal.dataset.rowKeyword) {
           await window.fetchOptimisationStatuses([{
@@ -30060,6 +30065,7 @@ Final Score: ${score}/100`;
       });
 
       paginatedRows.forEach((row, index) => {
+        try {
         const tr = document.createElement("tr");
         tr.dataset.index = String(originalIndexMap.get(index));
 
@@ -30234,7 +30240,8 @@ Final Score: ${score}/100`;
         const taskType = 'on_page'; // Default task type for this integration
         const status = window.getOptimisationStatus(row, taskType);
         
-        if (!status) {
+        // Safety check: ensure status object has expected structure
+        if (!status || typeof status !== 'object' || !status.status) {
           // Not tracked - show "Not tracked" pill + Track button
           const notTrackedBadge = document.createElement("span");
           notTrackedBadge.className = "ranking-badge ranking-badge--segment-general";
@@ -30304,6 +30311,10 @@ Final Score: ${score}/100`;
               window.openTrackKeywordModal(row, taskType);
             };
             tdOptimisation.appendChild(trackBtn);
+            
+            // Append the optimisation cell to the row, then append row to tbody
+            tr.appendChild(tdOptimisation);
+            tbody.appendChild(tr);
             return; // Exit early, don't show Manage button
           }
           
@@ -30430,6 +30441,10 @@ Final Score: ${score}/100`;
         tr.appendChild(tdOptimisation);
 
         tbody.appendChild(tr);
+        } catch (error) {
+          console.error(`[Ranking Table] Error rendering row ${index} for keyword "${row?.keyword || 'unknown'}":`, error);
+          // Continue to next row instead of stopping the loop
+        }
       });
 
       // Update sort indicators
