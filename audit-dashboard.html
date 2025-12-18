@@ -17108,7 +17108,25 @@ Final Score: ${score}/100`;
         }
         
         // Get the last GSC timeseries date (Money Pages metrics are GSC-derived)
+        // Use actual GSC data date, not audit date - GSC data is typically 2-3 days behind
         let lastGscTimeseriesDate = window.lastGscTimeseriesDate || null;
+        
+        // If not set, try to get from the latest history record's actual GSC date
+        if (!lastGscTimeseriesDate && history.length > 0) {
+          // Find the latest date that has moneySegmentMetrics (actual GSC data)
+          const recordsWithMetrics = history
+            .filter(r => r.moneySegmentMetrics && !r.isPartial)
+            .map(r => r.date || r.audit_date || r.auditDate)
+            .filter(Boolean)
+            .sort()
+            .reverse();
+          
+          if (recordsWithMetrics.length > 0) {
+            // Use the latest date that has actual GSC metrics
+            lastGscTimeseriesDate = recordsWithMetrics[0];
+            debugLog(`Money Pages Trend Chart: Using latest date with GSC metrics: ${lastGscTimeseriesDate}`, 'info');
+          }
+        }
         
         debugLog(`Money Pages Trend Chart: Starting with ${history.length} history records, lastGscTimeseriesDate: ${lastGscTimeseriesDate}`, 'info');
         
