@@ -671,19 +671,30 @@ export default async function handler(req, res) {
       console.log('[Supabase Save] ✓ Successfully inserted new audit results');
     }
 
+    // Prepare response first (don't block on per-date calculation)
+    const responseData = {
+      status: 'ok',
+      message: 'Audit results saved successfully',
+      data: result,
+      meta: { generatedAt: new Date().toISOString() }
+    };
+
     // Calculate money_segment_metrics per-date for the last 28 days using current audit's moneyPagePriorityData
     // This ensures all dates in the GSC window have proper metrics, even if the audit was partial
     // ALWAYS use gsc_timeseries table to get complete 28-day data (not just current audit's timeseries)
+    // Run this AFTER sending response to avoid timeout
     if (moneySegmentMetrics && moneyPagePriorityData && !isPartialUpdate) {
-      try {
-        const allMoney = moneySegmentMetrics.allMoney || {};
-        
-        // Check if current metrics are valid (not all zeros)
-        const hasValidMetrics = allMoney.clicks > 0 || allMoney.impressions > 0;
-        
-        // ALWAYS fetch from gsc_timeseries table to ensure we have all dates in the last 28 days
-        // (current audit's timeseries might not include all historical dates)
-        if (hasValidMetrics) {
+      // Don't await - run in background after response is sent
+      setImmediate(async () => {
+        try {
+          const allMoney = moneySegmentMetrics.allMoney || {};
+          
+          // Check if current metrics are valid (not all zeros)
+          const hasValidMetrics = allMoney.clicks > 0 || allMoney.impressions > 0;
+          
+          // ALWAYS fetch from gsc_timeseries table to ensure we have all dates in the last 28 days
+          // (current audit's timeseries might not include all historical dates)
+          if (hasValidMetrics) {
           console.log('[Supabase Save] Fetching timeseries from gsc_timeseries table for last 28 days...');
           const currentDate = new Date(auditDate);
           const twentyEightDaysAgo = new Date(currentDate);
@@ -714,8 +725,8 @@ export default async function handler(req, res) {
           } else {
             console.warn('[Supabase Save] Failed to fetch from gsc_timeseries table, will skip per-date calculation');
           }
-        
-        if (hasValidMetrics && timeseries.length > 0) {
+          
+          if (hasValidMetrics && timeseries.length > 0) {
           // Calculate total site-wide metrics for the current audit date from timeseries
           const currentDateData = timeseries.find(t => {
             const tsDate = t.date ? (t.date.split('T')[0]) : null;
@@ -903,14 +914,14 @@ export default async function handler(req, res) {
                 }
               }
             }
-            }
           }
+          }
+        } catch (backfillError) {
+          // Don't fail the entire save if calculation fails
+          console.warn('[Supabase Save] ⚠ Error during per-date calculation (non-critical):', backfillError.message);
+          console.warn('[Supabase Save] Stack:', backfillError.stack);
         }
-      } catch (backfillError) {
-        // Don't fail the entire save if calculation fails
-        console.warn('[Supabase Save] ⚠ Error during per-date calculation (non-critical):', backfillError.message);
-        console.warn('[Supabase Save] Stack:', backfillError.stack);
-      }
+      });
     }
 
     // Save individual keyword rows to keyword_rankings table if rankingAiData is provided
@@ -1027,12 +1038,16 @@ export default async function handler(req, res) {
       console.log(`[Supabase Save] ⚠ No rankingAiData.combinedRows found. rankingAiData exists: ${!!rankingAiData}, combinedRows exists: ${!!(rankingAiData && rankingAiData.combinedRows)}, isArray: ${Array.isArray(rankingAiData?.combinedRows)}`);
     }
 
-    return res.status(200).json({
+    // Return response immediately (per-date calculation runs in background)
+    res.status(200).json({
       status: 'ok',
       message: 'Audit results saved successfully',
       data: result,
       meta: { generatedAt: new Date().toISOString() }
     });
+    
+    // Note: Per-date calculation continues in background (setImmediate above)
+    // Don't return here - let it complete in background
 
   } catch (error) {
     console.error('[Supabase Save] Exception:', error.message);
