@@ -6095,12 +6095,15 @@
         objectiveCycleEl.textContent = `(Cycle ${cycleNo})`;
       }
 
-      // Update progress badge
+      // Update progress badge (use goal_state from task if available, otherwise from progress)
       const objectiveBadgeEl = document.getElementById('optimisation-drawer-objective-badge');
-      if (objectiveBadgeEl && progress) {
-        const state = progress.objective_state || 'not_set';
+      if (objectiveBadgeEl) {
+        // Check for goal_state from task (from goal status view) or progress
+        const state = task.goal_state || (progress && progress.objective_state) || 
+          (task.objective_metric || task.objective_kpi ? 'no_measurement' : 'not_set');
         const badgeConfig = {
           'achieved': { text: 'Achieved', bg: '#10b981', color: '#ffffff' },
+          'met': { text: 'Met', bg: '#10b981', color: '#ffffff' },
           'on_track': { text: 'On track', bg: '#3b82f6', color: '#ffffff' },
           'at_risk': { text: 'At risk', bg: '#f59e0b', color: '#ffffff' },
           'overdue': { text: 'Overdue', bg: '#ef4444', color: '#ffffff' },
@@ -6112,8 +6115,6 @@
         objectiveBadgeEl.style.background = config.bg;
         objectiveBadgeEl.style.color = config.color;
         objectiveBadgeEl.style.display = 'inline-block';
-      } else if (objectiveBadgeEl) {
-        objectiveBadgeEl.style.display = 'none';
       }
 
       const objectiveContentEl = document.getElementById('optimisation-drawer-objective-content');

@@ -65,13 +65,25 @@ ranked as (
     coalesce(ac.cycle_no, b.cycle_active, 1) as cycle_no,
     coalesce(ac.cycle_status, b.status) as cycle_status,
     coalesce(cc.cycle_count, 0) as cycle_count,
-    ac.objective_title,
-    ac.primary_kpi,
-    ac.target_value,
-    ac.target_direction,
-    ac.timeframe_days,
-    ac.plan,
-    ac.cycle_start_date,
+    -- Phase B: Use task-level objective fields if available, otherwise fall back to cycle fields
+    coalesce(b.objective_title, ac.objective_title) as objective_title,
+    coalesce(b.objective_kpi, b.objective_metric, ac.primary_kpi) as objective_kpi,
+    coalesce(b.objective_metric, b.objective_kpi, ac.primary_kpi) as objective_metric,
+    coalesce(b.objective_direction, ac.target_direction) as objective_direction,
+    coalesce(b.objective_target_delta, b.objective_target_value, ac.target_value) as objective_target_delta,
+    coalesce(b.objective_target_value, b.objective_target_delta, ac.target_value) as objective_target_value,
+    coalesce(b.objective_timeframe_days, ac.timeframe_days) as objective_timeframe_days,
+    coalesce(b.objective_due_at, 
+      case 
+        when b.cycle_started_at is not null and b.objective_timeframe_days is not null
+        then b.cycle_started_at + (b.objective_timeframe_days || ' days')::interval
+        when ac.cycle_start_date is not null and ac.timeframe_days is not null
+        then ac.cycle_start_date + (ac.timeframe_days || ' days')::interval
+        else null
+      end
+    ) as objective_due_at,
+    coalesce(b.objective_plan, ac.plan) as objective_plan,
+    coalesce(b.cycle_started_at, ac.cycle_start_date) as cycle_started_at,
     -- baseline = earliest event in current cycle that has metrics (prefer created)
     (
       select e.metrics

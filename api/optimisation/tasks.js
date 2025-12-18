@@ -78,7 +78,7 @@ export default async function handler(req, res) {
     if (taskIds.length > 0) {
       let goalQuery = supabase
         .from('vw_optimisation_task_goal_status')
-        .select('task_id, goal_state, objective_kpi, objective_target_delta, objective_due_at, objective_delta')
+        .select('task_id, goal_state, objective_kpi, objective_target_delta, objective_due_at, objective_delta, objective_direction')
         .in('task_id', taskIds);
 
       const { data: goalStatuses, error: goalError } = await goalQuery;
@@ -93,7 +93,8 @@ export default async function handler(req, res) {
             objective_kpi: gs.objective_kpi,
             objective_target_delta: gs.objective_target_delta,
             objective_due_at: gs.objective_due_at,
-            objective_delta: gs.objective_delta
+            objective_delta: gs.objective_delta,
+            objective_direction: gs.objective_direction
           };
         });
       }
