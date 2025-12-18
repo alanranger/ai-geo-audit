@@ -3930,7 +3930,7 @@
           <div id="optimisation-drawer-content" style="padding: 1.5rem; overflow-y: auto; flex: 1;">
           <div>
             <!-- Task Header (Full Width) -->
-            <div id="optimisation-drawer-header" style="margin-bottom: 2rem; display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem;">
+            <div id="optimisation-drawer-header" style="margin-bottom: 2rem; display: grid; grid-template-columns: 1fr 2fr 1.5fr; gap: 1.5rem;">
               <div>
                 <strong>Keyword:</strong>
                 <div id="optimisation-drawer-keyword" style="margin-top: 0.25rem; font-size: 1.1rem; color: #2563eb;"></div>
@@ -3939,7 +3939,7 @@
                 <strong>Target URL:</strong>
                 <div id="optimisation-drawer-url" style="margin-top: 0.25rem; word-break: break-all;"></div>
               </div>
-              <div>
+              <div style="text-align: right;">
                 <div style="margin-bottom: 0.5rem;">
                   <strong>Task Type:</strong>
                   <span id="optimisation-drawer-type" style="margin-left: 0.5rem; padding: 0.25rem 0.5rem; background: #f0f0f0; border-radius: 4px;"></span>
@@ -3971,24 +3971,6 @@
                   </div>
                 </div>
 
-                <!-- Add Event Form -->
-                <div style="padding: 1rem; background: #f8f9fa; border-radius: 4px;">
-                  <h4 style="margin-bottom: 1rem;">Add Event</h4>
-                  <div style="margin-bottom: 1rem;">
-                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Event Type:</label>
-                    <select id="optimisation-event-type" style="width: 100%; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;">
-                      <option value="note">Note</option>
-                      <option value="change_deployed">Change Deployed</option>
-                      <option value="measurement">Measurement</option>
-                      <option value="status_changed">Status Changed</option>
-                    </select>
-                  </div>
-                  <div style="margin-bottom: 1rem;">
-                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Note:</label>
-                    <textarea id="optimisation-event-note" rows="3" style="width: 100%; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;"></textarea>
-                  </div>
-                  <button id="optimisation-add-event-btn" class="btn btn-primary" style="width: 100%;">Add Event</button>
-                </div>
               </div>
 
               <!-- Right Column -->
@@ -4006,11 +3988,39 @@
                   </div>
                 </div>
 
-                <!-- Actions -->
+                <!-- Start New Cycle -->
                 <div style="padding: 1rem; background: #f8f9fa; border-radius: 4px;">
-                  <h4 style="margin-bottom: 1rem;">Actions</h4>
-                  <div style="display: flex; flex-direction: column; gap: 0.5rem;">
-                    <button id="optimisation-start-cycle-btn" class="btn btn-secondary">Start New Cycle</button>
+                  <h4 style="margin-bottom: 1rem;">Start New Cycle</h4>
+                  <button id="optimisation-start-cycle-btn" class="btn btn-secondary" style="width: 100%;">Start New Cycle</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Actions Section (Full Width) -->
+            <div style="margin-top: 2rem; padding: 1rem; background: #f8f9fa; border-radius: 4px;">
+              <h4 style="margin-bottom: 1rem;">Actions</h4>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
+                <!-- Left: Add Event Form -->
+                <div>
+                  <div style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Event Type:</label>
+                    <select id="optimisation-event-type" style="width: 100%; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;">
+                      <option value="note">Note</option>
+                      <option value="change_deployed">Change Deployed</option>
+                      <option value="measurement">Measurement</option>
+                      <option value="status_changed">Status Changed</option>
+                    </select>
+                  </div>
+                  <div style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Note:</label>
+                    <textarea id="optimisation-event-note" rows="3" style="width: 100%; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;"></textarea>
+                  </div>
+                  <button id="optimisation-add-event-btn" class="btn btn-primary" style="width: 100%;">Add Event</button>
+                </div>
+                <!-- Right: Change Status -->
+                <div>
+                  <div style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Change Status:</label>
                     <div style="display: flex; gap: 0.5rem;">
                       <select id="optimisation-change-status" style="flex: 1; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;">
                         <option value="">Change Status...</option>
@@ -5561,7 +5571,30 @@
 
       // Populate header
       document.getElementById('optimisation-drawer-keyword').textContent = task.keyword_text || '';
-      document.getElementById('optimisation-drawer-url').textContent = task.target_url_clean || task.target_url || '';
+      
+      // Make Target URL clickable
+      const urlEl = document.getElementById('optimisation-drawer-url');
+      const targetUrl = task.target_url_clean || task.target_url || '';
+      let fullUrl = '';
+      if (targetUrl) {
+        try {
+          if (targetUrl.includes('alanranger.com')) {
+            fullUrl = targetUrl.startsWith('http') ? targetUrl : 'https://' + targetUrl;
+          } else if (targetUrl.startsWith('/')) {
+            fullUrl = 'https://www.alanranger.com' + targetUrl;
+          } else {
+            fullUrl = 'https://www.alanranger.com/' + targetUrl;
+          }
+        } catch (e) {
+          fullUrl = 'https://www.alanranger.com/' + (targetUrl.startsWith('/') ? targetUrl : '/' + targetUrl);
+        }
+      }
+      if (fullUrl) {
+        urlEl.innerHTML = `<a href="${fullUrl}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${escapeHtml(targetUrl)}</a>`;
+      } else {
+        urlEl.textContent = targetUrl;
+      }
+      
       document.getElementById('optimisation-drawer-type').textContent = task.task_type || 'on_page';
       
       const statusColors = {
@@ -5578,7 +5611,16 @@
       statusEl.style.background = statusStyle.bg;
       statusEl.style.color = statusStyle.color;
       
-      document.getElementById('optimisation-drawer-cycle').textContent = `Cycle ${task.cycle_active || 1}`;
+      // Add date created to cycle
+      const cycleEl = document.getElementById('optimisation-drawer-cycle');
+      const cycleText = `Cycle ${task.cycle_active || 1}`;
+      if (task.created_at) {
+        const createdDate = new Date(task.created_at).toLocaleDateString('en-GB');
+        cycleEl.textContent = `${cycleText} (Created: ${createdDate})`;
+      } else {
+        cycleEl.textContent = cycleText;
+      }
+      
       document.getElementById('optimisation-change-status').value = task.status || '';
 
       // Render metrics snapshot
@@ -5781,7 +5823,6 @@
       ];
 
       let html = `
-        <div style="font-weight: 600; padding: 0.5rem; background: #e0e7ff; border-radius: 4px;">Metric</div>
         <div style="font-weight: 600; padding: 0.5rem; background: #fef3c7; border-radius: 4px;">Baseline</div>
         <div style="font-weight: 600; padding: 0.5rem; background: #dbeafe; border-radius: 4px;">Latest</div>
       `;
@@ -5798,7 +5839,7 @@
         };
 
         html += `
-          <div style="padding: 0.5rem; border-bottom: 1px solid #e5e7eb;">${metric.label}</div>
+          <div style="padding: 0.5rem; border-bottom: 1px solid #e5e7eb; font-weight: 600;">${metric.label}</div>
           <div style="padding: 0.5rem; border-bottom: 1px solid #e5e7eb;">${formatValue(baselineVal)}</div>
           <div style="padding: 0.5rem; border-bottom: 1px solid #e5e7eb;">
             ${formatValue(latestVal)}
@@ -5810,7 +5851,7 @@
       // Add captured_at timestamps
       if (baseline?.captured_at || latest?.captured_at) {
         html += `
-          <div style="padding: 0.5rem; border-top: 2px solid #e5e7eb; font-size: 0.75rem; color: #666; grid-column: 1;">Captured</div>
+          <div style="padding: 0.5rem; border-top: 2px solid #e5e7eb; font-size: 0.75rem; color: #666; font-weight: 600;">Captured</div>
           <div style="padding: 0.5rem; border-top: 2px solid #e5e7eb; font-size: 0.75rem; color: #666;">
             ${baseline?.captured_at ? new Date(baseline.captured_at).toLocaleDateString() : '—'}
           </div>
