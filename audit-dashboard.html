@@ -4191,31 +4191,42 @@
           // Clone response BEFORE reading to allow multiple reads
           const responseClone = response.clone();
           let errorMessage = 'Failed to update status';
+          let errorDetails = null;
           
           try {
             // Try to read as JSON first (most APIs return JSON)
             const errorData = await response.json();
             errorMessage = errorData.error || errorData.message || errorMessage;
+            errorDetails = errorData;
             console.error('[Optimisation] API error response:', errorData);
           } catch (e) {
             // If JSON parsing fails, try text from clone
+            console.error('[Optimisation] JSON parse failed, trying text:', e);
             try {
               const errorText = await responseClone.text();
-              if (errorText) {
+              console.error('[Optimisation] Error response text (length):', errorText ? errorText.length : 0);
+              if (errorText && errorText.trim()) {
                 // Try to parse as JSON if it looks like JSON
                 try {
                   const parsed = JSON.parse(errorText);
                   errorMessage = parsed.error || parsed.message || errorText;
+                  errorDetails = parsed;
                 } catch (parseError) {
                   errorMessage = errorText.substring(0, 200); // Limit length
+                  errorDetails = { rawText: errorText.substring(0, 500) };
                 }
+                console.error('[Optimisation] API error text:', errorText.substring(0, 200));
+              } else {
+                console.error('[Optimisation] Error response body is empty');
+                errorDetails = { empty: true };
               }
-              console.error('[Optimisation] API error text:', errorText.substring(0, 200));
             } catch (e2) {
               console.error('[Optimisation] Failed to read error response:', e2);
+              errorDetails = { readError: e2.message };
             }
           }
           
+          // Enhance error message based on status code
           if (response.status === 401) {
             errorMessage = 'Unauthorized - admin key missing or invalid. Please set your admin key in the configuration section.';
           } else if (response.status === 404) {
@@ -4224,7 +4235,17 @@
             errorMessage = 'Forbidden - you do not have permission to update this task.';
           } else if (response.status === 500) {
             errorMessage = `Server error (${response.status}): ${errorMessage}`;
+          } else {
+            errorMessage = `HTTP ${response.status}: ${errorMessage}`;
           }
+          
+          console.error('[Optimisation] Full error details:', {
+            status: response.status,
+            statusText: response.statusText,
+            errorMessage,
+            errorDetails
+          });
+          
           throw new Error(errorMessage);
         }
         
@@ -4396,31 +4417,42 @@
           // Clone response BEFORE reading to allow multiple reads
           const responseClone = response.clone();
           let errorMessage = 'Failed to stop tracking';
+          let errorDetails = null;
           
           try {
             // Try to read as JSON first (most APIs return JSON)
             const errorData = await response.json();
             errorMessage = errorData.error || errorData.message || errorMessage;
+            errorDetails = errorData;
             console.error('[Optimisation] API error response:', errorData);
           } catch (e) {
             // If JSON parsing fails, try text from clone
+            console.error('[Optimisation] JSON parse failed, trying text:', e);
             try {
               const errorText = await responseClone.text();
-              if (errorText) {
+              console.error('[Optimisation] Error response text (length):', errorText ? errorText.length : 0);
+              if (errorText && errorText.trim()) {
                 // Try to parse as JSON if it looks like JSON
                 try {
                   const parsed = JSON.parse(errorText);
                   errorMessage = parsed.error || parsed.message || errorText;
+                  errorDetails = parsed;
                 } catch (parseError) {
                   errorMessage = errorText.substring(0, 200); // Limit length
+                  errorDetails = { rawText: errorText.substring(0, 500) };
                 }
+                console.error('[Optimisation] API error text:', errorText.substring(0, 200));
+              } else {
+                console.error('[Optimisation] Error response body is empty');
+                errorDetails = { empty: true };
               }
-              console.error('[Optimisation] API error text:', errorText.substring(0, 200));
             } catch (e2) {
               console.error('[Optimisation] Failed to read error response:', e2);
+              errorDetails = { readError: e2.message };
             }
           }
           
+          // Enhance error message based on status code
           if (response.status === 401) {
             errorMessage = 'Unauthorized - admin key missing or invalid. Please set your admin key in the configuration section.';
           } else if (response.status === 404) {
@@ -4429,7 +4461,17 @@
             errorMessage = 'Forbidden - you do not have permission to update this task.';
           } else if (response.status === 500) {
             errorMessage = `Server error (${response.status}): ${errorMessage}`;
+          } else {
+            errorMessage = `HTTP ${response.status}: ${errorMessage}`;
           }
+          
+          console.error('[Optimisation] Full error details:', {
+            status: response.status,
+            statusText: response.statusText,
+            errorMessage,
+            errorDetails
+          });
+          
           throw new Error(errorMessage);
         }
         
