@@ -6745,19 +6745,32 @@
             console.log('[Optimisation] Built currentMetrics from matching row:', currentMetrics);
           }
 
-          // If no current data, show warning but still allow creating measurement
+          // If no current data, try to use baseline metrics (if no new audit, current = baseline)
           if (!currentMetrics) {
             console.warn('[Optimisation] No matching row found for:', {
               keyword: task.keyword_text,
               url: task.target_url_clean || task.target_url
             });
-            const proceed = confirm('Could not find current ranking data for this keyword/URL. Create measurement with current timestamp only?');
-            if (!proceed) return;
             
-            // Create minimal metrics with just captured_at
-            currentMetrics = {
-              captured_at: new Date().toISOString()
-            };
+            // Check if we have baseline metrics to reuse
+            const baselineMetrics = task.baseline_metrics;
+            if (baselineMetrics && typeof baselineMetrics === 'object') {
+              console.log('[Optimisation] Using baseline metrics as current (no new audit data found)');
+              // Reuse baseline metrics but update captured_at to current timestamp
+              currentMetrics = {
+                ...baselineMetrics,
+                captured_at: new Date().toISOString()
+              };
+            } else {
+              // No baseline either, ask user
+              const proceed = confirm('Could not find current ranking data for this keyword/URL. Create measurement with current timestamp only?');
+              if (!proceed) return;
+              
+              // Create minimal metrics with just captured_at
+              currentMetrics = {
+                captured_at: new Date().toISOString()
+              };
+            }
           }
 
           try {
