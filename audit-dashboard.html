@@ -3909,9 +3909,10 @@
             </div>
           </div>
           
-          <!-- Cancel Task Button (moved to header area) -->
-          <div style="padding: 0.75rem 1.5rem; border-bottom: 1px solid #eee; background: #fff5f5;">
+          <!-- Cancel Task and Delete Task Buttons (moved to header area) -->
+          <div style="padding: 0.75rem 1.5rem; border-bottom: 1px solid #eee; background: #fff5f5; display: flex; gap: 0.5rem;">
             <button id="optimisation-cancel-task-btn" class="btn" style="background: #ef4444; color: white; border: 1px solid #ef4444; padding: 0.5rem 1rem; font-size: 0.875rem;">Cancel Task</button>
+            <button id="optimisation-delete-task-btn" class="btn" style="background: #991b1b; color: white; border: 1px solid #991b1b; padding: 0.5rem 1rem; font-size: 0.875rem;">Delete Task</button>
           </div>
           
           <!-- Scrollable Content -->
@@ -3993,6 +3994,7 @@
                   <option value="done">Done</option>
                   <option value="paused">Paused</option>
                   <option value="cancelled">Cancelled</option>
+                  <option value="deleted">Deleted</option>
                 </select>
                 <button id="optimisation-save-status-btn" class="btn btn-primary">Save</button>
               </div>
@@ -4880,6 +4882,92 @@
       } catch (error) {
         console.error('[Optimisation] Error stopping tracking:', error);
         alert('Failed to stop tracking: ' + error.message);
+      }
+    };
+
+    // Delete task (set status to 'deleted')
+    window.deleteTask = async function deleteTask() {
+      const modal = document.getElementById('optimisation-manage-modal');
+      const drawerTaskId = window.optimisationModuleState?.currentTaskId;
+      const modalTaskId = modal?.dataset.taskId;
+      const taskId = drawerTaskId || modalTaskId;
+      
+      if (!taskId) {
+        console.warn('[Optimisation] No task ID found in modal or drawer');
+        return;
+      }
+
+      try {
+        const headers = window.getOptimisationHeaders();
+        console.log('[Optimisation] Deleting task:', { taskId, hasAdminKey: !!headers['x-arp-admin-key'] });
+        
+        const response = await fetch(apiUrl(`/api/optimisation/task/${taskId}`), {
+          method: 'PATCH',
+          headers: headers,
+          body: JSON.stringify({
+            status: 'deleted'
+          })
+        });
+
+        console.log('[Optimisation] Response status:', response.status, response.statusText);
+
+        if (!response.ok) {
+          const responseClone = response.clone();
+          let errorMessage = 'Failed to delete task';
+          
+          try {
+            const errorData = await response.json();
+            errorMessage = errorData.error || errorData.message || errorMessage;
+            console.error('[Optimisation] API error response:', errorData);
+          } catch (e) {
+            try {
+              const errorText = await responseClone.text();
+              if (errorText && errorText.trim()) {
+                try {
+                  const parsed = JSON.parse(errorText);
+                  errorMessage = parsed.error || parsed.message || errorText;
+                } catch (parseError) {
+                  errorMessage = errorText.substring(0, 200);
+                }
+              }
+            } catch (e2) {
+              console.error('[Optimisation] Failed to read error response:', e2);
+            }
+          }
+          
+          if (response.status === 401) {
+            errorMessage = 'Unauthorized - admin key missing or invalid. Please set your admin key in the configuration section.';
+          } else if (response.status === 404) {
+            errorMessage = 'Task not found. It may have been deleted.';
+          } else if (response.status === 403) {
+            errorMessage = 'Forbidden - you do not have permission to update this task.';
+          } else if (response.status === 500) {
+            errorMessage = `Server error (${response.status}): ${errorMessage}`;
+          } else {
+            errorMessage = `HTTP ${response.status}: ${errorMessage}`;
+          }
+          
+          throw new Error(errorMessage);
+        }
+        
+        const result = await response.json();
+        console.log('[Optimisation] Delete task successful:', result);
+
+        // Refresh data
+        if (modal && modal.dataset.rowKeyword) {
+          await window.fetchOptimisationStatuses([{
+            keyword: modal.dataset.rowKeyword,
+            best_url: modal.dataset.rowUrl
+          }]);
+        }
+        
+        // Refresh all tasks if drawer is open
+        if (window.optimisationModuleState?.currentTaskId) {
+          await window.loadAllOptimisationTasks();
+        }
+      } catch (error) {
+        console.error('[Optimisation] Error deleting task:', error);
+        throw error; // Re-throw so caller can handle
       }
     };
 
@@ -5861,6 +5949,31 @@
           } catch (error) {
             console.error('[Optimisation Module] Error cancelling task:', error);
             alert('Failed to cancel task: ' + error.message);
+          }
+        });
+      }
+
+      const deleteTaskBtn = document.getElementById('optimisation-delete-task-btn');
+      if (deleteTaskBtn) {
+        deleteTaskBtn.addEventListener('click', async () => {
+          if (!confirm('Delete this task? It will be marked as deleted. You can start a new cycle by clicking Track in the Ranking & AI table.')) {
+            return;
+          }
+
+          const taskId = window.optimisationModuleState.currentTaskId;
+          if (!taskId) return;
+
+          try {
+            await window.deleteTask();
+            await window.loadAllOptimisationTasks();
+            // Refresh Ranking & AI table if it's visible
+            if (typeof window.renderRankingAiTab === 'function') {
+              await window.renderRankingAiTab();
+            }
+            closeOptimisationTaskDrawer();
+          } catch (error) {
+            console.error('[Optimisation Module] Error deleting task:', error);
+            alert('Failed to delete task: ' + error.message);
           }
         });
       }
@@ -30151,6 +30264,41 @@ Final Score: ${score}/100`;
           };
           tdOptimisation.appendChild(trackBtn);
         } else {
+          // Tracked - check if status is 'deleted' or 'done', show Track button instead of Manage
+          if (status.status === 'deleted' || status.status === 'done') {
+            // Show Track button to create next cycle
+            const notTrackedBadge = document.createElement("span");
+            notTrackedBadge.className = "ranking-badge ranking-badge--segment-general";
+            notTrackedBadge.style.marginRight = "0.5rem";
+            notTrackedBadge.textContent = status.status === 'done' ? 'Done' : 'Deleted';
+            notTrackedBadge.title = status.status === 'done' 
+              ? 'Task completed. Click Track to start a new cycle.' 
+              : 'Task deleted. Click Track to start a new cycle.';
+            tdOptimisation.appendChild(notTrackedBadge);
+            
+            const trackBtn = document.createElement("button");
+            trackBtn.className = "btn btn-small";
+            trackBtn.style.padding = "0.25rem 0.5rem";
+            trackBtn.style.fontSize = "0.75rem";
+            trackBtn.textContent = "Track";
+            if (!window.hasAdminKey()) {
+              trackBtn.disabled = true;
+              trackBtn.title = "Admin key required - set your admin key in the configuration section";
+              trackBtn.style.opacity = "0.5";
+              trackBtn.style.cursor = "not-allowed";
+            }
+            trackBtn.onclick = (e) => {
+              e.stopPropagation();
+              if (!window.hasAdminKey()) {
+                alert('Admin key required. Please set your admin key in the "Optimisation Tracking Security" section.');
+                return;
+              }
+              window.openTrackKeywordModal(row, taskType);
+            };
+            tdOptimisation.appendChild(trackBtn);
+            return; // Exit early, don't show Manage button
+          }
+          
           // Tracked - show status pill + metadata + Manage button
           console.log('[Optimisation] Creating Manage button for tracked keyword:', row.keyword, 'Status:', status);
           const statusBadge = document.createElement("span");
@@ -30160,7 +30308,8 @@ Final Score: ${score}/100`;
             'monitoring': 'Monitoring',
             'done': 'Done',
             'paused': 'Paused',
-            'cancelled': 'Cancelled'
+            'cancelled': 'Cancelled',
+            'deleted': 'Deleted'
           }[status.status] || status.status;
           
           // Use existing badge classes based on status
@@ -30180,7 +30329,8 @@ Final Score: ${score}/100`;
             'monitoring': 'Monitoring: Changes deployed, watching for performance improvements',
             'done': 'Done: Optimisation completed successfully',
             'paused': 'Paused: Temporarily on hold',
-            'cancelled': 'Cancelled: No longer being tracked'
+            'cancelled': 'Cancelled: No longer being tracked',
+            'deleted': 'Deleted: Task has been deleted. Click Track to start a new cycle.'
           };
           statusBadge.title = statusTooltips[status.status] || `Status: ${statusText}`;
           

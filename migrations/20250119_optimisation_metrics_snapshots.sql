@@ -20,7 +20,9 @@ create index if not exists idx_optim_task_events_task_cycle_created
 on optimisation_task_events (task_id, cycle_number, created_at desc);
 
 -- 4) Update vw_optimisation_task_status to expose baseline + latest snapshot
-create or replace view vw_optimisation_task_status as
+-- Drop and recreate to allow column changes
+drop view if exists vw_optimisation_task_status;
+create view vw_optimisation_task_status as
 with base as (
   select
     t.*,
@@ -84,4 +86,5 @@ ranked as (
 )
 select * from ranked
 where rn = 1;
+
 

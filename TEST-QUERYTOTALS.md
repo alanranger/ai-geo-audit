@@ -96,3 +96,20 @@ queryTotals Save/Retrieve Test
 ✅ The get endpoint retrieves queryTotals correctly  
 ✅ The data structure is preserved (array format, required fields)
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
