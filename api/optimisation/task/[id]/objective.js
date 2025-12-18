@@ -79,14 +79,16 @@ export default async function handler(req, res) {
       return sendJSON(res, 403, { error: 'Forbidden' });
     }
 
-    // Extract objective fields from request body
+    // Extract objective fields from request body (Phase B)
     const {
       objective_title,
       objective_kpi,
       objective_metric,
       objective_direction,
       objective_target_value,
+      objective_target_delta, // Phase B field
       objective_timeframe_days,
+      objective_due_at, // Phase B field
       objective_plan
     } = req.body;
 
@@ -96,12 +98,20 @@ export default async function handler(req, res) {
     if (objective_kpi !== undefined) updates.objective_kpi = objective_kpi;
     if (objective_metric !== undefined) updates.objective_metric = objective_metric;
     if (objective_direction !== undefined) updates.objective_direction = objective_direction;
-    if (objective_target_value !== undefined) updates.objective_target_value = objective_target_value != null ? parseFloat(objective_target_value) : null;
+    // Support both Phase 4 (objective_target_value) and Phase B (objective_target_delta)
+    if (objective_target_delta !== undefined) {
+      updates.objective_target_delta = objective_target_delta != null ? parseFloat(objective_target_delta) : null;
+    } else if (objective_target_value !== undefined) {
+      updates.objective_target_value = objective_target_value != null ? parseFloat(objective_target_value) : null;
+      // Also set objective_target_delta for Phase B compatibility
+      updates.objective_target_delta = objective_target_value != null ? parseFloat(objective_target_value) : null;
+    }
     if (objective_timeframe_days !== undefined) updates.objective_timeframe_days = objective_timeframe_days != null ? parseInt(objective_timeframe_days) : null;
+    if (objective_due_at !== undefined) updates.objective_due_at = objective_due_at || null;
     if (objective_plan !== undefined) updates.objective_plan = objective_plan;
 
     // Set cycle_started_at if not already set and we're setting an objective
-    if (!currentTask.cycle_started_at && (objective_metric || objective_direction || objective_target_value)) {
+    if (!currentTask.cycle_started_at && (objective_metric || objective_direction || objective_target_delta || objective_target_value)) {
       updates.cycle_started_at = new Date().toISOString();
     }
 

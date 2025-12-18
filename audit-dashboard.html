@@ -4443,13 +4443,21 @@
       const title = document.getElementById('track-title').value.trim();
       const notes = document.getElementById('track-notes').value.trim();
       
-      // Get objective fields
+      // Get objective fields (Phase B)
       const objective_title = document.getElementById('track-objective-title').value.trim();
-      const primary_kpi = document.getElementById('track-primary-kpi').value.trim();
-      const target_direction = document.getElementById('track-target-direction').value.trim();
-      const target_value = document.getElementById('track-target-value').value.trim();
-      const timeframe_days = document.getElementById('track-timeframe-days').value.trim();
-      const plan = document.getElementById('track-plan').value.trim();
+      const objective_kpi = document.getElementById('track-primary-kpi').value.trim(); // Map primary_kpi to objective_kpi
+      const objective_metric = objective_kpi; // Use same value for metric
+      const objective_direction = document.getElementById('track-target-direction').value.trim();
+      const objective_target_delta = document.getElementById('track-target-value').value.trim() ? parseFloat(document.getElementById('track-target-value').value) : null;
+      const objective_timeframe_days = document.getElementById('track-timeframe-days').value.trim() ? parseInt(document.getElementById('track-timeframe-days').value) : null;
+      const objective_plan = document.getElementById('track-plan').value.trim();
+      
+      // Calculate objective_due_at if timeframe is set
+      let objective_due_at = null;
+      if (objective_timeframe_days) {
+        const startDate = new Date();
+        objective_due_at = new Date(startDate.getTime() + objective_timeframe_days * 24 * 60 * 60 * 1000).toISOString();
+      }
 
       if (!keyword || !targetUrl) {
         alert('Missing keyword or URL');
@@ -4501,13 +4509,17 @@
             title: title || null,
             notes: notes || null,
             baselineMetrics: baselineMetrics,
-            // Cycle 1 objective fields
+            // Phase B objective fields
             objective_title: objective_title || null,
-            primary_kpi: primary_kpi || null,
-            target_direction: target_direction || null,
-            target_value: target_value ? parseFloat(target_value) : null,
-            timeframe_days: timeframe_days ? parseInt(timeframe_days) : null,
-            plan: plan || null
+            objective_kpi: objective_kpi || null,
+            objective_metric: objective_metric || null,
+            objective_direction: objective_direction || null,
+            objective_target_delta: objective_target_delta,
+            objective_timeframe_days: objective_timeframe_days,
+            objective_due_at: objective_due_at,
+            objective_plan: objective_plan || null,
+            // Also set cycle_started_at when creating task
+            cycle_started_at: new Date().toISOString()
           })
         });
 
@@ -4943,14 +4955,23 @@
       const content = document.getElementById('optimisation-drawer-objective-content');
       if (!form || !content) return;
 
-      // Populate form with current values
-      document.getElementById('optimisation-edit-objective-title').value = task.objective_title || task.objective_title || '';
-      document.getElementById('optimisation-edit-objective-kpi').value = task.objective_kpi || task.primary_kpi || '';
-      document.getElementById('optimisation-edit-objective-metric').value = task.objective_metric || '';
-      document.getElementById('optimisation-edit-objective-direction').value = task.objective_direction || task.target_direction || '';
-      document.getElementById('optimisation-edit-objective-target-value').value = task.objective_target_value != null ? task.objective_target_value : (task.target_value != null ? task.target_value : '');
-      document.getElementById('optimisation-edit-objective-timeframe').value = task.objective_timeframe_days != null ? task.objective_timeframe_days : (task.timeframe_days != null ? task.timeframe_days : '');
-      document.getElementById('optimisation-edit-objective-plan').value = task.objective_plan || task.plan || '';
+      // Populate form with current values (support both Phase 4 and Phase B fields)
+      document.getElementById('optimisation-edit-objective-title').value = task.objective_title || '';
+      document.getElementById('optimisation-edit-objective-kpi').value = task.objective_kpi || task.objective_metric || '';
+      document.getElementById('optimisation-edit-objective-metric').value = task.objective_metric || task.objective_kpi || '';
+      document.getElementById('optimisation-edit-objective-direction').value = task.objective_direction || '';
+      document.getElementById('optimisation-edit-objective-target-value').value = task.objective_target_delta != null ? task.objective_target_delta : (task.objective_target_value != null ? task.objective_target_value : '');
+      document.getElementById('optimisation-edit-objective-timeframe').value = task.objective_timeframe_days != null ? task.objective_timeframe_days : '';
+      document.getElementById('optimisation-edit-objective-plan').value = task.objective_plan || '';
+      
+      // If objective_due_at exists, calculate and display it
+      if (task.objective_due_at) {
+        const dueDateEl = document.getElementById('optimisation-edit-objective-due-date');
+        if (dueDateEl) {
+          const dueDate = new Date(task.objective_due_at);
+          dueDateEl.textContent = `Due: ${dueDate.toLocaleDateString('en-GB')}`;
+        }
+      }
 
       // Calculate and show due date
       updateObjectiveDueDate();
@@ -4986,14 +5007,35 @@
         return;
       }
 
+      // Get form values
+      const objective_title = document.getElementById('optimisation-edit-objective-title').value.trim() || null;
+      const objective_kpi = document.getElementById('optimisation-edit-objective-kpi').value.trim() || null;
+      const objective_metric = document.getElementById('optimisation-edit-objective-metric').value || null;
+      const objective_direction = document.getElementById('optimisation-edit-objective-direction').value || null;
+      const targetValue = document.getElementById('optimisation-edit-objective-target-value').value;
+      const objective_target_delta = targetValue ? parseFloat(targetValue) : null;
+      const timeframeDays = document.getElementById('optimisation-edit-objective-timeframe').value;
+      const objective_timeframe_days = timeframeDays ? parseInt(timeframeDays) : null;
+      const objective_plan = document.getElementById('optimisation-edit-objective-plan').value.trim() || null;
+
+      // Calculate objective_due_at if timeframe is set
+      let objective_due_at = null;
+      if (objective_timeframe_days) {
+        const taskId = window.optimisationModuleState?.currentTaskId;
+        const task = window.optimisationModuleState?.allTasks?.find(t => t.id === taskId);
+        const startDate = task?.cycle_started_at ? new Date(task.cycle_started_at) : new Date();
+        objective_due_at = new Date(startDate.getTime() + objective_timeframe_days * 24 * 60 * 60 * 1000).toISOString();
+      }
+
       const objectiveData = {
-        objective_title: document.getElementById('optimisation-edit-objective-title').value.trim() || null,
-        objective_kpi: document.getElementById('optimisation-edit-objective-kpi').value.trim() || null,
-        objective_metric: document.getElementById('optimisation-edit-objective-metric').value || null,
-        objective_direction: document.getElementById('optimisation-edit-objective-direction').value || null,
-        objective_target_value: document.getElementById('optimisation-edit-objective-target-value').value ? parseFloat(document.getElementById('optimisation-edit-objective-target-value').value) : null,
-        objective_timeframe_days: document.getElementById('optimisation-edit-objective-timeframe').value ? parseInt(document.getElementById('optimisation-edit-objective-timeframe').value) : null,
-        objective_plan: document.getElementById('optimisation-edit-objective-plan').value.trim() || null
+        objective_title,
+        objective_kpi,
+        objective_metric,
+        objective_direction,
+        objective_target_delta,
+        objective_timeframe_days,
+        objective_due_at,
+        objective_plan
       };
 
       try {
@@ -6468,6 +6510,45 @@
         maximizeBtn.addEventListener('click', maximizeOptimisationDrawer);
       }
       
+      // Edit Objective button
+      const editObjectiveBtn = document.getElementById('optimisation-edit-objective-btn');
+      if (editObjectiveBtn) {
+        editObjectiveBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (typeof window.editObjective === 'function') {
+            window.editObjective();
+          }
+        });
+      }
+
+      // Save Objective button
+      const saveObjectiveBtn = document.getElementById('optimisation-save-objective-btn');
+      if (saveObjectiveBtn) {
+        saveObjectiveBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (typeof window.saveObjective === 'function') {
+            window.saveObjective();
+          }
+        });
+      }
+
+      // Cancel Edit Objective button
+      const cancelEditObjectiveBtn = document.getElementById('optimisation-cancel-edit-objective-btn');
+      if (cancelEditObjectiveBtn) {
+        cancelEditObjectiveBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (typeof window.cancelEditObjective === 'function') {
+            window.cancelEditObjective();
+          }
+        });
+      }
+
+      // Update due date when timeframe changes
+      const timeframeInput = document.getElementById('optimisation-edit-objective-timeframe');
+      if (timeframeInput) {
+        timeframeInput.addEventListener('input', updateObjectiveDueDate);
+      }
+
       // Backdrop click to close (but not when clicking on drawer)
       const backdrop = document.getElementById('optimisation-task-drawer-backdrop');
       if (backdrop) {
