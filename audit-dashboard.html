@@ -6361,18 +6361,59 @@
 
           // Try to find matching row in Ranking & AI data
           let currentMetrics = null;
+          
+          // First try RankingAiModule state
           if (typeof RankingAiModule !== 'undefined' && RankingAiModule.state) {
             const { combinedRows } = RankingAiModule.state();
             const matchingRow = combinedRows?.find(r => 
               r.keyword === task.keyword_text && 
-              (r.best_url === task.target_url || r.targetUrl === task.target_url || r.ranking_url === task.target_url)
+              (r.best_url === task.target_url || r.targetUrl === task.target_url || r.ranking_url === task.target_url || 
+               r.best_url === task.target_url_clean || r.targetUrl === task.target_url_clean || r.ranking_url === task.target_url_clean)
             );
             
             if (matchingRow) {
+              // Get queryTotal data for clicks, impressions, and CTR (same as submitTrackKeyword)
+              let queryTotal = null;
+              if (typeof getQueryTotalForKeyword === 'function') {
+                queryTotal = getQueryTotalForKeyword(task.keyword_text);
+              }
+              
               currentMetrics = {
-                gsc_clicks_28d: matchingRow.gsc_clicks_28d || matchingRow.clicks_28d || null,
-                gsc_impressions_28d: matchingRow.gsc_impressions_28d || matchingRow.impressions_28d || null,
-                gsc_ctr_28d: matchingRow.gsc_ctr_28d || matchingRow.ctr_28d || null,
+                gsc_clicks_28d: queryTotal?.clicks || matchingRow.gsc_clicks_28d || matchingRow.clicks_28d || null,
+                gsc_impressions_28d: queryTotal?.impressions || matchingRow.gsc_impressions_28d || matchingRow.impressions_28d || null,
+                // queryTotal.ctr is a percentage (0-100), convert to decimal for storage
+                gsc_ctr_28d: queryTotal?.ctr != null ? (queryTotal.ctr / 100) : (matchingRow.gsc_ctr_28d || matchingRow.ctr_28d || null),
+                current_rank: matchingRow.best_rank_group || matchingRow.current_rank || null,
+                opportunity_score: matchingRow.opportunityScore || null,
+                ai_overview: matchingRow.has_ai_overview || false,
+                ai_citations: matchingRow.ai_alan_citations_count || 0,
+                ai_citations_total: matchingRow.ai_total_citations || 0,
+                classic_ranking_url: matchingRow.best_url || matchingRow.targetUrl || matchingRow.ranking_url || null,
+                page_type: matchingRow.pageType || null,
+                segment: matchingRow.segment || null,
+                captured_at: new Date().toISOString()
+              };
+            }
+          }
+          
+          // If still no data, try to get from window.rankingAiData or window.queryTotals
+          if (!currentMetrics && typeof window.rankingAiData !== 'undefined' && Array.isArray(window.rankingAiData)) {
+            const matchingRow = window.rankingAiData.find(r => 
+              r.keyword === task.keyword_text && 
+              (r.best_url === task.target_url || r.targetUrl === task.target_url || r.ranking_url === task.target_url ||
+               r.best_url === task.target_url_clean || r.targetUrl === task.target_url_clean || r.ranking_url === task.target_url_clean)
+            );
+            
+            if (matchingRow) {
+              let queryTotal = null;
+              if (typeof getQueryTotalForKeyword === 'function') {
+                queryTotal = getQueryTotalForKeyword(task.keyword_text);
+              }
+              
+              currentMetrics = {
+                gsc_clicks_28d: queryTotal?.clicks || matchingRow.gsc_clicks_28d || matchingRow.clicks_28d || null,
+                gsc_impressions_28d: queryTotal?.impressions || matchingRow.gsc_impressions_28d || matchingRow.impressions_28d || null,
+                gsc_ctr_28d: queryTotal?.ctr != null ? (queryTotal.ctr / 100) : (matchingRow.gsc_ctr_28d || matchingRow.ctr_28d || null),
                 current_rank: matchingRow.best_rank_group || matchingRow.current_rank || null,
                 opportunity_score: matchingRow.opportunityScore || null,
                 ai_overview: matchingRow.has_ai_overview || false,
