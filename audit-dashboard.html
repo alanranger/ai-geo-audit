@@ -3801,6 +3801,23 @@
           </div>
         </div>
 
+        <!-- Goal Rollup Badges (Phase B) -->
+        <div class="optimisation-goal-rollups" style="display: flex; gap: 0.75rem; margin: 1rem 0; flex-wrap: wrap; align-items: center;">
+          <div style="font-weight: 600; color: #475569; margin-right: 0.5rem;">Objectives:</div>
+          <span class="ranking-badge ranking-badge--segment-general" style="padding: 0.5rem 1rem;">
+            Not set: <span id="optimisation-goal-not-set">0</span>
+          </span>
+          <span class="ranking-badge ranking-badge--segment-education" style="padding: 0.5rem 1rem;">
+            On track: <span id="optimisation-goal-on-track">0</span>
+          </span>
+          <span class="ranking-badge ranking-badge--segment-money" style="padding: 0.5rem 1rem; background: #fee2e2; color: #991b1b;">
+            Overdue: <span id="optimisation-goal-overdue">0</span>
+          </span>
+          <span class="ranking-badge ranking-badge--segment-brand" style="padding: 0.5rem 1rem; background: #d1fae5; color: #065f46;">
+            Met: <span id="optimisation-goal-met">0</span>
+          </span>
+        </div>
+
         <!-- Tab Pills (B2) -->
         <div class="optimisation-tab-pills" style="display: flex; gap: 0.5rem; margin: 1.5rem 0; flex-wrap: wrap;">
           <button class="metric-pill metric-pill--neutral optimisation-tab-btn" data-tab="active" style="cursor: pointer; padding: 0.75rem 1.5rem;">
@@ -3886,6 +3903,10 @@
                     <div>Title <span class="sort-indicator"></span></div>
                     <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Optional title or label for this optimisation task.">ℹ</div>
                   </th>
+                  <th title="Goal status and progress for the current cycle objective.">
+                    <div>Goal</div>
+                    <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Goal status and progress for the current cycle objective.">ℹ</div>
+                  </th>
                   <th style="text-align: center;" title="Actions available for this task.">
                     <div>Actions</div>
                   </th>
@@ -3893,7 +3914,7 @@
               </thead>
               <tbody id="optimisation-tasks-tbody">
                 <tr>
-                  <td colspan="10" style="padding: 2rem; text-align: center; color: #666;">Loading tasks...</td>
+                  <td colspan="11" style="padding: 2rem; text-align: center; color: #666;">Loading tasks...</td>
                 </tr>
               </tbody>
             </table>
@@ -5464,6 +5485,23 @@
       document.querySelectorAll('.optimisation-tab-count[data-tab="paused-cancelled"]').forEach(el => {
         el.textContent = `(${pausedCancelled.length})`;
       });
+
+      // Update goal rollups (Phase B) - only count active tasks (not cancelled/deleted)
+      const activeTasks = tasks.filter(t => !['done', 'cancelled', 'deleted'].includes(t.status));
+      const goalNotSet = activeTasks.filter(t => !t.goal_state || t.goal_state === 'not_set').length;
+      const goalOnTrack = activeTasks.filter(t => t.goal_state === 'on_track').length;
+      const goalOverdue = activeTasks.filter(t => t.goal_state === 'overdue').length;
+      const goalMet = activeTasks.filter(t => t.goal_state === 'met').length;
+
+      const notSetEl = document.getElementById('optimisation-goal-not-set');
+      const onTrackEl = document.getElementById('optimisation-goal-on-track');
+      const overdueEl = document.getElementById('optimisation-goal-overdue');
+      const metEl = document.getElementById('optimisation-goal-met');
+      
+      if (notSetEl) notSetEl.textContent = goalNotSet;
+      if (onTrackEl) onTrackEl.textContent = goalOnTrack;
+      if (overdueEl) overdueEl.textContent = goalOverdue;
+      if (metEl) metEl.textContent = goalMet;
     }
 
     // Sort optimisation tasks
@@ -5551,10 +5589,10 @@
 
       tbody.innerHTML = '';
 
-      // Check for authentication error
+        // Check for authentication error
       if (window.optimisationModuleState.authError) {
         const errorMessage = window.optimisationModuleState.authError;
-        tbody.innerHTML = `<tr><td colspan="10" style="padding: 2rem; text-align: center;">
+        tbody.innerHTML = `<tr><td colspan="11" style="padding: 2rem; text-align: center;">
           <div style="color: #ef4444; margin-bottom: 0.5rem; font-weight: 600;">⚠️ Authentication Error</div>
           <div style="color: #666; margin-bottom: 1rem;">${escapeHtml(errorMessage)}</div>
           <a href="#configuration" onclick="if(typeof setActivePanel === 'function') setActivePanel('configuration');" style="color: #2563eb; text-decoration: underline;">Go to Configuration to set your admin key</a>
@@ -5564,7 +5602,7 @@
       }
 
       if (tasks.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="10" class="ranking-table-empty">No tasks found</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="11" class="ranking-table-empty">No tasks found</td></tr>';
         updateOptimisationPaginationControls(totalRows, currentPage, totalPages, startIdx, endIdx);
         return;
       }
@@ -5627,6 +5665,41 @@
           }
         }
 
+        // Build goal status display
+        let goalHtml = '–';
+        if (task.goal_state && task.goal_state !== 'not_set') {
+          const goalConfig = {
+            'on_track': { text: 'On track', bg: '#dbeafe', color: '#1e40af' },
+            'overdue': { text: 'Overdue', bg: '#fee2e2', color: '#991b1b' },
+            'met': { text: 'Met', bg: '#d1fae5', color: '#065f46' },
+            'at_risk': { text: 'At risk', bg: '#fef3c7', color: '#92400e' }
+          };
+          const config = goalConfig[task.goal_state] || goalConfig['on_track'];
+          let goalText = `<span style="padding: 0.25rem 0.5rem; border-radius: 4px; background: ${config.bg}; color: ${config.color}; font-size: 0.75rem; font-weight: 600; display: inline-block; margin-bottom: 0.25rem;">${config.text}</span>`;
+          
+          // Add KPI + target info
+          if (task.objective_kpi && task.objective_target_delta != null) {
+            const kpiLabel = task.objective_kpi.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            const direction = task.objective_direction === 'decrease' ? '-' : '+';
+            const targetText = `${kpiLabel} ${direction}${Math.abs(task.objective_target_delta)}`;
+            let dueText = '';
+            if (task.objective_due_at) {
+              const dueDate = new Date(task.objective_due_at).toLocaleDateString('en-GB');
+              dueText = ` by ${dueDate}`;
+            }
+            goalText += `<div style="font-size: 0.7rem; color: #64748b; margin-top: 0.25rem;">${targetText}${dueText}</div>`;
+          }
+          
+          // Add delta if available
+          if (task.objective_delta != null) {
+            const deltaColor = task.objective_delta >= 0 ? '#10b981' : '#ef4444';
+            const deltaSign = task.objective_delta >= 0 ? '+' : '';
+            goalText += `<div style="font-size: 0.7rem; color: ${deltaColor}; margin-top: 0.125rem; font-weight: 600;">Δ ${deltaSign}${task.objective_delta}</div>`;
+          }
+          
+          goalHtml = goalText;
+        }
+
         tr.innerHTML = `
           <td>${escapeHtml(task.keyword_text || '')}</td>
           <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
@@ -5639,6 +5712,7 @@
           <td>${baselineCaptured}</td>
           <td>${latestCaptured || measurementIndicator}</td>
           <td>${escapeHtml(task.title || '–')}</td>
+          <td style="font-size: 0.85rem;">${goalHtml}</td>
           <td>
             <button class="btn btn-secondary" onclick="event.stopPropagation(); openOptimisationTaskDrawer('${task.id}');" style="padding: 0.25rem 0.75rem; font-size: 0.875rem;">Open</button>
           </td>
@@ -6028,21 +6102,42 @@
             }
             objectiveHtml += `<div style="margin-bottom: 0.5rem;"><strong>Target:</strong> ${escapeHtml(targetText)}</div>`;
           }
-          if (objectiveTimeframe) {
-            let timeframeText = `${objectiveTimeframe} days`;
-            if (progress && progress.due_at) {
-              const dueDate = new Date(progress.due_at).toLocaleDateString('en-GB');
-              timeframeText += ` (Due: ${dueDate})`;
-              if (progress.days_remaining != null) {
+          if (objectiveTimeframe || task.objective_due_at) {
+            let timeframeText = '';
+            const dueAt = task.objective_due_at || (progress && progress.due_at) || null;
+            if (dueAt) {
+              const dueDate = new Date(dueAt).toLocaleDateString('en-GB');
+              timeframeText = `Due: ${dueDate}`;
+              if (progress && progress.days_remaining != null) {
                 const daysRemaining = Math.round(progress.days_remaining);
-                timeframeText += ` - ${daysRemaining} days remaining`;
+                timeframeText += ` (${daysRemaining} days remaining)`;
               }
-            } else if (cycleStartedAt && objectiveTimeframe) {
-              const startDate = new Date(cycleStartedAt);
-              const dueDate = new Date(startDate.getTime() + objectiveTimeframe * 24 * 60 * 60 * 1000);
-              timeframeText += ` (Due: ${dueDate.toLocaleDateString('en-GB')})`;
+            } else if (objectiveTimeframe) {
+              timeframeText = `${objectiveTimeframe} days`;
+              if (cycleStartedAt) {
+                const startDate = new Date(cycleStartedAt);
+                const dueDate = new Date(startDate.getTime() + objectiveTimeframe * 24 * 60 * 60 * 1000);
+                timeframeText += ` (Due: ${dueDate.toLocaleDateString('en-GB')})`;
+              }
             }
-            objectiveHtml += `<div style="margin-bottom: 0.5rem;"><strong>Timeframe:</strong> ${timeframeText}</div>`;
+            if (timeframeText) {
+              objectiveHtml += `<div style="margin-bottom: 0.5rem;"><strong>Timeframe:</strong> ${timeframeText}</div>`;
+            }
+          }
+          
+          // Show progress: baseline → latest (Δ) vs target
+          if (progress && progress.baseline_value != null && progress.latest_value != null && objectiveMetric) {
+            const baselineVal = progress.baseline_value;
+            const latestVal = progress.latest_value;
+            const delta = progress.objective_delta != null ? progress.objective_delta : (latestVal - baselineVal);
+            const targetDelta = task.objective_target_delta != null ? task.objective_target_delta : (task.objective_target_value != null ? task.objective_target_value : null);
+            
+            if (targetDelta != null) {
+              const deltaColor = delta >= 0 ? '#10b981' : '#ef4444';
+              const deltaSign = delta >= 0 ? '+' : '';
+              const kpiLabel = (objectiveKpi || objectiveMetric).replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+              objectiveHtml += `<div style="margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e2e8f0;"><strong>Progress:</strong> ${baselineVal} → ${latestVal} (<span style="color: ${deltaColor}; font-weight: 600;">${deltaSign}${delta}</span>) vs target ${targetDelta > 0 ? '+' : ''}${targetDelta}</div>`;
+            }
           }
           if (objectivePlan) {
             objectiveHtml += `<div style="margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e2e8f0;"><strong>Plan:</strong> ${escapeHtml(objectivePlan)}</div>`;

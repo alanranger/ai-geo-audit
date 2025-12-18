@@ -84,7 +84,7 @@ export default async function handler(req, res) {
       status,
       title,
       notes,
-      // Cycle objective fields
+      // Cycle objective fields (Phase 4)
       objective_title,
       primary_kpi,
       target_value,
@@ -92,6 +92,11 @@ export default async function handler(req, res) {
       timeframe_days,
       hypothesis,
       plan,
+      // Phase B objective fields
+      objective_kpi,
+      objective_target_delta,
+      objective_due_at,
+      objective_plan,
       ...otherUpdates
     } = req.body;
 
@@ -99,6 +104,14 @@ export default async function handler(req, res) {
     if (status !== undefined) updates.status = status;
     if (title !== undefined) updates.title = title;
     if (notes !== undefined) updates.notes = notes;
+    
+    // Phase B objective fields
+    if (objective_title !== undefined) updates.objective_title = objective_title;
+    if (objective_kpi !== undefined) updates.objective_kpi = objective_kpi;
+    if (objective_target_delta !== undefined) updates.objective_target_delta = objective_target_delta != null ? parseFloat(objective_target_delta) : null;
+    if (target_direction !== undefined) updates.objective_direction = target_direction;
+    if (objective_due_at !== undefined) updates.objective_due_at = objective_due_at || null;
+    if (objective_plan !== undefined) updates.objective_plan = objective_plan;
 
     // Update task if there are task-level updates
     let task = currentTask;

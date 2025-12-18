@@ -134,12 +134,23 @@ export default async function handler(req, res) {
       return sendJSON(res, 500, { error: cycleError.message });
     }
 
-    // Update task with new active_cycle_id and increment cycle_active
+    // Update task with new active_cycle_id, increment cycle_active, and clear objective fields
     const { error: updateError } = await supabase
       .from('optimisation_tasks')
       .update({ 
         active_cycle_id: cycle.id,
-        cycle_active: nextCycleNo
+        cycle_active: nextCycleNo,
+        cycle_started_at: new Date().toISOString(),
+        // Clear objective fields for new cycle
+        objective_title: null,
+        objective_kpi: null,
+        objective_metric: null,
+        objective_target_delta: null,
+        objective_target_value: null,
+        objective_direction: null,
+        objective_due_at: null,
+        objective_timeframe_days: null,
+        objective_plan: null
       })
       .eq('id', id);
 
