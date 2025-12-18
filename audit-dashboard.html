@@ -16402,6 +16402,7 @@ Final Score: ${score}/100`;
         }
         
         // Calculate money page proportions from latest audit's metrics
+        // Find the latest audit that has both moneySegmentMetrics and corresponding timeseries data
         let moneyClicksProportion = 0;
         let moneyImpressionsProportion = 0;
         let segmentProportions = {
@@ -16410,27 +16411,73 @@ Final Score: ${score}/100`;
           productPages: { clicks: 0, impressions: 0 }
         };
         
-        if (latestMoneySegmentMetrics && latestMoneySegmentMetrics.allMoney) {
-          const allMoney = latestMoneySegmentMetrics.allMoney;
-          // Get total site clicks/impressions from latest audit date's timeseries
-          const latestAuditDate = history.length > 0 ? (history[history.length - 1].date || history[history.length - 1].audit_date) : null;
+        // Find latest audit with valid metrics
+        let referenceAudit = null;
+        let referenceTs = null;
+        
+        // Try to find an audit with both metrics and timeseries data
+        for (let i = history.length - 1; i >= 0; i--) {
+          const audit = history[i];
+          const auditDate = audit.date || audit.audit_date || audit.auditDate;
+          if (!auditDate) continue;
+          
+          const metrics = audit.moneySegmentMetrics;
+          if (metrics && metrics.allMoney && metrics.allMoney.clicks > 0 && metrics.allMoney.impressions > 0) {
+            // Check if we have timeseries data for this date
+            const ts = timeseriesMap.get(auditDate);
+            if (ts && ts.clicks > 0 && ts.impressions > 0) {
+              referenceAudit = audit;
+              referenceTs = ts;
+              break;
+            }
+          }
+        }
+        
+        // If no exact match, try to find closest timeseries date to latest audit
+        if (!referenceAudit && history.length > 0 && latestMoneySegmentMetrics && latestMoneySegmentMetrics.allMoney) {
+          const latestAuditDate = history[history.length - 1].date || history[history.length - 1].audit_date;
           if (latestAuditDate) {
-            const latestTs = timeseriesMap.get(latestAuditDate);
-            if (latestTs && latestTs.clicks > 0 && latestTs.impressions > 0) {
-              moneyClicksProportion = allMoney.clicks / latestTs.clicks;
-              moneyImpressionsProportion = allMoney.impressions / latestTs.impressions;
-              
-              // Calculate segment proportions
-              if (allMoney.clicks > 0) {
-                segmentProportions.landingPages.clicks = (latestMoneySegmentMetrics.landingPages?.clicks || 0) / allMoney.clicks;
-                segmentProportions.eventPages.clicks = (latestMoneySegmentMetrics.eventPages?.clicks || 0) / allMoney.clicks;
-                segmentProportions.productPages.clicks = (latestMoneySegmentMetrics.productPages?.clicks || 0) / allMoney.clicks;
+            // Find closest timeseries date (before or on audit date)
+            const auditDateObj = new Date(latestAuditDate + 'T00:00:00');
+            let closestTs = null;
+            let closestDate = null;
+            
+            for (const [tsDate, tsData] of timeseriesMap.entries()) {
+              const tsDateObj = new Date(tsDate + 'T00:00:00');
+              if (tsDateObj <= auditDateObj && tsData.clicks > 0 && tsData.impressions > 0) {
+                if (!closestDate || tsDateObj > new Date(closestDate + 'T00:00:00')) {
+                  closestDate = tsDate;
+                  closestTs = tsData;
+                }
               }
-              if (allMoney.impressions > 0) {
-                segmentProportions.landingPages.impressions = (latestMoneySegmentMetrics.landingPages?.impressions || 0) / allMoney.impressions;
-                segmentProportions.eventPages.impressions = (latestMoneySegmentMetrics.eventPages?.impressions || 0) / allMoney.impressions;
-                segmentProportions.productPages.impressions = (latestMoneySegmentMetrics.productPages?.impressions || 0) / allMoney.impressions;
-              }
+            }
+            
+            if (closestTs && latestMoneySegmentMetrics.allMoney.clicks > 0 && latestMoneySegmentMetrics.allMoney.impressions > 0) {
+              referenceAudit = { moneySegmentMetrics: latestMoneySegmentMetrics };
+              referenceTs = closestTs;
+            }
+          }
+        }
+        
+        // Calculate proportions from reference audit
+        if (referenceAudit && referenceTs && referenceAudit.moneySegmentMetrics) {
+          const allMoney = referenceAudit.moneySegmentMetrics.allMoney;
+          if (allMoney && allMoney.clicks > 0 && allMoney.impressions > 0 && referenceTs.clicks > 0 && referenceTs.impressions > 0) {
+            moneyClicksProportion = allMoney.clicks / referenceTs.clicks;
+            moneyImpressionsProportion = allMoney.impressions / referenceTs.impressions;
+            
+            debugLog(`[KPI Tracker] Calculated proportions: clicks=${(moneyClicksProportion * 100).toFixed(1)}%, impressions=${(moneyImpressionsProportion * 100).toFixed(1)}%`, 'info');
+            
+            // Calculate segment proportions
+            if (allMoney.clicks > 0) {
+              segmentProportions.landingPages.clicks = (referenceAudit.moneySegmentMetrics.landingPages?.clicks || 0) / allMoney.clicks;
+              segmentProportions.eventPages.clicks = (referenceAudit.moneySegmentMetrics.eventPages?.clicks || 0) / allMoney.clicks;
+              segmentProportions.productPages.clicks = (referenceAudit.moneySegmentMetrics.productPages?.clicks || 0) / allMoney.clicks;
+            }
+            if (allMoney.impressions > 0) {
+              segmentProportions.landingPages.impressions = (referenceAudit.moneySegmentMetrics.landingPages?.impressions || 0) / allMoney.impressions;
+              segmentProportions.eventPages.impressions = (referenceAudit.moneySegmentMetrics.eventPages?.impressions || 0) / allMoney.impressions;
+              segmentProportions.productPages.impressions = (referenceAudit.moneySegmentMetrics.productPages?.impressions || 0) / allMoney.impressions;
             }
           }
         }
@@ -16449,81 +16496,16 @@ Final Score: ${score}/100`;
         };
         
         // Debug: Log what we have
-        debugLog(`[KPI Tracker] Building history: timeseries.length=${timeseries.length}, latestMoneySegmentMetrics=${!!latestMoneySegmentMetrics}, moneyClicksProportion=${moneyClicksProportion}, moneyImpressionsProportion=${moneyImpressionsProportion}`, 'info');
+        debugLog(`[KPI Tracker] Building history: timeseries.length=${timeseries.length}, timeseriesMap.size=${timeseriesMap.size}, moneyClicksProportion=${moneyClicksProportion}, moneyImpressionsProportion=${moneyImpressionsProportion}`, 'info');
         
-        // If we don't have timeseries data or proportions, fall back to using audit records
-        const useTimeseriesCalculation = timeseries.length > 0 && moneyClicksProportion > 0 && moneyImpressionsProportion > 0;
-        
-        if (!useTimeseriesCalculation) {
-          debugLog(`[KPI Tracker] Falling back to audit records method (timeseries=${timeseries.length}, proportions=${moneyClicksProportion > 0})`, 'warn');
-          
-          // Fallback: Use audit records (original method)
-          const historyMap = new Map();
-          for (const row of history) {
-            const dateStr = row.date || row.audit_date || row.auditDate;
-            if (!dateStr) continue;
-            const date = new Date(dateStr);
-            if (Number.isNaN(date.getTime())) continue;
-            
-            if (dateStr.localeCompare(startDate.toISOString().split('T')[0]) >= 0 &&
-                (!lastGscTimeseriesDate || dateStr.localeCompare(lastGscTimeseriesDate) <= 0)) {
-              historyMap.set(dateStr, {
-                date: date,
-                dateStr: dateStr,
-                metrics: row.moneySegmentMetrics || null,
-                isPartial: row.isPartial || false
-              });
-            }
-          }
-          
-          let lastValues = {
-            allMoney: null,
-            landingPages: null,
-            eventPages: null,
-            productPages: null
-          };
-          
+        // Process each of the 8 weekly date points - calculate from actual GSC timeseries data
+        // Only proceed if we have valid proportions (calculated from real audit data)
+        if (timeseries.length === 0 || (moneyClicksProportion === 0 && moneyImpressionsProportion === 0)) {
+          debugLog(`[KPI Tracker] Cannot calculate: timeseries=${timeseries.length}, proportions=${moneyClicksProportion > 0}`, 'warn');
+          // Return empty data structure - don't fake it
           for (const datePoint of datePoints) {
-            // Find closest audit record
-            let audit = historyMap.get(datePoint);
-            if (!audit) {
-              const datePointDate = new Date(datePoint + 'T00:00:00');
-              let closestDate = null;
-              let closestDiff = Infinity;
-              
-              for (const [dateStr, record] of historyMap.entries()) {
-                const recordDate = new Date(dateStr + 'T00:00:00');
-                if (recordDate <= datePointDate) {
-                  const diff = datePointDate - recordDate;
-                  if (diff < closestDiff) {
-                    closestDiff = diff;
-                    closestDate = dateStr;
-                  }
-                }
-              }
-              
-              if (closestDate) {
-                audit = historyMap.get(closestDate);
-              }
-            }
-            
-            const m = audit ? audit.metrics : null;
             for (const key of Object.keys(segments)) {
-              let v = null;
-              
-              if (m && m[key]) {
-                v = m[key][metricKey] != null ? m[key][metricKey] : null;
-              }
-              
-              if (v == null && lastValues[key] != null) {
-                v = lastValues[key];
-              }
-              
-              if (v != null) {
-                lastValues[key] = v;
-              }
-              
-              segments[key].push(v);
+              segments[key].push(null);
             }
           }
         } else {
@@ -16566,10 +16548,10 @@ Final Score: ${score}/100`;
                   } else if (metricKey === 'ctr') {
                     v = moneyImpressions > 0 ? (moneyClicks / moneyImpressions) * 100 : 0;
                   } else if (metricKey === 'avgPosition') {
-                    // Use latest audit's avgPosition (position doesn't change much day-to-day)
-                    v = latestMoneySegmentMetrics?.allMoney?.avgPosition || null;
+                    // Use reference audit's avgPosition (position doesn't change much day-to-day)
+                    v = referenceAudit?.moneySegmentMetrics?.allMoney?.avgPosition || null;
                   } else if (metricKey === 'behaviourScore') {
-                    v = latestMoneySegmentMetrics?.allMoney?.behaviourScore || null;
+                    v = referenceAudit?.moneySegmentMetrics?.allMoney?.behaviourScore || null;
                   }
                 } else {
                   // Calculate segment metrics
@@ -16583,14 +16565,14 @@ Final Score: ${score}/100`;
                   } else if (metricKey === 'ctr') {
                     v = segmentImpressions > 0 ? (segmentClicks / segmentImpressions) * 100 : 0;
                   } else if (metricKey === 'avgPosition') {
-                    v = latestMoneySegmentMetrics?.[key]?.avgPosition || null;
+                    v = referenceAudit?.moneySegmentMetrics?.[key]?.avgPosition || null;
                   } else if (metricKey === 'behaviourScore') {
-                    v = latestMoneySegmentMetrics?.[key]?.behaviourScore || null;
+                    v = referenceAudit?.moneySegmentMetrics?.[key]?.behaviourScore || null;
                   }
                 }
               } else if (ts && metricKey === 'avgPosition') {
-                // For position, use latest audit's value (position is relatively stable)
-                v = latestMoneySegmentMetrics?.[key]?.avgPosition || null;
+                // For position, use reference audit's value (position is relatively stable)
+                v = referenceAudit?.moneySegmentMetrics?.[key]?.avgPosition || null;
               }
               
               segments[key].push(v);
