@@ -2266,6 +2266,10 @@
         <span class="aigeo-nav-icon">🔍</span>
         <span>Ranking & AI</span>
       </button>
+      <button class="aigeo-nav-item" data-panel="optimisation">
+        <span class="aigeo-nav-icon">✅</span>
+        <span>Optimisation Tracking</span>
+      </button>
       <button class="aigeo-nav-item" data-panel="ai-sources">
         <span class="aigeo-nav-icon">🤖</span>
         <span>AI Sources & Influence</span>
@@ -3740,6 +3744,180 @@
         <!-- Local entity, GBP, reviews content will be inserted here by JS -->
       </section>
 
+      <!-- Optimisation Tracking Panel -->
+      <section class="aigeo-panel" data-panel="optimisation" hidden>
+        <div class="card card--section-header">
+          <h2>Optimisation Tracking</h2>
+          <p>Track and manage keyword optimisation tasks across your site. Monitor progress, cycles, and outcomes.</p>
+        </div>
+
+        <!-- Summary Cards (B6) -->
+        <div class="optimisation-summary-cards" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin: 1.5rem 0;">
+          <div class="card" style="background: #f0f9ff; border-left: 4px solid #3b82f6;">
+            <div style="font-size: 2rem; font-weight: bold; color: #3b82f6;" id="optimisation-summary-active">–</div>
+            <div style="color: #666; margin-top: 0.5rem;">Active Tasks</div>
+          </div>
+          <div class="card" style="background: #f0fdf4; border-left: 4px solid #10b981;">
+            <div style="font-size: 2rem; font-weight: bold; color: #10b981;" id="optimisation-summary-in-progress">–</div>
+            <div style="color: #666; margin-top: 0.5rem;">In Progress</div>
+          </div>
+          <div class="card" style="background: #eff6ff; border-left: 4px solid #2563eb;">
+            <div style="font-size: 2rem; font-weight: bold; color: #2563eb;" id="optimisation-summary-monitoring">–</div>
+            <div style="color: #666; margin-top: 0.5rem;">Monitoring</div>
+          </div>
+          <div class="card" style="background: #fef3c7; border-left: 4px solid #f59e0b;">
+            <div style="font-size: 2rem; font-weight: bold; color: #f59e0b;" id="optimisation-summary-recent">–</div>
+            <div style="color: #666; margin-top: 0.5rem;">Updated (30d)</div>
+          </div>
+        </div>
+
+        <!-- Tab Pills (B2) -->
+        <div class="optimisation-tab-pills" style="display: flex; gap: 0.5rem; margin: 1.5rem 0; flex-wrap: wrap;">
+          <button class="metric-pill metric-pill--neutral optimisation-tab-btn" data-tab="active" style="cursor: pointer; padding: 0.75rem 1.5rem;">
+            <span>Active</span>
+            <span class="optimisation-tab-count" data-tab="active">0</span>
+          </button>
+          <button class="metric-pill metric-pill--neutral optimisation-tab-btn" data-tab="done" style="cursor: pointer; padding: 0.75rem 1.5rem;">
+            <span>Done</span>
+            <span class="optimisation-tab-count" data-tab="done">0</span>
+          </button>
+          <button class="metric-pill metric-pill--neutral optimisation-tab-btn" data-tab="paused-cancelled" style="cursor: pointer; padding: 0.75rem 1.5rem;">
+            <span>Paused/Cancelled</span>
+            <span class="optimisation-tab-count" data-tab="paused-cancelled">0</span>
+          </button>
+        </div>
+
+        <!-- Filters (B6) -->
+        <div class="optimisation-filters" style="display: flex; gap: 1rem; margin: 1rem 0; flex-wrap: wrap; align-items: center;">
+          <select id="optimisation-filter-status" style="padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;">
+            <option value="">All Statuses</option>
+            <option value="planned">Planned</option>
+            <option value="in_progress">In Progress</option>
+            <option value="monitoring">Monitoring</option>
+            <option value="done">Done</option>
+            <option value="paused">Paused</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+          <select id="optimisation-filter-type" style="padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;">
+            <option value="">All Types</option>
+            <option value="on_page">On Page</option>
+            <option value="content">Content</option>
+            <option value="internal_links">Internal Links</option>
+            <option value="links_pr">Links/PR</option>
+            <option value="technical">Technical</option>
+            <option value="local">Local</option>
+            <option value="other">Other</option>
+          </select>
+          <input type="text" id="optimisation-filter-keyword" placeholder="Filter by keyword..." style="padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px; flex: 1; min-width: 200px;">
+          <input type="text" id="optimisation-filter-url" placeholder="Filter by URL..." style="padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px; flex: 1; min-width: 200px;">
+          <button id="optimisation-clear-filters" class="btn btn-secondary" style="padding: 0.5rem 1rem;">Clear Filters</button>
+        </div>
+
+        <!-- Tasks Table (B2) -->
+        <div class="card" style="margin-top: 1.5rem;">
+          <div id="optimisation-tasks-table-container">
+            <table id="optimisation-tasks-table" style="width: 100%; border-collapse: collapse;">
+              <thead>
+                <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                  <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Keyword</th>
+                  <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Target URL</th>
+                  <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Task Type</th>
+                  <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Status</th>
+                  <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Cycle</th>
+                  <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Last Activity</th>
+                  <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Title</th>
+                  <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="optimisation-tasks-tbody">
+                <tr>
+                  <td colspan="8" style="padding: 2rem; text-align: center; color: #666;">Loading tasks...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Task Detail Drawer (B3) -->
+        <div id="optimisation-task-drawer" style="display: none; position: fixed; top: 0; right: -500px; width: 500px; height: 100vh; background: white; box-shadow: -2px 0 8px rgba(0,0,0,0.1); z-index: 1000; transition: right 0.3s ease; overflow-y: auto;">
+          <div style="padding: 1.5rem; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; background: white; z-index: 10;">
+            <h3 id="optimisation-drawer-title" style="margin: 0;">Task Details</h3>
+            <button id="optimisation-drawer-close" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; padding: 0.25rem 0.5rem;">&times;</button>
+          </div>
+          
+          <div style="padding: 1.5rem;">
+            <!-- Task Header -->
+            <div id="optimisation-drawer-header" style="margin-bottom: 2rem;">
+              <div style="margin-bottom: 1rem;">
+                <strong>Keyword:</strong>
+                <div id="optimisation-drawer-keyword" style="margin-top: 0.25rem; font-size: 1.1rem; color: #2563eb;"></div>
+              </div>
+              <div style="margin-bottom: 1rem;">
+                <strong>Target URL:</strong>
+                <div id="optimisation-drawer-url" style="margin-top: 0.25rem; word-break: break-all;"></div>
+              </div>
+              <div style="margin-bottom: 1rem;">
+                <strong>Task Type:</strong>
+                <span id="optimisation-drawer-type" style="margin-left: 0.5rem; padding: 0.25rem 0.5rem; background: #f0f0f0; border-radius: 4px;"></span>
+              </div>
+              <div style="margin-bottom: 1rem;">
+                <strong>Status:</strong>
+                <span id="optimisation-drawer-status" style="margin-left: 0.5rem; padding: 0.25rem 0.5rem; border-radius: 4px;"></span>
+              </div>
+              <div style="margin-bottom: 1rem;">
+                <strong>Cycle:</strong>
+                <span id="optimisation-drawer-cycle" style="margin-left: 0.5rem;"></span>
+              </div>
+            </div>
+
+            <!-- Timeline/Events -->
+            <div style="margin-bottom: 2rem;">
+              <h4 style="margin-bottom: 1rem;">Timeline</h4>
+              <div id="optimisation-drawer-events" style="border-left: 2px solid #e0e0e0; padding-left: 1rem;">
+                <div style="color: #666; font-style: italic;">Loading events...</div>
+              </div>
+            </div>
+
+            <!-- Add Event Form -->
+            <div style="margin-bottom: 2rem; padding: 1rem; background: #f8f9fa; border-radius: 4px;">
+              <h4 style="margin-bottom: 1rem;">Add Event</h4>
+              <div style="margin-bottom: 1rem;">
+                <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Event Type:</label>
+                <select id="optimisation-event-type" style="width: 100%; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;">
+                  <option value="note">Note</option>
+                  <option value="change_deployed">Change Deployed</option>
+                  <option value="measurement">Measurement</option>
+                  <option value="status_changed">Status Changed</option>
+                </select>
+              </div>
+              <div style="margin-bottom: 1rem;">
+                <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Note:</label>
+                <textarea id="optimisation-event-note" rows="3" style="width: 100%; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;"></textarea>
+              </div>
+              <button id="optimisation-add-event-btn" class="btn btn-primary" style="width: 100%;">Add Event</button>
+            </div>
+
+            <!-- Actions -->
+            <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+              <button id="optimisation-start-cycle-btn" class="btn btn-secondary">Start New Cycle</button>
+              <div style="display: flex; gap: 0.5rem;">
+                <select id="optimisation-change-status" style="flex: 1; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;">
+                  <option value="">Change Status...</option>
+                  <option value="planned">Planned</option>
+                  <option value="in_progress">In Progress</option>
+                  <option value="monitoring">Monitoring</option>
+                  <option value="done">Done</option>
+                  <option value="paused">Paused</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+                <button id="optimisation-save-status-btn" class="btn btn-primary">Save</button>
+              </div>
+              <button id="optimisation-cancel-task-btn" class="btn" style="background: #ef4444; color: white; border: 1px solid #ef4444;">Cancel Task</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- History Panel -->
       <section class="aigeo-panel" data-panel="history">
         <!-- Supabase history charts / trend lines / previous audits will be inserted here by JS -->
@@ -4159,13 +4337,31 @@
     };
 
     // Submit status change
-    window.submitStatusChange = async function submitStatusChange() {
+    window.submitStatusChange = async function submitStatusChange(newStatusParam, taskIdParam) {
+      // B5: Support both modal and drawer - accept optional parameters
       const modal = document.getElementById('optimisation-manage-modal');
-      if (!modal || !modal.dataset.taskId) return;
+      const drawerTaskId = window.optimisationModuleState?.currentTaskId;
+      const modalTaskId = modal?.dataset.taskId;
+      const taskId = taskIdParam || drawerTaskId || modalTaskId;
+      
+      if (!taskId) {
+        console.warn('[Optimisation] No task ID found');
+        return;
+      }
 
-      const taskId = modal.dataset.taskId;
-      const oldStatus = modal.dataset.currentStatus || document.getElementById('manage-status-text').textContent;
-      const newStatus = document.getElementById('manage-status-select').value;
+      // Get status from parameter, modal select, or drawer select
+      const newStatus = newStatusParam || 
+        (modal ? document.getElementById('manage-status-select')?.value : null) ||
+        document.getElementById('optimisation-change-status')?.value;
+      
+      if (!newStatus) {
+        alert('Please select a status');
+        return;
+      }
+
+      const oldStatus = modal?.dataset.currentStatus || 
+        document.getElementById('manage-status-text')?.textContent ||
+        document.getElementById('optimisation-drawer-status')?.textContent;
 
       if (oldStatus === newStatus) {
         alert('Status unchanged');
@@ -4253,15 +4449,26 @@
         const result = await response.json();
         console.log('[Optimisation] Status update successful:', result);
 
-        // Refresh and close
-        await window.fetchOptimisationStatuses([{
-          keyword: modal.dataset.rowKeyword,
-          best_url: modal.dataset.rowUrl
-        }]);
+        // Refresh data
+        if (modal && modal.dataset.rowKeyword) {
+          await window.fetchOptimisationStatuses([{
+            keyword: modal.dataset.rowKeyword,
+            best_url: modal.dataset.rowUrl
+          }]);
+        }
         
-        modal.style.display = 'none';
+        // Refresh all tasks if drawer is open
+        if (window.optimisationModuleState?.currentTaskId) {
+          await window.loadAllOptimisationTasks();
+        }
         
-        // Ensure Ranking & AI tab stays active and refresh table
+        // Close modal if open
+        if (modal) {
+          modal.style.display = 'none';
+        }
+        
+        // Ensure Ranking & AI tab stays active and refresh table (only if modal was used)
+        if (modal && modal.dataset.rowKeyword) {
         const rankingTab = document.querySelector('[data-panel="ranking"]');
         if (rankingTab) {
           // Use setActivePanel to properly show the panel
@@ -4310,10 +4517,16 @@
 
     // Start new cycle
     window.startNewCycle = async function startNewCycle() {
+      // B5: Support both modal and drawer
       const modal = document.getElementById('optimisation-manage-modal');
-      if (!modal || !modal.dataset.taskId) return;
-
-      const taskId = modal.dataset.taskId;
+      const drawerTaskId = window.optimisationModuleState?.currentTaskId;
+      const modalTaskId = modal?.dataset.taskId;
+      const taskId = drawerTaskId || modalTaskId;
+      
+      if (!taskId) {
+        console.warn('[Optimisation] No task ID found in modal or drawer');
+        return;
+      }
       const currentCycle = Number(modal.dataset.currentCycle) || 1;
       const newCycle = currentCycle + 1;
 
@@ -4390,14 +4603,20 @@
 
     // Stop tracking
     window.stopTracking = async function stopTracking() {
+      // B5: Support both modal and drawer
       const modal = document.getElementById('optimisation-manage-modal');
-      if (!modal || !modal.dataset.taskId) return;
+      const drawerTaskId = window.optimisationModuleState?.currentTaskId;
+      const modalTaskId = modal?.dataset.taskId;
+      const taskId = drawerTaskId || modalTaskId;
+      
+      if (!taskId) {
+        console.warn('[Optimisation] No task ID found in modal or drawer');
+        return;
+      }
 
       if (!confirm('Stop tracking this keyword? The task will be marked as cancelled but history will be preserved.')) {
         return;
       }
-
-      const taskId = modal.dataset.taskId;
 
       try {
         const headers = window.getOptimisationHeaders();
@@ -4479,13 +4698,26 @@
         const result = await response.json();
         console.log('[Optimisation] Stop tracking successful:', result);
 
-        // Refresh and close
-        await window.fetchOptimisationStatuses([{
-          keyword: modal.dataset.rowKeyword,
-          best_url: modal.dataset.rowUrl
-        }]);
+        // Refresh data
+        if (modal && modal.dataset.rowKeyword) {
+          await window.fetchOptimisationStatuses([{
+            keyword: modal.dataset.rowKeyword,
+            best_url: modal.dataset.rowUrl
+          }]);
+        }
         
-        modal.style.display = 'none';
+        // Refresh all tasks if drawer is open
+        if (window.optimisationModuleState?.currentTaskId) {
+          await window.loadAllOptimisationTasks();
+        }
+        
+        // Close modal if open, drawer if open
+        if (modal) {
+          modal.style.display = 'none';
+        }
+        if (window.optimisationModuleState?.currentTaskId) {
+          closeOptimisationTaskDrawer();
+        }
         
         // Ensure Ranking & AI tab stays active and refresh table
         const rankingTab = document.querySelector('[data-panel="ranking"]');
@@ -4531,6 +4763,429 @@
       } catch (error) {
         console.error('[Optimisation] Error stopping tracking:', error);
         alert('Failed to stop tracking: ' + error.message);
+      }
+    };
+
+    // ======================
+    // Optimisation Tracking Module (Phase B)
+    // ======================
+    
+    // State
+    window.optimisationModuleState = {
+      allTasks: [],
+      filteredTasks: [],
+      activeTab: 'active',
+      currentTaskId: null
+    };
+
+    // Load all optimisation tasks
+    window.loadAllOptimisationTasks = async function loadAllOptimisationTasks() {
+      try {
+        const headers = window.getOptimisationHeaders();
+        const response = await fetch(apiUrl('/api/optimisation/tasks'), {
+          method: 'GET',
+          headers: headers
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to load tasks: ${response.status}`);
+        }
+
+        const data = await response.json();
+        window.optimisationModuleState.allTasks = data.tasks || [];
+        window.optimisationModuleState.filteredTasks = [...window.optimisationModuleState.allTasks];
+        
+        updateOptimisationSummaryCards();
+        renderOptimisationTasksTable();
+        
+        return window.optimisationModuleState.allTasks;
+      } catch (error) {
+        console.error('[Optimisation Module] Error loading tasks:', error);
+        return [];
+      }
+    };
+
+    // Update summary cards (B6)
+    function updateOptimisationSummaryCards() {
+      const tasks = window.optimisationModuleState.allTasks;
+      const active = tasks.filter(t => ['planned', 'in_progress', 'monitoring'].includes(t.status));
+      const inProgress = tasks.filter(t => t.status === 'in_progress');
+      const monitoring = tasks.filter(t => t.status === 'monitoring');
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      const recent = tasks.filter(t => {
+        const lastActivity = t.last_activity_at ? new Date(t.last_activity_at) : new Date(t.updated_at);
+        return lastActivity >= thirtyDaysAgo;
+      });
+
+      document.getElementById('optimisation-summary-active').textContent = active.length;
+      document.getElementById('optimisation-summary-in-progress').textContent = inProgress.length;
+      document.getElementById('optimisation-summary-monitoring').textContent = monitoring.length;
+      document.getElementById('optimisation-summary-recent').textContent = recent.length;
+
+      // Update tab counts
+      const done = tasks.filter(t => t.status === 'done');
+      const pausedCancelled = tasks.filter(t => ['paused', 'cancelled'].includes(t.status));
+      
+      document.querySelectorAll('.optimisation-tab-count[data-tab="active"]').forEach(el => {
+        el.textContent = `(${active.length})`;
+      });
+      document.querySelectorAll('.optimisation-tab-count[data-tab="done"]').forEach(el => {
+        el.textContent = `(${done.length})`;
+      });
+      document.querySelectorAll('.optimisation-tab-count[data-tab="paused-cancelled"]').forEach(el => {
+        el.textContent = `(${pausedCancelled.length})`;
+      });
+    }
+
+    // Render tasks table (B2)
+    function renderOptimisationTasksTable() {
+      const tbody = document.getElementById('optimisation-tasks-tbody');
+      if (!tbody) return;
+
+      let tasks = window.optimisationModuleState.filteredTasks;
+
+      // Apply tab filter
+      if (window.optimisationModuleState.activeTab === 'active') {
+        tasks = tasks.filter(t => ['planned', 'in_progress', 'monitoring'].includes(t.status));
+      } else if (window.optimisationModuleState.activeTab === 'done') {
+        tasks = tasks.filter(t => t.status === 'done');
+      } else if (window.optimisationModuleState.activeTab === 'paused-cancelled') {
+        tasks = tasks.filter(t => ['paused', 'cancelled'].includes(t.status));
+      }
+
+      tbody.innerHTML = '';
+
+      if (tasks.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" style="padding: 2rem; text-align: center; color: #666;">No tasks found</td></tr>';
+        return;
+      }
+
+      tasks.forEach(task => {
+        const tr = document.createElement('tr');
+        tr.style.borderBottom = '1px solid #eee';
+        tr.style.cursor = 'pointer';
+        tr.onclick = () => openOptimisationTaskDrawer(task.id);
+
+        const statusColors = {
+          planned: { bg: '#fef3c7', color: '#92400e' },
+          in_progress: { bg: '#d1fae5', color: '#065f46' },
+          monitoring: { bg: '#dbeafe', color: '#1e40af' },
+          done: { bg: '#e5e7eb', color: '#374151' },
+          paused: { bg: '#fed7aa', color: '#9a3412' },
+          cancelled: { bg: '#fee2e2', color: '#991b1b' }
+        };
+
+        const statusStyle = statusColors[task.status] || statusColors.planned;
+        const lastActivity = task.last_activity_at 
+          ? new Date(task.last_activity_at).toLocaleDateString('en-GB')
+          : new Date(task.updated_at).toLocaleDateString('en-GB');
+
+        tr.innerHTML = `
+          <td style="padding: 0.75rem;">${escapeHtml(task.keyword_text || '')}</td>
+          <td style="padding: 0.75rem; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(task.target_url_clean || '')}">${escapeHtml(task.target_url_clean || '')}</td>
+          <td style="padding: 0.75rem;"><span style="padding: 0.25rem 0.5rem; background: #f0f0f0; border-radius: 4px;">${escapeHtml(task.task_type || 'on_page')}</span></td>
+          <td style="padding: 0.75rem;"><span style="padding: 0.25rem 0.5rem; border-radius: 4px; background: ${statusStyle.bg}; color: ${statusStyle.color};">${escapeHtml(task.status || 'planned')}</span></td>
+          <td style="padding: 0.75rem;">Cycle ${task.cycle_active || 1}</td>
+          <td style="padding: 0.75rem;">${lastActivity}</td>
+          <td style="padding: 0.75rem;">${escapeHtml(task.title || '–')}</td>
+          <td style="padding: 0.75rem;">
+            <button class="btn btn-secondary" onclick="event.stopPropagation(); openOptimisationTaskDrawer('${task.id}');" style="padding: 0.25rem 0.75rem; font-size: 0.875rem;">Open</button>
+          </td>
+        `;
+
+        tbody.appendChild(tr);
+      });
+    }
+
+    // Helper to escape HTML
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // Tab switching (B2)
+    function switchOptimisationTab(tabName) {
+      window.optimisationModuleState.activeTab = tabName;
+      
+      // Update tab button states
+      document.querySelectorAll('.optimisation-tab-btn').forEach(btn => {
+        btn.classList.toggle('metric-pill--active', btn.dataset.tab === tabName);
+      });
+
+      renderOptimisationTasksTable();
+    }
+
+    // Open task drawer (B3, B4)
+    window.openOptimisationTaskDrawer = async function openOptimisationTaskDrawer(taskId) {
+      const drawer = document.getElementById('optimisation-task-drawer');
+      if (!drawer) return;
+
+      window.optimisationModuleState.currentTaskId = taskId;
+      
+      // Find task
+      const task = window.optimisationModuleState.allTasks.find(t => t.id === taskId);
+      if (!task) {
+        alert('Task not found');
+        return;
+      }
+
+      // Populate header
+      document.getElementById('optimisation-drawer-keyword').textContent = task.keyword_text || '';
+      document.getElementById('optimisation-drawer-url').textContent = task.target_url_clean || task.target_url || '';
+      document.getElementById('optimisation-drawer-type').textContent = task.task_type || 'on_page';
+      
+      const statusColors = {
+        planned: { bg: '#fef3c7', color: '#92400e' },
+        in_progress: { bg: '#d1fae5', color: '#065f46' },
+        monitoring: { bg: '#dbeafe', color: '#1e40af' },
+        done: { bg: '#e5e7eb', color: '#374151' },
+        paused: { bg: '#fed7aa', color: '#9a3412' },
+        cancelled: { bg: '#fee2e2', color: '#991b1b' }
+      };
+      const statusStyle = statusColors[task.status] || statusColors.planned;
+      const statusEl = document.getElementById('optimisation-drawer-status');
+      statusEl.textContent = task.status || 'planned';
+      statusEl.style.background = statusStyle.bg;
+      statusEl.style.color = statusStyle.color;
+      
+      document.getElementById('optimisation-drawer-cycle').textContent = `Cycle ${task.cycle_active || 1}`;
+      document.getElementById('optimisation-change-status').value = task.status || '';
+
+      // Load events
+      await loadOptimisationTaskEvents(taskId);
+
+      // Show drawer
+      drawer.style.display = 'block';
+      setTimeout(() => {
+        drawer.style.right = '0';
+      }, 10);
+    };
+
+    // Close task drawer
+    function closeOptimisationTaskDrawer() {
+      const drawer = document.getElementById('optimisation-task-drawer');
+      if (!drawer) return;
+      
+      drawer.style.right = '-500px';
+      setTimeout(() => {
+        drawer.style.display = 'none';
+        window.optimisationModuleState.currentTaskId = null;
+      }, 300);
+    }
+
+    // Load task events (B3)
+    async function loadOptimisationTaskEvents(taskId) {
+      const eventsContainer = document.getElementById('optimisation-drawer-events');
+      if (!eventsContainer) return;
+
+      try {
+        const headers = window.getOptimisationHeaders();
+        const response = await fetch(apiUrl(`/api/optimisation/task/${taskId}/events`), {
+          method: 'GET',
+          headers: headers
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to load events: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const events = data.events || [];
+
+        if (events.length === 0) {
+          eventsContainer.innerHTML = '<div style="color: #666; font-style: italic;">No events yet</div>';
+          return;
+        }
+
+        eventsContainer.innerHTML = events.map(event => {
+          const date = new Date(event.event_at || event.created_at).toLocaleString('en-GB');
+          return `
+            <div style="margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #eee;">
+              <div style="font-weight: 600; color: #2563eb;">${escapeHtml(event.event_type || 'note')}</div>
+              <div style="color: #666; font-size: 0.875rem; margin-top: 0.25rem;">${date}</div>
+              ${event.note ? `<div style="margin-top: 0.5rem;">${escapeHtml(event.note)}</div>` : ''}
+            </div>
+          `;
+        }).join('');
+      } catch (error) {
+        console.error('[Optimisation Module] Error loading events:', error);
+        eventsContainer.innerHTML = '<div style="color: #ef4444;">Error loading events</div>';
+      }
+    }
+
+    // Initialize Optimisation Tracking module
+    function initOptimisationTrackingModule() {
+      // Tab button handlers
+      document.querySelectorAll('.optimisation-tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          switchOptimisationTab(btn.dataset.tab);
+        });
+      });
+
+      // Drawer close button
+      const closeBtn = document.getElementById('optimisation-drawer-close');
+      if (closeBtn) {
+        closeBtn.addEventListener('click', closeOptimisationTaskDrawer);
+      }
+
+      // Filter handlers
+      const filterStatus = document.getElementById('optimisation-filter-status');
+      const filterType = document.getElementById('optimisation-filter-type');
+      const filterKeyword = document.getElementById('optimisation-filter-keyword');
+      const filterUrl = document.getElementById('optimisation-filter-url');
+      const clearFilters = document.getElementById('optimisation-clear-filters');
+
+      const applyFilters = () => {
+        let filtered = [...window.optimisationModuleState.allTasks];
+
+        if (filterStatus.value) {
+          filtered = filtered.filter(t => t.status === filterStatus.value);
+        }
+        if (filterType.value) {
+          filtered = filtered.filter(t => t.task_type === filterType.value);
+        }
+        if (filterKeyword.value) {
+          const keyword = filterKeyword.value.toLowerCase();
+          filtered = filtered.filter(t => 
+            (t.keyword_text || '').toLowerCase().includes(keyword)
+          );
+        }
+        if (filterUrl.value) {
+          const url = filterUrl.value.toLowerCase();
+          filtered = filtered.filter(t => 
+            (t.target_url_clean || '').toLowerCase().includes(url) ||
+            (t.target_url || '').toLowerCase().includes(url)
+          );
+        }
+
+        window.optimisationModuleState.filteredTasks = filtered;
+        renderOptimisationTasksTable();
+      };
+
+      if (filterStatus) filterStatus.addEventListener('change', applyFilters);
+      if (filterType) filterType.addEventListener('change', applyFilters);
+      if (filterKeyword) filterKeyword.addEventListener('input', applyFilters);
+      if (filterUrl) filterUrl.addEventListener('input', applyFilters);
+      if (clearFilters) {
+        clearFilters.addEventListener('click', () => {
+          if (filterStatus) filterStatus.value = '';
+          if (filterType) filterType.value = '';
+          if (filterKeyword) filterKeyword.value = '';
+          if (filterUrl) filterUrl.value = '';
+          applyFilters();
+        });
+      }
+
+      // Drawer action handlers
+      const addEventBtn = document.getElementById('optimisation-add-event-btn');
+      if (addEventBtn) {
+        addEventBtn.addEventListener('click', async () => {
+          const taskId = window.optimisationModuleState.currentTaskId;
+          if (!taskId) return;
+
+          const eventType = document.getElementById('optimisation-event-type').value;
+          const note = document.getElementById('optimisation-event-note').value;
+
+          if (!note.trim()) {
+            alert('Please enter a note');
+            return;
+          }
+
+          try {
+            const headers = window.getOptimisationHeaders();
+            const response = await fetch(apiUrl(`/api/optimisation/task/${taskId}/event`), {
+              method: 'POST',
+              headers: headers,
+              body: JSON.stringify({ event_type: eventType, note })
+            });
+
+            if (!response.ok) throw new Error('Failed to add event');
+
+            document.getElementById('optimisation-event-note').value = '';
+            await loadOptimisationTaskEvents(taskId);
+            await window.loadAllOptimisationTasks();
+          } catch (error) {
+            console.error('[Optimisation Module] Error adding event:', error);
+            alert('Failed to add event: ' + error.message);
+          }
+        });
+      }
+
+      const saveStatusBtn = document.getElementById('optimisation-save-status-btn');
+      if (saveStatusBtn) {
+        saveStatusBtn.addEventListener('click', async () => {
+          const taskId = window.optimisationModuleState.currentTaskId;
+          if (!taskId) return;
+
+          const newStatus = document.getElementById('optimisation-change-status').value;
+          if (!newStatus) {
+            alert('Please select a status');
+            return;
+          }
+
+          try {
+            await window.submitStatusChange(newStatus, taskId);
+            await window.loadAllOptimisationTasks();
+            await openOptimisationTaskDrawer(taskId);
+          } catch (error) {
+            console.error('[Optimisation Module] Error changing status:', error);
+            alert('Failed to change status: ' + error.message);
+          }
+        });
+      }
+
+      const startCycleBtn = document.getElementById('optimisation-start-cycle-btn');
+      if (startCycleBtn) {
+        startCycleBtn.addEventListener('click', async () => {
+          const taskId = window.optimisationModuleState.currentTaskId;
+          if (!taskId) return;
+
+          try {
+            await window.startNewCycle();
+            await window.loadAllOptimisationTasks();
+            await openOptimisationTaskDrawer(taskId);
+          } catch (error) {
+            console.error('[Optimisation Module] Error starting cycle:', error);
+            alert('Failed to start cycle: ' + error.message);
+          }
+        });
+      }
+
+      const cancelTaskBtn = document.getElementById('optimisation-cancel-task-btn');
+      if (cancelTaskBtn) {
+        cancelTaskBtn.addEventListener('click', async () => {
+          if (!confirm('Cancel this task? It will be marked as cancelled but history will be preserved.')) {
+            return;
+          }
+
+          const taskId = window.optimisationModuleState.currentTaskId;
+          if (!taskId) return;
+
+          try {
+            await window.stopTracking();
+            await window.loadAllOptimisationTasks();
+            closeOptimisationTaskDrawer();
+          } catch (error) {
+            console.error('[Optimisation Module] Error cancelling task:', error);
+            alert('Failed to cancel task: ' + error.message);
+          }
+        });
+      }
+    }
+
+    // Add to ensurePanelRendered
+    const originalEnsurePanelRendered = ensurePanelRendered;
+    ensurePanelRendered = function(panelId) {
+      originalEnsurePanelRendered(panelId);
+      
+      if (panelId === 'optimisation') {
+        if (!window.optimisationModuleInitialized) {
+          initOptimisationTrackingModule();
+          window.optimisationModuleInitialized = true;
+        }
+        window.loadAllOptimisationTasks();
       }
     };
 
@@ -28797,13 +29452,23 @@ Final Score: ${score}/100`;
             manageBtn.style.opacity = "0.5";
             manageBtn.style.cursor = "not-allowed";
           }
-          manageBtn.onclick = (e) => {
+          manageBtn.onclick = async (e) => {
             e.stopPropagation();
             if (!window.hasAdminKey()) {
               alert('Admin key required. Please set your admin key in the "Optimisation Tracking Security" section.');
               return;
             }
-            window.openManageOptimisationModal(row, status, taskType);
+            // B4: Open drawer instead of modal for consistent workflow
+            if (status && status.id && typeof window.openOptimisationTaskDrawer === 'function') {
+              // Ensure tasks are loaded first
+              if (!window.optimisationModuleState || !window.optimisationModuleState.allTasks || window.optimisationModuleState.allTasks.length === 0) {
+                await window.loadAllOptimisationTasks();
+              }
+              await window.openOptimisationTaskDrawer(status.id);
+            } else {
+              // Fallback to modal if drawer not available or no status
+              window.openManageOptimisationModal(row, status, taskType);
+            }
           };
           tdOptimisation.appendChild(manageBtn);
         }

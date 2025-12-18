@@ -1,0 +1,117 @@
+// /api/optimisation/task/[id]/event.js
+// Add an event to a task
+
+export const config = { runtime: 'nodejs' };
+
+import { createClient } from '@supabase/supabase-js';
+import { requireAdmin } from '../../../../lib/api/requireAdmin.js';
+
+const need = (k) => {
+  const v = process.env[k];
+  if (!v || !String(v).trim()) throw new Error(`missing_env:${k}`);
+  return v;
+};
+
+const sendJSON = (res, status, obj) => {
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-arp-admin-key');
+  res.status(status).send(JSON.stringify(obj));
+};
+
+export default async function handler(req, res) {
+  // Handle CORS preflight
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-arp-admin-key');
+    return res.status(200).end();
+  }
+
+  if (req.method !== 'POST') {
+    return sendJSON(res, 405, { error: 'Method not allowed' });
+  }
+
+  // Admin key gate
+  if (!requireAdmin(req, res, sendJSON)) {
+    return; // Response already sent
+  }
+
+  try {
+    const { id } = req.query;
+    if (!id) {
+      return sendJSON(res, 400, { error: 'Task ID required' });
+    }
+
+    const { event_type, note, gsc_clicks, gsc_impressions, gsc_ctr, gsc_avg_position } = req.body;
+
+    if (!event_type) {
+      return sendJSON(res, 400, { error: 'event_type required' });
+    }
+
+    const supabase = createClient(
+      need('SUPABASE_URL'),
+      need('SUPABASE_SERVICE_ROLE_KEY')
+    );
+
+    // Get current user from auth header if available
+    const authHeader = req.headers.authorization;
+    let userId = null;
+    
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.substring(7);
+      const { data: { user } } = await supabase.auth.getUser(token);
+      if (user) userId = user.id;
+    }
+
+    // For single-user admin key approach, use a placeholder UUID if no auth
+    if (!userId) {
+      userId = '00000000-0000-0000-0000-000000000000';
+    }
+
+    // Verify task ownership
+    const { data: task, error: taskError } = await supabase
+      .from('optimisation_tasks')
+      .select('owner_user_id')
+      .eq('id', id)
+      .single();
+
+    if (taskError || !task) {
+      return sendJSON(res, 404, { error: 'Task not found' });
+    }
+
+    if (userId && task.owner_user_id !== userId) {
+      return sendJSON(res, 403, { error: 'Forbidden' });
+    }
+
+    // Insert event
+    const eventData = {
+      task_id: id,
+      event_type,
+      note: note || null,
+      owner_user_id: userId,
+      gsc_clicks: gsc_clicks || null,
+      gsc_impressions: gsc_impressions || null,
+      gsc_ctr: gsc_ctr || null,
+      gsc_avg_position: gsc_avg_position || null
+    };
+
+    const { data: event, error } = await supabase
+      .from('optimisation_task_events')
+      .insert(eventData)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('[Optimisation Event] Insert error:', error);
+      return sendJSON(res, 500, { error: error.message });
+    }
+
+    return sendJSON(res, 200, { event });
+  } catch (error) {
+    console.error('[Optimisation Event] Error:', error);
+    return sendJSON(res, 500, { error: error.message || 'Internal server error' });
+  }
+}
+
