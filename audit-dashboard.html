@@ -6108,16 +6108,49 @@
         }
         
         // Validate 'met' or 'achieved' state: check if delta actually meets target
-        if ((state === 'met' || state === 'achieved') && progress && task.objective_target_delta != null) {
-          const delta = progress.objective_delta != null ? progress.objective_delta : 
-            (progress.latest_value != null && progress.baseline_value != null ? 
-              progress.latest_value - progress.baseline_value : 0);
+        // Always validate, even if goal_state says 'met', to prevent false positives
+        if ((state === 'met' || state === 'achieved')) {
           const target = task.objective_target_delta != null ? task.objective_target_delta : 
             (task.objective_target_value != null ? task.objective_target_value : null);
           
-          // If delta doesn't meet target, change to 'on_track'
-          if (target != null && delta < target) {
-            state = 'on_track';
+          if (target != null) {
+            // Calculate delta from progress data or task goal_state delta
+            let delta = null;
+            
+            // Try to get delta from progress
+            if (progress) {
+              if (progress.objective_delta != null) {
+                delta = progress.objective_delta;
+              } else if (progress.latest_value != null && progress.baseline_value != null) {
+                delta = progress.latest_value - progress.baseline_value;
+              }
+            }
+            
+            // Fall back to task's objective_delta from goal status view
+            if (delta === null && task.objective_delta != null) {
+              delta = task.objective_delta;
+            }
+            
+            // If we have a delta and target, validate
+            if (delta !== null) {
+              // For increase direction, delta must be >= target
+              // For decrease direction, delta must be <= -target (negative)
+              const direction = task.objective_direction || 'increase';
+              const meetsTarget = direction === 'decrease' 
+                ? delta <= (target * -1)
+                : delta >= target;
+              
+              if (!meetsTarget) {
+                state = 'on_track';
+              }
+            } else {
+              // If we can't calculate delta but have baseline and latest are same, it's not achieved
+              if (progress && progress.baseline_value != null && progress.latest_value != null) {
+                if (progress.baseline_value === progress.latest_value && target > 0) {
+                  state = 'on_track';
+                }
+              }
+            }
           }
         }
         
