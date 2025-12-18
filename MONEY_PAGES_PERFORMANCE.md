@@ -1,14 +1,23 @@
 # Money Pages Performance & Actions - Feature Specification
 
-## Implementation Status (2025-12-16)
+## Implementation Status (2025-12-18)
 
 ✅ **Fully Implemented**:
 - Performance Trends charts (split into Volume and Rate/Score charts for better Y-axis scaling)
-- KPI Tracker (last 12 audits) with chart and table side-by-side
+  - Uses actual Google Search Console timeseries data for last 28 days
+  - Displays 8 weekly data points (28 days / 4 = 7 weeks)
+  - Calculates metrics from GSC data using money page proportions from latest audit
+- KPI Tracker (last 28 days) with chart and table side-by-side
+  - Uses actual Google Search Console timeseries data
+  - Displays 8 weekly data points across 28-day range
+  - Calculates segment metrics (All, Landing, Event, Product) from GSC data
+  - Supports CTR, Impressions, Clicks, and Avg Position metrics
 - Priority & Actions section with impact/difficulty matrix
 - Filter dropdowns with persistent counts
 - Accurate CTR plotting (calculated directly from clicks/impressions)
 - Enhanced CTR Y-axis precision (0.02 stepSize, 2 decimal places)
+- Bold, larger chart axis labels for better visibility
+- Correct trend calculations (percentage points, not multiplied values)
 
 ## Overview
 
@@ -208,7 +217,7 @@ At the top right of the table:
 
 ### Audit Awareness
 Small caption at bottom:
-"Based on the last audit period (e.g. 90 days). Trends over time are available in the History tab."
+"Data calculated from Google Search Console timeseries for the last 28 days, displayed as 8 weekly data points. Metrics are calculated using money page proportions from the latest audit."
 
 ### RAG Legend
 A small legend explaining the colours used for:

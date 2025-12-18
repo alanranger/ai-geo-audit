@@ -150,6 +150,14 @@ Save new dates to Supabase
 Return merged data to Client
 ```
 
+### Money Pages KPI Tracker & Performance Trends
+**Data Source:** Uses `gsc_timeseries` table directly for all date calculations
+- Fetches last 28 days of timeseries data from `gsc_timeseries` table
+- Calculates money page metrics using proportions from latest audit's `moneySegmentMetrics`
+- Displays 8 weekly data points (28 days / 4 = 7 weeks)
+- No fallback to audit records - uses actual GSC data or shows null
+- Metrics calculated per date: clicks, impressions, CTR from GSC timeseries × money page proportions
+
 **Example:**
 - User requests 180 days of data
 - Supabase has last 150 days stored

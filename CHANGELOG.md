@@ -2,6 +2,54 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2025-12-18] - v1.6.1 - Money Pages Data Accuracy & Chart Improvements
+
+### Fixed
+- **28-Day Date Range Calculation**: Fixed date range showing 29 days instead of 28
+  - Changed calculation to go back 27 days (27 + end date = 28 days total)
+  - Applied to both Performance Trends and KPI Tracker charts
+  - Ensures exactly 28 days of data (e.g., 18 Nov to 15 Dec)
+- **CTR Percentage Display**: Fixed CTR showing 800% instead of 8%
+  - Removed double multiplication by 100 (values already stored as percentages 0-100)
+  - Fixed in table cells, chart y-axis ticks, and tooltips
+  - CTR now displays correctly (e.g., 8% instead of 800%)
+- **Trend Calculation**: Fixed trend values showing incorrect percentage points
+  - Removed multiplication by 100 for CTR trends (diff already in percentage points)
+  - Trend now shows correct values (e.g., -0.6pp instead of -63.4pp)
+- **Chart Axis Labels**: Made all axis labels bold and larger for better visibility
+  - Axis titles: size 14, weight 'bold'
+  - Axis ticks: size 12, weight 'bold'
+  - Applied to KPI Tracker chart and Performance Trends charts
+
+### Changed
+- **Money Pages Data Source**: Changed from audit records to actual GSC timeseries data
+  - KPI Tracker now calculates metrics from `gsc_timeseries` table for all dates
+  - Uses money page proportions from latest audit to calculate segment metrics
+  - Performance Trends charts use actual GSC data for all 28 days
+  - Removed fallback to audit records (now uses real GSC data or shows null)
+- **Weekly Data Points**: Changed from 15 evenly spaced points to 8 weekly points
+  - 28 days / 4 = 7 weeks, so 8 data points (one per week)
+  - Better fits container width and reduces chart clutter
+  - Applied to both KPI Tracker and Performance Trends charts
+- **Section Descriptions**: Updated to reflect actual data source
+  - Performance Trends: "Weekly trends calculated from actual Google Search Console data for the last 28 days"
+  - KPI Tracker: "Weekly KPI trends by money-page segment calculated from actual Google Search Console data"
+  - Footer: "Data calculated from Google Search Console timeseries for the last 28 days, displayed as 8 weekly data points"
+
+### Technical Details
+- **Date Range Calculation**: 
+  - `startDate = endDate - 27 days` (27 days back + end date = 28 days total)
+  - Date points generated with `step = (28 - 1) / 7` for 8 weekly points
+- **GSC Timeseries Calculation**:
+  - Finds reference audit with both `moneySegmentMetrics` and matching timeseries data
+  - Calculates money page proportions (clicks/impressions) from reference audit
+  - Applies proportions to each date's GSC timeseries data
+  - Calculates segment metrics using segment proportions from reference audit
+- **CTR Formatting**:
+  - Values stored as percentages (0-100), not decimals (0-1)
+  - Display: `${value.toFixed(1)}%` (no multiplication)
+  - Trend: `${diff.toFixed(1)}pp` (diff already in percentage points)
+
 ## [2025-12-16] - v1.6.0 - Money Pages UI Improvements & Branding Update
 
 ### Added

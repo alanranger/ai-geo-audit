@@ -106,7 +106,7 @@ Vercel will automatically rebuild and deploy (usually takes 1-2 minutes).
 - ✅ **Ranking & AI Visibility**: Keyword rankings with AI Overview citations, competitor analysis, and domain strength integration
 - ✅ **Domain Strength Tracking**: Domain rank snapshots with competitor flags and domain type classification
 - ✅ **Keyword Management**: Edit Keywords modal for managing keyword list with data loss warnings
-- ✅ **Money Pages Performance Tracking**: Split trend charts, KPI tracker, and priority actions with accurate CTR plotting
+- ✅ **Money Pages Performance Tracking**: Split trend charts, KPI tracker (last 28 days with 8 weekly data points), and priority actions with accurate CTR plotting. Uses actual GSC timeseries data calculated from `gsc_timeseries` table.
 - ✅ **GAIO Branding**: Updated throughout UI from "AIO" to "GAIO (Generative AI Optimization)"
 
 ## API Endpoints
