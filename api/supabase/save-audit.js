@@ -722,37 +722,42 @@ export default async function handler(req, res) {
             return tsDate === auditDate;
           });
           
-          if (currentDateData && currentDateData.clicks > 0) {
+          if (currentDateData && currentDateData.clicks > 0 && currentDateData.impressions > 0) {
             // Calculate proportion of money pages from current audit
-            const moneyClicksProportion = allMoney.clicks / currentDateData.clicks;
-            const moneyImpressionsProportion = allMoney.impressions / currentDateData.impressions;
+            const moneyClicksProportion = allMoney.clicks > 0 ? allMoney.clicks / currentDateData.clicks : 0;
+            const moneyImpressionsProportion = allMoney.impressions > 0 ? allMoney.impressions / currentDateData.impressions : 0;
             
-            // Calculate segment proportions from current metrics
-            const segmentProportions = {
-              allMoney: { clicks: 1.0, impressions: 1.0 },
-              landingPages: {
-                clicks: (moneySegmentMetrics.landingPages?.clicks || 0) / allMoney.clicks,
-                impressions: (moneySegmentMetrics.landingPages?.impressions || 0) / allMoney.impressions
-              },
-              eventPages: {
-                clicks: (moneySegmentMetrics.eventPages?.clicks || 0) / allMoney.clicks,
-                impressions: (moneySegmentMetrics.eventPages?.impressions || 0) / allMoney.impressions
-              },
-              productPages: {
-                clicks: (moneySegmentMetrics.productPages?.clicks || 0) / allMoney.clicks,
-                impressions: (moneySegmentMetrics.productPages?.impressions || 0) / allMoney.impressions
-              }
-            };
-            
-            console.log(`[Supabase Save] Calculating per-date money_segment_metrics for ${timeseries.length} dates using proportions`);
-            console.log(`[Supabase Save] Money pages proportion: ${(moneyClicksProportion * 100).toFixed(1)}% clicks, ${(moneyImpressionsProportion * 100).toFixed(1)}% impressions`);
-            
-            // Get all audit dates in the timeseries range
-            const timeseriesDates = timeseries.map(t => t.date ? t.date.split('T')[0] : null).filter(Boolean);
-            const minDate = timeseriesDates.length > 0 ? timeseriesDates[0] : null;
-            const maxDate = timeseriesDates.length > 0 ? timeseriesDates[timeseriesDates.length - 1] : null;
-            
-            if (minDate && maxDate) {
+            // Skip if proportions are invalid (would cause NaN/Infinity)
+            if (moneyClicksProportion <= 0 || moneyImpressionsProportion <= 0 || 
+                moneyClicksProportion > 1 || moneyImpressionsProportion > 1) {
+              console.warn(`[Supabase Save] ⚠ Invalid money page proportions (clicks: ${moneyClicksProportion}, impressions: ${moneyImpressionsProportion}), skipping per-date calculation`);
+            } else {
+              // Calculate segment proportions from current metrics
+              const segmentProportions = {
+                allMoney: { clicks: 1.0, impressions: 1.0 },
+                landingPages: {
+                  clicks: allMoney.clicks > 0 ? (moneySegmentMetrics.landingPages?.clicks || 0) / allMoney.clicks : 0,
+                  impressions: allMoney.impressions > 0 ? (moneySegmentMetrics.landingPages?.impressions || 0) / allMoney.impressions : 0
+                },
+                eventPages: {
+                  clicks: allMoney.clicks > 0 ? (moneySegmentMetrics.eventPages?.clicks || 0) / allMoney.clicks : 0,
+                  impressions: allMoney.impressions > 0 ? (moneySegmentMetrics.eventPages?.impressions || 0) / allMoney.impressions : 0
+                },
+                productPages: {
+                  clicks: allMoney.clicks > 0 ? (moneySegmentMetrics.productPages?.clicks || 0) / allMoney.clicks : 0,
+                  impressions: allMoney.impressions > 0 ? (moneySegmentMetrics.productPages?.impressions || 0) / allMoney.impressions : 0
+                }
+              };
+              
+              console.log(`[Supabase Save] Calculating per-date money_segment_metrics for ${timeseries.length} dates using proportions`);
+              console.log(`[Supabase Save] Money pages proportion: ${(moneyClicksProportion * 100).toFixed(1)}% clicks, ${(moneyImpressionsProportion * 100).toFixed(1)}% impressions`);
+              
+              // Get all audit dates in the timeseries range
+              const timeseriesDates = timeseries.map(t => t.date ? t.date.split('T')[0] : null).filter(Boolean);
+              const minDate = timeseriesDates.length > 0 ? timeseriesDates[0] : null;
+              const maxDate = timeseriesDates.length > 0 ? timeseriesDates[timeseriesDates.length - 1] : null;
+              
+              if (minDate && maxDate) {
               // Fetch all audit dates in the timeseries range
               const historyQuery = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=gte.${minDate}&audit_date=lte.${maxDate}&select=audit_date,money_segment_metrics&order=audit_date.asc`;
               const historyResponse = await fetch(historyQuery, {
