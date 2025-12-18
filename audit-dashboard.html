@@ -6112,11 +6112,12 @@
         }
         
         // Final validation: if state is 'met', verify delta actually meets target
+        // This is a safety check in case the database view hasn't been updated yet
         if (state === 'met') {
           const target = task.objective_target_delta != null ? task.objective_target_delta : 
             (task.objective_target_value != null ? task.objective_target_value : null);
           
-          if (target != null) {
+          if (target != null && target > 0) {
             // Get delta from task (from goal status view) or calculate from progress
             let delta = task.objective_delta;
             if (delta === null || delta === undefined) {
@@ -6133,12 +6134,16 @@
                 : delta >= target;
               
               if (!meetsTarget) {
+                console.log('[Optimisation] Overriding met state: delta', delta, 'target', target, 'direction', direction);
                 state = 'on_track';
               }
-            } else if (progress && progress.baseline_value != null && progress.latest_value != null) {
-              // If baseline equals latest and target > 0, it's not met
-              if (progress.baseline_value === progress.latest_value && target > 0) {
-                state = 'on_track';
+            } else {
+              // If we can't get delta but baseline equals latest, it's definitely not met
+              if (progress && progress.baseline_value != null && progress.latest_value != null) {
+                if (progress.baseline_value === progress.latest_value) {
+                  console.log('[Optimisation] Overriding met state: baseline equals latest, delta is 0');
+                  state = 'on_track';
+                }
               }
             }
           }
