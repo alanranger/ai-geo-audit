@@ -3814,8 +3814,9 @@
         </div>
 
         <!-- Tasks Table (B2) -->
-        <div class="card" style="margin-top: 1.5rem;">
-          <div class="ranking-table-wrapper" id="optimisation-tasks-table-container">
+        <div class="ranking-table-section" style="margin-top: 1.5rem;">
+          <div class="card">
+            <div class="ranking-table-wrapper" id="optimisation-tasks-table-container">
             <table id="optimisation-tasks-table" class="ranking-table">
               <thead>
                 <tr>
@@ -3858,6 +3859,29 @@
                 </tr>
               </tbody>
             </table>
+            </div>
+            <div class="ranking-pagination-controls" id="optimisation-pagination-controls" style="display: none;">
+            <div class="ranking-pagination-info" id="optimisation-pagination-info">
+              Showing 0-0 of 0
+            </div>
+            <div class="ranking-pagination-buttons">
+              <button id="optimisation-pagination-first" type="button">First</button>
+              <button id="optimisation-pagination-prev" type="button">Previous</button>
+              <span id="optimisation-pagination-page-info" style="padding: 0 0.5rem; font-size: 0.875rem;">Page 1 of 1</span>
+              <button id="optimisation-pagination-next" type="button">Next</button>
+              <button id="optimisation-pagination-last" type="button">Last</button>
+            </div>
+            <div class="ranking-rows-per-page">
+              <label>Rows per page:</label>
+              <select id="optimisation-rows-per-page">
+                <option value="10" selected>10</option>
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+                <option value="all">All</option>
+              </select>
+            </div>
+          </div>
           </div>
         </div>
 
@@ -4828,6 +4852,12 @@
       column: 'lastActivity',
       direction: 'desc'
     };
+    
+    // Pagination state
+    let optimisationPaginationState = {
+      currentPage: 1,
+      rowsPerPage: 10
+    };
 
     // Load all optimisation tasks
     window.loadAllOptimisationTasks = async function loadAllOptimisationTasks() {
@@ -4952,15 +4982,27 @@
 
       // Sort tasks
       tasks = sortOptimisationTasks(tasks);
+      
+      // Calculate pagination
+      const totalRows = tasks.length;
+      const rowsPerPage = optimisationPaginationState.rowsPerPage === 'all' ? totalRows : optimisationPaginationState.rowsPerPage;
+      const totalPages = rowsPerPage > 0 ? Math.ceil(totalRows / rowsPerPage) : 1;
+      const currentPage = Math.min(Math.max(1, optimisationPaginationState.currentPage), totalPages);
+      optimisationPaginationState.currentPage = currentPage;
+      
+      const startIdx = rowsPerPage === 'all' ? 0 : (currentPage - 1) * rowsPerPage;
+      const endIdx = rowsPerPage === 'all' ? totalRows : Math.min(startIdx + rowsPerPage, totalRows);
+      const paginatedTasks = tasks.slice(startIdx, endIdx);
 
       tbody.innerHTML = '';
 
       if (tasks.length === 0) {
         tbody.innerHTML = '<tr><td colspan="8" class="ranking-table-empty">No tasks found</td></tr>';
+        updateOptimisationPaginationControls(totalRows, currentPage, totalPages, startIdx, endIdx);
         return;
       }
 
-      tasks.forEach((task, index) => {
+      paginatedTasks.forEach((task, index) => {
         const tr = document.createElement('tr');
         tr.onclick = () => openOptimisationTaskDrawer(task.id);
 
@@ -4978,9 +5020,38 @@
           ? new Date(task.last_activity_at).toLocaleDateString('en-GB')
           : new Date(task.updated_at).toLocaleDateString('en-GB');
 
+        // Extract path from URL for display
+        let urlPath = '';
+        let fullUrl = '';
+        const urlText = task.target_url_clean || task.target_url || '';
+        if (urlText) {
+          try {
+            // If URL contains domain, extract just the path
+            if (urlText.includes('alanranger.com')) {
+              const urlObj = new URL(urlText.startsWith('http') ? urlText : 'https://' + urlText);
+              urlPath = urlObj.pathname || '/';
+              fullUrl = urlObj.href;
+            } else if (urlText.startsWith('/')) {
+              // Already a path
+              urlPath = urlText;
+              fullUrl = 'https://www.alanranger.com' + urlText;
+            } else {
+              // Assume it's a path without leading slash
+              urlPath = '/' + urlText;
+              fullUrl = 'https://www.alanranger.com/' + urlText;
+            }
+          } catch (e) {
+            // Fallback: treat as path
+            urlPath = urlText.startsWith('/') ? urlText : '/' + urlText;
+            fullUrl = 'https://www.alanranger.com' + urlPath;
+          }
+        }
+
         tr.innerHTML = `
           <td>${escapeHtml(task.keyword_text || '')}</td>
-          <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(task.target_url_clean || '')}">${escapeHtml(task.target_url_clean || '')}</td>
+          <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+            ${urlPath ? `<a href="${fullUrl}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${escapeHtml(urlPath)}</a>` : '–'}
+          </td>
           <td><span style="padding: 0.25rem 0.5rem; background: #f0f0f0; border-radius: 4px;">${escapeHtml(task.task_type || 'on_page')}</span></td>
           <td><span style="padding: 0.25rem 0.5rem; border-radius: 4px; background: ${statusStyle.bg}; color: ${statusStyle.color};">${escapeHtml(task.status || 'planned')}</span></td>
           <td>Cycle ${task.cycle_active || 1}</td>
@@ -5002,8 +5073,128 @@
         }
       });
       
+      // Update pagination controls
+      updateOptimisationPaginationControls(totalRows, currentPage, totalPages, startIdx, endIdx);
+      
       // Wire sorting handlers
       wireOptimisationSorting();
+      
+      // Wire pagination handlers
+      wireOptimisationPagination();
+    }
+    
+    // Update pagination controls
+    function updateOptimisationPaginationControls(totalRows, currentPage, totalPages, startIdx, endIdx) {
+      const paginationControls = document.getElementById('optimisation-pagination-controls');
+      const paginationInfo = document.getElementById('optimisation-pagination-info');
+      const pageInfo = document.getElementById('optimisation-pagination-page-info');
+      const firstBtn = document.getElementById('optimisation-pagination-first');
+      const prevBtn = document.getElementById('optimisation-pagination-prev');
+      const nextBtn = document.getElementById('optimisation-pagination-next');
+      const lastBtn = document.getElementById('optimisation-pagination-last');
+      const rowsPerPageSelect = document.getElementById('optimisation-rows-per-page');
+      
+      if (!paginationControls) return;
+      
+      if (totalRows === 0) {
+        paginationControls.style.display = 'none';
+        return;
+      }
+      
+      paginationControls.style.display = 'flex';
+      
+      if (paginationInfo) {
+        paginationInfo.textContent = `Showing ${startIdx + 1}-${endIdx} of ${totalRows}`;
+      }
+      
+      if (pageInfo) {
+        pageInfo.textContent = `Page ${currentPage} of ${totalPages}`;
+      }
+      
+      if (firstBtn) {
+        firstBtn.disabled = currentPage === 1;
+      }
+      
+      if (prevBtn) {
+        prevBtn.disabled = currentPage === 1;
+      }
+      
+      if (nextBtn) {
+        nextBtn.disabled = currentPage === totalPages;
+      }
+      
+      if (lastBtn) {
+        lastBtn.disabled = currentPage === totalPages;
+      }
+      
+      if (rowsPerPageSelect) {
+        rowsPerPageSelect.value = optimisationPaginationState.rowsPerPage;
+      }
+    }
+    
+    // Wire pagination handlers
+    function wireOptimisationPagination() {
+      const firstBtn = document.getElementById('optimisation-pagination-first');
+      const prevBtn = document.getElementById('optimisation-pagination-prev');
+      const nextBtn = document.getElementById('optimisation-pagination-next');
+      const lastBtn = document.getElementById('optimisation-pagination-last');
+      const rowsPerPageSelect = document.getElementById('optimisation-rows-per-page');
+      
+      if (firstBtn) {
+        const newFirstBtn = firstBtn.cloneNode(true);
+        firstBtn.parentNode.replaceChild(newFirstBtn, firstBtn);
+        newFirstBtn.addEventListener('click', () => {
+          optimisationPaginationState.currentPage = 1;
+          renderOptimisationTasksTable();
+        });
+      }
+      
+      if (prevBtn) {
+        const newPrevBtn = prevBtn.cloneNode(true);
+        prevBtn.parentNode.replaceChild(newPrevBtn, prevBtn);
+        newPrevBtn.addEventListener('click', () => {
+          if (optimisationPaginationState.currentPage > 1) {
+            optimisationPaginationState.currentPage--;
+            renderOptimisationTasksTable();
+          }
+        });
+      }
+      
+      if (nextBtn) {
+        const newNextBtn = nextBtn.cloneNode(true);
+        nextBtn.parentNode.replaceChild(newNextBtn, nextBtn);
+        newNextBtn.addEventListener('click', () => {
+          const totalRows = window.optimisationModuleState.filteredTasks.length;
+          const rowsPerPage = optimisationPaginationState.rowsPerPage === 'all' ? totalRows : optimisationPaginationState.rowsPerPage;
+          const totalPages = rowsPerPage > 0 ? Math.ceil(totalRows / rowsPerPage) : 1;
+          if (optimisationPaginationState.currentPage < totalPages) {
+            optimisationPaginationState.currentPage++;
+            renderOptimisationTasksTable();
+          }
+        });
+      }
+      
+      if (lastBtn) {
+        const newLastBtn = lastBtn.cloneNode(true);
+        lastBtn.parentNode.replaceChild(newLastBtn, lastBtn);
+        newLastBtn.addEventListener('click', () => {
+          const totalRows = window.optimisationModuleState.filteredTasks.length;
+          const rowsPerPage = optimisationPaginationState.rowsPerPage === 'all' ? totalRows : optimisationPaginationState.rowsPerPage;
+          const totalPages = rowsPerPage > 0 ? Math.ceil(totalRows / rowsPerPage) : 1;
+          optimisationPaginationState.currentPage = totalPages;
+          renderOptimisationTasksTable();
+        });
+      }
+      
+      if (rowsPerPageSelect) {
+        const newSelect = rowsPerPageSelect.cloneNode(true);
+        rowsPerPageSelect.parentNode.replaceChild(newSelect, rowsPerPageSelect);
+        newSelect.addEventListener('change', () => {
+          optimisationPaginationState.rowsPerPage = newSelect.value === 'all' ? 'all' : parseInt(newSelect.value, 10);
+          optimisationPaginationState.currentPage = 1; // Reset to first page
+          renderOptimisationTasksTable();
+        });
+      }
     }
     
     // Wire sorting handlers
@@ -5041,6 +5232,9 @@
     // Tab switching (B2)
     function switchOptimisationTab(tabName) {
       window.optimisationModuleState.activeTab = tabName;
+      
+      // Reset pagination when switching tabs
+      optimisationPaginationState.currentPage = 1;
       
       // Update tab button states
       document.querySelectorAll('.optimisation-tab-btn').forEach(btn => {
@@ -5355,6 +5549,8 @@
         }
 
         window.optimisationModuleState.filteredTasks = filtered;
+        // Reset pagination when filters change
+        optimisationPaginationState.currentPage = 1;
         renderOptimisationTasksTable();
       };
 
@@ -29752,15 +29948,38 @@ Final Score: ${score}/100`;
               alert('Admin key required. Please set your admin key in the "Optimisation Tracking Security" section.');
               return;
             }
-            // B4: Open drawer instead of modal for consistent workflow
-            if (status && status.id && typeof window.openOptimisationTaskDrawer === 'function') {
-              // Ensure tasks are loaded first
-              if (!window.optimisationModuleState || !window.optimisationModuleState.allTasks || window.optimisationModuleState.allTasks.length === 0) {
-                await window.loadAllOptimisationTasks();
+            try {
+              // B4: Open drawer instead of modal for consistent workflow
+              if (status && status.id && typeof window.openOptimisationTaskDrawer === 'function') {
+                // Ensure tasks are loaded first
+                if (!window.optimisationModuleState || !window.optimisationModuleState.allTasks || window.optimisationModuleState.allTasks.length === 0) {
+                  await window.loadAllOptimisationTasks();
+                }
+                // Try to find task by ID
+                const task = window.optimisationModuleState.allTasks.find(t => t.id === status.id);
+                if (task) {
+                  await window.openOptimisationTaskDrawer(status.id);
+                } else {
+                  console.warn('[Optimisation] Task not found in loaded tasks, trying to load again...', status.id);
+                  // Try loading again in case it wasn't in the cache
+                  await window.loadAllOptimisationTasks();
+                  const taskAfterReload = window.optimisationModuleState.allTasks.find(t => t.id === status.id);
+                  if (taskAfterReload) {
+                    await window.openOptimisationTaskDrawer(status.id);
+                  } else {
+                    console.error('[Optimisation] Task not found after reload:', status.id);
+                    // Fallback to modal
+                    window.openManageOptimisationModal(row, status, taskType);
+                  }
+                }
+              } else {
+                // Fallback to modal if drawer not available or no status
+                console.warn('[Optimisation] Opening modal fallback - status:', status, 'has id:', status?.id);
+                window.openManageOptimisationModal(row, status, taskType);
               }
-              await window.openOptimisationTaskDrawer(status.id);
-            } else {
-              // Fallback to modal if drawer not available or no status
+            } catch (error) {
+              console.error('[Optimisation] Error opening task drawer:', error);
+              // Fallback to modal on error
               window.openManageOptimisationModal(row, status, taskType);
             }
           };
