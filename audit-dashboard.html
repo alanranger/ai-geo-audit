@@ -16448,54 +16448,153 @@ Final Score: ${score}/100`;
           productPages: []
         };
         
-        // Process each of the 8 weekly date points - calculate from actual GSC timeseries data
-        for (const datePoint of datePoints) {
-          const ts = timeseriesMap.get(datePoint);
+        // Debug: Log what we have
+        debugLog(`[KPI Tracker] Building history: timeseries.length=${timeseries.length}, latestMoneySegmentMetrics=${!!latestMoneySegmentMetrics}, moneyClicksProportion=${moneyClicksProportion}, moneyImpressionsProportion=${moneyImpressionsProportion}`, 'info');
+        
+        // If we don't have timeseries data or proportions, fall back to using audit records
+        const useTimeseriesCalculation = timeseries.length > 0 && moneyClicksProportion > 0 && moneyImpressionsProportion > 0;
+        
+        if (!useTimeseriesCalculation) {
+          debugLog(`[KPI Tracker] Falling back to audit records method (timeseries=${timeseries.length}, proportions=${moneyClicksProportion > 0})`, 'warn');
           
-          for (const key of Object.keys(segments)) {
-            let v = null;
+          // Fallback: Use audit records (original method)
+          const historyMap = new Map();
+          for (const row of history) {
+            const dateStr = row.date || row.audit_date || row.auditDate;
+            if (!dateStr) continue;
+            const date = new Date(dateStr);
+            if (Number.isNaN(date.getTime())) continue;
             
-            if (ts && ts.clicks > 0 && ts.impressions > 0 && moneyClicksProportion > 0 && moneyImpressionsProportion > 0) {
-              // Calculate metrics from actual GSC timeseries data using proportions
-              if (key === 'allMoney') {
-                const moneyClicks = Math.round(ts.clicks * moneyClicksProportion);
-                const moneyImpressions = Math.round(ts.impressions * moneyImpressionsProportion);
-                
-                if (metricKey === 'clicks') {
-                  v = moneyClicks;
-                } else if (metricKey === 'impressions') {
-                  v = moneyImpressions;
-                } else if (metricKey === 'ctr') {
-                  v = moneyImpressions > 0 ? (moneyClicks / moneyImpressions) * 100 : 0;
-                } else if (metricKey === 'avgPosition') {
-                  // Use latest audit's avgPosition (position doesn't change much day-to-day)
-                  v = latestMoneySegmentMetrics?.allMoney?.avgPosition || null;
-                } else if (metricKey === 'behaviourScore') {
-                  v = latestMoneySegmentMetrics?.allMoney?.behaviourScore || null;
-                }
-              } else {
-                // Calculate segment metrics
-                const segmentClicks = Math.round(ts.clicks * moneyClicksProportion * segmentProportions[key].clicks);
-                const segmentImpressions = Math.round(ts.impressions * moneyImpressionsProportion * segmentProportions[key].impressions);
-                
-                if (metricKey === 'clicks') {
-                  v = segmentClicks;
-                } else if (metricKey === 'impressions') {
-                  v = segmentImpressions;
-                } else if (metricKey === 'ctr') {
-                  v = segmentImpressions > 0 ? (segmentClicks / segmentImpressions) * 100 : 0;
-                } else if (metricKey === 'avgPosition') {
-                  v = latestMoneySegmentMetrics?.[key]?.avgPosition || null;
-                } else if (metricKey === 'behaviourScore') {
-                  v = latestMoneySegmentMetrics?.[key]?.behaviourScore || null;
+            if (dateStr.localeCompare(startDate.toISOString().split('T')[0]) >= 0 &&
+                (!lastGscTimeseriesDate || dateStr.localeCompare(lastGscTimeseriesDate) <= 0)) {
+              historyMap.set(dateStr, {
+                date: date,
+                dateStr: dateStr,
+                metrics: row.moneySegmentMetrics || null,
+                isPartial: row.isPartial || false
+              });
+            }
+          }
+          
+          let lastValues = {
+            allMoney: null,
+            landingPages: null,
+            eventPages: null,
+            productPages: null
+          };
+          
+          for (const datePoint of datePoints) {
+            // Find closest audit record
+            let audit = historyMap.get(datePoint);
+            if (!audit) {
+              const datePointDate = new Date(datePoint + 'T00:00:00');
+              let closestDate = null;
+              let closestDiff = Infinity;
+              
+              for (const [dateStr, record] of historyMap.entries()) {
+                const recordDate = new Date(dateStr + 'T00:00:00');
+                if (recordDate <= datePointDate) {
+                  const diff = datePointDate - recordDate;
+                  if (diff < closestDiff) {
+                    closestDiff = diff;
+                    closestDate = dateStr;
+                  }
                 }
               }
-            } else if (ts && metricKey === 'avgPosition') {
-              // For position, use latest audit's value (position is relatively stable)
-              v = latestMoneySegmentMetrics?.[key]?.avgPosition || null;
+              
+              if (closestDate) {
+                audit = historyMap.get(closestDate);
+              }
             }
             
-            segments[key].push(v);
+            const m = audit ? audit.metrics : null;
+            for (const key of Object.keys(segments)) {
+              let v = null;
+              
+              if (m && m[key]) {
+                v = m[key][metricKey] != null ? m[key][metricKey] : null;
+              }
+              
+              if (v == null && lastValues[key] != null) {
+                v = lastValues[key];
+              }
+              
+              if (v != null) {
+                lastValues[key] = v;
+              }
+              
+              segments[key].push(v);
+            }
+          }
+        } else {
+          // Process each of the 8 weekly date points - calculate from actual GSC timeseries data
+          for (const datePoint of datePoints) {
+            // Find closest timeseries date (might not be exact match)
+            let ts = timeseriesMap.get(datePoint);
+            if (!ts) {
+              // Find closest timeseries date before or on this date
+              const datePointDate = new Date(datePoint + 'T00:00:00');
+              let closestTs = null;
+              let closestDate = null;
+              
+              for (const [tsDate, tsData] of timeseriesMap.entries()) {
+                const tsDateObj = new Date(tsDate + 'T00:00:00');
+                if (tsDateObj <= datePointDate && (!closestDate || tsDateObj > new Date(closestDate + 'T00:00:00'))) {
+                  closestDate = tsDate;
+                  closestTs = tsData;
+                }
+              }
+              
+              if (closestTs) {
+                ts = closestTs;
+              }
+            }
+            
+            for (const key of Object.keys(segments)) {
+              let v = null;
+              
+              if (ts && ts.clicks > 0 && ts.impressions > 0 && moneyClicksProportion > 0 && moneyImpressionsProportion > 0) {
+                // Calculate metrics from actual GSC timeseries data using proportions
+                if (key === 'allMoney') {
+                  const moneyClicks = Math.round(ts.clicks * moneyClicksProportion);
+                  const moneyImpressions = Math.round(ts.impressions * moneyImpressionsProportion);
+                  
+                  if (metricKey === 'clicks') {
+                    v = moneyClicks;
+                  } else if (metricKey === 'impressions') {
+                    v = moneyImpressions;
+                  } else if (metricKey === 'ctr') {
+                    v = moneyImpressions > 0 ? (moneyClicks / moneyImpressions) * 100 : 0;
+                  } else if (metricKey === 'avgPosition') {
+                    // Use latest audit's avgPosition (position doesn't change much day-to-day)
+                    v = latestMoneySegmentMetrics?.allMoney?.avgPosition || null;
+                  } else if (metricKey === 'behaviourScore') {
+                    v = latestMoneySegmentMetrics?.allMoney?.behaviourScore || null;
+                  }
+                } else {
+                  // Calculate segment metrics
+                  const segmentClicks = Math.round(ts.clicks * moneyClicksProportion * segmentProportions[key].clicks);
+                  const segmentImpressions = Math.round(ts.impressions * moneyImpressionsProportion * segmentProportions[key].impressions);
+                  
+                  if (metricKey === 'clicks') {
+                    v = segmentClicks;
+                  } else if (metricKey === 'impressions') {
+                    v = segmentImpressions;
+                  } else if (metricKey === 'ctr') {
+                    v = segmentImpressions > 0 ? (segmentClicks / segmentImpressions) * 100 : 0;
+                  } else if (metricKey === 'avgPosition') {
+                    v = latestMoneySegmentMetrics?.[key]?.avgPosition || null;
+                  } else if (metricKey === 'behaviourScore') {
+                    v = latestMoneySegmentMetrics?.[key]?.behaviourScore || null;
+                  }
+                }
+              } else if (ts && metricKey === 'avgPosition') {
+                // For position, use latest audit's value (position is relatively stable)
+                v = latestMoneySegmentMetrics?.[key]?.avgPosition || null;
+              }
+              
+              segments[key].push(v);
+            }
           }
         }
 
