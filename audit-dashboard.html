@@ -30001,115 +30001,29 @@ Final Score: ${score}/100`;
           manageBtn.onclick = async function(e) {
             e.stopPropagation();
             e.preventDefault();
-            console.log('[Optimisation] Manage button onclick FIRED!', { status: statusObj, row: rowData, taskType: taskTypeValue, statusId });
-            alert('Button clicked - ID: ' + (statusId || 'no ID'));
             
             if (!window.hasAdminKey()) {
               alert('Admin key required. Please set your admin key in the "Optimisation Tracking Security" section.');
               return;
             }
             
-            try {
-              // Check if status exists and has an id
-              if (!statusObj) {
-                console.error('[Optimisation] No status object found');
-                alert('No optimisation status found for this keyword. Please try tracking it first.');
-                return;
-              }
-              
-              console.log('[Optimisation] Status object:', statusObj);
-              console.log('[Optimisation] Status ID:', statusId);
-              
-              // B4: Open drawer instead of modal for consistent workflow
-              if (statusId && typeof window.openOptimisationTaskDrawer === 'function') {
-                console.log('[Optimisation] Attempting to open drawer with task ID:', statusId);
-                
-                // Ensure tasks are loaded first
-                if (!window.optimisationModuleState) {
-                  window.optimisationModuleState = { allTasks: [], filteredTasks: [], activeTab: 'active', currentTaskId: null };
-                }
-                
-                if (!window.optimisationModuleState.allTasks || window.optimisationModuleState.allTasks.length === 0) {
-                  console.log('[Optimisation] Loading all tasks...');
-                  await window.loadAllOptimisationTasks();
-                  console.log('[Optimisation] Loaded tasks:', window.optimisationModuleState.allTasks.length);
-                }
-                
-                // Try to find task by ID
-                const task = window.optimisationModuleState.allTasks.find(t => t.id === statusId);
-                console.log('[Optimisation] Found task:', task ? 'Yes' : 'No', 'Task ID searched:', statusId);
-                
-                if (task) {
-                  console.log('[Optimisation] Opening drawer with task:', task);
-                  await window.openOptimisationTaskDrawer(statusId);
-                } else {
-                  console.warn('[Optimisation] Task not found by ID, trying to find by keyword and URL...', {
-                    searchedId: statusId,
-                    keyword: rowData.keyword,
-                    url: rowData.best_url || rowData.targetUrl || rowData.ranking_url
-                  });
-                  
-                  // Try to find by keyword and URL as fallback
-                  const url = rowData.best_url || rowData.targetUrl || rowData.ranking_url || '';
-                  const urlKey = window.cleanUrlForKey ? window.cleanUrlForKey(url) : url;
-                  const taskByKey = window.optimisationModuleState.allTasks.find(t => {
-                    const taskKeywordMatch = (t.keyword_text || '').toLowerCase() === (rowData.keyword || '').toLowerCase();
-                    const taskUrlMatch = (t.target_url_clean || t.target_url || '').toLowerCase() === (urlKey || '').toLowerCase();
-                    const taskTypeMatch = (t.task_type || 'on_page') === taskTypeValue;
-                    return taskKeywordMatch && taskUrlMatch && taskTypeMatch;
-                  });
-                  
-                  if (taskByKey) {
-                    console.log('[Optimisation] Found task by keyword/URL, opening drawer:', taskByKey.id);
-                    await window.openOptimisationTaskDrawer(taskByKey.id);
-                  } else {
-                    console.warn('[Optimisation] Task not found in loaded tasks, trying to load again...', {
-                      searchedId: statusId,
-                      availableIds: window.optimisationModuleState.allTasks.map(t => t.id)
-                    });
-                    
-                    // Try loading again in case it wasn't in the cache
-                    await window.loadAllOptimisationTasks();
-                    const taskAfterReload = window.optimisationModuleState.allTasks.find(t => t.id === statusId);
-                    
-                    if (taskAfterReload) {
-                      console.log('[Optimisation] Found task after reload, opening drawer');
-                      await window.openOptimisationTaskDrawer(statusId);
-                    } else {
-                      // Try keyword/URL search again after reload
-                      const taskByKeyAfterReload = window.optimisationModuleState.allTasks.find(t => {
-                        const taskKeywordMatch = (t.keyword_text || '').toLowerCase() === (rowData.keyword || '').toLowerCase();
-                        const taskUrlMatch = (t.target_url_clean || t.target_url || '').toLowerCase() === (urlKey || '').toLowerCase();
-                        const taskTypeMatch = (t.task_type || 'on_page') === taskTypeValue;
-                        return taskKeywordMatch && taskUrlMatch && taskTypeMatch;
-                      });
-                      
-                      if (taskByKeyAfterReload) {
-                        console.log('[Optimisation] Found task by keyword/URL after reload, opening drawer:', taskByKeyAfterReload.id);
-                        await window.openOptimisationTaskDrawer(taskByKeyAfterReload.id);
-                      } else {
-                        console.error('[Optimisation] Task not found after reload:', {
-                          searchedId: statusId,
-                          availableIds: window.optimisationModuleState.allTasks.map(t => t.id),
-                          allTasks: window.optimisationModuleState.allTasks
-                        });
-                        // Fallback to modal
-                        console.log('[Optimisation] Falling back to modal');
-                        window.openManageOptimisationModal(rowData, statusObj, taskTypeValue);
-                      }
-                    }
-                  }
-                }
-              } else {
-                // Fallback to modal if drawer not available or no status id
-                console.warn('[Optimisation] Opening modal fallback - status:', statusObj, 'has id:', statusId, 'drawer function exists:', typeof window.openOptimisationTaskDrawer);
+            if (!statusId) {
+              alert('No task ID found. Please try refreshing the page.');
+              return;
+            }
+            
+            // Simple approach: just open the drawer with the status ID
+            // The drawer function will handle loading tasks if needed
+            if (typeof window.openOptimisationTaskDrawer === 'function') {
+              try {
+                await window.openOptimisationTaskDrawer(statusId);
+              } catch (error) {
+                console.error('[Optimisation] Error opening drawer:', error);
+                // Fallback to modal
                 window.openManageOptimisationModal(rowData, statusObj, taskTypeValue);
               }
-            } catch (error) {
-              console.error('[Optimisation] Error opening task drawer:', error);
-              console.error('[Optimisation] Error stack:', error.stack);
-              // Fallback to modal on error
-              alert('Error opening task drawer: ' + error.message + '. Opening modal instead.');
+            } else {
+              // Fallback to modal if drawer function doesn't exist
               window.openManageOptimisationModal(rowData, statusObj, taskTypeValue);
             }
           };
