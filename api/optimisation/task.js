@@ -147,8 +147,8 @@ export default async function handler(req, res) {
       // Don't fail, but log
     }
 
-    // Insert created event with baseline metrics snapshot, linked to cycle
-    const eventData = {
+    // Insert created event
+    const createdEventData = {
       task_id: task.id,
       event_type: 'created',
       note: 'Created from Ranking & AI module',
@@ -158,21 +158,39 @@ export default async function handler(req, res) {
       source: 'ranking_ai'
     };
 
-    // Add baseline metrics if provided
-    if (baselineMetrics) {
-      eventData.metrics = {
-        ...baselineMetrics,
-        captured_at: baselineMetrics.captured_at || new Date().toISOString()
-      };
+    const { error: createdEventError } = await supabase
+      .from('optimisation_task_events')
+      .insert(createdEventData);
+
+    if (createdEventError) {
+      console.error('[Optimisation Task] Created event insert error:', createdEventError);
+      // Don't fail the request, just log
     }
 
-    const { error: eventError } = await supabase
-      .from('optimisation_task_events')
-      .insert(eventData);
+    // Insert baseline measurement event if baseline metrics provided
+    if (baselineMetrics) {
+      const measurementEventData = {
+        task_id: task.id,
+        event_type: 'measurement',
+        note: 'Baseline measurement from task creation',
+        owner_user_id: userId,
+        cycle_id: cycle.id,
+        cycle_number: 1,
+        source: 'ranking_ai',
+        metrics: {
+          ...baselineMetrics,
+          captured_at: baselineMetrics.captured_at || new Date().toISOString()
+        }
+      };
 
-    if (eventError) {
-      console.error('[Optimisation Task] Event insert error:', eventError);
-      // Don't fail the request, just log
+      const { error: measurementEventError } = await supabase
+        .from('optimisation_task_events')
+        .insert(measurementEventData);
+
+      if (measurementEventError) {
+        console.error('[Optimisation Task] Baseline measurement event insert error:', measurementEventError);
+        // Don't fail the request, just log
+      }
     }
 
     // Fetch updated task with cycle info
