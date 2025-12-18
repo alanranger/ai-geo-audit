@@ -67,14 +67,47 @@ export default async function handler(req, res) {
       query = query.eq('owner_user_id', userId);
     }
 
-    const { data, error } = await query;
+    const { data: statuses, error: statusError } = await query;
 
-    if (error) {
-      console.error('[Optimisation Status] Query error:', error);
-      return sendJSON(res, 500, { error: error.message });
+    if (statusError) {
+      console.error('[Optimisation Status] Query error:', statusError);
+      return sendJSON(res, 500, { error: statusError.message });
     }
 
-    return sendJSON(res, 200, { statuses: data || [] });
+    // Get progress data for all tasks
+    const taskIds = (statuses || []).map(s => s.id).filter(Boolean);
+    let progressData = {};
+    
+    if (taskIds.length > 0) {
+      const { data: progress, error: progressError } = await supabase
+        .from('vw_optimisation_task_progress')
+        .select('task_id, objective_state, due_at, days_remaining')
+        .in('task_id', taskIds);
+
+      if (progressError) {
+        console.error('[Optimisation Status] Progress query error:', progressError);
+        // Don't fail, just log
+      } else if (progress) {
+        // Create a map of task_id -> progress
+        progress.forEach(p => {
+          progressData[p.task_id] = {
+            objective_state: p.objective_state || 'not_set',
+            due_at: p.due_at,
+            days_remaining: p.days_remaining
+          };
+        });
+      }
+    }
+
+    // Merge progress data into statuses
+    const enrichedStatuses = (statuses || []).map(status => ({
+      ...status,
+      objective_state: progressData[status.id]?.objective_state || 'not_set',
+      due_at: progressData[status.id]?.due_at || null,
+      days_remaining: progressData[status.id]?.days_remaining || null
+    }));
+
+    return sendJSON(res, 200, { statuses: enrichedStatuses });
   } catch (error) {
     console.error('[Optimisation Status] Error:', error);
     return sendJSON(res, 500, { error: error.message || 'Internal server error' });
