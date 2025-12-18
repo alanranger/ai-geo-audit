@@ -741,6 +741,22 @@
       color: #64748b;
       line-height: 1.6;
     }
+    /* Sticky positioning for domain strength table */
+    #domain-strength-table thead {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: #f8fafc;
+    }
+    #domain-strength-table thead th {
+      background: #f8fafc;
+    }
+    #domain-strength-self-row {
+      position: sticky;
+      top: 40px; /* Adjust based on header height */
+      z-index: 9;
+      background: #fefce8 !important;
+    }
     .modal {
       display: none;
       position: fixed;
@@ -3226,9 +3242,10 @@
 
             <div id="domain-strength-run-status" style="margin-top: 0.75rem; font-size: 0.875rem; color: #64748b;"></div>
             <div class="ranking-table-wrapper" style="margin-top: 1rem; max-height: none;">
-              <table class="ranking-table" id="domain-strength-table">
-                <thead>
-                  <tr>
+              <div style="position: relative; overflow: visible; max-height: 80vh; overflow-y: auto;">
+                <table class="ranking-table" id="domain-strength-table" style="position: relative;">
+                  <thead id="domain-strength-thead" style="position: sticky; top: 0; z-index: 10; background: #f8fafc;">
+                    <tr>
                     <th data-sort="name" class="sortable" title="Domain name or label for this site">
                       <div>Name <span class="sort-indicator"></span></div>
                       <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Domain name or label for this site">ℹ</div>
@@ -3265,11 +3282,13 @@
                       <div>Competitor</div>
                     </th>
                   </tr>
-                </thead>
-                <tbody id="domain-strength-table-body">
-                  <tr><td colspan="9" class="ranking-table-empty">No domain strength snapshots yet. Click "Run Domain Strength Snapshot".</td></tr>
-                </tbody>
-              </table>
+                    </tr>
+                  </thead>
+                  <tbody id="domain-strength-table-body">
+                    <tr><td colspan="9" class="ranking-table-empty">No domain strength snapshots yet. Click "Run Domain Strength Snapshot".</td></tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
             <div id="domain-strength-pagination-controls" style="margin-top: 1rem; display: flex; justify-content: space-between; align-items: center; padding-top: 1rem; border-top: 1px solid #e2e8f0; flex-wrap: wrap; gap: 1rem;">
               <div style="font-size: 0.85rem; color: #64748b;">
@@ -33102,6 +33121,10 @@ Final Score: ${score}/100`;
         currentPage: 1,
         rowsPerPage: 10
       };
+      let domainStrengthFilterState = {
+        segment: 'your_site' // Default to "Your site"
+      };
+      let domainStrengthExpanded = false; // Collapsed by default
 
       // Sort domain strength rows
       function sortDomainStrengthRows(rows) {
@@ -33182,7 +33205,7 @@ Final Score: ${score}/100`;
             <div style="font-weight:700; color:#0f172a; margin-bottom:0.25rem;">Domain Strength</div>
             <div style="color:#64748b; font-size:0.95rem;">No domain strength snapshots yet. Run a snapshot to populate this panel.</div>
           `;
-          tbody.innerHTML = '<tr><td colspan="8" class="ranking-table-empty">No domain strength snapshots yet. Click “Run Domain Strength Snapshot”.</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="9" class="ranking-table-empty">No domain strength snapshots yet. Click "Run Domain Strength Snapshot".</td></tr>';
           return;
         }
 
@@ -33190,6 +33213,15 @@ Final Score: ${score}/100`;
 
         const selfDomain = getSelfDomainForDomainStrength();
         debugLog(`[DomainStrength] Self domain: ${selfDomain}`, 'info');
+        
+        // Filter by segment if filter is set
+        if (domainStrengthFilterState.segment) {
+          items = items.filter((it) => {
+            const domainType = it?.domain_type || it?.segment || 'unmapped';
+            return domainType === domainStrengthFilterState.segment;
+          });
+        }
+        
         const selfItem = items.find((it) => String(it?.domain || '') === selfDomain) || null;
         
         if (selfItem && selfItem.latest) {
@@ -33263,8 +33295,12 @@ Final Score: ${score}/100`;
         // Sort rows using sortDomainStrengthRows
         let sorted = sortDomainStrengthRows(items);
 
-        // Don't pin self to top when sorting - respect the sort order
-        // (Previously we pinned self to top, but this interferes with sorting)
+        // Always put alanranger.com first, regardless of sort order
+        const selfIndex = sorted.findIndex((it) => String(it?.domain || '') === selfDomain);
+        if (selfIndex > 0) {
+          const selfRow = sorted.splice(selfIndex, 1)[0];
+          sorted.unshift(selfRow);
+        }
 
         // Calculate pagination
         const totalRows = sorted.length;
@@ -33277,8 +33313,12 @@ Final Score: ${score}/100`;
         const endIdx = rowsPerPage === 'all' ? totalRows : Math.min(startIdx + rowsPerPage, totalRows);
         const paginatedRows = sorted.slice(startIdx, endIdx);
 
+        // Determine visible rows based on expand/collapse state
+        const visibleRows = domainStrengthExpanded ? paginatedRows : paginatedRows.slice(0, 2);
+        const hiddenRowsCount = paginatedRows.length - visibleRows.length;
+
         tbody.innerHTML = '';
-        for (const it of paginatedRows) {
+        for (const it of visibleRows) {
           const latest = it?.latest || null;
           const delta = it?.trend?.deltaLatest ?? null;
           const points = Array.isArray(it?.trend?.points) ? it.trend.points : [];
@@ -33302,6 +33342,7 @@ Final Score: ${score}/100`;
 
           const tr = document.createElement('tr');
           if (isSelfDomain) {
+            tr.id = 'domain-strength-self-row';
             tr.style.fontWeight = '700';
             tr.style.backgroundColor = '#fefce8';
           }
@@ -33448,6 +33489,45 @@ Final Score: ${score}/100`;
 
           const canvas = document.getElementById(canvasId);
           renderDomainStrengthSparklineChart(canvas, labels, scores);
+        }
+
+        // Add expand/collapse row if there are hidden rows
+        if (!domainStrengthExpanded && hiddenRowsCount > 0) {
+          const expandRow = document.createElement('tr');
+          expandRow.id = 'domain-strength-expand-row';
+          expandRow.style.cursor = 'pointer';
+          expandRow.style.backgroundColor = '#f8fafc';
+          expandRow.innerHTML = `
+            <td colspan="9" style="text-align: center; padding: 0.75rem; color: #2563eb; font-weight: 600; font-size: 0.9rem;">
+              <span style="display: inline-flex; align-items: center; gap: 0.5rem;">
+                <span>▼</span>
+                <span>Show ${hiddenRowsCount} more row${hiddenRowsCount !== 1 ? 's' : ''}</span>
+              </span>
+            </td>
+          `;
+          expandRow.addEventListener('click', () => {
+            domainStrengthExpanded = true;
+            renderDomainStrengthSection();
+          });
+          tbody.appendChild(expandRow);
+        } else if (domainStrengthExpanded && hiddenRowsCount > 0) {
+          const collapseRow = document.createElement('tr');
+          collapseRow.id = 'domain-strength-collapse-row';
+          collapseRow.style.cursor = 'pointer';
+          collapseRow.style.backgroundColor = '#f8fafc';
+          collapseRow.innerHTML = `
+            <td colspan="9" style="text-align: center; padding: 0.75rem; color: #2563eb; font-weight: 600; font-size: 0.9rem;">
+              <span style="display: inline-flex; align-items: center; gap: 0.5rem;">
+                <span>▲</span>
+                <span>Show less</span>
+              </span>
+            </td>
+          `;
+          collapseRow.addEventListener('click', () => {
+            domainStrengthExpanded = false;
+            renderDomainStrengthSection();
+          });
+          tbody.appendChild(collapseRow);
         }
 
         // Update sort indicators
