@@ -4048,6 +4048,7 @@
       modal.dataset.rowUrl = row.best_url || row.targetUrl || row.ranking_url || '';
       modal.dataset.taskType = taskType;
       modal.dataset.currentCycle = status.cycle_active || 1;
+      modal.dataset.currentStatus = status.status; // Store actual status value for comparison
 
       modal.style.display = 'flex';
     };
@@ -4076,7 +4077,18 @@
         });
 
         if (!response.ok) {
-          throw new Error('Failed to update status');
+          let errorMessage = 'Failed to update status';
+          try {
+            const errorData = await response.json();
+            errorMessage = errorData.error || errorData.message || errorMessage;
+          } catch (e) {
+            const errorText = await response.text();
+            if (errorText) errorMessage = errorText;
+          }
+          if (response.status === 401) {
+            errorMessage = 'Unauthorized - admin key missing or invalid. Please set your admin key in the configuration section.';
+          }
+          throw new Error(errorMessage);
         }
 
         // Refresh and close
@@ -4126,7 +4138,7 @@
       try {
         const response = await fetch(apiUrl(`/api/optimisation/task/${taskId}/cycle`), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: window.getOptimisationHeaders(),
           body: JSON.stringify({
             cycle_active: newCycle
           })
@@ -4206,10 +4218,25 @@
         
         modal.style.display = 'none';
         
+        // Ensure Ranking & AI tab stays active and refresh table
+        const rankingTab = document.querySelector('[data-panel="ranking"]');
+        if (rankingTab) {
+          document.querySelectorAll('.aigeo-panel').forEach(panel => panel.classList.remove('is-active'));
+          rankingTab.classList.add('is-active');
+          document.querySelectorAll('.aigeo-nav button').forEach(btn => btn.classList.remove('is-active'));
+          const rankingNavBtn = Array.from(document.querySelectorAll('.aigeo-nav button')).find(btn => 
+            btn.textContent.includes('Ranking') || btn.getAttribute('data-tab') === 'ranking'
+          );
+          if (rankingNavBtn) rankingNavBtn.classList.add('is-active');
+        }
+        
         // Trigger table re-render
-        if (typeof renderRankingAiTable === 'function') {
-          renderRankingAiTable();
+        if (typeof renderRankingAiTab === 'function') {
+          await renderRankingAiTab();
+        } else if (typeof window.renderRankingAiTab === 'function') {
+          await window.renderRankingAiTab();
         } else {
+          console.warn('[Optimisation] renderRankingAiTab not found, refreshing page');
           location.reload();
         }
       } catch (error) {
@@ -33131,11 +33158,11 @@ Final Score: ${score}/100`;
       <div style="margin-bottom: 1rem; padding: 1rem; background: #f8fafc; border-radius: 4px;">
         <div style="margin-bottom: 0.75rem;">
           <strong style="color: #475569;">Keyword:</strong>
-          <div id="manage-keyword-text" style="color: #1e293b; margin-top: 0.25rem;"></div>
+          <div id="manage-keyword-text" style="padding: 0.5rem; background: #f8fafc; border-radius: 4px; color: #0284c7; font-weight: 600; font-size: 1rem; margin-top: 0.25rem;"></div>
         </div>
         <div style="margin-bottom: 0.75rem;">
           <strong style="color: #475569;">Target URL:</strong>
-          <div id="manage-url-text" style="color: #1e293b; margin-top: 0.25rem; word-break: break-all;"></div>
+          <div id="manage-url-text" style="padding: 0.5rem; background: #f8fafc; border-radius: 4px; margin-top: 0.25rem; word-break: break-all;"></div>
         </div>
         <div style="margin-bottom: 0.75rem;">
           <strong style="color: #475569;">Task type:</strong>
