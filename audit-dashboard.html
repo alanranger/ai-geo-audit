@@ -6427,10 +6427,10 @@
             }
           }
 
-          // If no current data, prompt for manual entry
+          // If no current data, show warning but still allow creating measurement
           if (!currentMetrics) {
-            const note = prompt('Enter a note for this measurement snapshot (optional):');
-            if (note === null) return; // User cancelled
+            const proceed = confirm('Could not find current ranking data. Create measurement with current timestamp only?');
+            if (!proceed) return;
             
             // Create minimal metrics with just captured_at
             currentMetrics = {
@@ -6440,23 +6440,45 @@
 
           try {
             const headers = window.getOptimisationHeaders();
+            console.log('[Optimisation] Adding measurement with metrics:', currentMetrics);
+            
             const response = await fetch(apiUrl(`/api/optimisation/task/${taskId}/measurement`), {
               method: 'POST',
               headers: headers,
               body: JSON.stringify({
                 metrics: currentMetrics,
-                note: currentMetrics.note || 'Measurement snapshot'
+                note: 'Measurement snapshot'
               })
             });
 
             if (!response.ok) {
-              const error = await response.text();
-              throw new Error(error || 'Failed to add measurement');
+              const errorText = await response.text();
+              console.error('[Optimisation] Measurement error response:', errorText);
+              throw new Error(errorText || 'Failed to add measurement');
             }
 
-            // Reload tasks and refresh drawer
+            const responseData = await response.json();
+            console.log('[Optimisation] Measurement response:', responseData);
+
+            // Reload tasks to get fresh data from view
             await window.loadAllOptimisationTasks();
+            
+            // If the response includes updated task data, use it to update state immediately
+            if (responseData.task) {
+              const taskIndex = window.optimisationModuleState.allTasks.findIndex(t => t.id === taskId);
+              if (taskIndex >= 0) {
+                window.optimisationModuleState.allTasks[taskIndex] = responseData.task;
+                console.log('[Optimisation] Updated task in state with latest_metrics:', responseData.task.latest_metrics);
+              } else {
+                // Task not in state yet, add it
+                window.optimisationModuleState.allTasks.push(responseData.task);
+              }
+            }
+            
+            // Refresh drawer with updated data
             await openOptimisationTaskDrawer(taskId);
+            
+            alert('Measurement added successfully!');
           } catch (error) {
             console.error('[Optimisation Module] Error adding measurement:', error);
             alert('Failed to add measurement: ' + error.message);
