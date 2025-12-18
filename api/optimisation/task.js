@@ -36,14 +36,23 @@ export default async function handler(req, res) {
       title, 
       notes, 
       baselineMetrics,
-      // Cycle 1 objective fields
+      // Cycle 1 objective fields (Phase 4)
       objective_title,
       primary_kpi,
       target_value,
       target_direction,
       timeframe_days,
       hypothesis,
-      plan
+      plan,
+      // Phase B objective fields
+      objective_kpi,
+      objective_metric,
+      objective_direction,
+      objective_target_delta,
+      objective_timeframe_days,
+      objective_due_at,
+      objective_plan,
+      cycle_started_at
     } = req.body;
 
     if (!keyword_text || !target_url) {
@@ -71,7 +80,7 @@ export default async function handler(req, res) {
       userId = '00000000-0000-0000-0000-000000000000';
     }
 
-    // Insert task
+    // Insert task with Phase B objective fields
     const { data: task, error: taskError } = await supabase
       .from('optimisation_tasks')
       .insert({
@@ -81,7 +90,17 @@ export default async function handler(req, res) {
         status: status || 'planned',
         title: title || null,
         notes: notes || null,
-        owner_user_id: userId
+        owner_user_id: userId,
+        // Phase B objective fields
+        objective_title: objective_title || null,
+        objective_kpi: objective_kpi || null,
+        objective_metric: objective_metric || null,
+        objective_direction: objective_direction || target_direction || null,
+        objective_target_delta: objective_target_delta != null ? parseFloat(objective_target_delta) : null,
+        objective_timeframe_days: objective_timeframe_days != null ? parseInt(objective_timeframe_days) : (timeframe_days != null ? parseInt(timeframe_days) : null),
+        objective_due_at: objective_due_at || null,
+        objective_plan: objective_plan || plan || null,
+        cycle_started_at: cycle_started_at || (objective_title || objective_kpi || objective_metric ? new Date().toISOString() : null)
       })
       .select()
       .single();
