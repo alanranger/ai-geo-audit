@@ -3351,9 +3351,9 @@
                       <div>Page type <span class="sort-indicator"></span></div>
                       <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Type of page that ranks for this keyword: GBP (Google Business Profile), Landing (landing page), Event (event/workshop page), Product (product/service page), or Other.">ℹ</div>
                     </th>
-                    <th title="SERP features present for this keyword: AI Overview, Local pack, People Also Ask (PAA), or Featured snippet.">
-                      <div>SERP features</div>
-                      <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="SERP features present for this keyword: AI Overview, Local pack, People Also Ask (PAA), or Featured snippet.">ℹ</div>
+                    <th title="Optimisation tracking status for this keyword and target URL. Shows whether optimisation work is planned, in progress, being monitored, or completed.">
+                      <div>Optimisation</div>
+                      <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Optimisation tracking status for this keyword and target URL. Shows whether optimisation work is planned, in progress, being monitored, or completed.">ℹ</div>
                     </th>
                   </tr>
                 </thead>
@@ -3656,6 +3656,346 @@
       };
     })();
     
+    // ======================
+    // Optimisation Tracking Utilities (Phase 2)
+    // ======================
+    // Normalization functions matching DB helpers (arp_keyword_key, arp_clean_url)
+    window.keywordKey = function keywordKey(keyword) {
+      if (!keyword || typeof keyword !== 'string') return null;
+      return keyword.trim().replace(/\s+/g, ' ').toLowerCase();
+    };
+
+    window.cleanUrlForKey = function cleanUrlForKey(url) {
+      if (!url || typeof url !== 'string') return null;
+      // Remove fragment (#)
+      let cleaned = url.split('#')[0];
+      // Remove query string (?)
+      cleaned = cleaned.split('?')[0];
+      // Remove protocol (http:// or https://)
+      cleaned = cleaned.replace(/^https?:\/\//, '');
+      // Remove trailing slashes
+      cleaned = cleaned.replace(/\/+$/, '');
+      return cleaned;
+    };
+
+    // Cache for optimisation status (keyed by keyword_key::target_url_clean::task_type)
+    window.optimisationStatusCache = new Map();
+
+    // Fetch optimisation statuses in bulk
+    window.fetchOptimisationStatuses = async function fetchOptimisationStatuses(rows) {
+      if (!rows || rows.length === 0) {
+        window.optimisationStatusCache.clear();
+        return;
+      }
+
+      try {
+        // Build unique set of keyword keys and URL keys
+        const keywordKeys = new Set();
+        const urlKeys = new Set();
+        rows.forEach(row => {
+          const kwKey = window.keywordKey(row.keyword);
+          const url = row.best_url || row.targetUrl || row.ranking_url || '';
+          const urlKey = window.cleanUrlForKey(url);
+          if (kwKey) keywordKeys.add(kwKey);
+          if (urlKey) urlKeys.add(urlKey);
+        });
+
+        if (keywordKeys.size === 0) {
+          window.optimisationStatusCache.clear();
+          return;
+        }
+
+        // Fetch from API endpoint (we'll create this)
+        const response = await fetch(apiUrl('/api/optimisation/status'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            keyword_keys: Array.from(keywordKeys),
+            url_keys: Array.from(urlKeys)
+          })
+        });
+
+        if (!response.ok) {
+          console.warn('[Optimisation] Failed to fetch statuses:', response.status);
+          window.optimisationStatusCache.clear();
+          return;
+        }
+
+        const data = await response.json();
+        window.optimisationStatusCache.clear();
+
+        // Build cache map: key = keyword_key::target_url_clean::task_type
+        (data.statuses || []).forEach(status => {
+          const key = `${status.keyword_key}::${status.target_url_clean}::${status.task_type || 'on_page'}`;
+          window.optimisationStatusCache.set(key, status);
+        });
+
+        console.log(`[Optimisation] Loaded ${window.optimisationStatusCache.size} status records`);
+      } catch (error) {
+        console.error('[Optimisation] Error fetching statuses:', error);
+        window.optimisationStatusCache.clear();
+      }
+    };
+
+    // Get optimisation status for a row
+    window.getOptimisationStatus = function getOptimisationStatus(row, taskType = 'on_page') {
+      const kwKey = window.keywordKey(row.keyword);
+      const url = row.best_url || row.targetUrl || row.ranking_url || '';
+      const urlKey = window.cleanUrlForKey(url);
+      
+      if (!kwKey || !urlKey) return null;
+      
+      const key = `${kwKey}::${urlKey}::${taskType}`;
+      return window.optimisationStatusCache.get(key) || null;
+    };
+
+    // ======================
+    // Optimisation Tracking Modals (Phase 2)
+    // ======================
+    
+    // Open Track Keyword modal
+    window.openTrackKeywordModal = function openTrackKeywordModal(row, taskType = 'on_page') {
+      const modal = document.getElementById('optimisation-track-modal');
+      if (!modal) {
+        console.error('[Optimisation] Track modal not found');
+        return;
+      }
+
+      // Populate fields
+      document.getElementById('track-keyword-text').textContent = row.keyword;
+      document.getElementById('track-url-text').textContent = row.best_url || row.targetUrl || row.ranking_url || '';
+      document.getElementById('track-task-type').value = taskType;
+      document.getElementById('track-status').value = 'planned';
+      document.getElementById('track-title').value = '';
+      document.getElementById('track-notes').value = '';
+
+      // Store row data for submit
+      modal.dataset.rowKeyword = row.keyword;
+      modal.dataset.rowUrl = row.best_url || row.targetUrl || row.ranking_url || '';
+      modal.dataset.taskType = taskType;
+
+      modal.style.display = 'flex';
+    };
+
+    // Submit Track Keyword
+    window.submitTrackKeyword = async function submitTrackKeyword() {
+      const modal = document.getElementById('optimisation-track-modal');
+      if (!modal) return;
+
+      const keyword = modal.dataset.rowKeyword;
+      const targetUrl = modal.dataset.rowUrl;
+      const taskType = modal.dataset.taskType || document.getElementById('track-task-type').value;
+      const status = document.getElementById('track-status').value;
+      const title = document.getElementById('track-title').value.trim();
+      const notes = document.getElementById('track-notes').value.trim();
+
+      if (!keyword || !targetUrl) {
+        alert('Missing keyword or URL');
+        return;
+      }
+
+      try {
+        const response = await fetch(apiUrl('/api/optimisation/task'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            keyword_text: keyword,
+            target_url: targetUrl,
+            task_type: taskType,
+            status: status,
+            title: title || null,
+            notes: notes || null
+          })
+        });
+
+        if (!response.ok) {
+          const error = await response.text();
+          throw new Error(error || 'Failed to create task');
+        }
+
+        // Refresh status cache
+        await window.fetchOptimisationStatuses([{ keyword, best_url: targetUrl }]);
+        
+        // Close modal
+        modal.style.display = 'none';
+        
+        // Trigger table re-render
+        if (typeof renderRankingAiTable === 'function') {
+          renderRankingAiTable();
+        } else {
+          // Fallback: reload page
+          location.reload();
+        }
+      } catch (error) {
+        console.error('[Optimisation] Error creating task:', error);
+        alert('Failed to create task: ' + error.message);
+      }
+    };
+
+    // Open Manage Optimisation modal
+    window.openManageOptimisationModal = function openManageOptimisationModal(row, status, taskType = 'on_page') {
+      const modal = document.getElementById('optimisation-manage-modal');
+      if (!modal) {
+        console.error('[Optimisation] Manage modal not found');
+        return;
+      }
+
+      // Populate read-only fields
+      document.getElementById('manage-keyword-text').textContent = row.keyword;
+      document.getElementById('manage-url-text').textContent = window.cleanUrlForKey(row.best_url || row.targetUrl || row.ranking_url || '');
+      document.getElementById('manage-task-type-text').textContent = taskType;
+      document.getElementById('manage-status-text').textContent = status.status;
+      document.getElementById('manage-cycle-text').textContent = status.cycle_active || 1;
+      document.getElementById('manage-last-activity-text').textContent = status.last_activity_at 
+        ? new Date(status.last_activity_at).toLocaleDateString()
+        : 'Never';
+
+      // Set current status in dropdown
+      document.getElementById('manage-status-select').value = status.status;
+
+      // Store data for submit
+      modal.dataset.taskId = status.id;
+      modal.dataset.rowKeyword = row.keyword;
+      modal.dataset.rowUrl = row.best_url || row.targetUrl || row.ranking_url || '';
+      modal.dataset.taskType = taskType;
+      modal.dataset.currentCycle = status.cycle_active || 1;
+
+      modal.style.display = 'flex';
+    };
+
+    // Submit status change
+    window.submitStatusChange = async function submitStatusChange() {
+      const modal = document.getElementById('optimisation-manage-modal');
+      if (!modal || !modal.dataset.taskId) return;
+
+      const taskId = modal.dataset.taskId;
+      const oldStatus = modal.dataset.currentStatus || document.getElementById('manage-status-text').textContent;
+      const newStatus = document.getElementById('manage-status-select').value;
+
+      if (oldStatus === newStatus) {
+        alert('Status unchanged');
+        return;
+      }
+
+      try {
+        const response = await fetch(apiUrl(`/api/optimisation/task/${taskId}`), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            status: newStatus
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to update status');
+        }
+
+        // Refresh and close
+        await window.fetchOptimisationStatuses([{
+          keyword: modal.dataset.rowKeyword,
+          best_url: modal.dataset.rowUrl
+        }]);
+        
+        modal.style.display = 'none';
+        
+        // Trigger table re-render
+        if (typeof renderRankingAiTable === 'function') {
+          renderRankingAiTable();
+        } else {
+          location.reload();
+        }
+      } catch (error) {
+        console.error('[Optimisation] Error updating status:', error);
+        alert('Failed to update status: ' + error.message);
+      }
+    };
+
+    // Start new cycle
+    window.startNewCycle = async function startNewCycle() {
+      const modal = document.getElementById('optimisation-manage-modal');
+      if (!modal || !modal.dataset.taskId) return;
+
+      const taskId = modal.dataset.taskId;
+      const currentCycle = Number(modal.dataset.currentCycle) || 1;
+      const newCycle = currentCycle + 1;
+
+      try {
+        const response = await fetch(apiUrl(`/api/optimisation/task/${taskId}/cycle`), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            cycle_active: newCycle
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to start new cycle');
+        }
+
+        // Refresh and close
+        await window.fetchOptimisationStatuses([{
+          keyword: modal.dataset.rowKeyword,
+          best_url: modal.dataset.rowUrl
+        }]);
+        
+        modal.style.display = 'none';
+        
+        // Trigger table re-render
+        if (typeof renderRankingAiTable === 'function') {
+          renderRankingAiTable();
+        } else {
+          location.reload();
+        }
+      } catch (error) {
+        console.error('[Optimisation] Error starting new cycle:', error);
+        alert('Failed to start new cycle: ' + error.message);
+      }
+    };
+
+    // Stop tracking
+    window.stopTracking = async function stopTracking() {
+      const modal = document.getElementById('optimisation-manage-modal');
+      if (!modal || !modal.dataset.taskId) return;
+
+      if (!confirm('Stop tracking this keyword? The task will be marked as cancelled but history will be preserved.')) {
+        return;
+      }
+
+      const taskId = modal.dataset.taskId;
+
+      try {
+        const response = await fetch(apiUrl(`/api/optimisation/task/${taskId}`), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            status: 'cancelled'
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to stop tracking');
+        }
+
+        // Refresh and close
+        await window.fetchOptimisationStatuses([{
+          keyword: modal.dataset.rowKeyword,
+          best_url: modal.dataset.rowUrl
+        }]);
+        
+        modal.style.display = 'none';
+        
+        // Trigger table re-render
+        if (typeof renderRankingAiTable === 'function') {
+          renderRankingAiTable();
+        } else {
+          location.reload();
+        }
+      } catch (error) {
+        console.error('[Optimisation] Error stopping tracking:', error);
+        alert('Failed to stop tracking: ' + error.message);
+      }
+    };
+
     // ======================
     // GSC Date Range Configuration
     // ======================
@@ -27612,6 +27952,11 @@ Final Score: ${score}/100`;
       const endIdx = rowsPerPage === 'all' ? totalRows : Math.min(startIdx + rowsPerPage, totalRows);
       const paginatedRows = sortedRows.slice(startIdx, endIdx);
 
+      // -------- Fetch optimisation statuses (Phase 2) --------
+      if (typeof window.fetchOptimisationStatuses === 'function') {
+        await window.fetchOptimisationStatuses(sortedRows);
+      }
+
       // -------- Keyword table --------
       // tbody already declared at top of function, just clear it
       tbody.innerHTML = "";
@@ -27808,15 +28153,91 @@ Final Score: ${score}/100`;
         tdType.appendChild(typeBadge);
         tr.appendChild(tdType);
 
-        // SERP features
-        const tdFeatures = document.createElement("td");
-        const features = [];
-        if (row.serp_features.has_local_pack) features.push("Local pack");
-        if (row.serp_features.has_featured_snippet) features.push("Snippet");
-        if (row.serp_features.has_people_also_ask) features.push("PAA");
-        if (row.has_ai_overview) features.push("AI Overview");
-        tdFeatures.textContent = features.length ? features.join(", ") : "—";
-        tr.appendChild(tdFeatures);
+        // Optimisation column
+        const tdOptimisation = document.createElement("td");
+        tdOptimisation.style.position = "relative";
+        
+        const taskType = 'on_page'; // Default task type for this integration
+        const status = window.getOptimisationStatus(row, taskType);
+        
+        if (!status) {
+          // Not tracked - show "Not tracked" pill + Track button
+          const notTrackedBadge = document.createElement("span");
+          notTrackedBadge.className = "ranking-badge ranking-badge--segment-general";
+          notTrackedBadge.style.marginRight = "0.5rem";
+          notTrackedBadge.textContent = "Not tracked";
+          tdOptimisation.appendChild(notTrackedBadge);
+          
+          const trackBtn = document.createElement("button");
+          trackBtn.className = "btn btn-small";
+          trackBtn.style.padding = "0.25rem 0.5rem";
+          trackBtn.style.fontSize = "0.75rem";
+          trackBtn.textContent = "Track";
+          trackBtn.onclick = (e) => {
+            e.stopPropagation();
+            window.openTrackKeywordModal(row, taskType);
+          };
+          tdOptimisation.appendChild(trackBtn);
+        } else {
+          // Tracked - show status pill + metadata + Manage button
+          const statusBadge = document.createElement("span");
+          const statusText = {
+            'planned': 'Backlog',
+            'in_progress': 'In progress',
+            'monitoring': 'Monitoring',
+            'done': 'Done',
+            'paused': 'Paused',
+            'cancelled': 'Cancelled'
+          }[status.status] || status.status;
+          
+          // Use existing badge classes based on status
+          let badgeClass = "ranking-badge ranking-badge--segment-general";
+          if (status.status === 'in_progress') badgeClass = "ranking-badge ranking-badge--segment-money";
+          else if (status.status === 'monitoring') badgeClass = "ranking-badge ranking-badge--segment-education";
+          else if (status.status === 'done') badgeClass = "ranking-badge ranking-badge--segment-brand";
+          
+          statusBadge.className = badgeClass;
+          statusBadge.textContent = statusText;
+          statusBadge.style.marginRight = "0.5rem";
+          tdOptimisation.appendChild(statusBadge);
+          
+          // Metadata (cycle + last activity)
+          const metadataDiv = document.createElement("div");
+          metadataDiv.style.fontSize = "0.7rem";
+          metadataDiv.style.color = "#64748b";
+          metadataDiv.style.marginTop = "0.25rem";
+          metadataDiv.style.marginBottom = "0.25rem";
+          
+          const cycleText = document.createElement("span");
+          cycleText.textContent = `Cycle ${status.cycle_active || 1}`;
+          cycleText.style.marginRight = "0.5rem";
+          metadataDiv.appendChild(cycleText);
+          
+          if (status.last_activity_at) {
+            const lastActivityText = document.createElement("span");
+            const lastActivity = new Date(status.last_activity_at);
+            const now = new Date();
+            const daysAgo = Math.floor((now - lastActivity) / (1000 * 60 * 60 * 24));
+            lastActivityText.textContent = daysAgo === 0 ? "Today" : daysAgo === 1 ? "1 day ago" : `${daysAgo} days ago`;
+            metadataDiv.appendChild(lastActivityText);
+          }
+          
+          tdOptimisation.appendChild(metadataDiv);
+          
+          // Manage button
+          const manageBtn = document.createElement("button");
+          manageBtn.className = "btn btn-small";
+          manageBtn.style.padding = "0.25rem 0.5rem";
+          manageBtn.style.fontSize = "0.75rem";
+          manageBtn.textContent = "Manage";
+          manageBtn.onclick = (e) => {
+            e.stopPropagation();
+            window.openManageOptimisationModal(row, status, taskType);
+          };
+          tdOptimisation.appendChild(manageBtn);
+        }
+        
+        tr.appendChild(tdOptimisation);
 
         tbody.appendChild(tr);
       });
@@ -32391,6 +32812,118 @@ Final Score: ${score}/100`;
       window.renderAiSourcesTab = renderAiSourcesTab;
       window.wireAiSourcesFilters = wireAiSourcesFilters;
   </script>
+
+  <!-- Optimisation Tracking Modals (Phase 2) -->
+  <!-- Track Keyword Modal -->
+  <div id="optimisation-track-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 10000; align-items: center; justify-content: center;">
+    <div style="background: white; padding: 2rem; border-radius: 8px; max-width: 500px; width: 90%; max-height: 90vh; overflow-y: auto;">
+      <h3 style="margin: 0 0 1.5rem 0; font-size: 1.25rem; color: #1e293b;">Track Keyword</h3>
+      
+      <div style="margin-bottom: 1rem;">
+        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #475569;">Keyword:</label>
+        <div id="track-keyword-text" style="padding: 0.5rem; background: #f8fafc; border-radius: 4px; color: #1e293b;"></div>
+      </div>
+      
+      <div style="margin-bottom: 1rem;">
+        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #475569;">Target URL:</label>
+        <div id="track-url-text" style="padding: 0.5rem; background: #f8fafc; border-radius: 4px; color: #1e293b; word-break: break-all;"></div>
+      </div>
+      
+      <div style="margin-bottom: 1rem;">
+        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #475569;">Task type:</label>
+        <select id="track-task-type" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px;">
+          <option value="on_page">On-page</option>
+          <option value="content">Content</option>
+          <option value="internal_links">Internal links</option>
+          <option value="links_pr">Links/PR</option>
+          <option value="technical">Technical</option>
+          <option value="local">Local</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+      
+      <div style="margin-bottom: 1rem;">
+        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #475569;">Status:</label>
+        <select id="track-status" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px;">
+          <option value="planned">Planned</option>
+          <option value="in_progress">In progress</option>
+          <option value="monitoring">Monitoring</option>
+        </select>
+      </div>
+      
+      <div style="margin-bottom: 1rem;">
+        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #475569;">Title (optional):</label>
+        <input type="text" id="track-title" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px;" placeholder="e.g. Rewrite title/H1 + FAQ schema">
+      </div>
+      
+      <div style="margin-bottom: 1.5rem;">
+        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #475569;">Notes (optional):</label>
+        <textarea id="track-notes" rows="3" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-family: inherit;" placeholder="Additional notes..."></textarea>
+      </div>
+      
+      <div style="display: flex; gap: 0.75rem; justify-content: flex-end;">
+        <button type="button" onclick="document.getElementById('optimisation-track-modal').style.display='none'" style="padding: 0.5rem 1rem; border: 1px solid #cbd5e1; border-radius: 4px; background: white; cursor: pointer;">Cancel</button>
+        <button type="button" onclick="window.submitTrackKeyword()" style="padding: 0.5rem 1rem; border: none; border-radius: 4px; background: #2563eb; color: white; cursor: pointer; font-weight: 500;">Create Task</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Manage Optimisation Modal -->
+  <div id="optimisation-manage-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 10000; align-items: center; justify-content: center;">
+    <div style="background: white; padding: 2rem; border-radius: 8px; max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto;">
+      <h3 style="margin: 0 0 1.5rem 0; font-size: 1.25rem; color: #1e293b;">Manage Optimisation</h3>
+      
+      <div style="margin-bottom: 1rem; padding: 1rem; background: #f8fafc; border-radius: 4px;">
+        <div style="margin-bottom: 0.75rem;">
+          <strong style="color: #475569;">Keyword:</strong>
+          <div id="manage-keyword-text" style="color: #1e293b; margin-top: 0.25rem;"></div>
+        </div>
+        <div style="margin-bottom: 0.75rem;">
+          <strong style="color: #475569;">Target URL:</strong>
+          <div id="manage-url-text" style="color: #1e293b; margin-top: 0.25rem; word-break: break-all;"></div>
+        </div>
+        <div style="margin-bottom: 0.75rem;">
+          <strong style="color: #475569;">Task type:</strong>
+          <div id="manage-task-type-text" style="color: #1e293b; margin-top: 0.25rem;"></div>
+        </div>
+        <div style="margin-bottom: 0.75rem;">
+          <strong style="color: #475569;">Current status:</strong>
+          <div id="manage-status-text" style="color: #1e293b; margin-top: 0.25rem;"></div>
+        </div>
+        <div style="margin-bottom: 0.75rem;">
+          <strong style="color: #475569;">Cycle:</strong>
+          <div id="manage-cycle-text" style="color: #1e293b; margin-top: 0.25rem;"></div>
+        </div>
+        <div>
+          <strong style="color: #475569;">Last activity:</strong>
+          <div id="manage-last-activity-text" style="color: #1e293b; margin-top: 0.25rem;"></div>
+        </div>
+      </div>
+      
+      <div style="margin-bottom: 1.5rem;">
+        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #475569;">Change status:</label>
+        <select id="manage-status-select" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px;">
+          <option value="planned">Planned</option>
+          <option value="in_progress">In progress</option>
+          <option value="monitoring">Monitoring</option>
+          <option value="done">Done</option>
+          <option value="paused">Paused</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+      </div>
+      
+      <div style="display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1.5rem;">
+        <button type="button" onclick="window.submitStatusChange()" style="padding: 0.5rem 1rem; border: none; border-radius: 4px; background: #2563eb; color: white; cursor: pointer; font-weight: 500;">Save Status Change</button>
+        <button type="button" onclick="window.startNewCycle()" style="padding: 0.5rem 1rem; border: 1px solid #2563eb; border-radius: 4px; background: white; color: #2563eb; cursor: pointer; font-weight: 500;">Start New Cycle</button>
+        <button type="button" onclick="window.stopTracking()" style="padding: 0.5rem 1rem; border: 1px solid #ef4444; border-radius: 4px; background: white; color: #ef4444; cursor: pointer; font-weight: 500;">Stop Tracking</button>
+      </div>
+      
+      <div style="display: flex; justify-content: flex-end;">
+        <button type="button" onclick="document.getElementById('optimisation-manage-modal').style.display='none'" style="padding: 0.5rem 1rem; border: 1px solid #cbd5e1; border-radius: 4px; background: white; cursor: pointer;">Close</button>
+      </div>
+    </div>
+  </div>
+
 </body>
 </html>
 
