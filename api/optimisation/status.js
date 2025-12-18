@@ -54,10 +54,13 @@ export default async function handler(req, res) {
     }
 
     // Query the status view with filters
+    // Exclude deleted tasks - if a task is deleted, it shouldn't exist (hard delete),
+    // but filter by status just to be safe in case of stale data
     let query = supabase
       .from('vw_optimisation_task_status')
       .select('*')
-      .in('keyword_key', keyword_keys);
+      .in('keyword_key', keyword_keys)
+      .neq('status', 'deleted'); // Exclude deleted tasks
 
     if (url_keys.length > 0) {
       query = query.in('target_url_clean', url_keys);
