@@ -4052,16 +4052,30 @@
         // Ensure Ranking & AI tab stays active and refresh table
         const rankingTab = document.querySelector('[data-panel="ranking"]');
         if (rankingTab) {
-          // Ensure tab is active
-          document.querySelectorAll('.aigeo-panel').forEach(panel => panel.classList.remove('is-active'));
-          rankingTab.classList.add('is-active');
+          // Use setActivePanel to properly show the panel
+          if (typeof setActivePanel === 'function') {
+            setActivePanel('ranking');
+          } else {
+            // Fallback: manually set active state
+            document.querySelectorAll('.aigeo-panel').forEach(panel => {
+              panel.classList.remove('is-active');
+              panel.hidden = true;
+            });
+            rankingTab.classList.add('is-active');
+            rankingTab.hidden = false;
+          }
           
           // Update nav button states
-          document.querySelectorAll('.aigeo-nav button').forEach(btn => btn.classList.remove('is-active'));
-          const rankingNavBtn = Array.from(document.querySelectorAll('.aigeo-nav button')).find(btn => 
-            btn.textContent.includes('Ranking') || btn.getAttribute('data-tab') === 'ranking'
+          document.querySelectorAll('.aigeo-nav-item').forEach(btn => btn.classList.remove('is-active'));
+          const rankingNavBtn = Array.from(document.querySelectorAll('.aigeo-nav-item')).find(btn => 
+            btn.getAttribute('data-panel') === 'ranking'
           );
           if (rankingNavBtn) rankingNavBtn.classList.add('is-active');
+          
+          // Ensure panel is rendered
+          if (typeof ensurePanelRendered === 'function') {
+            ensurePanelRendered('ranking');
+          }
         }
         
         // Trigger table re-render
@@ -4169,12 +4183,25 @@
 
         if (!response.ok) {
           let errorMessage = 'Failed to update status';
+          // Clone response to read body multiple times if needed
+          const responseClone = response.clone();
           try {
-            const errorData = await response.json();
-            errorMessage = errorData.error || errorData.message || errorMessage;
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+              const errorData = await response.json();
+              errorMessage = errorData.error || errorData.message || errorMessage;
+            } else {
+              const errorText = await responseClone.text();
+              if (errorText) errorMessage = errorText;
+            }
           } catch (e) {
-            const errorText = await response.text();
-            if (errorText) errorMessage = errorText;
+            // If all else fails, try to get text from clone
+            try {
+              const errorText = await responseClone.text();
+              if (errorText) errorMessage = errorText;
+            } catch (e2) {
+              // Ignore - use default error message
+            }
           }
           if (response.status === 401) {
             errorMessage = 'Unauthorized - admin key missing or invalid. Please set your admin key in the configuration section.';
@@ -4193,13 +4220,30 @@
         // Ensure Ranking & AI tab stays active and refresh table
         const rankingTab = document.querySelector('[data-panel="ranking"]');
         if (rankingTab) {
-          document.querySelectorAll('.aigeo-panel').forEach(panel => panel.classList.remove('is-active'));
-          rankingTab.classList.add('is-active');
-          document.querySelectorAll('.aigeo-nav button').forEach(btn => btn.classList.remove('is-active'));
-          const rankingNavBtn = Array.from(document.querySelectorAll('.aigeo-nav button')).find(btn => 
-            btn.textContent.includes('Ranking') || btn.getAttribute('data-tab') === 'ranking'
+          // Use setActivePanel to properly show the panel
+          if (typeof setActivePanel === 'function') {
+            setActivePanel('ranking');
+          } else {
+            // Fallback: manually set active state
+            document.querySelectorAll('.aigeo-panel').forEach(panel => {
+              panel.classList.remove('is-active');
+              panel.hidden = true;
+            });
+            rankingTab.classList.add('is-active');
+            rankingTab.hidden = false;
+          }
+          
+          // Update nav button states
+          document.querySelectorAll('.aigeo-nav-item').forEach(btn => btn.classList.remove('is-active'));
+          const rankingNavBtn = Array.from(document.querySelectorAll('.aigeo-nav-item')).find(btn => 
+            btn.getAttribute('data-panel') === 'ranking'
           );
           if (rankingNavBtn) rankingNavBtn.classList.add('is-active');
+          
+          // Ensure panel is rendered
+          if (typeof ensurePanelRendered === 'function') {
+            ensurePanelRendered('ranking');
+          }
         }
         
         // Trigger table re-render
@@ -4256,13 +4300,30 @@
         // Ensure Ranking & AI tab stays active and refresh table
         const rankingTab = document.querySelector('[data-panel="ranking"]');
         if (rankingTab) {
-          document.querySelectorAll('.aigeo-panel').forEach(panel => panel.classList.remove('is-active'));
-          rankingTab.classList.add('is-active');
-          document.querySelectorAll('.aigeo-nav button').forEach(btn => btn.classList.remove('is-active'));
-          const rankingNavBtn = Array.from(document.querySelectorAll('.aigeo-nav button')).find(btn => 
-            btn.textContent.includes('Ranking') || btn.getAttribute('data-tab') === 'ranking'
+          // Use setActivePanel to properly show the panel
+          if (typeof setActivePanel === 'function') {
+            setActivePanel('ranking');
+          } else {
+            // Fallback: manually set active state
+            document.querySelectorAll('.aigeo-panel').forEach(panel => {
+              panel.classList.remove('is-active');
+              panel.hidden = true;
+            });
+            rankingTab.classList.add('is-active');
+            rankingTab.hidden = false;
+          }
+          
+          // Update nav button states
+          document.querySelectorAll('.aigeo-nav-item').forEach(btn => btn.classList.remove('is-active'));
+          const rankingNavBtn = Array.from(document.querySelectorAll('.aigeo-nav-item')).find(btn => 
+            btn.getAttribute('data-panel') === 'ranking'
           );
           if (rankingNavBtn) rankingNavBtn.classList.add('is-active');
+          
+          // Ensure panel is rendered
+          if (typeof ensurePanelRendered === 'function') {
+            ensurePanelRendered('ranking');
+          }
         }
         
         // Trigger table re-render
@@ -4304,7 +4365,31 @@
         });
 
         if (!response.ok) {
-          throw new Error('Failed to stop tracking');
+          let errorMessage = 'Failed to stop tracking';
+          // Clone response to read body multiple times if needed
+          const responseClone = response.clone();
+          try {
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+              const errorData = await response.json();
+              errorMessage = errorData.error || errorData.message || errorMessage;
+            } else {
+              const errorText = await responseClone.text();
+              if (errorText) errorMessage = errorText;
+            }
+          } catch (e) {
+            // If all else fails, try to get text from clone
+            try {
+              const errorText = await responseClone.text();
+              if (errorText) errorMessage = errorText;
+            } catch (e2) {
+              // Ignore - use default error message
+            }
+          }
+          if (response.status === 401) {
+            errorMessage = 'Unauthorized - admin key missing or invalid. Please set your admin key in the configuration section.';
+          }
+          throw new Error(errorMessage);
         }
 
         // Refresh and close
@@ -4318,13 +4403,30 @@
         // Ensure Ranking & AI tab stays active and refresh table
         const rankingTab = document.querySelector('[data-panel="ranking"]');
         if (rankingTab) {
-          document.querySelectorAll('.aigeo-panel').forEach(panel => panel.classList.remove('is-active'));
-          rankingTab.classList.add('is-active');
-          document.querySelectorAll('.aigeo-nav button').forEach(btn => btn.classList.remove('is-active'));
-          const rankingNavBtn = Array.from(document.querySelectorAll('.aigeo-nav button')).find(btn => 
-            btn.textContent.includes('Ranking') || btn.getAttribute('data-tab') === 'ranking'
+          // Use setActivePanel to properly show the panel
+          if (typeof setActivePanel === 'function') {
+            setActivePanel('ranking');
+          } else {
+            // Fallback: manually set active state
+            document.querySelectorAll('.aigeo-panel').forEach(panel => {
+              panel.classList.remove('is-active');
+              panel.hidden = true;
+            });
+            rankingTab.classList.add('is-active');
+            rankingTab.hidden = false;
+          }
+          
+          // Update nav button states
+          document.querySelectorAll('.aigeo-nav-item').forEach(btn => btn.classList.remove('is-active'));
+          const rankingNavBtn = Array.from(document.querySelectorAll('.aigeo-nav-item')).find(btn => 
+            btn.getAttribute('data-panel') === 'ranking'
           );
           if (rankingNavBtn) rankingNavBtn.classList.add('is-active');
+          
+          // Ensure panel is rendered
+          if (typeof ensurePanelRendered === 'function') {
+            ensurePanelRendered('ranking');
+          }
         }
         
         // Trigger table re-render
