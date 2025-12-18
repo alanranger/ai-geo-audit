@@ -28,7 +28,23 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { keyword_text, target_url, task_type, status, title, notes, baselineMetrics } = req.body;
+    const { 
+      keyword_text, 
+      target_url, 
+      task_type, 
+      status, 
+      title, 
+      notes, 
+      baselineMetrics,
+      // Cycle 1 objective fields
+      objective_title,
+      primary_kpi,
+      target_value,
+      target_direction,
+      timeframe_days,
+      hypothesis,
+      plan
+    } = req.body;
 
     if (!keyword_text || !target_url) {
       return sendJSON(res, 400, { error: 'keyword_text and target_url required' });
@@ -75,13 +91,51 @@ export default async function handler(req, res) {
       return sendJSON(res, 500, { error: taskError.message });
     }
 
-    // Insert created event with baseline metrics snapshot
+    // Create Cycle 1
+    const cycleData = {
+      task_id: task.id,
+      cycle_no: 1,
+      status: status || 'planned',
+      objective_title: objective_title || null,
+      primary_kpi: primary_kpi || null,
+      target_value: target_value != null ? parseFloat(target_value) : null,
+      target_direction: target_direction || null,
+      timeframe_days: timeframe_days != null ? parseInt(timeframe_days) : null,
+      hypothesis: hypothesis || null,
+      plan: plan || null,
+      start_date: new Date().toISOString()
+    };
+
+    const { data: cycle, error: cycleError } = await supabase
+      .from('optimisation_task_cycles')
+      .insert(cycleData)
+      .select()
+      .single();
+
+    if (cycleError) {
+      console.error('[Optimisation Task] Cycle insert error:', cycleError);
+      return sendJSON(res, 500, { error: cycleError.message });
+    }
+
+    // Update task with active_cycle_id
+    const { error: updateError } = await supabase
+      .from('optimisation_tasks')
+      .update({ active_cycle_id: cycle.id })
+      .eq('id', task.id);
+
+    if (updateError) {
+      console.error('[Optimisation Task] Update active_cycle_id error:', updateError);
+      // Don't fail, but log
+    }
+
+    // Insert created event with baseline metrics snapshot, linked to cycle
     const eventData = {
       task_id: task.id,
       event_type: 'created',
       note: 'Created from Ranking & AI module',
       owner_user_id: userId,
-      cycle_number: task.cycle_active || 1,
+      cycle_id: cycle.id,
+      cycle_number: 1,
       source: 'ranking_ai'
     };
 
@@ -102,7 +156,18 @@ export default async function handler(req, res) {
       // Don't fail the request, just log
     }
 
-    return sendJSON(res, 201, { task });
+    // Fetch updated task with cycle info
+    const { data: updatedTask, error: fetchError } = await supabase
+      .from('optimisation_tasks')
+      .select('*')
+      .eq('id', task.id)
+      .single();
+
+    if (fetchError) {
+      console.error('[Optimisation Task] Fetch updated task error:', fetchError);
+    }
+
+    return sendJSON(res, 201, { task: updatedTask || task, cycle });
   } catch (error) {
     console.error('[Optimisation Task] Error:', error);
     return sendJSON(res, 500, { error: error.message || 'Internal server error' });

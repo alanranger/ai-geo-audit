@@ -69,10 +69,10 @@ export default async function handler(req, res) {
       userId = '00000000-0000-0000-0000-000000000000';
     }
 
-    // Get task to verify ownership and get current cycle
+    // Get task to verify ownership and get active cycle
     const { data: task, error: taskError } = await supabase
       .from('optimisation_tasks')
-      .select('id, owner_user_id, cycle_active')
+      .select('id, owner_user_id, cycle_active, active_cycle_id')
       .eq('id', id)
       .single();
 
@@ -84,12 +84,26 @@ export default async function handler(req, res) {
       return sendJSON(res, 403, { error: 'Forbidden' });
     }
 
+    // Get cycle number if active_cycle_id exists
+    let cycleNo = task.cycle_active || 1;
+    if (task.active_cycle_id) {
+      const { data: cycle } = await supabase
+        .from('optimisation_task_cycles')
+        .select('cycle_no')
+        .eq('id', task.active_cycle_id)
+        .single();
+      if (cycle) {
+        cycleNo = cycle.cycle_no;
+      }
+    }
+
     // Insert measurement event
     const eventData = {
       task_id: id,
       event_type: 'measurement',
       note: note || null,
-      cycle_number: task.cycle_active || 1,
+      cycle_id: task.active_cycle_id || null,
+      cycle_number: cycleNo,
       metrics: {
         ...metrics,
         captured_at: metrics.captured_at || new Date().toISOString()

@@ -3959,6 +3959,17 @@
               </div>
             </div>
 
+            <!-- Objective Section (Full Width) -->
+            <div id="optimisation-drawer-objective" style="margin-bottom: 1.5rem; padding: 0.75rem; background: #f8f9fa; border-radius: 4px; border: 1px solid #e2e8f0;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+                <h4 style="margin: 0; font-size: 0.95rem; font-weight: 600;">Objective <span id="optimisation-drawer-objective-cycle">(Cycle 1)</span></h4>
+                <button id="optimisation-edit-objective-btn" class="btn btn-small" onclick="window.editObjective()" style="padding: 0.25rem 0.75rem; font-size: 0.875rem;">Edit</button>
+              </div>
+              <div id="optimisation-drawer-objective-content" style="font-size: 0.875rem;">
+                <div style="color: #666; font-style: italic;">Loading objective...</div>
+              </div>
+            </div>
+
             <!-- Two Column Layout -->
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem;">
               <!-- Left Column -->
@@ -4297,6 +4308,13 @@
       document.getElementById('track-status').value = 'planned';
       document.getElementById('track-title').value = '';
       document.getElementById('track-notes').value = '';
+      // Reset objective fields
+      document.getElementById('track-objective-title').value = '';
+      document.getElementById('track-primary-kpi').value = '';
+      document.getElementById('track-target-direction').value = '';
+      document.getElementById('track-target-value').value = '';
+      document.getElementById('track-timeframe-days').value = '';
+      document.getElementById('track-plan').value = '';
 
       // Store cleaned URL and row data for submit (row data needed for baseline metrics)
       modal.dataset.rowKeyword = row.keyword;
@@ -4322,6 +4340,14 @@
       const status = document.getElementById('track-status').value;
       const title = document.getElementById('track-title').value.trim();
       const notes = document.getElementById('track-notes').value.trim();
+      
+      // Get objective fields
+      const objective_title = document.getElementById('track-objective-title').value.trim();
+      const primary_kpi = document.getElementById('track-primary-kpi').value.trim();
+      const target_direction = document.getElementById('track-target-direction').value.trim();
+      const target_value = document.getElementById('track-target-value').value.trim();
+      const timeframe_days = document.getElementById('track-timeframe-days').value.trim();
+      const plan = document.getElementById('track-plan').value.trim();
 
       if (!keyword || !targetUrl) {
         alert('Missing keyword or URL');
@@ -4372,7 +4398,14 @@
             status: status,
             title: title || null,
             notes: notes || null,
-            baselineMetrics: baselineMetrics
+            baselineMetrics: baselineMetrics,
+            // Cycle 1 objective fields
+            objective_title: objective_title || null,
+            primary_kpi: primary_kpi || null,
+            target_direction: target_direction || null,
+            target_value: target_value ? parseFloat(target_value) : null,
+            timeframe_days: timeframe_days ? parseInt(timeframe_days) : null,
+            plan: plan || null
           })
         });
 
@@ -4689,25 +4722,84 @@
 
     // Start new cycle
     window.startNewCycle = async function startNewCycle() {
-      // B5: Support both modal and drawer
-      const modal = document.getElementById('optimisation-manage-modal');
-      const drawerTaskId = window.optimisationModuleState?.currentTaskId;
-      const modalTaskId = modal?.dataset.taskId;
-      const taskId = drawerTaskId || modalTaskId;
+      const taskId = window.optimisationModuleState?.currentTaskId;
       
       if (!taskId) {
-        console.warn('[Optimisation] No task ID found in modal or drawer');
+        console.warn('[Optimisation] No task ID found');
         return;
       }
-      const currentCycle = Number(modal.dataset.currentCycle) || 1;
-      const newCycle = currentCycle + 1;
+
+      // Get current task to get cycle info
+      const task = window.optimisationModuleState.allTasks.find(t => t.id === taskId);
+      if (!task) {
+        alert('Task not found. Please refresh the page.');
+        return;
+      }
+
+      const currentCycleNo = task.cycle_no || task.cycle_active || 1;
+      const newCycleNo = currentCycleNo + 1;
+
+      // Show modal for editing new cycle objective
+      const modal = document.getElementById('optimisation-new-cycle-modal');
+      if (!modal) {
+        alert('New cycle modal not found. Please refresh the page.');
+        return;
+      }
+
+      // Populate with previous cycle's objective if it exists (for copying)
+      if (task.objective_title) {
+        document.getElementById('new-cycle-objective-title').value = task.objective_title;
+      }
+      if (task.primary_kpi) {
+        document.getElementById('new-cycle-primary-kpi').value = task.primary_kpi;
+      }
+      if (task.target_direction) {
+        document.getElementById('new-cycle-target-direction').value = task.target_direction;
+      }
+      if (task.target_value != null) {
+        document.getElementById('new-cycle-target-value').value = task.target_value;
+      }
+      if (task.timeframe_days) {
+        document.getElementById('new-cycle-timeframe-days').value = task.timeframe_days;
+      }
+      if (task.plan) {
+        document.getElementById('new-cycle-plan').value = task.plan;
+      }
+
+      document.getElementById('new-cycle-cycle-no').textContent = `Cycle ${newCycleNo}`;
+      modal.dataset.taskId = taskId;
+      modal.style.display = 'flex';
+    };
+
+    window.submitNewCycle = async function submitNewCycle() {
+      const modal = document.getElementById('optimisation-new-cycle-modal');
+      if (!modal) return;
+
+      const taskId = modal.dataset.taskId;
+      if (!taskId) {
+        alert('Task ID not found');
+        return;
+      }
+
+      // Get objective fields
+      const objective_title = document.getElementById('new-cycle-objective-title').value.trim();
+      const primary_kpi = document.getElementById('new-cycle-primary-kpi').value.trim();
+      const target_direction = document.getElementById('new-cycle-target-direction').value.trim();
+      const target_value = document.getElementById('new-cycle-target-value').value.trim();
+      const timeframe_days = document.getElementById('new-cycle-timeframe-days').value.trim();
+      const plan = document.getElementById('new-cycle-plan').value.trim();
 
       try {
         const response = await fetch(apiUrl(`/api/optimisation/task/${taskId}/cycle`), {
           method: 'POST',
           headers: window.getOptimisationHeaders(),
           body: JSON.stringify({
-            cycle_active: newCycle
+            objective_title: objective_title || null,
+            primary_kpi: primary_kpi || null,
+            target_direction: target_direction || null,
+            target_value: target_value ? parseFloat(target_value) : null,
+            timeframe_days: timeframe_days ? parseInt(timeframe_days) : null,
+            plan: plan || null
           })
         });
 
@@ -4715,29 +4807,117 @@
           if (response.status === 401) {
             throw new Error('Unauthorized - admin key missing or invalid. Please set your admin key in the configuration section.');
           }
-          throw new Error('Failed to start new cycle');
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Failed to start new cycle');
         }
 
-        // Refresh and close
-        await window.fetchOptimisationStatuses([{
-          keyword: modal.dataset.rowKeyword,
-          best_url: modal.dataset.rowUrl
-        }]);
+        // Refresh tasks and reload drawer
+        await window.loadAllOptimisationTasks();
+        
+        // Reload drawer if it's open
+        if (window.optimisationModuleState.currentTaskId === taskId) {
+          await window.openOptimisationTaskDrawer(taskId);
+        }
         
         modal.style.display = 'none';
         
-        // Ensure Ranking & AI tab stays active and refresh table
-        const rankingTab = document.querySelector('[data-panel="ranking"]');
-        if (rankingTab) {
-          // Use setActivePanel to properly show the panel
-          if (typeof setActivePanel === 'function') {
-            setActivePanel('ranking');
-          } else {
-            // Fallback: manually set active state
-            document.querySelectorAll('.aigeo-panel').forEach(panel => {
-              panel.classList.remove('is-active');
-              panel.hidden = true;
-            });
+        alert('New cycle started successfully!');
+      } catch (error) {
+        console.error('[Optimisation] Error starting new cycle:', error);
+        alert('Failed to start new cycle: ' + error.message);
+      }
+    };
+
+    // Edit Objective function
+    window.editObjective = async function editObjective() {
+      const taskId = window.optimisationModuleState?.currentTaskId;
+      if (!taskId) return;
+
+      const task = window.optimisationModuleState.allTasks.find(t => t.id === taskId);
+      if (!task) return;
+
+      // Show edit modal (reuse new cycle modal structure)
+      const modal = document.getElementById('optimisation-edit-objective-modal');
+      if (!modal) {
+        alert('Edit objective modal not found. Please refresh the page.');
+        return;
+      }
+
+      // Populate with current objective
+      document.getElementById('edit-objective-title').value = task.objective_title || '';
+      document.getElementById('edit-objective-primary-kpi').value = task.primary_kpi || '';
+      document.getElementById('edit-objective-target-direction').value = task.target_direction || '';
+      document.getElementById('edit-objective-target-value').value = task.target_value || '';
+      document.getElementById('edit-objective-timeframe-days').value = task.timeframe_days || '';
+      document.getElementById('edit-objective-plan').value = task.plan || '';
+
+      modal.dataset.taskId = taskId;
+      modal.style.display = 'flex';
+    };
+
+    window.submitEditObjective = async function submitEditObjective() {
+      const modal = document.getElementById('optimisation-edit-objective-modal');
+      if (!modal) return;
+
+      const taskId = modal.dataset.taskId;
+      if (!taskId) {
+        alert('Task ID not found');
+        return;
+      }
+
+      // Get objective fields
+      const objective_title = document.getElementById('edit-objective-title').value.trim();
+      const primary_kpi = document.getElementById('edit-objective-primary-kpi').value.trim();
+      const target_direction = document.getElementById('edit-objective-target-direction').value.trim();
+      const target_value = document.getElementById('edit-objective-target-value').value.trim();
+      const timeframe_days = document.getElementById('edit-objective-timeframe-days').value.trim();
+      const plan = document.getElementById('edit-objective-plan').value.trim();
+
+      try {
+        const response = await fetch(apiUrl(`/api/optimisation/task/${taskId}`), {
+          method: 'PATCH',
+          headers: window.getOptimisationHeaders(),
+          body: JSON.stringify({
+            objective_title: objective_title || null,
+            primary_kpi: primary_kpi || null,
+            target_direction: target_direction || null,
+            target_value: target_value ? parseFloat(target_value) : null,
+            timeframe_days: timeframe_days ? parseInt(timeframe_days) : null,
+            plan: plan || null
+          })
+        });
+
+        if (!response.ok) {
+          if (response.status === 401) {
+            throw new Error('Unauthorized - admin key missing or invalid. Please set your admin key in the configuration section.');
+          }
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Failed to update objective');
+        }
+
+        // Refresh tasks and reload drawer
+        await window.loadAllOptimisationTasks();
+        
+        // Reload drawer if it's open
+        if (window.optimisationModuleState.currentTaskId === taskId) {
+          await window.openOptimisationTaskDrawer(taskId);
+        }
+        
+        modal.style.display = 'none';
+        
+        alert('Objective updated successfully!');
+      } catch (error) {
+        console.error('[Optimisation] Error updating objective:', error);
+        alert('Failed to update objective: ' + error.message);
+      }
+    };
+
+    // Helper function to escape HTML
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
             rankingTab.classList.add('is-active');
             rankingTab.hidden = false;
           }
@@ -5613,14 +5793,60 @@
       statusEl.style.background = statusStyle.bg;
       statusEl.style.color = statusStyle.color;
       
-      // Add date created to cycle
+      // Update cycle display with cycle info
       const cycleEl = document.getElementById('optimisation-drawer-cycle');
-      const cycleText = `Cycle ${task.cycle_active || 1}`;
-      if (task.created_at) {
+      const cycleNo = task.cycle_no || task.cycle_active || 1;
+      const cycleText = `Cycle ${cycleNo}`;
+      if (task.cycle_start_date) {
+        const startDate = new Date(task.cycle_start_date).toLocaleDateString('en-GB');
+        cycleEl.textContent = `${cycleText} (Started: ${startDate})`;
+      } else if (task.created_at) {
         const createdDate = new Date(task.created_at).toLocaleDateString('en-GB');
         cycleEl.textContent = `${cycleText} (Created: ${createdDate})`;
       } else {
         cycleEl.textContent = cycleText;
+      }
+
+      // Update objective display
+      const objectiveCycleEl = document.getElementById('optimisation-drawer-objective-cycle');
+      if (objectiveCycleEl) {
+        objectiveCycleEl.textContent = `(Cycle ${cycleNo})`;
+      }
+
+      const objectiveContentEl = document.getElementById('optimisation-drawer-objective-content');
+      if (objectiveContentEl) {
+        if (task.objective_title || task.primary_kpi) {
+          let objectiveHtml = '';
+          if (task.objective_title) {
+            objectiveHtml += `<div style="margin-bottom: 0.5rem;"><strong>Title:</strong> ${escapeHtml(task.objective_title)}</div>`;
+          }
+          if (task.primary_kpi) {
+            const kpiLabel = task.primary_kpi.charAt(0).toUpperCase() + task.primary_kpi.slice(1).replace('_', ' ');
+            let targetText = '';
+            if (task.target_direction && task.target_value != null) {
+              const directionLabels = {
+                'increase': 'Increase by',
+                'decrease': 'Decrease by',
+                'at_least': 'At least',
+                'at_most': 'At most'
+              };
+              targetText = ` ${directionLabels[task.target_direction] || task.target_direction} ${task.target_value}`;
+              if (task.primary_kpi === 'ctr') {
+                targetText += '%';
+              }
+            }
+            objectiveHtml += `<div style="margin-bottom: 0.5rem;"><strong>KPI:</strong> ${escapeHtml(kpiLabel)}${targetText}</div>`;
+          }
+          if (task.timeframe_days) {
+            objectiveHtml += `<div style="margin-bottom: 0.5rem;"><strong>Timeframe:</strong> ${task.timeframe_days} days</div>`;
+          }
+          if (task.plan) {
+            objectiveHtml += `<div style="margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e2e8f0;"><strong>Plan:</strong> ${escapeHtml(task.plan)}</div>`;
+          }
+          objectiveContentEl.innerHTML = objectiveHtml || '<div style="color: #666; font-style: italic;">No objective set</div>';
+        } else {
+          objectiveContentEl.innerHTML = '<div style="color: #666; font-style: italic;">No objective set</div>';
+        }
       }
       
       document.getElementById('optimisation-change-status').value = task.status || '';
@@ -35257,6 +35483,60 @@ Final Score: ${score}/100`;
         <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #475569;">Notes (optional):</label>
         <textarea id="track-notes" rows="3" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-family: inherit;" placeholder="Additional notes..."></textarea>
       </div>
+
+      <!-- Objective Section (Cycle 1) -->
+      <div style="margin-bottom: 1.5rem; padding: 1rem; background: #f8fafc; border-radius: 4px; border: 1px solid #e2e8f0;">
+        <h4 style="margin: 0 0 1rem 0; font-size: 1rem; color: #1e293b; font-weight: 600;">Objective (Cycle 1)</h4>
+        
+        <div style="margin-bottom: 0.75rem;">
+          <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #475569; font-size: 0.875rem;">Objective Title:</label>
+          <input type="text" id="track-objective-title" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.875rem;" placeholder="e.g. Improve CTR by 20%">
+        </div>
+
+        <div style="margin-bottom: 0.75rem;">
+          <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #475569; font-size: 0.875rem;">Primary KPI:</label>
+          <select id="track-primary-kpi" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.875rem;">
+            <option value="">Select KPI...</option>
+            <option value="ctr">CTR</option>
+            <option value="rank">Rank</option>
+            <option value="clicks">Clicks</option>
+            <option value="impressions">Impressions</option>
+            <option value="ai_citations">AI Citations</option>
+          </select>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 0.75rem;">
+          <div>
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #475569; font-size: 0.875rem;">Target Direction:</label>
+            <select id="track-target-direction" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.875rem;">
+              <option value="">Select...</option>
+              <option value="increase">Increase</option>
+              <option value="decrease">Decrease</option>
+              <option value="at_least">At least</option>
+              <option value="at_most">At most</option>
+            </select>
+          </div>
+          <div>
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #475569; font-size: 0.875rem;">Target Value:</label>
+            <input type="number" id="track-target-value" step="0.01" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.875rem;" placeholder="e.g. 20">
+          </div>
+        </div>
+
+        <div style="margin-bottom: 0.75rem;">
+          <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #475569; font-size: 0.875rem;">Timeframe (days):</label>
+          <select id="track-timeframe-days" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.875rem;">
+            <option value="">Select timeframe...</option>
+            <option value="30">30 days</option>
+            <option value="60">60 days</option>
+            <option value="90">90 days</option>
+          </select>
+        </div>
+
+        <div style="margin-bottom: 0.75rem;">
+          <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #475569; font-size: 0.875rem;">Plan / Hypothesis (optional):</label>
+          <textarea id="track-plan" rows="2" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-family: inherit; font-size: 0.875rem;" placeholder="Describe your plan or hypothesis..."></textarea>
+        </div>
+      </div>
       
       <div style="display: flex; gap: 0.75rem; justify-content: flex-end;">
         <button type="button" onclick="document.getElementById('optimisation-track-modal').style.display='none'" style="padding: 0.5rem 1rem; border: 1px solid #cbd5e1; border-radius: 4px; background: white; cursor: pointer;">Cancel</button>
@@ -35317,6 +35597,134 @@ Final Score: ${score}/100`;
       
       <div style="display: flex; justify-content: flex-end;">
         <button type="button" onclick="document.getElementById('optimisation-manage-modal').style.display='none'" style="padding: 0.5rem 1rem; border: 1px solid #cbd5e1; border-radius: 4px; background: white; cursor: pointer;">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- New Cycle Modal -->
+  <div id="optimisation-new-cycle-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 10001; align-items: center; justify-content: center;">
+    <div style="background: white; padding: 2rem; border-radius: 8px; max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto;">
+      <h3 style="margin: 0 0 1.5rem 0; font-size: 1.25rem; color: #1e293b;">Start New Cycle: <span id="new-cycle-cycle-no">Cycle 2</span></h3>
+      
+      <div style="margin-bottom: 1rem; padding: 0.75rem; background: #f0f9ff; border-radius: 4px; border: 1px solid #bae6fd;">
+        <div style="font-size: 0.875rem; color: #0369a1;">
+          <strong>Tip:</strong> The form is pre-filled with the previous cycle's objective. You can modify it for this new cycle.
+        </div>
+      </div>
+
+      <div style="margin-bottom: 0.75rem;">
+        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #475569; font-size: 0.875rem;">Objective Title:</label>
+        <input type="text" id="new-cycle-objective-title" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.875rem;" placeholder="e.g. Improve CTR by 20%">
+      </div>
+
+      <div style="margin-bottom: 0.75rem;">
+        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #475569; font-size: 0.875rem;">Primary KPI:</label>
+        <select id="new-cycle-primary-kpi" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.875rem;">
+          <option value="">Select KPI...</option>
+          <option value="ctr">CTR</option>
+          <option value="rank">Rank</option>
+          <option value="clicks">Clicks</option>
+          <option value="impressions">Impressions</option>
+          <option value="ai_citations">AI Citations</option>
+        </select>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 0.75rem;">
+        <div>
+          <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #475569; font-size: 0.875rem;">Target Direction:</label>
+          <select id="new-cycle-target-direction" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.875rem;">
+            <option value="">Select...</option>
+            <option value="increase">Increase</option>
+            <option value="decrease">Decrease</option>
+            <option value="at_least">At least</option>
+            <option value="at_most">At most</option>
+          </select>
+        </div>
+        <div>
+          <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #475569; font-size: 0.875rem;">Target Value:</label>
+          <input type="number" id="new-cycle-target-value" step="0.01" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.875rem;" placeholder="e.g. 20">
+        </div>
+      </div>
+
+      <div style="margin-bottom: 0.75rem;">
+        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #475569; font-size: 0.875rem;">Timeframe (days):</label>
+        <select id="new-cycle-timeframe-days" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.875rem;">
+          <option value="">Select timeframe...</option>
+          <option value="30">30 days</option>
+          <option value="60">60 days</option>
+          <option value="90">90 days</option>
+        </select>
+      </div>
+
+      <div style="margin-bottom: 1.5rem;">
+        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #475569; font-size: 0.875rem;">Plan / Hypothesis (optional):</label>
+        <textarea id="new-cycle-plan" rows="3" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-family: inherit; font-size: 0.875rem;" placeholder="Describe your plan or hypothesis..."></textarea>
+      </div>
+      
+      <div style="display: flex; gap: 0.75rem; justify-content: flex-end;">
+        <button type="button" onclick="document.getElementById('optimisation-new-cycle-modal').style.display='none'" style="padding: 0.5rem 1rem; border: 1px solid #cbd5e1; border-radius: 4px; background: white; cursor: pointer;">Cancel</button>
+        <button type="button" onclick="window.submitNewCycle()" style="padding: 0.5rem 1rem; border: none; border-radius: 4px; background: #2563eb; color: white; cursor: pointer; font-weight: 500;">Start Cycle</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Objective Modal -->
+  <div id="optimisation-edit-objective-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 10001; align-items: center; justify-content: center;">
+    <div style="background: white; padding: 2rem; border-radius: 8px; max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto;">
+      <h3 style="margin: 0 0 1.5rem 0; font-size: 1.25rem; color: #1e293b;">Edit Objective</h3>
+
+      <div style="margin-bottom: 0.75rem;">
+        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #475569; font-size: 0.875rem;">Objective Title:</label>
+        <input type="text" id="edit-objective-title" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.875rem;" placeholder="e.g. Improve CTR by 20%">
+      </div>
+
+      <div style="margin-bottom: 0.75rem;">
+        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #475569; font-size: 0.875rem;">Primary KPI:</label>
+        <select id="edit-objective-primary-kpi" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.875rem;">
+          <option value="">Select KPI...</option>
+          <option value="ctr">CTR</option>
+          <option value="rank">Rank</option>
+          <option value="clicks">Clicks</option>
+          <option value="impressions">Impressions</option>
+          <option value="ai_citations">AI Citations</option>
+        </select>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 0.75rem;">
+        <div>
+          <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #475569; font-size: 0.875rem;">Target Direction:</label>
+          <select id="edit-objective-target-direction" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.875rem;">
+            <option value="">Select...</option>
+            <option value="increase">Increase</option>
+            <option value="decrease">Decrease</option>
+            <option value="at_least">At least</option>
+            <option value="at_most">At most</option>
+          </select>
+        </div>
+        <div>
+          <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #475569; font-size: 0.875rem;">Target Value:</label>
+          <input type="number" id="edit-objective-target-value" step="0.01" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.875rem;" placeholder="e.g. 20">
+        </div>
+      </div>
+
+      <div style="margin-bottom: 0.75rem;">
+        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #475569; font-size: 0.875rem;">Timeframe (days):</label>
+        <select id="edit-objective-timeframe-days" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.875rem;">
+          <option value="">Select timeframe...</option>
+          <option value="30">30 days</option>
+          <option value="60">60 days</option>
+          <option value="90">90 days</option>
+        </select>
+      </div>
+
+      <div style="margin-bottom: 1.5rem;">
+        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #475569; font-size: 0.875rem;">Plan / Hypothesis (optional):</label>
+        <textarea id="edit-objective-plan" rows="3" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-family: inherit; font-size: 0.875rem;" placeholder="Describe your plan or hypothesis..."></textarea>
+      </div>
+      
+      <div style="display: flex; gap: 0.75rem; justify-content: flex-end;">
+        <button type="button" onclick="document.getElementById('optimisation-edit-objective-modal').style.display='none'" style="padding: 0.5rem 1rem; border: 1px solid #cbd5e1; border-radius: 4px; background: white; cursor: pointer;">Cancel</button>
+        <button type="button" onclick="window.submitEditObjective()" style="padding: 0.5rem 1rem; border: none; border-radius: 4px; background: #2563eb; color: white; cursor: pointer; font-weight: 500;">Save Objective</button>
       </div>
     </div>
   </div>

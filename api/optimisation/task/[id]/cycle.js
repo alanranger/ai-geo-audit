@@ -1,5 +1,5 @@
 // /api/optimisation/task/[id]/cycle.js
-// Start a new optimisation cycle
+// Create a new cycle for an optimisation task
 
 export const config = { runtime: 'nodejs' };
 
@@ -14,10 +14,21 @@ const need = (k) => {
 
 const sendJSON = (res, status, obj) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-arp-admin-key');
   res.status(status).send(JSON.stringify(obj));
 };
 
 export default async function handler(req, res) {
+  // Handle CORS preflight
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-arp-admin-key');
+    return res.status(200).end();
+  }
+
   if (req.method !== 'POST') {
     return sendJSON(res, 405, { error: 'Method not allowed' });
   }
@@ -32,6 +43,16 @@ export default async function handler(req, res) {
     if (!id) {
       return sendJSON(res, 400, { error: 'Task ID required' });
     }
+
+    const {
+      objective_title,
+      primary_kpi,
+      target_value,
+      target_direction,
+      timeframe_days,
+      hypothesis,
+      plan
+    } = req.body;
 
     const supabase = createClient(
       need('SUPABASE_URL'),
@@ -48,60 +69,103 @@ export default async function handler(req, res) {
       if (user) userId = user.id;
     }
 
-    // For single-user admin key approach, use a placeholder UUID if no auth
     if (!userId) {
       userId = '00000000-0000-0000-0000-000000000000';
     }
 
-    // Get current task
-    const { data: currentTask, error: fetchError } = await supabase
+    // Get current task and active cycle
+    const { data: task, error: taskError } = await supabase
       .from('optimisation_tasks')
-      .select('cycle_active, status, owner_user_id')
+      .select('*, active_cycle_id')
       .eq('id', id)
       .single();
 
-    if (fetchError || !currentTask) {
+    if (taskError || !task) {
       return sendJSON(res, 404, { error: 'Task not found' });
     }
 
-    if (userId && currentTask.owner_user_id !== userId) {
-      return sendJSON(res, 403, { error: 'Forbidden' });
+    // Get the highest cycle number for this task
+    const { data: existingCycles, error: cyclesError } = await supabase
+      .from('optimisation_task_cycles')
+      .select('cycle_no')
+      .eq('task_id', id)
+      .order('cycle_no', { ascending: false })
+      .limit(1);
+
+    if (cyclesError) {
+      console.error('[Optimisation Cycle] Error fetching existing cycles:', cyclesError);
     }
 
-    const newCycle = (currentTask.cycle_active || 1) + 1;
+    const nextCycleNo = existingCycles && existingCycles.length > 0 
+      ? existingCycles[0].cycle_no + 1 
+      : (task.cycle_active || 1) + 1;
 
-    // Update task: increment cycle, set status to in_progress
-    const { data: task, error: updateError } = await supabase
-      .from('optimisation_tasks')
-      .update({
-        cycle_active: newCycle,
-        status: 'in_progress' // Default to in_progress when starting new cycle
-      })
-      .eq('id', id)
+    // End the previous cycle if it exists
+    if (task.active_cycle_id) {
+      await supabase
+        .from('optimisation_task_cycles')
+        .update({ end_date: new Date().toISOString() })
+        .eq('id', task.active_cycle_id);
+    }
+
+    // Create new cycle
+    const cycleData = {
+      task_id: id,
+      cycle_no: nextCycleNo,
+      status: task.status || 'planned',
+      objective_title: objective_title || null,
+      primary_kpi: primary_kpi || null,
+      target_value: target_value != null ? parseFloat(target_value) : null,
+      target_direction: target_direction || null,
+      timeframe_days: timeframe_days != null ? parseInt(timeframe_days) : null,
+      hypothesis: hypothesis || null,
+      plan: plan || null,
+      start_date: new Date().toISOString()
+    };
+
+    const { data: cycle, error: cycleError } = await supabase
+      .from('optimisation_task_cycles')
+      .insert(cycleData)
       .select()
       .single();
 
+    if (cycleError) {
+      console.error('[Optimisation Cycle] Insert error:', cycleError);
+      return sendJSON(res, 500, { error: cycleError.message });
+    }
+
+    // Update task with new active_cycle_id and increment cycle_active
+    const { error: updateError } = await supabase
+      .from('optimisation_tasks')
+      .update({ 
+        active_cycle_id: cycle.id,
+        cycle_active: nextCycleNo
+      })
+      .eq('id', id);
+
     if (updateError) {
-      console.error('[Optimisation Cycle] Update error:', updateError);
+      console.error('[Optimisation Cycle] Update task error:', updateError);
       return sendJSON(res, 500, { error: updateError.message });
     }
 
-    // Add change_deployed event
+    // Create event for new cycle
     const { error: eventError } = await supabase
       .from('optimisation_task_events')
       .insert({
         task_id: id,
-        event_type: 'change_deployed',
-        note: `Cycle incremented to ${newCycle}`,
-        owner_user_id: userId
+        event_type: 'status_changed',
+        note: `Started Cycle ${nextCycleNo}`,
+        owner_user_id: userId,
+        cycle_id: cycle.id,
+        cycle_number: nextCycleNo
       });
 
     if (eventError) {
       console.error('[Optimisation Cycle] Event insert error:', eventError);
-      // Don't fail the request
+      // Don't fail, just log
     }
 
-    return sendJSON(res, 200, { task });
+    return sendJSON(res, 201, { cycle });
   } catch (error) {
     console.error('[Optimisation Cycle] Error:', error);
     return sendJSON(res, 500, { error: error.message || 'Internal server error' });
