@@ -3781,7 +3781,7 @@
             <h2>Optimisation Tracking</h2>
             <p>Track and manage keyword optimisation tasks across your site. Monitor progress, cycles, and outcomes.</p>
           </div>
-          <button id="optimisation-bulk-update-btn" class="btn" style="padding: 0.75rem 1.5rem; font-size: 0.95rem; white-space: nowrap;" title="Captures the latest metrics for every active task (creates a measurement entry).">
+          <button id="optimisation-bulk-update-btn" class="btn" style="padding: 0.75rem 1.5rem; font-size: 0.95rem; white-space: nowrap;" title="Fetches the latest 28-day metrics and stores a new measurement snapshot (idempotent within 5 minutes).">
             📊 Update All Tasks with Latest Data
           </button>
         </div>
@@ -3806,19 +3806,19 @@
           </div>
         </div>
 
-        <!-- Goal Rollup Badges (Phase B) -->
+        <!-- Goal Rollup Badges (Phase B) - Clickable Filters -->
         <div class="optimisation-goal-rollups" style="display: flex; gap: 0.75rem; margin: 1rem 0; flex-wrap: wrap; align-items: center;">
           <div style="font-weight: 600; color: #475569; margin-right: 0.5rem;">Objectives:</div>
-          <span class="ranking-badge ranking-badge--segment-general" style="padding: 0.5rem 1rem;" title="Tasks with no objective set (no KPI, target, or timeframe defined).">
+          <span id="optimisation-goal-filter-not-set" class="ranking-badge ranking-badge--segment-general" style="padding: 0.5rem 1rem; cursor: pointer;" title="Tasks with no objective set (no KPI, target, or timeframe defined). Click to filter.">
             Not set: <span id="optimisation-goal-not-set">0</span>
           </span>
-          <span class="ranking-badge ranking-badge--segment-education" style="padding: 0.5rem 1rem;" title="Objective set and not yet due, or delta is moving in the right direction but hasn't met target yet.">
+          <span id="optimisation-goal-filter-on-track" class="ranking-badge ranking-badge--segment-education" style="padding: 0.5rem 1rem; cursor: pointer;" title="Objective set and not yet due, or delta is moving in the right direction but hasn't met target yet. Click to filter.">
             On track: <span id="optimisation-goal-on-track">0</span>
           </span>
-          <span class="ranking-badge ranking-badge--segment-money" style="padding: 0.5rem 1rem; background: #fee2e2; color: #991b1b;" title="Due date has passed and target has not been met.">
+          <span id="optimisation-goal-filter-overdue" class="ranking-badge ranking-badge--segment-money" style="padding: 0.5rem 1rem; background: #fee2e2; color: #991b1b; cursor: pointer;" title="Due date has passed and target has not been met. Click to filter.">
             Overdue: <span id="optimisation-goal-overdue">0</span>
           </span>
-          <span class="ranking-badge ranking-badge--segment-brand" style="padding: 0.5rem 1rem; background: #d1fae5; color: #065f46;" title="Target has been met (delta meets or exceeds target value).">
+          <span id="optimisation-goal-filter-met" class="ranking-badge ranking-badge--segment-brand" style="padding: 0.5rem 1rem; background: #d1fae5; color: #065f46; cursor: pointer;" title="Target has been met (delta meets or exceeds target value). Click to filter.">
             Met: <span id="optimisation-goal-met">0</span>
           </span>
         </div>
@@ -3862,7 +3862,7 @@
           </select>
           <input type="text" id="optimisation-filter-keyword" placeholder="Filter by keyword..." style="padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px; flex: 1; min-width: 200px;">
           <input type="text" id="optimisation-filter-url" placeholder="Filter by URL..." style="padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px; flex: 1; min-width: 200px;">
-          <button id="optimisation-filter-needs-update" class="btn btn-secondary" style="padding: 0.5rem 1rem;" title="Show tasks that need measurement update (no measurement or older than 30 days).">Needs Update</button>
+          <button id="optimisation-filter-needs-update" class="btn btn-secondary" style="padding: 0.5rem 1rem;" title="Shows tasks with no measurement, or last measurement older than 30 days.">Needs Update</button>
           <button id="optimisation-clear-filters" class="btn btn-secondary" style="padding: 0.5rem 1rem;">Clear Filters</button>
         </div>
 
@@ -3968,8 +3968,8 @@
           
           <!-- Cancel Task, Delete Task, and Title (moved to header area) -->
           <div style="padding: 0.75rem 1.5rem; border-bottom: 1px solid #eee; background: #fff5f5; display: flex; gap: 0.5rem; align-items: center;">
-            <button id="optimisation-cancel-task-btn" class="btn" style="background: #ef4444; color: white; border: 1px solid #ef4444; padding: 0.5rem 1rem; font-size: 0.875rem;" title="Stop tracking (keeps history).">Cancel Task</button>
-            <button id="optimisation-delete-task-btn" class="btn" style="background: #991b1b; color: white; border: 1px solid #991b1b; padding: 0.5rem 1rem; font-size: 0.875rem;" title="Permanently remove task and events (cannot be undone).">Delete Task</button>
+            <button id="optimisation-cancel-task-btn" class="btn" style="background: #ef4444; color: white; border: 1px solid #ef4444; padding: 0.5rem 1rem; font-size: 0.875rem;" title="Stops tracking (keeps history). You can Track again later.">Cancel Task</button>
+            <button id="optimisation-delete-task-btn" class="btn" style="background: #991b1b; color: white; border: 1px solid #991b1b; padding: 0.5rem 1rem; font-size: 0.875rem;" title="Permanently deletes the task and its timeline. Use with care.">Delete Task</button>
             <div style="flex: 1; display: flex; align-items: center; gap: 0.5rem; margin-left: 1rem;">
               <strong style="white-space: nowrap;">Title:</strong>
               <input type="text" id="optimisation-drawer-title" style="flex: 1; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px; font-size: 0.875rem; color: #1e293b;" placeholder="Enter task title...">
@@ -4114,7 +4114,7 @@
                 <!-- Start New Cycle -->
                 <div style="padding: 0.75rem; background: #f8f9fa; border-radius: 4px;">
                   <h4 style="margin-bottom: 0.75rem; font-size: 0.95rem;">Start New Cycle</h4>
-                  <button id="optimisation-start-cycle-btn" class="btn btn-secondary" style="width: 100%; padding: 0.5rem; font-size: 0.875rem;" title="Begins a new optimisation attempt while preserving history from previous cycles.">Start New Cycle</button>
+                  <button id="optimisation-start-cycle-btn" class="btn btn-secondary" style="width: 100%; padding: 0.5rem; font-size: 0.875rem;" title="Begins a new optimisation cycle while keeping history.">Start New Cycle</button>
                 </div>
 
                 <!-- Add Event Form -->
@@ -5433,7 +5433,8 @@
       filteredTasks: [],
       activeTab: 'active',
       currentTaskId: null,
-      authError: null
+      authError: null,
+      activeObjectiveFilter: null // 'not_set' | 'on_track' | 'overdue' | 'met' | null
     };
     
     // Sorting state
@@ -5774,7 +5775,7 @@
           <td style="font-size: 0.85rem;">${goalHtml}</td>
           <td style="display: flex; gap: 0.25rem; align-items: center;">
             <button class="btn btn-secondary" onclick="event.stopPropagation(); openOptimisationTaskDrawer('${task.id}');" style="padding: 0.25rem 0.75rem; font-size: 0.875rem;">Open</button>
-            <button class="btn btn-small" onclick="event.stopPropagation(); updateTaskLatest('${task.id}');" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;" title="Capture latest metrics for this task.">Update</button>
+            <button class="btn btn-small" onclick="event.stopPropagation(); updateTaskLatest('${task.id}');" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;" title="Capture a new 'Latest' measurement for this task.">Update</button>
           </td>
         `;
 
@@ -6733,6 +6734,16 @@
             (t.target_url || '').toLowerCase().includes(url)
           );
         }
+        
+        // Objective status filter
+        if (window.optimisationModuleState.activeObjectiveFilter) {
+          const filterState = window.optimisationModuleState.activeObjectiveFilter;
+          if (filterState === 'not_set') {
+            filtered = filtered.filter(t => !t.goal_state || t.goal_state === 'not_set');
+          } else {
+            filtered = filtered.filter(t => t.goal_state === filterState);
+          }
+        }
 
         window.optimisationModuleState.filteredTasks = filtered;
         // Reset pagination when filters change
@@ -6760,6 +6771,74 @@
         });
       }
       
+      // Objective filter pills
+      const goalNotSet = document.getElementById('optimisation-goal-filter-not-set');
+      const goalOnTrack = document.getElementById('optimisation-goal-filter-on-track');
+      const goalOverdue = document.getElementById('optimisation-goal-filter-overdue');
+      const goalMet = document.getElementById('optimisation-goal-filter-met');
+      
+      const updateObjectiveFilterUI = () => {
+        const active = window.optimisationModuleState.activeObjectiveFilter;
+        [goalNotSet, goalOnTrack, goalOverdue, goalMet].forEach((el, idx) => {
+          if (!el) return;
+          const states = ['not_set', 'on_track', 'overdue', 'met'];
+          if (active === states[idx]) {
+            el.style.opacity = '1';
+            el.style.fontWeight = '600';
+            el.style.border = '2px solid #3b82f6';
+          } else {
+            el.style.opacity = active ? '0.6' : '1';
+            el.style.fontWeight = '';
+            el.style.border = '';
+          }
+        });
+      };
+      
+      if (goalNotSet) {
+        goalNotSet.addEventListener('click', () => {
+          if (window.optimisationModuleState.activeObjectiveFilter === 'not_set') {
+            window.optimisationModuleState.activeObjectiveFilter = null;
+          } else {
+            window.optimisationModuleState.activeObjectiveFilter = 'not_set';
+          }
+          updateObjectiveFilterUI();
+          applyFilters();
+        });
+      }
+      if (goalOnTrack) {
+        goalOnTrack.addEventListener('click', () => {
+          if (window.optimisationModuleState.activeObjectiveFilter === 'on_track') {
+            window.optimisationModuleState.activeObjectiveFilter = null;
+          } else {
+            window.optimisationModuleState.activeObjectiveFilter = 'on_track';
+          }
+          updateObjectiveFilterUI();
+          applyFilters();
+        });
+      }
+      if (goalOverdue) {
+        goalOverdue.addEventListener('click', () => {
+          if (window.optimisationModuleState.activeObjectiveFilter === 'overdue') {
+            window.optimisationModuleState.activeObjectiveFilter = null;
+          } else {
+            window.optimisationModuleState.activeObjectiveFilter = 'overdue';
+          }
+          updateObjectiveFilterUI();
+          applyFilters();
+        });
+      }
+      if (goalMet) {
+        goalMet.addEventListener('click', () => {
+          if (window.optimisationModuleState.activeObjectiveFilter === 'met') {
+            window.optimisationModuleState.activeObjectiveFilter = null;
+          } else {
+            window.optimisationModuleState.activeObjectiveFilter = 'met';
+          }
+          updateObjectiveFilterUI();
+          applyFilters();
+        });
+      }
+      
       if (clearFilters) {
         clearFilters.addEventListener('click', () => {
           if (filterStatus) filterStatus.value = '';
@@ -6771,6 +6850,8 @@
             needsUpdateBtn.style.background = '';
             needsUpdateBtn.style.color = '';
           }
+          window.optimisationModuleState.activeObjectiveFilter = null;
+          updateObjectiveFilterUI();
           applyFilters();
         });
       }
@@ -7249,7 +7330,7 @@
           if (!currentMetrics) {
             failCount++;
             errors.push(`${task.keyword_text}: No data found`);
-            return;
+            continue;
           }
 
             // Create measurement
