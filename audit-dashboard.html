@@ -6217,12 +6217,15 @@
         const cycleStartedAt = task.cycle_started_at || task.cycle_start_date || null;
 
         if (objectiveTitle || objectiveKpi || objectiveMetric || objectiveDirection) {
-          let objectiveHtml = '';
+          // Use two-column layout for objective details
+          let leftColumn = '';
+          let rightColumn = '';
+          
           if (objectiveTitle) {
-            objectiveHtml += `<div style="margin-bottom: 0.5rem;"><strong>Title:</strong> ${escapeHtml(objectiveTitle)}</div>`;
+            leftColumn += `<div style="margin-bottom: 0.4rem;"><strong>Title:</strong> ${escapeHtml(objectiveTitle)}</div>`;
           }
           if (objectiveKpi) {
-            objectiveHtml += `<div style="margin-bottom: 0.5rem;"><strong>KPI:</strong> ${escapeHtml(objectiveKpi)}</div>`;
+            leftColumn += `<div style="margin-bottom: 0.4rem;"><strong>KPI:</strong> ${escapeHtml(objectiveKpi)}</div>`;
           }
           if (objectiveMetric && objectiveDirection && objectiveTargetValue != null) {
             const directionLabels = {
@@ -6235,8 +6238,9 @@
             if (objectiveMetric === 'ctr_28d') {
               targetText += '%';
             }
-            objectiveHtml += `<div style="margin-bottom: 0.5rem;"><strong>Target:</strong> ${escapeHtml(targetText)}</div>`;
+            leftColumn += `<div style="margin-bottom: 0.4rem;"><strong>Target:</strong> ${escapeHtml(targetText)}</div>`;
           }
+          
           if (objectiveTimeframe || task.objective_due_at) {
             let timeframeText = '';
             const dueAt = task.objective_due_at || (progress && progress.due_at) || null;
@@ -6256,7 +6260,7 @@
               }
             }
             if (timeframeText) {
-              objectiveHtml += `<div style="margin-bottom: 0.5rem;"><strong>Timeframe:</strong> ${timeframeText}</div>`;
+              rightColumn += `<div style="margin-bottom: 0.4rem;"><strong>Timeframe:</strong> ${timeframeText}</div>`;
             }
           }
           
@@ -6271,9 +6275,16 @@
               const deltaColor = delta >= 0 ? '#10b981' : '#ef4444';
               const deltaSign = delta >= 0 ? '+' : '';
               const kpiLabel = (objectiveKpi || objectiveMetric).replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-              objectiveHtml += `<div style="margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e2e8f0;"><strong>Progress:</strong> ${baselineVal} → ${latestVal} (<span style="color: ${deltaColor}; font-weight: 600;">${deltaSign}${delta}</span>) vs target ${targetDelta > 0 ? '+' : ''}${targetDelta}</div>`;
+              rightColumn += `<div style="margin-bottom: 0.4rem;"><strong>Progress:</strong> ${baselineVal} → ${latestVal} (<span style="color: ${deltaColor}; font-weight: 600;">${deltaSign}${delta}</span>) vs target ${targetDelta > 0 ? '+' : ''}${targetDelta}</div>`;
             }
           }
+          
+          // Build two-column layout
+          let objectiveHtml = `<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+            <div>${leftColumn || '<div style="color: #999; font-style: italic;">–</div>'}</div>
+            <div>${rightColumn || '<div style="color: #999; font-style: italic;">–</div>'}</div>
+          </div>`;
+          
           if (objectivePlan) {
             objectiveHtml += `<div style="margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e2e8f0;"><strong>Plan:</strong> ${escapeHtml(objectivePlan)}</div>`;
           }
