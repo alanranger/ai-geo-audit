@@ -4031,7 +4031,34 @@
 
       // Populate read-only fields
       document.getElementById('manage-keyword-text').textContent = row.keyword;
-      document.getElementById('manage-url-text').textContent = window.cleanUrlForKey(row.best_url || row.targetUrl || row.ranking_url || '');
+      
+      // Make URL a clickable link
+      const urlText = window.cleanUrlForDisplay ? window.cleanUrlForDisplay(row.best_url || row.targetUrl || row.ranking_url || '') : window.cleanUrlForKey(row.best_url || row.targetUrl || row.ranking_url || '');
+      const urlContainer = document.getElementById('manage-url-text');
+      urlContainer.innerHTML = ''; // Clear existing content
+      if (urlText) {
+        // Ensure URL has protocol
+        let fullUrl = urlText;
+        if (!fullUrl.startsWith('http://') && !fullUrl.startsWith('https://')) {
+          fullUrl = 'https://' + fullUrl;
+        }
+        const urlLink = document.createElement('a');
+        urlLink.href = fullUrl;
+        urlLink.target = '_blank';
+        urlLink.rel = 'noopener noreferrer';
+        urlLink.textContent = urlText;
+        urlLink.style.color = '#0284c7';
+        urlLink.style.fontWeight = '600';
+        urlLink.style.fontSize = '0.95rem';
+        urlLink.style.textDecoration = 'none';
+        urlLink.style.wordBreak = 'break-all';
+        urlLink.onmouseover = () => { urlLink.style.textDecoration = 'underline'; };
+        urlLink.onmouseout = () => { urlLink.style.textDecoration = 'none'; };
+        urlContainer.appendChild(urlLink);
+      } else {
+        urlContainer.textContent = '—';
+      }
+      
       document.getElementById('manage-task-type-text').textContent = taskType;
       document.getElementById('manage-status-text').textContent = status.status;
       document.getElementById('manage-cycle-text').textContent = status.cycle_active || 1;
