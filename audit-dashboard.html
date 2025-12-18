@@ -14078,8 +14078,8 @@ Final Score: ${score}/100`;
                   <canvas id="money-kpi-sparkline" style="width: 100% !important;"></canvas>
                 </div>
 
-                <div class="table-wrapper" style="overflow-x: auto;">
-                  <table id="money-kpi-table" style="width: 100%; border-collapse: collapse;">
+                <div class="table-wrapper" style="overflow-x: auto; max-width: 100%;">
+                  <table id="money-kpi-table" style="min-width: 100%; border-collapse: collapse; table-layout: auto;">
                     <thead>
                       <tr id="money-kpi-header-row" style="background: #f1f5f9;">
                         <!-- Filled by JS -->
@@ -16526,11 +16526,15 @@ Final Score: ${score}/100`;
           });
         }
 
-        // Header with sortable columns
+        // Header with sortable columns - use shorter date format (MM-DD) to fit all 12 columns
         tableHead.innerHTML = `
-          <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none;" data-sort="segment" title="Money page segment type: All money pages, Landing pages (collection/category), Event pages (workshops/events), or Product pages (services/products). Click to sort.">Segment${sortArrow('segment')}</th>
-          ${labels.map((label, idx) => `<th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none;" data-sort="month_${idx}" title="Value for ${label}. Click to sort by this month.">${label}${sortArrow(`month_${idx}`)}</th>`).join("")}
-          <th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none;" data-sort="trend" title="Overall trend from first to last data point. ↑ = improving, ↓ = declining, → = stable. For Avg Position, lower is better so trend is inverted. Click to sort.">Trend${sortArrow('trend')}</th>
+          <th style="padding: 0.5rem 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none; white-space: nowrap;" data-sort="segment" title="Money page segment type: All money pages, Landing pages (collection/category), Event pages (workshops/events), or Product pages (services/products). Click to sort.">Segment${sortArrow('segment')}</th>
+          ${labels.map((label, idx) => {
+            // Convert YYYY-MM-DD to MM-DD for compact display
+            const shortLabel = label.includes('-') ? label.split('-').slice(1).join('-') : label;
+            return `<th style="padding: 0.5rem 0.5rem; text-align: right; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none; white-space: nowrap; font-size: 0.85rem;" data-sort="month_${idx}" title="Value for ${label}. Click to sort by this date.">${shortLabel}${sortArrow(`month_${idx}`)}</th>`;
+          }).join("")}
+          <th style="padding: 0.5rem 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none; white-space: nowrap;" data-sort="trend" title="Overall trend from first to last data point. ↑ = improving, ↓ = declining, → = stable. For Avg Position, lower is better so trend is inverted. Click to sort.">Trend${sortArrow('trend')}</th>
         `;
         
         // Add click handlers to header cells
@@ -16582,7 +16586,7 @@ Final Score: ${score}/100`;
 
             const cells = values
               .map((v, idx) => {
-                if (v == null) return `<td style="padding: 0.75rem; text-align: right;">—</td>`;
+                if (v == null) return `<td style="padding: 0.5rem 0.5rem; text-align: right; font-size: 0.85rem;">—</td>`;
 
                 // arrow vs previous non-null
                 let arrow = "→";
@@ -16612,7 +16616,7 @@ Final Score: ${score}/100`;
                 else if (metricKey === "avgPosition") formatted = `${v.toFixed(1)} ${arrowHtml}`;
                 else formatted = `${Math.round(v).toLocaleString()} ${arrowHtml}`;
 
-                return `<td style="padding: 0.75rem; text-align: right;">${formatted}</td>`;
+                return `<td style="padding: 0.5rem 0.5rem; text-align: right; font-size: 0.85rem;">${formatted}</td>`;
               })
               .join("");
 
@@ -17108,18 +17112,18 @@ Final Score: ${score}/100`;
         
         debugLog(`Money Pages Trend Chart: Starting with ${history.length} history records, lastGscTimeseriesDate: ${lastGscTimeseriesDate}`, 'info');
         
-        // Calculate the cutoff date for last 30 days
+        // Calculate the cutoff date for last 28 days (matches GSC data window)
         // Use the last GSC date if available, otherwise use today
         const cutoffDate = lastGscTimeseriesDate ? new Date(lastGscTimeseriesDate) : new Date();
-        const thirtyDaysAgo = new Date(cutoffDate);
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
+        const twentyEightDaysAgo = new Date(cutoffDate);
+        twentyEightDaysAgo.setDate(twentyEightDaysAgo.getDate() - 28);
+        const twentyEightDaysAgoStr = twentyEightDaysAgo.toISOString().split('T')[0];
         
-        debugLog(`Money Pages Trend Chart: Showing last 30 days up to ${cutoffDate.toISOString().split('T')[0]} (from ${thirtyDaysAgoStr})`, 'info');
+        debugLog(`Money Pages Trend Chart: Showing last 28 days up to ${cutoffDate.toISOString().split('T')[0]} (from ${twentyEightDaysAgoStr})`, 'info');
         
         // Filter history to only include:
         // 1. Dates up to the last GSC timeseries date
-        // 2. Dates within the last 30 days
+        // 2. Dates within the last 28 days
         // 3. EXCLUDE partial audits (isPartial=true) to prevent unnatural spikes
         let filteredHistory = history;
         if (lastGscTimeseriesDate) {
@@ -17134,22 +17138,22 @@ Final Score: ${score}/100`;
               return false;
             }
             
-            // Check if date is within last 30 days
-            const isWithin30Days = recordDate.localeCompare(thirtyDaysAgoStr) >= 0;
+            // Check if date is within last 28 days
+            const isWithin28Days = recordDate.localeCompare(twentyEightDaysAgoStr) >= 0;
             
             // Check if date is up to last GSC date
             const isUpToGscDate = recordDate.localeCompare(lastGscTimeseriesDate) <= 0;
             
-            const include = isWithin30Days && isUpToGscDate;
+            const include = isWithin28Days && isUpToGscDate;
             if (!include) {
-              debugLog(`Money Pages Trend: Excluding record with date ${recordDate} (30-day cutoff: ${thirtyDaysAgoStr}, last GSC date: ${lastGscTimeseriesDate})`, 'info');
+              debugLog(`Money Pages Trend: Excluding record with date ${recordDate} (28-day cutoff: ${twentyEightDaysAgoStr}, last GSC date: ${lastGscTimeseriesDate})`, 'info');
             }
             return include;
           });
-          debugLog(`Money Pages Trend: Filtered history from ${beforeFilter} to ${filteredHistory.length} records (last 30 days up to GSC date: ${lastGscTimeseriesDate}, excluding partial audits)`, 'info');
+          debugLog(`Money Pages Trend: Filtered history from ${beforeFilter} to ${filteredHistory.length} records (last 28 days up to GSC date: ${lastGscTimeseriesDate}, excluding partial audits)`, 'info');
           debugLog(`Money Pages Trend: Filtered dates: ${filteredHistory.map(r => r.date || r.audit_date || r.auditDate).join(', ')}`, 'info');
         } else {
-          // If no GSC date, just filter by last 30 days and exclude partial audits
+          // If no GSC date, just filter by last 28 days and exclude partial audits
           const beforeFilter = history.length;
           filteredHistory = history.filter(record => {
             const recordDate = record.date || record.audit_date || record.auditDate;
@@ -17161,10 +17165,10 @@ Final Score: ${score}/100`;
               return false;
             }
             
-            const isWithin30Days = recordDate.localeCompare(thirtyDaysAgoStr) >= 0;
-            return isWithin30Days;
+            const isWithin28Days = recordDate.localeCompare(twentyEightDaysAgoStr) >= 0;
+            return isWithin28Days;
           });
-          debugLog(`Money Pages Trend: Filtered history from ${beforeFilter} to ${filteredHistory.length} records (last 30 days, no GSC date limit, excluding partial audits)`, 'info');
+          debugLog(`Money Pages Trend: Filtered history from ${beforeFilter} to ${filteredHistory.length} records (last 28 days, no GSC date limit, excluding partial audits)`, 'info');
         }
         
         // Create a map of date -> record for quick lookup
@@ -17181,9 +17185,9 @@ Final Score: ${score}/100`;
         });
         debugLog(`Money Pages Trend: Created historyMap with ${historyMap.size} entries`, 'info');
         
-        // Generate complete date range for last 30 days (up to GSC date)
+        // Generate complete date range for last 28 days (up to GSC date)
         const endDate = lastGscTimeseriesDate ? new Date(lastGscTimeseriesDate + 'T00:00:00') : new Date();
-        const startDate = new Date(thirtyDaysAgo);
+        const startDate = new Date(twentyEightDaysAgo);
         const allDates = [];
         const currentDate = new Date(startDate);
         
@@ -17925,8 +17929,8 @@ Final Score: ${score}/100`;
                   <canvas id="money-kpi-sparkline" style="width: 100% !important;"></canvas>
                 </div>
 
-                <div class="table-wrapper" style="overflow-x: auto;">
-                  <table id="money-kpi-table" style="width: 100%; border-collapse: collapse;">
+                <div class="table-wrapper" style="overflow-x: auto; max-width: 100%;">
+                  <table id="money-kpi-table" style="min-width: 100%; border-collapse: collapse; table-layout: auto;">
                     <thead>
                       <tr id="money-kpi-header-row" style="background: #f1f5f9;">
                         <!-- Filled by JS -->
