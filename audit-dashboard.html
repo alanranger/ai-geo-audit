@@ -29999,6 +29999,8 @@ Final Score: ${score}/100`;
           
           // Use onclick - simpler and more reliable
           manageBtn.onclick = async function(e) {
+            console.log('[Optimisation] BUTTON CLICKED - onclick handler fired!');
+            console.log('[Optimisation] Manage button clicked!', { statusId, statusObj, hasAdminKey: window.hasAdminKey() });
             e.stopPropagation();
             e.preventDefault();
             
@@ -30008,21 +30010,28 @@ Final Score: ${score}/100`;
             }
             
             if (!statusId) {
+              console.error('[Optimisation] No statusId found!');
               alert('No task ID found. Please try refreshing the page.');
               return;
             }
             
+            console.log('[Optimisation] Checking if drawer function exists...', typeof window.openOptimisationTaskDrawer);
+            
             // Simple approach: just open the drawer with the status ID
             // The drawer function will handle loading tasks if needed
             if (typeof window.openOptimisationTaskDrawer === 'function') {
+              console.log('[Optimisation] Calling openOptimisationTaskDrawer with statusId:', statusId);
               try {
                 await window.openOptimisationTaskDrawer(statusId);
+                console.log('[Optimisation] Drawer function completed');
               } catch (error) {
                 console.error('[Optimisation] Error opening drawer:', error);
                 // Fallback to modal
+                console.log('[Optimisation] Falling back to modal');
                 window.openManageOptimisationModal(rowData, statusObj, taskTypeValue);
               }
             } else {
+              console.error('[Optimisation] Drawer function does not exist! Falling back to modal');
               // Fallback to modal if drawer function doesn't exist
               window.openManageOptimisationModal(rowData, statusObj, taskTypeValue);
             }
@@ -30031,6 +30040,11 @@ Final Score: ${score}/100`;
           // Verify button was created
           console.log('[Optimisation] Manage button created:', manageBtn, 'Status ID:', statusId);
           tdOptimisation.appendChild(manageBtn);
+          
+          // Test: Add a direct click listener to verify button is clickable
+          manageBtn.addEventListener('click', function testClick(e) {
+            console.log('[Optimisation] TEST: Button clicked via addEventListener!', e);
+          }, true); // Use capture phase
         }
         
         tr.appendChild(tdOptimisation);
