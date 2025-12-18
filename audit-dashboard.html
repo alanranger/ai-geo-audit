@@ -33163,7 +33163,7 @@ Final Score: ${score}/100`;
         rowsPerPage: 10
       };
       let domainStrengthFilterState = {
-        segment: 'your_site' // Default to "Your site"
+        segment: null // Show all domains by default
       };
       let domainStrengthExpanded = false; // Collapsed by default
 
@@ -33255,15 +33255,10 @@ Final Score: ${score}/100`;
         const selfDomain = getSelfDomainForDomainStrength();
         debugLog(`[DomainStrength] Self domain: ${selfDomain}`, 'info');
         
-        // Filter by segment if filter is set
-        if (domainStrengthFilterState.segment) {
-          items = items.filter((it) => {
-            const domainType = it?.domain_type || it?.segment || 'unmapped';
-            return domainType === domainStrengthFilterState.segment;
-          });
-        }
-        
+        // Don't filter - show all domains
+        // Separate your site from competitors
         const selfItem = items.find((it) => String(it?.domain || '') === selfDomain) || null;
+        const competitorItems = items.filter((it) => String(it?.domain || '') !== selfDomain);
         
         if (selfItem && selfItem.latest) {
           debugLog(`[DomainStrength] Self item found: domain=${selfItem.domain}, score=${selfItem.latest.score}, snapshotDate=${selfItem.latest.snapshotDate}, createdAt=${selfItem.latest.createdAt}`, 'info');
@@ -33333,15 +33328,26 @@ Final Score: ${score}/100`;
           `;
         }
 
-        // Sort rows using sortDomainStrengthRows
-        let sorted = sortDomainStrengthRows(items);
-
-        // Always put alanranger.com first, regardless of sort order
-        const selfIndex = sorted.findIndex((it) => String(it?.domain || '') === selfDomain);
-        if (selfIndex > 0) {
-          const selfRow = sorted.splice(selfIndex, 1)[0];
-          sorted.unshift(selfRow);
+        // Sort competitors by strength score (highest to lowest)
+        const sortedCompetitors = sortDomainStrengthRows(competitorItems);
+        // Reverse if needed to get highest first (default sort is usually asc, we want desc for score)
+        if (domainStrengthSortState.column === 'score' && domainStrengthSortState.direction === 'asc') {
+          sortedCompetitors.reverse();
+        } else if (domainStrengthSortState.column !== 'score') {
+          // For non-score sorts, sort by score desc as secondary sort
+          sortedCompetitors.sort((a, b) => {
+            const aScore = a?.latest?.score ?? 0;
+            const bScore = b?.latest?.score ?? 0;
+            return bScore - aScore; // Descending
+          });
         }
+
+        // Build final sorted array: your site first, then top competitors
+        let sorted = [];
+        if (selfItem) {
+          sorted.push(selfItem);
+        }
+        sorted.push(...sortedCompetitors);
 
         // Calculate pagination
         const totalRows = sorted.length;
@@ -33355,8 +33361,22 @@ Final Score: ${score}/100`;
         const paginatedRows = sorted.slice(startIdx, endIdx);
 
         // Determine visible rows based on expand/collapse state
-        // Show first 3 rows by default (header + 3 data rows)
-        const visibleRows = domainStrengthExpanded ? paginatedRows : paginatedRows.slice(0, 3);
+        // Always show your site (first row), then top 2 competitors = 3 rows total
+        // If your site is not in paginated rows, show first 3 rows
+        const selfRowIndex = paginatedRows.findIndex((it) => String(it?.domain || '') === selfDomain);
+        let visibleRows;
+        if (domainStrengthExpanded) {
+          visibleRows = paginatedRows;
+        } else {
+          if (selfRowIndex >= 0) {
+            // Your site is in the paginated rows
+            // Show your site + next 2 rows (competitors)
+            visibleRows = paginatedRows.slice(0, Math.min(selfRowIndex + 3, paginatedRows.length));
+          } else {
+            // Your site not in current page, just show first 3
+            visibleRows = paginatedRows.slice(0, 3);
+          }
+        }
         const hiddenRowsCount = paginatedRows.length - visibleRows.length;
 
         tbody.innerHTML = '';
