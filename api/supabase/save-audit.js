@@ -855,24 +855,46 @@ export default async function handler(req, res) {
                   }
                 }
                 
-                // Batch update records
+                // Batch update records (non-blocking - don't wait for completion to avoid timeout)
                 if (updates.length > 0) {
-                  console.log(`[Supabase Save] Updating ${updates.length} audit date(s) with calculated money_segment_metrics from timeseries`);
-                  for (const update of updates) {
-                    const updateUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${update.audit_date}`;
-                    await fetch(updateUrl, {
-                      method: 'PATCH',
-                      headers: {
-                        'Content-Type': 'application/json',
-                        'apikey': supabaseKey,
-                        'Authorization': `Bearer ${supabaseKey}`
-                      },
-                      body: JSON.stringify({
-                        money_segment_metrics: ensureJson(update.money_segment_metrics)
-                      })
-                    });
+                  console.log(`[Supabase Save] Queueing ${updates.length} audit date(s) for money_segment_metrics update (non-blocking)`);
+                  
+                  // Run updates in background without blocking the main save
+                  // Limit to 10 updates at a time to avoid timeout
+                  const maxUpdates = Math.min(updates.length, 10);
+                  const updatesToProcess = updates.slice(0, maxUpdates);
+                  
+                  // Process updates without awaiting (fire and forget)
+                  Promise.allSettled(
+                    updatesToProcess.map(update => {
+                      const updateUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${update.audit_date}`;
+                      return fetch(updateUrl, {
+                        method: 'PATCH',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          'apikey': supabaseKey,
+                          'Authorization': `Bearer ${supabaseKey}`
+                        },
+                        body: JSON.stringify({
+                          money_segment_metrics: ensureJson(update.money_segment_metrics)
+                        })
+                      }).then(res => {
+                        if (res.ok) {
+                          console.log(`[Supabase Save] ✓ Updated money_segment_metrics for ${update.audit_date}`);
+                        } else {
+                          console.warn(`[Supabase Save] ⚠ Failed to update ${update.audit_date}: ${res.status}`);
+                        }
+                      }).catch(err => {
+                        console.warn(`[Supabase Save] ⚠ Error updating ${update.audit_date}: ${err.message}`);
+                      });
+                    })
+                  ).then(() => {
+                    console.log(`[Supabase Save] ✓ Completed ${updatesToProcess.length}/${updates.length} money_segment_metrics updates`);
+                  });
+                  
+                  if (updates.length > maxUpdates) {
+                    console.log(`[Supabase Save] ⚠ Limited to ${maxUpdates} updates to avoid timeout (${updates.length - maxUpdates} remaining)`);
                   }
-                  console.log(`[Supabase Save] ✓ Calculated and saved money_segment_metrics for ${updates.length} date(s) from timeseries data`);
                 }
               }
             }
