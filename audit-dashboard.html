@@ -31786,10 +31786,45 @@ Final Score: ${score}/100`;
             };
             tdOptimisation.appendChild(trackBtn);
             
-            // Append the optimisation cell to the row, then append row to tbody
             tr.appendChild(tdOptimisation);
             tbody.appendChild(tr);
             return; // Exit early, don't show Manage button
+          }
+          
+          // Handle 'deleted' status gracefully (shouldn't happen with hard delete, but safety check)
+          if (status.status === 'deleted') {
+            // Show "Not tracked" + Track button
+            const notTrackedBadge = document.createElement("span");
+            notTrackedBadge.className = "ranking-badge ranking-badge--segment-general";
+            notTrackedBadge.style.marginRight = "0.5rem";
+            notTrackedBadge.textContent = "Not tracked";
+            notTrackedBadge.title = "No optimisation task exists for this keyword + URL.";
+            tdOptimisation.appendChild(notTrackedBadge);
+            
+            const trackBtn = document.createElement("button");
+            trackBtn.className = "btn btn-small";
+            trackBtn.style.padding = "0.25rem 0.5rem";
+            trackBtn.style.fontSize = "0.75rem";
+            trackBtn.textContent = "Track";
+            trackBtn.title = "Create a task for this keyword + URL and capture baseline metrics.";
+            if (!window.hasAdminKey()) {
+              trackBtn.disabled = true;
+              trackBtn.title = "Admin key required - set your admin key in the configuration section";
+              trackBtn.style.opacity = "0.5";
+              trackBtn.style.cursor = "not-allowed";
+            }
+            trackBtn.onclick = (e) => {
+              e.stopPropagation();
+              if (!window.hasAdminKey()) {
+                alert('Admin key required. Please set your admin key in the "Optimisation Tracking Security" section.');
+                return;
+              }
+              window.openTrackKeywordModal(row, taskType);
+            };
+            tdOptimisation.appendChild(trackBtn);
+            tr.appendChild(tdOptimisation);
+            tbody.appendChild(tr);
+            return; // Exit early
           }
           
           // Tracked - show status pill + metadata + Manage button
