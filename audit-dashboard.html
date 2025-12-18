@@ -16349,7 +16349,7 @@ Final Score: ${score}/100`;
        * @returns {{ labels: string[], segments: Record<string, number[]> }}
        */
       function buildMoneyKpiHistory(history, metricKey) {
-        // Use last 28 days (matching Performance Trends charts) with 15 evenly spaced date points
+        // Use last 28 days (matching Performance Trends charts) with 8 weekly date points (28 days / 4 = 7 weeks)
         // Get the last GSC timeseries date (same logic as Performance Trends)
         let lastGscTimeseriesDate = window.lastGscTimeseriesDate || null;
         
@@ -16374,13 +16374,14 @@ Final Score: ${score}/100`;
         startDate.setHours(0, 0, 0, 0);
         endDate.setHours(0, 0, 0, 0);
         
-        // Generate 15 evenly spaced date points across the 28-day range
+        // Generate 8 weekly date points across the 28-day range (28 days / 4 = 7 weeks, so 8 points)
         // Range is from startDate to endDate (inclusive) = 28 days total
         const datePoints = [];
         const totalDays = 28; // startDate to endDate inclusive
-        const step = (totalDays - 1) / 14; // 15 points = 14 intervals across 28 days (0 to 27)
+        const numPoints = 8; // Weekly points: 7 intervals of 4 days each
+        const step = (totalDays - 1) / (numPoints - 1); // 8 points = 7 intervals across 28 days
         
-        for (let i = 0; i < 15; i++) {
+        for (let i = 0; i < numPoints; i++) {
           const date = new Date(startDate);
           date.setDate(date.getDate() + Math.round(i * step));
           date.setHours(0, 0, 0, 0);
@@ -17273,29 +17274,37 @@ Final Score: ${score}/100`;
         });
         debugLog(`Money Pages Trend: Created historyMap with ${historyMap.size} entries`, 'info');
         
-        // Generate complete date range for last 28 days (up to GSC date)
+        // Generate 8 weekly date points for last 28 days (up to GSC date)
+        // 28 days / 4 = 7 weeks, so 8 points (one per week including start and end)
         const endDate = lastGscTimeseriesDate ? new Date(lastGscTimeseriesDate + 'T00:00:00') : new Date();
         const startDate = new Date(twentyEightDaysAgo);
         const allDates = [];
-        const currentDate = new Date(startDate);
+        const numPoints = 8; // Weekly points: 7 intervals of 4 days each
+        const totalDays = 28;
+        const step = (totalDays - 1) / (numPoints - 1); // 8 points = 7 intervals
         
         // Ensure we're comparing dates correctly (set time to midnight)
         endDate.setHours(0, 0, 0, 0);
         startDate.setHours(0, 0, 0, 0);
-        currentDate.setHours(0, 0, 0, 0);
         
-        while (currentDate <= endDate) {
-          const dateStr = currentDate.toISOString().split('T')[0];
+        // Generate weekly date points
+        for (let i = 0; i < numPoints; i++) {
+          const date = new Date(startDate);
+          date.setDate(date.getDate() + Math.round(i * step));
+          date.setHours(0, 0, 0, 0);
+          const dateStr = date.toISOString().split('T')[0];
           allDates.push(dateStr);
-          const nextDate = new Date(currentDate);
-          nextDate.setDate(nextDate.getDate() + 1);
-          currentDate.setTime(nextDate.getTime());
         }
         
-        debugLog(`Money Pages Trend: Generated ${allDates.length} dates in range (${allDates[0]} to ${allDates[allDates.length - 1]})`, 'info');
+        // Ensure last point is exactly endDate
+        if (allDates.length > 0) {
+          allDates[allDates.length - 1] = endDate.toISOString().split('T')[0];
+        }
+        
+        debugLog(`Money Pages Trend: Generated ${allDates.length} weekly date points in range (${allDates[0]} to ${allDates[allDates.length - 1]})`, 'info');
         debugLog(`Money Pages Trend: Date range: startDate=${startDate.toISOString().split('T')[0]}, endDate=${endDate.toISOString().split('T')[0]}, twentyEightDaysAgoStr=${twentyEightDaysAgoStr}`, 'info');
         
-        // Extract money pages trend data, filling in all dates
+        // Extract money pages trend data, filling in weekly dates
         const labels = [];
         const clicksData = [];
         const impressionsData = [];
@@ -17316,7 +17325,25 @@ Final Score: ${score}/100`;
           const date = new Date(dateStr);
           labels.push(date.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' }));
           
-          const record = historyMap.get(dateStr);
+          // For weekly points, find the nearest audit record (exact match or closest before this date)
+          let record = historyMap.get(dateStr);
+          if (!record) {
+            // Find the closest audit date before or on this weekly point date
+            const weeklyDate = new Date(dateStr);
+            let closestDate = null;
+            let closestRecord = null;
+            
+            historyMap.forEach((rec, recDateStr) => {
+              const recDate = new Date(recDateStr);
+              if (recDate <= weeklyDate && (!closestDate || recDate > closestDate)) {
+                closestDate = recDate;
+                closestRecord = rec;
+              }
+            });
+            
+            record = closestRecord;
+          }
+          
           if (record) {
             // Skip partial audits or audits with all-zero metrics (like Dec 15)
             // Check if this is a partial audit or has invalid zero data
