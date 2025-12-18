@@ -63,6 +63,10 @@ active_cycle_info as (
     c.status as cycle_status,
     c.objective_title,
     c.primary_kpi,
+    c.target_value,
+    c.target_direction,
+    c.timeframe_days,
+    c.plan,
     c.start_date as cycle_start_date
   from public.optimisation_task_cycles c
   inner join public.optimisation_tasks t on t.active_cycle_id = c.id
@@ -101,6 +105,10 @@ ranked as (
     coalesce(cc.cycle_count, 0) as cycle_count,
     ac.objective_title,
     ac.primary_kpi,
+    ac.target_value,
+    ac.target_direction,
+    ac.timeframe_days,
+    ac.plan,
     ac.cycle_start_date,
     -- baseline = earliest event in current cycle that has metrics (prefer created)
     (
