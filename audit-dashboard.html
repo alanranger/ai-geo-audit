@@ -2506,6 +2506,13 @@
             } else {
               // Fallback: reload the page
               if (confirm('Admin key saved! Refresh the page to enable Track buttons?')) {
+                // Preserve current tab state before reload
+                const currentPanel = document.querySelector('.aigeo-panel.is-active');
+                if (currentPanel) {
+                  const panelId = currentPanel.dataset.panel;
+                  sessionStorage.setItem('activeTab', panelId);
+                  window.location.hash = '#' + panelId;
+                }
                 location.reload();
               }
             }
@@ -2535,6 +2542,28 @@
         function updateAdminKeyStatus() {
           const statusEl = document.getElementById('admin-key-status');
           if (!statusEl) return;
+          
+          // Safety check: ensure hasAdminKey function is loaded
+          if (typeof window.hasAdminKey !== 'function') {
+            // Retry after a short delay if function not yet loaded
+            setTimeout(() => {
+              if (typeof window.hasAdminKey === 'function') {
+                updateAdminKeyStatus();
+              } else {
+                // If still not loaded after retry, show warning
+                statusEl.innerHTML = '<span style="color: #f59e0b;">⏳ Loading admin key functions...</span>';
+                // Try one more time after longer delay
+                setTimeout(() => {
+                  if (typeof window.hasAdminKey === 'function') {
+                    updateAdminKeyStatus();
+                  } else {
+                    statusEl.innerHTML = '<span style="color: #ef4444;">⚠ Admin key functions not loaded — please refresh the page</span>';
+                  }
+                }, 1000);
+              }
+            }, 100);
+            return;
+          }
           
           const hasKey = window.hasAdminKey();
           if (hasKey) {
@@ -3929,7 +3958,36 @@
 
       // Populate fields
       document.getElementById('track-keyword-text').textContent = row.keyword;
-      document.getElementById('track-url-text').textContent = cleanedUrl; // Use .textContent for div
+      
+      // Make URL clickable in Track modal
+      const trackUrlContainer = document.getElementById('track-url-text');
+      trackUrlContainer.innerHTML = ''; // Clear existing content
+      if (cleanedUrl) {
+        // Ensure URL has protocol
+        let fullUrl = cleanedUrl;
+        if (!fullUrl.startsWith('http://') && !fullUrl.startsWith('https://')) {
+          fullUrl = 'https://' + fullUrl;
+        }
+        const urlLink = document.createElement('a');
+        urlLink.href = fullUrl;
+        urlLink.target = '_blank';
+        urlLink.rel = 'noopener noreferrer';
+        urlLink.textContent = cleanedUrl;
+        urlLink.style.color = '#0284c7';
+        urlLink.style.textDecoration = 'none';
+        urlLink.style.fontWeight = '600';
+        urlLink.style.wordBreak = 'break-all';
+        urlLink.addEventListener('mouseenter', () => {
+          urlLink.style.textDecoration = 'underline';
+        });
+        urlLink.addEventListener('mouseleave', () => {
+          urlLink.style.textDecoration = 'none';
+        });
+        trackUrlContainer.appendChild(urlLink);
+      } else {
+        trackUrlContainer.textContent = 'No URL available';
+      }
+      
       document.getElementById('track-task-type').value = taskType;
       document.getElementById('track-status').value = 'planned';
       document.getElementById('track-title').value = '';
@@ -4013,6 +4071,9 @@
           await window.renderRankingAiTab();
         } else {
           console.warn('[Optimisation] renderRankingAiTab not found, refreshing page');
+          // Preserve Ranking & AI tab state before reload
+          sessionStorage.setItem('activeTab', 'ranking');
+          window.location.hash = '#ranking';
           location.reload();
         }
       } catch (error) {
@@ -4031,7 +4092,37 @@
 
       // Populate read-only fields
       document.getElementById('manage-keyword-text').textContent = row.keyword;
-      document.getElementById('manage-url-text').textContent = window.cleanUrlForKey(row.best_url || row.targetUrl || row.ranking_url || '');
+      
+      // Make URL clickable in Manage modal
+      const manageUrlContainer = document.getElementById('manage-url-text');
+      const rawUrl = row.best_url || row.targetUrl || row.ranking_url || '';
+      const urlText = window.cleanUrlForDisplay ? window.cleanUrlForDisplay(rawUrl) : window.cleanUrlForKey(rawUrl);
+      manageUrlContainer.innerHTML = ''; // Clear existing content
+      if (urlText) {
+        // Ensure URL has protocol
+        let fullUrl = urlText;
+        if (!fullUrl.startsWith('http://') && !fullUrl.startsWith('https://')) {
+          fullUrl = 'https://' + fullUrl;
+        }
+        const urlLink = document.createElement('a');
+        urlLink.href = fullUrl;
+        urlLink.target = '_blank';
+        urlLink.rel = 'noopener noreferrer';
+        urlLink.textContent = urlText;
+        urlLink.style.color = '#0284c7';
+        urlLink.style.textDecoration = 'none';
+        urlLink.style.wordBreak = 'break-all';
+        urlLink.addEventListener('mouseenter', () => {
+          urlLink.style.textDecoration = 'underline';
+        });
+        urlLink.addEventListener('mouseleave', () => {
+          urlLink.style.textDecoration = 'none';
+        });
+        manageUrlContainer.appendChild(urlLink);
+      } else {
+        manageUrlContainer.textContent = 'No URL available';
+      }
+      
       document.getElementById('manage-task-type-text').textContent = taskType;
       document.getElementById('manage-status-text').textContent = status.status;
       document.getElementById('manage-cycle-text').textContent = status.cycle_active || 1;
@@ -4118,6 +4209,9 @@
           await window.renderRankingAiTab();
         } else {
           console.warn('[Optimisation] renderRankingAiTab not found, refreshing page');
+          // Preserve Ranking & AI tab state before reload
+          sessionStorage.setItem('activeTab', 'ranking');
+          window.location.hash = '#ranking';
           location.reload();
         }
       } catch (error) {
@@ -4178,6 +4272,9 @@
           await window.renderRankingAiTab();
         } else {
           console.warn('[Optimisation] renderRankingAiTab not found, refreshing page');
+          // Preserve Ranking & AI tab state before reload
+          sessionStorage.setItem('activeTab', 'ranking');
+          window.location.hash = '#ranking';
           location.reload();
         }
       } catch (error) {
@@ -4237,6 +4334,9 @@
           await window.renderRankingAiTab();
         } else {
           console.warn('[Optimisation] renderRankingAiTab not found, refreshing page');
+          // Preserve Ranking & AI tab state before reload
+          sessionStorage.setItem('activeTab', 'ranking');
+          window.location.hash = '#ranking';
           location.reload();
         }
       } catch (error) {
@@ -30259,12 +30359,52 @@ Final Score: ${score}/100`;
 
     // Tab switching for sidebar navigation - Optimized for performance (INP)
     (function() {
+      // Restore tab state on page load (from sessionStorage or URL hash)
+      function restoreTabState() {
+        // Check URL hash first (more reliable)
+        const hash = window.location.hash;
+        if (hash && hash.startsWith('#')) {
+          const panelId = hash.substring(1);
+          const panel = document.querySelector(`[data-panel="${panelId}"]`);
+          if (panel) {
+            setActivePanel(panelId);
+            ensurePanelRendered(panelId);
+            return;
+          }
+        }
+        
+        // Fallback to sessionStorage
+        const savedTab = sessionStorage.getItem('activeTab');
+        if (savedTab) {
+          const panel = document.querySelector(`[data-panel="${savedTab}"]`);
+          if (panel) {
+            setActivePanel(savedTab);
+            ensurePanelRendered(savedTab);
+            // Update URL hash to match
+            window.location.hash = '#' + savedTab;
+            return;
+          }
+        }
+      }
+      
+      // Restore tab state when DOM is ready
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', restoreTabState);
+      } else {
+        // DOM already loaded, restore immediately
+        restoreTabState();
+      }
+
       const navItems = document.querySelectorAll(".aigeo-nav-item");
 
       navItems.forEach(btn => {
         btn.addEventListener("click", () => {
           const panelId = btn.getAttribute("data-panel");
           if (!panelId) return;
+
+          // Store active tab in sessionStorage
+          sessionStorage.setItem('activeTab', panelId);
+          window.location.hash = '#' + panelId;
 
           // Fast UI switch first - no heavy work here
           setActivePanel(panelId);
