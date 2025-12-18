@@ -49,9 +49,10 @@ export default async function handler(req, res) {
       if (user) userId = user.id;
     }
 
+    // For single-user admin key approach, use a placeholder UUID if no auth
+    // This is a well-known UUID for "system" user in single-user apps
     if (!userId) {
-      // For now, allow anonymous creation (you may want to require auth)
-      // In production, you'd require authentication
+      userId = '00000000-0000-0000-0000-000000000000';
     }
 
     // Insert task

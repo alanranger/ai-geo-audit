@@ -48,6 +48,11 @@ export default async function handler(req, res) {
       if (user) userId = user.id;
     }
 
+    // For single-user admin key approach, use a placeholder UUID if no auth
+    if (!userId) {
+      userId = '00000000-0000-0000-0000-000000000000';
+    }
+
     // Get current task
     const { data: currentTask, error: fetchError } = await supabase
       .from('optimisation_tasks')
