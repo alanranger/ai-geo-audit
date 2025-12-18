@@ -16435,7 +16435,18 @@ Final Score: ${score}/100`;
           productPages: null
         };
         
-        // Process each of the 15 date points
+        // First, find the first available audit record (for backward-filling the first point)
+        let firstAvailableAudit = null;
+        let firstAvailableDate = null;
+        for (const [dateStr, record] of historyMap.entries()) {
+          if (record.metrics && !record.isPartial) {
+            firstAvailableDate = dateStr;
+            firstAvailableAudit = record;
+            break;
+          }
+        }
+        
+        // Process each of the 8 weekly date points
         for (const datePoint of datePoints) {
           // Find the closest audit record for this date (or exact match)
           let audit = historyMap.get(datePoint);
@@ -16460,6 +16471,12 @@ Final Score: ${score}/100`;
             if (closestDate) {
               audit = historyMap.get(closestDate);
             }
+          }
+          
+          // If still no audit found and this is the first point, use the first available audit (backward-fill)
+          if (!audit && datePoint === datePoints[0] && firstAvailableAudit) {
+            audit = firstAvailableAudit;
+            debugLog(`[KPI Tracker] First date point ${datePoint} has no data, backward-filling from first available audit ${firstAvailableDate}`, 'info');
           }
           
           const m = audit ? audit.metrics : null;
@@ -17321,7 +17338,23 @@ Final Score: ${score}/100`;
         let lastCtr = null;
         let lastBehaviour = null;
         
-        allDates.forEach(dateStr => {
+        // Find the first available audit record (for backward-filling the first point)
+        let firstAvailableRecord = null;
+        let firstAvailableDateStr = null;
+        for (const [dateStr, record] of historyMap.entries()) {
+          if (!record.isPartial) {
+            const segmentMetrics = record.moneySegmentMetrics || {};
+            const allMoney = segmentMetrics.allMoney || {};
+            const hasZeroMetrics = (allMoney.clicks === 0 && allMoney.impressions === 0 && allMoney.ctr === 0);
+            if (!hasZeroMetrics) {
+              firstAvailableRecord = record;
+              firstAvailableDateStr = dateStr;
+              break;
+            }
+          }
+        }
+        
+        allDates.forEach((dateStr, dateIndex) => {
           const date = new Date(dateStr);
           labels.push(date.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' }));
           
@@ -17342,6 +17375,12 @@ Final Score: ${score}/100`;
             });
             
             record = closestRecord;
+          }
+          
+          // If still no record found and this is the first date point, use the first available record (backward-fill)
+          if (!record && dateIndex === 0 && firstAvailableRecord) {
+            record = firstAvailableRecord;
+            debugLog(`Money Pages Trend: First date point ${dateStr} has no data, backward-filling from first available audit ${firstAvailableDateStr}`, 'info');
           }
           
           if (record) {
