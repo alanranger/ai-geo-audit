@@ -2493,7 +2493,25 @@
           window.setAdminKey(key);
           updateAdminKeyStatus();
           input.value = ''; // Clear input for security
-          alert('Admin key saved to session storage');
+          
+          // Re-render Ranking & AI table to enable Track buttons
+          // Check if Ranking & AI tab is active
+          const rankingTab = document.querySelector('[data-panel="ranking"]');
+          if (rankingTab && rankingTab.classList.contains('is-active')) {
+            // Tab is active, try to refresh the table
+            if (typeof renderRankingAiTab === 'function') {
+              renderRankingAiTab().catch(err => console.warn('Failed to refresh table:', err));
+            } else if (typeof window.renderRankingAiTab === 'function') {
+              window.renderRankingAiTab().catch(err => console.warn('Failed to refresh table:', err));
+            } else {
+              // Fallback: reload the page
+              if (confirm('Admin key saved! Refresh the page to enable Track buttons?')) {
+                location.reload();
+              }
+            }
+          } else {
+            alert('Admin key saved! Switch to the "Ranking & AI" tab to see enabled Track buttons.');
+          }
         }
 
         function clearAdminKeyUI() {
@@ -2501,6 +2519,16 @@
             window.clearAdminKey();
             document.getElementById('admin-key-input').value = '';
             updateAdminKeyStatus();
+            
+            // Re-render Ranking & AI table to disable Track buttons
+            const rankingTab = document.querySelector('[data-panel="ranking"]');
+            if (rankingTab && rankingTab.classList.contains('is-active')) {
+              if (typeof renderRankingAiTab === 'function') {
+                renderRankingAiTab().catch(err => console.warn('Failed to refresh table:', err));
+              } else if (typeof window.renderRankingAiTab === 'function') {
+                window.renderRankingAiTab().catch(err => console.warn('Failed to refresh table:', err));
+              }
+            }
           }
         }
 
