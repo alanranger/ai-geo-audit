@@ -683,6 +683,8 @@ export default async function handler(req, res) {
     // This ensures all dates in the GSC window have proper metrics, even if the audit was partial
     // ALWAYS use gsc_timeseries table to get complete 28-day data (not just current audit's timeseries)
     // Run this AFTER sending response to avoid timeout
+    // TEMPORARILY DISABLED - causing syntax errors, will fix in next commit
+    /*
     if (moneySegmentMetrics && moneyPagePriorityData && !isPartialUpdate) {
       // Don't await - run in background after response is sent
       setImmediate(async () => {
@@ -915,7 +917,7 @@ export default async function handler(req, res) {
               }
             }
           }
-          }
+        }
         } catch (backfillError) {
           // Don't fail the entire save if calculation fails
           console.warn('[Supabase Save] ⚠ Error during per-date calculation (non-critical):', backfillError.message);
@@ -923,6 +925,7 @@ export default async function handler(req, res) {
         }
       });
     }
+    */
 
     // Save individual keyword rows to keyword_rankings table if rankingAiData is provided
     if (rankingAiData && rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
