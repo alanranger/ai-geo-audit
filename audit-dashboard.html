@@ -14078,8 +14078,8 @@ Final Score: ${score}/100`;
                   <canvas id="money-kpi-sparkline" style="width: 100% !important;"></canvas>
                 </div>
 
-                <div class="table-wrapper" style="overflow-x: auto; max-width: 100%;">
-                  <table id="money-kpi-table" style="min-width: 100%; border-collapse: collapse; table-layout: auto;">
+                <div class="table-wrapper" style="overflow-x: auto; max-width: 100%; width: 100%;">
+                  <table id="money-kpi-table" style="width: max-content; min-width: 100%; border-collapse: collapse; table-layout: fixed;">
                     <thead>
                       <tr id="money-kpi-header-row" style="background: #f1f5f9;">
                         <!-- Filled by JS -->
@@ -16407,10 +16407,10 @@ Final Score: ${score}/100`;
           }
         }
         
-        // Create labels using date format (MM-DD for compact display)
+        // Create labels using same format as Performance Trends charts (e.g., "17 Nov", "15 Dec")
         const labels = datePoints.map(dateStr => {
-          const parts = dateStr.split('-');
-          return `${parts[1]}-${parts[2]}`;
+          const date = new Date(dateStr + 'T00:00:00');
+          return date.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' });
         });
         
         const segments = {
@@ -16501,7 +16501,7 @@ Final Score: ${score}/100`;
           }
         }
 
-        return { labels, segments };
+        return { labels, segments, datePoints };
       }
       
       /**
@@ -16585,13 +16585,13 @@ Final Score: ${score}/100`;
           });
         }
 
-        // Header with sortable columns - use shorter date format (MM-DD) to fit all 12 columns
+        // Header with sortable columns - use same format as chart labels (e.g., "17 Nov")
         tableHead.innerHTML = `
           <th style="padding: 0.5rem 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none; white-space: nowrap;" data-sort="segment" title="Money page segment type: All money pages, Landing pages (collection/category), Event pages (workshops/events), or Product pages (services/products). Click to sort.">Segment${sortArrow('segment')}</th>
           ${labels.map((label, idx) => {
-            // Convert YYYY-MM-DD to MM-DD for compact display
-            const shortLabel = label.includes('-') ? label.split('-').slice(1).join('-') : label;
-            return `<th style="padding: 0.5rem 0.5rem; text-align: right; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none; white-space: nowrap; font-size: 0.85rem;" data-sort="month_${idx}" title="Value for ${label}. Click to sort by this date.">${shortLabel}${sortArrow(`month_${idx}`)}</th>`;
+            // Labels are already in "17 Nov" format from buildMoneyKpiHistory
+            const fullDate = datePoints[idx] || label;
+            return `<th style="padding: 0.4rem 0.3rem; text-align: right; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none; white-space: nowrap; font-size: 0.75rem; min-width: 50px;" data-sort="month_${idx}" title="Value for ${fullDate}. Click to sort by this date.">${label}${sortArrow(`month_${idx}`)}</th>`;
           }).join("")}
           <th style="padding: 0.5rem 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none; white-space: nowrap;" data-sort="trend" title="Overall trend from first to last data point. ↑ = improving, ↓ = declining, → = stable. For Avg Position, lower is better so trend is inverted. Click to sort.">Trend${sortArrow('trend')}</th>
         `;
@@ -18006,8 +18006,8 @@ Final Score: ${score}/100`;
                   <canvas id="money-kpi-sparkline" style="width: 100% !important;"></canvas>
                 </div>
 
-                <div class="table-wrapper" style="overflow-x: auto; max-width: 100%;">
-                  <table id="money-kpi-table" style="min-width: 100%; border-collapse: collapse; table-layout: auto;">
+                <div class="table-wrapper" style="overflow-x: auto; max-width: 100%; width: 100%;">
+                  <table id="money-kpi-table" style="width: max-content; min-width: 100%; border-collapse: collapse; table-layout: fixed;">
                     <thead>
                       <tr id="money-kpi-header-row" style="background: #f1f5f9;">
                         <!-- Filled by JS -->
