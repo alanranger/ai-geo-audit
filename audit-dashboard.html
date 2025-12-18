@@ -5996,15 +5996,20 @@
 
       window.optimisationModuleState.currentTaskId = taskId;
       
-      // Find task
+      // Always reload tasks to ensure we have latest goal_state from the view
+      // This ensures the badge uses the correct state even if migrations haven't been run
+      if (typeof window.loadAllOptimisationTasks === 'function') {
+        await window.loadAllOptimisationTasks();
+      }
+      
+      // Find task (after reload to ensure fresh data)
       let task = window.optimisationModuleState.allTasks.find(t => t.id === taskId);
       
-      // If task not found, try loading tasks (even if array isn't empty - task might be newly created)
+      // If task still not found, error
       if (!task) {
-        if (typeof window.loadAllOptimisationTasks === 'function') {
-          await window.loadAllOptimisationTasks();
-          task = window.optimisationModuleState.allTasks.find(t => t.id === taskId);
-        }
+        console.error('[Optimisation Drawer] Task not found after reload:', taskId);
+        alert(`Task not found (ID: ${taskId}). Please try refreshing the page.`);
+        return;
       }
       
       if (!task) {
