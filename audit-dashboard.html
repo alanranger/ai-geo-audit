@@ -2498,6 +2498,17 @@
           updateAdminKeyStatus();
           input.value = ''; // Clear input for security
           
+          // Clear auth error and reload optimisation tasks if on that tab
+          if (window.optimisationModuleState) {
+            window.optimisationModuleState.authError = null;
+            const optimisationTab = document.querySelector('[data-panel="optimisation"]');
+            if (optimisationTab && optimisationTab.classList.contains('is-active')) {
+              if (typeof window.loadAllOptimisationTasks === 'function') {
+                window.loadAllOptimisationTasks();
+              }
+            }
+          }
+          
           // Re-render Ranking & AI table to enable Track buttons
           // Check if Ranking & AI tab is active
           const rankingTab = document.querySelector('[data-panel="ranking"]');
@@ -5019,7 +5030,8 @@
       allTasks: [],
       filteredTasks: [],
       activeTab: 'active',
-      currentTaskId: null
+      currentTaskId: null,
+      authError: null
     };
     
     // Sorting state
@@ -5037,6 +5049,16 @@
     // Load all optimisation tasks
     window.loadAllOptimisationTasks = async function loadAllOptimisationTasks() {
       try {
+        // Check if admin key is set
+        if (!window.hasAdminKey || !window.hasAdminKey()) {
+          window.optimisationModuleState.allTasks = [];
+          window.optimisationModuleState.filteredTasks = [];
+          window.optimisationModuleState.authError = 'Admin key not set. Please set your admin key in the Configuration section.';
+          updateOptimisationSummaryCards();
+          renderOptimisationTasksTable();
+          return [];
+        }
+
         const headers = window.getOptimisationHeaders();
         const response = await fetch(apiUrl('/api/optimisation/tasks'), {
           method: 'GET',
@@ -5044,8 +5066,20 @@
         });
 
         if (!response.ok) {
-          throw new Error(`Failed to load tasks: ${response.status}`);
+          if (response.status === 401) {
+            window.optimisationModuleState.authError = 'Unauthorized - admin key missing or invalid. Please check your admin key in the Configuration section.';
+          } else {
+            window.optimisationModuleState.authError = `Failed to load tasks (${response.status}). Please try refreshing the page.`;
+          }
+          window.optimisationModuleState.allTasks = [];
+          window.optimisationModuleState.filteredTasks = [];
+          updateOptimisationSummaryCards();
+          renderOptimisationTasksTable();
+          return [];
         }
+
+        // Clear any previous auth errors
+        window.optimisationModuleState.authError = null;
 
         const data = await response.json();
         window.optimisationModuleState.allTasks = data.tasks || [];
@@ -5057,6 +5091,11 @@
         return window.optimisationModuleState.allTasks;
       } catch (error) {
         console.error('[Optimisation Module] Error loading tasks:', error);
+        window.optimisationModuleState.allTasks = [];
+        window.optimisationModuleState.filteredTasks = [];
+        window.optimisationModuleState.authError = error.message || 'Failed to load tasks. Please try refreshing the page.';
+        updateOptimisationSummaryCards();
+        renderOptimisationTasksTable();
         return [];
       }
     };
@@ -5178,6 +5217,18 @@
       const paginatedTasks = tasks.slice(startIdx, endIdx);
 
       tbody.innerHTML = '';
+
+      // Check for authentication error
+      if (window.optimisationModuleState.authError) {
+        const errorMessage = window.optimisationModuleState.authError;
+        tbody.innerHTML = `<tr><td colspan="10" style="padding: 2rem; text-align: center;">
+          <div style="color: #ef4444; margin-bottom: 0.5rem; font-weight: 600;">⚠️ Authentication Error</div>
+          <div style="color: #666; margin-bottom: 1rem;">${escapeHtml(errorMessage)}</div>
+          <a href="#configuration" onclick="if(typeof setActivePanel === 'function') setActivePanel('configuration');" style="color: #2563eb; text-decoration: underline;">Go to Configuration to set your admin key</a>
+        </td></tr>`;
+        updateOptimisationPaginationControls(0, 1, 1, 0, 0);
+        return;
+      }
 
       if (tasks.length === 0) {
         tbody.innerHTML = '<tr><td colspan="10" class="ranking-table-empty">No tasks found</td></tr>';
