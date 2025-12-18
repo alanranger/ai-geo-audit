@@ -3991,11 +3991,28 @@
         // Close modal
         modal.style.display = 'none';
         
+        // Ensure Ranking & AI tab stays active and refresh table
+        const rankingTab = document.querySelector('[data-panel="ranking"]');
+        if (rankingTab) {
+          // Ensure tab is active
+          document.querySelectorAll('.aigeo-panel').forEach(panel => panel.classList.remove('is-active'));
+          rankingTab.classList.add('is-active');
+          
+          // Update nav button states
+          document.querySelectorAll('.aigeo-nav button').forEach(btn => btn.classList.remove('is-active'));
+          const rankingNavBtn = Array.from(document.querySelectorAll('.aigeo-nav button')).find(btn => 
+            btn.textContent.includes('Ranking') || btn.getAttribute('data-tab') === 'ranking'
+          );
+          if (rankingNavBtn) rankingNavBtn.classList.add('is-active');
+        }
+        
         // Trigger table re-render
-        if (typeof renderRankingAiTable === 'function') {
-          renderRankingAiTable();
+        if (typeof renderRankingAiTab === 'function') {
+          await renderRankingAiTab();
+        } else if (typeof window.renderRankingAiTab === 'function') {
+          await window.renderRankingAiTab();
         } else {
-          // Fallback: reload page
+          console.warn('[Optimisation] renderRankingAiTab not found, refreshing page');
           location.reload();
         }
       } catch (error) {
@@ -4070,10 +4087,25 @@
         
         modal.style.display = 'none';
         
+        // Ensure Ranking & AI tab stays active and refresh table
+        const rankingTab = document.querySelector('[data-panel="ranking"]');
+        if (rankingTab) {
+          document.querySelectorAll('.aigeo-panel').forEach(panel => panel.classList.remove('is-active'));
+          rankingTab.classList.add('is-active');
+          document.querySelectorAll('.aigeo-nav button').forEach(btn => btn.classList.remove('is-active'));
+          const rankingNavBtn = Array.from(document.querySelectorAll('.aigeo-nav button')).find(btn => 
+            btn.textContent.includes('Ranking') || btn.getAttribute('data-tab') === 'ranking'
+          );
+          if (rankingNavBtn) rankingNavBtn.classList.add('is-active');
+        }
+        
         // Trigger table re-render
-        if (typeof renderRankingAiTable === 'function') {
-          renderRankingAiTable();
+        if (typeof renderRankingAiTab === 'function') {
+          await renderRankingAiTab();
+        } else if (typeof window.renderRankingAiTab === 'function') {
+          await window.renderRankingAiTab();
         } else {
+          console.warn('[Optimisation] renderRankingAiTab not found, refreshing page');
           location.reload();
         }
       } catch (error) {
@@ -4115,10 +4147,25 @@
         
         modal.style.display = 'none';
         
+        // Ensure Ranking & AI tab stays active and refresh table
+        const rankingTab = document.querySelector('[data-panel="ranking"]');
+        if (rankingTab) {
+          document.querySelectorAll('.aigeo-panel').forEach(panel => panel.classList.remove('is-active'));
+          rankingTab.classList.add('is-active');
+          document.querySelectorAll('.aigeo-nav button').forEach(btn => btn.classList.remove('is-active'));
+          const rankingNavBtn = Array.from(document.querySelectorAll('.aigeo-nav button')).find(btn => 
+            btn.textContent.includes('Ranking') || btn.getAttribute('data-tab') === 'ranking'
+          );
+          if (rankingNavBtn) rankingNavBtn.classList.add('is-active');
+        }
+        
         // Trigger table re-render
-        if (typeof renderRankingAiTable === 'function') {
-          renderRankingAiTable();
+        if (typeof renderRankingAiTab === 'function') {
+          await renderRankingAiTab();
+        } else if (typeof window.renderRankingAiTab === 'function') {
+          await window.renderRankingAiTab();
         } else {
+          console.warn('[Optimisation] renderRankingAiTab not found, refreshing page');
           location.reload();
         }
       } catch (error) {
@@ -28341,6 +28388,7 @@ Final Score: ${score}/100`;
           notTrackedBadge.className = "ranking-badge ranking-badge--segment-general";
           notTrackedBadge.style.marginRight = "0.5rem";
           notTrackedBadge.textContent = "Not tracked";
+          notTrackedBadge.title = "This keyword is not currently being tracked for optimisation";
           tdOptimisation.appendChild(notTrackedBadge);
           
           const trackBtn = document.createElement("button");
@@ -28384,6 +28432,18 @@ Final Score: ${score}/100`;
           statusBadge.className = badgeClass;
           statusBadge.textContent = statusText;
           statusBadge.style.marginRight = "0.5rem";
+          
+          // Add tooltip based on status
+          const statusTooltips = {
+            'planned': 'Planned: Task is in the backlog, not yet started',
+            'in_progress': 'In progress: Actively working on this optimisation',
+            'monitoring': 'Monitoring: Changes deployed, watching for performance improvements',
+            'done': 'Done: Optimisation completed successfully',
+            'paused': 'Paused: Temporarily on hold',
+            'cancelled': 'Cancelled: No longer being tracked'
+          };
+          statusBadge.title = statusTooltips[status.status] || `Status: ${statusText}`;
+          
           tdOptimisation.appendChild(statusBadge);
           
           // Metadata (cycle + last activity)
