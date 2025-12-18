@@ -6101,23 +6101,34 @@
       }
 
       // Update progress badge - ALWAYS use goal_state from task (from goal status view)
-      // Ignore progress.objective_state as it has bugs
+      // Ignore progress.objective_state as it has bugs - they can't both be true!
       const objectiveBadgeEl = document.getElementById('optimisation-drawer-objective-badge');
       if (objectiveBadgeEl) {
         // Use goal_state from task (from goal status view) - this is the source of truth
+        // The table uses this same field, so modal must too
+        let state = task.goal_state;
+        
         // Debug logging to understand what's happening
         if (typeof debugLog === 'function') {
-          debugLog(`[Optimisation Badge] Task ${task.id}: goal_state=${task.goal_state}, objective_delta=${task.objective_delta}, target=${task.objective_target_delta || task.objective_target_value}, direction=${task.objective_direction}`, 'info');
+          debugLog(`[Optimisation Badge] Task ${task.id}: goal_state="${task.goal_state}", objective_delta=${task.objective_delta}, target=${task.objective_target_delta || task.objective_target_value}, direction=${task.objective_direction}, progress.objective_state="${progress?.objective_state}"`, 'info');
         }
-        let state = task.goal_state;
         
         // If goal_state is not available, determine from objective fields
         if (!state && (task.objective_metric || task.objective_kpi)) {
           // Check if baseline_metrics exists (from view) or if we have any measurement
           const hasBaseline = task.baseline_metrics || (progress && progress.baseline_value != null);
           state = hasBaseline ? 'on_track' : 'no_measurement';
+          if (typeof debugLog === 'function') {
+            debugLog(`[Optimisation Badge] goal_state was null, determined state="${state}" from objective fields`, 'warn');
+          }
         } else if (!state) {
           state = 'not_set';
+        }
+        
+        // NEVER use progress.objective_state - it's from a different (buggy) view
+        // If we're seeing 'achieved' here, it means task.goal_state is wrong or missing
+        if (typeof debugLog === 'function' && progress?.objective_state && progress.objective_state !== state) {
+          debugLog(`[Optimisation Badge] WARNING: progress.objective_state="${progress.objective_state}" differs from goal_state="${state}". Using goal_state.`, 'warn');
         }
         
         // Final validation: if state is 'met', verify delta actually meets target
@@ -6172,6 +6183,11 @@
           'no_measurement': { text: 'No measurement', bg: '#9ca3af', color: '#ffffff' }
         };
         const config = badgeConfig[state] || badgeConfig['not_set'];
+        
+        if (typeof debugLog === 'function') {
+          debugLog(`[Optimisation Badge] Setting badge: state="${state}", text="${config.text}"`, 'info');
+        }
+        
         objectiveBadgeEl.textContent = config.text;
         objectiveBadgeEl.style.background = config.bg;
         objectiveBadgeEl.style.color = config.color;
