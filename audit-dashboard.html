@@ -16349,35 +16349,68 @@ Final Score: ${score}/100`;
        * @returns {{ labels: string[], segments: Record<string, number[]> }}
        */
       function buildMoneyKpiHistory(history, metricKey) {
-        // Take last 12 audits (all audits, not grouped by month)
-        // Filter and sort audits by date
-        const validAudits = [];
+        // Use last 28 days (matching Performance Trends charts) with 15 evenly spaced date points
+        // Get the last GSC timeseries date (same logic as Performance Trends)
+        let lastGscTimeseriesDate = window.lastGscTimeseriesDate || null;
         
+        // If not set, find the latest date with actual GSC metrics
+        if (!lastGscTimeseriesDate && history.length > 0) {
+          const recordsWithMetrics = history
+            .filter(r => r.moneySegmentMetrics && !r.isPartial)
+            .map(r => r.date || r.audit_date || r.auditDate)
+            .filter(Boolean)
+            .sort()
+            .reverse();
+          
+          if (recordsWithMetrics.length > 0) {
+            lastGscTimeseriesDate = recordsWithMetrics[0];
+          }
+        }
+        
+        // Calculate 28-day range ending at last GSC date
+        const endDate = lastGscTimeseriesDate ? new Date(lastGscTimeseriesDate + 'T00:00:00') : new Date();
+        const startDate = new Date(endDate);
+        startDate.setDate(startDate.getDate() - 28);
+        startDate.setHours(0, 0, 0, 0);
+        endDate.setHours(0, 0, 0, 0);
+        
+        // Generate 15 evenly spaced date points across the 28-day range
+        const datePoints = [];
+        const totalDays = 28;
+        const step = totalDays / 14; // 15 points = 14 intervals
+        
+        for (let i = 0; i < 15; i++) {
+          const date = new Date(startDate);
+          date.setDate(date.getDate() + (i * step));
+          date.setHours(0, 0, 0, 0);
+          const dateStr = date.toISOString().split('T')[0];
+          datePoints.push(dateStr);
+        }
+        
+        // Create a map of date -> record for quick lookup
+        const historyMap = new Map();
         for (const row of history) {
-          // API returns 'date' field (not 'audit_date')
-          const dateStr = row.date || row.audit_date;
+          const dateStr = row.date || row.audit_date || row.auditDate;
           if (!dateStr) continue;
           const date = new Date(dateStr);
           if (Number.isNaN(date.getTime())) continue;
-          // Include ALL audits, even if they don't have moneySegmentMetrics
-          // We'll use forward-fill to populate missing values from last known good value
           
-          validAudits.push({
-            date: date,
-            dateStr: dateStr,
-            metrics: row.moneySegmentMetrics || null, // Allow null for partial audits
-            isPartial: row.isPartial || false
-          });
+          // Only include dates within the 28-day range and up to last GSC date
+          if (dateStr.localeCompare(startDate.toISOString().split('T')[0]) >= 0 &&
+              (!lastGscTimeseriesDate || dateStr.localeCompare(lastGscTimeseriesDate) <= 0)) {
+            historyMap.set(dateStr, {
+              date: date,
+              dateStr: dateStr,
+              metrics: row.moneySegmentMetrics || null,
+              isPartial: row.isPartial || false
+            });
+          }
         }
         
-        // Sort by date (oldest first) and take last 12
-        validAudits.sort((a, b) => a.date - b.date);
-        const last12Audits = validAudits.slice(-12);
-        
-        // Create labels using date format (YYYY-MM-DD or short date)
-        const labels = last12Audits.map(audit => {
-          const date = audit.date;
-          return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+        // Create labels using date format (MM-DD for compact display)
+        const labels = datePoints.map(dateStr => {
+          const parts = dateStr.split('-');
+          return `${parts[1]}-${parts[2]}`;
         });
         
         const segments = {
@@ -16395,8 +16428,34 @@ Final Score: ${score}/100`;
           productPages: null
         };
         
-        for (const audit of last12Audits) {
-          const m = audit.metrics;
+        // Process each of the 15 date points
+        for (const datePoint of datePoints) {
+          // Find the closest audit record for this date (or exact match)
+          let audit = historyMap.get(datePoint);
+          
+          // If no exact match, find the closest date before this point
+          if (!audit) {
+            const datePointDate = new Date(datePoint + 'T00:00:00');
+            let closestDate = null;
+            let closestDiff = Infinity;
+            
+            for (const [dateStr, record] of historyMap.entries()) {
+              const recordDate = new Date(dateStr + 'T00:00:00');
+              if (recordDate <= datePointDate) {
+                const diff = datePointDate - recordDate;
+                if (diff < closestDiff) {
+                  closestDiff = diff;
+                  closestDate = dateStr;
+                }
+              }
+            }
+            
+            if (closestDate) {
+              audit = historyMap.get(closestDate);
+            }
+          }
+          
+          const m = audit ? audit.metrics : null;
           for (const key of Object.keys(segments)) {
             let v = null;
             
@@ -16419,14 +16478,14 @@ Final Score: ${score}/100`;
             // This handles Dec 15 which has all zeros in money_segment_metrics
             if (isZeroValue && !hasOtherNonZeroMetrics && lastValues[key] != null) {
               v = lastValues[key];
-              debugLog(`[KPI Tracker] Forward-filling ${key}.${metricKey} for ${audit.dateStr} (was 0, using last good value: ${lastValues[key]})`, 'info');
+              debugLog(`[KPI Tracker] Forward-filling ${key}.${metricKey} for ${datePoint} (was 0, using last good value: ${lastValues[key]})`, 'info');
             }
             
             // Forward-fill: if value is null/missing, use last known good value
             // This handles partial audits that don't have moneySegmentMetrics
             if (v == null && lastValues[key] != null) {
               v = lastValues[key];
-              debugLog(`[KPI Tracker] Forward-filling ${key}.${metricKey} for ${audit.dateStr} with last good value: ${lastValues[key]}`, 'info');
+              debugLog(`[KPI Tracker] Forward-filling ${key}.${metricKey} for ${datePoint} with last good value: ${lastValues[key]}`, 'info');
             }
             
             // Update last value if we have a new one (not null and not zero for non-position metrics)
