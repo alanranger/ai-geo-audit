@@ -4017,8 +4017,6 @@
 
   <script>
     // Immediate console log to verify script is running
-    console.log('[AI GEO Audit] Main script loaded and executing');
-    console.log('[AI GEO Audit] Testing console output - if you see this, JavaScript is working');
     console.log('%c=== GAIO AUDIT DASHBOARD LOADED ===', 'color: #E57200; font-size: 16px; font-weight: bold;');
     console.log('%cDebug panel should be visible at bottom with orange border', 'color: #E57200; font-size: 14px;');
     console.log('Current time:', new Date().toISOString());
@@ -5266,8 +5264,6 @@
 
     // Open task drawer (B3, B4)
     window.openOptimisationTaskDrawer = async function openOptimisationTaskDrawer(taskId) {
-      console.log('[Optimisation Drawer] Opening drawer for task ID:', taskId);
-      
       // CRITICAL: Switch to Optimisation tab first, otherwise drawer will be hidden
       if (typeof setActivePanel === 'function') {
         setActivePanel('optimisation');
@@ -5298,17 +5294,10 @@
       window.optimisationModuleState.currentTaskId = taskId;
       
       // Find task
-      console.log('[Optimisation Drawer] Looking for task in allTasks:', {
-        taskId,
-        allTasksCount: window.optimisationModuleState.allTasks.length,
-        availableIds: window.optimisationModuleState.allTasks.map(t => t.id)
-      });
-      
       let task = window.optimisationModuleState.allTasks.find(t => t.id === taskId);
       
       // If task not found, try loading tasks
       if (!task && window.optimisationModuleState.allTasks.length === 0) {
-        console.log('[Optimisation Drawer] Tasks not loaded, loading now...');
         if (typeof window.loadAllOptimisationTasks === 'function') {
           await window.loadAllOptimisationTasks();
           task = window.optimisationModuleState.allTasks.find(t => t.id === taskId);
@@ -5316,16 +5305,10 @@
       }
       
       if (!task) {
-        console.error('[Optimisation Drawer] Task not found:', {
-          searchedId: taskId,
-          availableIds: window.optimisationModuleState.allTasks.map(t => t.id),
-          allTasks: window.optimisationModuleState.allTasks
-        });
-        alert(`Task not found (ID: ${taskId}). Please try refreshing the page or check the console for details.`);
+        console.error('[Optimisation Drawer] Task not found:', taskId);
+        alert(`Task not found (ID: ${taskId}). Please try refreshing the page.`);
         return;
       }
-      
-      console.log('[Optimisation Drawer] Found task:', task);
 
       // Populate header
       document.getElementById('optimisation-drawer-keyword').textContent = task.keyword_text || '';
@@ -5375,27 +5358,6 @@
       // Update button states
       document.getElementById('optimisation-drawer-minimize').textContent = '−';
       document.getElementById('optimisation-drawer-maximize').textContent = '□';
-    };
-
-    // TEST FUNCTION: Run this in browser console to test drawer
-    // Usage: window.testOptimisationDrawer('task-id-here')
-    window.testOptimisationDrawer = async function testOptimisationDrawer(taskId) {
-      console.log('[TEST] Testing drawer with taskId:', taskId);
-      console.log('[TEST] Drawer element exists:', !!document.getElementById('optimisation-task-drawer'));
-      console.log('[TEST] Backdrop element exists:', !!document.getElementById('optimisation-task-drawer-backdrop'));
-      console.log('[TEST] openOptimisationTaskDrawer function exists:', typeof window.openOptimisationTaskDrawer);
-      console.log('[TEST] hasAdminKey:', window.hasAdminKey ? window.hasAdminKey() : 'function not found');
-      
-      if (typeof window.openOptimisationTaskDrawer === 'function') {
-        try {
-          await window.openOptimisationTaskDrawer(taskId);
-          console.log('[TEST] Drawer function completed successfully');
-        } catch (error) {
-          console.error('[TEST] Drawer function error:', error);
-        }
-      } else {
-        console.error('[TEST] openOptimisationTaskDrawer function not found!');
-      }
     };
 
     // Close task drawer
@@ -5736,24 +5698,6 @@
       }
     }
 
-    // Diagnostic function to check if everything is set up correctly
-    window.diagnoseOptimisationModule = function diagnoseOptimisationModule() {
-      const diagnostics = {
-        drawerElement: !!document.getElementById('optimisation-task-drawer'),
-        backdropElement: !!document.getElementById('optimisation-task-drawer-backdrop'),
-        drawerFunction: typeof window.openOptimisationTaskDrawer === 'function',
-        loadTasksFunction: typeof window.loadAllOptimisationTasks === 'function',
-        getStatusFunction: typeof window.getOptimisationStatus === 'function',
-        statusCache: window.optimisationStatusCache ? window.optimisationStatusCache.size : 0,
-        moduleState: !!window.optimisationModuleState,
-        allTasksCount: window.optimisationModuleState?.allTasks?.length || 0,
-        hasAdminKey: window.hasAdminKey ? window.hasAdminKey() : false
-      };
-      
-      console.log('[Optimisation Diagnostics]', diagnostics);
-      return diagnostics;
-    };
-
     // Add to ensurePanelRendered
     const originalEnsurePanelRendered = ensurePanelRendered;
     ensurePanelRendered = function(panelId) {
@@ -5767,16 +5711,6 @@
         window.loadAllOptimisationTasks();
       }
     };
-    
-    // Run diagnostics on page load (after a short delay to ensure DOM is ready)
-    if (typeof window !== 'undefined') {
-      setTimeout(() => {
-        if (window.diagnoseOptimisationModule) {
-          console.log('[Optimisation] Running diagnostics on page load...');
-          window.diagnoseOptimisationModule();
-        }
-      }, 2000);
-    }
 
     // ======================
     // GSC Date Range Configuration
@@ -29940,18 +29874,7 @@ Final Score: ${score}/100`;
         tdOptimisation.style.position = "relative";
         
         const taskType = 'on_page'; // Default task type for this integration
-        
-        // Debug: Check if getOptimisationStatus exists
-        if (typeof window.getOptimisationStatus !== 'function') {
-          console.error('[Optimisation] getOptimisationStatus function not found!');
-          tdOptimisation.textContent = 'Error: Function missing';
-          tr.appendChild(tdOptimisation);
-          tbody.appendChild(tr);
-          return; // Skip this row if function doesn't exist (in forEach, use return not continue)
-        }
-        
         const status = window.getOptimisationStatus(row, taskType);
-        console.log('[Optimisation] Row:', row.keyword, 'Status:', status ? 'Found' : 'Not tracked', status?.id);
         
         if (!status) {
           // Not tracked - show "Not tracked" pill + Track button
@@ -30042,7 +29965,6 @@ Final Score: ${score}/100`;
           tdOptimisation.appendChild(metadataDiv);
           
           // Manage button
-          console.log('[Optimisation] About to create Manage button, status.id:', status?.id);
           const manageBtn = document.createElement("button");
           manageBtn.className = "btn btn-small";
           manageBtn.style.padding = "0.25rem 0.5rem";
@@ -30070,8 +29992,6 @@ Final Score: ${score}/100`;
           
           // Use onclick - simpler and more reliable
           manageBtn.onclick = async function(e) {
-            console.log('[Optimisation] BUTTON CLICKED - onclick handler fired!');
-            console.log('[Optimisation] Manage button clicked!', { statusId, statusObj, hasAdminKey: window.hasAdminKey() });
             e.stopPropagation();
             e.preventDefault();
             
@@ -30081,41 +30001,27 @@ Final Score: ${score}/100`;
             }
             
             if (!statusId) {
-              console.error('[Optimisation] No statusId found!');
               alert('No task ID found. Please try refreshing the page.');
               return;
             }
             
-            console.log('[Optimisation] Checking if drawer function exists...', typeof window.openOptimisationTaskDrawer);
-            
-            // Simple approach: just open the drawer with the status ID
-            // The drawer function will handle loading tasks if needed
+            // Open the drawer with the status ID
+            // The drawer function will handle loading tasks if needed and switching tabs
             if (typeof window.openOptimisationTaskDrawer === 'function') {
-              console.log('[Optimisation] Calling openOptimisationTaskDrawer with statusId:', statusId);
               try {
                 await window.openOptimisationTaskDrawer(statusId);
-                console.log('[Optimisation] Drawer function completed');
               } catch (error) {
                 console.error('[Optimisation] Error opening drawer:', error);
                 // Fallback to modal
-                console.log('[Optimisation] Falling back to modal');
                 window.openManageOptimisationModal(rowData, statusObj, taskTypeValue);
               }
             } else {
-              console.error('[Optimisation] Drawer function does not exist! Falling back to modal');
               // Fallback to modal if drawer function doesn't exist
               window.openManageOptimisationModal(rowData, statusObj, taskTypeValue);
             }
           };
           
-          // Verify button was created
-          console.log('[Optimisation] Manage button created:', manageBtn, 'Status ID:', statusId);
           tdOptimisation.appendChild(manageBtn);
-          
-          // Test: Add a direct click listener to verify button is clickable
-          manageBtn.addEventListener('click', function testClick(e) {
-            console.log('[Optimisation] TEST: Button clicked via addEventListener!', e);
-          }, true); // Use capture phase
         }
         
         tr.appendChild(tdOptimisation);
