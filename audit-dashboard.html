@@ -3862,6 +3862,7 @@
           </select>
           <input type="text" id="optimisation-filter-keyword" placeholder="Filter by keyword..." style="padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px; flex: 1; min-width: 200px;">
           <input type="text" id="optimisation-filter-url" placeholder="Filter by URL..." style="padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px; flex: 1; min-width: 200px;">
+          <button id="optimisation-filter-needs-update" class="btn btn-secondary" style="padding: 0.5rem 1rem;" title="Show tasks that need measurement update (no measurement or older than 30 days).">Needs Update</button>
           <button id="optimisation-clear-filters" class="btn btn-secondary" style="padding: 0.5rem 1rem;">Clear Filters</button>
         </div>
 
@@ -5676,9 +5677,20 @@
         const baselineCaptured = task.baseline_metrics?.captured_at 
           ? new Date(task.baseline_metrics.captured_at).toLocaleDateString('en-GB')
           : '–';
-        const latestCaptured = task.latest_metrics?.captured_at 
-          ? new Date(task.latest_metrics.captured_at).toLocaleDateString('en-GB')
+        const latestCapturedDate = task.latest_metrics?.captured_at 
+          ? new Date(task.latest_metrics.captured_at)
           : null;
+        const latestCaptured = latestCapturedDate 
+          ? latestCapturedDate.toLocaleDateString('en-GB')
+          : null;
+        
+        // "Needs update" indicator: blank or older than 30 days
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        const needsUpdate = !latestCapturedDate || latestCapturedDate < thirtyDaysAgo;
+        const needsUpdateBadge = needsUpdate 
+          ? '<span style="padding: 0.125rem 0.375rem; background: #fee2e2; color: #991b1b; border-radius: 4px; font-size: 0.7rem; font-weight: 600; margin-left: 0.25rem;">Needs update</span>'
+          : '';
         
         // "No measurement yet" indicator
         const measurementIndicator = !latestCaptured 
@@ -5757,11 +5769,12 @@
           <td>Cycle ${task.cycle_active || 1}</td>
           <td>${lastActivity}</td>
           <td>${baselineCaptured}</td>
-          <td>${latestCaptured || measurementIndicator}</td>
+          <td>${latestCaptured || measurementIndicator}${needsUpdateBadge}</td>
           <td>${escapeHtml(task.title || '–')}</td>
           <td style="font-size: 0.85rem;">${goalHtml}</td>
-          <td>
+          <td style="display: flex; gap: 0.25rem; align-items: center;">
             <button class="btn btn-secondary" onclick="event.stopPropagation(); openOptimisationTaskDrawer('${task.id}');" style="padding: 0.25rem 0.75rem; font-size: 0.875rem;">Open</button>
+            <button class="btn btn-small" onclick="event.stopPropagation(); updateTaskLatest('${task.id}');" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;" title="Capture latest metrics for this task.">Update</button>
           </td>
         `;
 
@@ -6731,12 +6744,33 @@
       if (filterType) filterType.addEventListener('change', applyFilters);
       if (filterKeyword) filterKeyword.addEventListener('input', applyFilters);
       if (filterUrl) filterUrl.addEventListener('input', applyFilters);
+      
+      const needsUpdateBtn = document.getElementById('optimisation-filter-needs-update');
+      if (needsUpdateBtn) {
+        needsUpdateBtn.addEventListener('click', () => {
+          needsUpdateBtn.classList.toggle('active');
+          if (needsUpdateBtn.classList.contains('active')) {
+            needsUpdateBtn.style.background = '#3b82f6';
+            needsUpdateBtn.style.color = '#ffffff';
+          } else {
+            needsUpdateBtn.style.background = '';
+            needsUpdateBtn.style.color = '';
+          }
+          applyFilters();
+        });
+      }
+      
       if (clearFilters) {
         clearFilters.addEventListener('click', () => {
           if (filterStatus) filterStatus.value = '';
           if (filterType) filterType.value = '';
           if (filterKeyword) filterKeyword.value = '';
           if (filterUrl) filterUrl.value = '';
+          if (needsUpdateBtn) {
+            needsUpdateBtn.classList.remove('active');
+            needsUpdateBtn.style.background = '';
+            needsUpdateBtn.style.color = '';
+          }
           applyFilters();
         });
       }
@@ -7144,16 +7178,21 @@
       }
 
       let successCount = 0;
+      let skippedCount = 0;
       let failCount = 0;
       const errors = [];
 
       try {
-        for (let i = 0; i < activeTasks.length; i++) {
-          const task = activeTasks[i];
+        // Process sequentially to avoid rate limits (max 3 concurrent)
+        const maxConcurrent = 3;
+        for (let i = 0; i < activeTasks.length; i += maxConcurrent) {
+          const batch = activeTasks.slice(i, i + maxConcurrent);
           
-          if (bulkUpdateBtn) {
-            bulkUpdateBtn.textContent = `Updating ${i + 1}/${activeTasks.length}...`;
-          }
+          await Promise.all(batch.map(async (task, batchIdx) => {
+            const taskNum = i + batchIdx + 1;
+            if (bulkUpdateBtn) {
+              bulkUpdateBtn.textContent = `Updating ${taskNum}/${activeTasks.length}...`;
+            }
 
           // Find matching row
           const taskUrlClean = (task.target_url_clean || task.target_url || '').replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
@@ -7213,29 +7252,35 @@
             continue;
           }
 
-          // Create measurement
-          try {
-            const headers = window.getOptimisationHeaders();
-            const response = await fetch(apiUrl(`/api/optimisation/task/${task.id}/measurement`), {
-              method: 'POST',
-              headers: { ...headers, 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                metrics: currentMetrics,
-                note: 'Bulk update - latest data snapshot'
-              })
-            });
+            // Create measurement
+            try {
+              const headers = window.getOptimisationHeaders();
+              const response = await fetch(apiUrl(`/api/optimisation/task/${task.id}/measurement`), {
+                method: 'POST',
+                headers: { ...headers, 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  metrics: currentMetrics,
+                  note: 'Bulk update - latest data snapshot'
+                })
+              });
 
-            if (!response.ok) {
-              const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-              throw new Error(error.error || 'Failed to create measurement');
+              if (!response.ok) {
+                const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+                throw new Error(error.error || 'Failed to create measurement');
+              }
+
+              const result = await response.json();
+              if (result.skipped) {
+                skippedCount++;
+              } else {
+                successCount++;
+              }
+            } catch (error) {
+              failCount++;
+              errors.push(`${task.keyword_text}: ${error.message}`);
+              console.error(`[Optimisation] Error updating task ${task.id}:`, error);
             }
-
-            successCount++;
-          } catch (error) {
-            failCount++;
-            errors.push(`${task.keyword_text}: ${error.message}`);
-            console.error(`[Optimisation] Error updating task ${task.id}:`, error);
-          }
+          }));
         }
 
         // Reload tasks to show updated data
@@ -7243,6 +7288,9 @@
 
         // Show results
         let message = `Updated ${successCount} task(s) successfully.`;
+        if (skippedCount > 0) {
+          message += ` Skipped ${skippedCount} (recent measurement within 5 minutes).`;
+        }
         if (failCount > 0) {
           message += `\n\nFailed to update ${failCount} task(s):\n${errors.slice(0, 5).join('\n')}`;
           if (errors.length > 5) {
@@ -7258,6 +7306,158 @@
         if (bulkUpdateBtn) {
           bulkUpdateBtn.disabled = false;
           bulkUpdateBtn.textContent = originalText;
+        }
+      }
+    };
+
+    // Update latest metrics for a single task
+    window.updateTaskLatest = async function updateTaskLatest(taskId) {
+      const task = window.optimisationModuleState.allTasks.find(t => t.id === taskId);
+      if (!task) {
+        alert('Task not found. Please refresh the page.');
+        return;
+      }
+
+      // Ensure Ranking & AI data is loaded
+      if (typeof window.renderRankingAiTab === 'function') {
+        try {
+          await window.renderRankingAiTab();
+          await new Promise(resolve => setTimeout(resolve, 500));
+        } catch (e) {
+          console.warn('[Optimisation] Could not refresh Ranking & AI data:', e);
+        }
+      }
+
+      // Get ranking data sources
+      let combinedRows = [];
+      if (typeof RankingAiModule !== 'undefined' && RankingAiModule.state) {
+        const state = RankingAiModule.state();
+        combinedRows = state.combinedRows || [];
+      }
+      if (combinedRows.length === 0 && typeof window.rankingAiData !== 'undefined' && Array.isArray(window.rankingAiData)) {
+        combinedRows = window.rankingAiData;
+      }
+
+      // Find matching row
+      const taskUrlClean = (task.target_url_clean || task.target_url || '').replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
+      const taskUrlPath = taskUrlClean.includes('/') ? taskUrlClean.split('/').slice(1).join('/') : '';
+      
+      const matchingRow = combinedRows.find(r => {
+        const keywordMatch = (r.keyword || '').toLowerCase() === (task.keyword_text || '').toLowerCase();
+        if (!keywordMatch) return false;
+        
+        const rowUrl = (r.best_url || r.targetUrl || r.ranking_url || '').toLowerCase();
+        const rowUrlClean = rowUrl.replace(/^https?:\/\//, '').replace(/^www\./, '');
+        const rowUrlPath = rowUrlClean.includes('/') ? rowUrlClean.split('/').slice(1).join('/') : '';
+        
+        return rowUrl === taskUrlClean || 
+               rowUrlClean === taskUrlClean ||
+               rowUrlPath === taskUrlPath ||
+               rowUrl.includes(taskUrlClean) ||
+               taskUrlClean.includes(rowUrlClean);
+      });
+
+      let currentMetrics = null;
+
+      if (matchingRow) {
+        // Get queryTotal data for clicks, impressions, and CTR
+        let queryTotal = null;
+        if (typeof getQueryTotalForKeyword === 'function') {
+          queryTotal = getQueryTotalForKeyword(task.keyword_text);
+        }
+        
+        currentMetrics = {
+          gsc_clicks_28d: queryTotal?.clicks || matchingRow.gsc_clicks_28d || matchingRow.clicks_28d || null,
+          gsc_impressions_28d: queryTotal?.impressions || matchingRow.gsc_impressions_28d || matchingRow.impressions_28d || null,
+          gsc_ctr_28d: queryTotal?.ctr != null ? (queryTotal.ctr / 100) : (matchingRow.gsc_ctr_28d || matchingRow.ctr_28d || null),
+          current_rank: matchingRow.best_rank_group || matchingRow.current_rank || null,
+          opportunity_score: matchingRow.opportunityScore || null,
+          ai_overview: matchingRow.has_ai_overview || false,
+          ai_citations: matchingRow.ai_alan_citations_count || 0,
+          ai_citations_total: matchingRow.ai_total_citations || 0,
+          classic_ranking_url: matchingRow.best_url || matchingRow.targetUrl || matchingRow.ranking_url || null,
+          page_type: matchingRow.pageType || null,
+          segment: matchingRow.segment || null,
+          captured_at: new Date().toISOString()
+        };
+      } else if (task.baseline_metrics) {
+        // Fallback to baseline if no current data found
+        currentMetrics = { ...task.baseline_metrics, captured_at: new Date().toISOString() };
+        if (currentMetrics.gsc_clicks_28d === null) delete currentMetrics.gsc_clicks_28d;
+        if (currentMetrics.gsc_impressions_28d === null) delete currentMetrics.gsc_impressions_28d;
+        if (currentMetrics.gsc_ctr_28d === null) delete currentMetrics.gsc_ctr_28d;
+      }
+
+      if (!currentMetrics) {
+        alert('No ranking data available for this task. Please run a Ranking & AI check first.');
+        return;
+      }
+
+      // Find the Update button to show loading state
+      const updateBtn = event?.target;
+      const originalText = updateBtn?.textContent || 'Update';
+      if (updateBtn) {
+        updateBtn.disabled = true;
+        updateBtn.textContent = 'Updating...';
+      }
+
+      try {
+        const headers = window.getOptimisationHeaders();
+        const response = await fetch(apiUrl(`/api/optimisation/task/${taskId}/measurement`), {
+          method: 'POST',
+          headers: { ...headers, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            metrics: currentMetrics,
+            note: 'Latest measurement captured'
+          })
+        });
+
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+          throw new Error(error.error || 'Failed to create measurement');
+        }
+
+        const result = await response.json();
+        
+        // Reload tasks to show updated data
+        await window.loadAllOptimisationTasks();
+        
+        // Show success message
+        if (result.skipped) {
+          if (typeof debugLog === 'function') {
+            debugLog(`[Optimisation] Measurement skipped (recent): ${task.keyword_text}`, 'info');
+          }
+          // Show brief feedback
+          if (updateBtn) {
+            updateBtn.textContent = 'Skipped';
+            setTimeout(() => {
+              if (updateBtn) {
+                updateBtn.disabled = false;
+                updateBtn.textContent = originalText;
+              }
+            }, 2000);
+          }
+        } else {
+          if (typeof debugLog === 'function') {
+            debugLog(`[Optimisation] Measurement updated: ${task.keyword_text}`, 'success');
+          }
+          // Show brief success feedback
+          if (updateBtn) {
+            updateBtn.textContent = '✓';
+            setTimeout(() => {
+              if (updateBtn) {
+                updateBtn.disabled = false;
+                updateBtn.textContent = originalText;
+              }
+            }, 2000);
+          }
+        }
+      } catch (error) {
+        console.error(`[Optimisation] Error updating task ${taskId}:`, error);
+        alert(`Failed to update task: ${error.message}`);
+        if (updateBtn) {
+          updateBtn.disabled = false;
+          updateBtn.textContent = originalText;
         }
       }
     };
