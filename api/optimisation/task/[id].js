@@ -14,12 +14,23 @@ const need = (k) => {
 
 const sendJSON = (res, status, obj) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'PATCH, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-arp-admin-key');
   res.status(status).send(JSON.stringify(obj));
 };
 
 export default async function handler(req, res) {
+  // Handle CORS preflight
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'PATCH, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-arp-admin-key');
+    return res.status(200).end();
+  }
+
   if (req.method !== 'PATCH') {
-    return sendJSON(res, 405, { error: 'Method not allowed' });
+    return sendJSON(res, 405, { error: `Method not allowed. Received: ${req.method}, Expected: PATCH` });
   }
 
   // Admin key gate
