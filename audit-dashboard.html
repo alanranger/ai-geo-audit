@@ -3776,9 +3776,14 @@
 
       <!-- Optimisation Tracking Panel -->
       <section class="aigeo-panel" data-panel="optimisation" hidden>
-        <div class="card card--section-header">
-          <h2>Optimisation Tracking</h2>
-          <p>Track and manage keyword optimisation tasks across your site. Monitor progress, cycles, and outcomes.</p>
+        <div class="card card--section-header" style="display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <h2>Optimisation Tracking</h2>
+            <p>Track and manage keyword optimisation tasks across your site. Monitor progress, cycles, and outcomes.</p>
+          </div>
+          <button id="optimisation-bulk-update-btn" class="btn" style="padding: 0.75rem 1.5rem; font-size: 0.95rem; white-space: nowrap;">
+            📊 Update All Tasks with Latest Data
+          </button>
         </div>
 
         <!-- Summary Cards (B6) -->
@@ -6562,6 +6567,190 @@
       
       // Initialize dragging
       initOptimisationDrawerDragging();
+
+      // Bulk update button
+      const bulkUpdateBtn = document.getElementById('optimisation-bulk-update-btn');
+      if (bulkUpdateBtn) {
+        bulkUpdateBtn.addEventListener('click', async () => {
+          if (typeof window.bulkUpdateAllTasks === 'function') {
+            await window.bulkUpdateAllTasks();
+          }
+        });
+      }
+    }
+
+    // Bulk update all tasks with latest data
+    window.bulkUpdateAllTasks = async function bulkUpdateAllTasks() {
+      if (!window.optimisationModuleState || !window.optimisationModuleState.allTasks) {
+        alert('No tasks loaded. Please wait for tasks to load first.');
+        return;
+      }
+
+      // Get active tasks (not done/cancelled/deleted)
+      const activeTasks = window.optimisationModuleState.allTasks.filter(
+        t => !['done', 'cancelled', 'deleted'].includes(t.status)
+      );
+
+      if (activeTasks.length === 0) {
+        alert('No active tasks to update.');
+        return;
+      }
+
+      const confirmMsg = `Update ${activeTasks.length} task(s) with latest ranking data? This will create a new measurement for each task.`;
+      if (!confirm(confirmMsg)) {
+        return;
+      }
+
+      // Ensure Ranking & AI data is loaded
+      if (typeof window.renderRankingAiTab === 'function') {
+        try {
+          await window.renderRankingAiTab();
+          await new Promise(resolve => setTimeout(resolve, 1000)); // Give time for data to load
+        } catch (e) {
+          console.warn('[Optimisation] Could not refresh Ranking & AI data:', e);
+        }
+      }
+
+      // Get ranking data sources
+      let combinedRows = [];
+      if (typeof RankingAiModule !== 'undefined' && RankingAiModule.state) {
+        const state = RankingAiModule.state();
+        combinedRows = state.combinedRows || [];
+      }
+      if (combinedRows.length === 0 && typeof window.rankingAiData !== 'undefined' && Array.isArray(window.rankingAiData)) {
+        combinedRows = window.rankingAiData;
+      }
+
+      if (combinedRows.length === 0) {
+        alert('No ranking data available. Please run a Ranking & AI check first.');
+        return;
+      }
+
+      const bulkUpdateBtn = document.getElementById('optimisation-bulk-update-btn');
+      const originalText = bulkUpdateBtn ? bulkUpdateBtn.textContent : '';
+      if (bulkUpdateBtn) {
+        bulkUpdateBtn.disabled = true;
+        bulkUpdateBtn.textContent = 'Updating...';
+      }
+
+      let successCount = 0;
+      let failCount = 0;
+      const errors = [];
+
+      try {
+        for (let i = 0; i < activeTasks.length; i++) {
+          const task = activeTasks[i];
+          
+          if (bulkUpdateBtn) {
+            bulkUpdateBtn.textContent = `Updating ${i + 1}/${activeTasks.length}...`;
+          }
+
+          // Find matching row
+          const taskUrlClean = (task.target_url_clean || task.target_url || '').replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
+          const taskUrlPath = taskUrlClean.includes('/') ? taskUrlClean.split('/').slice(1).join('/') : '';
+          
+          const matchingRow = combinedRows.find(r => {
+            const keywordMatch = (r.keyword || '').toLowerCase() === (task.keyword_text || '').toLowerCase();
+            if (!keywordMatch) return false;
+            
+            const rowUrl = (r.best_url || r.targetUrl || r.ranking_url || '').toLowerCase();
+            const rowUrlClean = rowUrl.replace(/^https?:\/\//, '').replace(/^www\./, '');
+            const rowUrlPath = rowUrlClean.includes('/') ? rowUrlClean.split('/').slice(1).join('/') : '';
+            
+            return rowUrl === taskUrlClean || 
+                   rowUrlClean === taskUrlClean ||
+                   rowUrlPath === taskUrlPath ||
+                   rowUrl.includes(taskUrlClean) ||
+                   taskUrlClean.includes(rowUrlClean);
+          });
+
+          let currentMetrics = null;
+
+          if (matchingRow) {
+            // Get queryTotal data for clicks, impressions, and CTR
+            let queryTotal = null;
+            if (typeof getQueryTotalForKeyword === 'function') {
+              queryTotal = getQueryTotalForKeyword(task.keyword_text);
+            }
+            
+            currentMetrics = {
+              gsc_clicks_28d: queryTotal?.clicks || matchingRow.gsc_clicks_28d || matchingRow.clicks_28d || null,
+              gsc_impressions_28d: queryTotal?.impressions || matchingRow.gsc_impressions_28d || matchingRow.impressions_28d || null,
+              gsc_ctr_28d: queryTotal?.ctr != null ? (queryTotal.ctr / 100) : (matchingRow.gsc_ctr_28d || matchingRow.ctr_28d || null),
+              current_rank: matchingRow.best_rank_group || matchingRow.current_rank || null,
+              opportunity_score: matchingRow.opportunityScore || null,
+              ai_overview: matchingRow.has_ai_overview || false,
+              ai_citations: matchingRow.ai_alan_citations_count || 0,
+              ai_citations_total: matchingRow.ai_total_citations || 0,
+              classic_ranking_url: matchingRow.best_url || matchingRow.targetUrl || matchingRow.ranking_url || null,
+              page_type: matchingRow.pageType || null,
+              segment: matchingRow.segment || null,
+              captured_at: new Date().toISOString()
+            };
+          } else if (task.baseline_metrics) {
+            // Fallback to baseline if no current data found
+            console.log(`[Optimisation] No current data for ${task.keyword_text}, using baseline`);
+            currentMetrics = { ...task.baseline_metrics, captured_at: new Date().toISOString() };
+            // Remove null GSC metrics to avoid stale nulls
+            if (currentMetrics.gsc_clicks_28d === null) delete currentMetrics.gsc_clicks_28d;
+            if (currentMetrics.gsc_impressions_28d === null) delete currentMetrics.gsc_impressions_28d;
+            if (currentMetrics.gsc_ctr_28d === null) delete currentMetrics.gsc_ctr_28d;
+          }
+
+          if (!currentMetrics) {
+            failCount++;
+            errors.push(`${task.keyword_text}: No data found`);
+            continue;
+          }
+
+          // Create measurement
+          try {
+            const headers = window.getOptimisationHeaders();
+            const response = await fetch(apiUrl(`/api/optimisation/task/${task.id}/measurement`), {
+              method: 'POST',
+              headers: { ...headers, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                metrics: currentMetrics,
+                note: 'Bulk update - latest data snapshot'
+              })
+            });
+
+            if (!response.ok) {
+              const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+              throw new Error(error.error || 'Failed to create measurement');
+            }
+
+            successCount++;
+          } catch (error) {
+            failCount++;
+            errors.push(`${task.keyword_text}: ${error.message}`);
+            console.error(`[Optimisation] Error updating task ${task.id}:`, error);
+          }
+        }
+
+        // Reload tasks to show updated data
+        await window.loadAllOptimisationTasks();
+
+        // Show results
+        let message = `Updated ${successCount} task(s) successfully.`;
+        if (failCount > 0) {
+          message += `\n\nFailed to update ${failCount} task(s):\n${errors.slice(0, 5).join('\n')}`;
+          if (errors.length > 5) {
+            message += `\n... and ${errors.length - 5} more.`;
+          }
+        }
+        alert(message);
+
+      } catch (error) {
+        console.error('[Optimisation] Bulk update error:', error);
+        alert('Bulk update failed: ' + error.message);
+      } finally {
+        if (bulkUpdateBtn) {
+          bulkUpdateBtn.disabled = false;
+          bulkUpdateBtn.textContent = originalText;
+        }
+      }
+    };
 
       // Timeline toggle (collapsed by default)
       const timelineHeader = document.getElementById('optimisation-timeline-header');
