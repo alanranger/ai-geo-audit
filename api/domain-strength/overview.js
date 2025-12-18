@@ -223,7 +223,7 @@ export default async function handler(req, res) {
       competitorMeta.get(domain) ??
       (domain === primaryDomain
         ? { label: "Alan Ranger Photography", domain_type: "your_site", segment: "your_site", isCompetitor: false }
-        : { label: domain, domain_type: "unmapped", segment: "unmapped", isCompetitor: true });
+        : { label: domain, domain_type: "unmapped", segment: "unmapped", isCompetitor: false }); // Default to false, only true if explicitly marked
 
     items.push({
       domain,
