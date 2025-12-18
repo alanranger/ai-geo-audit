@@ -3789,6 +3789,18 @@
       return cleaned;
     };
 
+    // Clean URL but keep protocol (for display in modals)
+    window.cleanUrlForDisplay = function cleanUrlForDisplay(url) {
+      if (!url || typeof url !== 'string') return '';
+      // Remove fragment (#)
+      let cleaned = url.split('#')[0];
+      // Remove query string (?)
+      cleaned = cleaned.split('?')[0];
+      // Remove trailing slashes
+      cleaned = cleaned.replace(/\/+$/, '');
+      return cleaned;
+    };
+
     // Admin key utilities (Phase A - Security)
     window.getAdminKey = function getAdminKey() {
       if (typeof window === "undefined") return "";
@@ -3896,15 +3908,24 @@
     
     // Open Track Keyword modal
     window.openTrackKeywordModal = function openTrackKeywordModal(row, taskType = 'on_page') {
+      console.log('[Optimisation] openTrackKeywordModal called', { row, taskType });
       const modal = document.getElementById('optimisation-track-modal');
       if (!modal) {
         console.error('[Optimisation] Track modal not found');
+        alert('Track modal not found. Please refresh the page.');
         return;
       }
 
       // Get and clean URL (remove query strings and fragments)
       const rawUrl = row.best_url || row.targetUrl || row.ranking_url || '';
+      console.log('[Optimisation] Raw URL:', rawUrl);
+      if (!window.cleanUrlForDisplay) {
+        console.error('[Optimisation] cleanUrlForDisplay function not found');
+        alert('Error: cleanUrlForDisplay function not found. Please refresh the page.');
+        return;
+      }
       const cleanedUrl = window.cleanUrlForDisplay(rawUrl);
+      console.log('[Optimisation] Cleaned URL:', cleanedUrl);
 
       // Populate fields
       document.getElementById('track-keyword-text').textContent = row.keyword;
@@ -3928,9 +3949,10 @@
       if (!modal) return;
 
       const keyword = modal.dataset.rowKeyword;
-      // Get URL from input field (user may have edited it) and clean it
-      let targetUrl = document.getElementById('track-url-text').value.trim();
-      targetUrl = window.cleanUrlForDisplay(targetUrl); // Ensure it's cleaned
+      // Get cleaned URL from dataset (already cleaned when modal opened)
+      let targetUrl = modal.dataset.rowUrl || '';
+      // Double-check it's cleaned (in case it was modified elsewhere)
+      targetUrl = window.cleanUrlForDisplay(targetUrl);
       const taskType = modal.dataset.taskType || document.getElementById('track-task-type').value;
       const status = document.getElementById('track-status').value;
       const title = document.getElementById('track-title').value.trim();
