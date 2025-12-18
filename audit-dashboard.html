@@ -3902,17 +3902,21 @@
         return;
       }
 
+      // Get and clean URL (remove query strings and fragments)
+      const rawUrl = row.best_url || row.targetUrl || row.ranking_url || '';
+      const cleanedUrl = window.cleanUrlForDisplay(rawUrl);
+
       // Populate fields
       document.getElementById('track-keyword-text').textContent = row.keyword;
-      document.getElementById('track-url-text').textContent = row.best_url || row.targetUrl || row.ranking_url || '';
+      document.getElementById('track-url-text').textContent = cleanedUrl; // Use .textContent for div
       document.getElementById('track-task-type').value = taskType;
       document.getElementById('track-status').value = 'planned';
       document.getElementById('track-title').value = '';
       document.getElementById('track-notes').value = '';
 
-      // Store row data for submit
+      // Store cleaned URL for submit
       modal.dataset.rowKeyword = row.keyword;
-      modal.dataset.rowUrl = row.best_url || row.targetUrl || row.ranking_url || '';
+      modal.dataset.rowUrl = cleanedUrl;
       modal.dataset.taskType = taskType;
 
       modal.style.display = 'flex';
@@ -3924,7 +3928,9 @@
       if (!modal) return;
 
       const keyword = modal.dataset.rowKeyword;
-      const targetUrl = modal.dataset.rowUrl;
+      // Get URL from input field (user may have edited it) and clean it
+      let targetUrl = document.getElementById('track-url-text').value.trim();
+      targetUrl = window.cleanUrlForDisplay(targetUrl); // Ensure it's cleaned
       const taskType = modal.dataset.taskType || document.getElementById('track-task-type').value;
       const status = document.getElementById('track-status').value;
       const title = document.getElementById('track-title').value.trim();
