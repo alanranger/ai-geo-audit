@@ -92,27 +92,35 @@ select
   (b.baseline_metrics->>'ai_citations')::numeric as baseline_ai_citations,
   (l.latest_metrics->>'ai_citations')::numeric   as latest_ai_citations,
 
-  -- Computed: delta for the chosen objective KPI
-  case
-    when coalesce(t.objective_kpi, t.objective_metric) is null or coalesce(t.objective_kpi, t.objective_metric) = '' then null
-    when coalesce(t.objective_kpi, t.objective_metric) in ('gsc_clicks_28d', 'clicks_28d') then 
-      ((l.latest_metrics->>'gsc_clicks_28d')::numeric - (b.baseline_metrics->>'gsc_clicks_28d')::numeric)
-    when coalesce(t.objective_kpi, t.objective_metric) in ('gsc_impressions_28d', 'impressions_28d') then 
-      ((l.latest_metrics->>'gsc_impressions_28d')::numeric - (b.baseline_metrics->>'gsc_impressions_28d')::numeric)
-    when coalesce(t.objective_kpi, t.objective_metric) in ('gsc_ctr_28d', 'ctr_28d') then 
-      ((l.latest_metrics->>'gsc_ctr_28d')::numeric - (b.baseline_metrics->>'gsc_ctr_28d')::numeric)
-    when coalesce(t.objective_kpi, t.objective_metric) in ('current_rank', 'rank') then 
-      ((l.latest_metrics->>'current_rank')::numeric - (b.baseline_metrics->>'current_rank')::numeric)
-    when coalesce(t.objective_kpi, t.objective_metric) in ('opportunity_score', 'opportunity') then 
-      ((l.latest_metrics->>'opportunity_score')::numeric - (b.baseline_metrics->>'opportunity_score')::numeric)
-    when coalesce(t.objective_kpi, t.objective_metric) in ('ai_citations', 'citations') then 
-      ((l.latest_metrics->>'ai_citations')::numeric - (b.baseline_metrics->>'ai_citations')::numeric)
-    else null
-  end as objective_delta,
+      -- Computed: delta for the chosen objective KPI
+      -- If latest_metrics is null, use baseline_metrics as latest (delta = 0)
+      case
+        when coalesce(t.objective_kpi, t.objective_metric) is null or coalesce(t.objective_kpi, t.objective_metric) = '' then null
+        when coalesce(t.objective_kpi, t.objective_metric) in ('gsc_clicks_28d', 'clicks_28d') then 
+          coalesce((l.latest_metrics->>'gsc_clicks_28d')::numeric, (b.baseline_metrics->>'gsc_clicks_28d')::numeric) - 
+          coalesce((b.baseline_metrics->>'gsc_clicks_28d')::numeric, 0)
+        when coalesce(t.objective_kpi, t.objective_metric) in ('gsc_impressions_28d', 'impressions_28d') then 
+          coalesce((l.latest_metrics->>'gsc_impressions_28d')::numeric, (b.baseline_metrics->>'gsc_impressions_28d')::numeric) - 
+          coalesce((b.baseline_metrics->>'gsc_impressions_28d')::numeric, 0)
+        when coalesce(t.objective_kpi, t.objective_metric) in ('gsc_ctr_28d', 'ctr_28d') then 
+          coalesce((l.latest_metrics->>'gsc_ctr_28d')::numeric, (b.baseline_metrics->>'gsc_ctr_28d')::numeric) - 
+          coalesce((b.baseline_metrics->>'gsc_ctr_28d')::numeric, 0)
+        when coalesce(t.objective_kpi, t.objective_metric) in ('current_rank', 'rank') then 
+          coalesce((l.latest_metrics->>'current_rank')::numeric, (b.baseline_metrics->>'current_rank')::numeric) - 
+          coalesce((b.baseline_metrics->>'current_rank')::numeric, 0)
+        when coalesce(t.objective_kpi, t.objective_metric) in ('opportunity_score', 'opportunity') then 
+          coalesce((l.latest_metrics->>'opportunity_score')::numeric, (b.baseline_metrics->>'opportunity_score')::numeric) - 
+          coalesce((b.baseline_metrics->>'opportunity_score')::numeric, 0)
+        when coalesce(t.objective_kpi, t.objective_metric) in ('ai_citations', 'citations') then 
+          coalesce((l.latest_metrics->>'ai_citations')::numeric, (b.baseline_metrics->>'ai_citations')::numeric) - 
+          coalesce((b.baseline_metrics->>'ai_citations')::numeric, 0)
+        else null
+      end as objective_delta,
 
   -- Computed: goal state
   case
     when coalesce(t.objective_kpi, t.objective_metric) is null or coalesce(t.objective_kpi, t.objective_metric) = '' then 'not_set'
+    when b.baseline_metrics is null then 'no_measurement' -- No baseline measurement yet
     when coalesce(t.objective_due_at, 
       case 
         when t.cycle_started_at is not null and t.objective_timeframe_days is not null
@@ -133,7 +141,8 @@ select
           case 
             when coalesce(t.objective_kpi, t.objective_metric) in ('current_rank', 'rank') then
               case when coalesce(
-                ((l.latest_metrics->>'current_rank')::numeric - (b.baseline_metrics->>'current_rank')::numeric),
+                coalesce((l.latest_metrics->>'current_rank')::numeric, (b.baseline_metrics->>'current_rank')::numeric) - 
+                coalesce((b.baseline_metrics->>'current_rank')::numeric, 0),
                 0
               ) <= (coalesce(t.objective_target_delta, t.objective_target_value) * -1) then 'met' else 'overdue' end
             else 'overdue' -- decrease not supported for other metrics yet
@@ -143,13 +152,17 @@ select
           case when coalesce(
             case 
               when coalesce(t.objective_kpi, t.objective_metric) in ('ai_citations', 'citations') then 
-                ((l.latest_metrics->>'ai_citations')::numeric - (b.baseline_metrics->>'ai_citations')::numeric)
+                coalesce((l.latest_metrics->>'ai_citations')::numeric, (b.baseline_metrics->>'ai_citations')::numeric) - 
+                coalesce((b.baseline_metrics->>'ai_citations')::numeric, 0)
               when coalesce(t.objective_kpi, t.objective_metric) in ('gsc_ctr_28d', 'ctr_28d') then 
-                ((l.latest_metrics->>'gsc_ctr_28d')::numeric - (b.baseline_metrics->>'gsc_ctr_28d')::numeric)
+                coalesce((l.latest_metrics->>'gsc_ctr_28d')::numeric, (b.baseline_metrics->>'gsc_ctr_28d')::numeric) - 
+                coalesce((b.baseline_metrics->>'gsc_ctr_28d')::numeric, 0)
               when coalesce(t.objective_kpi, t.objective_metric) in ('gsc_clicks_28d', 'clicks_28d') then 
-                ((l.latest_metrics->>'gsc_clicks_28d')::numeric - (b.baseline_metrics->>'gsc_clicks_28d')::numeric)
+                coalesce((l.latest_metrics->>'gsc_clicks_28d')::numeric, (b.baseline_metrics->>'gsc_clicks_28d')::numeric) - 
+                coalesce((b.baseline_metrics->>'gsc_clicks_28d')::numeric, 0)
               when coalesce(t.objective_kpi, t.objective_metric) in ('gsc_impressions_28d', 'impressions_28d') then 
-                ((l.latest_metrics->>'gsc_impressions_28d')::numeric - (b.baseline_metrics->>'gsc_impressions_28d')::numeric)
+                coalesce((l.latest_metrics->>'gsc_impressions_28d')::numeric, (b.baseline_metrics->>'gsc_impressions_28d')::numeric) - 
+                coalesce((b.baseline_metrics->>'gsc_impressions_28d')::numeric, 0)
               else null
             end,
             0
@@ -165,13 +178,17 @@ select
           case when coalesce(
             case 
               when coalesce(t.objective_kpi, t.objective_metric) in ('ai_citations', 'citations') then 
-                ((l.latest_metrics->>'ai_citations')::numeric - (b.baseline_metrics->>'ai_citations')::numeric)
+                coalesce((l.latest_metrics->>'ai_citations')::numeric, (b.baseline_metrics->>'ai_citations')::numeric) - 
+                coalesce((b.baseline_metrics->>'ai_citations')::numeric, 0)
               when coalesce(t.objective_kpi, t.objective_metric) in ('gsc_ctr_28d', 'ctr_28d') then 
-                ((l.latest_metrics->>'gsc_ctr_28d')::numeric - (b.baseline_metrics->>'gsc_ctr_28d')::numeric)
+                coalesce((l.latest_metrics->>'gsc_ctr_28d')::numeric, (b.baseline_metrics->>'gsc_ctr_28d')::numeric) - 
+                coalesce((b.baseline_metrics->>'gsc_ctr_28d')::numeric, 0)
               when coalesce(t.objective_kpi, t.objective_metric) in ('gsc_clicks_28d', 'clicks_28d') then 
-                ((l.latest_metrics->>'gsc_clicks_28d')::numeric - (b.baseline_metrics->>'gsc_clicks_28d')::numeric)
+                coalesce((l.latest_metrics->>'gsc_clicks_28d')::numeric, (b.baseline_metrics->>'gsc_clicks_28d')::numeric) - 
+                coalesce((b.baseline_metrics->>'gsc_clicks_28d')::numeric, 0)
               when coalesce(t.objective_kpi, t.objective_metric) in ('gsc_impressions_28d', 'impressions_28d') then 
-                ((l.latest_metrics->>'gsc_impressions_28d')::numeric - (b.baseline_metrics->>'gsc_impressions_28d')::numeric)
+                coalesce((l.latest_metrics->>'gsc_impressions_28d')::numeric, (b.baseline_metrics->>'gsc_impressions_28d')::numeric) - 
+                coalesce((b.baseline_metrics->>'gsc_impressions_28d')::numeric, 0)
               else null
             end,
             0
