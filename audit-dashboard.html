@@ -5725,6 +5725,24 @@
       }
     }
 
+    // Diagnostic function to check if everything is set up correctly
+    window.diagnoseOptimisationModule = function diagnoseOptimisationModule() {
+      const diagnostics = {
+        drawerElement: !!document.getElementById('optimisation-task-drawer'),
+        backdropElement: !!document.getElementById('optimisation-task-drawer-backdrop'),
+        drawerFunction: typeof window.openOptimisationTaskDrawer === 'function',
+        loadTasksFunction: typeof window.loadAllOptimisationTasks === 'function',
+        getStatusFunction: typeof window.getOptimisationStatus === 'function',
+        statusCache: window.optimisationStatusCache ? window.optimisationStatusCache.size : 0,
+        moduleState: !!window.optimisationModuleState,
+        allTasksCount: window.optimisationModuleState?.allTasks?.length || 0,
+        hasAdminKey: window.hasAdminKey ? window.hasAdminKey() : false
+      };
+      
+      console.log('[Optimisation Diagnostics]', diagnostics);
+      return diagnostics;
+    };
+
     // Add to ensurePanelRendered
     const originalEnsurePanelRendered = ensurePanelRendered;
     ensurePanelRendered = function(panelId) {
@@ -5738,6 +5756,16 @@
         window.loadAllOptimisationTasks();
       }
     };
+    
+    // Run diagnostics on page load (after a short delay to ensure DOM is ready)
+    if (typeof window !== 'undefined') {
+      setTimeout(() => {
+        if (window.diagnoseOptimisationModule) {
+          console.log('[Optimisation] Running diagnostics on page load...');
+          window.diagnoseOptimisationModule();
+        }
+      }, 2000);
+    }
 
     // ======================
     // GSC Date Range Configuration
