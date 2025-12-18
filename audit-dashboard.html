@@ -6359,17 +6359,52 @@
             return;
           }
 
+          // Try to ensure Ranking & AI data is loaded
+          if (typeof window.renderRankingAiTab === 'function') {
+            try {
+              await window.renderRankingAiTab();
+              // Small delay to let data load
+              await new Promise(resolve => setTimeout(resolve, 500));
+            } catch (e) {
+              console.warn('[Optimisation] Could not refresh Ranking & AI data:', e);
+            }
+          }
+
           // Try to find matching row in Ranking & AI data
           let currentMetrics = null;
+          let matchingRow = null;
           
           // First try RankingAiModule state
           if (typeof RankingAiModule !== 'undefined' && RankingAiModule.state) {
             const { combinedRows } = RankingAiModule.state();
-            const matchingRow = combinedRows?.find(r => 
-              r.keyword === task.keyword_text && 
-              (r.best_url === task.target_url || r.targetUrl === task.target_url || r.ranking_url === task.target_url || 
-               r.best_url === task.target_url_clean || r.targetUrl === task.target_url_clean || r.ranking_url === task.target_url_clean)
-            );
+            console.log('[Optimisation] Searching in combinedRows:', combinedRows?.length, 'rows');
+            
+            // Normalize URLs for comparison
+            const taskUrlClean = (task.target_url_clean || task.target_url || '').replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
+            const taskUrlPath = taskUrlClean.includes('/') ? taskUrlClean.split('/').slice(1).join('/') : '';
+            
+            matchingRow = combinedRows?.find(r => {
+              const keywordMatch = (r.keyword || '').toLowerCase() === (task.keyword_text || '').toLowerCase();
+              if (!keywordMatch) return false;
+              
+              // Try multiple URL matching strategies
+              const rowUrl = (r.best_url || r.targetUrl || r.ranking_url || '').toLowerCase();
+              const rowUrlClean = rowUrl.replace(/^https?:\/\//, '').replace(/^www\./, '');
+              const rowUrlPath = rowUrlClean.includes('/') ? rowUrlClean.split('/').slice(1).join('/') : '';
+              
+              return rowUrl === taskUrlClean || 
+                     rowUrlClean === taskUrlClean ||
+                     rowUrlPath === taskUrlPath ||
+                     rowUrl.includes(taskUrlClean) ||
+                     taskUrlClean.includes(rowUrlClean);
+            });
+            
+            console.log('[Optimisation] Found matching row:', matchingRow ? 'YES' : 'NO', { 
+              taskKeyword: task.keyword_text, 
+              taskUrl: task.target_url_clean || task.target_url,
+              matchingRowKeyword: matchingRow?.keyword,
+              matchingRowUrl: matchingRow?.best_url || matchingRow?.targetUrl
+            });
             
             if (matchingRow) {
               // Get queryTotal data for clicks, impressions, and CTR (same as submitTrackKeyword)
@@ -6396,40 +6431,67 @@
             }
           }
           
-          // If still no data, try to get from window.rankingAiData or window.queryTotals
-          if (!currentMetrics && typeof window.rankingAiData !== 'undefined' && Array.isArray(window.rankingAiData)) {
-            const matchingRow = window.rankingAiData.find(r => 
-              r.keyword === task.keyword_text && 
-              (r.best_url === task.target_url || r.targetUrl === task.target_url || r.ranking_url === task.target_url ||
-               r.best_url === task.target_url_clean || r.targetUrl === task.target_url_clean || r.ranking_url === task.target_url_clean)
-            );
+          // If still no data, try to get from window.rankingAiData
+          if (!matchingRow && typeof window.rankingAiData !== 'undefined' && Array.isArray(window.rankingAiData)) {
+            console.log('[Optimisation] Searching in window.rankingAiData:', window.rankingAiData.length, 'rows');
             
-            if (matchingRow) {
-              let queryTotal = null;
-              if (typeof getQueryTotalForKeyword === 'function') {
-                queryTotal = getQueryTotalForKeyword(task.keyword_text);
-              }
+            const taskUrlClean = (task.target_url_clean || task.target_url || '').replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
+            const taskUrlPath = taskUrlClean.includes('/') ? taskUrlClean.split('/').slice(1).join('/') : '';
+            
+            matchingRow = window.rankingAiData.find(r => {
+              const keywordMatch = (r.keyword || '').toLowerCase() === (task.keyword_text || '').toLowerCase();
+              if (!keywordMatch) return false;
               
-              currentMetrics = {
-                gsc_clicks_28d: queryTotal?.clicks || matchingRow.gsc_clicks_28d || matchingRow.clicks_28d || null,
-                gsc_impressions_28d: queryTotal?.impressions || matchingRow.gsc_impressions_28d || matchingRow.impressions_28d || null,
-                gsc_ctr_28d: queryTotal?.ctr != null ? (queryTotal.ctr / 100) : (matchingRow.gsc_ctr_28d || matchingRow.ctr_28d || null),
-                current_rank: matchingRow.best_rank_group || matchingRow.current_rank || null,
-                opportunity_score: matchingRow.opportunityScore || null,
-                ai_overview: matchingRow.has_ai_overview || false,
-                ai_citations: matchingRow.ai_alan_citations_count || 0,
-                ai_citations_total: matchingRow.ai_total_citations || 0,
-                classic_ranking_url: matchingRow.best_url || matchingRow.targetUrl || matchingRow.ranking_url || null,
-                page_type: matchingRow.pageType || null,
-                segment: matchingRow.segment || null,
-                captured_at: new Date().toISOString()
-              };
+              const rowUrl = (r.best_url || r.targetUrl || r.ranking_url || '').toLowerCase();
+              const rowUrlClean = rowUrl.replace(/^https?:\/\//, '').replace(/^www\./, '');
+              const rowUrlPath = rowUrlClean.includes('/') ? rowUrlClean.split('/').slice(1).join('/') : '';
+              
+              return rowUrl === taskUrlClean || 
+                     rowUrlClean === taskUrlClean ||
+                     rowUrlPath === taskUrlPath ||
+                     rowUrl.includes(taskUrlClean) ||
+                     taskUrlClean.includes(rowUrlClean);
+            });
+            
+            console.log('[Optimisation] Found matching row in window.rankingAiData:', matchingRow ? 'YES' : 'NO');
+            
+          }
+          
+          // Build metrics from matching row if found
+          if (matchingRow) {
+            // Get queryTotal data for clicks, impressions, and CTR (same as submitTrackKeyword)
+            let queryTotal = null;
+            if (typeof getQueryTotalForKeyword === 'function') {
+              queryTotal = getQueryTotalForKeyword(task.keyword_text);
+              console.log('[Optimisation] QueryTotal for keyword:', queryTotal);
             }
+            
+            currentMetrics = {
+              gsc_clicks_28d: queryTotal?.clicks || matchingRow.gsc_clicks_28d || matchingRow.clicks_28d || null,
+              gsc_impressions_28d: queryTotal?.impressions || matchingRow.gsc_impressions_28d || matchingRow.impressions_28d || null,
+              // queryTotal.ctr is a percentage (0-100), convert to decimal for storage
+              gsc_ctr_28d: queryTotal?.ctr != null ? (queryTotal.ctr / 100) : (matchingRow.gsc_ctr_28d || matchingRow.ctr_28d || null),
+              current_rank: matchingRow.best_rank_group || matchingRow.current_rank || null,
+              opportunity_score: matchingRow.opportunityScore || null,
+              ai_overview: matchingRow.has_ai_overview || false,
+              ai_citations: matchingRow.ai_alan_citations_count || 0,
+              ai_citations_total: matchingRow.ai_total_citations || 0,
+              classic_ranking_url: matchingRow.best_url || matchingRow.targetUrl || matchingRow.ranking_url || null,
+              page_type: matchingRow.pageType || null,
+              segment: matchingRow.segment || null,
+              captured_at: new Date().toISOString()
+            };
+            
+            console.log('[Optimisation] Built currentMetrics from matching row:', currentMetrics);
           }
 
           // If no current data, show warning but still allow creating measurement
           if (!currentMetrics) {
-            const proceed = confirm('Could not find current ranking data. Create measurement with current timestamp only?');
+            console.warn('[Optimisation] No matching row found for:', {
+              keyword: task.keyword_text,
+              url: task.target_url_clean || task.target_url
+            });
+            const proceed = confirm('Could not find current ranking data for this keyword/URL. Create measurement with current timestamp only?');
             if (!proceed) return;
             
             // Create minimal metrics with just captured_at
