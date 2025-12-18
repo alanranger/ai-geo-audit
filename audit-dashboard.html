@@ -3844,6 +3844,14 @@
                     <div>Last Activity <span class="sort-indicator"></span></div>
                     <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Date of the last activity or event recorded for this task.">ℹ</div>
                   </th>
+                  <th data-sort="baselineCaptured" class="sortable" title="Date when baseline metrics snapshot was captured (when task was created).">
+                    <div>Baseline Captured <span class="sort-indicator"></span></div>
+                    <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Date when baseline metrics snapshot was captured (when task was created).">ℹ</div>
+                  </th>
+                  <th data-sort="latestCaptured" class="sortable" title="Date when latest measurement snapshot was captured.">
+                    <div>Latest Captured <span class="sort-indicator"></span></div>
+                    <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Date when latest measurement snapshot was captured.">ℹ</div>
+                  </th>
                   <th data-sort="title" class="sortable" title="Optional title or label for this optimisation task.">
                     <div>Title <span class="sort-indicator"></span></div>
                     <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Optional title or label for this optimisation task.">ℹ</div>
@@ -3855,7 +3863,7 @@
               </thead>
               <tbody id="optimisation-tasks-tbody">
                 <tr>
-                  <td colspan="8" style="padding: 2rem; text-align: center; color: #666;">Loading tasks...</td>
+                  <td colspan="10" style="padding: 2rem; text-align: center; color: #666;">Loading tasks...</td>
                 </tr>
               </tbody>
             </table>
@@ -3931,6 +3939,18 @@
               <div style="margin-bottom: 1rem;">
                 <strong>Cycle:</strong>
                 <span id="optimisation-drawer-cycle" style="margin-left: 0.5rem;"></span>
+              </div>
+            </div>
+
+            <!-- Performance Snapshot -->
+            <div style="margin-bottom: 2rem; padding: 1rem; background: #f8f9fa; border-radius: 4px;">
+              <h4 style="margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center;">
+                <span>Performance Snapshot</span>
+                <button id="optimisation-add-measurement-btn" class="btn btn-small" style="padding: 0.25rem 0.75rem; font-size: 0.875rem;">Add Measurement</button>
+              </h4>
+              <div id="optimisation-metrics-snapshot" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; font-size: 0.875rem;">
+                <!-- Metrics will be populated by JavaScript -->
+                <div style="color: #666; font-style: italic; grid-column: 1 / -1;">Loading metrics...</div>
               </div>
             </div>
 
@@ -4239,10 +4259,12 @@
       document.getElementById('track-title').value = '';
       document.getElementById('track-notes').value = '';
 
-      // Store cleaned URL for submit
+      // Store cleaned URL and row data for submit (row data needed for baseline metrics)
       modal.dataset.rowKeyword = row.keyword;
       modal.dataset.rowUrl = cleanedUrl;
       modal.dataset.taskType = taskType;
+      // Store row data as JSON string for baseline metrics
+      modal.dataset.rowData = JSON.stringify(row);
 
       modal.style.display = 'flex';
     };
@@ -4267,6 +4289,31 @@
         return;
       }
 
+      // Build baseline metrics from row data (stored in modal dataset)
+      const rowDataStr = modal.dataset.rowData;
+      let baselineMetrics = null;
+      if (rowDataStr) {
+        try {
+          const rowData = JSON.parse(rowDataStr);
+          baselineMetrics = {
+            gsc_clicks_28d: rowData.gsc_clicks_28d || rowData.clicks_28d || null,
+            gsc_impressions_28d: rowData.gsc_impressions_28d || rowData.impressions_28d || null,
+            gsc_ctr_28d: rowData.gsc_ctr_28d || rowData.ctr_28d || null,
+            current_rank: rowData.best_rank_group || rowData.current_rank || null,
+            opportunity_score: rowData.opportunityScore || null,
+            ai_overview: rowData.has_ai_overview || false,
+            ai_citations: rowData.ai_alan_citations_count || 0,
+            ai_citations_total: rowData.ai_total_citations || 0,
+            classic_ranking_url: rowData.best_url || rowData.targetUrl || rowData.ranking_url || null,
+            page_type: rowData.pageType || null,
+            segment: rowData.segment || null,
+            captured_at: new Date().toISOString()
+          };
+        } catch (e) {
+          console.error('[Optimisation] Failed to parse row data for baseline metrics:', e);
+        }
+      }
+
       try {
         const response = await fetch(apiUrl('/api/optimisation/task'), {
           method: 'POST',
@@ -4277,7 +4324,8 @@
             task_type: taskType,
             status: status,
             title: title || null,
-            notes: notes || null
+            notes: notes || null,
+            baselineMetrics: baselineMetrics
           })
         });
 
@@ -4949,6 +4997,14 @@
             aVal = a.last_activity_at ? new Date(a.last_activity_at).getTime() : (a.updated_at ? new Date(a.updated_at).getTime() : 0);
             bVal = b.last_activity_at ? new Date(b.last_activity_at).getTime() : (b.updated_at ? new Date(b.updated_at).getTime() : 0);
             break;
+          case 'baselineCaptured':
+            aVal = a.baseline_metrics?.captured_at ? new Date(a.baseline_metrics.captured_at).getTime() : 0;
+            bVal = b.baseline_metrics?.captured_at ? new Date(b.baseline_metrics.captured_at).getTime() : 0;
+            break;
+          case 'latestCaptured':
+            aVal = a.latest_metrics?.captured_at ? new Date(a.latest_metrics.captured_at).getTime() : 0;
+            bVal = b.latest_metrics?.captured_at ? new Date(b.latest_metrics.captured_at).getTime() : 0;
+            break;
           case 'title':
             aVal = (a.title || '').toLowerCase();
             bVal = (b.title || '').toLowerCase();
@@ -4997,7 +5053,7 @@
       tbody.innerHTML = '';
 
       if (tasks.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" class="ranking-table-empty">No tasks found</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="10" class="ranking-table-empty">No tasks found</td></tr>';
         updateOptimisationPaginationControls(totalRows, currentPage, totalPages, startIdx, endIdx);
         return;
       }
@@ -5019,6 +5075,19 @@
         const lastActivity = task.last_activity_at 
           ? new Date(task.last_activity_at).toLocaleDateString('en-GB')
           : new Date(task.updated_at).toLocaleDateString('en-GB');
+
+        // Format baseline and latest captured dates
+        const baselineCaptured = task.baseline_metrics?.captured_at 
+          ? new Date(task.baseline_metrics.captured_at).toLocaleDateString('en-GB')
+          : '–';
+        const latestCaptured = task.latest_metrics?.captured_at 
+          ? new Date(task.latest_metrics.captured_at).toLocaleDateString('en-GB')
+          : null;
+        
+        // "No measurement yet" indicator
+        const measurementIndicator = !latestCaptured 
+          ? '<span style="padding: 0.25rem 0.5rem; background: #fef3c7; color: #92400e; border-radius: 4px; font-size: 0.75rem;">No measurement yet</span>'
+          : '';
 
         // Extract path from URL for display
         let urlPath = '';
@@ -5056,6 +5125,8 @@
           <td><span style="padding: 0.25rem 0.5rem; border-radius: 4px; background: ${statusStyle.bg}; color: ${statusStyle.color};">${escapeHtml(task.status || 'planned')}</span></td>
           <td>Cycle ${task.cycle_active || 1}</td>
           <td>${lastActivity}</td>
+          <td>${baselineCaptured}</td>
+          <td>${latestCaptured || measurementIndicator}</td>
           <td>${escapeHtml(task.title || '–')}</td>
           <td>
             <button class="btn btn-secondary" onclick="event.stopPropagation(); openOptimisationTaskDrawer('${task.id}');" style="padding: 0.25rem 0.75rem; font-size: 0.875rem;">Open</button>
@@ -5332,6 +5403,9 @@
       document.getElementById('optimisation-drawer-cycle').textContent = `Cycle ${task.cycle_active || 1}`;
       document.getElementById('optimisation-change-status').value = task.status || '';
 
+      // Render metrics snapshot
+      renderOptimisationMetricsSnapshot(task);
+
       // Load events
       await loadOptimisationTaskEvents(taskId);
 
@@ -5469,6 +5543,100 @@
     }
 
     // Load task events (B3)
+    // Render metrics snapshot (baseline + latest + deltas)
+    function renderOptimisationMetricsSnapshot(task) {
+      const container = document.getElementById('optimisation-metrics-snapshot');
+      if (!container) return;
+
+      const baseline = task.baseline_metrics || null;
+      const latest = task.latest_metrics || null;
+
+      if (!baseline && !latest) {
+        container.innerHTML = '<div style="color: #666; font-style: italic; grid-column: 1 / -1;">No metrics snapshot available yet.</div>';
+        return;
+      }
+
+      // Helper to format numbers
+      const formatNum = (val) => {
+        if (val == null) return '—';
+        if (typeof val === 'number') {
+          if (val >= 1000) return (val / 1000).toFixed(1) + 'k';
+          return val.toLocaleString();
+        }
+        return val;
+      };
+
+      // Helper to calculate delta
+      const calcDelta = (latestVal, baselineVal) => {
+        if (latestVal == null || baselineVal == null) return null;
+        if (typeof latestVal === 'number' && typeof baselineVal === 'number') {
+          return latestVal - baselineVal;
+        }
+        return null;
+      };
+
+      // Helper to format delta with color
+      const formatDelta = (delta) => {
+        if (delta == null) return { text: '—', color: '#666' };
+        if (delta > 0) return { text: `+${formatNum(delta)}`, color: '#10b981' };
+        if (delta < 0) return { text: formatNum(delta), color: '#ef4444' };
+        return { text: '0', color: '#666' };
+      };
+
+      // Build metrics table
+      const metrics = [
+        { label: 'Clicks (28d)', baselineKey: 'gsc_clicks_28d', latestKey: 'gsc_clicks_28d', higherIsBetter: true },
+        { label: 'Impressions (28d)', baselineKey: 'gsc_impressions_28d', latestKey: 'gsc_impressions_28d', higherIsBetter: true },
+        { label: 'CTR (28d)', baselineKey: 'gsc_ctr_28d', latestKey: 'gsc_ctr_28d', higherIsBetter: true, format: (v) => v != null ? (v * 100).toFixed(2) + '%' : '—' },
+        { label: 'Current Rank', baselineKey: 'current_rank', latestKey: 'current_rank', higherIsBetter: false },
+        { label: 'Opportunity Score', baselineKey: 'opportunity_score', latestKey: 'opportunity_score', higherIsBetter: true },
+        { label: 'AI Overview', baselineKey: 'ai_overview', latestKey: 'ai_overview', format: (v) => v ? 'On' : 'Off' },
+        { label: 'AI Citations', baselineKey: 'ai_citations', latestKey: 'ai_citations', higherIsBetter: true }
+      ];
+
+      let html = `
+        <div style="font-weight: 600; padding: 0.5rem; background: #e0e7ff; border-radius: 4px;">Metric</div>
+        <div style="font-weight: 600; padding: 0.5rem; background: #fef3c7; border-radius: 4px;">Baseline</div>
+        <div style="font-weight: 600; padding: 0.5rem; background: #dbeafe; border-radius: 4px;">Latest</div>
+      `;
+
+      metrics.forEach(metric => {
+        const baselineVal = baseline?.[metric.baselineKey];
+        const latestVal = latest?.[metric.latestKey];
+        const delta = calcDelta(latestVal, baselineVal);
+        const deltaFormatted = formatDelta(delta);
+
+        const formatValue = (val) => {
+          if (metric.format) return metric.format(val);
+          return formatNum(val);
+        };
+
+        html += `
+          <div style="padding: 0.5rem; border-bottom: 1px solid #e5e7eb;">${metric.label}</div>
+          <div style="padding: 0.5rem; border-bottom: 1px solid #e5e7eb;">${formatValue(baselineVal)}</div>
+          <div style="padding: 0.5rem; border-bottom: 1px solid #e5e7eb;">
+            ${formatValue(latestVal)}
+            ${delta != null ? `<span style="margin-left: 0.5rem; color: ${deltaFormatted.color}; font-weight: 600;">(${deltaFormatted.text})</span>` : ''}
+          </div>
+        `;
+      });
+
+      // Add captured_at timestamps
+      if (baseline?.captured_at || latest?.captured_at) {
+        html += `
+          <div style="padding: 0.5rem; border-top: 2px solid #e5e7eb; font-size: 0.75rem; color: #666; grid-column: 1;">Captured</div>
+          <div style="padding: 0.5rem; border-top: 2px solid #e5e7eb; font-size: 0.75rem; color: #666;">
+            ${baseline?.captured_at ? new Date(baseline.captured_at).toLocaleDateString() : '—'}
+          </div>
+          <div style="padding: 0.5rem; border-top: 2px solid #e5e7eb; font-size: 0.75rem; color: #666;">
+            ${latest?.captured_at ? new Date(latest.captured_at).toLocaleDateString() : '—'}
+          </div>
+        `;
+      }
+
+      container.innerHTML = html;
+    }
+
     async function loadOptimisationTaskEvents(taskId) {
       const eventsContainer = document.getElementById('optimisation-drawer-events');
       if (!eventsContainer) return;
@@ -5693,6 +5861,83 @@
           } catch (error) {
             console.error('[Optimisation Module] Error cancelling task:', error);
             alert('Failed to cancel task: ' + error.message);
+          }
+        });
+      }
+
+      const addMeasurementBtn = document.getElementById('optimisation-add-measurement-btn');
+      if (addMeasurementBtn) {
+        addMeasurementBtn.addEventListener('click', async () => {
+          const taskId = window.optimisationModuleState.currentTaskId;
+          if (!taskId) return;
+
+          // Try to get current row data from Ranking & AI table if available
+          const task = window.optimisationModuleState.allTasks.find(t => t.id === taskId);
+          if (!task) {
+            alert('Task not found. Please refresh the page.');
+            return;
+          }
+
+          // Try to find matching row in Ranking & AI data
+          let currentMetrics = null;
+          if (typeof RankingAiModule !== 'undefined' && RankingAiModule.state) {
+            const { combinedRows } = RankingAiModule.state();
+            const matchingRow = combinedRows?.find(r => 
+              r.keyword === task.keyword_text && 
+              (r.best_url === task.target_url || r.targetUrl === task.target_url || r.ranking_url === task.target_url)
+            );
+            
+            if (matchingRow) {
+              currentMetrics = {
+                gsc_clicks_28d: matchingRow.gsc_clicks_28d || matchingRow.clicks_28d || null,
+                gsc_impressions_28d: matchingRow.gsc_impressions_28d || matchingRow.impressions_28d || null,
+                gsc_ctr_28d: matchingRow.gsc_ctr_28d || matchingRow.ctr_28d || null,
+                current_rank: matchingRow.best_rank_group || matchingRow.current_rank || null,
+                opportunity_score: matchingRow.opportunityScore || null,
+                ai_overview: matchingRow.has_ai_overview || false,
+                ai_citations: matchingRow.ai_alan_citations_count || 0,
+                ai_citations_total: matchingRow.ai_total_citations || 0,
+                classic_ranking_url: matchingRow.best_url || matchingRow.targetUrl || matchingRow.ranking_url || null,
+                page_type: matchingRow.pageType || null,
+                segment: matchingRow.segment || null,
+                captured_at: new Date().toISOString()
+              };
+            }
+          }
+
+          // If no current data, prompt for manual entry
+          if (!currentMetrics) {
+            const note = prompt('Enter a note for this measurement snapshot (optional):');
+            if (note === null) return; // User cancelled
+            
+            // Create minimal metrics with just captured_at
+            currentMetrics = {
+              captured_at: new Date().toISOString()
+            };
+          }
+
+          try {
+            const headers = window.getOptimisationHeaders();
+            const response = await fetch(apiUrl(`/api/optimisation/task/${taskId}/measurement`), {
+              method: 'POST',
+              headers: headers,
+              body: JSON.stringify({
+                metrics: currentMetrics,
+                note: currentMetrics.note || 'Measurement snapshot'
+              })
+            });
+
+            if (!response.ok) {
+              const error = await response.text();
+              throw new Error(error || 'Failed to add measurement');
+            }
+
+            // Reload tasks and refresh drawer
+            await window.loadAllOptimisationTasks();
+            await openOptimisationTaskDrawer(taskId);
+          } catch (error) {
+            console.error('[Optimisation Module] Error adding measurement:', error);
+            alert('Failed to add measurement: ' + error.message);
           }
         });
       }

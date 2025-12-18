@@ -28,7 +28,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { keyword_text, target_url, task_type, status, title, notes } = req.body;
+    const { keyword_text, target_url, task_type, status, title, notes, baselineMetrics } = req.body;
 
     if (!keyword_text || !target_url) {
       return sendJSON(res, 400, { error: 'keyword_text and target_url required' });
@@ -75,15 +75,27 @@ export default async function handler(req, res) {
       return sendJSON(res, 500, { error: taskError.message });
     }
 
-    // Insert created event
+    // Insert created event with baseline metrics snapshot
+    const eventData = {
+      task_id: task.id,
+      event_type: 'created',
+      note: 'Created from Ranking & AI module',
+      owner_user_id: userId,
+      cycle_number: task.cycle_active || 1,
+      source: 'ranking_ai'
+    };
+
+    // Add baseline metrics if provided
+    if (baselineMetrics) {
+      eventData.metrics = {
+        ...baselineMetrics,
+        captured_at: baselineMetrics.captured_at || new Date().toISOString()
+      };
+    }
+
     const { error: eventError } = await supabase
       .from('optimisation_task_events')
-      .insert({
-        task_id: task.id,
-        event_type: 'created',
-        note: 'Created from Ranking & AI module',
-        owner_user_id: userId
-      });
+      .insert(eventData);
 
     if (eventError) {
       console.error('[Optimisation Task] Event insert error:', eventError);
