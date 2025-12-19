@@ -4,7 +4,7 @@
 export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
-import { requireAdmin } from '../../../lib/api/requireAdmin.js';
+import { requireAdminOrShare, isShareMode } from '../../../lib/api/requireAdminOrShare.js';
 
 const need = (k) => {
   const v = process.env[k];
@@ -15,8 +15,8 @@ const need = (k) => {
 const sendJSON = (res, status, obj) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-arp-admin-key');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, PATCH, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-arp-admin-key, x-arp-share-token');
   res.status(status).send(JSON.stringify(obj));
 };
 
@@ -24,14 +24,81 @@ export default async function handler(req, res) {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'PATCH, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-arp-admin-key');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, PATCH, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-arp-admin-key, x-arp-share-token');
     return res.status(200).end();
   }
 
-  // Admin key gate (for all methods)
-  if (!requireAdmin(req, res, sendJSON)) {
+  // Handle GET (read-only - allow share mode)
+  if (req.method === 'GET') {
+    const auth = requireAdminOrShare(req, res, sendJSON);
+    if (!auth.authorized) {
+      return; // Response already sent
+    }
+
+    try {
+      const { id } = req.query;
+      if (!id) {
+        return sendJSON(res, 400, { error: 'Task ID required' });
+      }
+
+      const supabase = createClient(
+        need('SUPABASE_URL'),
+        need('SUPABASE_SERVICE_ROLE_KEY')
+      );
+
+      // Get task with status view (includes baseline/latest metrics)
+      const { data: task, error: taskError } = await supabase
+        .from('vw_optimisation_task_status')
+        .select('*')
+        .eq('id', id)
+        .single();
+
+      if (taskError || !task) {
+        return sendJSON(res, 404, { error: 'Task not found' });
+      }
+
+      // Get goal status
+      const { data: goalStatus } = await supabase
+        .from('vw_optimisation_task_goal_status')
+        .select('goal_state, objective_kpi, objective_target_delta, objective_due_at, objective_delta, objective_direction')
+        .eq('task_id', id)
+        .single();
+
+      // Get events (timeline)
+      const { data: events } = await supabase
+        .from('optimisation_task_events')
+        .select('*')
+        .eq('task_id', id)
+        .order('created_at', { ascending: false });
+
+      return sendJSON(res, 200, {
+        task: {
+          ...task,
+          goal_state: goalStatus?.goal_state || 'not_set',
+          objective_kpi: goalStatus?.objective_kpi,
+          objective_target_delta: goalStatus?.objective_target_delta,
+          objective_due_at: goalStatus?.objective_due_at,
+          objective_delta: goalStatus?.objective_delta,
+          objective_direction: goalStatus?.objective_direction
+        },
+        events: events || []
+      });
+    } catch (error) {
+      console.error('[Optimisation Task] GET error:', error);
+      return sendJSON(res, 500, { error: error.message || 'Internal server error' });
+    }
+  }
+
+  // For write operations (PATCH, DELETE), require admin only
+  const auth = requireAdminOrShare(req, res, sendJSON);
+  if (!auth.authorized) {
     return; // Response already sent
+  }
+
+  // Reject share mode for write operations
+  if (isShareMode(req)) {
+    return sendJSON(res, 403, { error: 'Write operations not allowed in share mode' });
   }
 
   // Handle DELETE (hard delete)
@@ -77,7 +144,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method !== 'PATCH') {
-    return sendJSON(res, 405, { error: `Method not allowed. Received: ${req.method}, Expected: PATCH or DELETE` });
+    return sendJSON(res, 405, { error: `Method not allowed. Received: ${req.method}, Expected: GET, PATCH, or DELETE` });
   }
 
   try {

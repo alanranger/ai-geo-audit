@@ -4,7 +4,7 @@
 export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
-import { requireAdmin } from '../../lib/api/requireAdmin.js';
+import { requireAdminOrShare, isShareMode } from '../../lib/api/requireAdminOrShare.js';
 
 const need = (k) => {
   const v = process.env[k];
@@ -14,17 +14,33 @@ const need = (k) => {
 
 const sendJSON = (res, status, obj) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-arp-admin-key, x-arp-share-token');
   res.status(status).send(JSON.stringify(obj));
 };
 
 export default async function handler(req, res) {
+  // Handle CORS preflight
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-arp-admin-key, x-arp-share-token');
+    return res.status(200).end();
+  }
+
   if (req.method !== 'POST') {
     return sendJSON(res, 405, { error: 'Method not allowed' });
   }
 
-  // Admin key gate
-  if (!requireAdmin(req, res, sendJSON)) {
+  // Write operation - require admin only (reject share mode)
+  const auth = requireAdminOrShare(req, res, sendJSON);
+  if (!auth.authorized) {
     return; // Response already sent
+  }
+
+  if (isShareMode(req)) {
+    return sendJSON(res, 403, { error: 'Write operations not allowed in share mode' });
   }
 
   try {

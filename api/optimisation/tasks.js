@@ -4,7 +4,7 @@
 export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
-import { requireAdmin } from '../../lib/api/requireAdmin.js';
+import { requireAdminOrShare, isShareMode } from '../../lib/api/requireAdminOrShare.js';
 
 const need = (k) => {
   const v = process.env[k];
@@ -16,7 +16,7 @@ const sendJSON = (res, status, obj) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-arp-admin-key');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-arp-admin-key, x-arp-share-token');
   res.status(status).send(JSON.stringify(obj));
 };
 
@@ -25,7 +25,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-arp-admin-key');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-arp-admin-key, x-arp-share-token');
     return res.status(200).end();
   }
 
@@ -33,8 +33,9 @@ export default async function handler(req, res) {
     return sendJSON(res, 405, { error: 'Method not allowed' });
   }
 
-  // Admin key gate
-  if (!requireAdmin(req, res, sendJSON)) {
+  // Admin key OR share token (read-only allowed)
+  const auth = requireAdminOrShare(req, res, sendJSON);
+  if (!auth.authorized) {
     return; // Response already sent
   }
 

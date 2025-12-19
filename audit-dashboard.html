@@ -2463,8 +2463,17 @@
       </div>
     </div>
 
+    <!-- Share Mode Banner (read-only) -->
+    <div id="share-mode-banner" class="config-panel" style="margin-top: 2rem; display: none; background: #fef3c7; border-left: 4px solid #f59e0b; padding: 1rem; border-radius: 4px;">
+      <div style="display: flex; align-items: center; gap: 0.5rem;">
+        <span style="font-size: 1.25rem;">🔒</span>
+        <strong style="color: #92400e;">Shared view (read-only)</strong>
+        <span style="color: #92400e; font-size: 0.9rem;">— You can view all data but cannot make changes</span>
+      </div>
+    </div>
+
     <!-- Admin Key Configuration (Phase A - Security) -->
-    <div class="config-panel" style="margin-top: 2rem;">
+    <div id="admin-key-panel" class="config-panel" style="margin-top: 2rem;">
       <h2>Optimisation Tracking Security</h2>
       <div class="info-box" style="background: #e0f2fe; border-left: 4px solid #0284c7; padding: 1rem; margin-bottom: 1rem; border-radius: 4px;">
         <p style="margin: 0; font-size: 0.9rem; color: #0c4a6e;">
@@ -2497,6 +2506,44 @@
       </div>
       <div id="admin-key-status" style="font-size: 0.85rem; color: #64748b; margin-top: 0.5rem;"></div>
       <script>
+        // Share mode initialization
+        (function() {
+          const urlParams = new URLSearchParams(window.location.search);
+          const isShare = urlParams.get('share') === '1';
+          const shareToken = urlParams.get('st') || '';
+          
+          if (isShare) {
+            // Hide admin key panel
+            const adminPanel = document.getElementById('admin-key-panel');
+            if (adminPanel) adminPanel.style.display = 'none';
+            
+            // Show share mode banner
+            const shareBanner = document.getElementById('share-mode-banner');
+            if (shareBanner) shareBanner.style.display = 'block';
+            
+            // Disable write buttons
+            window.addEventListener('DOMContentLoaded', function() {
+              // Disable audit scan, sync CSV, save config buttons
+              const writeButtons = document.querySelectorAll('[onclick="runAudit()"], [onclick="syncCsv()"], [onclick="saveConfig()"]');
+              writeButtons.forEach(btn => {
+                btn.disabled = true;
+                btn.style.opacity = '0.5';
+                btn.style.cursor = 'not-allowed';
+                btn.title = 'Not available in share mode (read-only)';
+              });
+              
+              // Disable Optimisation Tracking write buttons
+              const bulkUpdateBtn = document.getElementById('optimisation-bulk-update-btn');
+              if (bulkUpdateBtn) {
+                bulkUpdateBtn.disabled = true;
+                bulkUpdateBtn.style.opacity = '0.5';
+                bulkUpdateBtn.style.cursor = 'not-allowed';
+                bulkUpdateBtn.title = 'Not available in share mode (read-only)';
+              }
+            });
+          }
+        })();
+        
         // Admin key UI functions
         function saveAdminKey() {
           const input = document.getElementById('admin-key-input');
@@ -4275,12 +4322,21 @@
       sessionStorage.removeItem("arp_admin_key");
     };
 
-    // Helper to build headers with admin key
+    // Share mode detection
+    const urlParams = new URLSearchParams(window.location.search);
+    window.isShareMode = urlParams.get('share') === '1';
+    window.shareToken = urlParams.get('st') || '';
+
+    // Helper to build headers with admin key or share token
     window.getOptimisationHeaders = function getOptimisationHeaders() {
       const headers = { 'Content-Type': 'application/json' };
-      const adminKey = window.getAdminKey();
-      if (adminKey) {
-        headers['x-arp-admin-key'] = adminKey;
+      if (window.isShareMode && window.shareToken) {
+        headers['x-arp-share-token'] = window.shareToken;
+      } else {
+        const adminKey = window.getAdminKey();
+        if (adminKey) {
+          headers['x-arp-admin-key'] = adminKey;
+        }
       }
       return headers;
     };
@@ -5979,6 +6035,50 @@
       originalLeft: '50%'
     };
 
+    // Helper to disable write buttons in share mode
+    function disableWriteButtonsInShareMode() {
+      if (!window.isShareMode) return;
+      
+      const writeButtonIds = [
+        'optimisation-cancel-task-btn',
+        'optimisation-delete-task-btn',
+        'optimisation-edit-objective-btn',
+        'optimisation-add-measurement-btn',
+        'optimisation-start-cycle-btn',
+        'optimisation-add-event-btn',
+        'optimisation-save-status-btn',
+        'optimisation-save-objective-btn',
+        'optimisation-update-latest-btn'
+      ];
+      
+      writeButtonIds.forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) {
+          btn.disabled = true;
+          btn.style.opacity = '0.5';
+          btn.style.cursor = 'not-allowed';
+          btn.title = (btn.title || '') + ' (Not available in share mode)';
+        }
+      });
+      
+      // Disable inputs
+      const titleInput = document.getElementById('optimisation-drawer-title');
+      if (titleInput) {
+        titleInput.disabled = true;
+        titleInput.style.opacity = '0.5';
+      }
+      
+      const statusSelect = document.getElementById('optimisation-change-status');
+      if (statusSelect) {
+        statusSelect.disabled = true;
+        statusSelect.style.opacity = '0.5';
+      }
+      
+      // Hide edit objective form
+      const editForm = document.getElementById('optimisation-edit-objective-form');
+      if (editForm) editForm.style.display = 'none';
+    }
+
     // Open task drawer (B3, B4)
     window.openOptimisationTaskDrawer = async function openOptimisationTaskDrawer(taskId) {
       // CRITICAL: Switch to Optimisation tab first, otherwise drawer will be hidden
@@ -6336,6 +6436,9 @@
       drawer.style.transform = 'translate(-50%, -50%)';
       drawer.style.width = optimisationDrawerState.originalWidth;
       drawer.style.height = optimisationDrawerState.originalHeight;
+      
+      // Disable write buttons in share mode
+      disableWriteButtonsInShareMode();
       drawer.style.maxHeight = '90vh';
       
       // Ensure content is visible
@@ -31730,7 +31833,12 @@ Final Score: ${score}/100`;
           trackBtn.style.fontSize = "0.75rem";
           trackBtn.textContent = "Track";
           trackBtn.title = "Create a task for this keyword + URL and capture baseline metrics.";
-          if (!window.hasAdminKey()) {
+          if (window.isShareMode) {
+            trackBtn.disabled = true;
+            trackBtn.title = "Not available in share mode (read-only)";
+            trackBtn.style.opacity = "0.5";
+            trackBtn.style.cursor = "not-allowed";
+          } else if (!window.hasAdminKey()) {
             trackBtn.disabled = true;
             trackBtn.title = "Admin key required - set your admin key in the configuration section";
             trackBtn.style.opacity = "0.5";
@@ -31738,6 +31846,10 @@ Final Score: ${score}/100`;
           }
           trackBtn.onclick = (e) => {
             e.stopPropagation();
+            if (window.isShareMode) {
+              alert('Write operations are not available in share mode (read-only).');
+              return;
+            }
             if (!window.hasAdminKey()) {
               alert('Admin key required. Please set your admin key in the "Optimisation Tracking Security" section.');
               return;
@@ -31771,7 +31883,12 @@ Final Score: ${score}/100`;
             trackBtn.style.fontSize = "0.75rem";
             trackBtn.textContent = "Track again";
             trackBtn.title = "Start a new cycle for this keyword + URL.";
-            if (!window.hasAdminKey()) {
+            if (window.isShareMode) {
+              trackBtn.disabled = true;
+              trackBtn.title = "Not available in share mode (read-only)";
+              trackBtn.style.opacity = "0.5";
+              trackBtn.style.cursor = "not-allowed";
+            } else if (!window.hasAdminKey()) {
               trackBtn.disabled = true;
               trackBtn.title = "Admin key required - set your admin key in the configuration section";
               trackBtn.style.opacity = "0.5";
@@ -31779,6 +31896,10 @@ Final Score: ${score}/100`;
             }
             trackBtn.onclick = (e) => {
               e.stopPropagation();
+              if (window.isShareMode) {
+                alert('Write operations are not available in share mode (read-only).');
+                return;
+              }
               if (!window.hasAdminKey()) {
                 alert('Admin key required. Please set your admin key in the "Optimisation Tracking Security" section.');
                 return;
