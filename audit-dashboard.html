@@ -3791,6 +3791,14 @@
                   </select>
                 </div>
                 <div class="filter-group">
+                  <label>Domain type:</label>
+                  <select id="ai-sources-filter-domain-type" class="filter-control">
+                    <option value="all">All</option>
+                    <option value="competitor">Competitor</option>
+                    <option value="self">Self</option>
+                  </select>
+                </div>
+                <div class="filter-group">
                   <label>Search:</label>
                   <input type="text" id="ai-sources-filter-domain" class="filter-control" placeholder="Filter by domain...">
                 </div>
@@ -3802,6 +3810,7 @@
                 <thead>
                   <tr>
                     <th data-sort="domain" class="sortable">Domain <span class="sort-indicator"></span></th>
+                    <th data-sort="domain_type" class="sortable">Domain type <span class="sort-indicator"></span></th>
                     <th data-sort="type" class="sortable">Type <span class="sort-indicator"></span></th>
                     <th data-sort="citations" class="sortable">AI citations <span class="sort-indicator"></span></th>
                     <th data-sort="keywords" class="sortable">Keywords <span class="sort-indicator"></span></th>
@@ -3810,7 +3819,7 @@
                   </tr>
                 </thead>
                 <tbody id="ai-sources-table-body">
-                  <tr><td colspan="6" class="ranking-table-empty">Loading domain data...</td></tr>
+                  <tr><td colspan="7" class="ranking-table-empty">Loading domain data...</td></tr>
                 </tbody>
               </table>
             </div>
@@ -36480,10 +36489,20 @@ Final Score: ${score}/100`;
         const tableBody = document.getElementById('ai-sources-table-body');
         if (!tableBody) return;
 
-        // Apply filters
-        let filtered = domainStats.filter(stat => {
+        // Separate alanranger.com (self) from others
+        // Self domain is always shown regardless of filters (sticky first row)
+        const selfDomain = domainStats.find(stat => stat.is_self);
+        const otherDomains = domainStats.filter(stat => !stat.is_self);
+
+        // Apply filters to other domains (self domain always shown, filtered separately if needed)
+        let filtered = otherDomains.filter(stat => {
           if (filters.type && filters.type !== 'all' && stat.source_type !== filters.type) {
             return false;
+          }
+          if (filters.domainType && filters.domainType !== 'all') {
+            // If filter is 'self', only show self (handled separately)
+            if (filters.domainType === 'self') return false;
+            // If filter is 'competitor', show all non-self domains (already filtered)
           }
           if (filters.domain && !stat.domain.toLowerCase().includes(filters.domain.toLowerCase())) {
             return false;
@@ -36491,8 +36510,8 @@ Final Score: ${score}/100`;
           return true;
         });
 
-        // Apply sorting (default: citations descending)
-        const sortColumn = window.aiSourcesSortState?.column || 'citations';
+        // Apply sorting (default: domain_type - competitors first, then self)
+        const sortColumn = window.aiSourcesSortState?.column || 'domain_type';
         const sortDirection = window.aiSourcesSortState?.direction || 'desc';
         filtered.sort((a, b) => {
           let aVal, bVal;
@@ -36500,6 +36519,13 @@ Final Score: ${score}/100`;
             case 'domain':
               aVal = a.domain.toLowerCase();
               bVal = b.domain.toLowerCase();
+              break;
+            case 'domain_type':
+              // Sort by competitor status: competitors (false) first, then self (true)
+              // Descending: competitors (0) first, then self (1)
+              // Ascending: self (1) first, then competitors (0)
+              aVal = a.is_self ? 1 : 0;
+              bVal = b.is_self ? 1 : 0;
               break;
             case 'type':
               aVal = a.source_type;
@@ -36525,71 +36551,102 @@ Final Score: ${score}/100`;
           return 0;
         });
 
-        if (filtered.length === 0) {
-          tableBody.innerHTML = '<tr><td colspan="6" class="ranking-table-empty">No domains match the current filters.</td></tr>';
+        if (filtered.length === 0 && !selfDomain) {
+          tableBody.innerHTML = '<tr><td colspan="7" class="ranking-table-empty">No domains match the current filters.</td></tr>';
           return;
         }
 
         tableBody.innerHTML = '';
+        
+        // Always render self domain first with yellow highlight (regardless of filters, but respect domain search)
+        if (selfDomain) {
+          // Only filter self domain by domain search text if provided
+          const showSelf = !filters.domain || selfDomain.domain.toLowerCase().includes(filters.domain.toLowerCase());
+          if (showSelf) {
+            const selfRow = createDomainRow(selfDomain, true);
+            tableBody.appendChild(selfRow);
+          }
+        }
+        
+        // Render filtered other domains
         filtered.forEach(stat => {
-          const tr = document.createElement('tr');
-          tr.dataset.domain = stat.domain;
-          
-          // Domain
-          const tdDomain = document.createElement('td');
-          tdDomain.textContent = stat.domain;
-          if (stat.is_self) {
-            tdDomain.style.fontWeight = '700';
-            tdDomain.style.color = '#166534';
-          }
-          tr.appendChild(tdDomain);
-
-          // Type
-          const tdType = document.createElement('td');
-          tdType.textContent = stat.source_type;
-          tr.appendChild(tdType);
-
-          // Citations
-          const tdCitations = document.createElement('td');
-          tdCitations.textContent = stat.total_citations;
-          tr.appendChild(tdCitations);
-
-          // Keywords
-          const tdKeywords = document.createElement('td');
-          tdKeywords.textContent = stat.keyword_count;
-          tr.appendChild(tdKeywords);
-
-          // Citation share
-          const tdShare = document.createElement('td');
-          tdShare.textContent = `${stat.share_of_citations.toFixed(1)}%`;
-          tr.appendChild(tdShare);
-
-          // Example page
-          const tdExample = document.createElement('td');
-          if (stat.example_urls && stat.example_urls.length > 0) {
-            const a = document.createElement('a');
-            a.href = stat.example_urls[0];
-            a.target = '_blank';
-            a.rel = 'noopener noreferrer';
-            a.textContent = stat.is_self ? new URL(stat.example_urls[0]).pathname : stat.example_urls[0];
-            a.style.color = '#0284c7';
-            a.style.textDecoration = 'none';
-            tdExample.appendChild(a);
-          } else {
-            tdExample.textContent = '—';
-          }
-          tr.appendChild(tdExample);
-
-          // Click handler
-          tr.style.cursor = 'pointer';
-          tr.addEventListener('click', () => {
-            document.querySelectorAll('#ai-sources-table-body tr').forEach(r => r.classList.remove('ranking-table-row--selected'));
-            tr.classList.add('ranking-table-row--selected');
-            renderAiSourcesDetail(stat);
-          });
-
-          tableBody.appendChild(tr);
+          const row = createDomainRow(stat, false);
+          tableBody.appendChild(row);
         });
+      }
+
+      /**
+       * Create a table row for a domain stat
+       */
+      function createDomainRow(stat, isSelf) {
+        const tr = document.createElement('tr');
+        tr.dataset.domain = stat.domain;
+        
+        // Highlight self domain row in yellow
+        if (isSelf) {
+          tr.style.backgroundColor = '#ffffcc';
+          tr.style.fontWeight = '600';
+        }
+        
+        // Domain
+        const tdDomain = document.createElement('td');
+        tdDomain.textContent = stat.domain;
+        if (stat.is_self) {
+          tdDomain.style.fontWeight = '700';
+          tdDomain.style.color = '#166534';
+        }
+        tr.appendChild(tdDomain);
+
+        // Domain type (Competitor/Self)
+        const tdDomainType = document.createElement('td');
+        tdDomainType.textContent = stat.is_self ? 'Self' : 'Competitor';
+        tr.appendChild(tdDomainType);
+
+        // Type (Source type)
+        const tdType = document.createElement('td');
+        tdType.textContent = stat.source_type;
+        tr.appendChild(tdType);
+
+        // Citations
+        const tdCitations = document.createElement('td');
+        tdCitations.textContent = stat.total_citations;
+        tr.appendChild(tdCitations);
+
+        // Keywords
+        const tdKeywords = document.createElement('td');
+        tdKeywords.textContent = stat.keyword_count;
+        tr.appendChild(tdKeywords);
+
+        // Citation share
+        const tdShare = document.createElement('td');
+        tdShare.textContent = `${stat.share_of_citations.toFixed(1)}%`;
+        tr.appendChild(tdShare);
+
+        // Example page
+        const tdExample = document.createElement('td');
+        if (stat.example_urls && stat.example_urls.length > 0) {
+          const a = document.createElement('a');
+          a.href = stat.example_urls[0];
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+          a.textContent = stat.is_self ? new URL(stat.example_urls[0]).pathname : stat.example_urls[0];
+          a.style.color = '#0284c7';
+          a.style.textDecoration = 'none';
+          tdExample.appendChild(a);
+        } else {
+          tdExample.textContent = '—';
+        }
+        tr.appendChild(tdExample);
+
+        // Click handler
+        tr.style.cursor = 'pointer';
+        tr.addEventListener('click', () => {
+          document.querySelectorAll('#ai-sources-table-body tr').forEach(r => r.classList.remove('ranking-table-row--selected'));
+          tr.classList.add('ranking-table-row--selected');
+          renderAiSourcesDetail(stat);
+        });
+
+        return tr;
       }
 
       /**
@@ -37029,20 +37086,22 @@ Final Score: ${score}/100`;
         }
       })();
 
-      // Initialize AI Sources sort state
+      // Initialize AI Sources sort state (default: sort by competitor - competitors first)
       if (!window.aiSourcesSortState) {
-        window.aiSourcesSortState = { column: 'citations', direction: 'desc' };
+        window.aiSourcesSortState = { column: 'domain_type', direction: 'desc' };
       }
 
       // Wire up AI Sources tab filters and sorting
       function wireAiSourcesFilters() {
         const typeFilter = document.getElementById('ai-sources-filter-type');
+        const domainTypeFilter = document.getElementById('ai-sources-filter-domain-type');
         const domainFilter = document.getElementById('ai-sources-filter-domain');
         const clearBtn = document.getElementById('ai-sources-filter-clear');
 
         const updateFilters = () => {
           const filters = {
             type: typeFilter ? typeFilter.value : 'all',
+            domainType: domainTypeFilter ? domainTypeFilter.value : 'all',
             domain: domainFilter ? domainFilter.value.trim() : ''
           };
           if (window.aiSourcesDomainStats) {
@@ -37051,10 +37110,12 @@ Final Score: ${score}/100`;
         };
 
         if (typeFilter) typeFilter.addEventListener('change', updateFilters);
+        if (domainTypeFilter) domainTypeFilter.addEventListener('change', updateFilters);
         if (domainFilter) domainFilter.addEventListener('input', updateFilters);
         if (clearBtn) {
           clearBtn.addEventListener('click', () => {
             if (typeFilter) typeFilter.value = 'all';
+            if (domainTypeFilter) domainTypeFilter.value = 'all';
             if (domainFilter) domainFilter.value = '';
             updateFilters();
           });
@@ -37062,6 +37123,14 @@ Final Score: ${score}/100`;
 
         // Wire up table sorting
         const sortableHeaders = document.querySelectorAll('#ai-sources-table th.sortable');
+        
+        // Set initial sort indicator
+        sortableHeaders.forEach(h => {
+          if (h.dataset.sort === window.aiSourcesSortState.column) {
+            h.classList.add(`sort-${window.aiSourcesSortState.direction}`);
+          }
+        });
+        
         sortableHeaders.forEach(th => {
           th.addEventListener('click', () => {
             const column = th.dataset.sort;
@@ -37085,6 +37154,7 @@ Final Score: ${score}/100`;
             // Re-render table with new sort
             const filters = {
               type: typeFilter ? typeFilter.value : 'all',
+              domainType: domainTypeFilter ? domainTypeFilter.value : 'all',
               domain: domainFilter ? domainFilter.value.trim() : ''
             };
             if (window.aiSourcesDomainStats) {
