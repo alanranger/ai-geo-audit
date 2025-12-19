@@ -5839,7 +5839,14 @@
 
     // Update summary cards (B6)
     function updateOptimisationSummaryCards() {
-      const tasks = window.optimisationModuleState.allTasks;
+      let tasks = window.optimisationModuleState.allTasks;
+      
+      // Filter out test tasks if checkbox is unchecked
+      const includeTestCheckbox = document.getElementById('optimisation-filter-include-test');
+      if (!includeTestCheckbox || !includeTestCheckbox.checked) {
+        tasks = tasks.filter(t => !t.is_test_task);
+      }
+      
       const active = tasks.filter(t => ['planned', 'in_progress', 'monitoring'].includes(t.status));
       const planned = tasks.filter(t => t.status === 'planned');
       const inProgress = tasks.filter(t => t.status === 'in_progress');
@@ -8566,7 +8573,10 @@
       // Include test tasks checkbox
       const includeTestCheckbox = document.getElementById('optimisation-filter-include-test');
       if (includeTestCheckbox) {
-        includeTestCheckbox.addEventListener('change', applyFilters);
+        includeTestCheckbox.addEventListener('change', () => {
+          applyFilters();
+          updateOptimisationSummaryCards();
+        });
       }
 
       // Drawer action handlers
