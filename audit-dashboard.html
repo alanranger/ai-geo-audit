@@ -4617,8 +4617,25 @@
           </span>
         </div>
 
-        <!-- Objective Metrics Traffic Lights (7 metrics, each with 3 stacked pills: red, amber, green) -->
-        <div class="optimisation-objective-metrics" style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 1rem; margin: 2rem 0;">
+        <!-- Objective Metrics Traffic Lights (8 columns: All Metrics aggregated + 7 individual metrics) -->
+        <div class="optimisation-objective-metrics" style="display: grid; grid-template-columns: repeat(8, 1fr); gap: 1rem; margin: 2rem 0;">
+          <!-- All Metrics (Aggregated) -->
+          <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+            <div style="text-align: center; margin-bottom: 0.5rem; color: #ffffff; font-size: 1.5rem; font-weight: 700;">All Metrics</div>
+            <div class="traffic-light-pill" data-metric="all_metrics" data-bucket="worse" style="background: rgba(239, 68, 68, 0.2);" onclick="handleTrafficLightClick('all_metrics', 'worse')">
+              <div style="font-size: 2rem; font-weight: 700; color: #f87171;" id="objective-all-metrics-red">0</div>
+              <div style="color: var(--dark-text); font-size: 0.875rem; margin-top: 0.5rem;">Worse</div>
+            </div>
+            <div class="traffic-light-pill" data-metric="all_metrics" data-bucket="same" style="background: rgba(245, 158, 11, 0.2);" onclick="handleTrafficLightClick('all_metrics', 'same')">
+              <div style="font-size: 2rem; font-weight: 700; color: #fbbf24;" id="objective-all-metrics-amber">0</div>
+              <div style="color: var(--dark-text); font-size: 0.875rem; margin-top: 0.5rem;">Same</div>
+            </div>
+            <div class="traffic-light-pill" data-metric="all_metrics" data-bucket="better" style="background: rgba(16, 185, 129, 0.2);" onclick="handleTrafficLightClick('all_metrics', 'better')">
+              <div style="font-size: 2rem; font-weight: 700; color: #34d399;" id="objective-all-metrics-green">0</div>
+              <div style="color: var(--dark-text); font-size: 0.875rem; margin-top: 0.5rem;">Better</div>
+            </div>
+          </div>
+
           <!-- CTR (28d) -->
           <div style="display: flex; flex-direction: column; gap: 0.5rem;">
             <div style="text-align: center; margin-bottom: 0.5rem; color: #ffffff; font-size: 1.5rem; font-weight: 700;">CTR (28d)</div>
@@ -6718,9 +6735,10 @@
         ai_citations: { worse: 0, same: 0, better: 0 },
         ai_overview: { worse: 0, same: 0, better: 0 },
         opportunity_score: { worse: 0, same: 0, better: 0 },
+        all_metrics: { worse: 0, same: 0, better: 0 }, // Aggregated counts
       };
 
-      const metricKeys = Object.keys(counts);
+      const metricKeys = ['ctr_28d', 'impressions_28d', 'clicks_28d', 'current_rank', 'ai_citations', 'ai_overview', 'opportunity_score'];
 
       for (const task of tasks) {
         // Only count active tasks
@@ -6742,6 +6760,9 @@
           continue;
         }
 
+        // Track classifications for all metrics to compute aggregated count
+        const taskClassifications = [];
+
         // Classify each metric
         for (const metricKey of metricKeys) {
           const classification = classifyMetric(
@@ -6752,6 +6773,16 @@
 
           if (classification) {
             counts[metricKey][classification]++;
+            taskClassifications.push(classification);
+          }
+        }
+
+        // For aggregated "all_metrics": count tasks where ALL 7 metrics have the same classification
+        if (taskClassifications.length === 7) {
+          const firstClass = taskClassifications[0];
+          const allSame = taskClassifications.every(cls => cls === firstClass);
+          if (allSame && firstClass) {
+            counts.all_metrics[firstClass]++;
           }
         }
       }
@@ -9149,51 +9180,82 @@
         window.optimisationModuleState.metricTrafficFilter = { metricKey, bucket };
       }
       
-      // Update visual state
+      // Update visual state (highlighting)
       updateTrafficLightVisuals();
       
-      // Apply filters and sort table by the metric
+      // Apply filters
       applyOptimisationFilters();
       
-      // Sort the filtered tasks by the metric (better tasks first, then same, then worse)
-      let tasks = [...window.optimisationModuleState.filteredTasks];
-      const scope = window.optimisationModuleState.scope || 'active_cycle';
-      
-      // Sort tasks by their classification for this metric
-      tasks.sort((a, b) => {
-        // Get classifications for both tasks
-        const aActiveCycle = scope === 'active_cycle' 
-          ? (a.cycles?.find(c => c.is_active || c.id === a.active_cycle_id) || null)
-          : null;
-        const bActiveCycle = scope === 'active_cycle' 
-          ? (b.cycles?.find(c => c.is_active || c.id === b.active_cycle_id) || null)
-          : null;
+      // Only sort if there's an active filter
+      if (window.optimisationModuleState.metricTrafficFilter) {
+        const filter = window.optimisationModuleState.metricTrafficFilter;
+        let tasks = [...window.optimisationModuleState.filteredTasks];
+        const scope = window.optimisationModuleState.scope || 'active_cycle';
+        const metricKeys = ['ctr_28d', 'impressions_28d', 'clicks_28d', 'current_rank', 'ai_citations', 'ai_overview', 'opportunity_score'];
         
-        const aMeasurements = a.measurements || [];
-        const bMeasurements = b.measurements || [];
+        // Sort tasks by their classification for this metric
+        tasks.sort((a, b) => {
+          // Get classifications for both tasks
+          const aActiveCycle = scope === 'active_cycle' 
+            ? (a.cycles?.find(c => c.is_active || c.id === a.active_cycle_id) || null)
+            : null;
+          const bActiveCycle = scope === 'active_cycle' 
+            ? (b.cycles?.find(c => c.is_active || c.id === b.active_cycle_id) || null)
+            : null;
+          
+          const aMeasurements = a.measurements || [];
+          const bMeasurements = b.measurements || [];
+          
+          const aBaselineLatest = getBaselineLatest(aMeasurements, scope, aActiveCycle);
+          const bBaselineLatest = getBaselineLatest(bMeasurements, scope, bActiveCycle);
+          
+          let aClass, bClass;
+          
+          if (filter.metricKey === 'all_metrics') {
+            // For all_metrics, check if all metrics have the same classification
+            const aClasses = [];
+            const bClasses = [];
+            
+            if (aBaselineLatest) {
+              for (const mk of metricKeys) {
+                const cls = classifyMetric(mk, aBaselineLatest.baseline, aBaselineLatest.latest);
+                if (cls) aClasses.push(cls);
+              }
+            }
+            
+            if (bBaselineLatest) {
+              for (const mk of metricKeys) {
+                const cls = classifyMetric(mk, bBaselineLatest.baseline, bBaselineLatest.latest);
+                if (cls) bClasses.push(cls);
+              }
+            }
+            
+            // If all 7 metrics have the same classification, use that; otherwise null
+            aClass = (aClasses.length === 7 && aClasses.every(c => c === aClasses[0])) ? aClasses[0] : null;
+            bClass = (bClasses.length === 7 && bClasses.every(c => c === bClasses[0])) ? bClasses[0] : null;
+          } else {
+            // Single metric
+            aClass = aBaselineLatest ? classifyMetric(filter.metricKey, aBaselineLatest.baseline, aBaselineLatest.latest) : null;
+            bClass = bBaselineLatest ? classifyMetric(filter.metricKey, bBaselineLatest.baseline, bBaselineLatest.latest) : null;
+          }
+          
+          // Priority: better (2) > same (1) > worse (0) > null (-1)
+          const getPriority = (cls) => {
+            if (cls === 'better') return 2;
+            if (cls === 'same') return 1;
+            if (cls === 'worse') return 0;
+            return -1;
+          };
+          
+          const aPriority = getPriority(aClass);
+          const bPriority = getPriority(bClass);
+          
+          // Sort descending (better first)
+          return bPriority - aPriority;
+        });
         
-        const aBaselineLatest = getBaselineLatest(aMeasurements, scope, aActiveCycle);
-        const bBaselineLatest = getBaselineLatest(bMeasurements, scope, bActiveCycle);
-        
-        const aClass = aBaselineLatest ? classifyMetric(metricKey, aBaselineLatest.baseline, aBaselineLatest.latest) : null;
-        const bClass = bBaselineLatest ? classifyMetric(metricKey, bBaselineLatest.baseline, bBaselineLatest.latest) : null;
-        
-        // Priority: better (2) > same (1) > worse (0) > null (-1)
-        const getPriority = (cls) => {
-          if (cls === 'better') return 2;
-          if (cls === 'same') return 1;
-          if (cls === 'worse') return 0;
-          return -1;
-        };
-        
-        const aPriority = getPriority(aClass);
-        const bPriority = getPriority(bClass);
-        
-        // Sort descending (better first)
-        return bPriority - aPriority;
-      });
-      
-      window.optimisationModuleState.filteredTasks = tasks;
+        window.optimisationModuleState.filteredTasks = tasks;
+      }
       
       // Re-render table with new filter and sort
       renderOptimisationTasksTable();
@@ -9263,6 +9325,7 @@
       
       // Update display
       const metricMap = {
+        all_metrics: 'all-metrics',
         ctr_28d: 'ctr',
         impressions_28d: 'impressions',
         clicks_28d: 'clicks',
@@ -9321,6 +9384,8 @@
       const metricTrafficFilter = window.optimisationModuleState.metricTrafficFilter;
       if (metricTrafficFilter) {
         const scope = window.optimisationModuleState.scope || 'active_cycle';
+        const metricKeys = ['ctr_28d', 'impressions_28d', 'clicks_28d', 'current_rank', 'ai_citations', 'ai_overview', 'opportunity_score'];
+        
         tasks = tasks.filter(task => {
           // Only active tasks can match
           if (!isActiveStatus(task.status)) {
@@ -9341,15 +9406,36 @@
             return false;
           }
           
-          // Classify the metric
-          const classification = classifyMetric(
-            metricTrafficFilter.metricKey,
-            baselineLatest.baseline,
-            baselineLatest.latest
-          );
-          
-          // Include only if classification matches the filter bucket
-          return classification === metricTrafficFilter.bucket;
+          // Handle "all_metrics" filter: check that ALL 7 metrics have the same classification
+          if (metricTrafficFilter.metricKey === 'all_metrics') {
+            const classifications = [];
+            for (const metricKey of metricKeys) {
+              const classification = classifyMetric(
+                metricKey,
+                baselineLatest.baseline,
+                baselineLatest.latest
+              );
+              if (classification) {
+                classifications.push(classification);
+              }
+            }
+            
+            // All 7 metrics must be classified and all must match the filter bucket
+            if (classifications.length === 7) {
+              return classifications.every(cls => cls === metricTrafficFilter.bucket);
+            }
+            return false;
+          } else {
+            // Single metric filter
+            const classification = classifyMetric(
+              metricTrafficFilter.metricKey,
+              baselineLatest.baseline,
+              baselineLatest.latest
+            );
+            
+            // Include only if classification matches the filter bucket
+            return classification === metricTrafficFilter.bucket;
+          }
         });
       }
       
