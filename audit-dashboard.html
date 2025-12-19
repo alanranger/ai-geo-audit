@@ -36495,7 +36495,21 @@ Final Score: ${score}/100`;
         const allDomains = domainStats.map(stat => stat.domain);
         const domainMetadata = await fetchDomainMetadataForDomains(allDomains);
         const normalizedDomains = allDomains.map(normalizeDomainForStrength).filter(Boolean);
+        // Fetch domain strength for all domains (not just first 30)
+        // Note: fetchLatestDomainStrengthForDomains has a 30 domain limit, so we need to batch if needed
         const domainStrength = await fetchLatestDomainStrengthForDomains(normalizedDomains);
+        
+        // If we have more than 30 domains, fetch in batches
+        if (normalizedDomains.length > 30) {
+          const batches = [];
+          for (let i = 0; i < normalizedDomains.length; i += 30) {
+            batches.push(normalizedDomains.slice(i, i + 30));
+          }
+          for (const batch of batches.slice(1)) {
+            const batchStrength = await fetchLatestDomainStrengthForDomains(batch);
+            Object.assign(domainStrength, batchStrength);
+          }
+        }
 
         // Separate alanranger.com (self) from others
         // Self domain is always shown regardless of filters (sticky first row)
@@ -36668,16 +36682,19 @@ Final Score: ${score}/100`;
         }
         
         // Map domain_type value to display label (same as Ranking & AI)
-        // Always show domain_type for all rows (not just "Competitor")
+        // Always show domain_type for all rows
         let displayType = '';
         if (stat.is_self) {
           // For self domain, show mapped label or "Your site" if unmapped
           const domainType = meta.domain_type && meta.domain_type !== 'unmapped' ? meta.domain_type : 'your_site';
           displayType = getDomainTypeLabel(domainType);
         } else {
-          // For non-self domains, show mapped label if available, otherwise blank (same as Ranking & AI)
+          // For non-self domains, show mapped label if available, otherwise show "Unmapped"
           if (meta.domain_type && meta.domain_type !== 'unmapped') {
             displayType = getDomainTypeLabel(meta.domain_type);
+          } else {
+            // Show "Unmapped" so user knows domain exists but type not assigned yet
+            displayType = 'Unmapped';
           }
         }
         tdDomainType.textContent = displayType;
