@@ -3811,7 +3811,6 @@
                   <tr>
                     <th data-sort="domain" class="sortable">Domain <span class="sort-indicator"></span></th>
                     <th data-sort="domain_type" class="sortable">Domain type <span class="sort-indicator"></span></th>
-                    <th data-sort="type" class="sortable">Type <span class="sort-indicator"></span></th>
                     <th data-sort="citations" class="sortable">AI citations <span class="sort-indicator"></span></th>
                     <th data-sort="keywords" class="sortable">Keywords <span class="sort-indicator"></span></th>
                     <th data-sort="share" class="sortable">Citation share <span class="sort-indicator"></span></th>
@@ -3819,7 +3818,7 @@
                   </tr>
                 </thead>
                 <tbody id="ai-sources-table-body">
-                  <tr><td colspan="7" class="ranking-table-empty">Loading domain data...</td></tr>
+                  <tr><td colspan="6" class="ranking-table-empty">Loading domain data...</td></tr>
                 </tbody>
               </table>
             </div>
@@ -36527,21 +36526,25 @@ Final Score: ${score}/100`;
               bVal = b.domain.toLowerCase();
               break;
             case 'domain_type':
-              // Sort by domain_type string value from metadata
+              // Sort by domain_type string value from metadata (using mapped labels for consistent sorting)
               const aNorm = normalizeDomainForStrength(a.domain);
               const bNorm = normalizeDomainForStrength(b.domain);
               const aMeta = domainMetadata[aNorm] || { domain_type: 'unmapped' };
               const bMeta = domainMetadata[bNorm] || { domain_type: 'unmapped' };
-              // For self domains, use "Your site" if unmapped, otherwise use domain_type
+              // For self domains, use "your_site" if unmapped, otherwise use domain_type
               if (a.is_self) {
-                aVal = aMeta.domain_type && aMeta.domain_type !== 'unmapped' ? aMeta.domain_type : 'Your site';
+                const aDomainType = aMeta.domain_type && aMeta.domain_type !== 'unmapped' ? aMeta.domain_type : 'your_site';
+                aVal = getDomainTypeLabel(aDomainType);
               } else {
-                aVal = aMeta.domain_type && aMeta.domain_type !== 'unmapped' ? aMeta.domain_type : 'zzz_unmapped';
+                const aDomainType = aMeta.domain_type && aMeta.domain_type !== 'unmapped' ? aMeta.domain_type : 'zzz_unmapped';
+                aVal = getDomainTypeLabel(aDomainType) || 'zzz_unmapped';
               }
               if (b.is_self) {
-                bVal = bMeta.domain_type && bMeta.domain_type !== 'unmapped' ? bMeta.domain_type : 'Your site';
+                const bDomainType = bMeta.domain_type && bMeta.domain_type !== 'unmapped' ? bMeta.domain_type : 'your_site';
+                bVal = getDomainTypeLabel(bDomainType);
               } else {
-                bVal = bMeta.domain_type && bMeta.domain_type !== 'unmapped' ? bMeta.domain_type : 'zzz_unmapped';
+                const bDomainType = bMeta.domain_type && bMeta.domain_type !== 'unmapped' ? bMeta.domain_type : 'zzz_unmapped';
+                bVal = getDomainTypeLabel(bDomainType) || 'zzz_unmapped';
               }
               break;
             case 'type':
@@ -36569,7 +36572,7 @@ Final Score: ${score}/100`;
         });
 
         if (filtered.length === 0 && !selfDomain) {
-          tableBody.innerHTML = '<tr><td colspan="7" class="ranking-table-empty">No domains match the current filters.</td></tr>';
+          tableBody.innerHTML = '<tr><td colspan="6" class="ranking-table-empty">No domains match the current filters.</td></tr>';
           return;
         }
 
@@ -36597,14 +36600,35 @@ Final Score: ${score}/100`;
       }
 
       /**
+       * Map domain_type value to display label (same as Ranking & AI module)
+       */
+      function getDomainTypeLabel(domainType) {
+        const domainTypeMap = {
+          'unmapped': 'Unmapped',
+          'your_site': 'Your site',
+          'platform': 'Platform',
+          'directory': 'Directory',
+          'publisher': 'Publisher',
+          'vendor': 'Vendor',
+          'institution': 'Institution',
+          'government': 'Government',
+          'site': 'Site'
+        };
+        return domainTypeMap[domainType] || domainType || '';
+      }
+
+      /**
        * Create a table row for a domain stat
        */
       function createDomainRow(stat, isSelf, meta) {
         const tr = document.createElement('tr');
         tr.dataset.domain = stat.domain;
         
-        // Highlight self domain row in yellow
+        // Make self domain row sticky and highlight in yellow
         if (isSelf) {
+          tr.style.position = 'sticky';
+          tr.style.top = '0';
+          tr.style.zIndex = '10';
           tr.style.backgroundColor = '#ffffcc';
           tr.style.fontWeight = '600';
         }
@@ -36615,45 +36639,65 @@ Final Score: ${score}/100`;
         if (stat.is_self) {
           tdDomain.style.fontWeight = '700';
           tdDomain.style.color = '#166534';
+          tdDomain.style.backgroundColor = '#ffffcc'; // Ensure background covers cell
         }
         tr.appendChild(tdDomain);
 
         // Domain type (use same categorization as Ranking & AI module)
         const tdDomainType = document.createElement('td');
-        // Use domain_type from metadata, but show "Your site" for self domain if domain_type is not set
+        tdDomainType.style.padding = '0.5rem 0.4rem';
+        tdDomainType.style.fontSize = '0.8rem';
+        tdDomainType.style.wordWrap = 'break-word';
+        tdDomainType.style.overflowWrap = 'break-word';
+        if (stat.is_self) {
+          tdDomainType.style.backgroundColor = '#ffffcc'; // Ensure background covers cell
+        }
+        
+        // Map domain_type value to display label (same as Ranking & AI)
         let displayType = '';
         if (stat.is_self) {
-          displayType = meta.domain_type && meta.domain_type !== 'unmapped' ? meta.domain_type : 'Your site';
+          // For self domain, show mapped label or "Your site" if unmapped
+          const domainType = meta.domain_type && meta.domain_type !== 'unmapped' ? meta.domain_type : 'your_site';
+          displayType = getDomainTypeLabel(domainType);
         } else {
-          // For non-self domains, show domain_type if available, otherwise show blank (same as Ranking & AI)
-          displayType = meta.domain_type && meta.domain_type !== 'unmapped' ? meta.domain_type : '';
+          // For non-self domains, show mapped label if available, otherwise blank (same as Ranking & AI)
+          if (meta.domain_type && meta.domain_type !== 'unmapped') {
+            displayType = getDomainTypeLabel(meta.domain_type);
+          }
         }
         tdDomainType.textContent = displayType;
         tdDomainType.style.color = displayType ? '#475569' : '#94a3b8';
         tr.appendChild(tdDomainType);
 
-        // Type (Source type)
-        const tdType = document.createElement('td');
-        tdType.textContent = stat.source_type;
-        tr.appendChild(tdType);
-
         // Citations
         const tdCitations = document.createElement('td');
         tdCitations.textContent = stat.total_citations;
+        if (stat.is_self) {
+          tdCitations.style.backgroundColor = '#ffffcc'; // Ensure background covers cell
+        }
         tr.appendChild(tdCitations);
 
         // Keywords
         const tdKeywords = document.createElement('td');
         tdKeywords.textContent = stat.keyword_count;
+        if (stat.is_self) {
+          tdKeywords.style.backgroundColor = '#ffffcc'; // Ensure background covers cell
+        }
         tr.appendChild(tdKeywords);
 
         // Citation share
         const tdShare = document.createElement('td');
         tdShare.textContent = `${stat.share_of_citations.toFixed(1)}%`;
+        if (stat.is_self) {
+          tdShare.style.backgroundColor = '#ffffcc'; // Ensure background covers cell
+        }
         tr.appendChild(tdShare);
 
         // Example page
         const tdExample = document.createElement('td');
+        if (stat.is_self) {
+          tdExample.style.backgroundColor = '#ffffcc'; // Ensure background covers cell
+        }
         if (stat.example_urls && stat.example_urls.length > 0) {
           const a = document.createElement('a');
           a.href = stat.example_urls[0];
