@@ -1524,6 +1524,55 @@
     .optimisation-impact-tiles .card:hover::before {
       transform: scaleX(1);
     }
+    
+    /* Traffic light pills - same styling as other cards */
+    .traffic-light-pill {
+      background: var(--dark-panel) !important;
+      border: 2px solid var(--dark-border) !important;
+      border-radius: 12px !important;
+      padding: 1rem !important;
+      transition: all 0.3s ease !important;
+      position: relative !important;
+      overflow: hidden !important;
+      text-align: center !important;
+      cursor: pointer !important;
+    }
+    
+    .traffic-light-pill::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: var(--dark-brand);
+      transform: scaleX(0);
+      transition: transform 0.3s ease;
+    }
+    
+    .traffic-light-pill:hover {
+      border-color: var(--dark-brand) !important;
+      transform: translateY(-4px);
+      box-shadow: 0 8px 24px rgba(245, 158, 11, 0.2);
+      animation: wobble 0.5s ease-in-out;
+    }
+    
+    .traffic-light-pill:hover::before {
+      transform: scaleX(1);
+    }
+    
+    /* Restore background colors on hover based on bucket */
+    .traffic-light-pill[data-bucket="worse"]:hover {
+      background: rgba(239, 68, 68, 0.3) !important;
+    }
+    
+    .traffic-light-pill[data-bucket="same"]:hover {
+      background: rgba(245, 158, 11, 0.3) !important;
+    }
+    
+    .traffic-light-pill[data-bucket="better"]:hover {
+      background: rgba(16, 185, 129, 0.3) !important;
+    }
 
     /* Green centered count values (like analytics.html) - no background */
     .optimisation-summary-cards .card > div:first-child,
@@ -4527,15 +4576,15 @@
           <!-- CTR (28d) -->
           <div style="display: flex; flex-direction: column; gap: 0.5rem;">
             <div style="text-align: center; margin-bottom: 0.5rem; color: #ffffff; font-size: 1.5rem; font-weight: 700;">CTR (28d)</div>
-            <div class="traffic-light-pill" data-metric="ctr_28d" data-bucket="worse" style="background: rgba(239, 68, 68, 0.2); border-radius: 8px; padding: 1rem; text-align: center; border: 1px solid var(--dark-border); cursor: pointer; transition: all 0.2s;" onclick="handleTrafficLightClick('ctr_28d', 'worse')" onmouseover="this.style.background='rgba(239, 68, 68, 0.3)'" onmouseout="updateTrafficLightHover(this)">
+            <div class="traffic-light-pill" data-metric="ctr_28d" data-bucket="worse" style="background: rgba(239, 68, 68, 0.2);" onclick="handleTrafficLightClick('ctr_28d', 'worse')">
               <div style="font-size: 2rem; font-weight: 700; color: #f87171;" id="objective-ctr-red">0</div>
               <div style="color: var(--dark-text); font-size: 0.875rem; margin-top: 0.5rem;">Worse</div>
             </div>
-            <div class="traffic-light-pill" data-metric="ctr_28d" data-bucket="same" style="background: rgba(245, 158, 11, 0.2); border-radius: 8px; padding: 1rem; text-align: center; border: 1px solid var(--dark-border); cursor: pointer; transition: all 0.2s;" onclick="handleTrafficLightClick('ctr_28d', 'same')" onmouseover="this.style.background='rgba(245, 158, 11, 0.3)'" onmouseout="updateTrafficLightHover(this)">
+            <div class="traffic-light-pill" data-metric="ctr_28d" data-bucket="same" style="background: rgba(245, 158, 11, 0.2);" onclick="handleTrafficLightClick('ctr_28d', 'same')">
               <div style="font-size: 2rem; font-weight: 700; color: #fbbf24;" id="objective-ctr-amber">0</div>
               <div style="color: var(--dark-text); font-size: 0.875rem; margin-top: 0.5rem;">Same</div>
             </div>
-            <div class="traffic-light-pill" data-metric="ctr_28d" data-bucket="better" style="background: rgba(16, 185, 129, 0.2); border-radius: 8px; padding: 1rem; text-align: center; border: 1px solid var(--dark-border); cursor: pointer; transition: all 0.2s;" onclick="handleTrafficLightClick('ctr_28d', 'better')" onmouseover="this.style.background='rgba(16, 185, 129, 0.3)'" onmouseout="updateTrafficLightHover(this)">
+            <div class="traffic-light-pill" data-metric="ctr_28d" data-bucket="better" style="background: rgba(16, 185, 129, 0.2);" onclick="handleTrafficLightClick('ctr_28d', 'better')">
               <div style="font-size: 2rem; font-weight: 700; color: #34d399;" id="objective-ctr-green">0</div>
               <div style="color: var(--dark-text); font-size: 0.875rem; margin-top: 0.5rem;">Better</div>
             </div>
@@ -9057,7 +9106,50 @@
       // Update visual state
       updateTrafficLightVisuals();
       
-      // Re-render table with new filter
+      // Apply filters and sort table by the metric
+      applyOptimisationFilters();
+      
+      // Sort the filtered tasks by the metric (better tasks first, then same, then worse)
+      let tasks = [...window.optimisationModuleState.filteredTasks];
+      const scope = window.optimisationModuleState.scope || 'active_cycle';
+      
+      // Sort tasks by their classification for this metric
+      tasks.sort((a, b) => {
+        // Get classifications for both tasks
+        const aActiveCycle = scope === 'active_cycle' 
+          ? (a.cycles?.find(c => c.is_active || c.id === a.active_cycle_id) || null)
+          : null;
+        const bActiveCycle = scope === 'active_cycle' 
+          ? (b.cycles?.find(c => c.is_active || c.id === b.active_cycle_id) || null)
+          : null;
+        
+        const aMeasurements = a.measurements || [];
+        const bMeasurements = b.measurements || [];
+        
+        const aBaselineLatest = getBaselineLatest(aMeasurements, scope, aActiveCycle);
+        const bBaselineLatest = getBaselineLatest(bMeasurements, scope, bActiveCycle);
+        
+        const aClass = aBaselineLatest ? classifyMetric(metricKey, aBaselineLatest.baseline, aBaselineLatest.latest) : null;
+        const bClass = bBaselineLatest ? classifyMetric(metricKey, bBaselineLatest.baseline, bBaselineLatest.latest) : null;
+        
+        // Priority: better (2) > same (1) > worse (0) > null (-1)
+        const getPriority = (cls) => {
+          if (cls === 'better') return 2;
+          if (cls === 'same') return 1;
+          if (cls === 'worse') return 0;
+          return -1;
+        };
+        
+        const aPriority = getPriority(aClass);
+        const bPriority = getPriority(bClass);
+        
+        // Sort descending (better first)
+        return bPriority - aPriority;
+      });
+      
+      window.optimisationModuleState.filteredTasks = tasks;
+      
+      // Re-render table with new filter and sort
       renderOptimisationTasksTable();
     };
     
@@ -9081,23 +9173,9 @@
       });
     }
     
-    // Helper to restore hover state (considering selection)
+    // Helper to restore hover state (considering selection) - no longer needed with CSS hover
     window.updateTrafficLightHover = function(element) {
-      const filter = window.optimisationModuleState.metricTrafficFilter;
-      const metricKey = element.dataset.metric;
-      const bucket = element.dataset.bucket;
-      const isSelected = filter && filter.metricKey === metricKey && filter.bucket === bucket;
-      
-      if (!isSelected) {
-        // Restore default background based on bucket
-        if (bucket === 'worse') {
-          element.style.background = 'rgba(239, 68, 68, 0.2)';
-        } else if (bucket === 'same') {
-          element.style.background = 'rgba(245, 158, 11, 0.2)';
-        } else {
-          element.style.background = 'rgba(16, 185, 129, 0.2)';
-        }
-      }
+      // CSS handles hover now, but keep for compatibility
     };
     
     // Update traffic light counts and display
@@ -10222,11 +10300,11 @@
               pill.classList.add('traffic-light-pill');
               pill.dataset.metric = metricKey;
               pill.dataset.bucket = 'worse';
-              pill.style.cursor = 'pointer';
-              pill.style.transition = 'all 0.2s';
+              pill.style.background = 'rgba(239, 68, 68, 0.2)';
               pill.onclick = () => handleTrafficLightClick(metricKey, 'worse');
-              pill.onmouseover = () => { pill.style.background = 'rgba(239, 68, 68, 0.3)'; };
-              pill.onmouseout = () => updateTrafficLightHover(pill);
+              // Remove any inline hover handlers - CSS handles it now
+              pill.removeAttribute('onmouseover');
+              pill.removeAttribute('onmouseout');
             }
           }
           
@@ -10236,11 +10314,11 @@
               pill.classList.add('traffic-light-pill');
               pill.dataset.metric = metricKey;
               pill.dataset.bucket = 'same';
-              pill.style.cursor = 'pointer';
-              pill.style.transition = 'all 0.2s';
+              pill.style.background = 'rgba(245, 158, 11, 0.2)';
               pill.onclick = () => handleTrafficLightClick(metricKey, 'same');
-              pill.onmouseover = () => { pill.style.background = 'rgba(245, 158, 11, 0.3)'; };
-              pill.onmouseout = () => updateTrafficLightHover(pill);
+              // Remove any inline hover handlers - CSS handles it now
+              pill.removeAttribute('onmouseover');
+              pill.removeAttribute('onmouseout');
             }
           }
           
@@ -10250,11 +10328,11 @@
               pill.classList.add('traffic-light-pill');
               pill.dataset.metric = metricKey;
               pill.dataset.bucket = 'better';
-              pill.style.cursor = 'pointer';
-              pill.style.transition = 'all 0.2s';
+              pill.style.background = 'rgba(16, 185, 129, 0.2)';
               pill.onclick = () => handleTrafficLightClick(metricKey, 'better');
-              pill.onmouseover = () => { pill.style.background = 'rgba(16, 185, 129, 0.3)'; };
-              pill.onmouseout = () => updateTrafficLightHover(pill);
+              // Remove any inline hover handlers - CSS handles it now
+              pill.removeAttribute('onmouseover');
+              pill.removeAttribute('onmouseout');
             }
           }
         }
