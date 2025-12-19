@@ -75,12 +75,35 @@ export default async function handler(req, res) {
       return sendJSON(res, 403, { error: 'Forbidden' });
     }
 
-    // Get events for this task
-    const { data: events, error } = await supabase
+    // Parse query parameters for filtering
+    const eventType = req.query.event_type;
+    const cycleId = req.query.cycle_id;
+    const cycleNumber = req.query.cycle_number;
+    const limit = req.query.limit ? parseInt(req.query.limit) : null;
+
+    // Build query
+    let query = supabase
       .from('optimisation_task_events')
       .select('*')
-      .eq('task_id', id)
-      .order('event_at', { ascending: false });
+      .eq('task_id', id);
+
+    if (eventType) {
+      query = query.eq('event_type', eventType);
+    }
+    if (cycleId) {
+      query = query.eq('cycle_id', cycleId);
+    }
+    if (cycleNumber) {
+      query = query.eq('cycle_number', parseInt(cycleNumber));
+    }
+
+    query = query.order('created_at', { ascending: false });
+
+    if (limit) {
+      query = query.limit(limit);
+    }
+
+    const { data: events, error } = await query;
 
     if (error) {
       console.error('[Optimisation Events] Query error:', error);

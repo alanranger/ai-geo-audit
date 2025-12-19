@@ -49,6 +49,7 @@ export default async function handler(req, res) {
       return sendJSON(res, 400, { error: 'Task ID required' });
     }
 
+    // Parse objective from body (can be either old format or new Phase 5 format)
     const {
       objective_title,
       primary_kpi,
@@ -56,7 +57,8 @@ export default async function handler(req, res) {
       target_direction,
       timeframe_days,
       hypothesis,
-      plan
+      plan,
+      objective // Phase 5 format (jsonb object)
     } = req.body;
 
     const supabase = createClient(
@@ -89,6 +91,33 @@ export default async function handler(req, res) {
       return sendJSON(res, 404, { error: 'Task not found' });
     }
 
+    // Get current cycle to find latest measurement
+    let currentCycle = null;
+    let currentCycleNo = task.cycle_active || 1;
+    if (task.active_cycle_id) {
+      const { data: cycle } = await supabase
+        .from('optimisation_task_cycles')
+        .select('id, cycle_no, objective, due_at')
+        .eq('id', task.active_cycle_id)
+        .single();
+      if (cycle) {
+        currentCycle = cycle;
+        currentCycleNo = cycle.cycle_no;
+      }
+    }
+
+    // Find most recent measurement event for current cycle (this becomes baseline for new cycle)
+    const { data: latestMeasurement } = await supabase
+      .from('optimisation_task_events')
+      .select('id, metrics, created_at')
+      .eq('task_id', id)
+      .eq('event_type', 'measurement')
+      .or(`cycle_id.eq.${task.active_cycle_id || 'null'},cycle_number.eq.${currentCycleNo}`)
+      .not('metrics', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
     // Get the highest cycle number for this task
     const { data: existingCycles, error: cyclesError } = await supabase
       .from('optimisation_task_cycles')
@@ -103,7 +132,7 @@ export default async function handler(req, res) {
 
     const nextCycleNo = existingCycles && existingCycles.length > 0 
       ? existingCycles[0].cycle_no + 1 
-      : (task.cycle_active || 1) + 1;
+      : currentCycleNo + 1;
 
     // End the previous cycle if it exists
     if (task.active_cycle_id) {
@@ -113,19 +142,62 @@ export default async function handler(req, res) {
         .eq('id', task.active_cycle_id);
     }
 
+    // Calculate due_at from objective timeframe if available
+    const now = new Date();
+    let dueAt = null;
+    if (objective && objective.due_at) {
+      dueAt = new Date(objective.due_at).toISOString();
+    } else if (objective && objective.timeframe_days) {
+      dueAt = new Date(now.getTime() + objective.timeframe_days * 24 * 60 * 60 * 1000).toISOString();
+    } else if (timeframe_days) {
+      dueAt = new Date(now.getTime() + parseInt(timeframe_days) * 24 * 60 * 60 * 1000).toISOString();
+    } else if (currentCycle && currentCycle.due_at) {
+      // If previous cycle had a due date, calculate new one from start date
+      const prevDue = new Date(currentCycle.due_at);
+      const prevStart = currentCycle.start_date ? new Date(currentCycle.start_date) : now;
+      const daysDiff = Math.round((prevDue - prevStart) / (24 * 60 * 60 * 1000));
+      if (daysDiff > 0) {
+        dueAt = new Date(now.getTime() + daysDiff * 24 * 60 * 60 * 1000).toISOString();
+      }
+    }
+
+    // Build objective in Phase 5 format if provided, otherwise use legacy fields
+    let objectiveData = null;
+    if (objective && typeof objective === 'object') {
+      objectiveData = objective;
+    } else if (objective_title || primary_kpi || target_value != null) {
+      // Convert legacy format to Phase 5 format
+      const { validateObjective } = await import('../../../../lib/optimisation/objectiveSchema.js');
+      const legacyObj = {
+        title: objective_title || 'Objective',
+        kpi: primary_kpi || 'clicks_28d',
+        target: target_value != null ? parseFloat(target_value) : 0,
+        target_type: target_direction === 'increase' ? 'delta' : (target_direction === 'decrease' ? 'delta' : 'delta'),
+        due_at: dueAt,
+        plan: plan || null
+      };
+      const validation = validateObjective(legacyObj);
+      if (validation.ok) {
+        objectiveData = validation.normalisedObjective;
+      }
+    }
+
     // Create new cycle
     const cycleData = {
       task_id: id,
       cycle_no: nextCycleNo,
       status: task.status || 'planned',
-      objective_title: objective_title || null,
+      objective_title: objective_title || null, // Keep for backward compatibility
       primary_kpi: primary_kpi || null,
       target_value: target_value != null ? parseFloat(target_value) : null,
       target_direction: target_direction || null,
       timeframe_days: timeframe_days != null ? parseInt(timeframe_days) : null,
       hypothesis: hypothesis || null,
       plan: plan || null,
-      start_date: new Date().toISOString()
+      objective: objectiveData, // Phase 5 format
+      started_at: now.toISOString(), // Use started_at (Phase 6)
+      due_at: dueAt, // Phase 6: set due date from objective timeframe
+      start_date: now.toISOString() // Keep for backward compatibility
     };
 
     const { data: cycle, error: cycleError } = await supabase
@@ -164,24 +236,47 @@ export default async function handler(req, res) {
       return sendJSON(res, 500, { error: updateError.message });
     }
 
-    // Create event for new cycle
-    const { error: eventError } = await supabase
+    // Create cycle_start event (Phase 6)
+    const cycleStartEvent = {
+      task_id: id,
+      event_type: 'cycle_start',
+      note: `Cycle ${nextCycleNo} started`,
+      owner_user_id: userId,
+      cycle_id: cycle.id,
+      cycle_number: nextCycleNo,
+      metrics: latestMeasurement ? {
+        baseline_from_measurement_event_id: latestMeasurement.id,
+        baseline_captured_at: latestMeasurement.created_at
+      } : null
+    };
+
+    const { data: cycleStartEventData, error: eventError } = await supabase
       .from('optimisation_task_events')
-      .insert({
-        task_id: id,
-        event_type: 'status_changed',
-        note: `Started Cycle ${nextCycleNo}`,
-        owner_user_id: userId,
-        cycle_id: cycle.id,
-        cycle_number: nextCycleNo
-      });
+      .insert(cycleStartEvent)
+      .select()
+      .single();
 
     if (eventError) {
       console.error('[Optimisation Cycle] Event insert error:', eventError);
       // Don't fail, just log
     }
 
-    return sendJSON(res, 201, { cycle });
+    // Get updated task with baseline/latest from view
+    const { data: updatedTask } = await supabase
+      .from('vw_optimisation_task_status')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    return sendJSON(res, 201, { 
+      cycle,
+      cycle_start_event: cycleStartEventData,
+      task: updatedTask,
+      baseline_from_measurement: latestMeasurement ? {
+        id: latestMeasurement.id,
+        captured_at: latestMeasurement.created_at
+      } : null
+    });
   } catch (error) {
     console.error('[Optimisation Cycle] Error:', error);
     return sendJSON(res, 500, { error: error.message || 'Internal server error' });
