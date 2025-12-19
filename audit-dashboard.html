@@ -4041,6 +4041,10 @@
           <button id="optimisation-filter-needs-update" class="btn btn-secondary" style="padding: 0.5rem 1rem;" title="Show tasks that need measurement update (no measurement or older than 30 days).">Needs Update</button>
           <button id="optimisation-filter-active-cycle" class="btn btn-secondary" style="padding: 0.5rem 1rem;" title="Show only tasks with an active cycle (current cycle not completed or archived).">Active Cycle Only</button>
           <button id="optimisation-filter-overdue-cycle" class="btn btn-secondary" style="padding: 0.5rem 1rem;" title="Show tasks with overdue current cycle (past due date and target not met).">Overdue Cycle</button>
+          <label style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; cursor: pointer;" title="Include test tasks in the view (test tasks are excluded from bulk updates).">
+            <input type="checkbox" id="optimisation-filter-include-test" style="cursor: pointer;">
+            <span>Include Test Tasks</span>
+          </label>
           <button id="optimisation-clear-filters" class="btn btn-secondary" style="padding: 0.5rem 1rem;">Clear Filters</button>
         </div>
 
@@ -6220,9 +6224,9 @@
           <td style="font-size: 0.85rem;">${dueInHtml}</td>
           <td style="font-size: 0.75rem; text-align: center;">${sparklineHtml}</td>
           <td style="font-size: 0.85rem;">${goalHtml}</td>
-          <td style="display: flex; gap: 0.25rem; align-items: center;">
-            <button class="btn btn-secondary" onclick="event.stopPropagation(); openOptimisationTaskDrawer('${task.id}');" style="padding: 0.25rem 0.75rem; font-size: 0.875rem;">Open</button>
-            <button class="btn btn-small" onclick="event.stopPropagation(); updateTaskLatest('${task.id}');" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;" title="Capture latest metrics for this task.">Update</button>
+          <td style="display: flex; flex-direction: column; gap: 0.15rem; align-items: center; min-width: 60px;">
+            <button class="btn btn-secondary" onclick="event.stopPropagation(); openOptimisationTaskDrawer('${task.id}');" style="padding: 0.2rem 0.5rem; font-size: 0.7rem; width: 100%;">Open</button>
+            <button class="btn btn-small" onclick="event.stopPropagation(); updateTaskLatest('${task.id}');" style="padding: 0.2rem 0.5rem; font-size: 0.7rem; width: 100%;" title="Capture latest metrics for this task.">Update</button>
           </td>
         `;
 
@@ -8301,6 +8305,12 @@
       const applyFilters = () => {
         let filtered = [...window.optimisationModuleState.allTasks];
 
+        // Filter out test tasks unless checkbox is checked
+        const includeTestCheckbox = document.getElementById('optimisation-filter-include-test');
+        if (!includeTestCheckbox || !includeTestCheckbox.checked) {
+          filtered = filtered.filter(t => !t.is_test_task);
+        }
+
         if (filterStatus.value) {
           filtered = filtered.filter(t => t.status === filterStatus.value);
         }
@@ -8521,10 +8531,20 @@
             overdueCycleBtn.style.background = '';
             overdueCycleBtn.style.color = '';
           }
+          const includeTestCheckbox = document.getElementById('optimisation-filter-include-test');
+          if (includeTestCheckbox) {
+            includeTestCheckbox.checked = false;
+          }
           window.optimisationModuleState.activeObjectiveFilter = null;
           updateObjectiveFilterUI();
           applyFilters();
         });
+      }
+      
+      // Include test tasks checkbox
+      const includeTestCheckbox = document.getElementById('optimisation-filter-include-test');
+      if (includeTestCheckbox) {
+        includeTestCheckbox.addEventListener('change', applyFilters);
       }
 
       // Drawer action handlers

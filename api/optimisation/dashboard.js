@@ -134,10 +134,10 @@ export default async function handler(req, res) {
       if (user) userId = user.id;
     }
 
-    // Fetch all tasks
+    // Fetch all tasks (including is_test_task from base table)
     let query = supabase
       .from('vw_optimisation_task_status')
-      .select('*')
+      .select('*, optimisation_tasks!inner(is_test_task)')
       .order('last_activity_at', { ascending: false });
 
     if (userId) {
@@ -173,6 +173,19 @@ export default async function handler(req, res) {
     }
 
     const taskIds = tasks.map(t => t.id).filter(Boolean);
+    
+    // Fetch is_test_task flags for all tasks
+    const { data: taskFlags, error: flagsError } = await supabase
+      .from('optimisation_tasks')
+      .select('id, is_test_task')
+      .in('id', taskIds);
+    
+    const testTaskMap = new Map();
+    if (taskFlags && !flagsError) {
+      taskFlags.forEach(t => {
+        testTaskMap.set(t.id, t.is_test_task || false);
+      });
+    }
 
     // Fetch all measurement events for these tasks (last 90 days)
     const ninetyDaysAgo = new Date();

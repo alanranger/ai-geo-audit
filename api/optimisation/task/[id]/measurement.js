@@ -78,12 +78,17 @@ export default async function handler(req, res) {
     // Get task to verify ownership and get active cycle
     const { data: task, error: taskError } = await supabase
       .from('optimisation_tasks')
-      .select('id, owner_user_id, cycle_active, active_cycle_id')
+      .select('id, owner_user_id, cycle_active, active_cycle_id, is_test_task')
       .eq('id', id)
       .single();
 
     if (taskError || !task) {
       return sendJSON(res, 404, { error: 'Task not found' });
+    }
+
+    // Reject updates for test tasks
+    if (task.is_test_task) {
+      return sendJSON(res, 403, { error: 'Cannot update test tasks. Test tasks are read-only.' });
     }
 
     if (userId && task.owner_user_id !== userId) {
