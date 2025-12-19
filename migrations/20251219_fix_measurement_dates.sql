@@ -30,7 +30,11 @@ active_cycle_info as (
     c.target_direction,
     c.timeframe_days,
     c.plan,
-    c.start_date as cycle_start_date
+    c.start_date as cycle_start_date,
+    c.objective, -- Phase 5: JSONB objective field
+    c.objective_status, -- Phase 5: objective status
+    c.objective_progress, -- Phase 5: objective progress
+    c.due_at -- Phase 5: cycle due date
   from public.optimisation_task_cycles c
   inner join public.optimisation_tasks t on t.active_cycle_id = c.id
 ),
@@ -73,6 +77,10 @@ ranked as (
     ac.timeframe_days,
     ac.plan,
     ac.cycle_start_date,
+    ac.objective, -- Phase 5: JSONB objective field
+    ac.objective_status, -- Phase 5: objective status
+    ac.objective_progress, -- Phase 5: objective progress
+    ac.due_at as cycle_due_at, -- Phase 5: cycle due date
     -- baseline = earliest event in current cycle that has metrics (include created_at in metrics)
     (
       select 
