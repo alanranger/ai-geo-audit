@@ -1593,9 +1593,10 @@
       padding: 1rem !important;
       transition: all 0.3s ease !important;
       position: relative !important;
-      overflow: hidden !important;
+      overflow: visible !important;
       text-align: center !important;
       cursor: pointer !important;
+      z-index: 1 !important;
     }
     
     .traffic-light-pill::before {
@@ -9321,11 +9322,33 @@
         const isSelected = filter && filter.metricKey === metricKey && filter.bucket === bucket;
         
         if (isSelected) {
-          pill.style.border = '2px solid var(--dark-brand)';
-          pill.style.boxShadow = '0 0 8px rgba(245, 158, 11, 0.5)';
+          // Active state: bright orange border, strong glow, and brighter background
+          pill.style.border = '3px solid var(--dark-brand)';
+          pill.style.boxShadow = '0 0 16px rgba(245, 158, 11, 0.8), 0 0 8px rgba(245, 158, 11, 0.6)';
+          pill.style.transform = 'scale(1.05)';
+          pill.style.zIndex = '10';
+          // Make background brighter when selected
+          if (bucket === 'worse') {
+            pill.style.background = 'rgba(239, 68, 68, 0.4) !important';
+          } else if (bucket === 'same') {
+            pill.style.background = 'rgba(245, 158, 11, 0.4) !important';
+          } else {
+            pill.style.background = 'rgba(16, 185, 129, 0.4) !important';
+          }
         } else {
-          pill.style.border = '1px solid var(--dark-border)';
+          // Inactive state: normal border, no glow, normal size
+          pill.style.border = '2px solid var(--dark-border)';
           pill.style.boxShadow = 'none';
+          pill.style.transform = 'scale(1)';
+          pill.style.zIndex = '1';
+          // Restore default background
+          if (bucket === 'worse') {
+            pill.style.background = 'rgba(239, 68, 68, 0.2)';
+          } else if (bucket === 'same') {
+            pill.style.background = 'rgba(245, 158, 11, 0.2)';
+          } else {
+            pill.style.background = 'rgba(16, 185, 129, 0.2)';
+          }
         }
       });
     }
