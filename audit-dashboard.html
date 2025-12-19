@@ -5983,17 +5983,31 @@
           const config = goalConfig[objectiveStatus] || goalConfig['on_track'];
           let goalText = `<span style="padding: 0.25rem 0.5rem; border-radius: 4px; background: ${config.bg}; color: ${config.color}; font-size: 0.75rem; font-weight: 600; display: inline-block; margin-bottom: 0.25rem;">${config.text}</span>`;
           
-          // Add progress info from objective_progress (Phase 5) or fallback
+          // Add progress info from objective_progress (Phase 8: use computeGoalProgress)
           if (task.objective_progress) {
             const progress = task.objective_progress;
-            if (progress.baseline_value != null && progress.latest_value != null && progress.delta != null) {
-              const deltaColor = progress.delta >= 0 ? '#10b981' : '#ef4444';
-              const deltaSign = progress.delta >= 0 ? '+' : '';
-              // Format delta and target based on KPI
+            if (progress.baseline_value != null && progress.latest_value != null && progress.target != null) {
               const taskKpi = task.objective_kpi || task.primary_kpi || task.objective_metric || null;
-              const formattedDelta = formatProgressValue(progress.delta, taskKpi);
-              const formattedTarget = formatProgressValue(progress.target, taskKpi);
-              goalText += `<div style="font-size: 0.7rem; color: ${deltaColor}; margin-top: 0.125rem; font-weight: 600;">Δ ${deltaSign}${formattedDelta} vs target ${formattedTarget}</div>`;
+              const targetType = (task.objective && task.objective.target_type) || 'delta';
+              
+              if (taskKpi) {
+                // Use Phase 8 helper for proper formatting
+                const goalProgress = computeGoalProgress({
+                  kpiKey: taskKpi,
+                  baseline: progress.baseline_value,
+                  latest: progress.latest_value,
+                  targetValue: progress.target,
+                  targetType: targetType
+                });
+                
+                const deltaColor = (progress.delta != null && progress.delta >= 0) ? '#10b981' : '#ef4444';
+                goalText += `<div style="font-size: 0.7rem; color: ${deltaColor}; margin-top: 0.125rem; font-weight: 600;">${goalProgress.deltaLabel} vs target ${goalProgress.targetLabel}</div>`;
+                if (goalProgress.remainingToTarget != null && goalProgress.remainingToTarget > 0) {
+                  const displayMeta = KPI_DISPLAY_METADATA[taskKpi];
+                  const remainingLabel = displayMeta ? displayMeta.formatDelta(goalProgress.remainingToTarget) : String(goalProgress.remainingToTarget);
+                  goalText += `<div style="font-size: 0.65rem; color: #666; margin-top: 0.125rem;">Remaining: ${remainingLabel}</div>`;
+                }
+              }
             }
           } else if (task.objective && task.objective.kpi && task.objective.target != null) {
             // Use objective from cycle
