@@ -4079,9 +4079,9 @@
                     <div>Baseline Captured <span class="sort-indicator"></span></div>
                     <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Date when baseline metrics snapshot was captured (when task was created).">ℹ</div>
                   </th>
-                  <th data-sort="latestCaptured" class="sortable" title="Date when latest measurement snapshot was captured.">
+                  <th data-sort="latestCaptured" class="sortable" title="Date when latest measurement snapshot was captured, with 'Needs update' indicator if >30 days.">
                     <div>Latest Captured <span class="sort-indicator"></span></div>
-                    <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Date when latest measurement snapshot was captured.">ℹ</div>
+                    <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Date when latest measurement snapshot was captured, with 'Needs update' indicator if >30 days.">ℹ</div>
                   </th>
                   <th data-sort="title" class="sortable" title="Optional title or label for this optimisation task.">
                     <div>Title <span class="sort-indicator"></span></div>
@@ -4103,10 +4103,6 @@
                     <div>Due In <span class="sort-indicator"></span></div>
                     <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Days remaining until due date, or 'Overdue Xd' if past due.">ℹ</div>
                   </th>
-                  <th data-sort="lastMeasured" class="sortable" title="Date of last measurement, with 'Needs update' indicator if >30 days.">
-                    <div>Last Measured <span class="sort-indicator"></span></div>
-                    <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Date of last measurement, with 'Needs update' indicator if >30 days.">ℹ</div>
-                  </th>
                   <th title="Mini trend line (sparkline) showing last ~10 measurements for the objective KPI.">
                     <div>Trend</div>
                     <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Mini trend line (sparkline) showing last ~10 measurements for the objective KPI.">ℹ</div>
@@ -4122,7 +4118,7 @@
               </thead>
               <tbody id="optimisation-tasks-tbody">
                 <tr>
-                  <td colspan="15" style="padding: 2rem; text-align: center; color: #666;">Loading tasks...</td>
+                  <td colspan="14" style="padding: 2rem; text-align: center; color: #666;">Loading tasks...</td>
                 </tr>
               </tbody>
             </table>
@@ -5987,7 +5983,7 @@
         // Check for authentication error
       if (window.optimisationModuleState.authError) {
         const errorMessage = window.optimisationModuleState.authError;
-        tbody.innerHTML = `<tr><td colspan="15" style="padding: 2rem; text-align: center;">
+        tbody.innerHTML = `<tr><td colspan="14" style="padding: 2rem; text-align: center;">
           <div style="color: #ef4444; margin-bottom: 0.5rem; font-weight: 600;">⚠️ Authentication Error</div>
           <div style="color: #666; margin-bottom: 1rem;">${escapeHtml(errorMessage)}</div>
           <a href="#configuration" onclick="if(typeof setActivePanel === 'function') setActivePanel('configuration');" style="color: #2563eb; text-decoration: underline;">Go to Configuration to set your admin key</a>
@@ -5997,7 +5993,7 @@
       }
 
       if (tasks.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="15" class="ranking-table-empty">No tasks found</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="14" class="ranking-table-empty">No tasks found</td></tr>';
         updateOptimisationPaginationControls(totalRows, currentPage, totalPages, startIdx, endIdx);
         return;
       }
@@ -6205,13 +6201,6 @@
           }
         })() : null);
         const dueInHtml = dueIn ? (dueIn.startsWith('Overdue') ? `<span style="color: #dc2626; font-weight: 600;">${dueIn}</span>` : dueIn) : '–';
-        
-        // Last Measured (use enriched data)
-        const lastMeasured = task.lastMeasuredAt || latestCapturedDate;
-        const lastMeasuredHtml = lastMeasured 
-          ? new Date(lastMeasured).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })
-          : '–';
-        const lastMeasuredFullHtml = lastMeasuredHtml + (needsUpdate ? needsUpdateBadge : '');
 
         tr.innerHTML = `
           <td>${escapeHtml(task.keyword_text || '')}</td>
@@ -6229,7 +6218,6 @@
           <td style="font-size: 0.85rem;">${baselineLatestHtml}</td>
           <td style="font-size: 0.85rem;">${deltaHtml}</td>
           <td style="font-size: 0.85rem;">${dueInHtml}</td>
-          <td style="font-size: 0.85rem;">${lastMeasuredFullHtml}</td>
           <td style="font-size: 0.75rem; text-align: center;">${sparklineHtml}</td>
           <td style="font-size: 0.85rem;">${goalHtml}</td>
           <td style="display: flex; gap: 0.25rem; align-items: center;">

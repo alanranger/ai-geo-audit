@@ -311,14 +311,15 @@ export default async function handler(req, res) {
         }
       }
 
-      // Get last measured date
+      // Check if needs measurement (>30 days or missing)
+      // Use latest_metrics.captured_at or cycle event created_at
+      let lastMeasuredAt = null;
       if (cycleEvents.length > 0) {
         lastMeasuredAt = cycleEvents[cycleEvents.length - 1].created_at;
       } else if (task.latest_metrics?.captured_at) {
         lastMeasuredAt = task.latest_metrics.captured_at;
       }
-
-      // Check if needs measurement (>30 days or missing)
+      
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
       const needsMeasurement = !lastMeasuredAt || new Date(lastMeasuredAt) < thirtyDaysAgo;
@@ -402,7 +403,6 @@ export default async function handler(req, res) {
         objectiveRag,
         dueAt,
         dueIn,
-        lastMeasuredAt,
         needsMeasurement,
         sparklinePoints,
       });
