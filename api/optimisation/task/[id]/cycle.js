@@ -256,18 +256,60 @@ export default async function handler(req, res) {
       objectiveData = objective;
     } else if (objective_title || primary_kpi || target_value != null) {
       // Convert legacy format to Phase 5 format
-      const { validateObjective } = await import('../../../../lib/optimisation/objectiveSchema.js');
+      const { validateObjective, KPI_METADATA } = await import('../../../../lib/optimisation/objectiveSchema.js');
+      
+      // Map legacy primary_kpi values to Phase 5 KPI format
+      const kpiMapping = {
+        'clicks': 'clicks_28d',
+        'impressions': 'impressions_28d',
+        'ctr': 'ctr_28d',
+        'rank': 'current_rank',
+        'opportunity_score': 'opportunity_score',
+        'ai_overview': 'ai_overview',
+        'ai_citations': 'ai_citations'
+      };
+      
+      let mappedKpi = primary_kpi;
+      if (primary_kpi && kpiMapping[primary_kpi.toLowerCase()]) {
+        mappedKpi = kpiMapping[primary_kpi.toLowerCase()];
+      } else if (primary_kpi && !primary_kpi.includes('_')) {
+        // If it's a simple name like "impressions", try to map it
+        const lowerKpi = primary_kpi.toLowerCase();
+        if (lowerKpi === 'impressions' || lowerKpi === 'impression') {
+          mappedKpi = 'impressions_28d';
+        } else if (lowerKpi === 'clicks' || lowerKpi === 'click') {
+          mappedKpi = 'clicks_28d';
+        } else if (lowerKpi === 'ctr') {
+          mappedKpi = 'ctr_28d';
+        } else if (lowerKpi === 'rank' || lowerKpi === 'ranking') {
+          mappedKpi = 'current_rank';
+        }
+      }
+      
       const legacyObj = {
         title: objective_title || 'Objective',
-        kpi: primary_kpi || 'clicks_28d',
+        kpi: mappedKpi || 'clicks_28d',
         target: target_value != null ? parseFloat(target_value) : 0,
         target_type: target_direction === 'increase' ? 'delta' : (target_direction === 'decrease' ? 'delta' : 'delta'),
         due_at: dueAt,
         plan: plan || null
       };
+      
       const validation = validateObjective(legacyObj);
       if (validation.ok) {
         objectiveData = validation.normalisedObjective;
+        console.log('[Optimisation Cycle] Created objective from legacy fields:', objectiveData);
+      } else {
+        console.error('[Optimisation Cycle] Objective validation failed:', validation.errors);
+        // Still create objective even if validation fails (for backward compatibility)
+        objectiveData = {
+          title: objective_title || 'Objective',
+          kpi: mappedKpi || 'clicks_28d',
+          target: target_value != null ? parseFloat(target_value) : 0,
+          target_type: 'delta',
+          due_at: dueAt,
+          plan: plan || null
+        };
       }
     }
 
