@@ -3512,6 +3512,20 @@
                     <option value="none">None</option>
                   </select>
                 </div>
+
+                <div class="filter-group">
+                  <label>Optimisation status:</label>
+                  <select id="ranking-filter-optimisation-status" class="filter-control">
+                    <option value="all">All</option>
+                    <option value="not-tracked">Not tracked</option>
+                    <option value="planned">Planned</option>
+                    <option value="in_progress">In progress</option>
+                    <option value="monitoring">Monitoring</option>
+                    <option value="done">Done</option>
+                    <option value="paused">Paused</option>
+                    <option value="cancelled">Cancelled</option>
+                  </select>
+                </div>
               </div>
 
               <div style="display: flex; gap: 0.75rem; align-items: flex-end;">
@@ -29884,6 +29898,7 @@ Final Score: ${score}/100`;
       aiCitation: 'all',
       pageType: 'all',
       serpFeatures: 'all',
+      optimisationStatus: 'all',
       keyword: '',
       minOpportunity: null // number | null
     };
@@ -31075,6 +31090,21 @@ Final Score: ${score}/100`;
           if (!row.keyword.toLowerCase().includes(kw)) return false;
         }
 
+        // Optimisation status filter
+        if (excludeFilter !== 'optimisationStatus' && rankingFilterState.optimisationStatus !== 'all') {
+          const taskType = 'on_page'; // Default task type
+          const status = window.getOptimisationStatus ? window.getOptimisationStatus(row, taskType) : null;
+          const rowStatus = status && status.status ? status.status : 'not-tracked';
+          
+          if (rankingFilterState.optimisationStatus === 'not-tracked' && rowStatus !== 'not-tracked') return false;
+          if (rankingFilterState.optimisationStatus === 'planned' && rowStatus !== 'planned') return false;
+          if (rankingFilterState.optimisationStatus === 'in_progress' && rowStatus !== 'in_progress') return false;
+          if (rankingFilterState.optimisationStatus === 'monitoring' && rowStatus !== 'monitoring') return false;
+          if (rankingFilterState.optimisationStatus === 'done' && rowStatus !== 'done') return false;
+          if (rankingFilterState.optimisationStatus === 'paused' && rowStatus !== 'paused') return false;
+          if (rankingFilterState.optimisationStatus === 'cancelled' && rowStatus !== 'cancelled') return false;
+        }
+
         // Priority matrix filter (Impact × Difficulty)
         if (rankingPriorityFilter) {
           const impact = calculateImpactBucket(row.demand_share || 0);
@@ -31541,6 +31571,21 @@ Final Score: ${score}/100`;
         if (!hasAi && !hasLocal && !hasPaa && !hasFeatured) serpCounts.none++;
       });
       updateSelectCounts('ranking-filter-serp-features', serpCounts);
+
+      // Optimisation status counts (excluding optimisation status filter)
+      const optimisationRows = applyRankingFilters(rows, 'optimisationStatus');
+      const optimisationCounts = { all: optimisationRows.length, 'not-tracked': 0, 'planned': 0, 'in_progress': 0, 'monitoring': 0, 'done': 0, 'paused': 0, 'cancelled': 0 };
+      optimisationRows.forEach(r => {
+        const taskType = 'on_page'; // Default task type
+        const status = window.getOptimisationStatus ? window.getOptimisationStatus(r, taskType) : null;
+        const rowStatus = status && status.status ? status.status : 'not-tracked';
+        if (optimisationCounts.hasOwnProperty(rowStatus)) {
+          optimisationCounts[rowStatus]++;
+        } else {
+          optimisationCounts['not-tracked']++;
+        }
+      });
+      updateSelectCounts('ranking-filter-optimisation-status', optimisationCounts);
     }
 
     function updateSelectCounts(selectId, counts) {
@@ -35421,6 +35466,7 @@ Final Score: ${score}/100`;
         const opportunityFilter = document.getElementById("ranking-filter-opportunity");
         const pageTypeFilter = document.getElementById("ranking-filter-page-type");
         const serpFeaturesFilter = document.getElementById("ranking-filter-serp-features");
+        const optimisationStatusFilter = document.getElementById("ranking-filter-optimisation-status");
         const keywordFilter = document.getElementById("ranking-filter-keyword");
         const clearBtn = document.getElementById("ranking-filter-clear");
 
@@ -35435,7 +35481,8 @@ Final Score: ${score}/100`;
             { el: aiCitationFilter, value: rankingFilterState.aiCitation },
             { el: opportunityFilter, value: rankingFilterState.opportunity },
             { el: pageTypeFilter, value: rankingFilterState.pageType },
-            { el: serpFeaturesFilter, value: rankingFilterState.serpFeatures }
+            { el: serpFeaturesFilter, value: rankingFilterState.serpFeatures },
+            { el: optimisationStatusFilter, value: rankingFilterState.optimisationStatus }
           ];
 
           filterControls.forEach(({ el, value }) => {
@@ -35471,6 +35518,7 @@ Final Score: ${score}/100`;
           if (opportunityFilter) rankingFilterState.opportunity = opportunityFilter.value;
           if (pageTypeFilter) rankingFilterState.pageType = pageTypeFilter.value;
           if (serpFeaturesFilter) rankingFilterState.serpFeatures = serpFeaturesFilter.value;
+          if (optimisationStatusFilter) rankingFilterState.optimisationStatus = optimisationStatusFilter.value;
           if (keywordFilter) rankingFilterState.keyword = keywordFilter.value.trim();
           
           // Min opportunity filter
@@ -35528,6 +35576,7 @@ Final Score: ${score}/100`;
         if (opportunityFilter) opportunityFilter.addEventListener("change", updateFilters);
         if (pageTypeFilter) pageTypeFilter.addEventListener("change", updateFilters);
         if (serpFeaturesFilter) serpFeaturesFilter.addEventListener("change", updateFilters);
+        if (optimisationStatusFilter) optimisationStatusFilter.addEventListener("change", updateFilters);
         if (keywordFilter) keywordFilter.addEventListener("input", debouncedUpdateFilters);
         if (minOpportunityInput) {
           minOpportunityInput.addEventListener("input", debouncedUpdateFilters);
@@ -35552,6 +35601,7 @@ Final Score: ${score}/100`;
               aiCitation: 'all',
               pageType: 'all',
               serpFeatures: 'all',
+              optimisationStatus: 'all',
               keyword: '',
               minOpportunity: null
             };
@@ -35567,6 +35617,7 @@ Final Score: ${score}/100`;
             if (opportunityFilter) opportunityFilter.value = 'all';
             if (pageTypeFilter) pageTypeFilter.value = 'all';
             if (serpFeaturesFilter) serpFeaturesFilter.value = 'all';
+            if (optimisationStatusFilter) optimisationStatusFilter.value = 'all';
             if (keywordFilter) keywordFilter.value = '';
             if (minOpportunityInput) {
               minOpportunityInput.value = '';
