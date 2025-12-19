@@ -1460,6 +1460,25 @@
       border-color: #f59e0b !important;
     }
     
+    /* Force black text on ALL buttons in drawer - most aggressive rule */
+    #optimisation-task-drawer button,
+    #optimisation-task-drawer button.btn,
+    #optimisation-task-drawer button.btn-primary,
+    #optimisation-task-drawer button.btn-secondary,
+    #optimisation-task-drawer button.btn-small,
+    #optimisation-task-drawer button.force-black-text {
+      color: #000000 !important;
+      font-weight: 700 !important;
+    }
+    
+    /* Force black text on button children too */
+    #optimisation-task-drawer button *,
+    #optimisation-task-drawer button.btn *,
+    #optimisation-task-drawer button.btn-primary *,
+    #optimisation-task-drawer button.btn-secondary * {
+      color: #000000 !important;
+    }
+    
     /* Override inline styles on all buttons in drawer */
     #optimisation-task-drawer button[style*="background"],
     #optimisation-task-drawer button[style*="color"] {
@@ -5037,8 +5056,8 @@
           
           <!-- Cancel Task, Delete Task, and Title (moved to header area) -->
           <div style="padding: 0.75rem 1.5rem; border-bottom: 1px solid var(--dark-border); background: var(--dark-panel); display: flex; gap: 0.5rem; align-items: center;">
-            <button id="optimisation-cancel-task-btn" class="btn" style="background: #ef4444; border: 1px solid #ef4444; padding: 0.5rem 1rem; font-size: 0.875rem;" title="Stop tracking (keeps history).">Cancel Task</button>
-            <button id="optimisation-delete-task-btn" class="btn" style="background: #991b1b; border: 1px solid #991b1b; padding: 0.5rem 1rem; font-size: 0.875rem;" title="Permanently remove task and events (cannot be undone).">Delete Task</button>
+            <button id="optimisation-cancel-task-btn" class="btn" style="background: #ef4444; border: 1px solid #ef4444; padding: 0.5rem 1rem; font-size: 0.875rem; color: #000000; font-weight: 700;" title="Stop tracking (keeps history).">Cancel Task</button>
+            <button id="optimisation-delete-task-btn" class="btn" style="background: #991b1b; border: 1px solid #991b1b; padding: 0.5rem 1rem; font-size: 0.875rem; color: #000000; font-weight: 700;" title="Permanently remove task and events (cannot be undone).">Delete Task</button>
             <div style="flex: 1; display: flex; align-items: center; gap: 0.5rem; margin-left: 1rem;">
               <strong style="white-space: nowrap; color: var(--dark-text);">Title:</strong>
               <input type="text" id="optimisation-drawer-title" style="flex: 1; padding: 0.5rem; border: 1px solid var(--dark-border); border-radius: 4px; font-size: 0.875rem; background: var(--dark-bg); color: var(--dark-text);" placeholder="Enter task title...">
@@ -5084,7 +5103,7 @@
                   <h4 style="margin: 0; font-size: 0.95rem; font-weight: 600;">Objective <span id="optimisation-drawer-objective-cycle">(Cycle 1)</span></h4>
                   <span id="optimisation-drawer-objective-badge" style="padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; display: none;"></span>
                 </div>
-                <button id="optimisation-edit-objective-btn" class="btn btn-small" style="padding: 0.25rem 0.75rem; font-size: 0.875rem;" title="Set target KPI and timeframe for this cycle.">Edit</button>
+                <button id="optimisation-edit-objective-btn" class="btn btn-small" style="padding: 0.25rem 0.75rem; font-size: 0.875rem; background: var(--dark-brand); color: #000000; font-weight: 700; border: 1px solid var(--dark-brand);" title="Set target KPI and timeframe for this cycle.">Edit</button>
               </div>
               <div id="optimisation-drawer-objective-content" style="font-size: 0.875rem; color: var(--dark-text);">
                 <div style="color: var(--dark-text-muted); font-style: italic;">Loading objective...</div>
@@ -5158,7 +5177,7 @@
                 <div style="padding: 0.75rem; background: var(--dark-panel); border-radius: 4px; border: 1px solid var(--dark-border);">
                   <h4 style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; font-size: 0.95rem; color: var(--dark-text);">
                     <span>Performance Snapshot <span title="Shows current metrics compared to baseline measurement. Baseline is captured when the cycle starts, and latest shows the most recent measurement. Use 'Add Measurement' to capture new snapshots." style="opacity: 0.6; cursor: help; font-size: 0.85rem;">ℹ</span></span>
-                    <button id="optimisation-add-measurement-btn" class="btn btn-small" style="padding: 0.25rem 0.75rem; font-size: 0.875rem;" title="Capture the latest metrics and compare to baseline.">Add Measurement</button>
+                    <button id="optimisation-add-measurement-btn" class="btn btn-small" style="padding: 0.25rem 0.75rem; font-size: 0.875rem; background: var(--dark-brand); color: #000000; font-weight: 700; border: 1px solid var(--dark-brand);" title="Capture the latest metrics and compare to baseline.">Add Measurement</button>
                   </h4>
                   <div id="optimisation-metrics-snapshot" style="display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 0.75rem; font-size: 0.9rem; color: var(--dark-text);">
                     <!-- Metrics will be populated by JavaScript -->
@@ -8198,28 +8217,34 @@
         if (drawer) {
           const allButtons = drawer.querySelectorAll('button');
           allButtons.forEach(btn => {
-            // Remove any inline color styles
-            if (btn.style.color) {
+            // Remove any inline color styles that might conflict
+            if (btn.style.color && btn.style.color !== 'rgb(0, 0, 0)' && btn.style.color !== '#000000' && btn.style.color !== '#000') {
               btn.style.removeProperty('color');
             }
-            // Force black text
+            // Force black text with !important
             btn.style.setProperty('color', '#000000', 'important');
             btn.style.setProperty('font-weight', '700', 'important');
-            // Also force on any child elements
+            // Also force on any child elements (spans, divs, etc.)
             const children = btn.querySelectorAll('*');
             children.forEach(child => {
-              child.style.setProperty('color', '#000000', 'important');
+              if (child.style) {
+                child.style.setProperty('color', '#000000', 'important');
+              }
             });
+            // Also set computed style via CSS class if needed
+            btn.classList.add('force-black-text');
           });
         }
       };
       
       // Run immediately and multiple times to catch all buttons
       forceBlackText();
+      setTimeout(forceBlackText, 10);
       setTimeout(forceBlackText, 50);
       setTimeout(forceBlackText, 100);
       setTimeout(forceBlackText, 200);
       setTimeout(forceBlackText, 500);
+      setTimeout(forceBlackText, 1000);
       
       // Also use MutationObserver to catch buttons added later
       const drawerForObserver = document.getElementById('optimisation-task-drawer');
