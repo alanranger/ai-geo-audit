@@ -5081,12 +5081,19 @@
           }
         }
         
+        // Small delay to ensure view has updated with new cycle
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
         // Refresh tasks to ensure all data is up to date
         await window.loadAllOptimisationTasks();
         
         // Reload drawer if it's open (will use updated task data)
         if (window.optimisationModuleState.currentTaskId === taskId) {
-          await window.openOptimisationTaskDrawer(taskId);
+          // Force reload by closing and reopening
+          const currentTaskId = window.optimisationModuleState.currentTaskId;
+          window.optimisationModuleState.currentTaskId = null;
+          await new Promise(resolve => setTimeout(resolve, 100));
+          await window.openOptimisationTaskDrawer(currentTaskId);
         }
         
         modal.style.display = 'none';
