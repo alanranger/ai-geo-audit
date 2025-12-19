@@ -1137,14 +1137,15 @@
     }
     
     .metric-pill--active {
-      background: #3b82f6;
+      background: #1e40af;
       color: #ffffff;
-      box-shadow: 0 2px 6px rgba(59, 130, 246, 0.3);
-      border-left-color: #2563eb;
+      box-shadow: 0 2px 6px rgba(30, 64, 175, 0.3);
+      border-left-color: #1e3a8a;
+      font-weight: 600;
     }
     
     .metric-pill--active:hover {
-      background: #2563eb;
+      background: #1e3a8a;
     }
 
     .metric-pill--green {
@@ -4063,7 +4064,7 @@
         <!-- Tasks Table (B2) -->
         <div class="ranking-table-section" style="margin-top: 1.5rem;">
           <div class="card">
-            <div class="ranking-table-wrapper" id="optimisation-tasks-table-container">
+            <div class="ranking-table-wrapper" id="optimisation-tasks-table-container" style="overflow: visible; max-height: none;">
             <table id="optimisation-tasks-table" class="ranking-table">
               <thead>
                 <tr>
@@ -5914,6 +5915,187 @@
       if (metEl) metEl.textContent = goalMet;
     }
 
+    // Update timeseries charts
+    function updateTimeseriesCharts() {
+      let timeseries = window.optimisationModuleState.dashboardTimeseries;
+      if (!timeseries) return;
+
+      // Filter out test tasks if checkbox is unchecked
+      const includeTestCheckbox = document.getElementById('optimisation-filter-include-test');
+      if (!includeTestCheckbox || !includeTestCheckbox.checked) {
+        // Recalculate timeseries from filtered tasks (excluding test tasks)
+        const allTasks = window.optimisationModuleState.allTasks || [];
+        const filteredTasks = allTasks.filter(t => !t.is_test_task);
+        
+        // Recalculate measurements per week from filtered tasks
+        const measurementsPerWeek = [];
+        const weekMap = new Map();
+        
+        for (const task of filteredTasks) {
+          // Get measurement events for this task (we need to get from task's latest_metrics or events)
+          // For now, we'll use a simplified approach: count tasks with recent measurements
+          if (task.latest_metrics && task.latest_metrics.captured_at) {
+            const date = new Date(task.latest_metrics.captured_at);
+            const weekStart = new Date(date);
+            weekStart.setDate(date.getDate() - date.getDay());
+            weekStart.setHours(0, 0, 0, 0);
+            const weekKey = weekStart.toISOString().split('T')[0];
+            
+            if (!weekMap.has(weekKey)) {
+              weekMap.set(weekKey, 0);
+            }
+            weekMap.set(weekKey, weekMap.get(weekKey) + 1);
+          }
+        }
+        
+        for (const [weekStart, count] of weekMap.entries()) {
+          measurementsPerWeek.push({ weekStart, count });
+        }
+        measurementsPerWeek.sort((a, b) => a.weekStart.localeCompare(b.weekStart));
+        
+        // Recalculate median deltas by KPI from filtered tasks
+        const medianDeltaByKpi = {};
+        const deltasByKpi = {};
+        
+        for (const task of filteredTasks) {
+          if (task.objectiveKpiKey && task.delta != null) {
+            if (!deltasByKpi[task.objectiveKpiKey]) {
+              deltasByKpi[task.objectiveKpiKey] = [];
+            }
+            deltasByKpi[task.objectiveKpiKey].push(task.delta);
+          }
+        }
+        
+        for (const [kpi, deltas] of Object.entries(deltasByKpi)) {
+          if (deltas.length > 0) {
+            deltas.sort((a, b) => a - b);
+            const mid = Math.floor(deltas.length / 2);
+            const median = deltas.length % 2 === 0
+              ? (deltas[mid - 1] + deltas[mid]) / 2
+              : deltas[mid];
+            medianDeltaByKpi[kpi] = median;
+          }
+        }
+        
+        timeseries = {
+          measurementsPerWeek,
+          medianDeltaByKpi: Object.entries(medianDeltaByKpi).map(([kpi, value]) => ({ kpi, value })),
+        };
+      }
+
+      // Render Measurements per Week chart
+      const measurementsCanvas = document.getElementById('chart-measurements-per-week');
+      if (measurementsCanvas && timeseries.measurementsPerWeek) {
+        const ctx = measurementsCanvas.getContext('2d');
+        const width = measurementsCanvas.width || 400;
+        const height = measurementsCanvas.height || 200;
+        measurementsCanvas.width = measurementsCanvas.offsetWidth || 400;
+        measurementsCanvas.height = 200;
+        
+        ctx.clearRect(0, 0, measurementsCanvas.width, measurementsCanvas.height);
+        
+        const data = timeseries.measurementsPerWeek;
+        if (data.length === 0) {
+          ctx.fillStyle = '#666';
+          ctx.font = '14px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('No data', measurementsCanvas.width / 2, measurementsCanvas.height / 2);
+          return;
+        }
+        
+        const maxCount = Math.max(...data.map(d => d.count), 1);
+        const padding = 40;
+        const chartWidth = measurementsCanvas.width - padding * 2;
+        const chartHeight = measurementsCanvas.height - padding * 2;
+        
+        // Draw axes
+        ctx.strokeStyle = '#ddd';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(padding, padding);
+        ctx.lineTo(padding, measurementsCanvas.height - padding);
+        ctx.lineTo(measurementsCanvas.width - padding, measurementsCanvas.height - padding);
+        ctx.stroke();
+        
+        // Draw line
+        ctx.strokeStyle = '#3b82f6';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        data.forEach((d, i) => {
+          const x = padding + (i / (data.length - 1 || 1)) * chartWidth;
+          const y = measurementsCanvas.height - padding - (d.count / maxCount) * chartHeight;
+          if (i === 0) {
+            ctx.moveTo(x, y);
+          } else {
+            ctx.lineTo(x, y);
+          }
+        });
+        ctx.stroke();
+        
+        // Draw points
+        ctx.fillStyle = '#3b82f6';
+        data.forEach((d, i) => {
+          const x = padding + (i / (data.length - 1 || 1)) * chartWidth;
+          const y = measurementsCanvas.height - padding - (d.count / maxCount) * chartHeight;
+          ctx.beginPath();
+          ctx.arc(x, y, 4, 0, Math.PI * 2);
+          ctx.fill();
+        });
+      }
+
+      // Render Median Delta by KPI chart
+      const deltaCanvas = document.getElementById('chart-median-delta');
+      if (deltaCanvas && timeseries.medianDeltaByKpi) {
+        const ctx = deltaCanvas.getContext('2d');
+        deltaCanvas.width = deltaCanvas.offsetWidth || 400;
+        deltaCanvas.height = 200;
+        
+        ctx.clearRect(0, 0, deltaCanvas.width, deltaCanvas.height);
+        
+        const data = timeseries.medianDeltaByKpi;
+        if (data.length === 0) {
+          ctx.fillStyle = '#666';
+          ctx.font = '14px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('No data', deltaCanvas.width / 2, deltaCanvas.height / 2);
+          return;
+        }
+        
+        const maxAbs = Math.max(...data.map(d => Math.abs(d.value)), 1);
+        const padding = 60;
+        const chartWidth = deltaCanvas.width - padding * 2;
+        const chartHeight = deltaCanvas.height - padding * 2;
+        const barWidth = chartWidth / data.length * 0.8;
+        const barSpacing = chartWidth / data.length * 0.2;
+        const zeroY = deltaCanvas.height - padding - (maxAbs / (maxAbs * 2)) * chartHeight;
+        
+        // Draw zero line
+        ctx.strokeStyle = '#ddd';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(padding, zeroY);
+        ctx.lineTo(deltaCanvas.width - padding, zeroY);
+        ctx.stroke();
+        
+        // Draw bars
+        data.forEach((d, i) => {
+          const x = padding + i * (barWidth + barSpacing);
+          const barHeight = (Math.abs(d.value) / maxAbs) * chartHeight;
+          const y = d.value >= 0 ? zeroY - barHeight : zeroY;
+          
+          ctx.fillStyle = d.value >= 0 ? '#10b981' : '#ef4444';
+          ctx.fillRect(x, y, barWidth, barHeight);
+          
+          // Draw KPI label (abbreviated)
+          ctx.fillStyle = '#666';
+          ctx.font = '10px sans-serif';
+          ctx.textAlign = 'center';
+          const label = d.kpi.replace(/_/g, ' ').substring(0, 8);
+          ctx.fillText(label, x + barWidth / 2, deltaCanvas.height - 10);
+        });
+      }
+    }
+
     // Sort optimisation tasks
     function sortOptimisationTasks(tasks) {
       const sorted = [...tasks];
@@ -6222,7 +6404,7 @@
         const dueInHtml = dueIn ? (dueIn.startsWith('Overdue') ? `<span style="color: #dc2626; font-weight: 600;">${dueIn}</span>` : dueIn) : '–';
 
         tr.innerHTML = `
-          <td>${escapeHtml(task.keyword_text || '')}</td>
+          <td><strong>${escapeHtml(task.keyword_text || '')}</strong></td>
           <td style="max-width: 150px; word-wrap: break-word; word-break: break-all;">
             ${urlPath ? `<a href="${fullUrl}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${escapeHtml(urlPath)}</a>` : '–'}
           </td>
@@ -8576,6 +8758,7 @@
         includeTestCheckbox.addEventListener('change', () => {
           applyFilters();
           updateOptimisationSummaryCards();
+          updateTimeseriesCharts();
         });
       }
 
