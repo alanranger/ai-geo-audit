@@ -4,9 +4,8 @@
 export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
-import { requireAdminOrShare } from '../../../lib/api/requireAdminOrShare.js';
-import { computeGoalProgress } from '../../../lib/optimisation/goalProgress.js';
-import { KPI_METADATA } from '../../../lib/optimisation/objectiveSchema.js';
+import { requireAdminOrShare } from '../../lib/api/requireAdminOrShare.js';
+import { KPI_METADATA } from '../../lib/optimisation/objectiveSchema.js';
 
 const need = (k) => {
   const v = process.env[k];
