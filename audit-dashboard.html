@@ -6435,39 +6435,36 @@
             cycleSelector.style.display = 'none';
             console.log('[Optimisation Drawer] Cycle selector hidden (only 1 cycle)');
           }
+          
+          // Store cycles in state for later use
+          if (!window.optimisationModuleState) {
+            window.optimisationModuleState = {};
+          }
+          window.optimisationModuleState.taskCycles = task.cycles;
+          window.optimisationModuleState.selectedCycleId = task.active_cycle_id;
+          
+          // Handle cycle selection change (remove old listener first to avoid duplicates)
+          const oldHandler = cycleSelector.dataset.handler;
+          if (oldHandler) {
+            cycleSelector.removeEventListener('change', window[oldHandler]);
+          }
+          const handlerName = `cycleSelectorHandler_${taskId}`;
+          const handler = async (e) => {
+            const selectedCycleId = e.target.value;
+            window.optimisationModuleState.selectedCycleId = selectedCycleId;
+            const selectedCycle = task.cycles.find(c => c.id === selectedCycleId);
+            const selectedCycleNo = selectedCycle?.cycle_no || 1;
+            await loadCycleData(taskId, selectedCycleId, task.cycles, selectedCycle, selectedCycleNo, task);
+          };
+          window[handlerName] = handler;
+          cycleSelector.dataset.handler = handlerName;
+          cycleSelector.addEventListener('change', handler);
         } else {
           cycleSelector.style.display = 'none';
           console.log('[Optimisation Drawer] Cycle selector hidden (no cycles data)');
         }
       } else {
         console.error('[Optimisation Drawer] Cycle selector element not found!');
-      }
-        
-        // Store cycles in state for later use
-        if (!window.optimisationModuleState) {
-          window.optimisationModuleState = {};
-        }
-        window.optimisationModuleState.taskCycles = task.cycles;
-        window.optimisationModuleState.selectedCycleId = task.active_cycle_id;
-        
-        // Handle cycle selection change (remove old listener first to avoid duplicates)
-        const oldHandler = cycleSelector.dataset.handler;
-        if (oldHandler) {
-          cycleSelector.removeEventListener('change', window[oldHandler]);
-        }
-        const handlerName = `cycleSelectorHandler_${taskId}`;
-        const handler = async (e) => {
-          const selectedCycleId = e.target.value;
-          window.optimisationModuleState.selectedCycleId = selectedCycleId;
-          const selectedCycle = task.cycles.find(c => c.id === selectedCycleId);
-          const selectedCycleNo = selectedCycle?.cycle_no || 1;
-          await loadCycleData(taskId, selectedCycleId, task.cycles, selectedCycle, selectedCycleNo, task);
-        };
-        window[handlerName] = handler;
-        cycleSelector.dataset.handler = handlerName;
-        cycleSelector.addEventListener('change', handler);
-      } else if (cycleSelector) {
-        cycleSelector.style.display = 'none';
       }
 
       // Load progress data
