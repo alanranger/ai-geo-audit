@@ -4676,8 +4676,8 @@
           </span>
         </div>
 
-        <!-- Objective Metrics Traffic Lights (8 columns: All Metrics aggregated + 7 individual metrics) -->
-        <div class="optimisation-objective-metrics" style="display: grid; grid-template-columns: repeat(8, 1fr); gap: 1rem; margin: 2rem 0;">
+        <!-- Objective Metrics Traffic Lights (7 columns: All Metrics aggregated + 6 individual metrics) -->
+        <div class="optimisation-objective-metrics" style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 1rem; margin: 2rem 0;">
           <!-- All Metrics (Aggregated) -->
           <div style="display: flex; flex-direction: column; gap: 0.5rem;">
             <div style="text-align: center; margin-bottom: 0.5rem; color: #ffffff; font-size: 1.5rem; font-weight: 700;">All Metrics</div>
@@ -4797,22 +4797,6 @@
             </div>
           </div>
 
-          <!-- Opportunity Score -->
-          <div style="display: flex; flex-direction: column; gap: 0.5rem;">
-            <div style="text-align: center; margin-bottom: 0.5rem; color: #ffffff; font-size: 1.5rem; font-weight: 700;">Opportunity Score</div>
-            <div style="background: rgba(239, 68, 68, 0.2); border-radius: 8px; padding: 1rem; text-align: center; border: 1px solid var(--dark-border);">
-              <div style="font-size: 2rem; font-weight: 700; color: #f87171;" id="objective-opportunity-score-red">0</div>
-              <div style="color: var(--dark-text); font-size: 0.875rem; margin-top: 0.5rem;">Worse</div>
-            </div>
-            <div style="background: rgba(245, 158, 11, 0.2); border-radius: 8px; padding: 1rem; text-align: center; border: 1px solid var(--dark-border);">
-              <div style="font-size: 2rem; font-weight: 700; color: #fbbf24;" id="objective-opportunity-score-amber">0</div>
-              <div style="color: var(--dark-text); font-size: 0.875rem; margin-top: 0.5rem;">Same</div>
-            </div>
-            <div style="background: rgba(16, 185, 129, 0.2); border-radius: 8px; padding: 1rem; text-align: center; border: 1px solid var(--dark-border);">
-              <div style="font-size: 2rem; font-weight: 700; color: #34d399;" id="objective-opportunity-score-green">0</div>
-              <div style="color: var(--dark-text); font-size: 0.875rem; margin-top: 0.5rem;">Better</div>
-            </div>
-          </div>
         </div>
 
         <!-- Phase 9: KPI Tiles (RAG) -->
@@ -5131,7 +5115,6 @@
                       <option value="impressions_28d">Impressions (28d)</option>
                       <option value="clicks_28d">Clicks (28d)</option>
                       <option value="rank">Rank</option>
-                      <option value="opportunity_score">Opportunity Score</option>
                     </select>
                   </div>
                   <div>
@@ -6886,11 +6869,10 @@
         current_rank: { worse: 0, same: 0, better: 0 },
         ai_citations: { worse: 0, same: 0, better: 0 },
         ai_overview: { worse: 0, same: 0, better: 0 },
-        opportunity_score: { worse: 0, same: 0, better: 0 },
         all_metrics: { worse: 0, same: 0, better: 0 }, // Aggregated counts
       };
 
-      const metricKeys = ['ctr_28d', 'impressions_28d', 'clicks_28d', 'current_rank', 'ai_citations', 'ai_overview', 'opportunity_score'];
+      const metricKeys = ['ctr_28d', 'impressions_28d', 'clicks_28d', 'current_rank', 'ai_citations', 'ai_overview'];
 
       for (const task of tasks) {
         // Only count active tasks
@@ -6927,7 +6909,7 @@
         }
 
         // For aggregated "all_metrics": count ALL active tasks
-        // If task has classifications, use majority vote (even if < 4 metrics)
+        // If task has classifications, use majority vote (at least 3 out of 6 metrics)
         // If no classifications or tie, default to 'same'
         if (taskClassifications.length > 0) {
           // Count occurrences of each classification
@@ -9136,7 +9118,7 @@
         const filter = window.optimisationModuleState.metricTrafficFilter;
         let tasks = [...window.optimisationModuleState.filteredTasks];
         const scope = window.optimisationModuleState.scope || 'active_cycle';
-        const metricKeys = ['ctr_28d', 'impressions_28d', 'clicks_28d', 'current_rank', 'ai_citations', 'ai_overview', 'opportunity_score'];
+        const metricKeys = ['ctr_28d', 'impressions_28d', 'clicks_28d', 'current_rank', 'ai_citations', 'ai_overview'];
         
         // Sort tasks by their classification for this metric
         tasks.sort((a, b) => {
@@ -9157,7 +9139,7 @@
           let aClass, bClass;
           
           if (filter.metricKey === 'all_metrics') {
-            // For all_metrics, find majority classification (at least 4 out of 7)
+            // For all_metrics, find majority classification (at least 3 out of 6)
             const aClasses = [];
             const bClasses = [];
             
@@ -9375,7 +9357,7 @@
       const metricTrafficFilter = window.optimisationModuleState.metricTrafficFilter;
       if (metricTrafficFilter) {
         const scope = window.optimisationModuleState.scope || 'active_cycle';
-        const metricKeys = ['ctr_28d', 'impressions_28d', 'clicks_28d', 'current_rank', 'ai_citations', 'ai_overview', 'opportunity_score'];
+        const metricKeys = ['ctr_28d', 'impressions_28d', 'clicks_28d', 'current_rank', 'ai_citations', 'ai_overview'];
         
         tasks = tasks.filter(task => {
           // Only active tasks can match
@@ -9397,7 +9379,7 @@
             return false;
           }
           
-          // Handle "all_metrics" filter: check that majority of metrics (at least 4) match the bucket
+          // Handle "all_metrics" filter: check that majority of metrics (at least 3 out of 6) match the bucket
           if (metricTrafficFilter.metricKey === 'all_metrics') {
             const classifications = [];
             for (const metricKey of metricKeys) {
@@ -9478,7 +9460,7 @@
       
       // Compute deltas for each KPI
       const deltasByKpi = {};
-      const kpiList = ['ctr_28d', 'impressions_28d', 'clicks_28d', 'current_rank', 'ai_citations', 'ai_overview', 'opportunity_score'];
+      const kpiList = ['ctr_28d', 'impressions_28d', 'clicks_28d', 'current_rank', 'ai_citations', 'ai_overview'];
       
       for (const task of eligibleTasks) {
         const activeCycle = scope === 'active_cycle' 
@@ -9694,8 +9676,7 @@
             'clicks_28d': 'Clicks',
             'current_rank': 'Rank (Δ, lower better)',
             'ai_citations': 'AI Citations',
-            'ai_overview': 'AI Overview',
-            'opportunity_score': 'Opp Score'
+            'ai_overview': 'AI Overview'
           };
           
           // Draw y-axis label - bright white and much larger
@@ -9973,7 +9954,6 @@
         { label: 'Impressions (28d)', baselineKey: 'gsc_impressions_28d', latestKey: 'gsc_impressions_28d', higherIsBetter: true },
         { label: 'CTR (28d)', baselineKey: 'gsc_ctr_28d', latestKey: 'gsc_ctr_28d', higherIsBetter: true, format: (v) => v != null ? (v * 100).toFixed(2) + '%' : '—' },
         { label: 'Current Rank', baselineKey: 'current_rank', latestKey: 'current_rank', higherIsBetter: false },
-        { label: 'Opportunity Score', baselineKey: 'opportunity_score', latestKey: 'opportunity_score', higherIsBetter: true },
         { label: 'AI Overview', baselineKey: 'ai_overview', latestKey: 'ai_overview', format: (v) => v ? 'On' : 'Off' },
         { label: 'AI Citations', baselineKey: 'ai_citations', latestKey: 'ai_citations', higherIsBetter: true }
       ];
@@ -10421,8 +10401,7 @@
           'objective-clicks': 'clicks_28d',
           'objective-rank': 'current_rank',
           'objective-ai-citations': 'ai_citations',
-          'objective-ai-overview': 'ai_overview',
-          'objective-opportunity-score': 'opportunity_score'
+          'objective-ai-overview': 'ai_overview'
         };
         
         for (const [prefix, metricKey] of Object.entries(metricMap)) {
