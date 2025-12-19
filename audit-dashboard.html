@@ -3794,8 +3794,16 @@
                   <label>Domain type:</label>
                   <select id="ai-sources-filter-domain-type" class="filter-control">
                     <option value="all">All</option>
+                    <option value="self">Your site</option>
                     <option value="competitor">Competitor</option>
-                    <option value="self">Self</option>
+                    <option value="site">Site</option>
+                    <option value="platform">Platform</option>
+                    <option value="directory">Directory</option>
+                    <option value="publisher">Publisher</option>
+                    <option value="vendor">Vendor</option>
+                    <option value="institution">Institution</option>
+                    <option value="government">Government</option>
+                    <option value="unmapped">Unmapped</option>
                   </select>
                 </div>
                 <div class="filter-group">
@@ -36522,9 +36530,22 @@ Final Score: ${score}/100`;
             return false;
           }
           if (filters.domainType && filters.domainType !== 'all') {
-            // If filter is 'self', only show self (handled separately)
-            if (filters.domainType === 'self') return false;
-            // If filter is 'competitor', show all non-self domains (already filtered)
+            const normalizedDomain = normalizeDomainForStrength(stat.domain);
+            const meta = domainMetadata[normalizedDomain] || { domain_type: 'unmapped' };
+            const domainType = meta.domain_type && meta.domain_type !== 'unmapped' ? meta.domain_type : 'unmapped';
+            
+            if (filters.domainType === 'self' || filters.domainType === 'your_site') {
+              // Filter is 'self' or 'your_site', but this is a competitor domain, so exclude it
+              return false;
+            } else if (filters.domainType === 'competitor') {
+              // Filter is 'competitor', show all non-self domains (already filtered)
+              // No additional filtering needed
+            } else {
+              // Filter by specific domain_type value (e.g., 'site', 'platform', 'directory', 'unmapped', etc.)
+              if (domainType !== filters.domainType) {
+                return false;
+              }
+            }
           }
           if (filters.domain && !stat.domain.toLowerCase().includes(filters.domain.toLowerCase())) {
             return false;
@@ -36604,13 +36625,31 @@ Final Score: ${score}/100`;
 
         tableBody.innerHTML = '';
         
-        // Always render self domain first with yellow highlight (regardless of filters, but respect domain search)
+        // Always render self domain first with yellow highlight (regardless of filters, but respect domain search and domain type filter)
         if (selfDomain) {
-          // Only filter self domain by domain search text if provided
-          const showSelf = !filters.domain || selfDomain.domain.toLowerCase().includes(filters.domain.toLowerCase());
+          // Check if self domain should be shown based on filters
+          const normalizedDomain = normalizeDomainForStrength(selfDomain.domain);
+          const meta = domainMetadata[normalizedDomain] || { domain_type: 'unmapped', is_competitor: false };
+          const domainType = meta.domain_type && meta.domain_type !== 'unmapped' ? meta.domain_type : 'your_site';
+          
+          let showSelf = true;
+          if (filters.domain && !selfDomain.domain.toLowerCase().includes(filters.domain.toLowerCase())) {
+            showSelf = false;
+          }
+          if (filters.domainType && filters.domainType !== 'all') {
+            if (filters.domainType === 'self' || filters.domainType === 'your_site') {
+              // Show self domain
+              showSelf = showSelf && true;
+            } else if (filters.domainType === 'competitor') {
+              // Hide self domain when filtering for competitors
+              showSelf = false;
+            } else {
+              // Filter by specific domain_type value
+              showSelf = showSelf && (domainType === filters.domainType);
+            }
+          }
+          
           if (showSelf) {
-            const normalizedDomain = normalizeDomainForStrength(selfDomain.domain);
-            const meta = domainMetadata[normalizedDomain] || { domain_type: 'unmapped', is_competitor: false };
             const strength = domainStrength[normalizedDomain] || null;
             const selfRow = createDomainRow(selfDomain, true, meta, strength);
             tableBody.appendChild(selfRow);
@@ -37243,18 +37282,26 @@ Final Score: ${score}/100`;
           });
         }
 
-        // Wire up table sorting
-        const sortableHeaders = document.querySelectorAll('#ai-sources-table th.sortable');
-        
-        // Set initial sort indicator
-        sortableHeaders.forEach(h => {
-          if (h.dataset.sort === window.aiSourcesSortState.column) {
-            h.classList.add(`sort-${window.aiSourcesSortState.direction}`);
-          }
-        });
-        
-        sortableHeaders.forEach(th => {
-          th.addEventListener('click', () => {
+        // Wire up table sorting - use event delegation to handle dynamically rendered headers
+        const table = document.getElementById('ai-sources-table');
+        if (table) {
+          // Remove any existing click listeners by cloning the table
+          const newTable = table.cloneNode(true);
+          table.parentNode.replaceChild(newTable, table);
+          
+          // Set initial sort indicator on headers
+          const sortableHeaders = newTable.querySelectorAll('th.sortable');
+          sortableHeaders.forEach(h => {
+            if (h.dataset.sort === window.aiSourcesSortState.column) {
+              h.classList.add(`sort-${window.aiSourcesSortState.direction}`);
+            }
+          });
+          
+          // Use event delegation on the table to handle clicks
+          newTable.addEventListener('click', (e) => {
+            const th = e.target.closest('th.sortable');
+            if (!th) return;
+            
             const column = th.dataset.sort;
             if (!column) return;
 
@@ -37266,7 +37313,8 @@ Final Score: ${score}/100`;
             }
 
             // Update sort indicators
-            sortableHeaders.forEach(h => {
+            const allHeaders = newTable.querySelectorAll('th.sortable');
+            allHeaders.forEach(h => {
               h.classList.remove('sort-asc', 'sort-desc');
               if (h.dataset.sort === window.aiSourcesSortState.column) {
                 h.classList.add(`sort-${window.aiSourcesSortState.direction}`);
@@ -37285,7 +37333,7 @@ Final Score: ${score}/100`;
               });
             }
           });
-        });
+        }
       }
 
       // Make functions globally available
