@@ -72,7 +72,7 @@ export default async function handler(req, res) {
       // Get all cycles for this task (Phase 6: for cycle selector)
       const { data: allCycles } = await supabase
         .from('optimisation_task_cycles')
-        .select('id, cycle_no, start_date, end_date, objective_title, primary_kpi, target_value, target_direction, objective, objective_status, objective_progress, due_at')
+        .select('id, cycle_no, start_date, end_date, objective_title, primary_kpi, target_value, target_direction, timeframe_days, plan, objective, objective_status, objective_progress, due_at')
         .eq('task_id', id)
         .order('cycle_no', { ascending: false });
 

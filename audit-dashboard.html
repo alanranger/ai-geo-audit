@@ -6617,22 +6617,38 @@
           if (objectiveTitle) {
             leftColumn += `<div style="margin-bottom: 0.4rem;"><strong>Title:</strong> ${escapeHtml(objectiveTitle)}</div>`;
           }
-          if (objectiveKpi) {
-            leftColumn += `<div style="margin-bottom: 0.4rem;"><strong>KPI:</strong> ${escapeHtml(objectiveKpi)}</div>`;
-          }
-          if (objectiveMetric && objectiveDirection && objectiveTargetValue != null) {
-            const directionLabels = {
-              'increase': 'Increase by',
-              'decrease': 'Decrease by',
-              'at_least': 'At least',
-              'at_most': 'At most'
-            };
-            let targetText = ` ${directionLabels[objectiveDirection] || objectiveDirection} ${objectiveTargetValue}`;
-            if (objectiveMetric === 'ctr_28d') {
-              targetText += '%';
+            if (objectiveKpi) {
+              leftColumn += `<div style="margin-bottom: 0.4rem;"><strong>KPI:</strong> ${escapeHtml(objectiveKpi)}</div>`;
             }
-            leftColumn += `<div style="margin-bottom: 0.4rem;"><strong>Target:</strong> ${escapeHtml(targetText)}</div>`;
-          }
+            // Show target if we have a target value (direction is optional)
+            if (objectiveTargetValue != null) {
+              const directionLabels = {
+                'increase': 'Increase by',
+                'decrease': 'Decrease by',
+                'at_least': 'At least',
+                'at_most': 'At most'
+              };
+              let targetText = '';
+              if (objectiveDirection) {
+                targetText = `${directionLabels[objectiveDirection] || objectiveDirection} ${objectiveTargetValue}`;
+              } else {
+                // If no direction specified, just show the target value
+                targetText = `${objectiveTargetValue}`;
+              }
+              if (objectiveMetric === 'ctr_28d' || (objectiveKpi && objectiveKpi.includes('ctr'))) {
+                targetText += '%';
+              }
+              leftColumn += `<div style="margin-bottom: 0.4rem;"><strong>Target:</strong> ${escapeHtml(targetText)}</div>`;
+            } else if (objectiveDirection) {
+              // Show direction even if no target value
+              const directionLabels = {
+                'increase': 'Increase',
+                'decrease': 'Decrease',
+                'at_least': 'At least',
+                'at_most': 'At most'
+              };
+              leftColumn += `<div style="margin-bottom: 0.4rem;"><strong>Direction:</strong> ${escapeHtml(directionLabels[objectiveDirection] || objectiveDirection)}</div>`;
+            }
           
           if (objectiveTimeframe || task.objective_due_at) {
             let timeframeText = '';
@@ -6928,13 +6944,37 @@
           const objectiveTitle = objective?.title || cycleTask.objective_title || null;
           const objectiveKpi = objective?.kpi || cycleTask.primary_kpi || null;
           const objectiveMetric = objective?.kpi || cycleTask.primary_kpi || null;
-          const objectiveDirection = objective?.target_type === 'delta' ? 'increase' : (cycleTask.target_direction || null);
+          // Handle target_type: 'delta' means increase/decrease, 'absolute' means at_least/at_most
+          let objectiveDirection = null;
+          if (objective?.target_type === 'delta') {
+            // For delta, check if target is positive (increase) or negative (decrease)
+            const targetVal = objective?.target != null ? objective.target : (cycleTask.target_value != null ? cycleTask.target_value : null);
+            objectiveDirection = targetVal != null && targetVal >= 0 ? 'increase' : 'decrease';
+          } else if (objective?.target_type === 'absolute') {
+            // For absolute, we need to determine from KPI direction (higher_better vs lower_better)
+            // For now, default to 'at_least' for most KPIs, 'at_most' for rank
+            objectiveDirection = (objectiveKpi && objectiveKpi.includes('rank')) ? 'at_most' : 'at_least';
+          } else {
+            // Fallback to legacy target_direction
+            objectiveDirection = cycleTask.target_direction || null;
+          }
           const objectiveTargetValue = objective?.target != null ? objective.target : (cycleTask.target_value != null ? cycleTask.target_value : null);
           const objectiveTimeframe = objective?.due_at ? null : (cycleTask.timeframe_days != null ? cycleTask.timeframe_days : null);
           const objectivePlan = objective?.plan || cycleTask.plan || null;
           const cycleStartedAt = cycleTask.cycle_start_date || null;
 
-          if (objective || objectiveTitle || objectiveKpi || objectiveMetric || objectiveDirection) {
+          // Debug logging
+          console.log('[loadCycleData] Cycle objective data:', {
+            objective,
+            objectiveTitle,
+            objectiveKpi,
+            objectiveMetric,
+            objectiveDirection,
+            objectiveTargetValue,
+            cycleTask
+          });
+
+          if (objective || objectiveTitle || objectiveKpi || objectiveMetric || objectiveDirection || objectiveTargetValue != null) {
             let leftColumn = '';
             let rightColumn = '';
             
@@ -6944,18 +6984,34 @@
             if (objectiveKpi) {
               leftColumn += `<div style="margin-bottom: 0.4rem;"><strong>KPI:</strong> ${escapeHtml(objectiveKpi)}</div>`;
             }
-            if (objectiveMetric && objectiveDirection && objectiveTargetValue != null) {
+            // Show target if we have a target value (direction is optional)
+            if (objectiveTargetValue != null) {
               const directionLabels = {
                 'increase': 'Increase by',
                 'decrease': 'Decrease by',
                 'at_least': 'At least',
                 'at_most': 'At most'
               };
-              let targetText = ` ${directionLabels[objectiveDirection] || objectiveDirection} ${objectiveTargetValue}`;
-              if (objectiveMetric === 'ctr_28d') {
+              let targetText = '';
+              if (objectiveDirection) {
+                targetText = `${directionLabels[objectiveDirection] || objectiveDirection} ${objectiveTargetValue}`;
+              } else {
+                // If no direction specified, just show the target value
+                targetText = `${objectiveTargetValue}`;
+              }
+              if (objectiveMetric === 'ctr_28d' || (objectiveKpi && objectiveKpi.includes('ctr'))) {
                 targetText += '%';
               }
               leftColumn += `<div style="margin-bottom: 0.4rem;"><strong>Target:</strong> ${escapeHtml(targetText)}</div>`;
+            } else if (objectiveDirection) {
+              // Show direction even if no target value
+              const directionLabels = {
+                'increase': 'Increase',
+                'decrease': 'Decrease',
+                'at_least': 'At least',
+                'at_most': 'At most'
+              };
+              leftColumn += `<div style="margin-bottom: 0.4rem;"><strong>Direction:</strong> ${escapeHtml(directionLabels[objectiveDirection] || objectiveDirection)}</div>`;
             }
             
             if (objectiveTimeframe || cycleTask.objective_due_at) {
