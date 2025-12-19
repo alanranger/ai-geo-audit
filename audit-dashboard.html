@@ -3975,6 +3975,8 @@
           <input type="text" id="optimisation-filter-keyword" placeholder="Filter by keyword..." style="padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px; flex: 1; min-width: 200px;">
           <input type="text" id="optimisation-filter-url" placeholder="Filter by URL..." style="padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px; flex: 1; min-width: 200px;">
           <button id="optimisation-filter-needs-update" class="btn btn-secondary" style="padding: 0.5rem 1rem;" title="Show tasks that need measurement update (no measurement or older than 30 days).">Needs Update</button>
+          <button id="optimisation-filter-active-cycle" class="btn btn-secondary" style="padding: 0.5rem 1rem;" title="Show only tasks with an active cycle (current cycle not completed or archived).">Active Cycle Only</button>
+          <button id="optimisation-filter-overdue-cycle" class="btn btn-secondary" style="padding: 0.5rem 1rem;" title="Show tasks with overdue current cycle (past due date and target not met).">Overdue Cycle</button>
           <button id="optimisation-clear-filters" class="btn btn-secondary" style="padding: 0.5rem 1rem;">Clear Filters</button>
         </div>
 
@@ -4242,10 +4244,14 @@
                   </div>
                 </div>
 
-                <!-- Start New Cycle -->
+                <!-- Cycle Management -->
                 <div style="padding: 0.75rem; background: #f8f9fa; border-radius: 4px;">
-                  <h4 style="margin-bottom: 0.75rem; font-size: 0.95rem;">Start New Cycle</h4>
-                  <button id="optimisation-start-cycle-btn" class="btn btn-secondary" style="width: 100%; padding: 0.5rem; font-size: 0.875rem;" title="Begins a new optimisation attempt while preserving history from previous cycles.">Start New Cycle</button>
+                  <h4 style="margin-bottom: 0.75rem; font-size: 0.95rem;">Cycle Management</h4>
+                  <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                    <button id="optimisation-complete-cycle-btn" class="btn" style="width: 100%; padding: 0.5rem; font-size: 0.875rem; background: #10b981; color: white; border-color: #10b981;" title="Mark the current cycle as completed. This closes the cycle and makes it viewable in history.">Complete Cycle</button>
+                    <button id="optimisation-archive-cycle-btn" class="btn btn-secondary" style="width: 100%; padding: 0.5rem; font-size: 0.875rem;" title="Archive the current cycle (for abandoned work). The cycle remains in history but is marked as archived.">Archive Cycle</button>
+                    <button id="optimisation-start-cycle-btn" class="btn btn-secondary" style="width: 100%; padding: 0.5rem; font-size: 0.875rem;" title="Begins a new optimisation attempt while preserving history from previous cycles.">Start New Cycle</button>
+                  </div>
                 </div>
 
                 <!-- Add Event Form -->
@@ -6259,6 +6265,8 @@
         'optimisation-edit-objective-btn',
         'optimisation-add-measurement-btn',
         'optimisation-start-cycle-btn',
+        'optimisation-complete-cycle-btn',
+        'optimisation-archive-cycle-btn',
         'optimisation-add-event-btn',
         'optimisation-save-status-btn',
         'optimisation-save-objective-btn',
@@ -6793,6 +6801,20 @@
       // Update button states
       document.getElementById('optimisation-drawer-minimize').textContent = '−';
       document.getElementById('optimisation-drawer-maximize').textContent = '□';
+      
+      // Phase 7: Show/hide Complete/Archive buttons based on active cycle
+      const completeCycleBtn = document.getElementById('optimisation-complete-cycle-btn');
+      const archiveCycleBtn = document.getElementById('optimisation-archive-cycle-btn');
+      const hasActiveCycle = task.active_cycle_id != null;
+      
+      if (completeCycleBtn) {
+        completeCycleBtn.style.display = hasActiveCycle ? 'block' : 'none';
+        completeCycleBtn.disabled = !hasActiveCycle || window.isShareMode;
+      }
+      if (archiveCycleBtn) {
+        archiveCycleBtn.style.display = hasActiveCycle ? 'block' : 'none';
+        archiveCycleBtn.disabled = !hasActiveCycle || window.isShareMode;
+      }
     };
 
     // Close task drawer
@@ -7683,6 +7705,24 @@
             return latestCapturedDate < thirtyDaysAgo; // Older than 30 days = needs update
           });
         }
+        
+        // "Active Cycle Only" filter: tasks with an active cycle (not completed/archived)
+        const activeCycleBtn = document.getElementById('optimisation-filter-active-cycle');
+        if (activeCycleBtn && activeCycleBtn.classList.contains('active')) {
+          filtered = filtered.filter(t => {
+            return t.active_cycle_id != null; // Has an active cycle
+          });
+        }
+        
+        // "Overdue Cycle" filter: tasks with overdue current cycle
+        const overdueCycleBtn = document.getElementById('optimisation-filter-overdue-cycle');
+        if (overdueCycleBtn && overdueCycleBtn.classList.contains('active')) {
+          filtered = filtered.filter(t => {
+            // Check if current cycle is overdue
+            const status = t.objective_status || t.goal_state;
+            return status === 'overdue';
+          });
+        }
 
         window.optimisationModuleState.filteredTasks = filtered;
         // Reset pagination when filters change
@@ -7714,6 +7754,42 @@
         });
       } else {
         console.error('[Optimisation] Needs Update button not found!');
+      }
+      
+      // Active Cycle Only filter button
+      const activeCycleBtn = document.getElementById('optimisation-filter-active-cycle');
+      if (activeCycleBtn) {
+        activeCycleBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          activeCycleBtn.classList.toggle('active');
+          if (activeCycleBtn.classList.contains('active')) {
+            activeCycleBtn.style.background = '#3b82f6';
+            activeCycleBtn.style.color = '#ffffff';
+          } else {
+            activeCycleBtn.style.background = '';
+            activeCycleBtn.style.color = '';
+          }
+          applyFilters();
+        });
+      }
+      
+      // Overdue Cycle filter button
+      const overdueCycleBtn = document.getElementById('optimisation-filter-overdue-cycle');
+      if (overdueCycleBtn) {
+        overdueCycleBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          overdueCycleBtn.classList.toggle('active');
+          if (overdueCycleBtn.classList.contains('active')) {
+            overdueCycleBtn.style.background = '#ef4444';
+            overdueCycleBtn.style.color = '#ffffff';
+          } else {
+            overdueCycleBtn.style.background = '';
+            overdueCycleBtn.style.color = '';
+          }
+          applyFilters();
+        });
       }
       
       // Objective filter pills
@@ -7795,6 +7871,18 @@
             needsUpdateBtn.style.background = '';
             needsUpdateBtn.style.color = '';
           }
+          const activeCycleBtn = document.getElementById('optimisation-filter-active-cycle');
+          if (activeCycleBtn) {
+            activeCycleBtn.classList.remove('active');
+            activeCycleBtn.style.background = '';
+            activeCycleBtn.style.color = '';
+          }
+          const overdueCycleBtn = document.getElementById('optimisation-filter-overdue-cycle');
+          if (overdueCycleBtn) {
+            overdueCycleBtn.classList.remove('active');
+            overdueCycleBtn.style.background = '';
+            overdueCycleBtn.style.color = '';
+          }
           window.optimisationModuleState.activeObjectiveFilter = null;
           updateObjectiveFilterUI();
           applyFilters();
@@ -7866,6 +7954,122 @@
           } catch (error) {
             console.error('[Optimisation Module] Error changing status:', error);
             alert('Failed to change status: ' + error.message);
+          }
+        });
+      }
+
+      // Complete Cycle button
+      const completeCycleBtn = document.getElementById('optimisation-complete-cycle-btn');
+      if (completeCycleBtn) {
+        completeCycleBtn.addEventListener('click', async () => {
+          const taskId = window.optimisationModuleState?.currentTaskId;
+          if (!taskId) {
+            alert('No task selected');
+            return;
+          }
+
+          const task = window.optimisationModuleState.allTasks.find(t => t.id === taskId);
+          if (!task || !task.active_cycle_id) {
+            alert('No active cycle to complete');
+            return;
+          }
+
+          if (!confirm(`Complete Cycle ${task.cycle_no || task.cycle_active || 'current'}? This will close the cycle and mark it as completed.`)) {
+            return;
+          }
+
+          try {
+            const response = await fetch(apiUrl(`/api/optimisation/task/${taskId}/cycle/complete`), {
+              method: 'POST',
+              headers: { ...window.getOptimisationHeaders(), 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                action: 'complete',
+                cycle_id: task.active_cycle_id
+              })
+            });
+
+            if (!response.ok) {
+              const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+              throw new Error(error.error || 'Failed to complete cycle');
+            }
+
+            const result = await response.json();
+            
+            // Update task in state
+            const taskIndex = window.optimisationModuleState.allTasks.findIndex(t => t.id === taskId);
+            if (taskIndex >= 0) {
+              window.optimisationModuleState.allTasks[taskIndex] = result.task;
+            }
+
+            // Reload tasks and refresh drawer
+            await window.loadAllOptimisationTasks();
+            if (window.optimisationModuleState.currentTaskId === taskId) {
+              await window.openOptimisationTaskDrawer(taskId);
+            }
+
+            // Refresh table
+            renderOptimisationTasksTable();
+          } catch (error) {
+            console.error('[Optimisation] Error completing cycle:', error);
+            alert('Failed to complete cycle: ' + error.message);
+          }
+        });
+      }
+
+      // Archive Cycle button
+      const archiveCycleBtn = document.getElementById('optimisation-archive-cycle-btn');
+      if (archiveCycleBtn) {
+        archiveCycleBtn.addEventListener('click', async () => {
+          const taskId = window.optimisationModuleState?.currentTaskId;
+          if (!taskId) {
+            alert('No task selected');
+            return;
+          }
+
+          const task = window.optimisationModuleState.allTasks.find(t => t.id === taskId);
+          if (!task || !task.active_cycle_id) {
+            alert('No active cycle to archive');
+            return;
+          }
+
+          if (!confirm(`Archive Cycle ${task.cycle_no || task.cycle_active || 'current'}? This will mark the cycle as archived (for abandoned work).`)) {
+            return;
+          }
+
+          try {
+            const response = await fetch(apiUrl(`/api/optimisation/task/${taskId}/cycle/complete`), {
+              method: 'POST',
+              headers: { ...window.getOptimisationHeaders(), 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                action: 'archive',
+                cycle_id: task.active_cycle_id
+              })
+            });
+
+            if (!response.ok) {
+              const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+              throw new Error(error.error || 'Failed to archive cycle');
+            }
+
+            const result = await response.json();
+            
+            // Update task in state
+            const taskIndex = window.optimisationModuleState.allTasks.findIndex(t => t.id === taskId);
+            if (taskIndex >= 0) {
+              window.optimisationModuleState.allTasks[taskIndex] = result.task;
+            }
+
+            // Reload tasks and refresh drawer
+            await window.loadAllOptimisationTasks();
+            if (window.optimisationModuleState.currentTaskId === taskId) {
+              await window.openOptimisationTaskDrawer(taskId);
+            }
+
+            // Refresh table
+            renderOptimisationTasksTable();
+          } catch (error) {
+            console.error('[Optimisation] Error archiving cycle:', error);
+            alert('Failed to archive cycle: ' + error.message);
           }
         });
       }
