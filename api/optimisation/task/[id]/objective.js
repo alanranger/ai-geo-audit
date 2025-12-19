@@ -5,6 +5,8 @@ export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
 import { requireAdminOrShare, isShareMode } from '../../../../lib/api/requireAdminOrShare.js';
+import { validateObjective } from '../../../../lib/optimisation/objectiveSchema.js';
+import { evaluateObjective } from '../../../../lib/optimisation/evaluateObjective.js';
 
 const need = (k) => {
   const v = process.env[k];
@@ -84,75 +86,145 @@ export default async function handler(req, res) {
       return sendJSON(res, 403, { error: 'Forbidden' });
     }
 
-    // Extract objective fields from request body (Phase B)
+    // Get or create active cycle
+    let activeCycleId = currentTask.active_cycle_id;
+    let cycleNo = currentTask.cycle_active || 1;
+
+    if (!activeCycleId) {
+      // Create Cycle 1 if it doesn't exist
+      const { data: newCycle, error: cycleCreateError } = await supabase
+        .from('optimisation_task_cycles')
+        .insert({
+          task_id: id,
+          cycle_no: 1,
+          status: currentTask.status || 'planned',
+          start_date: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      if (cycleCreateError) {
+        console.error('[Optimisation Task Objective] Cycle create error:', cycleCreateError);
+        return sendJSON(res, 500, { error: cycleCreateError.message });
+      }
+
+      activeCycleId = newCycle.id;
+      cycleNo = 1;
+
+      // Update task with active_cycle_id
+      await supabase
+        .from('optimisation_tasks')
+        .update({ active_cycle_id: activeCycleId, cycle_active: 1 })
+        .eq('id', id);
+    }
+
+    // Extract objective from request body (new Phase 5 format)
     const {
-      objective_title,
-      objective_kpi,
-      objective_metric,
-      objective_direction,
-      objective_target_value,
-      objective_target_delta, // Phase B field
-      objective_timeframe_days,
-      objective_due_at, // Phase B field
-      objective_plan
+      title,
+      kpi,
+      target,
+      target_type,
+      due_at,
+      plan
     } = req.body;
 
-    // Build update object (only include defined fields)
-    const updates = {};
-    if (objective_title !== undefined) updates.objective_title = objective_title;
-    if (objective_kpi !== undefined) updates.objective_kpi = objective_kpi;
-    if (objective_metric !== undefined) updates.objective_metric = objective_metric;
-    if (objective_direction !== undefined) updates.objective_direction = objective_direction;
-    // Support both Phase 4 (objective_target_value) and Phase B (objective_target_delta)
-    if (objective_target_delta !== undefined) {
-      updates.objective_target_delta = objective_target_delta != null ? parseFloat(objective_target_delta) : null;
-    } else if (objective_target_value !== undefined) {
-      updates.objective_target_value = objective_target_value != null ? parseFloat(objective_target_value) : null;
-      // Also set objective_target_delta for Phase B compatibility
-      updates.objective_target_delta = objective_target_value != null ? parseFloat(objective_target_value) : null;
-    }
-    if (objective_timeframe_days !== undefined) updates.objective_timeframe_days = objective_timeframe_days != null ? parseInt(objective_timeframe_days) : null;
-    if (objective_due_at !== undefined) updates.objective_due_at = objective_due_at || null;
-    if (objective_plan !== undefined) updates.objective_plan = objective_plan;
+    // If no objective fields provided, clear objective
+    if (title === undefined && kpi === undefined && target === undefined) {
+      // Clear objective
+      const { error: clearError } = await supabase
+        .from('optimisation_task_cycles')
+        .update({
+          objective: null,
+          objective_status: 'not_set',
+          objective_progress: null,
+          due_at: null,
+          objective_updated_at: new Date().toISOString()
+        })
+        .eq('id', activeCycleId);
 
-    // Set cycle_started_at if not already set and we're setting an objective
-    if (!currentTask.cycle_started_at && (objective_metric || objective_direction || objective_target_delta || objective_target_value)) {
-      updates.cycle_started_at = new Date().toISOString();
+      if (clearError) {
+        console.error('[Optimisation Task Objective] Clear error:', clearError);
+        return sendJSON(res, 500, { error: clearError.message });
+      }
+
+      const { data: updatedCycle } = await supabase
+        .from('optimisation_task_cycles')
+        .select('*')
+        .eq('id', activeCycleId)
+        .single();
+
+      return sendJSON(res, 200, { 
+        cycle: updatedCycle,
+        objective: null,
+        objective_status: 'not_set',
+        objective_progress: null
+      });
     }
 
-    // Update task
-    const { data: updatedTask, error: updateError } = await supabase
-      .from('optimisation_tasks')
-      .update(updates)
-      .eq('id', id)
+    // Validate and normalize objective
+    const objectiveObj = {
+      title: title || '',
+      kpi: kpi || '',
+      target: target,
+      target_type: target_type,
+      due_at: due_at || null,
+      plan: plan || null
+    };
+
+    const validation = validateObjective(objectiveObj);
+    if (!validation.ok) {
+      return sendJSON(res, 400, { 
+        error: 'Invalid objective',
+        errors: validation.errors
+      });
+    }
+
+    const normalisedObjective = validation.normalisedObjective;
+
+    // Fetch baseline and latest measurements for evaluation
+    const { data: measurements } = await supabase
+      .from('optimisation_task_events')
+      .select('metrics, created_at')
+      .eq('task_id', id)
+      .or(`cycle_id.eq.${activeCycleId},cycle_number.eq.${cycleNo}`)
+      .not('metrics', 'is', null)
+      .order('created_at', { ascending: true });
+
+    let baselineMeasurement = null;
+    let latestMeasurement = null;
+
+    if (measurements && measurements.length > 0) {
+      baselineMeasurement = measurements[0].metrics;
+      latestMeasurement = measurements[measurements.length - 1].metrics;
+    }
+
+    // Evaluate objective
+    const evaluation = evaluateObjective(
+      normalisedObjective,
+      baselineMeasurement,
+      latestMeasurement,
+      new Date()
+    );
+
+    // Update cycle with objective, status, and progress
+    const dueAt = normalisedObjective.due_at ? new Date(normalisedObjective.due_at).toISOString() : null;
+
+    const { data: updatedCycle, error: cycleUpdateError } = await supabase
+      .from('optimisation_task_cycles')
+      .update({
+        objective: normalisedObjective,
+        objective_status: evaluation.status,
+        objective_progress: evaluation.progress,
+        due_at: dueAt,
+        objective_updated_at: new Date().toISOString()
+      })
+      .eq('id', activeCycleId)
       .select()
       .single();
 
-    if (updateError) {
-      console.error('[Optimisation Task Objective] Update error:', updateError);
-      return sendJSON(res, 500, { error: updateError.message });
-    }
-
-    // Also update the active cycle if it exists (for backward compatibility)
-    if (currentTask.active_cycle_id) {
-      const cycleUpdates = {};
-      if (objective_title !== undefined) cycleUpdates.objective_title = objective_title;
-      if (objective_kpi !== undefined) cycleUpdates.primary_kpi = objective_kpi;
-      if (objective_target_value !== undefined) cycleUpdates.target_value = objective_target_value != null ? parseFloat(objective_target_value) : null;
-      if (objective_direction !== undefined) cycleUpdates.target_direction = objective_direction;
-      if (objective_timeframe_days !== undefined) cycleUpdates.timeframe_days = objective_timeframe_days != null ? parseInt(objective_timeframe_days) : null;
-      if (objective_plan !== undefined) cycleUpdates.plan = objective_plan;
-      cycleUpdates.updated_at = new Date().toISOString();
-
-      const { error: cycleUpdateError } = await supabase
-        .from('optimisation_task_cycles')
-        .update(cycleUpdates)
-        .eq('id', currentTask.active_cycle_id);
-
-      if (cycleUpdateError) {
-        console.error('[Optimisation Task Objective] Cycle update error:', cycleUpdateError);
-        // Don't fail, but log
-      }
+    if (cycleUpdateError) {
+      console.error('[Optimisation Task Objective] Cycle update error:', cycleUpdateError);
+      return sendJSON(res, 500, { error: cycleUpdateError.message });
     }
 
     // Insert event for objective update
@@ -186,7 +258,12 @@ export default async function handler(req, res) {
       // Don't fail the request
     }
 
-    return sendJSON(res, 200, { task: updatedTask });
+    return sendJSON(res, 200, { 
+      cycle: updatedCycle,
+      objective: normalisedObjective,
+      objective_status: evaluation.status,
+      objective_progress: evaluation.progress
+    });
   } catch (error) {
     console.error('[Optimisation Task Objective] Error:', error);
     return sendJSON(res, 500, { error: error.message || 'Internal server error' });

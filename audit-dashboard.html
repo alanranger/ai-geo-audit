@@ -5018,21 +5018,50 @@
       const content = document.getElementById('optimisation-drawer-objective-content');
       if (!form || !content) return;
 
-      // Populate form with current values (support both Phase 4 and Phase B fields)
-      document.getElementById('optimisation-edit-objective-title').value = task.objective_title || '';
-      document.getElementById('optimisation-edit-objective-kpi').value = task.objective_kpi || task.objective_metric || '';
-      document.getElementById('optimisation-edit-objective-metric').value = task.objective_metric || task.objective_kpi || '';
-      document.getElementById('optimisation-edit-objective-direction').value = task.objective_direction || '';
-      document.getElementById('optimisation-edit-objective-target-value').value = task.objective_target_delta != null ? task.objective_target_delta : (task.objective_target_value != null ? task.objective_target_value : '');
-      document.getElementById('optimisation-edit-objective-timeframe').value = task.objective_timeframe_days != null ? task.objective_timeframe_days : '';
-      document.getElementById('optimisation-edit-objective-plan').value = task.objective_plan || '';
+      // Populate form with current values (Phase 5: use objective from cycle, fallback to legacy)
+      const objective = task.objective || task.cycle?.objective || null;
       
-      // If objective_due_at exists, calculate and display it
-      if (task.objective_due_at) {
-        const dueDateEl = document.getElementById('optimisation-edit-objective-due-date');
-        if (dueDateEl) {
-          const dueDate = new Date(task.objective_due_at);
-          dueDateEl.textContent = `Due: ${dueDate.toLocaleDateString('en-GB')}`;
+      if (objective) {
+        // Phase 5 format
+        document.getElementById('optimisation-edit-objective-title').value = objective.title || '';
+        document.getElementById('optimisation-edit-objective-kpi').value = ''; // KPI label not used in Phase 5
+        document.getElementById('optimisation-edit-objective-metric').value = objective.kpi || '';
+        document.getElementById('optimisation-edit-objective-direction').value = objective.target_type === 'absolute' ? 'at_least' : 'increase'; // Default
+        document.getElementById('optimisation-edit-objective-target-value').value = objective.target != null ? objective.target : '';
+        document.getElementById('optimisation-edit-objective-plan').value = objective.plan || '';
+        
+        // Calculate timeframe from due_at if available
+        if (objective.due_at) {
+          const dueDate = new Date(objective.due_at);
+          const taskStart = task.cycle_started_at || task.cycle_start_date || new Date();
+          const startDate = new Date(taskStart);
+          const daysDiff = Math.round((dueDate - startDate) / (1000 * 60 * 60 * 24));
+          document.getElementById('optimisation-edit-objective-timeframe').value = daysDiff > 0 ? daysDiff : '';
+          
+          const dueDateEl = document.getElementById('optimisation-edit-objective-due-date');
+          if (dueDateEl) {
+            dueDateEl.textContent = `Due: ${dueDate.toLocaleDateString('en-GB')}`;
+          }
+        } else {
+          document.getElementById('optimisation-edit-objective-timeframe').value = '';
+        }
+      } else {
+        // Legacy format fallback
+        document.getElementById('optimisation-edit-objective-title').value = task.objective_title || '';
+        document.getElementById('optimisation-edit-objective-kpi').value = task.objective_kpi || task.objective_metric || '';
+        document.getElementById('optimisation-edit-objective-metric').value = task.objective_metric || task.objective_kpi || '';
+        document.getElementById('optimisation-edit-objective-direction').value = task.objective_direction || '';
+        document.getElementById('optimisation-edit-objective-target-value').value = task.objective_target_delta != null ? task.objective_target_delta : (task.objective_target_value != null ? task.objective_target_value : '');
+        document.getElementById('optimisation-edit-objective-timeframe').value = task.objective_timeframe_days != null ? task.objective_timeframe_days : '';
+        document.getElementById('optimisation-edit-objective-plan').value = task.objective_plan || '';
+        
+        // If objective_due_at exists, calculate and display it
+        if (task.objective_due_at) {
+          const dueDateEl = document.getElementById('optimisation-edit-objective-due-date');
+          if (dueDateEl) {
+            const dueDate = new Date(task.objective_due_at);
+            dueDateEl.textContent = `Due: ${dueDate.toLocaleDateString('en-GB')}`;
+          }
         }
       }
 
@@ -5070,35 +5099,40 @@
         return;
       }
 
-      // Get form values
-      const objective_title = document.getElementById('optimisation-edit-objective-title').value.trim() || null;
-      const objective_kpi = document.getElementById('optimisation-edit-objective-kpi').value.trim() || null;
-      const objective_metric = document.getElementById('optimisation-edit-objective-metric').value || null;
-      const objective_direction = document.getElementById('optimisation-edit-objective-direction').value || null;
+      // Get form values (Phase 5 format)
+      const title = document.getElementById('optimisation-edit-objective-title').value.trim();
+      const kpi = document.getElementById('optimisation-edit-objective-metric').value || null;
       const targetValue = document.getElementById('optimisation-edit-objective-target-value').value;
-      const objective_target_delta = targetValue ? parseFloat(targetValue) : null;
-      const timeframeDays = document.getElementById('optimisation-edit-objective-timeframe').value;
-      const objective_timeframe_days = timeframeDays ? parseInt(timeframeDays) : null;
-      const objective_plan = document.getElementById('optimisation-edit-objective-plan').value.trim() || null;
-
-      // Calculate objective_due_at if timeframe is set
-      let objective_due_at = null;
-      if (objective_timeframe_days) {
-        const taskId = window.optimisationModuleState?.currentTaskId;
-        const task = window.optimisationModuleState?.allTasks?.find(t => t.id === taskId);
-        const startDate = task?.cycle_started_at ? new Date(task.cycle_started_at) : new Date();
-        objective_due_at = new Date(startDate.getTime() + objective_timeframe_days * 24 * 60 * 60 * 1000).toISOString();
+      const target = targetValue ? (kpi === 'ai_overview' ? targetValue === 'true' : parseFloat(targetValue)) : null;
+      const direction = document.getElementById('optimisation-edit-objective-direction').value || null;
+      
+      // Determine target_type based on KPI
+      let target_type = 'delta';
+      if (kpi === 'ai_overview' || kpi === 'current_rank') {
+        target_type = 'absolute';
+      } else if (direction === 'at_least' || direction === 'at_most') {
+        target_type = 'absolute';
       }
 
+      const timeframeDays = document.getElementById('optimisation-edit-objective-timeframe').value;
+      const plan = document.getElementById('optimisation-edit-objective-plan').value.trim() || null;
+
+      // Calculate due_at if timeframe is set
+      let due_at = null;
+      if (timeframeDays) {
+        const task = window.optimisationModuleState?.allTasks?.find(t => t.id === taskId);
+        const startDate = task?.cycle_started_at || task?.cycle_start_date ? new Date(task.cycle_started_at || task.cycle_start_date) : new Date();
+        due_at = new Date(startDate.getTime() + parseInt(timeframeDays) * 24 * 60 * 60 * 1000).toISOString();
+      }
+
+      // Phase 5: Send new format
       const objectiveData = {
-        objective_title,
-        objective_kpi,
-        objective_metric,
-        objective_direction,
-        objective_target_delta,
-        objective_timeframe_days,
-        objective_due_at,
-        objective_plan
+        title: title || null,
+        kpi: kpi || null,
+        target: target,
+        target_type: target_type,
+        due_at: due_at,
+        plan: plan
       };
 
       try {
@@ -5111,8 +5145,14 @@
 
         if (!response.ok) {
           const error = await response.json();
-          throw new Error(error.error || 'Failed to save objective');
+          throw new Error(error.error || error.errors?.join(', ') || 'Failed to save objective');
         }
+
+        const data = await response.json();
+
+        // Hide edit form
+        document.getElementById('optimisation-edit-objective-form').style.display = 'none';
+        document.getElementById('optimisation-drawer-objective-content').style.display = 'block';
 
         // Reload tasks and refresh drawer
         if (typeof window.loadAllOptimisationTasks === 'function') {
@@ -5593,10 +5633,23 @@
 
       // Update goal rollups (Phase B) - only count active tasks (not cancelled/deleted)
       const activeTasks = tasks.filter(t => !['done', 'cancelled', 'deleted'].includes(t.status));
-      const goalNotSet = activeTasks.filter(t => !t.goal_state || t.goal_state === 'not_set').length;
-      const goalOnTrack = activeTasks.filter(t => t.goal_state === 'on_track').length;
-      const goalOverdue = activeTasks.filter(t => t.goal_state === 'overdue').length;
-      const goalMet = activeTasks.filter(t => t.goal_state === 'met').length;
+      // Use objective_status from cycle (Phase 5) or fallback to goal_state
+      const goalNotSet = activeTasks.filter(t => {
+        const status = t.objective_status || t.goal_state;
+        return !status || status === 'not_set';
+      }).length;
+      const goalOnTrack = activeTasks.filter(t => {
+        const status = t.objective_status || t.goal_state;
+        return status === 'on_track';
+      }).length;
+      const goalOverdue = activeTasks.filter(t => {
+        const status = t.objective_status || t.goal_state;
+        return status === 'overdue';
+      }).length;
+      const goalMet = activeTasks.filter(t => {
+        const status = t.objective_status || t.goal_state;
+        return status === 'met';
+      }).length;
 
       const notSetEl = document.getElementById('optimisation-goal-not-set');
       const onTrackEl = document.getElementById('optimisation-goal-on-track');
@@ -5781,20 +5834,42 @@
           }
         }
 
-        // Build goal status display
+        // Build goal status display (Phase 5: use objective_status from cycle)
         let goalHtml = '–';
-        if (task.goal_state && task.goal_state !== 'not_set') {
+        const objectiveStatus = task.objective_status || task.goal_state || 'not_set';
+        
+        if (objectiveStatus && objectiveStatus !== 'not_set') {
           const goalConfig = {
             'on_track': { text: 'On track', bg: '#dbeafe', color: '#1e40af' },
             'overdue': { text: 'Overdue', bg: '#fee2e2', color: '#991b1b' },
             'met': { text: 'Met', bg: '#d1fae5', color: '#065f46' },
             'at_risk': { text: 'At risk', bg: '#fef3c7', color: '#92400e' }
           };
-          const config = goalConfig[task.goal_state] || goalConfig['on_track'];
+          const config = goalConfig[objectiveStatus] || goalConfig['on_track'];
           let goalText = `<span style="padding: 0.25rem 0.5rem; border-radius: 4px; background: ${config.bg}; color: ${config.color}; font-size: 0.75rem; font-weight: 600; display: inline-block; margin-bottom: 0.25rem;">${config.text}</span>`;
           
-          // Add KPI + target info
-          if (task.objective_kpi && task.objective_target_delta != null) {
+          // Add progress info from objective_progress (Phase 5) or fallback
+          if (task.objective_progress) {
+            const progress = task.objective_progress;
+            if (progress.baseline_value != null && progress.latest_value != null && progress.delta != null) {
+              const deltaColor = progress.delta >= 0 ? '#10b981' : '#ef4444';
+              const deltaSign = progress.delta >= 0 ? '+' : '';
+              goalText += `<div style="font-size: 0.7rem; color: ${deltaColor}; margin-top: 0.125rem; font-weight: 600;">Δ ${deltaSign}${progress.delta} vs target ${progress.target}</div>`;
+            }
+          } else if (task.objective && task.objective.kpi && task.objective.target != null) {
+            // Use objective from cycle
+            const kpiLabel = task.objective.kpi.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            const targetText = task.objective.target_type === 'delta' 
+              ? `${kpiLabel} ${task.objective.target >= 0 ? '+' : ''}${task.objective.target}`
+              : `${kpiLabel} → ${task.objective.target}`;
+            let dueText = '';
+            if (task.objective.due_at || task.objective_due_at) {
+              const dueDate = new Date(task.objective.due_at || task.objective_due_at).toLocaleDateString('en-GB');
+              dueText = ` by ${dueDate}`;
+            }
+            goalText += `<div style="font-size: 0.7rem; color: #64748b; margin-top: 0.25rem;">${targetText}${dueText}</div>`;
+          } else if (task.objective_kpi && task.objective_target_delta != null) {
+            // Legacy fallback
             const kpiLabel = task.objective_kpi.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
             const direction = task.objective_direction === 'decrease' ? '-' : '+';
             const targetText = `${kpiLabel} ${direction}${Math.abs(task.objective_target_delta)}`;
@@ -5806,8 +5881,14 @@
             goalText += `<div style="font-size: 0.7rem; color: #64748b; margin-top: 0.25rem;">${targetText}${dueText}</div>`;
           }
           
-          // Add delta if available
-          if (task.objective_delta != null) {
+          // Add delta if available (from progress or legacy)
+          if (task.objective_progress && task.objective_progress.delta != null) {
+            const delta = task.objective_progress.delta;
+            const deltaColor = delta >= 0 ? '#10b981' : '#ef4444';
+            const deltaSign = delta >= 0 ? '+' : '';
+            goalText += `<div style="font-size: 0.7rem; color: ${deltaColor}; margin-top: 0.125rem; font-weight: 600;">Δ ${deltaSign}${delta}</div>`;
+          } else if (task.objective_delta != null) {
+            // Legacy fallback
             const deltaColor = task.objective_delta >= 0 ? '#10b981' : '#ef4444';
             const deltaSign = task.objective_delta >= 0 ? '+' : '';
             goalText += `<div style="font-size: 0.7rem; color: ${deltaColor}; margin-top: 0.125rem; font-weight: 600;">Δ ${deltaSign}${task.objective_delta}</div>`;
@@ -6214,13 +6295,11 @@
         objectiveCycleEl.textContent = `(Cycle ${cycleNo})`;
       }
 
-      // Update progress badge - ALWAYS use goal_state from task (from goal status view)
-      // Ignore progress.objective_state as it has bugs - they can't both be true!
+      // Update progress badge - Use objective_status from cycle (Phase 5) or fallback to goal_state
       const objectiveBadgeEl = document.getElementById('optimisation-drawer-objective-badge');
       if (objectiveBadgeEl) {
-        // Use goal_state from task (from goal status view) - this is the source of truth
-        // The table uses this same field, so modal must too
-        let state = task.goal_state;
+        // Phase 5: Use objective_status from cycle (server-computed), fallback to goal_state
+        let state = task.objective_status || task.goal_state;
         
         // Debug logging to understand what's happening
         if (typeof debugLog === 'function') {
@@ -6319,18 +6398,23 @@
 
       const objectiveContentEl = document.getElementById('optimisation-drawer-objective-content');
       if (objectiveContentEl) {
-        // Use task-level objective fields if available, otherwise fall back to cycle fields
-        const objectiveTitle = task.objective_title || null;
-        const objectiveKpi = task.objective_kpi || task.objective_metric || null;
-        const objectiveMetric = task.objective_metric || task.objective_kpi || null;
-        const objectiveDirection = task.objective_direction || null;
-        // Support both Phase B (objective_target_delta) and Phase 4 (objective_target_value)
-        const objectiveTargetValue = task.objective_target_delta != null ? task.objective_target_delta : (task.objective_target_value != null ? task.objective_target_value : null);
-        const objectiveTimeframe = task.objective_timeframe_days != null ? task.objective_timeframe_days : null;
-        const objectivePlan = task.objective_plan || null;
+        // Phase 5: Use objective from cycle (jsonb) or fallback to legacy task fields
+        const objective = task.objective || task.cycle?.objective || null;
+        const objectiveProgress = task.objective_progress || task.cycle?.objective_progress || null;
+        const objectiveStatus = task.objective_status || task.cycle?.objective_status || task.goal_state || 'not_set';
+        const objectiveDueAt = task.objective_due_at || task.cycle?.due_at || null;
+
+        // Legacy fallback fields
+        const objectiveTitle = objective?.title || task.objective_title || null;
+        const objectiveKpi = objective?.kpi || task.objective_kpi || task.objective_metric || null;
+        const objectiveMetric = objective?.kpi || task.objective_metric || task.objective_kpi || null;
+        const objectiveDirection = objective?.target_type === 'delta' ? 'increase' : (task.objective_direction || null);
+        const objectiveTargetValue = objective?.target != null ? objective.target : (task.objective_target_delta != null ? task.objective_target_delta : (task.objective_target_value != null ? task.objective_target_value : null));
+        const objectiveTimeframe = objective?.due_at ? null : (task.objective_timeframe_days != null ? task.objective_timeframe_days : null);
+        const objectivePlan = objective?.plan || task.objective_plan || null;
         const cycleStartedAt = task.cycle_started_at || task.cycle_start_date || null;
 
-        if (objectiveTitle || objectiveKpi || objectiveMetric || objectiveDirection) {
+        if (objective || objectiveTitle || objectiveKpi || objectiveMetric || objectiveDirection) {
           // Use two-column layout for objective details
           let leftColumn = '';
           let rightColumn = '';
@@ -6378,8 +6462,25 @@
             }
           }
           
-          // Show progress: baseline → latest (Δ) vs target
-          if (progress && progress.baseline_value != null && progress.latest_value != null && objectiveMetric) {
+          // Show progress: baseline → latest (Δ) vs target (Phase 5: use objective_progress)
+          if (objectiveProgress && objectiveProgress.baseline_value != null && objectiveProgress.latest_value != null) {
+            const baselineVal = objectiveProgress.baseline_value;
+            const latestVal = objectiveProgress.latest_value;
+            const delta = objectiveProgress.delta != null ? objectiveProgress.delta : (latestVal - baselineVal);
+            const target = objectiveProgress.target != null ? objectiveProgress.target : objectiveTargetValue;
+            
+            if (target != null) {
+              const deltaColor = delta >= 0 ? '#10b981' : '#ef4444';
+              const deltaSign = delta >= 0 ? '+' : '';
+              const kpiLabel = (objectiveKpi || objectiveMetric).replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+              const targetType = objective?.target_type || 'delta';
+              const targetText = targetType === 'delta' 
+                ? `target ${target >= 0 ? '+' : ''}${target}`
+                : `target ${target}`;
+              rightColumn += `<div style="margin-bottom: 0.4rem;"><strong>Progress:</strong> ${baselineVal} → ${latestVal} (<span style="color: ${deltaColor}; font-weight: 600;">${deltaSign}${delta}</span>) vs ${targetText}</div>`;
+            }
+          } else if (progress && progress.baseline_value != null && progress.latest_value != null && objectiveMetric) {
+            // Legacy fallback
             const baselineVal = progress.baseline_value;
             const latestVal = progress.latest_value;
             const delta = progress.objective_delta != null ? progress.objective_delta : (latestVal - baselineVal);

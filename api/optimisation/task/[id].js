@@ -58,7 +58,18 @@ export default async function handler(req, res) {
         return sendJSON(res, 404, { error: 'Task not found' });
       }
 
-      // Get goal status
+      // Get active cycle with objective (Phase 5)
+      let cycle = null;
+      if (task.active_cycle_id) {
+        const { data: cycleData } = await supabase
+          .from('optimisation_task_cycles')
+          .select('id, objective, objective_status, objective_progress, due_at')
+          .eq('id', task.active_cycle_id)
+          .single();
+        cycle = cycleData;
+      }
+
+      // Get goal status (fallback for backward compatibility)
       const { data: goalStatus } = await supabase
         .from('vw_optimisation_task_goal_status')
         .select('goal_state, objective_kpi, objective_target_delta, objective_due_at, objective_delta, objective_direction')
@@ -75,13 +86,19 @@ export default async function handler(req, res) {
       return sendJSON(res, 200, {
         task: {
           ...task,
+          // Phase 5: Use objective_status from cycle, fallback to goal_state
+          objective_status: cycle?.objective_status || goalStatus?.goal_state || 'not_set',
+          objective: cycle?.objective || null,
+          objective_progress: cycle?.objective_progress || null,
+          objective_due_at: cycle?.due_at || goalStatus?.objective_due_at || null,
+          // Legacy fields for backward compatibility
           goal_state: goalStatus?.goal_state || 'not_set',
           objective_kpi: goalStatus?.objective_kpi,
           objective_target_delta: goalStatus?.objective_target_delta,
-          objective_due_at: goalStatus?.objective_due_at,
           objective_delta: goalStatus?.objective_delta,
           objective_direction: goalStatus?.objective_direction
         },
+        cycle: cycle,
         events: events || []
       });
     } catch (error) {

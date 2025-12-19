@@ -72,11 +72,34 @@ export default async function handler(req, res) {
       return sendJSON(res, 500, { error: error.message });
     }
 
-    // Fetch goal status for all tasks
+    // Fetch objective status and progress from cycles (Phase 5)
     const taskIds = (tasks || []).map(t => t.id).filter(Boolean);
-    let goalStatusMap = {};
+    let objectiveStatusMap = {};
     
     if (taskIds.length > 0) {
+      // Get active cycles with objective data
+      const { data: cycles, error: cyclesError } = await supabase
+        .from('optimisation_task_cycles')
+        .select('task_id, objective, objective_status, objective_progress, due_at')
+        .in('task_id', taskIds)
+        .not('objective', 'is', null);
+
+      if (cyclesError) {
+        console.error('[Optimisation Tasks] Cycles query error:', cyclesError);
+        // Don't fail, just log
+      } else if (cycles) {
+        // Map by task_id (assuming one active cycle per task)
+        cycles.forEach(cycle => {
+          objectiveStatusMap[cycle.task_id] = {
+            objective: cycle.objective,
+            objective_status: cycle.objective_status || 'not_set',
+            objective_progress: cycle.objective_progress,
+            objective_due_at: cycle.due_at
+          };
+        });
+      }
+
+      // Also fetch from goal status view for backward compatibility
       let goalQuery = supabase
         .from('vw_optimisation_task_goal_status')
         .select('task_id, goal_state, objective_kpi, objective_target_delta, objective_due_at, objective_delta, objective_direction')
@@ -89,22 +112,30 @@ export default async function handler(req, res) {
         // Don't fail, just log
       } else if (goalStatuses) {
         goalStatuses.forEach(gs => {
-          goalStatusMap[gs.task_id] = {
-            goal_state: gs.goal_state || 'not_set',
-            objective_kpi: gs.objective_kpi,
-            objective_target_delta: gs.objective_target_delta,
-            objective_due_at: gs.objective_due_at,
-            objective_delta: gs.objective_delta,
-            objective_direction: gs.objective_direction
-          };
+          // Only use goal_state if we don't have objective_status from cycle
+          if (!objectiveStatusMap[gs.task_id]) {
+            objectiveStatusMap[gs.task_id] = {
+              goal_state: gs.goal_state || 'not_set',
+              objective_kpi: gs.objective_kpi,
+              objective_target_delta: gs.objective_target_delta,
+              objective_due_at: gs.objective_due_at,
+              objective_delta: gs.objective_delta,
+              objective_direction: gs.objective_direction
+            };
+          } else {
+            // Merge goal_state as fallback
+            objectiveStatusMap[gs.task_id].goal_state = gs.goal_state || 'not_set';
+          }
         });
       }
     }
 
-    // Merge goal status into tasks
+    // Merge objective status into tasks
     const enrichedTasks = (tasks || []).map(task => ({
       ...task,
-      ...goalStatusMap[task.id]
+      ...objectiveStatusMap[task.id],
+      // Use objective_status from cycle if available, otherwise goal_state
+      objective_status: objectiveStatusMap[task.id]?.objective_status || objectiveStatusMap[task.id]?.goal_state || 'not_set'
     }));
 
     return sendJSON(res, 200, { tasks: enrichedTasks });
