@@ -6489,14 +6489,15 @@
         const objectiveStatus = task.objective_status || task.cycle?.objective_status || task.goal_state || 'not_set';
         const objectiveDueAt = task.objective_due_at || task.cycle?.due_at || null;
 
-        // Legacy fallback fields
+        // Legacy fallback fields - read from cycle fields (via view) or task fields
         const objectiveTitle = objective?.title || task.objective_title || null;
-        const objectiveKpi = objective?.kpi || task.objective_kpi || task.objective_metric || null;
-        const objectiveMetric = objective?.kpi || task.objective_metric || task.objective_kpi || null;
-        const objectiveDirection = objective?.target_type === 'delta' ? 'increase' : (task.objective_direction || null);
-        const objectiveTargetValue = objective?.target != null ? objective.target : (task.objective_target_delta != null ? task.objective_target_delta : (task.objective_target_value != null ? task.objective_target_value : null));
-        const objectiveTimeframe = objective?.due_at ? null : (task.objective_timeframe_days != null ? task.objective_timeframe_days : null);
-        const objectivePlan = objective?.plan || task.objective_plan || null;
+        const objectiveKpi = objective?.kpi || task.primary_kpi || task.objective_kpi || task.objective_metric || null;
+        const objectiveMetric = objective?.kpi || task.primary_kpi || task.objective_metric || task.objective_kpi || null;
+        // target_direction comes from cycle, objective_direction is legacy task field
+        const objectiveDirection = objective?.target_type === 'delta' ? 'increase' : (task.target_direction || task.objective_direction || null);
+        const objectiveTargetValue = objective?.target != null ? objective.target : (task.target_value != null ? task.target_value : (task.objective_target_delta != null ? task.objective_target_delta : (task.objective_target_value != null ? task.objective_target_value : null)));
+        const objectiveTimeframe = objective?.due_at ? null : (task.timeframe_days != null ? task.timeframe_days : (task.objective_timeframe_days != null ? task.objective_timeframe_days : null));
+        const objectivePlan = objective?.plan || task.plan || task.objective_plan || null;
         const cycleStartedAt = task.cycle_started_at || task.cycle_start_date || null;
 
         if (objective || objectiveTitle || objectiveKpi || objectiveMetric || objectiveDirection) {
