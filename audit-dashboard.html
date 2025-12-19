@@ -9028,6 +9028,66 @@
       showStatus('Configuration saved!', 'success');
     }
 
+    async function shareAudit() {
+      // Check if admin key is set
+      const adminKey = window.getAdminKey();
+      if (!adminKey) {
+        alert('Admin key required. Please set your admin key in the "Optimisation Tracking Security" section.');
+        return;
+      }
+
+      try {
+        // Call share create endpoint
+        const response = await fetch(apiUrl('/api/share/create'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-arp-admin-key': adminKey
+          },
+          body: JSON.stringify({
+            expiryDays: 30 // Default to 30 days
+          })
+        });
+
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+          throw new Error(error.error || `HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        const shareUrl = data.shareUrl;
+        const expiresAt = data.expiresAt ? new Date(data.expiresAt).toLocaleDateString('en-GB') : 'Unknown';
+
+        // Show share URL in a prompt for easy copying
+        const message = `Share URL created!\n\nExpires: ${expiresAt}\n\nShare URL:\n${shareUrl}\n\nClick OK to copy to clipboard.`;
+        if (confirm(message)) {
+          // Copy to clipboard
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(shareUrl);
+            showStatus('Share URL copied to clipboard!', 'success');
+          } else {
+            // Fallback: select text
+            const textarea = document.createElement('textarea');
+            textarea.value = shareUrl;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+            try {
+              document.execCommand('copy');
+              showStatus('Share URL copied to clipboard!', 'success');
+            } catch (e) {
+              showStatus('Share URL created. Please copy it manually.', 'info');
+            }
+            document.body.removeChild(textarea);
+          }
+        }
+      } catch (error) {
+        console.error('[Share Audit] Error:', error);
+        alert(`Failed to create share URL: ${error.message}`);
+      }
+    }
+
     // Parse CSV and validate column names
     function parseUrlListCsv(csvText) {
       const lines = csvText.split('\n').filter(line => line.trim());
