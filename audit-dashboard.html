@@ -4842,7 +4842,7 @@
         <!-- Phase 9: Time-based Charts -->
         <div class="optimisation-timeseries-charts" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 1.5rem; margin: 1.5rem 0;">
           <div class="card" style="padding: 1.5rem;">
-            <h3 style="margin: 0 0 1rem 0; font-size: 1.1rem; font-weight: 600;">Measurements per Week</h3>
+            <h3 style="margin: 0 0 1rem 0; font-size: 1.1rem; font-weight: 600;">Tasks Updated per Week</h3>
             <div style="position: relative; height: 280px;">
               <canvas id="chart-measurements-per-week" style="width: 100%; height: 280px;"></canvas>
             </div>
@@ -6751,6 +6751,93 @@
       return null;
     }
 
+    // Helper: Get latest measurement in scope for a task
+    function getLatestMeasurementInScope(task, scope) {
+      const measurements = task.measurements || [];
+      if (measurements.length === 0) {
+        return null;
+      }
+
+      let eligibleMeasurements = [...measurements];
+
+      // Filter by scope
+      if (scope === 'active_cycle') {
+        const activeCycle = task.cycles?.find(c => c.is_active || c.id === task.active_cycle_id) || null;
+        if (activeCycle) {
+          const cycleStartDate = activeCycle.start_date ? new Date(activeCycle.start_date) : 
+                                (activeCycle.started_at ? new Date(activeCycle.started_at) : null);
+          if (cycleStartDate) {
+            eligibleMeasurements = eligibleMeasurements.filter(m => {
+              const mDate = m.captured_at ? new Date(m.captured_at) : null;
+              return mDate && mDate >= cycleStartDate;
+            });
+          }
+        }
+      }
+      // For 'all_tasks' scope, use all measurements
+
+      if (eligibleMeasurements.length === 0) {
+        return null;
+      }
+
+      // Sort by date (newest first) and return the latest
+      eligibleMeasurements.sort((a, b) => {
+        const dateA = a.captured_at ? new Date(a.captured_at) : new Date(0);
+        const dateB = b.captured_at ? new Date(b.captured_at) : new Date(0);
+        return dateB - dateA; // Descending (newest first)
+      });
+
+      return eligibleMeasurements[0];
+    }
+
+    // Helper: Get Monday-start week key (YYYY-MM-DD)
+    function weekStartISO(date) {
+      const d = new Date(date);
+      d.setHours(0, 0, 0, 0);
+      // Get day of week (0 = Sunday, 1 = Monday, etc.)
+      const day = d.getDay();
+      // Calculate days to subtract to get to Monday
+      const diff = day === 0 ? 6 : day - 1; // If Sunday, go back 6 days; otherwise go back (day-1) days
+      d.setDate(d.getDate() - diff);
+      // Return YYYY-MM-DD format
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const dayOfMonth = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${dayOfMonth}`;
+    }
+
+    // Helper: Compute delta for a KPI with correct units
+    function computeDeltaForKPI(kpi, baseline, latest) {
+      if (!baseline || !latest) {
+        return null;
+      }
+
+      const baselineValue = getMetricValue(baseline, kpi);
+      const latestValue = getMetricValue(latest, kpi);
+
+      if (baselineValue == null || latestValue == null) {
+        return null;
+      }
+
+      // CTR: return as percentage points
+      if (kpi === 'ctr_28d') {
+        return (latestValue - baselineValue) * 100;
+      }
+
+      // All others: absolute delta
+      return latestValue - baselineValue;
+    }
+
+    // Helper: Compute median of an array
+    function median(values) {
+      if (values.length === 0) return null;
+      const sorted = [...values].sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      return sorted.length % 2 === 0
+        ? (sorted[mid - 1] + sorted[mid]) / 2
+        : sorted[mid];
+    }
+
     function computeTrafficLightCounts(tasks, scope) {
       const counts = {
         ctr_28d: { worse: 0, same: 0, better: 0 },
@@ -6985,76 +7072,7 @@
     }
 
     // Update timeseries charts
-    function updateTimeseriesCharts() {
-      let timeseries = window.optimisationModuleState.dashboardTimeseries;
-      if (!timeseries) return;
-
-      // Filter out test tasks if checkbox is unchecked
-      const includeTestCheckbox = document.getElementById('optimisation-filter-include-test');
-      if (!includeTestCheckbox || !includeTestCheckbox.checked) {
-        // Recalculate timeseries from filtered tasks (excluding test tasks)
-        const allTasks = window.optimisationModuleState.allTasks || [];
-        const filteredTasks = allTasks.filter(t => !t.is_test_task);
-        
-        // Recalculate measurements per week from filtered tasks
-        const measurementsPerWeek = [];
-        const weekMap = new Map();
-        
-        for (const task of filteredTasks) {
-          // Get measurement events for this task (we need to get from task's latest_metrics or events)
-          // For now, we'll use a simplified approach: count tasks with recent measurements
-          if (task.latest_metrics && task.latest_metrics.captured_at) {
-            const date = new Date(task.latest_metrics.captured_at);
-            const weekStart = new Date(date);
-            weekStart.setDate(date.getDate() - date.getDay());
-            weekStart.setHours(0, 0, 0, 0);
-            const weekKey = weekStart.toISOString().split('T')[0];
-            
-            if (!weekMap.has(weekKey)) {
-              weekMap.set(weekKey, 0);
-            }
-            weekMap.set(weekKey, weekMap.get(weekKey) + 1);
-          }
-        }
-        
-        for (const [weekStart, count] of weekMap.entries()) {
-          measurementsPerWeek.push({ weekStart, count });
-        }
-        measurementsPerWeek.sort((a, b) => a.weekStart.localeCompare(b.weekStart));
-        
-        // Recalculate median deltas by KPI from filtered tasks
-        const medianDeltaByKpi = {};
-        const deltasByKpi = {};
-        
-        for (const task of filteredTasks) {
-          if (task.objectiveKpiKey && task.delta != null) {
-            if (!deltasByKpi[task.objectiveKpiKey]) {
-              deltasByKpi[task.objectiveKpiKey] = [];
-            }
-            deltasByKpi[task.objectiveKpiKey].push(task.delta);
-          }
-        }
-        
-        for (const [kpi, deltas] of Object.entries(deltasByKpi)) {
-          if (deltas.length > 0) {
-            deltas.sort((a, b) => a - b);
-            const mid = Math.floor(deltas.length / 2);
-            const median = deltas.length % 2 === 0
-              ? (deltas[mid - 1] + deltas[mid]) / 2
-              : deltas[mid];
-            medianDeltaByKpi[kpi] = median;
-          }
-        }
-        
-        timeseries = {
-          measurementsPerWeek,
-          medianDeltaByKpi: Object.entries(medianDeltaByKpi).map(([kpi, value]) => ({ kpi, value })),
-        };
-      }
-
-      // Render Measurements per Week chart
-      const measurementsCanvas = document.getElementById('chart-measurements-per-week');
-      if (measurementsCanvas && timeseries.measurementsPerWeek) {
+    // OLD FUNCTION - REMOVED (replaced by new implementation below)
         const ctx = measurementsCanvas.getContext('2d');
         const dpr = window.devicePixelRatio || 1;
         const displayWidth = measurementsCanvas.offsetWidth || 400;
@@ -9259,8 +9277,11 @@
       // Update visual state (highlighting)
       updateTrafficLightVisuals();
       
-      // Apply filters
+      // Apply filters (this will update filteredTasks)
       applyOptimisationFilters();
+      
+      // Update charts with new filtered data
+      updateTimeseriesCharts();
       
       // Only sort if there's an active filter
       if (window.optimisationModuleState.metricTrafficFilter) {
@@ -9566,85 +9587,96 @@
     
     // Update timeseries charts
     function updateTimeseriesCharts() {
-      let timeseries = window.optimisationModuleState.dashboardTimeseries;
+      // Use the SAME filteredTasks as the table (includes all filters + scope + traffic-pill filter)
+      let filteredTasks = window.optimisationModuleState.filteredTasks || [];
+      const scope = window.optimisationModuleState.scope || 'active_cycle';
       
-      // If no timeseries data, try to use filtered tasks
-      if (!timeseries) {
-        let tasks = window.optimisationModuleState.allTasks || [];
-        
-        // Filter out test tasks if checkbox is unchecked
-        const includeTestCheckbox = document.getElementById('optimisation-filter-include-test');
-        if (!includeTestCheckbox || !includeTestCheckbox.checked) {
-          tasks = tasks.filter(t => !t.is_test_task);
-        }
-        
-        // Recalculate median deltas by KPI from filtered tasks
-        const medianDeltaByKpi = {};
-        const deltasByKpi = {};
-        
-        for (const task of tasks) {
-          if (task.objectiveKpiKey && task.delta != null) {
-            if (!deltasByKpi[task.objectiveKpiKey]) {
-              deltasByKpi[task.objectiveKpiKey] = [];
-            }
-            deltasByKpi[task.objectiveKpiKey].push(task.delta);
+      // PART 1: Tasks Updated per Week (distinct tasks per week)
+      const tasksUpdatedPerWeek = [];
+      const weekTaskMap = new Map(); // weekKey -> Set(taskId)
+      
+      for (const task of filteredTasks) {
+        const latestMeasurement = getLatestMeasurementInScope(task, scope);
+        if (latestMeasurement && latestMeasurement.captured_at) {
+          const weekKey = weekStartISO(latestMeasurement.captured_at);
+          if (!weekTaskMap.has(weekKey)) {
+            weekTaskMap.set(weekKey, new Set());
           }
+          weekTaskMap.get(weekKey).add(task.id || task.task_id);
         }
-        
-        for (const [kpi, deltas] of Object.entries(deltasByKpi)) {
-          if (deltas.length > 0) {
-            deltas.sort((a, b) => a - b);
-            const mid = Math.floor(deltas.length / 2);
-            const median = deltas.length % 2 === 0
-              ? (deltas[mid - 1] + deltas[mid]) / 2
-              : deltas[mid];
-            medianDeltaByKpi[kpi] = median;
-          }
-        }
-        
-        timeseries = {
-          measurementsPerWeek: [], // Will be empty - need to reload from API
-          medianDeltaByKpi: Object.entries(medianDeltaByKpi).map(([kpi, value]) => ({ kpi, value })),
-        };
       }
       
-      // Filter timeseries if test tasks are excluded (recalculate median deltas)
-      const includeTestCheckbox = document.getElementById('optimisation-filter-include-test');
-      if (timeseries && (!includeTestCheckbox || !includeTestCheckbox.checked)) {
-        // Recalculate median deltas excluding test tasks
-        const tasks = (window.optimisationModuleState.allTasks || []).filter(t => !t.is_test_task);
-        const deltasByKpi = {};
+      // Convert to sorted array
+      for (const [weekKey, taskIds] of weekTaskMap.entries()) {
+        tasksUpdatedPerWeek.push({
+          weekStart: weekKey,
+          count: taskIds.size
+        });
+      }
+      tasksUpdatedPerWeek.sort((a, b) => a.weekStart.localeCompare(b.weekStart));
+      
+      // PART 2: Median Delta by KPI (Last 30d) - only tasks with latest measurement in last 30 days
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      
+      const eligibleTasks = filteredTasks.filter(task => {
+        const latestMeasurement = getLatestMeasurementInScope(task, scope);
+        if (!latestMeasurement || !latestMeasurement.captured_at) {
+          return false;
+        }
+        const latestDate = new Date(latestMeasurement.captured_at);
+        return latestDate >= thirtyDaysAgo;
+      });
+      
+      // Compute deltas for each KPI
+      const deltasByKpi = {};
+      const kpiList = ['ctr_28d', 'impressions_28d', 'clicks_28d', 'current_rank', 'ai_citations', 'ai_overview', 'opportunity_score'];
+      
+      for (const task of eligibleTasks) {
+        const activeCycle = scope === 'active_cycle' 
+          ? (task.cycles?.find(c => c.is_active || c.id === task.active_cycle_id) || null)
+          : null;
+        const measurements = task.measurements || [];
+        const baselineLatest = getBaselineLatest(measurements, scope, activeCycle);
         
-        for (const task of tasks) {
-          if (task.objectiveKpiKey && task.delta != null) {
-            if (!deltasByKpi[task.objectiveKpiKey]) {
-              deltasByKpi[task.objectiveKpiKey] = [];
+        if (!baselineLatest) {
+          continue;
+        }
+        
+        // Compute delta for each KPI
+        for (const kpi of kpiList) {
+          const delta = computeDeltaForKPI(kpi, baselineLatest.baseline, baselineLatest.latest);
+          if (delta != null) {
+            if (!deltasByKpi[kpi]) {
+              deltasByKpi[kpi] = [];
             }
-            deltasByKpi[task.objectiveKpiKey].push(task.delta);
+            deltasByKpi[kpi].push(delta);
           }
         }
-        
-        const medianDeltaByKpi = {};
-        for (const [kpi, deltas] of Object.entries(deltasByKpi)) {
-          if (deltas.length > 0) {
-            deltas.sort((a, b) => a - b);
-            const mid = Math.floor(deltas.length / 2);
-            const median = deltas.length % 2 === 0
-              ? (deltas[mid - 1] + deltas[mid]) / 2
-              : deltas[mid];
-            medianDeltaByKpi[kpi] = median;
-          }
-        }
-        
-        timeseries = {
-          ...timeseries,
-          medianDeltaByKpi: Object.entries(medianDeltaByKpi).map(([kpi, value]) => ({ kpi, value })),
-        };
       }
       
-      // Render Measurements per Week chart (with device pixel ratio for crisp rendering)
+      // Compute medians
+      const medianDeltaByKpi = [];
+      for (const [kpi, deltas] of Object.entries(deltasByKpi)) {
+        if (deltas.length > 0) {
+          const med = median(deltas);
+          if (med != null) {
+            medianDeltaByKpi.push({ kpi, value: med });
+          }
+        }
+      }
+      
+      // Sort by KPI name for consistent display
+      medianDeltaByKpi.sort((a, b) => a.kpi.localeCompare(b.kpi));
+      
+      const timeseries = {
+        tasksUpdatedPerWeek,
+        medianDeltaByKpi
+      };
+      
+      // Render Tasks Updated per Week chart (with device pixel ratio for crisp rendering)
       const measurementsCanvas = document.getElementById('chart-measurements-per-week');
-      if (measurementsCanvas && timeseries.measurementsPerWeek) {
+      if (measurementsCanvas && timeseries.tasksUpdatedPerWeek) {
         const ctx = measurementsCanvas.getContext('2d');
         const dpr = window.devicePixelRatio || 1;
         const displayWidth = measurementsCanvas.offsetWidth || 400;
@@ -9691,7 +9723,7 @@
           ctx.fillStyle = '#ffffff';
           ctx.font = 'bold 18px sans-serif';
           ctx.textAlign = 'center';
-          ctx.fillText('Measurements', 0, 0);
+          ctx.fillText('Tasks updated', 0, 0);
           ctx.restore();
           
           // Draw x-axis label - bright white and much larger
@@ -9812,8 +9844,9 @@
             'ctr_28d': 'CTR (pp)',
             'impressions_28d': 'Impressions',
             'clicks_28d': 'Clicks',
-            'current_rank': 'Rank',
+            'current_rank': 'Rank (Δ, lower better)',
             'ai_citations': 'AI Citations',
+            'ai_overview': 'AI Overview',
             'opportunity_score': 'Opp Score'
           };
           
@@ -10524,6 +10557,7 @@
         optimisationPaginationState.currentPage = 1;
         updateTrafficLights(); // Update traffic lights when filters change
         updateTrafficLightVisuals(); // Update visual state of pills
+        updateTimeseriesCharts(); // Update charts with filtered data
         renderOptimisationTasksTable();
       };
 
@@ -41626,5 +41660,6 @@ Final Score: ${score}/100`;
 
 </body>
 </html>
+
 
 
