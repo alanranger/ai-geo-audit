@@ -68,7 +68,6 @@ BEGIN
       owner_user_id,
       keyword_text,
       target_url,
-      target_url_clean,
       task_type,
       status,
       title,
@@ -81,9 +80,8 @@ BEGIN
       test_user_id,
       keywords[1 + (i - 1) % array_length(keywords, 1)],
       '/test-page-' || i,
-      '/test-page-' || i,
-      task_types[1 + (i - 1) % array_length(task_types, 1)],
-      statuses[1 + (i - 1) % array_length(statuses, 1)],
+      (task_types[1 + (i - 1) % array_length(task_types, 1)])::optim_task_type,
+      (statuses[1 + (i - 1) % array_length(statuses, 1)])::optim_task_status,
       'TEST: ' || keywords[1 + (i - 1) % array_length(keywords, 1)],
       true,
       1,
@@ -133,7 +131,7 @@ BEGIN
       ),
       CASE 
         WHEN (i % 4) = 0 THEN 'overdue'
-        WHEN (i % 4) = 1 THEN 'at_risk'
+        WHEN (i % 4) = 1 THEN 'on_track'
         WHEN (i % 4) = 2 THEN 'met'
         ELSE 'on_track'
       END,
