@@ -4527,15 +4527,15 @@
           <!-- CTR (28d) -->
           <div style="display: flex; flex-direction: column; gap: 0.5rem;">
             <div style="text-align: center; margin-bottom: 0.5rem; color: #ffffff; font-size: 1.5rem; font-weight: 700;">CTR (28d)</div>
-            <div style="background: rgba(239, 68, 68, 0.2); border-radius: 8px; padding: 1rem; text-align: center; border: 1px solid var(--dark-border);">
+            <div class="traffic-light-pill" data-metric="ctr_28d" data-bucket="worse" style="background: rgba(239, 68, 68, 0.2); border-radius: 8px; padding: 1rem; text-align: center; border: 1px solid var(--dark-border); cursor: pointer; transition: all 0.2s;" onclick="handleTrafficLightClick('ctr_28d', 'worse')" onmouseover="this.style.background='rgba(239, 68, 68, 0.3)'" onmouseout="updateTrafficLightHover(this)">
               <div style="font-size: 2rem; font-weight: 700; color: #f87171;" id="objective-ctr-red">0</div>
               <div style="color: var(--dark-text); font-size: 0.875rem; margin-top: 0.5rem;">Worse</div>
             </div>
-            <div style="background: rgba(245, 158, 11, 0.2); border-radius: 8px; padding: 1rem; text-align: center; border: 1px solid var(--dark-border);">
+            <div class="traffic-light-pill" data-metric="ctr_28d" data-bucket="same" style="background: rgba(245, 158, 11, 0.2); border-radius: 8px; padding: 1rem; text-align: center; border: 1px solid var(--dark-border); cursor: pointer; transition: all 0.2s;" onclick="handleTrafficLightClick('ctr_28d', 'same')" onmouseover="this.style.background='rgba(245, 158, 11, 0.3)'" onmouseout="updateTrafficLightHover(this)">
               <div style="font-size: 2rem; font-weight: 700; color: #fbbf24;" id="objective-ctr-amber">0</div>
               <div style="color: var(--dark-text); font-size: 0.875rem; margin-top: 0.5rem;">Same</div>
             </div>
-            <div style="background: rgba(16, 185, 129, 0.2); border-radius: 8px; padding: 1rem; text-align: center; border: 1px solid var(--dark-border);">
+            <div class="traffic-light-pill" data-metric="ctr_28d" data-bucket="better" style="background: rgba(16, 185, 129, 0.2); border-radius: 8px; padding: 1rem; text-align: center; border: 1px solid var(--dark-border); cursor: pointer; transition: all 0.2s;" onclick="handleTrafficLightClick('ctr_28d', 'better')" onmouseover="this.style.background='rgba(16, 185, 129, 0.3)'" onmouseout="updateTrafficLightHover(this)">
               <div style="font-size: 2rem; font-weight: 700; color: #34d399;" id="objective-ctr-green">0</div>
               <div style="color: var(--dark-text); font-size: 0.875rem; margin-top: 0.5rem;">Better</div>
             </div>
@@ -6464,9 +6464,206 @@
       currentTaskId: null,
       authError: null,
       activeObjectiveFilter: null, // 'not_set' | 'on_track' | 'overdue' | 'met' | null
-      scope: 'active_cycle' // 'active_cycle' | 'all_tasks'
+      scope: 'active_cycle', // 'active_cycle' | 'all_tasks'
+      metricTrafficFilter: null // { metricKey: string, bucket: 'better'|'same'|'worse' } | null
     };
     
+    // Traffic Light Utility Functions (inline from lib/optimisation/metricTraffic.js)
+    function isActiveStatus(status) {
+      return ['planned', 'in_progress', 'monitoring'].includes(status);
+    }
+
+    function getBaselineLatest(measurements, scope, activeCycle = null) {
+      if (!measurements || measurements.length === 0) {
+        return null;
+      }
+
+      let eligibleMeasurements = [...measurements];
+
+      // Filter by scope
+      if (scope === 'active_cycle' && activeCycle) {
+        const cycleStartDate = activeCycle.start_date ? new Date(activeCycle.start_date) : 
+                              (activeCycle.started_at ? new Date(activeCycle.started_at) : null);
+        if (cycleStartDate) {
+          eligibleMeasurements = eligibleMeasurements.filter(m => {
+            const mDate = m.captured_at ? new Date(m.captured_at) : null;
+            return mDate && mDate >= cycleStartDate;
+          });
+        }
+      }
+
+      // Need at least 2 measurements to compute baseline/latest
+      if (eligibleMeasurements.length < 2) {
+        return null;
+      }
+
+      // Sort by date (oldest first)
+      eligibleMeasurements.sort((a, b) => {
+        const dateA = a.captured_at ? new Date(a.captured_at) : new Date(0);
+        const dateB = b.captured_at ? new Date(b.captured_at) : new Date(0);
+        return dateA - dateB;
+      });
+
+      const baseline = eligibleMeasurements[0];
+      const latest = eligibleMeasurements[eligibleMeasurements.length - 1];
+
+      return { baseline, latest };
+    }
+
+    function getMetricValue(measurement, metricKey) {
+      if (!measurement) return null;
+
+      const extractors = {
+        ctr_28d: (m) => m?.ctr_28d ?? null,
+        impressions_28d: (m) => m?.impressions_28d ?? null,
+        clicks_28d: (m) => m?.clicks_28d ?? null,
+        current_rank: (m) => m?.current_rank ?? m?.rank ?? null,
+        opportunity_score: (m) => m?.opportunity_score ?? null,
+        ai_overview: (m) => m?.ai_overview ?? null,
+        ai_citations: (m) => m?.ai_citations ?? null,
+      };
+
+      const extractor = extractors[metricKey];
+      if (!extractor) return null;
+
+      return extractor(measurement);
+    }
+
+    function classifyMetric(metricKey, baseline, latest) {
+      if (!baseline || !latest) {
+        return null;
+      }
+
+      const baselineValue = getMetricValue(baseline, metricKey);
+      const latestValue = getMetricValue(latest, metricKey);
+
+      // If either value is null/undefined, cannot classify
+      if (baselineValue == null || latestValue == null) {
+        return null;
+      }
+
+      // CTR (28d) - stored as ratio (0-1), compare as percentage points
+      if (metricKey === 'ctr_28d') {
+        const deltaPp = (latestValue - baselineValue) * 100;
+        if (Math.abs(deltaPp) < 0.10) {
+          return 'same';
+        }
+        return deltaPp >= 0.10 ? 'better' : 'worse';
+      }
+
+      // Impressions (28d)
+      if (metricKey === 'impressions_28d') {
+        const delta = latestValue - baselineValue;
+        const tol = Math.max(20, Math.round(baselineValue * 0.02));
+        if (Math.abs(delta) < tol) {
+          return 'same';
+        }
+        return delta >= tol ? 'better' : 'worse';
+      }
+
+      // Clicks (28d)
+      if (metricKey === 'clicks_28d') {
+        const delta = latestValue - baselineValue;
+        const tol = Math.max(5, Math.round(baselineValue * 0.05));
+        if (Math.abs(delta) < tol) {
+          return 'same';
+        }
+        return delta >= tol ? 'better' : 'worse';
+      }
+
+      // Rank (lower is better)
+      if (metricKey === 'current_rank') {
+        const delta = latestValue - baselineValue; // positive means rank got worse (increased)
+        if (Math.abs(delta) < 0.5) {
+          return 'same';
+        }
+        return delta <= -0.5 ? 'better' : 'worse';
+      }
+
+      // AI Citations
+      if (metricKey === 'ai_citations') {
+        const delta = latestValue - baselineValue;
+        if (delta === 0) {
+          return 'same';
+        }
+        return delta > 0 ? 'better' : 'worse';
+      }
+
+      // AI Overview (boolean)
+      if (metricKey === 'ai_overview') {
+        const baselineBool = baselineValue === true || baselineValue === 'On' || baselineValue === 1;
+        const latestBool = latestValue === true || latestValue === 'On' || latestValue === 1;
+        
+        if (baselineBool === latestBool) {
+          return 'same';
+        }
+        // Better: Off -> On, Worse: On -> Off
+        return (!baselineBool && latestBool) ? 'better' : 'worse';
+      }
+
+      // Opportunity Score
+      if (metricKey === 'opportunity_score') {
+        const delta = latestValue - baselineValue;
+        if (Math.abs(delta) < 2) {
+          return 'same';
+        }
+        return delta >= 2 ? 'better' : 'worse';
+      }
+
+      // Unknown metric
+      return null;
+    }
+
+    function computeTrafficLightCounts(tasks, scope) {
+      const counts = {
+        ctr_28d: { worse: 0, same: 0, better: 0 },
+        impressions_28d: { worse: 0, same: 0, better: 0 },
+        clicks_28d: { worse: 0, same: 0, better: 0 },
+        current_rank: { worse: 0, same: 0, better: 0 },
+        ai_citations: { worse: 0, same: 0, better: 0 },
+        ai_overview: { worse: 0, same: 0, better: 0 },
+        opportunity_score: { worse: 0, same: 0, better: 0 },
+      };
+
+      const metricKeys = Object.keys(counts);
+
+      for (const task of tasks) {
+        // Only count active tasks
+        if (!isActiveStatus(task.status)) {
+          continue;
+        }
+
+        // Get active cycle if scope is 'active_cycle'
+        const activeCycle = scope === 'active_cycle' 
+          ? (task.cycles?.find(c => c.is_active || c.id === task.active_cycle_id) || null)
+          : null;
+
+        // Get measurements
+        const measurements = task.measurements || [];
+        const baselineLatest = getBaselineLatest(measurements, scope, activeCycle);
+
+        if (!baselineLatest) {
+          // Task doesn't have enough measurements, skip
+          continue;
+        }
+
+        // Classify each metric
+        for (const metricKey of metricKeys) {
+          const classification = classifyMetric(
+            metricKey,
+            baselineLatest.baseline,
+            baselineLatest.latest
+          );
+
+          if (classification) {
+            counts[metricKey][classification]++;
+          }
+        }
+      }
+
+      return counts;
+    }
+
     // Sorting state
     let optimisationSortState = {
       column: 'latestCaptured',
@@ -6529,6 +6726,8 @@
         updateKPITiles();
         updateImpactTiles();
         updateTimeseriesCharts();
+        updateTrafficLights();
+        applyOptimisationFilters();
         renderOptimisationTasksTable();
         
         return window.optimisationModuleState.allTasks;
@@ -8844,6 +9043,195 @@
       if (aiGapEl) aiGapEl.textContent = aiCitationGapCount || 0;
     }
     
+    // Handle traffic light pill click
+    window.handleTrafficLightClick = function(metricKey, bucket) {
+      const currentFilter = window.optimisationModuleState.metricTrafficFilter;
+      
+      // Toggle: if clicking the same pill, clear filter
+      if (currentFilter && currentFilter.metricKey === metricKey && currentFilter.bucket === bucket) {
+        window.optimisationModuleState.metricTrafficFilter = null;
+      } else {
+        window.optimisationModuleState.metricTrafficFilter = { metricKey, bucket };
+      }
+      
+      // Update visual state
+      updateTrafficLightVisuals();
+      
+      // Re-render table with new filter
+      renderOptimisationTasksTable();
+    };
+    
+    // Update visual state of traffic light pills (selected/not selected)
+    function updateTrafficLightVisuals() {
+      const filter = window.optimisationModuleState.metricTrafficFilter;
+      const pills = document.querySelectorAll('.traffic-light-pill');
+      
+      pills.forEach(pill => {
+        const metricKey = pill.dataset.metric;
+        const bucket = pill.dataset.bucket;
+        const isSelected = filter && filter.metricKey === metricKey && filter.bucket === bucket;
+        
+        if (isSelected) {
+          pill.style.border = '2px solid var(--dark-brand)';
+          pill.style.boxShadow = '0 0 8px rgba(245, 158, 11, 0.5)';
+        } else {
+          pill.style.border = '1px solid var(--dark-border)';
+          pill.style.boxShadow = 'none';
+        }
+      });
+    }
+    
+    // Helper to restore hover state (considering selection)
+    window.updateTrafficLightHover = function(element) {
+      const filter = window.optimisationModuleState.metricTrafficFilter;
+      const metricKey = element.dataset.metric;
+      const bucket = element.dataset.bucket;
+      const isSelected = filter && filter.metricKey === metricKey && filter.bucket === bucket;
+      
+      if (!isSelected) {
+        // Restore default background based on bucket
+        if (bucket === 'worse') {
+          element.style.background = 'rgba(239, 68, 68, 0.2)';
+        } else if (bucket === 'same') {
+          element.style.background = 'rgba(245, 158, 11, 0.2)';
+        } else {
+          element.style.background = 'rgba(16, 185, 129, 0.2)';
+        }
+      }
+    };
+    
+    // Update traffic light counts and display
+    function updateTrafficLights() {
+      let tasks = window.optimisationModuleState.allTasks || [];
+      
+      // Filter out test tasks if checkbox is unchecked
+      const includeTestCheckbox = document.getElementById('optimisation-filter-include-test');
+      if (!includeTestCheckbox || !includeTestCheckbox.checked) {
+        tasks = tasks.filter(t => !t.is_test_task);
+      }
+      
+      // Apply other existing filters (keyword, url, type, status) - same as table uses
+      // Get filter values
+      const keywordFilter = document.getElementById('optimisation-filter-keyword')?.value?.toLowerCase().trim() || '';
+      const urlFilter = document.getElementById('optimisation-filter-url')?.value?.toLowerCase().trim() || '';
+      const typeFilter = document.getElementById('optimisation-filter-type')?.value || '';
+      const statusFilter = document.getElementById('optimisation-filter-status')?.value || '';
+      
+      // Apply filters
+      if (keywordFilter) {
+        tasks = tasks.filter(t => (t.keyword || '').toLowerCase().includes(keywordFilter));
+      }
+      if (urlFilter) {
+        tasks = tasks.filter(t => (t.target_url || '').toLowerCase().includes(urlFilter));
+      }
+      if (typeFilter) {
+        tasks = tasks.filter(t => t.task_type === typeFilter);
+      }
+      if (statusFilter) {
+        tasks = tasks.filter(t => t.status === statusFilter);
+      }
+      
+      // Get scope
+      const scope = window.optimisationModuleState.scope || 'active_cycle';
+      
+      // Compute traffic light counts
+      const counts = computeTrafficLightCounts(tasks, scope);
+      
+      // Update display
+      const metricMap = {
+        ctr_28d: 'ctr',
+        impressions_28d: 'impressions',
+        clicks_28d: 'clicks',
+        current_rank: 'rank',
+        ai_citations: 'ai-citations',
+        ai_overview: 'ai-overview',
+        opportunity_score: 'opportunity-score'
+      };
+      
+      for (const [metricKey, displayKey] of Object.entries(metricMap)) {
+        const worseEl = document.getElementById(`objective-${displayKey}-red`);
+        const sameEl = document.getElementById(`objective-${displayKey}-amber`);
+        const betterEl = document.getElementById(`objective-${displayKey}-green`);
+        
+        if (worseEl) worseEl.textContent = counts[metricKey].worse || 0;
+        if (sameEl) sameEl.textContent = counts[metricKey].same || 0;
+        if (betterEl) betterEl.textContent = counts[metricKey].better || 0;
+      }
+    }
+    
+    // Apply all filters to filteredTasks (including metric traffic filter)
+    function applyOptimisationFilters() {
+      let tasks = [...window.optimisationModuleState.allTasks];
+      
+      // Filter out test tasks if checkbox is unchecked
+      const includeTestCheckbox = document.getElementById('optimisation-filter-include-test');
+      if (!includeTestCheckbox || !includeTestCheckbox.checked) {
+        tasks = tasks.filter(t => !t.is_test_task);
+      }
+      
+      // Apply keyword filter
+      const keywordFilter = document.getElementById('optimisation-filter-keyword')?.value?.toLowerCase().trim() || '';
+      if (keywordFilter) {
+        tasks = tasks.filter(t => (t.keyword || '').toLowerCase().includes(keywordFilter));
+      }
+      
+      // Apply URL filter
+      const urlFilter = document.getElementById('optimisation-filter-url')?.value?.toLowerCase().trim() || '';
+      if (urlFilter) {
+        tasks = tasks.filter(t => (t.target_url || '').toLowerCase().includes(urlFilter));
+      }
+      
+      // Apply type filter
+      const typeFilter = document.getElementById('optimisation-filter-type')?.value || '';
+      if (typeFilter) {
+        tasks = tasks.filter(t => t.task_type === typeFilter);
+      }
+      
+      // Apply status filter
+      const statusFilter = document.getElementById('optimisation-filter-status')?.value || '';
+      if (statusFilter) {
+        tasks = tasks.filter(t => t.status === statusFilter);
+      }
+      
+      // Apply metric traffic filter
+      const metricTrafficFilter = window.optimisationModuleState.metricTrafficFilter;
+      if (metricTrafficFilter) {
+        const scope = window.optimisationModuleState.scope || 'active_cycle';
+        tasks = tasks.filter(task => {
+          // Only active tasks can match
+          if (!isActiveStatus(task.status)) {
+            return false;
+          }
+          
+          // Get active cycle if scope is 'active_cycle'
+          const activeCycle = scope === 'active_cycle' 
+            ? (task.cycles?.find(c => c.is_active || c.id === task.active_cycle_id) || null)
+            : null;
+          
+          // Get measurements
+          const measurements = task.measurements || [];
+          const baselineLatest = getBaselineLatest(measurements, scope, activeCycle);
+          
+          if (!baselineLatest) {
+            // Task doesn't have enough measurements, exclude
+            return false;
+          }
+          
+          // Classify the metric
+          const classification = classifyMetric(
+            metricTrafficFilter.metricKey,
+            baselineLatest.baseline,
+            baselineLatest.latest
+          );
+          
+          // Include only if classification matches the filter bucket
+          return classification === metricTrafficFilter.bucket;
+        });
+      }
+      
+      window.optimisationModuleState.filteredTasks = tasks;
+    }
+    
     // Update timeseries charts
     function updateTimeseriesCharts() {
       let timeseries = window.optimisationModuleState.dashboardTimeseries;
@@ -9732,33 +10120,78 @@
       const clearFilters = document.getElementById('optimisation-clear-filters');
 
       const applyFilters = () => {
-        let filtered = [...window.optimisationModuleState.allTasks];
-
-        // Filter out test tasks unless checkbox is checked
-        const includeTestCheckbox = document.getElementById('optimisation-filter-include-test');
-        if (!includeTestCheckbox || !includeTestCheckbox.checked) {
-          filtered = filtered.filter(t => !t.is_test_task);
-        }
-
-        if (filterStatus.value) {
+        // Apply base filters (test tasks, keyword, url, type, status, metric traffic)
+        applyOptimisationFilters();
+        
+        // Apply additional button filters on top of base filters
+        let filtered = [...window.optimisationModuleState.filteredTasks];
+        
+        // Apply status/type/keyword/url filters (using field name variations)
+        if (filterStatus && filterStatus.value) {
           filtered = filtered.filter(t => t.status === filterStatus.value);
         }
-        if (filterType.value) {
+        if (filterType && filterType.value) {
           filtered = filtered.filter(t => t.task_type === filterType.value);
         }
-        if (filterKeyword.value) {
+        if (filterKeyword && filterKeyword.value) {
           const keyword = filterKeyword.value.toLowerCase();
           filtered = filtered.filter(t => 
-            (t.keyword_text || '').toLowerCase().includes(keyword)
+            (t.keyword_text || t.keyword || '').toLowerCase().includes(keyword)
           );
         }
-        if (filterUrl.value) {
+        if (filterUrl && filterUrl.value) {
           const url = filterUrl.value.toLowerCase();
           filtered = filtered.filter(t => 
-            (t.target_url_clean || '').toLowerCase().includes(url) ||
-            (t.target_url || '').toLowerCase().includes(url)
+            (t.target_url_clean || t.target_url || '').toLowerCase().includes(url)
           );
         }
+        
+        // "Needs Update" filter: tasks with no measurement or measurement older than 30 days
+        const needsUpdateBtn = document.getElementById('optimisation-filter-needs-update');
+        if (needsUpdateBtn && needsUpdateBtn.classList.contains('active')) {
+          const thirtyDaysAgo = new Date();
+          thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+          
+          filtered = filtered.filter(t => {
+            // Check if task has latest_metrics
+            if (!t.latest_metrics) {
+              return true; // No measurement = needs update
+            }
+            
+            // Check captured_at from latest_metrics
+            const capturedAt = t.latest_metrics.captured_at;
+            if (!capturedAt) {
+              return true; // No capture date = needs update
+            }
+            
+            const latestCapturedDate = new Date(capturedAt);
+            return latestCapturedDate < thirtyDaysAgo; // Older than 30 days = needs update
+          });
+        }
+        
+        // "Active Cycle Only" filter: tasks with an active cycle (not completed/archived)
+        const activeCycleBtn = document.getElementById('optimisation-filter-active-cycle');
+        if (activeCycleBtn && activeCycleBtn.classList.contains('active')) {
+          filtered = filtered.filter(t => {
+            return t.active_cycle_id != null; // Has an active cycle
+          });
+        }
+        
+        // "Overdue Cycle" filter: tasks with overdue current cycle
+        const overdueCycleBtn = document.getElementById('optimisation-filter-overdue-cycle');
+        if (overdueCycleBtn && overdueCycleBtn.classList.contains('active')) {
+          filtered = filtered.filter(t => {
+            // Check if current cycle is overdue
+            const status = t.objective_status || t.goal_state;
+            return status === 'overdue';
+          });
+        }
+
+        // Apply base filters (test tasks, keyword, url, type, status, metric traffic)
+        applyOptimisationFilters();
+        
+        // Apply additional button filters on top of base filters
+        let filtered = [...window.optimisationModuleState.filteredTasks];
         
         // "Needs Update" filter: tasks with no measurement or measurement older than 30 days
         const needsUpdateBtn = document.getElementById('optimisation-filter-needs-update');
@@ -9804,6 +10237,8 @@
         window.optimisationModuleState.filteredTasks = filtered;
         // Reset pagination when filters change
         optimisationPaginationState.currentPage = 1;
+        updateTrafficLights(); // Update traffic lights when filters change
+        updateTrafficLightVisuals(); // Update visual state of pills
         renderOptimisationTasksTable();
       };
 
@@ -9811,6 +10246,69 @@
       if (filterType) filterType.addEventListener('change', applyFilters);
       if (filterKeyword) filterKeyword.addEventListener('input', applyFilters);
       if (filterUrl) filterUrl.addEventListener('input', applyFilters);
+      
+      // Attach click handlers to all traffic light pills (for pills that don't have onclick yet)
+      setTimeout(() => {
+        const metricMap = {
+          'objective-impressions': 'impressions_28d',
+          'objective-clicks': 'clicks_28d',
+          'objective-rank': 'current_rank',
+          'objective-ai-citations': 'ai_citations',
+          'objective-ai-overview': 'ai_overview',
+          'objective-opportunity-score': 'opportunity_score'
+        };
+        
+        for (const [prefix, metricKey] of Object.entries(metricMap)) {
+          const worseEl = document.getElementById(`${prefix}-red`);
+          const sameEl = document.getElementById(`${prefix}-amber`);
+          const betterEl = document.getElementById(`${prefix}-green`);
+          
+          if (worseEl && !worseEl.closest('.traffic-light-pill')) {
+            const pill = worseEl.closest('div[style*="background"]');
+            if (pill) {
+              pill.classList.add('traffic-light-pill');
+              pill.dataset.metric = metricKey;
+              pill.dataset.bucket = 'worse';
+              pill.style.cursor = 'pointer';
+              pill.style.transition = 'all 0.2s';
+              pill.onclick = () => handleTrafficLightClick(metricKey, 'worse');
+              pill.onmouseover = () => { pill.style.background = 'rgba(239, 68, 68, 0.3)'; };
+              pill.onmouseout = () => updateTrafficLightHover(pill);
+            }
+          }
+          
+          if (sameEl && !sameEl.closest('.traffic-light-pill')) {
+            const pill = sameEl.closest('div[style*="background"]');
+            if (pill) {
+              pill.classList.add('traffic-light-pill');
+              pill.dataset.metric = metricKey;
+              pill.dataset.bucket = 'same';
+              pill.style.cursor = 'pointer';
+              pill.style.transition = 'all 0.2s';
+              pill.onclick = () => handleTrafficLightClick(metricKey, 'same');
+              pill.onmouseover = () => { pill.style.background = 'rgba(245, 158, 11, 0.3)'; };
+              pill.onmouseout = () => updateTrafficLightHover(pill);
+            }
+          }
+          
+          if (betterEl && !betterEl.closest('.traffic-light-pill')) {
+            const pill = betterEl.closest('div[style*="background"]');
+            if (pill) {
+              pill.classList.add('traffic-light-pill');
+              pill.dataset.metric = metricKey;
+              pill.dataset.bucket = 'better';
+              pill.style.cursor = 'pointer';
+              pill.style.transition = 'all 0.2s';
+              pill.onclick = () => handleTrafficLightClick(metricKey, 'better');
+              pill.onmouseover = () => { pill.style.background = 'rgba(16, 185, 129, 0.3)'; };
+              pill.onmouseout = () => updateTrafficLightHover(pill);
+            }
+          }
+        }
+        
+        // Update visual state on initial load
+        updateTrafficLightVisuals();
+      }, 100);
       
       const needsUpdateBtn = document.getElementById('optimisation-filter-needs-update');
       if (needsUpdateBtn) {

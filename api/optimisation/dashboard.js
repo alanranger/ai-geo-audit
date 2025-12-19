@@ -422,6 +422,12 @@ export default async function handler(req, res) {
       // Get is_test_task from map
       const isTestTask = testTaskMap.get(task.id) || false;
       
+      // Format measurements for client (convert events to measurement objects)
+      const measurements = cycleEvents.map(e => ({
+        captured_at: e.created_at,
+        ...e.metrics
+      }));
+
       // Enrich task
       enrichedTasks.push({
         ...task,
@@ -435,6 +441,8 @@ export default async function handler(req, res) {
         dueIn,
         needsMeasurement,
         sparklinePoints,
+        measurements, // Include measurements for traffic light calculations
+        cycles: taskCycles, // Include cycles for scope filtering
       });
     }
 
