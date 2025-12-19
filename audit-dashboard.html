@@ -3994,21 +3994,31 @@
             <div style="font-size: 1.5rem; font-weight: bold; color: #10b981;" id="impact-extra-clicks">0</div>
             <div style="color: #666; margin-top: 0.25rem; font-size: 0.875rem;">Estimated Extra Clicks (28d)</div>
           </div>
-          <div class="card" style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 1rem;" title="Count of tasks where AI Overview is on but citations = 0.">
-            <div style="font-size: 1.5rem; font-weight: bold; color: #f59e0b;" id="impact-ai-gap">0</div>
-            <div style="color: #666; margin-top: 0.25rem; font-size: 0.875rem;">AI Citation Gap</div>
-          </div>
+        </div>
+
+        <!-- Phase 9: Scope Toggle -->
+        <div class="optimisation-scope-toggle" style="display: flex; align-items: center; gap: 1rem; margin: 1.5rem 0; padding: 1rem; background: #f9fafb; border-radius: 8px;">
+          <label style="font-weight: 600; color: #374151;">Scope:</label>
+          <select id="optimisation-scope-select" style="padding: 0.5rem 1rem; border: 1px solid #ddd; border-radius: 4px; background: white; cursor: pointer; font-size: 0.875rem;">
+            <option value="active_cycle">Active Cycle Only</option>
+            <option value="all_tasks">All Tasks</option>
+          </select>
+          <span style="font-size: 0.875rem; color: #6b7280;" id="optimisation-scope-description">Showing metrics for tasks with active cycles only</span>
         </div>
 
         <!-- Phase 9: Time-based Charts -->
         <div class="optimisation-timeseries-charts" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 1.5rem; margin: 1.5rem 0;">
           <div class="card" style="padding: 1.5rem;">
             <h3 style="margin: 0 0 1rem 0; font-size: 1.1rem; font-weight: 600;">Measurements per Week</h3>
-            <canvas id="chart-measurements-per-week" style="max-height: 200px;"></canvas>
+            <div style="position: relative; height: 280px;">
+              <canvas id="chart-measurements-per-week" style="width: 100%; height: 280px;"></canvas>
+            </div>
           </div>
           <div class="card" style="padding: 1.5rem;">
             <h3 style="margin: 0 0 1rem 0; font-size: 1.1rem; font-weight: 600;">Median Delta by KPI (Last 30d)</h3>
-            <canvas id="chart-median-delta" style="max-height: 200px;"></canvas>
+            <div style="position: relative; height: 280px;">
+              <canvas id="chart-median-delta" style="width: 100%; height: 280px;"></canvas>
+            </div>
           </div>
         </div>
 
@@ -5757,7 +5767,8 @@
       activeTab: 'active',
       currentTaskId: null,
       authError: null,
-      activeObjectiveFilter: null // 'not_set' | 'on_track' | 'overdue' | 'met' | null
+      activeObjectiveFilter: null, // 'not_set' | 'on_track' | 'overdue' | 'met' | null
+      scope: 'active_cycle' // 'active_cycle' | 'all_tasks'
     };
     
     // Sorting state
@@ -5786,7 +5797,8 @@
         }
 
         const headers = window.getOptimisationHeaders();
-        const response = await fetch(apiUrl('/api/optimisation/dashboard'), {
+        const scope = window.optimisationModuleState.scope || 'active_cycle';
+        const response = await fetch(apiUrl(`/api/optimisation/dashboard?scope=${scope}`), {
           method: 'GET',
           headers: headers
         });
@@ -5990,7 +6002,7 @@
         const width = measurementsCanvas.width || 400;
         const height = measurementsCanvas.height || 200;
         measurementsCanvas.width = measurementsCanvas.offsetWidth || 400;
-        measurementsCanvas.height = 200;
+        measurementsCanvas.height = 280;
         
         ctx.clearRect(0, 0, measurementsCanvas.width, measurementsCanvas.height);
         
@@ -6004,26 +6016,75 @@
         }
         
         const maxCount = Math.max(...data.map(d => d.count), 1);
-        const padding = 40;
-        const chartWidth = measurementsCanvas.width - padding * 2;
-        const chartHeight = measurementsCanvas.height - padding * 2;
+        const padding = { top: 20, right: 20, bottom: 50, left: 60 };
+        const chartWidth = measurementsCanvas.width - padding.left - padding.right;
+        const chartHeight = measurementsCanvas.height - padding.top - padding.bottom;
         
         // Draw axes
         ctx.strokeStyle = '#ddd';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(padding, padding);
-        ctx.lineTo(padding, measurementsCanvas.height - padding);
-        ctx.lineTo(measurementsCanvas.width - padding, measurementsCanvas.height - padding);
+        ctx.moveTo(padding.left, padding.top);
+        ctx.lineTo(padding.left, measurementsCanvas.height - padding.bottom);
+        ctx.lineTo(measurementsCanvas.width - padding.right, measurementsCanvas.height - padding.bottom);
         ctx.stroke();
+        
+        // Draw y-axis label
+        ctx.save();
+        ctx.translate(15, measurementsCanvas.height / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillStyle = '#374151';
+        ctx.font = '12px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Measurements', 0, 0);
+        ctx.restore();
+        
+        // Draw x-axis label
+        ctx.fillStyle = '#374151';
+        ctx.font = '12px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Week starting', measurementsCanvas.width / 2, measurementsCanvas.height - 10);
+        
+        // Draw y-axis ticks and labels
+        const yTicks = 5;
+        for (let i = 0; i <= yTicks; i++) {
+          const value = (maxCount / yTicks) * i;
+          const y = measurementsCanvas.height - padding.bottom - (i / yTicks) * chartHeight;
+          ctx.strokeStyle = '#e5e7eb';
+          ctx.lineWidth = 0.5;
+          ctx.beginPath();
+          ctx.moveTo(padding.left, y);
+          ctx.lineTo(measurementsCanvas.width - padding.right, y);
+          ctx.stroke();
+          
+          ctx.fillStyle = '#6b7280';
+          ctx.font = '10px sans-serif';
+          ctx.textAlign = 'right';
+          ctx.fillText(Math.round(value).toString(), padding.left - 10, y + 4);
+        }
+        
+        // Draw x-axis week labels (rotate 45 degrees)
+        data.forEach((d, i) => {
+          const x = padding.left + (i / (data.length - 1 || 1)) * chartWidth;
+          const weekDate = new Date(d.weekStart);
+          const weekLabel = `${weekDate.getDate()}/${weekDate.getMonth() + 1}`;
+          ctx.save();
+          ctx.translate(x, measurementsCanvas.height - padding.bottom + 20);
+          ctx.rotate(Math.PI / 4);
+          ctx.fillStyle = '#6b7280';
+          ctx.font = '9px sans-serif';
+          ctx.textAlign = 'left';
+          ctx.fillText(weekLabel, 0, 0);
+          ctx.restore();
+        });
         
         // Draw line
         ctx.strokeStyle = '#3b82f6';
         ctx.lineWidth = 2;
         ctx.beginPath();
         data.forEach((d, i) => {
-          const x = padding + (i / (data.length - 1 || 1)) * chartWidth;
-          const y = measurementsCanvas.height - padding - (d.count / maxCount) * chartHeight;
+          const x = padding.left + (i / (data.length - 1 || 1)) * chartWidth;
+          const y = measurementsCanvas.height - padding.bottom - (d.count / maxCount) * chartHeight;
           if (i === 0) {
             ctx.moveTo(x, y);
           } else {
@@ -6035,8 +6096,8 @@
         // Draw points
         ctx.fillStyle = '#3b82f6';
         data.forEach((d, i) => {
-          const x = padding + (i / (data.length - 1 || 1)) * chartWidth;
-          const y = measurementsCanvas.height - padding - (d.count / maxCount) * chartHeight;
+          const x = padding.left + (i / (data.length - 1 || 1)) * chartWidth;
+          const y = measurementsCanvas.height - padding.bottom - (d.count / maxCount) * chartHeight;
           ctx.beginPath();
           ctx.arc(x, y, 4, 0, Math.PI * 2);
           ctx.fill();
@@ -6048,7 +6109,7 @@
       if (deltaCanvas && timeseries.medianDeltaByKpi) {
         const ctx = deltaCanvas.getContext('2d');
         deltaCanvas.width = deltaCanvas.offsetWidth || 400;
-        deltaCanvas.height = 200;
+        deltaCanvas.height = 280;
         
         ctx.clearRect(0, 0, deltaCanvas.width, deltaCanvas.height);
         
@@ -6062,36 +6123,79 @@
         }
         
         const maxAbs = Math.max(...data.map(d => Math.abs(d.value)), 1);
-        const padding = 60;
-        const chartWidth = deltaCanvas.width - padding * 2;
-        const chartHeight = deltaCanvas.height - padding * 2;
-        const barWidth = chartWidth / data.length * 0.8;
-        const barSpacing = chartWidth / data.length * 0.2;
-        const zeroY = deltaCanvas.height - padding - (maxAbs / (maxAbs * 2)) * chartHeight;
+        const padding = { top: 20, right: 20, bottom: 70, left: 60 };
+        const chartWidth = deltaCanvas.width - padding.left - padding.right;
+        const chartHeight = deltaCanvas.height - padding.top - padding.bottom;
+        const barWidth = chartWidth / data.length * 0.7;
+        const barSpacing = chartWidth / data.length * 0.3;
+        const zeroY = deltaCanvas.height - padding.bottom - (maxAbs / (maxAbs * 2)) * chartHeight;
+        
+        // KPI label mapping
+        const kpiLabels = {
+          'ctr_28d': 'CTR (pp)',
+          'impressions_28d': 'Impressions',
+          'clicks_28d': 'Clicks',
+          'current_rank': 'Rank',
+          'ai_citations': 'AI Citations',
+          'opportunity_score': 'Opp Score'
+        };
+        
+        // Draw y-axis label
+        ctx.save();
+        ctx.translate(15, deltaCanvas.height / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillStyle = '#374151';
+        ctx.font = '12px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Median Delta', 0, 0);
+        ctx.restore();
         
         // Draw zero line
         ctx.strokeStyle = '#ddd';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(padding, zeroY);
-        ctx.lineTo(deltaCanvas.width - padding, zeroY);
+        ctx.moveTo(padding.left, zeroY);
+        ctx.lineTo(deltaCanvas.width - padding.right, zeroY);
         ctx.stroke();
+        
+        // Draw y-axis ticks and labels
+        const yTicks = 5;
+        for (let i = 0; i <= yTicks; i++) {
+          const value = (maxAbs * 2 / yTicks) * i - maxAbs;
+          const y = deltaCanvas.height - padding.bottom - (i / yTicks) * chartHeight;
+          ctx.strokeStyle = '#e5e7eb';
+          ctx.lineWidth = 0.5;
+          ctx.beginPath();
+          ctx.moveTo(padding.left, y);
+          ctx.lineTo(deltaCanvas.width - padding.right, y);
+          ctx.stroke();
+          
+          ctx.fillStyle = '#6b7280';
+          ctx.font = '10px sans-serif';
+          ctx.textAlign = 'right';
+          const label = value >= 0 ? `+${value.toFixed(1)}` : value.toFixed(1);
+          ctx.fillText(label, padding.left - 10, y + 4);
+        }
         
         // Draw bars
         data.forEach((d, i) => {
-          const x = padding + i * (barWidth + barSpacing);
+          const x = padding.left + i * (barWidth + barSpacing) + barSpacing / 2;
           const barHeight = (Math.abs(d.value) / maxAbs) * chartHeight;
           const y = d.value >= 0 ? zeroY - barHeight : zeroY;
           
           ctx.fillStyle = d.value >= 0 ? '#10b981' : '#ef4444';
           ctx.fillRect(x, y, barWidth, barHeight);
           
-          // Draw KPI label (abbreviated)
-          ctx.fillStyle = '#666';
-          ctx.font = '10px sans-serif';
-          ctx.textAlign = 'center';
-          const label = d.kpi.replace(/_/g, ' ').substring(0, 8);
-          ctx.fillText(label, x + barWidth / 2, deltaCanvas.height - 10);
+          // Draw KPI label (rotated 45 degrees)
+          ctx.save();
+          ctx.translate(x + barWidth / 2, deltaCanvas.height - padding.bottom + 20);
+          ctx.rotate(Math.PI / 4);
+          ctx.fillStyle = '#6b7280';
+          ctx.font = '9px sans-serif';
+          ctx.textAlign = 'left';
+          const label = kpiLabels[d.kpi] || d.kpi.replace(/_/g, ' ').substring(0, 10);
+          ctx.fillText(label, 0, 0);
+          ctx.restore();
         });
       }
     }
@@ -8760,6 +8864,27 @@
           updateOptimisationSummaryCards();
           updateTimeseriesCharts();
         });
+      }
+      
+      // Scope toggle
+      const scopeSelect = document.getElementById('optimisation-scope-select');
+      const scopeDescription = document.getElementById('optimisation-scope-description');
+      if (scopeSelect) {
+        scopeSelect.value = window.optimisationModuleState.scope || 'active_cycle';
+        scopeSelect.addEventListener('change', () => {
+          window.optimisationModuleState.scope = scopeSelect.value;
+          if (scopeDescription) {
+            scopeDescription.textContent = scopeSelect.value === 'active_cycle' 
+              ? 'Showing metrics for tasks with active cycles only'
+              : 'Showing metrics for all tasks';
+          }
+          window.loadAllOptimisationTasks();
+        });
+        if (scopeDescription) {
+          scopeDescription.textContent = scopeSelect.value === 'active_cycle' 
+            ? 'Showing metrics for tasks with active cycles only'
+            : 'Showing metrics for all tasks';
+        }
       }
 
       // Drawer action handlers

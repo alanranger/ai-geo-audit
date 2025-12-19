@@ -117,6 +117,9 @@ export default async function handler(req, res) {
   if (!auth.authorized) {
     return; // Response already sent
   }
+  
+  // Get scope parameter (default: active_cycle)
+  const scope = req.query.scope || 'active_cycle';
 
   try {
     const supabase = createClient(
@@ -257,18 +260,29 @@ export default async function handler(req, res) {
       const taskEvents = eventsByTask.get(task.id) || [];
       const taskCycles = cyclesByTask.get(task.id) || [];
       
-      // Find active cycle
-      const activeCycle = taskCycles.find(c => c.id === task.active_cycle_id) || 
-                         taskCycles.find(c => c.cycle_no === task.cycle_active) ||
-                         (taskCycles.length > 0 ? taskCycles[0] : null);
+      // Find active cycle based on scope
+      let activeCycle = null;
+      if (scope === 'active_cycle') {
+        // For active cycle scope, only use the current active cycle
+        activeCycle = taskCycles.find(c => c.id === task.active_cycle_id) || 
+                     taskCycles.find(c => c.cycle_no === task.cycle_active) ||
+                     (taskCycles.length > 0 ? taskCycles.sort((a, b) => b.cycle_no - a.cycle_no).find(c => 
+                       c.objective_status !== 'archived' && c.objective_status !== 'completed'
+                     ) : null);
+      } else {
+        // For all_tasks scope, use the most recent cycle with objective
+        activeCycle = taskCycles.length > 0 
+          ? taskCycles.sort((a, b) => b.cycle_no - a.cycle_no)[0]
+          : null;
+      }
 
-      // Filter events for active cycle
+      // Filter events for active cycle (or all events if scope is all_tasks and no cycle)
       const cycleEvents = activeCycle
         ? taskEvents.filter(e => 
             (e.cycle_id && e.cycle_id === activeCycle.id) ||
             (e.cycle_number && e.cycle_number === activeCycle.cycle_no)
           )
-        : taskEvents;
+        : (scope === 'all_tasks' ? taskEvents : []);
 
       // Sort cycle events by date (ascending for baseline/latest, descending for sparkline)
       cycleEvents.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));

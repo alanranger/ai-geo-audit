@@ -165,9 +165,9 @@ export default async function handler(req, res) {
 
     // Insert created event
     const createdEventData = {
-      task_id: task.id,
-      event_type: 'created',
-      note: 'Created from Ranking & AI module',
+        task_id: task.id,
+        event_type: 'created',
+        note: 'Created from Ranking & AI module',
       owner_user_id: userId,
       cycle_id: cycle.id,
       cycle_number: 1,
