@@ -7521,9 +7521,21 @@
 
         eventsContainer.innerHTML = events.map(event => {
           const date = new Date(event.event_at || event.created_at).toLocaleString('en-GB');
+          // Format event type for display (replace underscores with spaces, capitalize)
+          const eventTypeDisplay = (event.event_type || 'note')
+            .replace(/_/g, ' ')
+            .replace(/\b\w/g, l => l.toUpperCase());
+          // Use different colors for different event types
+          let eventColor = '#2563eb'; // Default blue
+          if (event.event_type === 'cycle_completed') eventColor = '#10b981'; // Green
+          if (event.event_type === 'cycle_archived') eventColor = '#6b7280'; // Grey
+          if (event.event_type === 'cycle_start') eventColor = '#3b82f6'; // Blue
+          if (event.event_type === 'measurement') eventColor = '#8b5cf6'; // Purple
+          if (event.event_type === 'status_changed') eventColor = '#f59e0b'; // Orange
+          
           return `
             <div style="margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #eee;">
-              <div style="font-weight: 600; color: #2563eb;">${escapeHtml(event.event_type || 'note')}</div>
+              <div style="font-weight: 600; color: ${eventColor};">${escapeHtml(eventTypeDisplay)}</div>
               <div style="color: #666; font-size: 0.875rem; margin-top: 0.25rem;">${date}</div>
               ${event.note ? `<div style="margin-top: 0.5rem;">${escapeHtml(event.note)}</div>` : ''}
             </div>
