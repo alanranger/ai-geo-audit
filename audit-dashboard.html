@@ -5155,7 +5155,7 @@
                 <div style="padding: 0.75rem; background: var(--dark-panel); border-radius: 4px; border: 1px solid var(--dark-border);">
                   <h4 style="margin-bottom: 0.75rem; font-size: 0.95rem; display: flex; justify-content: space-between; align-items: center; color: var(--dark-text);">
                     <span>Measurement History <span title="Recent measurement snapshots for this cycle. Shows captured date, key metrics, and delta vs previous measurement." style="opacity: 0.6; cursor: help; font-size: 0.85rem;">ℹ</span></span>
-                    <button id="optimisation-measurement-history-toggle" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; background: var(--dark-bg); border: 1px solid var(--dark-border); border-radius: 4px; cursor: pointer; color: var(--dark-text);">Show</button>
+                    <button id="optimisation-measurement-history-toggle" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; background: rgba(156, 163, 175, 0.6); border: 1px solid var(--dark-border); border-radius: 4px; cursor: pointer;">Show</button>
                   </h4>
                   <div id="optimisation-measurement-history" style="display: none; max-height: 400px; overflow-y: auto;">
                     <div style="color: var(--dark-text-muted); font-style: italic;">Loading measurement history...</div>
@@ -5164,7 +5164,7 @@
 
                 <!-- Close Button -->
                 <div style="padding-top: 1rem;">
-                  <button id="optimisation-drawer-close-bottom" class="btn btn-secondary" style="width: 100%;">Close</button>
+                  <button id="optimisation-drawer-close-bottom" class="btn btn-secondary" style="width: 100%; padding: 0.5rem 1rem;">Close</button>
                 </div>
 
               </div>
@@ -8351,17 +8351,45 @@
       document.getElementById('optimisation-drawer-minimize').textContent = '−';
       document.getElementById('optimisation-drawer-maximize').textContent = '□';
       
-      // Force ALL buttons to have black text (override inline styles)
-      setTimeout(() => {
+      // Force ALL buttons to have black text (override inline styles) - run multiple times to catch all
+      const forceBlackText = () => {
         const drawer = document.getElementById('optimisation-task-drawer');
         if (drawer) {
           const allButtons = drawer.querySelectorAll('button');
           allButtons.forEach(btn => {
+            // Remove any inline color styles
+            if (btn.style.color) {
+              btn.style.removeProperty('color');
+            }
+            // Force black text
             btn.style.setProperty('color', '#000000', 'important');
             btn.style.setProperty('font-weight', '700', 'important');
+            // Also force on any child elements
+            const children = btn.querySelectorAll('*');
+            children.forEach(child => {
+              child.style.setProperty('color', '#000000', 'important');
+            });
           });
         }
-      }, 100);
+      };
+      
+      // Run immediately and multiple times to catch all buttons
+      forceBlackText();
+      setTimeout(forceBlackText, 50);
+      setTimeout(forceBlackText, 100);
+      setTimeout(forceBlackText, 200);
+      setTimeout(forceBlackText, 500);
+      
+      // Also use MutationObserver to catch buttons added later
+      const drawer = document.getElementById('optimisation-task-drawer');
+      if (drawer) {
+        const observer = new MutationObserver(() => {
+          forceBlackText();
+        });
+        observer.observe(drawer, { childList: true, subtree: true });
+        // Store observer to clean up later if needed
+        window.optimisationDrawerObserver = observer;
+      }
       
       // Phase 7: Show/hide Complete/Archive buttons based on active cycle
       const completeCycleBtn = document.getElementById('optimisation-complete-cycle-btn');
