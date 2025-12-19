@@ -288,7 +288,6 @@ export default async function handler(req, res) {
       let delta = null;
       let objectiveRag = 'no_data';
       let dueAt = null;
-      let lastMeasuredAt = null;
 
       if (activeCycle && activeCycle.objective) {
         objectiveKpiKey = activeCycle.objective.kpi;
