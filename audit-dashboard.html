@@ -6358,26 +6358,36 @@
       const measurementsCanvas = document.getElementById('chart-measurements-per-week');
       if (measurementsCanvas && timeseries.measurementsPerWeek) {
         const ctx = measurementsCanvas.getContext('2d');
-        const width = measurementsCanvas.width || 400;
-        const height = measurementsCanvas.height || 200;
-        measurementsCanvas.width = measurementsCanvas.offsetWidth || 400;
-        measurementsCanvas.height = 280;
+        const dpr = window.devicePixelRatio || 1;
+        const displayWidth = measurementsCanvas.offsetWidth || 400;
+        const displayHeight = 280;
         
-        ctx.clearRect(0, 0, measurementsCanvas.width, measurementsCanvas.height);
+        // Set canvas internal size accounting for device pixel ratio for crisp rendering
+        measurementsCanvas.width = displayWidth * dpr;
+        measurementsCanvas.height = displayHeight * dpr;
+        
+        // Scale canvas CSS size to display size
+        measurementsCanvas.style.width = displayWidth + 'px';
+        measurementsCanvas.style.height = displayHeight + 'px';
+        
+        // Scale context to match device pixel ratio
+        ctx.scale(dpr, dpr);
+        
+        ctx.clearRect(0, 0, displayWidth, displayHeight);
         
         const data = timeseries.measurementsPerWeek;
         if (data.length === 0) {
           ctx.fillStyle = '#ffffff';
           ctx.font = '16px sans-serif';
           ctx.textAlign = 'center';
-          ctx.fillText('No data', measurementsCanvas.width / 2, measurementsCanvas.height / 2);
+          ctx.fillText('No data', displayWidth / 2, displayHeight / 2);
           return;
         }
         
         const maxCount = Math.max(...data.map(d => d.count), 1);
         const padding = { top: 20, right: 20, bottom: 50, left: 60 };
-        const chartWidth = measurementsCanvas.width - padding.left - padding.right;
-        const chartHeight = measurementsCanvas.height - padding.top - padding.bottom;
+        const chartWidth = displayWidth - padding.left - padding.right;
+        const chartHeight = displayHeight - padding.top - padding.bottom;
         
         // Draw axes - white
         ctx.strokeStyle = '#ffffff';
@@ -6477,14 +6487,14 @@
           ctx.fillStyle = '#ffffff';
           ctx.font = '16px sans-serif';
           ctx.textAlign = 'center';
-          ctx.fillText('No data', deltaCanvas.width / 2, deltaCanvas.height / 2);
+          ctx.fillText('No data', displayWidth / 2, displayHeight / 2);
           return;
         }
         
         const maxAbs = Math.max(...data.map(d => Math.abs(d.value)), 1);
         const padding = { top: 20, right: 20, bottom: 70, left: 60 };
-        const chartWidth = deltaCanvas.width - padding.left - padding.right;
-        const chartHeight = deltaCanvas.height - padding.top - padding.bottom;
+        const chartWidth = displayWidth - padding.left - padding.right;
+        const chartHeight = displayHeight - padding.top - padding.bottom;
         const barWidth = chartWidth / data.length * 0.7;
         const barSpacing = chartWidth / data.length * 0.3;
         const zeroY = deltaCanvas.height - padding.bottom - (maxAbs / (maxAbs * 2)) * chartHeight;
@@ -8587,13 +8597,13 @@
           ctx.lineWidth = 1;
           ctx.beginPath();
           ctx.moveTo(padding.left, padding.top);
-          ctx.lineTo(padding.left, measurementsCanvas.height - padding.bottom);
-          ctx.lineTo(measurementsCanvas.width - padding.right, measurementsCanvas.height - padding.bottom);
+          ctx.lineTo(padding.left, displayHeight - padding.bottom);
+          ctx.lineTo(displayWidth - padding.right, displayHeight - padding.bottom);
           ctx.stroke();
           
           // Draw y-axis label - bright white and much larger
           ctx.save();
-          ctx.translate(15, measurementsCanvas.height / 2);
+          ctx.translate(15, displayHeight / 2);
           ctx.rotate(-Math.PI / 2);
           ctx.fillStyle = '#ffffff';
           ctx.font = 'bold 18px sans-serif';
@@ -8605,18 +8615,18 @@
           ctx.fillStyle = '#ffffff';
           ctx.font = 'bold 18px sans-serif';
           ctx.textAlign = 'center';
-          ctx.fillText('Week starting', measurementsCanvas.width / 2, measurementsCanvas.height - 10);
+          ctx.fillText('Week starting', displayWidth / 2, displayHeight - 10);
           
           // Draw y-axis ticks and labels - white and larger
           const yTicks = 5;
           for (let i = 0; i <= yTicks; i++) {
             const value = (maxCount / yTicks) * i;
-            const y = measurementsCanvas.height - padding.bottom - (i / yTicks) * chartHeight;
+            const y = displayHeight - padding.bottom - (i / yTicks) * chartHeight;
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
             ctx.lineWidth = 0.5;
             ctx.beginPath();
             ctx.moveTo(padding.left, y);
-            ctx.lineTo(measurementsCanvas.width - padding.right, y);
+            ctx.lineTo(displayWidth - padding.right, y);
             ctx.stroke();
             
             ctx.fillStyle = '#ffffff';
@@ -8631,7 +8641,7 @@
             const weekDate = new Date(d.weekStart);
             const weekLabel = `${weekDate.getDate()}/${weekDate.getMonth() + 1}`;
             ctx.save();
-            ctx.translate(x, measurementsCanvas.height - padding.bottom + 20);
+            ctx.translate(x, displayHeight - padding.bottom + 20);
             ctx.rotate(Math.PI / 4);
             ctx.fillStyle = '#ffffff';
             ctx.font = 'bold 13px sans-serif';
@@ -8646,7 +8656,7 @@
           ctx.beginPath();
           data.forEach((d, i) => {
             const x = padding.left + (i / (data.length - 1 || 1)) * chartWidth;
-            const y = measurementsCanvas.height - padding.bottom - (d.count / maxCount) * chartHeight;
+            const y = displayHeight - padding.bottom - (d.count / maxCount) * chartHeight;
             if (i === 0) {
               ctx.moveTo(x, y);
             } else {
@@ -8659,7 +8669,7 @@
           ctx.fillStyle = '#3b82f6';
           data.forEach((d, i) => {
             const x = padding.left + (i / (data.length - 1 || 1)) * chartWidth;
-            const y = measurementsCanvas.height - padding.bottom - (d.count / maxCount) * chartHeight;
+            const y = displayHeight - padding.bottom - (d.count / maxCount) * chartHeight;
             ctx.beginPath();
             ctx.arc(x, y, 4, 0, Math.PI * 2);
             ctx.fill();
@@ -8689,7 +8699,7 @@
           const chartHeight = deltaCanvas.height - padding.top - padding.bottom;
           const barWidth = chartWidth / data.length * 0.7;
           const barSpacing = chartWidth / data.length * 0.3;
-          const zeroY = deltaCanvas.height - padding.bottom - (maxAbs / (maxAbs * 2)) * chartHeight;
+          const zeroY = displayHeight - padding.bottom - (maxAbs / (maxAbs * 2)) * chartHeight;
           
           // KPI label mapping
           const kpiLabels = {
@@ -8703,7 +8713,7 @@
           
           // Draw y-axis label - bright white and much larger
           ctx.save();
-          ctx.translate(15, deltaCanvas.height / 2);
+          ctx.translate(15, displayHeight / 2);
           ctx.rotate(-Math.PI / 2);
           ctx.fillStyle = '#ffffff';
           ctx.font = 'bold 18px sans-serif';
@@ -8716,19 +8726,19 @@
           ctx.lineWidth = 1;
           ctx.beginPath();
           ctx.moveTo(padding.left, zeroY);
-          ctx.lineTo(deltaCanvas.width - padding.right, zeroY);
+          ctx.lineTo(displayWidth - padding.right, zeroY);
           ctx.stroke();
           
           // Draw y-axis ticks and labels - white and larger
           const yTicks = 5;
           for (let i = 0; i <= yTicks; i++) {
             const value = (maxAbs * 2 / yTicks) * i - maxAbs;
-            const y = deltaCanvas.height - padding.bottom - (i / yTicks) * chartHeight;
+            const y = displayHeight - padding.bottom - (i / yTicks) * chartHeight;
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
             ctx.lineWidth = 0.5;
             ctx.beginPath();
             ctx.moveTo(padding.left, y);
-            ctx.lineTo(deltaCanvas.width - padding.right, y);
+            ctx.lineTo(displayWidth - padding.right, y);
             ctx.stroke();
             
             ctx.fillStyle = '#ffffff';
@@ -8749,7 +8759,7 @@
             
             // Draw KPI label (rotated 45 degrees) - white and much larger
             ctx.save();
-            ctx.translate(x + barWidth / 2, deltaCanvas.height - padding.bottom + 20);
+            ctx.translate(x + barWidth / 2, displayHeight - padding.bottom + 20);
             ctx.rotate(Math.PI / 4);
             ctx.fillStyle = '#ffffff';
             ctx.font = 'bold 13px sans-serif';
