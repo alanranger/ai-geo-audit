@@ -2,6 +2,50 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2025-12-19] - v1.7.0 - Optimisation Tracking Module (Phases 1-8 Complete)
+
+### Added
+- **Optimisation Tracking Module**: Complete implementation of keyword optimisation tracking system
+  - Phase 1: Database schema with tasks, cycles, and events tables
+  - Phase 2: UI integration in Ranking & AI module (Optimisation column)
+  - Phase 3: Full Optimisation Tracking panel with filters, table, and task details modal
+  - Phase 4: Performance snapshots and measurement history
+  - Phase 5: Objective integrity with auto-status calculation (on_track/overdue/met)
+  - Phase 5.6: Read-only share mode with token-based authentication
+  - Phase 6: Cycle management with per-task cycle numbering and history
+  - Phase 7: Cycle completion and archival with timeline events
+  - Phase 8: Fixed KPI formatting bugs (CTR as pp, rank lower better, no double percentage)
+
+### Features
+- **Task Management**: Create, update, and track optimisation tasks per keyword+URL+type
+- **Cycle Tracking**: Multiple optimisation cycles per task with baseline/latest measurements
+- **Objective Tracking**: Set objectives with KPI, target, timeframe, and auto-calculated progress
+- **Measurement History**: Track performance metrics over time with delta calculations
+- **Timeline Events**: Log notes, measurements, status changes, and cycle events
+- **Share Mode**: Generate shareable read-only links for optimisation tracking data
+- **Filters**: Status, type, keyword, URL, optimisation status, needs update, active cycle, overdue cycle
+- **Summary Cards**: Counts for all task statuses and objective statuses
+
+### Fixed
+- **Target Unit Bugs**: Fixed "Increase by 100%" showing as "+10000.00%"
+- **CTR Formatting**: Deltas now show as percentage points (pp) instead of percentages
+- **Rank Calculation**: Lower rank is now correctly treated as better (positive delta = improvement)
+- **Progress Display**: Shows "Remaining: +X" instead of confusing double delta lines
+- **Measurement Dates**: Fixed baseline/latest dates showing today instead of actual capture time
+- **Timezone Display**: All dates/times now shown in UTC/GMT
+- **Cycle Events**: Timeline now shows cycle_start, cycle_completed, and cycle_archived events
+
+### Technical
+- **Database Migrations**:
+  - `20251218_optimisation_tracking_phase1.sql` - Initial schema
+  - `20251219_phase5_objective_integrity.sql` - Objective fields in cycles
+  - `20251219_fix_measurement_dates.sql` - Measurement timestamps
+  - `20251219_add_cycle_status_values.sql` - Cycle status enum values
+  - `20251219_add_cycle_event_types.sql` - Cycle event types
+- **API Endpoints**: 12 new endpoints for task/cycle/event management
+- **Authentication**: Admin key and share token support
+- **KPI Formatting**: Shared helper for consistent progress calculation and display
+
 ## [2025-12-18] - v1.6.1 - Money Pages Data Accuracy & Chart Improvements
 
 ### Fixed

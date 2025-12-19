@@ -27,6 +27,16 @@ Vercel will automatically rebuild and deploy (usually takes 1-2 minutes).
 
 ## Features
 
+- **Optimisation Tracking Module**: Complete keyword optimisation workflow management
+  - Create and track optimisation tasks per keyword+URL+type
+  - Multiple optimisation cycles with baseline/latest measurements
+  - Objective tracking with auto-calculated status (on_track/overdue/met)
+  - Performance snapshots showing metric deltas
+  - Timeline of events (measurements, notes, cycle changes)
+  - Cycle management (start, complete, archive)
+  - Read-only share mode for collaboration
+  - Comprehensive filtering and status tracking
+
 - **Site AI Health Dashboard**: Comprehensive health score visualization
   - Large speedometer gauge (30% larger) showing AI GEO Score (0-100)
   - Color-coded segments: Red (0-49), Amber (50-69), Green (70-100)
