@@ -37282,25 +37282,19 @@ Final Score: ${score}/100`;
           });
         }
 
-        // Wire up table sorting - use event delegation to handle dynamically rendered headers
-        const table = document.getElementById('ai-sources-table');
-        if (table) {
-          // Remove any existing click listeners by cloning the table
-          const newTable = table.cloneNode(true);
-          table.parentNode.replaceChild(newTable, table);
+        // Wire up table sorting - attach listeners after table is rendered
+        window.attachAiSourcesSortListeners = function attachSortListeners() {
+          const table = document.getElementById('ai-sources-table');
+          if (!table) return;
           
-          // Set initial sort indicator on headers
-          const sortableHeaders = newTable.querySelectorAll('th.sortable');
-          sortableHeaders.forEach(h => {
-            if (h.dataset.sort === window.aiSourcesSortState.column) {
-              h.classList.add(`sort-${window.aiSourcesSortState.direction}`);
-            }
-          });
-          
-          // Use event delegation on the table to handle clicks
-          newTable.addEventListener('click', (e) => {
+          // Remove any existing listeners by removing and re-adding the event listener
+          // Use a single delegated listener on the table
+          const handleSortClick = (e) => {
             const th = e.target.closest('th.sortable');
             if (!th) return;
+            
+            e.preventDefault();
+            e.stopPropagation();
             
             const column = th.dataset.sort;
             if (!column) return;
@@ -37313,7 +37307,7 @@ Final Score: ${score}/100`;
             }
 
             // Update sort indicators
-            const allHeaders = newTable.querySelectorAll('th.sortable');
+            const allHeaders = table.querySelectorAll('th.sortable');
             allHeaders.forEach(h => {
               h.classList.remove('sort-asc', 'sort-desc');
               if (h.dataset.sort === window.aiSourcesSortState.column) {
@@ -37328,12 +37322,36 @@ Final Score: ${score}/100`;
               domain: domainFilter ? domainFilter.value.trim() : ''
             };
             if (window.aiSourcesDomainStats) {
-              renderAiSourcesTable(window.aiSourcesDomainStats, filters).catch(err => {
+              renderAiSourcesTable(window.aiSourcesDomainStats, filters).then(() => {
+                // Re-attach listeners after re-render
+                if (typeof window.attachAiSourcesSortListeners === 'function') {
+                  window.attachAiSourcesSortListeners();
+                }
+              }).catch(err => {
                 console.error('Error rendering AI sources table:', err);
               });
             }
+          };
+          
+          // Remove old listener if it exists
+          if (table._sortHandler) {
+            table.removeEventListener('click', table._sortHandler);
+          }
+          table._sortHandler = handleSortClick;
+          table.addEventListener('click', handleSortClick);
+          
+          // Set initial sort indicator on headers
+          const sortableHeaders = table.querySelectorAll('th.sortable');
+          sortableHeaders.forEach(h => {
+            h.classList.remove('sort-asc', 'sort-desc');
+            if (h.dataset.sort === window.aiSourcesSortState.column) {
+              h.classList.add(`sort-${window.aiSourcesSortState.direction}`);
+            }
           });
         }
+        
+        // Attach sort listeners initially
+        window.attachAiSourcesSortListeners();
       }
 
       // Make functions globally available
