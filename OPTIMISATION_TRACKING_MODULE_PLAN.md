@@ -171,7 +171,101 @@ Add an Optimisation Tracking capability that turns high-value keywords (from Ran
 
 ---
 
-### Phase 5 — Governance + Workflows (Make It Stick)
+### Phase 5 — Objective Integrity + Auto-Status ✅ COMPLETE
+**Date Completed**: 2025-12-19
+
+**Goal**: Make objectives structurally consistent, validated on write, and auto-evaluated (status + progress) whenever a measurement is created/updated.
+
+**Deliverables**:
+- [x] Objective storage in `optimisation_task_cycles` (jsonb)
+- [x] Server-side objective evaluation (`evaluateObjective.js`)
+- [x] Auto-status calculation: `not_set`, `on_track`, `overdue`, `met`
+- [x] Auto-progress calculation with baseline/latest/delta/target
+- [x] Goal status badges in table and modal
+- [x] Summary chips: Not set / On track / Overdue / Met
+
+---
+
+### Phase 5.6 — Read-only Share Mode ✅ COMPLETE
+**Date Completed**: 2025-12-19
+
+**Goal**: Enable read-only sharing of optimisation tracking data via secure tokens.
+
+**Deliverables**:
+- [x] Share token generation endpoint
+- [x] Share token verification
+- [x] Read-only GET endpoints
+- [x] Write endpoints reject share mode
+- [x] Frontend share mode UI
+
+---
+
+### Phase 6 — Cycle Management + Measurement History ✅ COMPLETE
+**Date Completed**: 2025-12-19
+
+**Goal**: Make cycles repeatable with proper history tracking.
+
+**Deliverables**:
+- [x] "Start New Cycle" functionality
+- [x] Per-task cycle numbering
+- [x] Cycle selector in Task Details
+- [x] Measurement history per cycle
+- [x] Timeline events per cycle
+
+---
+
+### Phase 7 — Cycle Completion + Reporting Consistency ✅ COMPLETE
+**Date Completed**: 2025-12-19
+
+**Goal**: Make cycles behave like proper time-boxed experiments.
+
+**Deliverables**:
+- [x] Complete Cycle button
+- [x] Archive Cycle button
+- [x] Cycle status enum values (completed, archived)
+- [x] Cycle event types (cycle_completed, cycle_archived, cycle_start)
+- [x] Active Cycle Only filter
+- [x] Overdue Cycle filter
+- [x] Consistent objective status across all views
+
+---
+
+### Phase 8 — Progress/KPI Correctness + Formatting ✅ COMPLETE
+**Date Completed**: 2025-12-19
+
+**Goal**: Fix KPI/target math (especially percent KPIs), and make Goal/Progress display consistent.
+
+**Deliverables**:
+- [x] Fixed double percentage multiplication bug (100% → 10000%)
+- [x] CTR deltas shown as percentage points (pp)
+- [x] Rank treats lower as better
+- [x] AI citations as integers
+- [x] Shared progress calculation helper
+- [x] "Remaining to target" display instead of confusing delta lines
+
+---
+
+### Phase 9 — Enhanced Objective Visibility & Analytics 🚧 IN PROGRESS
+
+**Goal**: Make objectives visible and actionable at a glance, with RAG tiles, detailed table columns, sparklines, impact estimates, and time-based trends.
+
+**Tasks**:
+- [ ] Add second row of KPI tiles (RAG) that reflect objectives
+- [ ] Add objective progress columns to table (KPI, Target, Baseline→Latest, Δ, RAG, Due in, Last measured)
+- [ ] Add mini sparklines (per-task or per-KPI)
+- [ ] Add estimated impact tiles (CTR clicks, AI citation gap)
+- [ ] Add time-based charts (active objectives by KPI, net movement trends)
+
+**Deliverables**:
+- [ ] KPI tiles showing objective-based metrics (CTR, Rank, AI, Freshness)
+- [ ] Detailed progress columns in table (no need to open modal)
+- [ ] Visual trend indicators (sparklines)
+- [ ] Impact estimates (motivational and prioritising)
+- [ ] Historical trend charts
+
+---
+
+### Phase 10 — Advanced Reporting (Planned)
 
 **Goal**: Prevent drift and make it operational.
 

@@ -173,15 +173,78 @@
 
 ---
 
+### Phase 9 — Enhanced Objective Visibility & Analytics 🚧 IN PROGRESS
+**Status**: Planning/Ready to implement
+
+**Goal**: Make objectives visible and actionable at a glance, with RAG tiles, detailed table columns, sparklines, impact estimates, and time-based trends.
+
+#### 1) KPI Tiles (RAG) That Reflect Objectives
+**Deliverables**:
+- [ ] Second row of tiles driven by task's Objective KPI and latest measurement deltas
+- [ ] **CTR tasks tile**: On track / At risk / Overdue (RAG), plus net CTR delta across active CTR tasks
+- [ ] **Rank tasks tile**: Count of tasks with rank improved / worsened / flat since baseline
+- [ ] **AI tasks tile**: Count of pages with AI Overview on but citations = 0 (actionable "gap" tile)
+- [ ] **Measurement freshness tile**: Tasks with last measurement > 30d or missing baseline/latest
+- [ ] Each tile clickable to filter table
+
+**Why it's better**: Tells you what's happening in the objectives, not just workflow state.
+
+#### 2) Objective Progress Columns in Table
+**Deliverables**:
+- [ ] **Objective KPI column**: Display KPI type (e.g., CTR (28d), Rank, AI Citations)
+- [ ] **Target column**: Direction + value (e.g., "Increase by +1.00pp", "Decrease to rank 5")
+- [ ] **Baseline → Latest column**: Compact version showing baseline → latest values
+- [ ] **Δ vs baseline column**: Formatted delta (e.g., "+0.12pp", "-3", "+2")
+- [ ] **RAG progress column**: On track / At risk / Overdue status badge
+- [ ] **Due in column**: Days remaining (e.g., "12d") or "Overdue 4d"
+- [ ] **Last measured column**: Date + "Needs update" indicator if > 30d or missing
+
+**Why it's better**: Stop opening modals just to understand progress - everything visible in table.
+
+#### 3) Mini Sparklines
+**Deliverables**:
+- [ ] **Option A**: Per-task sparkline (tiny line) for objective KPI, last ~6–10 measurements
+- [ ] **Option B**: Per-KPI trend (one sparkline per KPI tile)
+- [ ] Using measurement history data
+- [ ] Visual trend indicator showing if metric is moving up/down/flat
+
+**Why it's better**: Makes dashboard feel "alive" and quickly answers "is this moving?"
+
+#### 4) Estimated Impact Tiles
+**Deliverables**:
+- [ ] **CTR impact tile**: Estimated extra clicks available
+  - Formula: `impressions_28d * (target_ctr - current_ctr)` summed across active CTR tasks
+  - Shows potential value of completing CTR objectives
+- [ ] **AI citation gap tile**: 
+  - Count of tasks where AI Overview = On and AI Citations = 0
+  - Optionally weighted by opportunity score
+  - Shows actionable gap size
+
+**Why it's better**: Extremely motivating and prioritises correctly - shows real business impact.
+
+#### 5) Time-Based Charts
+**Deliverables**:
+- [ ] **Active objectives by KPI over time**: Stacked counts by week/month
+  - Shows how many objectives are active for each KPI type over time
+- [ ] **Net movement trend**: 
+  - Median rank change for rank objectives
+  - Average CTR change for CTR objectives
+  - Only includes tasks with measurements in last 30 days
+  - Shows overall progress trend
+
+**Why it's better**: Simple, not clutter - gives high-level view of optimisation program health.
+
+---
+
 ## Next Steps (Future Phases)
 
-### Phase 9 — Advanced Reporting (Planned)
+### Phase 10 — Advanced Reporting (Planned)
 - Monthly rollup reports
 - Win/loss tracking
 - Regression detection
 - Export capabilities (CSV)
 
-### Phase 10 — Automation (Planned)
+### Phase 11 — Automation (Planned)
 - Automated follow-up reminders
 - Stale monitoring alerts
 - Integration with other tracking systems
