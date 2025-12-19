@@ -3819,6 +3819,7 @@
                   <tr>
                     <th data-sort="domain" class="sortable" style="background: white;">Domain <span class="sort-indicator"></span></th>
                     <th data-sort="domain_type" class="sortable" style="background: white;">Domain type <span class="sort-indicator"></span></th>
+                    <th data-sort="competitor" class="sortable" style="background: white;">Competitor <span class="sort-indicator"></span></th>
                     <th data-sort="rank" class="sortable" style="background: white;">Domain Rank <span class="sort-indicator"></span></th>
                     <th data-sort="citations" class="sortable" style="background: white;">AI citations <span class="sort-indicator"></span></th>
                     <th data-sort="keywords" class="sortable" style="background: white;">Keywords <span class="sort-indicator"></span></th>
@@ -3827,7 +3828,7 @@
                   </tr>
                 </thead>
                 <tbody id="ai-sources-table-body">
-                  <tr><td colspan="7" class="ranking-table-empty">Loading domain data...</td></tr>
+                  <tr><td colspan="8" class="ranking-table-empty">Loading domain data...</td></tr>
                 </tbody>
               </table>
             </div>
@@ -36585,6 +36586,15 @@ Final Score: ${score}/100`;
                 bVal = getDomainTypeLabel(bDomainType) || 'zzz_unmapped';
               }
               break;
+            case 'competitor':
+              // Sort by competitor status (competitors first, then non-competitors)
+              const aNormComp = normalizeDomainForStrength(a.domain);
+              const bNormComp = normalizeDomainForStrength(b.domain);
+              const aMetaComp = domainMetadata[aNormComp] || { is_competitor: false };
+              const bMetaComp = domainMetadata[bNormComp] || { is_competitor: false };
+              aVal = aMetaComp.is_competitor ? 1 : 0;
+              bVal = bMetaComp.is_competitor ? 1 : 0;
+              break;
             case 'rank':
               // Sort by domain rank score
               const aNormRank = normalizeDomainForStrength(a.domain);
@@ -36619,7 +36629,7 @@ Final Score: ${score}/100`;
         });
 
         if (filtered.length === 0 && !selfDomain) {
-          tableBody.innerHTML = '<tr><td colspan="7" class="ranking-table-empty">No domains match the current filters.</td></tr>';
+          tableBody.innerHTML = '<tr><td colspan="8" class="ranking-table-empty">No domains match the current filters.</td></tr>';
           return;
         }
 
@@ -36667,7 +36677,9 @@ Final Score: ${score}/100`;
         
         // Re-attach sort listeners after table is rendered
         if (typeof window.attachAiSourcesSortListeners === 'function') {
-          setTimeout(() => window.attachAiSourcesSortListeners(), 0);
+          setTimeout(() => {
+            window.attachAiSourcesSortListeners();
+          }, 50);
         }
       }
 
@@ -36747,6 +36759,35 @@ Final Score: ${score}/100`;
           tdDomainType.style.backgroundColor = '#ffffcc'; // Ensure background covers cell
         }
         tr.appendChild(tdDomainType);
+
+        // Competitor column (separate from domain type)
+        const tdCompetitor = document.createElement('td');
+        tdCompetitor.style.padding = '0.5rem 0.4rem';
+        tdCompetitor.style.fontSize = '0.8rem';
+        tdCompetitor.style.textAlign = 'center';
+        if (stat.is_self) {
+          tdCompetitor.style.backgroundColor = '#ffffcc'; // Ensure background covers cell
+        }
+        
+        // Show competitor badge if is_competitor is true (same as Ranking & AI module)
+        if (meta.is_competitor) {
+          const badge = document.createElement('span');
+          badge.textContent = 'Competitor';
+          badge.setAttribute('data-competitor-badge', 'true');
+          badge.style.display = 'inline-block';
+          badge.style.padding = '0.125rem 0.5rem';
+          badge.style.fontSize = '0.65rem';
+          badge.style.fontWeight = '600';
+          badge.style.color = '#dc2626';
+          badge.style.backgroundColor = '#fee2e2';
+          badge.style.borderRadius = '4px';
+          badge.style.border = '1px solid #fecaca';
+          tdCompetitor.appendChild(badge);
+        } else {
+          tdCompetitor.textContent = '—';
+          tdCompetitor.style.color = '#94a3b8';
+        }
+        tr.appendChild(tdCompetitor);
 
         // Domain Rank
         const tdRank = document.createElement('td');
