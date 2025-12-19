@@ -9050,8 +9050,21 @@
         });
 
         if (!response.ok) {
-          const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-          throw new Error(error.error || `HTTP ${response.status}`);
+          let errorMessage = `HTTP ${response.status}`;
+          try {
+            const errorData = await response.json();
+            errorMessage = errorData.error || errorMessage;
+          } catch (e) {
+            // If JSON parsing fails, try to get text
+            try {
+              const text = await response.text();
+              errorMessage = text || errorMessage;
+            } catch (e2) {
+              // If that fails too, use status
+              errorMessage = `HTTP ${response.status}: ${response.statusText || 'Unknown error'}`;
+            }
+          }
+          throw new Error(errorMessage);
         }
 
         const data = await response.json();

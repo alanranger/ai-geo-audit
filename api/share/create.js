@@ -50,7 +50,13 @@ export default async function handler(req, res) {
   }
 
   try {
-    const shareKey = need('ARP_SHARE_KEY');
+    // Check if ARP_SHARE_KEY is set
+    const shareKey = process.env.ARP_SHARE_KEY;
+    if (!shareKey || !String(shareKey).trim()) {
+      return sendJSON(res, 500, { 
+        error: 'ARP_SHARE_KEY environment variable is not set. Please configure it in Vercel environment variables.' 
+      });
+    }
     const { expiryDays = 30 } = req.body || {};
 
     // Validate expiry (1-90 days)
