@@ -107,6 +107,13 @@ export default async function handler(req, res) {
         .eq('id', id);
     }
 
+    // Get task to get owner_user_id for event
+    const { data: taskForEvent } = await supabase
+      .from('optimisation_tasks')
+      .select('owner_user_id')
+      .eq('id', id)
+      .single();
+
     // Create a timeline event
     await supabase
       .from('optimisation_task_events')
@@ -116,7 +123,8 @@ export default async function handler(req, res) {
         cycle_number: cycle.cycle_no,
         event_type: action === 'complete' ? 'cycle_completed' : 'cycle_archived',
         event_at: new Date().toISOString(),
-        note: `Cycle ${cycle.cycle_no} ${action === 'complete' ? 'completed' : 'archived'}`
+        note: `Cycle ${cycle.cycle_no} ${action === 'complete' ? 'completed' : 'archived'}`,
+        owner_user_id: taskForEvent?.owner_user_id || '00000000-0000-0000-0000-000000000000'
       });
 
     // Get updated task with cycles
