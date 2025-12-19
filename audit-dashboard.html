@@ -6889,8 +6889,10 @@
           }
         }
 
-        // For aggregated "all_metrics": count tasks where majority of metrics (at least 4 out of 7) have the same classification
-        if (taskClassifications.length >= 4) {
+        // For aggregated "all_metrics": count ALL active tasks
+        // If task has classifications, use majority vote (even if < 4 metrics)
+        // If no classifications or tie, default to 'same'
+        if (taskClassifications.length > 0) {
           // Count occurrences of each classification
           const classCounts = { worse: 0, same: 0, better: 0 };
           taskClassifications.forEach(cls => {
@@ -6898,15 +6900,29 @@
           });
           
           // Find the majority classification
+          const total = classCounts.worse + classCounts.same + classCounts.better;
           const majority = Math.max(classCounts.worse, classCounts.same, classCounts.better);
-          const majorityClass = classCounts.worse === majority ? 'worse' :
-                                classCounts.same === majority ? 'same' :
-                                classCounts.better === majority ? 'better' : null;
           
-          // Only count if majority is at least 4 metrics
-          if (majorityClass && majority >= 4) {
-            counts.all_metrics[majorityClass]++;
+          let majorityClass = null;
+          if (classCounts.better === majority && majority > 0) {
+            majorityClass = 'better';
+          } else if (classCounts.worse === majority && majority > 0) {
+            majorityClass = 'worse';
+          } else if (classCounts.same === majority && majority > 0) {
+            majorityClass = 'same';
           }
+          
+          // If there's a clear majority (more than half), use it
+          // Otherwise default to 'same'
+          if (majorityClass && majority > total / 2) {
+            counts.all_metrics[majorityClass]++;
+          } else {
+            // No clear majority or no classifications - default to 'same'
+            counts.all_metrics.same++;
+          }
+        } else {
+          // Task has no metric classifications (insufficient data) - count as 'same'
+          counts.all_metrics.same++;
         }
       }
 
@@ -8188,12 +8204,12 @@
       setTimeout(forceBlackText, 500);
       
       // Also use MutationObserver to catch buttons added later
-      const drawer = document.getElementById('optimisation-task-drawer');
-      if (drawer) {
+      const drawerForObserver = document.getElementById('optimisation-task-drawer');
+      if (drawerForObserver) {
         const observer = new MutationObserver(() => {
           forceBlackText();
         });
-        observer.observe(drawer, { childList: true, subtree: true });
+        observer.observe(drawerForObserver, { childList: true, subtree: true });
         // Store observer to clean up later if needed
         window.optimisationDrawerObserver = observer;
       }
