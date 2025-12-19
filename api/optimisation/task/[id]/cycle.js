@@ -260,6 +260,36 @@ export default async function handler(req, res) {
       // Don't fail, just log
     }
 
+    // Create baseline measurement event in new cycle from previous cycle's latest measurement (Phase 6)
+    // This ensures the view can find the baseline for the new cycle
+    if (latestMeasurement && latestMeasurement.metrics) {
+      const baselineMeasurementEvent = {
+        task_id: id,
+        event_type: 'measurement',
+        note: `Baseline measurement from Cycle ${currentCycleNo}`,
+        owner_user_id: userId,
+        cycle_id: cycle.id,
+        cycle_number: nextCycleNo,
+        metrics: {
+          ...latestMeasurement.metrics,
+          captured_at: latestMeasurement.created_at || latestMeasurement.metrics?.captured_at || new Date().toISOString(),
+          is_baseline: true,
+          baseline_from_cycle: currentCycleNo
+        }
+      };
+
+      const { error: baselineEventError } = await supabase
+        .from('optimisation_task_events')
+        .insert(baselineMeasurementEvent);
+
+      if (baselineEventError) {
+        console.error('[Optimisation Cycle] Baseline measurement event insert error:', baselineEventError);
+        // Don't fail, just log - the cycle_start event has the baseline info
+      } else {
+        console.log('[Optimisation Cycle] Created baseline measurement event for new cycle');
+      }
+    }
+
     // Get updated task with baseline/latest from view
     const { data: updatedTask } = await supabase
       .from('vw_optimisation_task_status')
