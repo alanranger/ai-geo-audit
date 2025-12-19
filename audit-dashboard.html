@@ -10187,53 +10187,6 @@
           });
         }
 
-        // Apply base filters (test tasks, keyword, url, type, status, metric traffic)
-        applyOptimisationFilters();
-        
-        // Apply additional button filters on top of base filters
-        let filtered = [...window.optimisationModuleState.filteredTasks];
-        
-        // "Needs Update" filter: tasks with no measurement or measurement older than 30 days
-        const needsUpdateBtn = document.getElementById('optimisation-filter-needs-update');
-        if (needsUpdateBtn && needsUpdateBtn.classList.contains('active')) {
-          const thirtyDaysAgo = new Date();
-          thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-          
-          filtered = filtered.filter(t => {
-            // Check if task has latest_metrics
-            if (!t.latest_metrics) {
-              return true; // No measurement = needs update
-            }
-            
-            // Check captured_at from latest_metrics
-            const capturedAt = t.latest_metrics.captured_at;
-            if (!capturedAt) {
-              return true; // No capture date = needs update
-            }
-            
-            const latestCapturedDate = new Date(capturedAt);
-            return latestCapturedDate < thirtyDaysAgo; // Older than 30 days = needs update
-          });
-        }
-        
-        // "Active Cycle Only" filter: tasks with an active cycle (not completed/archived)
-        const activeCycleBtn = document.getElementById('optimisation-filter-active-cycle');
-        if (activeCycleBtn && activeCycleBtn.classList.contains('active')) {
-          filtered = filtered.filter(t => {
-            return t.active_cycle_id != null; // Has an active cycle
-          });
-        }
-        
-        // "Overdue Cycle" filter: tasks with overdue current cycle
-        const overdueCycleBtn = document.getElementById('optimisation-filter-overdue-cycle');
-        if (overdueCycleBtn && overdueCycleBtn.classList.contains('active')) {
-          filtered = filtered.filter(t => {
-            // Check if current cycle is overdue
-            const status = t.objective_status || t.goal_state;
-            return status === 'overdue';
-          });
-        }
-
         window.optimisationModuleState.filteredTasks = filtered;
         // Reset pagination when filters change
         optimisationPaginationState.currentPage = 1;
