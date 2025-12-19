@@ -195,9 +195,8 @@ export default async function handler(req, res) {
       hypothesis: hypothesis || null,
       plan: plan || null,
       objective: objectiveData, // Phase 5 format
-      started_at: now.toISOString(), // Use started_at (Phase 6)
-      due_at: dueAt, // Phase 6: set due date from objective timeframe
-      start_date: now.toISOString() // Keep for backward compatibility
+      start_date: now.toISOString(), // Use start_date (existing column)
+      due_at: dueAt // Phase 6: set due date from objective timeframe
     };
 
     const { data: cycle, error: cycleError } = await supabase
