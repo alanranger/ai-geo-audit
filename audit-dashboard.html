@@ -7660,6 +7660,29 @@
             (t.target_url || '').toLowerCase().includes(url)
           );
         }
+        
+        // "Needs Update" filter: tasks with no measurement or measurement older than 30 days
+        const needsUpdateBtn = document.getElementById('optimisation-filter-needs-update');
+        if (needsUpdateBtn && needsUpdateBtn.classList.contains('active')) {
+          const thirtyDaysAgo = new Date();
+          thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+          
+          filtered = filtered.filter(t => {
+            // Check if task has latest_metrics
+            if (!t.latest_metrics) {
+              return true; // No measurement = needs update
+            }
+            
+            // Check captured_at from latest_metrics
+            const capturedAt = t.latest_metrics.captured_at;
+            if (!capturedAt) {
+              return true; // No capture date = needs update
+            }
+            
+            const latestCapturedDate = new Date(capturedAt);
+            return latestCapturedDate < thirtyDaysAgo; // Older than 30 days = needs update
+          });
+        }
 
         window.optimisationModuleState.filteredTasks = filtered;
         // Reset pagination when filters change
