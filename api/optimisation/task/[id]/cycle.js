@@ -106,17 +106,106 @@ export default async function handler(req, res) {
       }
     }
 
-    // Find most recent measurement event for current cycle (this becomes baseline for new cycle)
-    const { data: latestMeasurement } = await supabase
-      .from('optimisation_task_events')
-      .select('id, metrics, created_at')
-      .eq('task_id', id)
-      .eq('event_type', 'measurement')
-      .or(`cycle_id.eq.${task.active_cycle_id || 'null'},cycle_number.eq.${currentCycleNo}`)
-      .not('metrics', 'is', null)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    // Fetch baseline from latest audit in Supabase (proper source of truth)
+    // Get task's keyword and URL to query keyword_rankings table
+    const taskKeyword = task.keyword_text || task.keyword_key;
+    const taskUrl = task.target_url_clean || task.target_url;
+    let baselineFromAudit = null;
+
+    if (taskKeyword && taskUrl) {
+      // Normalize URL for query (remove protocol, www)
+      const normalizedUrl = taskUrl.replace(/^https?:\/\//, '').replace(/^www\./, '');
+      
+      // Fetch latest audit data for this keyword/URL from keyword_rankings table
+      const { data: auditRows, error: auditError } = await supabase
+        .from('keyword_rankings')
+        .select('*')
+        .eq('keyword', taskKeyword)
+        .eq('property_url', normalizedUrl)
+        .order('audit_date', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!auditError && auditRows) {
+        // Extract metrics from audit row
+        // Get GSC data from searchData.queryTotals if available
+        let gscClicks = null;
+        let gscImpressions = null;
+        let gscCtr = null;
+        
+        // Try to get from searchData.queryTotals (stored in keyword_rankings or needs to be fetched)
+        // For now, use direct fields if available, or fetch from queryTotals
+        if (auditRows.search_data) {
+          const searchData = typeof auditRows.search_data === 'string' 
+            ? JSON.parse(auditRows.search_data) 
+            : auditRows.search_data;
+          const queryTotal = searchData?.queryTotals?.find(qt => 
+            qt.query?.toLowerCase() === taskKeyword.toLowerCase()
+          );
+          if (queryTotal) {
+            gscClicks = queryTotal.clicks || null;
+            gscImpressions = queryTotal.impressions || null;
+            gscCtr = queryTotal.ctr != null ? (queryTotal.ctr / 100) : null; // Convert percentage to decimal
+          }
+        }
+
+        // Parse AI citations
+        let aiCitations = auditRows.ai_alan_citations || [];
+        if (typeof aiCitations === 'string') {
+          try {
+            aiCitations = JSON.parse(aiCitations);
+          } catch (e) {
+            aiCitations = [];
+          }
+        }
+        if (!Array.isArray(aiCitations)) aiCitations = [];
+
+        baselineFromAudit = {
+          gsc_clicks_28d: gscClicks,
+          gsc_impressions_28d: gscImpressions,
+          gsc_ctr_28d: gscCtr,
+          current_rank: auditRows.best_rank_group || auditRows.best_rank_absolute || null,
+          opportunity_score: auditRows.opportunity_score || null,
+          ai_overview: auditRows.has_ai_overview || false,
+          ai_citations: aiCitations.length || 0,
+          ai_citations_total: auditRows.ai_total_citations || 0,
+          classic_ranking_url: auditRows.best_url || null,
+          page_type: auditRows.page_type || null,
+          segment: auditRows.segment || null,
+          captured_at: auditRows.audit_date ? new Date(auditRows.audit_date + 'T00:00:00').toISOString() : new Date().toISOString(),
+          audit_date: auditRows.audit_date,
+          is_baseline_from_audit: true
+        };
+
+        console.log('[Optimisation Cycle] Found baseline from audit:', {
+          audit_date: auditRows.audit_date,
+          keyword: taskKeyword,
+          url: normalizedUrl,
+          metrics: baselineFromAudit
+        });
+      } else if (auditError) {
+        console.warn('[Optimisation Cycle] Error fetching audit data:', auditError);
+      } else {
+        console.log('[Optimisation Cycle] No audit data found for keyword/URL:', { keyword: taskKeyword, url: normalizedUrl });
+      }
+    }
+
+    // Fallback: Find most recent measurement event for current cycle (if no audit data)
+    let latestMeasurement = null;
+    if (!baselineFromAudit) {
+      const { data: measurementData } = await supabase
+        .from('optimisation_task_events')
+        .select('id, metrics, created_at')
+        .eq('task_id', id)
+        .eq('event_type', 'measurement')
+        .or(`cycle_id.eq.${task.active_cycle_id || 'null'},cycle_number.eq.${currentCycleNo}`)
+        .not('metrics', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      
+      latestMeasurement = measurementData;
+    }
 
     // Get the highest cycle number for this task
     const { data: existingCycles, error: cyclesError } = await supabase
@@ -243,10 +332,14 @@ export default async function handler(req, res) {
       owner_user_id: userId,
       cycle_id: cycle.id,
       cycle_number: nextCycleNo,
-      metrics: latestMeasurement ? {
+      metrics: baselineFromAudit ? {
+        baseline_from_audit: true,
+        audit_date: baselineFromAudit.audit_date,
+        captured_at: baselineFromAudit.captured_at
+      } : (latestMeasurement ? {
         baseline_from_measurement_event_id: latestMeasurement.id,
         baseline_captured_at: latestMeasurement.created_at
-      } : null
+      } : null)
     };
 
     const { data: cycleStartEventData, error: eventError } = await supabase
@@ -260,21 +353,26 @@ export default async function handler(req, res) {
       // Don't fail, just log
     }
 
-    // Create baseline measurement event in new cycle from previous cycle's latest measurement (Phase 6)
+    // Create baseline measurement event in new cycle from latest audit (Phase 6)
     // This ensures the view can find the baseline for the new cycle
-    if (latestMeasurement && latestMeasurement.metrics) {
+    const baselineMetrics = baselineFromAudit || (latestMeasurement?.metrics || null);
+    
+    if (baselineMetrics) {
       const baselineMeasurementEvent = {
         task_id: id,
         event_type: 'measurement',
-        note: `Baseline measurement from Cycle ${currentCycleNo}`,
+        note: baselineFromAudit 
+          ? `Baseline measurement from audit ${baselineFromAudit.audit_date}`
+          : `Baseline measurement from Cycle ${currentCycleNo}`,
         owner_user_id: userId,
         cycle_id: cycle.id,
         cycle_number: nextCycleNo,
         metrics: {
-          ...latestMeasurement.metrics,
-          captured_at: latestMeasurement.created_at || latestMeasurement.metrics?.captured_at || new Date().toISOString(),
+          ...baselineMetrics,
+          captured_at: baselineMetrics.captured_at || latestMeasurement?.created_at || new Date().toISOString(),
           is_baseline: true,
-          baseline_from_cycle: currentCycleNo
+          baseline_from_audit: baselineFromAudit ? true : false,
+          baseline_from_cycle: baselineFromAudit ? null : currentCycleNo
         }
       };
 
@@ -286,7 +384,8 @@ export default async function handler(req, res) {
         console.error('[Optimisation Cycle] Baseline measurement event insert error:', baselineEventError);
         // Don't fail, just log - the cycle_start event has the baseline info
       } else {
-        console.log('[Optimisation Cycle] Created baseline measurement event for new cycle');
+        console.log('[Optimisation Cycle] Created baseline measurement event for new cycle from', 
+          baselineFromAudit ? `audit ${baselineFromAudit.audit_date}` : `Cycle ${currentCycleNo}`);
       }
     }
 
@@ -301,7 +400,11 @@ export default async function handler(req, res) {
       cycle,
       cycle_start_event: cycleStartEventData,
       task: updatedTask,
-      baseline_from_measurement: latestMeasurement ? {
+      baseline_from_audit: baselineFromAudit ? {
+        audit_date: baselineFromAudit.audit_date,
+        captured_at: baselineFromAudit.captured_at
+      } : null,
+      baseline_from_measurement: !baselineFromAudit && latestMeasurement ? {
         id: latestMeasurement.id,
         captured_at: latestMeasurement.created_at
       } : null
