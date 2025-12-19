@@ -1137,15 +1137,20 @@
     }
     
     .metric-pill--active {
-      background: #1e40af;
-      color: #ffffff;
+      background: #1e40af !important;
+      color: #ffffff !important;
       box-shadow: 0 2px 6px rgba(30, 64, 175, 0.3);
       border-left-color: #1e3a8a;
       font-weight: 600;
     }
     
+    .metric-pill--active span,
+    .metric-pill--active .optimisation-tab-count {
+      color: #ffffff !important;
+    }
+    
     .metric-pill--active:hover {
-      background: #1e3a8a;
+      background: #1e3a8a !important;
     }
 
     .metric-pill--green {
@@ -6601,7 +6606,7 @@
       }
       
       if (rowsPerPageSelect) {
-        rowsPerPageSelect.value = optimisationPaginationState.rowsPerPage;
+        rowsPerPageSelect.value = optimisationPaginationState.rowsPerPage === 'all' ? 'all' : String(optimisationPaginationState.rowsPerPage);
       }
     }
     
@@ -8002,8 +8007,61 @@
     
     // Update KPI tiles
     function updateKPITiles() {
-      const tiles = window.optimisationModuleState.dashboardTiles;
-      if (!tiles) return;
+      let tasks = window.optimisationModuleState.allTasks || [];
+      
+      // Filter out test tasks if checkbox is unchecked
+      const includeTestCheckbox = document.getElementById('optimisation-filter-include-test');
+      if (!includeTestCheckbox || !includeTestCheckbox.checked) {
+        tasks = tasks.filter(t => !t.is_test_task);
+      }
+      
+      // Recalculate tiles from filtered tasks
+      const tiles = {
+        ctr: { on_track: 0, at_risk: 0, overdue: 0 },
+        rank: { improved: 0, worse: 0, flat: 0 },
+        ai_gap: 0,
+        needs_measurement: 0,
+        overdue_cycles: 0,
+      };
+      
+      for (const task of tasks) {
+        const objectiveRag = task.objectiveRag || task.objective_status || 'no_data';
+        const objectiveKpiKey = task.objectiveKpiKey || task.objective?.kpi;
+        const delta = task.delta != null ? task.delta : 0;
+        
+        // CTR tiles
+        if (objectiveKpiKey === 'ctr_28d' && objectiveRag !== 'no_data') {
+          if (objectiveRag === 'on_track') tiles.ctr.on_track++;
+          else if (objectiveRag === 'at_risk') tiles.ctr.at_risk++;
+          else if (objectiveRag === 'overdue') tiles.ctr.overdue++;
+        }
+        
+        // Rank tiles
+        if (objectiveKpiKey === 'current_rank' && delta != null) {
+          if (delta > 0) tiles.rank.improved++;
+          else if (delta < 0) tiles.rank.worse++;
+          else tiles.rank.flat++;
+        }
+        
+        // AI Gap
+        if (task.latestValue != null && objectiveKpiKey === 'ai_citations') {
+          // Check if AI overview is on but citations = 0
+          const latestMetrics = task.latest_metrics || {};
+          if (latestMetrics.ai_overview === true && (latestMetrics.ai_citations === 0 || latestMetrics.ai_citations == null)) {
+            tiles.ai_gap++;
+          }
+        }
+        
+        // Needs Measurement
+        if (task.needsMeasurement) {
+          tiles.needs_measurement++;
+        }
+        
+        // Overdue Cycles
+        if (objectiveRag === 'overdue') {
+          tiles.overdue_cycles++;
+        }
+      }
       
       if (tiles.ctr) {
         const onTrackEl = document.getElementById('kpi-ctr-on-track');
@@ -8033,36 +8091,320 @@
     
     // Update impact tiles
     function updateImpactTiles() {
-      const impact = window.optimisationModuleState.dashboardImpact;
-      if (!impact) return;
+      let tasks = window.optimisationModuleState.allTasks || [];
       
-      const extraClicks = impact.estimated_extra_clicks || 0;
+      // Filter out test tasks if checkbox is unchecked
+      const includeTestCheckbox = document.getElementById('optimisation-filter-include-test');
+      if (!includeTestCheckbox || !includeTestCheckbox.checked) {
+        tasks = tasks.filter(t => !t.is_test_task);
+      }
+      
+      // Recalculate impact from filtered tasks
+      let estimatedExtraClicks = 0;
+      let aiCitationGapCount = 0;
+      
+      for (const task of tasks) {
+        const objectiveKpiKey = task.objectiveKpiKey || task.objective?.kpi;
+        const baselineValue = task.baselineValue;
+        const latestValue = task.latestValue;
+        const latestMetrics = task.latest_metrics || {};
+        
+        // Estimated extra clicks for CTR tasks
+        if (objectiveKpiKey === 'ctr_28d' && baselineValue != null && latestValue != null) {
+          const impressions = latestMetrics.impressions_28d || 0;
+          if (impressions > 0 && task.objective) {
+            let goalCtr = null;
+            if (task.objective.target_type === 'delta') {
+              goalCtr = baselineValue + task.objective.target;
+            } else {
+              goalCtr = task.objective.target;
+            }
+            if (goalCtr != null && goalCtr > latestValue) {
+              const extraClicks = impressions * (goalCtr - latestValue);
+              estimatedExtraClicks += extraClicks;
+            }
+          }
+        }
+        
+        // AI Citation Gap
+        if (latestMetrics.ai_overview === true && (latestMetrics.ai_citations === 0 || latestMetrics.ai_citations == null)) {
+          aiCitationGapCount++;
+        }
+      }
+      
       const extraClicksEl = document.getElementById('impact-extra-clicks');
       if (extraClicksEl) {
-        extraClicksEl.textContent = extraClicks >= 1000 
-          ? (extraClicks / 1000).toFixed(1) + 'k' 
-          : Math.round(extraClicks).toLocaleString('en-GB');
+        extraClicksEl.textContent = estimatedExtraClicks >= 1000 
+          ? (estimatedExtraClicks / 1000).toFixed(1) + 'k' 
+          : Math.round(estimatedExtraClicks).toLocaleString('en-GB');
       }
       
       const aiGapEl = document.getElementById('impact-ai-gap');
-      if (aiGapEl) aiGapEl.textContent = impact.ai_citation_gap || 0;
+      if (aiGapEl) aiGapEl.textContent = aiCitationGapCount || 0;
     }
     
     // Update timeseries charts
     function updateTimeseriesCharts() {
-      const timeseries = window.optimisationModuleState.dashboardTimeseries;
-      if (!timeseries) return;
+      let tasks = window.optimisationModuleState.allTasks || [];
       
-      // Measurements per week chart
-      const measurementsCanvas = document.getElementById('chart-measurements-per-week');
-      if (measurementsCanvas && timeseries.measurementsPerWeek) {
-        renderLineChart(measurementsCanvas, timeseries.measurementsPerWeek, 'count', 'Measurements per Week');
+      // Filter out test tasks if checkbox is unchecked
+      const includeTestCheckbox = document.getElementById('optimisation-filter-include-test');
+      if (!includeTestCheckbox || !includeTestCheckbox.checked) {
+        tasks = tasks.filter(t => !t.is_test_task);
       }
       
-      // Median delta by KPI chart
-      const medianDeltaCanvas = document.getElementById('chart-median-delta');
-      if (medianDeltaCanvas && timeseries.medianDeltaByKpi) {
-        renderBarChart(medianDeltaCanvas, timeseries.medianDeltaByKpi, 'value', 'Median Delta');
+      // Recalculate measurements per week from filtered tasks
+      const measurementsPerWeek = [];
+      const weekMap = new Map();
+      
+      for (const task of tasks) {
+        // Get measurement events for this task
+        if (task.latest_metrics && task.latest_metrics.captured_at) {
+          const date = new Date(task.latest_metrics.captured_at);
+          const weekStart = new Date(date);
+          weekStart.setDate(date.getDate() - date.getDay());
+          weekStart.setHours(0, 0, 0, 0);
+          const weekKey = weekStart.toISOString().split('T')[0];
+          
+          if (!weekMap.has(weekKey)) {
+            weekMap.set(weekKey, 0);
+          }
+          weekMap.set(weekKey, weekMap.get(weekKey) + 1);
+        }
+      }
+      
+      for (const [weekStart, count] of weekMap.entries()) {
+        measurementsPerWeek.push({ weekStart, count });
+      }
+      measurementsPerWeek.sort((a, b) => a.weekStart.localeCompare(b.weekStart));
+      
+      // Recalculate median deltas by KPI from filtered tasks
+      const medianDeltaByKpi = {};
+      const deltasByKpi = {};
+      
+      for (const task of tasks) {
+        if (task.objectiveKpiKey && task.delta != null) {
+          if (!deltasByKpi[task.objectiveKpiKey]) {
+            deltasByKpi[task.objectiveKpiKey] = [];
+          }
+          deltasByKpi[task.objectiveKpiKey].push(task.delta);
+        }
+      }
+      
+      for (const [kpi, deltas] of Object.entries(deltasByKpi)) {
+        if (deltas.length > 0) {
+          deltas.sort((a, b) => a - b);
+          const mid = Math.floor(deltas.length / 2);
+          const median = deltas.length % 2 === 0
+            ? (deltas[mid - 1] + deltas[mid]) / 2
+            : deltas[mid];
+          medianDeltaByKpi[kpi] = median;
+        }
+      }
+      
+      const timeseries = {
+        measurementsPerWeek,
+        medianDeltaByKpi: Object.entries(medianDeltaByKpi).map(([kpi, value]) => ({ kpi, value })),
+      };
+      
+      // Render Measurements per Week chart
+      const measurementsCanvas = document.getElementById('chart-measurements-per-week');
+      if (measurementsCanvas && timeseries.measurementsPerWeek) {
+        const ctx = measurementsCanvas.getContext('2d');
+        measurementsCanvas.width = measurementsCanvas.offsetWidth || 400;
+        measurementsCanvas.height = 280;
+        
+        ctx.clearRect(0, 0, measurementsCanvas.width, measurementsCanvas.height);
+        
+        const data = timeseries.measurementsPerWeek;
+        if (data.length === 0) {
+          ctx.fillStyle = '#666';
+          ctx.font = '14px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('No data', measurementsCanvas.width / 2, measurementsCanvas.height / 2);
+        } else {
+          const maxCount = Math.max(...data.map(d => d.count), 1);
+          const padding = { top: 20, right: 20, bottom: 50, left: 60 };
+          const chartWidth = measurementsCanvas.width - padding.left - padding.right;
+          const chartHeight = measurementsCanvas.height - padding.top - padding.bottom;
+          
+          // Draw axes
+          ctx.strokeStyle = '#ddd';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(padding.left, padding.top);
+          ctx.lineTo(padding.left, measurementsCanvas.height - padding.bottom);
+          ctx.lineTo(measurementsCanvas.width - padding.right, measurementsCanvas.height - padding.bottom);
+          ctx.stroke();
+          
+          // Draw y-axis label
+          ctx.save();
+          ctx.translate(15, measurementsCanvas.height / 2);
+          ctx.rotate(-Math.PI / 2);
+          ctx.fillStyle = '#374151';
+          ctx.font = '12px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('Measurements', 0, 0);
+          ctx.restore();
+          
+          // Draw x-axis label
+          ctx.fillStyle = '#374151';
+          ctx.font = '12px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('Week starting', measurementsCanvas.width / 2, measurementsCanvas.height - 10);
+          
+          // Draw y-axis ticks and labels
+          const yTicks = 5;
+          for (let i = 0; i <= yTicks; i++) {
+            const value = (maxCount / yTicks) * i;
+            const y = measurementsCanvas.height - padding.bottom - (i / yTicks) * chartHeight;
+            ctx.strokeStyle = '#e5e7eb';
+            ctx.lineWidth = 0.5;
+            ctx.beginPath();
+            ctx.moveTo(padding.left, y);
+            ctx.lineTo(measurementsCanvas.width - padding.right, y);
+            ctx.stroke();
+            
+            ctx.fillStyle = '#6b7280';
+            ctx.font = '10px sans-serif';
+            ctx.textAlign = 'right';
+            ctx.fillText(Math.round(value).toString(), padding.left - 10, y + 4);
+          }
+          
+          // Draw x-axis week labels (rotate 45 degrees)
+          data.forEach((d, i) => {
+            const x = padding.left + (i / (data.length - 1 || 1)) * chartWidth;
+            const weekDate = new Date(d.weekStart);
+            const weekLabel = `${weekDate.getDate()}/${weekDate.getMonth() + 1}`;
+            ctx.save();
+            ctx.translate(x, measurementsCanvas.height - padding.bottom + 20);
+            ctx.rotate(Math.PI / 4);
+            ctx.fillStyle = '#6b7280';
+            ctx.font = '9px sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText(weekLabel, 0, 0);
+            ctx.restore();
+          });
+          
+          // Draw line
+          ctx.strokeStyle = '#3b82f6';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          data.forEach((d, i) => {
+            const x = padding.left + (i / (data.length - 1 || 1)) * chartWidth;
+            const y = measurementsCanvas.height - padding.bottom - (d.count / maxCount) * chartHeight;
+            if (i === 0) {
+              ctx.moveTo(x, y);
+            } else {
+              ctx.lineTo(x, y);
+            }
+          });
+          ctx.stroke();
+          
+          // Draw points
+          ctx.fillStyle = '#3b82f6';
+          data.forEach((d, i) => {
+            const x = padding.left + (i / (data.length - 1 || 1)) * chartWidth;
+            const y = measurementsCanvas.height - padding.bottom - (d.count / maxCount) * chartHeight;
+            ctx.beginPath();
+            ctx.arc(x, y, 4, 0, Math.PI * 2);
+            ctx.fill();
+          });
+        }
+      }
+
+      // Render Median Delta by KPI chart
+      const deltaCanvas = document.getElementById('chart-median-delta');
+      if (deltaCanvas && timeseries.medianDeltaByKpi) {
+        const ctx = deltaCanvas.getContext('2d');
+        deltaCanvas.width = deltaCanvas.offsetWidth || 400;
+        deltaCanvas.height = 280;
+        
+        ctx.clearRect(0, 0, deltaCanvas.width, deltaCanvas.height);
+        
+        const data = timeseries.medianDeltaByKpi;
+        if (data.length === 0) {
+          ctx.fillStyle = '#666';
+          ctx.font = '14px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('No data', deltaCanvas.width / 2, deltaCanvas.height / 2);
+        } else {
+          const maxAbs = Math.max(...data.map(d => Math.abs(d.value)), 1);
+          const padding = { top: 20, right: 20, bottom: 70, left: 60 };
+          const chartWidth = deltaCanvas.width - padding.left - padding.right;
+          const chartHeight = deltaCanvas.height - padding.top - padding.bottom;
+          const barWidth = chartWidth / data.length * 0.7;
+          const barSpacing = chartWidth / data.length * 0.3;
+          const zeroY = deltaCanvas.height - padding.bottom - (maxAbs / (maxAbs * 2)) * chartHeight;
+          
+          // KPI label mapping
+          const kpiLabels = {
+            'ctr_28d': 'CTR (pp)',
+            'impressions_28d': 'Impressions',
+            'clicks_28d': 'Clicks',
+            'current_rank': 'Rank',
+            'ai_citations': 'AI Citations',
+            'opportunity_score': 'Opp Score'
+          };
+          
+          // Draw y-axis label
+          ctx.save();
+          ctx.translate(15, deltaCanvas.height / 2);
+          ctx.rotate(-Math.PI / 2);
+          ctx.fillStyle = '#374151';
+          ctx.font = '12px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('Median Delta', 0, 0);
+          ctx.restore();
+          
+          // Draw zero line
+          ctx.strokeStyle = '#ddd';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(padding.left, zeroY);
+          ctx.lineTo(deltaCanvas.width - padding.right, zeroY);
+          ctx.stroke();
+          
+          // Draw y-axis ticks and labels
+          const yTicks = 5;
+          for (let i = 0; i <= yTicks; i++) {
+            const value = (maxAbs * 2 / yTicks) * i - maxAbs;
+            const y = deltaCanvas.height - padding.bottom - (i / yTicks) * chartHeight;
+            ctx.strokeStyle = '#e5e7eb';
+            ctx.lineWidth = 0.5;
+            ctx.beginPath();
+            ctx.moveTo(padding.left, y);
+            ctx.lineTo(deltaCanvas.width - padding.right, y);
+            ctx.stroke();
+            
+            ctx.fillStyle = '#6b7280';
+            ctx.font = '10px sans-serif';
+            ctx.textAlign = 'right';
+            const label = value >= 0 ? `+${value.toFixed(1)}` : value.toFixed(1);
+            ctx.fillText(label, padding.left - 10, y + 4);
+          }
+          
+          // Draw bars
+          data.forEach((d, i) => {
+            const x = padding.left + i * (barWidth + barSpacing) + barSpacing / 2;
+            const barHeight = (Math.abs(d.value) / maxAbs) * chartHeight;
+            const y = d.value >= 0 ? zeroY - barHeight : zeroY;
+            
+            ctx.fillStyle = d.value >= 0 ? '#10b981' : '#ef4444';
+            ctx.fillRect(x, y, barWidth, barHeight);
+            
+            // Draw KPI label (rotated 45 degrees)
+            ctx.save();
+            ctx.translate(x + barWidth / 2, deltaCanvas.height - padding.bottom + 20);
+            ctx.rotate(Math.PI / 4);
+            ctx.fillStyle = '#6b7280';
+            ctx.font = '9px sans-serif';
+            ctx.textAlign = 'left';
+            const label = kpiLabels[d.kpi] || d.kpi.replace(/_/g, ' ').substring(0, 10);
+            ctx.fillText(label, 0, 0);
+            ctx.restore();
+          });
+        }
       }
     }
     
@@ -8862,6 +9204,8 @@
         includeTestCheckbox.addEventListener('change', () => {
           applyFilters();
           updateOptimisationSummaryCards();
+          updateKPITiles();
+          updateImpactTiles();
           updateTimeseriesCharts();
         });
       }
