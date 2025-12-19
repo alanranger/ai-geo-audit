@@ -5063,10 +5063,28 @@
 
         const result = await response.json();
         
-        // Refresh tasks and reload drawer
+        // Update task in state immediately with returned task data (includes new cycle objective)
+        if (result.task && window.optimisationModuleState && window.optimisationModuleState.allTasks) {
+          const taskIndex = window.optimisationModuleState.allTasks.findIndex(t => t.id === taskId);
+          if (taskIndex >= 0) {
+            window.optimisationModuleState.allTasks[taskIndex] = result.task;
+            console.log('[Optimisation] Updated task in state with new cycle data:', result.task);
+          } else {
+            window.optimisationModuleState.allTasks.push(result.task);
+          }
+          // Also update filtered tasks if it exists there
+          if (window.optimisationModuleState.filteredTasks) {
+            const filteredIndex = window.optimisationModuleState.filteredTasks.findIndex(t => t.id === taskId);
+            if (filteredIndex >= 0) {
+              window.optimisationModuleState.filteredTasks[filteredIndex] = result.task;
+            }
+          }
+        }
+        
+        // Refresh tasks to ensure all data is up to date
         await window.loadAllOptimisationTasks();
         
-        // Reload drawer if it's open
+        // Reload drawer if it's open (will use updated task data)
         if (window.optimisationModuleState.currentTaskId === taskId) {
           await window.openOptimisationTaskDrawer(taskId);
         }
@@ -5075,7 +5093,7 @@
         
         // Show success message with cycle info
         const cycleNo = result.cycle?.cycle_no || result.task?.cycle_active || 'new';
-        alert(`Cycle ${cycleNo} started successfully!${result.baseline_from_measurement ? ' Baseline set from previous latest measurement.' : ''}`);
+        alert(`Cycle ${cycleNo} started successfully!${result.baseline_from_audit ? ' Baseline set from latest audit.' : (result.baseline_from_measurement ? ' Baseline set from previous latest measurement.' : '')}`);
       } catch (error) {
         console.error('[Optimisation] Error starting new cycle:', error);
         alert('Failed to start new cycle: ' + error.message);
