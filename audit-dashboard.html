@@ -3807,18 +3807,19 @@
             </div>
             <div class="ranking-table-wrapper">
               <table class="ranking-table" id="ai-sources-table">
-                <thead>
+                <thead style="position: sticky; top: 0; z-index: 20; background: white;">
                   <tr>
-                    <th data-sort="domain" class="sortable">Domain <span class="sort-indicator"></span></th>
-                    <th data-sort="domain_type" class="sortable">Domain type <span class="sort-indicator"></span></th>
-                    <th data-sort="citations" class="sortable">AI citations <span class="sort-indicator"></span></th>
-                    <th data-sort="keywords" class="sortable">Keywords <span class="sort-indicator"></span></th>
-                    <th data-sort="share" class="sortable">Citation share <span class="sort-indicator"></span></th>
-                    <th>Example page</th>
+                    <th data-sort="domain" class="sortable" style="background: white;">Domain <span class="sort-indicator"></span></th>
+                    <th data-sort="domain_type" class="sortable" style="background: white;">Domain type <span class="sort-indicator"></span></th>
+                    <th data-sort="rank" class="sortable" style="background: white;">Domain Rank <span class="sort-indicator"></span></th>
+                    <th data-sort="citations" class="sortable" style="background: white;">AI citations <span class="sort-indicator"></span></th>
+                    <th data-sort="keywords" class="sortable" style="background: white;">Keywords <span class="sort-indicator"></span></th>
+                    <th data-sort="share" class="sortable" style="background: white;">Citation share <span class="sort-indicator"></span></th>
+                    <th style="background: white;">Example page</th>
                   </tr>
                 </thead>
                 <tbody id="ai-sources-table-body">
-                  <tr><td colspan="6" class="ranking-table-empty">Loading domain data...</td></tr>
+                  <tr><td colspan="7" class="ranking-table-empty">Loading domain data...</td></tr>
                 </tbody>
               </table>
             </div>
@@ -36490,9 +36491,11 @@ Final Score: ${score}/100`;
         const tableBody = document.getElementById('ai-sources-table-body');
         if (!tableBody) return;
 
-        // Fetch domain metadata for all domains (same as Ranking & AI module)
+        // Fetch domain metadata and domain strength for all domains (same as Ranking & AI module)
         const allDomains = domainStats.map(stat => stat.domain);
         const domainMetadata = await fetchDomainMetadataForDomains(allDomains);
+        const normalizedDomains = allDomains.map(normalizeDomainForStrength).filter(Boolean);
+        const domainStrength = await fetchLatestDomainStrengthForDomains(normalizedDomains);
 
         // Separate alanranger.com (self) from others
         // Self domain is always shown regardless of filters (sticky first row)
@@ -36547,6 +36550,15 @@ Final Score: ${score}/100`;
                 bVal = getDomainTypeLabel(bDomainType) || 'zzz_unmapped';
               }
               break;
+            case 'rank':
+              // Sort by domain rank score
+              const aNormRank = normalizeDomainForStrength(a.domain);
+              const bNormRank = normalizeDomainForStrength(b.domain);
+              const aStrength = domainStrength[aNormRank] || { score: null };
+              const bStrength = domainStrength[bNormRank] || { score: null };
+              aVal = aStrength.score !== null ? aStrength.score : -1;
+              bVal = bStrength.score !== null ? bStrength.score : -1;
+              break;
             case 'type':
               aVal = a.source_type;
               bVal = b.source_type;
@@ -36572,7 +36584,7 @@ Final Score: ${score}/100`;
         });
 
         if (filtered.length === 0 && !selfDomain) {
-          tableBody.innerHTML = '<tr><td colspan="6" class="ranking-table-empty">No domains match the current filters.</td></tr>';
+          tableBody.innerHTML = '<tr><td colspan="7" class="ranking-table-empty">No domains match the current filters.</td></tr>';
           return;
         }
 
@@ -36585,7 +36597,8 @@ Final Score: ${score}/100`;
           if (showSelf) {
             const normalizedDomain = normalizeDomainForStrength(selfDomain.domain);
             const meta = domainMetadata[normalizedDomain] || { domain_type: 'unmapped', is_competitor: false };
-            const selfRow = createDomainRow(selfDomain, true, meta);
+            const strength = domainStrength[normalizedDomain] || null;
+            const selfRow = createDomainRow(selfDomain, true, meta, strength);
             tableBody.appendChild(selfRow);
           }
         }
@@ -36594,7 +36607,8 @@ Final Score: ${score}/100`;
         filtered.forEach(stat => {
           const normalizedDomain = normalizeDomainForStrength(stat.domain);
           const meta = domainMetadata[normalizedDomain] || { domain_type: 'unmapped', is_competitor: false };
-          const row = createDomainRow(stat, false, meta);
+          const strength = domainStrength[normalizedDomain] || null;
+          const row = createDomainRow(stat, false, meta, strength);
           tableBody.appendChild(row);
         });
       }
@@ -36620,15 +36634,15 @@ Final Score: ${score}/100`;
       /**
        * Create a table row for a domain stat
        */
-      function createDomainRow(stat, isSelf, meta) {
+      function createDomainRow(stat, isSelf, meta, strength) {
         const tr = document.createElement('tr');
         tr.dataset.domain = stat.domain;
         
-        // Make self domain row sticky and highlight in yellow
+        // Make self domain row sticky and highlight in yellow (below header)
         if (isSelf) {
           tr.style.position = 'sticky';
-          tr.style.top = '0';
-          tr.style.zIndex = '10';
+          tr.style.top = '40px'; // Below sticky header (approximate header height)
+          tr.style.zIndex = '15';
           tr.style.backgroundColor = '#ffffcc';
           tr.style.fontWeight = '600';
         }
@@ -36654,6 +36668,7 @@ Final Score: ${score}/100`;
         }
         
         // Map domain_type value to display label (same as Ranking & AI)
+        // Always show domain_type for all rows (not just "Competitor")
         let displayType = '';
         if (stat.is_self) {
           // For self domain, show mapped label or "Your site" if unmapped
@@ -36667,7 +36682,21 @@ Final Score: ${score}/100`;
         }
         tdDomainType.textContent = displayType;
         tdDomainType.style.color = displayType ? '#475569' : '#94a3b8';
+        if (stat.is_self) {
+          tdDomainType.style.backgroundColor = '#ffffcc'; // Ensure background covers cell
+        }
         tr.appendChild(tdDomainType);
+
+        // Domain Rank
+        const tdRank = document.createElement('td');
+        tdRank.style.textAlign = 'right';
+        tdRank.style.padding = '0.5rem 0.4rem';
+        tdRank.style.fontSize = '0.8rem';
+        if (stat.is_self) {
+          tdRank.style.backgroundColor = '#ffffcc'; // Ensure background covers cell
+        }
+        tdRank.innerHTML = renderDomainRankCellHtml(strength);
+        tr.appendChild(tdRank);
 
         // Citations
         const tdCitations = document.createElement('td');
