@@ -134,10 +134,10 @@ export default async function handler(req, res) {
       if (user) userId = user.id;
     }
 
-    // Fetch all tasks (including is_test_task from base table)
+    // Fetch all tasks
     let query = supabase
       .from('vw_optimisation_task_status')
-      .select('*, optimisation_tasks!inner(is_test_task)')
+      .select('*')
       .order('last_activity_at', { ascending: false });
 
     if (userId) {
@@ -406,9 +406,13 @@ export default async function handler(req, res) {
         }
       }
 
+      // Get is_test_task from map
+      const isTestTask = testTaskMap.get(task.id) || false;
+      
       // Enrich task
       enrichedTasks.push({
         ...task,
+        is_test_task: isTestTask,
         objectiveKpiKey,
         baselineValue,
         latestValue,
