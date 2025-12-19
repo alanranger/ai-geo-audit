@@ -33,7 +33,7 @@ export default async function handler(req, res) {
   if (req.method === 'GET') {
     const auth = requireAdminOrShare(req, res, sendJSON);
     if (!auth.authorized) {
-      return; // Response already sent
+    return; // Response already sent
     }
 
     try {
@@ -69,6 +69,13 @@ export default async function handler(req, res) {
         cycle = cycleData;
       }
 
+      // Get all cycles for this task (Phase 6: for cycle selector)
+      const { data: allCycles } = await supabase
+        .from('optimisation_task_cycles')
+        .select('id, cycle_no, start_date, end_date, objective_title, primary_kpi, target_value, target_direction, objective, objective_status, objective_progress, due_at')
+        .eq('task_id', id)
+        .order('cycle_no', { ascending: false });
+
       // Get goal status (fallback for backward compatibility)
       const { data: goalStatus } = await supabase
         .from('vw_optimisation_task_goal_status')
@@ -99,6 +106,7 @@ export default async function handler(req, res) {
           objective_direction: goalStatus?.objective_direction
         },
         cycle: cycle,
+        cycles: allCycles || [], // Phase 6: All cycles for cycle selector
         events: events || []
       });
     } catch (error) {

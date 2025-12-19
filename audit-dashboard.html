@@ -4094,9 +4094,12 @@
                   <strong>Status:</strong>
                   <span id="optimisation-drawer-status" style="margin-left: 0.5rem; padding: 0.25rem 0.5rem; border-radius: 4px;"></span>
                 </div>
-                <div>
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
                   <strong>Cycle:</strong>
-                  <span id="optimisation-drawer-cycle" style="margin-left: 0.5rem;"></span>
+                  <span id="optimisation-drawer-cycle" style="margin-left: 0;"></span>
+                  <select id="optimisation-drawer-cycle-selector" style="padding: 0.25rem 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.875rem; background: white; cursor: pointer; display: none; min-width: 100px;" title="Select a cycle to view its objective, measurements, and events">
+                    <!-- Options will be populated by JavaScript -->
+                  </select>
                 </div>
               </div>
             </div>
@@ -5964,7 +5967,11 @@
             if (progress.baseline_value != null && progress.latest_value != null && progress.delta != null) {
               const deltaColor = progress.delta >= 0 ? '#10b981' : '#ef4444';
               const deltaSign = progress.delta >= 0 ? '+' : '';
-              goalText += `<div style="font-size: 0.7rem; color: ${deltaColor}; margin-top: 0.125rem; font-weight: 600;">Δ ${deltaSign}${progress.delta} vs target ${progress.target}</div>`;
+              // Format delta and target based on KPI
+              const taskKpi = task.objective_kpi || task.primary_kpi || task.objective_metric || null;
+              const formattedDelta = formatProgressValue(progress.delta, taskKpi);
+              const formattedTarget = formatProgressValue(progress.target, taskKpi);
+              goalText += `<div style="font-size: 0.7rem; color: ${deltaColor}; margin-top: 0.125rem; font-weight: 600;">Δ ${deltaSign}${formattedDelta} vs target ${formattedTarget}</div>`;
             }
           } else if (task.objective && task.objective.kpi && task.objective.target != null) {
             // Use objective from cycle
@@ -6014,7 +6021,7 @@
           </td>
           <td><span style="padding: 0.25rem 0.5rem; background: #f0f0f0; border-radius: 4px;">${escapeHtml(task.task_type || 'on_page')}</span></td>
           <td><span style="padding: 0.25rem 0.5rem; border-radius: 4px; background: ${statusStyle.bg}; color: ${statusStyle.color};">${escapeHtml(task.status || 'planned')}</span></td>
-          <td>Cycle ${task.cycle_active || 1}</td>
+          <td>Cycle ${task.cycle_no || task.cycle_active || 1}</td>
           <td>${lastActivity}</td>
           <td>${baselineCaptured}</td>
           <td>${latestCaptured || measurementIndicator}${needsUpdateBadge}</td>
@@ -6316,11 +6323,29 @@
         alert(`Task not found (ID: ${taskId}). Please try refreshing the page.`);
         return;
       }
-      
-      if (!task) {
-        console.error('[Optimisation Drawer] Task not found:', taskId);
-        alert(`Task not found (ID: ${taskId}). Please try refreshing the page.`);
-        return;
+
+      // Phase 6: Fetch full task details including cycles
+      try {
+        const headers = window.getOptimisationHeaders();
+        const taskResponse = await fetch(apiUrl(`/api/optimisation/task/${taskId}`), {
+          method: 'GET',
+          headers: headers
+        });
+        if (taskResponse.ok) {
+          const taskData = await taskResponse.json();
+          console.log('[Optimisation Drawer] Task data from API:', taskData);
+          // Merge cycles and other detailed fields into task
+          task = {
+            ...task,
+            ...taskData.task,
+            cycles: taskData.cycles || [],
+            events: taskData.events || []
+          };
+          console.log('[Optimisation Drawer] Merged task with cycles:', task.cycles);
+        }
+      } catch (error) {
+        console.error('[Optimisation Drawer] Error fetching task details:', error);
+        // Continue with task from state if fetch fails
       }
 
       // Populate header
@@ -6371,6 +6396,7 @@
       
       // Update cycle display with cycle info
       const cycleEl = document.getElementById('optimisation-drawer-cycle');
+      const cycleSelector = document.getElementById('optimisation-drawer-cycle-selector');
       const cycleNo = task.cycle_no || task.cycle_active || 1;
       const cycleText = `Cycle ${cycleNo}`;
       if (task.cycle_start_date) {
@@ -6381,6 +6407,67 @@
         cycleEl.textContent = `${cycleText} (Created: ${createdDate})`;
       } else {
         cycleEl.textContent = cycleText;
+      }
+
+      // Phase 6: Populate cycle selector dropdown
+      // Debug: Log cycles data
+      console.log('[Optimisation Drawer] Cycles data:', task.cycles, 'Length:', task.cycles?.length, 'Active cycle ID:', task.active_cycle_id);
+      
+      if (cycleSelector) {
+        if (task.cycles && Array.isArray(task.cycles) && task.cycles.length > 0) {
+          cycleSelector.innerHTML = '';
+          // Sort cycles by cycle_no descending (newest first)
+          const sortedCycles = [...task.cycles].sort((a, b) => (b.cycle_no || 0) - (a.cycle_no || 0));
+          sortedCycles.forEach(c => {
+            const option = document.createElement('option');
+            option.value = c.id;
+            option.textContent = `Cycle ${c.cycle_no}`;
+            if (c.id === task.active_cycle_id) {
+              option.selected = true;
+            }
+            cycleSelector.appendChild(option);
+          });
+          // Show selector if there are multiple cycles
+          if (task.cycles.length > 1) {
+            cycleSelector.style.display = 'inline-block';
+            console.log('[Optimisation Drawer] Cycle selector shown with', task.cycles.length, 'cycles');
+          } else {
+            cycleSelector.style.display = 'none';
+            console.log('[Optimisation Drawer] Cycle selector hidden (only 1 cycle)');
+          }
+        } else {
+          cycleSelector.style.display = 'none';
+          console.log('[Optimisation Drawer] Cycle selector hidden (no cycles data)');
+        }
+      } else {
+        console.error('[Optimisation Drawer] Cycle selector element not found!');
+      }
+        
+        // Store cycles in state for later use
+        if (!window.optimisationModuleState) {
+          window.optimisationModuleState = {};
+        }
+        window.optimisationModuleState.taskCycles = task.cycles;
+        window.optimisationModuleState.selectedCycleId = task.active_cycle_id;
+        
+        // Handle cycle selection change (remove old listener first to avoid duplicates)
+        const oldHandler = cycleSelector.dataset.handler;
+        if (oldHandler) {
+          cycleSelector.removeEventListener('change', window[oldHandler]);
+        }
+        const handlerName = `cycleSelectorHandler_${taskId}`;
+        const handler = async (e) => {
+          const selectedCycleId = e.target.value;
+          window.optimisationModuleState.selectedCycleId = selectedCycleId;
+          const selectedCycle = task.cycles.find(c => c.id === selectedCycleId);
+          const selectedCycleNo = selectedCycle?.cycle_no || 1;
+          await loadCycleData(taskId, selectedCycleId, task.cycles, selectedCycle, selectedCycleNo, task);
+        };
+        window[handlerName] = handler;
+        cycleSelector.dataset.handler = handlerName;
+        cycleSelector.addEventListener('change', handler);
+      } else if (cycleSelector) {
+        cycleSelector.style.display = 'none';
       }
 
       // Load progress data
@@ -6585,10 +6672,17 @@
               const deltaSign = delta >= 0 ? '+' : '';
               const kpiLabel = (objectiveKpi || objectiveMetric).replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
               const targetType = objective?.target_type || 'delta';
+              
+              // Format values based on KPI type
+              const formattedBaseline = formatProgressValue(baselineVal, objectiveKpi || objectiveMetric);
+              const formattedLatest = formatProgressValue(latestVal, objectiveKpi || objectiveMetric);
+              const formattedDelta = formatProgressValue(delta, objectiveKpi || objectiveMetric);
+              const formattedTarget = formatProgressValue(target, objectiveKpi || objectiveMetric);
+              
               const targetText = targetType === 'delta' 
-                ? `target ${target >= 0 ? '+' : ''}${target}`
-                : `target ${target}`;
-              rightColumn += `<div style="margin-bottom: 0.4rem;"><strong>Progress:</strong> ${baselineVal} → ${latestVal} (<span style="color: ${deltaColor}; font-weight: 600;">${deltaSign}${delta}</span>) vs ${targetText}</div>`;
+                ? `target ${delta >= 0 ? '+' : ''}${formattedTarget}`
+                : `target ${formattedTarget}`;
+              rightColumn += `<div style="margin-bottom: 0.4rem;"><strong>Progress:</strong> ${formattedBaseline} → ${formattedLatest} (<span style="color: ${deltaColor}; font-weight: 600;">${deltaSign}${formattedDelta}</span>) vs ${targetText}</div>`;
             }
           } else if (progress && progress.baseline_value != null && progress.latest_value != null && objectiveMetric) {
             // Legacy fallback
@@ -6601,7 +6695,14 @@
               const deltaColor = delta >= 0 ? '#10b981' : '#ef4444';
               const deltaSign = delta >= 0 ? '+' : '';
               const kpiLabel = (objectiveKpi || objectiveMetric).replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-              rightColumn += `<div style="margin-bottom: 0.4rem;"><strong>Progress:</strong> ${baselineVal} → ${latestVal} (<span style="color: ${deltaColor}; font-weight: 600;">${deltaSign}${delta}</span>) vs target ${targetDelta > 0 ? '+' : ''}${targetDelta}</div>`;
+              
+              // Format values based on KPI type
+              const formattedBaseline = formatProgressValue(baselineVal, objectiveKpi || objectiveMetric);
+              const formattedLatest = formatProgressValue(latestVal, objectiveKpi || objectiveMetric);
+              const formattedDelta = formatProgressValue(delta, objectiveKpi || objectiveMetric);
+              const formattedTarget = formatProgressValue(targetDelta, objectiveKpi || objectiveMetric);
+              
+              rightColumn += `<div style="margin-bottom: 0.4rem;"><strong>Progress:</strong> ${formattedBaseline} → ${formattedLatest} (<span style="color: ${deltaColor}; font-weight: 600;">${deltaSign}${formattedDelta}</span>) vs target ${targetDelta > 0 ? '+' : ''}${formattedTarget}</div>`;
             }
           }
           
@@ -6622,14 +6723,12 @@
       
       document.getElementById('optimisation-change-status').value = task.status || '';
 
-      // Render metrics snapshot
-      renderOptimisationMetricsSnapshot(task);
-
-      // Load measurement history (for current cycle)
-      await loadOptimisationMeasurementHistory(taskId, task.active_cycle_id || null, task.cycle_active || 1);
-
-      // Load events
-      await loadOptimisationTaskEvents(taskId);
+      // Phase 6: Load data for selected cycle (defaults to active cycle)
+      const selectedCycleId = window.optimisationModuleState?.selectedCycleId || task.active_cycle_id;
+      const selectedCycle = task.cycles?.find(c => c.id === selectedCycleId) || null;
+      const selectedCycleNo = selectedCycle?.cycle_no || task.cycle_no || task.cycle_active || 1;
+      
+      await loadCycleData(taskId, selectedCycleId, task.cycles, selectedCycle, selectedCycleNo, task);
 
       // Reset timeline to collapsed state
       const timelineContainer = document.getElementById('optimisation-drawer-events-container');
@@ -6774,6 +6873,310 @@
         }
       });
     }
+
+    // Phase 6: Load cycle-specific data (objective, measurements, events)
+    async function loadCycleData(taskId, cycleId, allCycles, selectedCycle, cycleNo, task) {
+      // Update objective display for selected cycle
+      const objectiveCycleEl = document.getElementById('optimisation-drawer-objective-cycle');
+      if (objectiveCycleEl) {
+        objectiveCycleEl.textContent = `(Cycle ${cycleNo})`;
+      }
+
+      // Get cycle data (use selected cycle if provided, otherwise fetch from task)
+      let cycleData = selectedCycle;
+      if (!cycleData && cycleId && allCycles) {
+        cycleData = allCycles.find(c => c.id === cycleId);
+      }
+
+      // Update objective display with selected cycle's objective
+      if (cycleData) {
+        // Merge cycle data into task for rendering
+        const cycleTask = {
+          ...task,
+          objective: cycleData.objective || null,
+          objective_status: cycleData.objective_status || 'not_set',
+          objective_progress: cycleData.objective_progress || null,
+          objective_due_at: cycleData.due_at || null,
+          objective_title: cycleData.objective_title || null,
+          primary_kpi: cycleData.primary_kpi || null,
+          target_value: cycleData.target_value != null ? parseFloat(cycleData.target_value) : null,
+          target_direction: cycleData.target_direction || null,
+          timeframe_days: cycleData.timeframe_days != null ? parseInt(cycleData.timeframe_days) : null,
+          plan: cycleData.plan || null,
+          cycle_start_date: cycleData.start_date || null
+        };
+        
+        // Re-render objective badge and content for selected cycle
+        const objectiveBadgeEl = document.getElementById('optimisation-drawer-objective-badge');
+        if (objectiveBadgeEl) {
+          const status = cycleTask.objective_status || 'not_set';
+          const badgeConfig = {
+            'met': { text: 'Met', bg: '#10b981', color: '#ffffff' },
+            'on_track': { text: 'On track', bg: '#3b82f6', color: '#ffffff' },
+            'overdue': { text: 'Overdue', bg: '#ef4444', color: '#ffffff' },
+            'not_set': { text: 'Not set', bg: '#9ca3af', color: '#ffffff' }
+          };
+          const config = badgeConfig[status] || badgeConfig['not_set'];
+          objectiveBadgeEl.textContent = config.text;
+          objectiveBadgeEl.style.background = config.bg;
+          objectiveBadgeEl.style.color = config.color;
+          objectiveBadgeEl.style.display = 'inline-block';
+        }
+        
+        // Re-render objective content (reuse existing logic from earlier in the file)
+        const objectiveContentEl = document.getElementById('optimisation-drawer-objective-content');
+        if (objectiveContentEl) {
+          const objective = cycleTask.objective || null;
+          const objectiveProgress = cycleTask.objective_progress || null;
+          const objectiveTitle = objective?.title || cycleTask.objective_title || null;
+          const objectiveKpi = objective?.kpi || cycleTask.primary_kpi || null;
+          const objectiveMetric = objective?.kpi || cycleTask.primary_kpi || null;
+          const objectiveDirection = objective?.target_type === 'delta' ? 'increase' : (cycleTask.target_direction || null);
+          const objectiveTargetValue = objective?.target != null ? objective.target : (cycleTask.target_value != null ? cycleTask.target_value : null);
+          const objectiveTimeframe = objective?.due_at ? null : (cycleTask.timeframe_days != null ? cycleTask.timeframe_days : null);
+          const objectivePlan = objective?.plan || cycleTask.plan || null;
+          const cycleStartedAt = cycleTask.cycle_start_date || null;
+
+          if (objective || objectiveTitle || objectiveKpi || objectiveMetric || objectiveDirection) {
+            let leftColumn = '';
+            let rightColumn = '';
+            
+            if (objectiveTitle) {
+              leftColumn += `<div style="margin-bottom: 0.4rem;"><strong>Title:</strong> ${escapeHtml(objectiveTitle)}</div>`;
+            }
+            if (objectiveKpi) {
+              leftColumn += `<div style="margin-bottom: 0.4rem;"><strong>KPI:</strong> ${escapeHtml(objectiveKpi)}</div>`;
+            }
+            if (objectiveMetric && objectiveDirection && objectiveTargetValue != null) {
+              const directionLabels = {
+                'increase': 'Increase by',
+                'decrease': 'Decrease by',
+                'at_least': 'At least',
+                'at_most': 'At most'
+              };
+              let targetText = ` ${directionLabels[objectiveDirection] || objectiveDirection} ${objectiveTargetValue}`;
+              if (objectiveMetric === 'ctr_28d') {
+                targetText += '%';
+              }
+              leftColumn += `<div style="margin-bottom: 0.4rem;"><strong>Target:</strong> ${escapeHtml(targetText)}</div>`;
+            }
+            
+            if (objectiveTimeframe || cycleTask.objective_due_at) {
+              let timeframeText = '';
+              const dueAt = cycleTask.objective_due_at || null;
+              if (dueAt) {
+                const dueDate = new Date(dueAt).toLocaleDateString('en-GB');
+                timeframeText = `Due: ${dueDate}`;
+              } else if (objectiveTimeframe && cycleStartedAt) {
+                timeframeText = `${objectiveTimeframe} days`;
+                const startDate = new Date(cycleStartedAt);
+                const dueDate = new Date(startDate.getTime() + objectiveTimeframe * 24 * 60 * 60 * 1000);
+                timeframeText += ` (Due: ${dueDate.toLocaleDateString('en-GB')})`;
+              }
+              if (timeframeText) {
+                rightColumn += `<div style="margin-bottom: 0.4rem;"><strong>Timeframe:</strong> ${timeframeText}</div>`;
+              }
+            }
+            
+            if (objectiveProgress && objectiveProgress.baseline_value != null && objectiveProgress.latest_value != null) {
+              const baselineVal = objectiveProgress.baseline_value;
+              const latestVal = objectiveProgress.latest_value;
+              const delta = objectiveProgress.delta != null ? objectiveProgress.delta : (latestVal - baselineVal);
+              const target = objectiveProgress.target != null ? objectiveProgress.target : objectiveTargetValue;
+              
+              if (target != null) {
+                const deltaColor = delta >= 0 ? '#10b981' : '#ef4444';
+                const deltaSign = delta >= 0 ? '+' : '';
+                const targetType = objective?.target_type || 'delta';
+                
+                // Format values based on KPI type
+                const formattedBaseline = formatProgressValue(baselineVal, objectiveKpi || objectiveMetric);
+                const formattedLatest = formatProgressValue(latestVal, objectiveKpi || objectiveMetric);
+                const formattedDelta = formatProgressValue(delta, objectiveKpi || objectiveMetric);
+                const formattedTarget = formatProgressValue(target, objectiveKpi || objectiveMetric);
+                
+                const targetText = targetType === 'delta' 
+                  ? `target ${delta >= 0 ? '+' : ''}${formattedTarget}`
+                  : `target ${formattedTarget}`;
+                rightColumn += `<div style="margin-bottom: 0.4rem;"><strong>Progress:</strong> ${formattedBaseline} → ${formattedLatest} (<span style="color: ${deltaColor}; font-weight: 600;">${deltaSign}${formattedDelta}</span>) vs ${targetText}</div>`;
+              }
+            }
+            
+            let objectiveHtml = `<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+              <div>${leftColumn || '<div style="color: #999; font-style: italic;">–</div>'}</div>
+              <div>${rightColumn || '<div style="color: #999; font-style: italic;">–</div>'}</div>
+            </div>`;
+            
+            if (objectivePlan) {
+              objectiveHtml += `<div style="margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e2e8f0;"><strong>Plan:</strong> ${escapeHtml(objectivePlan)}</div>`;
+            }
+            objectiveContentEl.innerHTML = objectiveHtml || '<div style="color: #666; font-style: italic;">No objective set</div>';
+          } else {
+            objectiveContentEl.innerHTML = '<div style="color: #666; font-style: italic;">No objective set</div>';
+          }
+        }
+      }
+
+      // Fetch baseline and latest metrics for selected cycle
+      await renderOptimisationMetricsSnapshotForCycle(taskId, cycleId, cycleNo);
+
+      // Load measurement history (for selected cycle)
+      await loadOptimisationMeasurementHistory(taskId, cycleId, cycleNo);
+
+      // Load events (filtered to selected cycle)
+      await loadOptimisationTaskEventsForCycle(taskId, cycleId, cycleNo);
+    }
+
+    // Phase 6: Render metrics snapshot for a specific cycle
+    async function renderOptimisationMetricsSnapshotForCycle(taskId, cycleId, cycleNo) {
+      // Fetch events for this cycle to get baseline and latest
+      const headers = window.getOptimisationHeaders();
+      const response = await fetch(apiUrl(`/api/optimisation/task/${taskId}/events?cycle_id=${cycleId || ''}&cycle_number=${cycleNo || ''}&event_type=measurement`), {
+        headers: headers
+      });
+
+      let baselineMetrics = null;
+      let latestMetrics = null;
+
+      if (response.ok) {
+        const data = await response.json();
+        const measurements = data.events || [];
+        
+        if (measurements.length > 0) {
+          // Sort by created_at ascending
+          const sorted = [...measurements].sort((a, b) => {
+            const dateA = new Date(a.created_at || a.event_at || 0);
+            const dateB = new Date(b.created_at || b.event_at || 0);
+            return dateA - dateB;
+          });
+          
+          baselineMetrics = sorted[0]?.metrics || null;
+          latestMetrics = sorted[sorted.length - 1]?.metrics || null;
+          
+          // Add captured_at to metrics
+          if (baselineMetrics && sorted[0].created_at) {
+            baselineMetrics.captured_at = sorted[0].created_at;
+          }
+          if (latestMetrics && sorted[sorted.length - 1].created_at) {
+            latestMetrics.captured_at = sorted[sorted.length - 1].created_at;
+          }
+        }
+      }
+
+      // Render with cycle-specific metrics
+      const cycleTask = {
+        baseline_metrics: baselineMetrics,
+        latest_metrics: latestMetrics
+      };
+      renderOptimisationMetricsSnapshot(cycleTask);
+    }
+
+    // Phase 6: Load events filtered to selected cycle
+    async function loadOptimisationTaskEventsForCycle(taskId, cycleId, cycleNo) {
+      const eventsContainer = document.getElementById('optimisation-drawer-events');
+      if (!eventsContainer) return;
+
+      try {
+        const headers = window.getOptimisationHeaders();
+        let url = apiUrl(`/api/optimisation/task/${taskId}/events`);
+        if (cycleId) {
+          url += `?cycle_id=${cycleId}`;
+        } else if (cycleNo) {
+          url += `?cycle_number=${cycleNo}`;
+        }
+        
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: headers
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to load events: ${response.status}`);
+        }
+
+        const data = await response.json();
+        let events = data.events || [];
+
+        // Filter to selected cycle if not already filtered by API
+        if (cycleId || cycleNo) {
+          events = events.filter(e => {
+            if (cycleId) return e.cycle_id === cycleId;
+            if (cycleNo) return e.cycle_number === cycleNo;
+            return true;
+          });
+        }
+
+        if (events.length === 0) {
+          eventsContainer.innerHTML = `<div style="color: #666; font-style: italic;">No events for Cycle ${cycleNo || 'this cycle'}</div>`;
+          return;
+        }
+
+        // Group events by cycle for display
+        const eventsByCycle = {};
+        events.forEach(event => {
+          const cycleKey = event.cycle_number || 'unknown';
+          if (!eventsByCycle[cycleKey]) {
+            eventsByCycle[cycleKey] = [];
+          }
+          eventsByCycle[cycleKey].push(event);
+        });
+
+        eventsContainer.innerHTML = Object.keys(eventsByCycle).sort((a, b) => {
+          if (a === 'unknown') return 1;
+          if (b === 'unknown') return -1;
+          return parseInt(b) - parseInt(a);
+        }).map(cycleKey => {
+          const cycleEvents = eventsByCycle[cycleKey];
+          const cycleLabel = cycleKey === 'unknown' ? 'Other' : `Cycle ${cycleKey}`;
+          return `
+            <div style="margin-bottom: 1.5rem;">
+              <div style="font-weight: 700; color: #1e293b; margin-bottom: 0.5rem; padding-bottom: 0.25rem; border-bottom: 2px solid #e2e8f0;">${cycleLabel}</div>
+              ${cycleEvents.map(event => {
+                const date = new Date(event.event_at || event.created_at).toLocaleString('en-GB', { timeZone: 'UTC' });
+                return `
+                  <div style="margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #eee;">
+                    <div style="font-weight: 600; color: #2563eb;">${escapeHtml(event.event_type || 'note')}</div>
+                    <div style="color: #666; font-size: 0.875rem; margin-top: 0.25rem;">${date}</div>
+                    ${event.note ? `<div style="margin-top: 0.5rem;">${escapeHtml(event.note)}</div>` : ''}
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          `;
+        }).join('');
+      } catch (error) {
+        console.error('[Optimisation Module] Error loading events:', error);
+        eventsContainer.innerHTML = '<div style="color: #ef4444;">Error loading events</div>';
+      }
+    }
+
+    // Helper function to format progress values based on KPI type
+    function formatProgressValue(value, kpi) {
+      if (value == null || value === undefined) return '—';
+      
+      // CTR values should be displayed as percentages
+      if (kpi && (kpi.includes('ctr') || kpi === 'ctr_28d')) {
+        // Convert decimal to percentage (e.g., 0.0113 → 1.13%)
+        return (value * 100).toFixed(2) + '%';
+      }
+      
+      // For other numeric values, format with appropriate precision
+      if (typeof value === 'number') {
+        // If it's a small decimal (< 1), show 2 decimal places
+        if (Math.abs(value) < 1 && value !== 0) {
+          return value.toFixed(2);
+        }
+        // For integers or large numbers, use locale string
+        if (Number.isInteger(value) || Math.abs(value) >= 1) {
+          return value.toLocaleString('en-GB', { maximumFractionDigits: 2 });
+        }
+        return value.toFixed(2);
+      }
+      
+      return value;
+    }
+
+    // Load task events (B3)
 
     // Load task events (B3)
     // Render metrics snapshot (baseline + latest + deltas)
