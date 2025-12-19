@@ -5693,12 +5693,12 @@
             bVal = b.last_activity_at ? new Date(b.last_activity_at).getTime() : (b.updated_at ? new Date(b.updated_at).getTime() : 0);
             break;
           case 'baselineCaptured':
-            aVal = a.baseline_metrics?.captured_at ? new Date(a.baseline_metrics.captured_at).getTime() : 0;
-            bVal = b.baseline_metrics?.captured_at ? new Date(b.baseline_metrics.captured_at).getTime() : 0;
+            aVal = (a.baseline_metrics?.captured_at || a.baseline_metrics?.created_at) ? new Date(a.baseline_metrics.captured_at || a.baseline_metrics.created_at).getTime() : 0;
+            bVal = (b.baseline_metrics?.captured_at || b.baseline_metrics?.created_at) ? new Date(b.baseline_metrics.captured_at || b.baseline_metrics.created_at).getTime() : 0;
             break;
           case 'latestCaptured':
-            aVal = a.latest_metrics?.captured_at ? new Date(a.latest_metrics.captured_at).getTime() : 0;
-            bVal = b.latest_metrics?.captured_at ? new Date(b.latest_metrics.captured_at).getTime() : 0;
+            aVal = (a.latest_metrics?.captured_at || a.latest_metrics?.created_at) ? new Date(a.latest_metrics.captured_at || a.latest_metrics.created_at).getTime() : 0;
+            bVal = (b.latest_metrics?.captured_at || b.latest_metrics?.created_at) ? new Date(b.latest_metrics.captured_at || b.latest_metrics.created_at).getTime() : 0;
             break;
           case 'title':
             aVal = (a.title || '').toLowerCase();
@@ -5784,11 +5784,12 @@
           : new Date(task.updated_at).toLocaleDateString('en-GB');
 
         // Format baseline and latest captured dates
-        const baselineCaptured = task.baseline_metrics?.captured_at 
-          ? new Date(task.baseline_metrics.captured_at).toLocaleDateString('en-GB')
+        // Use captured_at from metrics (set by view from event.created_at) or fallback to created_at
+        const baselineCaptured = (task.baseline_metrics?.captured_at || task.baseline_metrics?.created_at)
+          ? new Date(task.baseline_metrics.captured_at || task.baseline_metrics.created_at).toLocaleDateString('en-GB')
           : '–';
-        const latestCapturedDate = task.latest_metrics?.captured_at 
-          ? new Date(task.latest_metrics.captured_at)
+        const latestCapturedDate = (task.latest_metrics?.captured_at || task.latest_metrics?.created_at)
+          ? new Date(task.latest_metrics.captured_at || task.latest_metrics.created_at)
           : null;
         const latestCaptured = latestCapturedDate 
           ? latestCapturedDate.toLocaleDateString('en-GB')
@@ -6747,15 +6748,17 @@
         `;
       });
 
-      // Add captured_at timestamps
-      if (baseline?.captured_at || latest?.captured_at) {
+      // Add captured_at timestamps (use created_at from event if captured_at not in metrics)
+      const baselineDate = baseline?.captured_at || baseline?.created_at;
+      const latestDate = latest?.captured_at || latest?.created_at;
+      if (baselineDate || latestDate) {
         html += `
           <div style="padding: 0.5rem; border-top: 2px solid #e5e7eb; font-size: 0.85rem; color: #1e293b; font-weight: 600;">Captured</div>
           <div style="padding: 0.5rem; border-top: 2px solid #e5e7eb; font-size: 0.85rem; color: #1e293b; font-weight: 700;">
-            ${baseline?.captured_at ? new Date(baseline.captured_at).toLocaleDateString() : '—'}
+            ${baselineDate ? new Date(baselineDate).toLocaleDateString('en-GB') : '—'}
           </div>
           <div style="padding: 0.5rem; border-top: 2px solid #e5e7eb; font-size: 0.85rem; color: #1e293b; font-weight: 700;">
-            ${latest?.captured_at ? new Date(latest.captured_at).toLocaleDateString() : '—'}
+            ${latestDate ? new Date(latestDate).toLocaleDateString('en-GB') : '—'}
           </div>
         `;
       }

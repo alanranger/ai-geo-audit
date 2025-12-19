@@ -140,8 +140,9 @@ export default async function handler(req, res) {
       cycle_id: task.active_cycle_id || null,
       cycle_number: cycleNo,
       metrics: {
-        ...metrics,
-        captured_at: metrics.captured_at || new Date().toISOString()
+        ...metrics
+        // Don't set captured_at here - it will be set from event.created_at in the view
+        // If client provides captured_at, keep it; otherwise the view will use event.created_at
       },
       owner_user_id: userId
     };
