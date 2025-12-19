@@ -3854,6 +3854,10 @@
             <div style="font-size: 2rem; font-weight: bold; color: #3b82f6;" id="optimisation-summary-active">–</div>
             <div style="color: #666; margin-top: 0.5rem;">Active Tasks</div>
           </div>
+          <div class="card" style="background: #f0f9ff; border-left: 4px solid #CCFFFF; padding: 1rem;" title="Tasks with status: planned (task created but work not started).">
+            <div style="font-size: 2rem; font-weight: bold; color: #000000;" id="optimisation-summary-planned">–</div>
+            <div style="color: #666; margin-top: 0.5rem;">Planned</div>
+          </div>
           <div class="card" style="background: #f0fdf4; border-left: 4px solid #10b981; padding: 1rem;" title="Tasks with status: in_progress (actively being worked on).">
             <div style="font-size: 2rem; font-weight: bold; color: #10b981;" id="optimisation-summary-in-progress">–</div>
             <div style="color: #666; margin-top: 0.5rem;">In Progress</div>
@@ -3861,6 +3865,18 @@
           <div class="card" style="background: #eff6ff; border-left: 4px solid #2563eb; padding: 1rem;" title="Tasks with status: monitoring (changes deployed, tracking results).">
             <div style="font-size: 2rem; font-weight: bold; color: #2563eb;" id="optimisation-summary-monitoring">–</div>
             <div style="color: #666; margin-top: 0.5rem;">Monitoring</div>
+          </div>
+          <div class="card" style="background: #f0fdf4; border-left: 4px solid #059669; padding: 1rem;" title="Tasks with status: done (cycle completed; start a new cycle if optimising again).">
+            <div style="font-size: 2rem; font-weight: bold; color: #059669;" id="optimisation-summary-done">–</div>
+            <div style="color: #666; margin-top: 0.5rem;">Done</div>
+          </div>
+          <div class="card" style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 1rem;" title="Tasks with status: paused (tracking stopped; you can start a new cycle later).">
+            <div style="font-size: 2rem; font-weight: bold; color: #f59e0b;" id="optimisation-summary-paused">–</div>
+            <div style="color: #666; margin-top: 0.5rem;">Paused</div>
+          </div>
+          <div class="card" style="background: #fee2e2; border-left: 4px solid #dc2626; padding: 1rem;" title="Tasks with status: cancelled (tracking stopped; you can start a new cycle later).">
+            <div style="font-size: 2rem; font-weight: bold; color: #dc2626;" id="optimisation-summary-cancelled">–</div>
+            <div style="color: #666; margin-top: 0.5rem;">Cancelled</div>
           </div>
           <div class="card" style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 1rem;" title="Tasks that have had a measurement event created in the last 30 days.">
             <div style="font-size: 2rem; font-weight: bold; color: #f59e0b;" id="optimisation-summary-recent">–</div>
@@ -5631,8 +5647,12 @@
     function updateOptimisationSummaryCards() {
       const tasks = window.optimisationModuleState.allTasks;
       const active = tasks.filter(t => ['planned', 'in_progress', 'monitoring'].includes(t.status));
+      const planned = tasks.filter(t => t.status === 'planned');
       const inProgress = tasks.filter(t => t.status === 'in_progress');
       const monitoring = tasks.filter(t => t.status === 'monitoring');
+      const done = tasks.filter(t => t.status === 'done');
+      const paused = tasks.filter(t => t.status === 'paused');
+      const cancelled = tasks.filter(t => t.status === 'cancelled');
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
       const recent = tasks.filter(t => {
@@ -5641,13 +5661,16 @@
       });
 
       document.getElementById('optimisation-summary-active').textContent = active.length;
+      document.getElementById('optimisation-summary-planned').textContent = planned.length;
       document.getElementById('optimisation-summary-in-progress').textContent = inProgress.length;
       document.getElementById('optimisation-summary-monitoring').textContent = monitoring.length;
+      document.getElementById('optimisation-summary-done').textContent = done.length;
+      document.getElementById('optimisation-summary-paused').textContent = paused.length;
+      document.getElementById('optimisation-summary-cancelled').textContent = cancelled.length;
       document.getElementById('optimisation-summary-recent').textContent = recent.length;
 
       // Update tab counts
-      const done = tasks.filter(t => t.status === 'done');
-      const pausedCancelled = tasks.filter(t => ['paused', 'cancelled'].includes(t.status));
+      const pausedCancelled = paused.length + cancelled.length;
       
       document.querySelectorAll('.optimisation-tab-count[data-tab="active"]').forEach(el => {
         el.textContent = `(${active.length})`;
@@ -5656,7 +5679,7 @@
         el.textContent = `(${done.length})`;
       });
       document.querySelectorAll('.optimisation-tab-count[data-tab="paused-cancelled"]').forEach(el => {
-        el.textContent = `(${pausedCancelled.length})`;
+        el.textContent = `(${pausedCancelled})`;
       });
 
       // Update goal rollups (Phase B) - only count active tasks (not cancelled/deleted)
