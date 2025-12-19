@@ -6791,12 +6791,23 @@
           }
         }
 
-        // For aggregated "all_metrics": count tasks where ALL 7 metrics have the same classification
-        if (taskClassifications.length === 7) {
-          const firstClass = taskClassifications[0];
-          const allSame = taskClassifications.every(cls => cls === firstClass);
-          if (allSame && firstClass) {
-            counts.all_metrics[firstClass]++;
+        // For aggregated "all_metrics": count tasks where majority of metrics (at least 4 out of 7) have the same classification
+        if (taskClassifications.length >= 4) {
+          // Count occurrences of each classification
+          const classCounts = { worse: 0, same: 0, better: 0 };
+          taskClassifications.forEach(cls => {
+            if (cls) classCounts[cls]++;
+          });
+          
+          // Find the majority classification
+          const majority = Math.max(classCounts.worse, classCounts.same, classCounts.better);
+          const majorityClass = classCounts.worse === majority ? 'worse' :
+                                classCounts.same === majority ? 'same' :
+                                classCounts.better === majority ? 'better' : null;
+          
+          // Only count if majority is at least 4 metrics
+          if (majorityClass && majority >= 4) {
+            counts.all_metrics[majorityClass]++;
           }
         }
       }
@@ -9226,7 +9237,7 @@
           let aClass, bClass;
           
           if (filter.metricKey === 'all_metrics') {
-            // For all_metrics, check if all metrics have the same classification
+            // For all_metrics, find majority classification (at least 4 out of 7)
             const aClasses = [];
             const bClasses = [];
             
@@ -9244,9 +9255,33 @@
               }
             }
             
-            // If all 7 metrics have the same classification, use that; otherwise null
-            aClass = (aClasses.length === 7 && aClasses.every(c => c === aClasses[0])) ? aClasses[0] : null;
-            bClass = (bClasses.length === 7 && bClasses.every(c => c === bClasses[0])) ? bClasses[0] : null;
+            // Find majority classification for task A
+            if (aClasses.length >= 4) {
+              const aCounts = { worse: 0, same: 0, better: 0 };
+              aClasses.forEach(c => aCounts[c]++);
+              const aMajority = Math.max(aCounts.worse, aCounts.same, aCounts.better);
+              aClass = aCounts.worse === aMajority ? 'worse' :
+                       aCounts.same === aMajority ? 'same' :
+                       aCounts.better === aMajority ? 'better' : null;
+              // Only use if majority is at least 4
+              if (aMajority < 4) aClass = null;
+            } else {
+              aClass = null;
+            }
+            
+            // Find majority classification for task B
+            if (bClasses.length >= 4) {
+              const bCounts = { worse: 0, same: 0, better: 0 };
+              bClasses.forEach(c => bCounts[c]++);
+              const bMajority = Math.max(bCounts.worse, bCounts.same, bCounts.better);
+              bClass = bCounts.worse === bMajority ? 'worse' :
+                       bCounts.same === bMajority ? 'same' :
+                       bCounts.better === bMajority ? 'better' : null;
+              // Only use if majority is at least 4
+              if (bMajority < 4) bClass = null;
+            } else {
+              bClass = null;
+            }
           } else {
             // Single metric
             aClass = aBaselineLatest ? classifyMetric(filter.metricKey, aBaselineLatest.baseline, aBaselineLatest.latest) : null;
@@ -9420,7 +9455,7 @@
             return false;
           }
           
-          // Handle "all_metrics" filter: check that ALL 7 metrics have the same classification
+          // Handle "all_metrics" filter: check that majority of metrics (at least 4) match the bucket
           if (metricTrafficFilter.metricKey === 'all_metrics') {
             const classifications = [];
             for (const metricKey of metricKeys) {
@@ -9434,11 +9469,11 @@
               }
             }
             
-            // All 7 metrics must be classified and all must match the filter bucket
-            if (classifications.length === 7) {
-              return classifications.every(cls => cls === metricTrafficFilter.bucket);
-            }
-            return false;
+            // Count occurrences of the filter bucket
+            const bucketCount = classifications.filter(cls => cls === metricTrafficFilter.bucket).length;
+            
+            // At least 4 metrics must match the bucket (majority)
+            return bucketCount >= 4;
           } else {
             // Single metric filter
             const classification = classifyMetric(
