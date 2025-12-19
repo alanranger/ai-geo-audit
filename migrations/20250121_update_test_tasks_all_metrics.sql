@@ -59,6 +59,8 @@ BEGIN
     
     IF cycle_id_var IS NULL THEN
       -- Create a cycle if none exists
+      -- Start date: 8 weeks ago (for baseline)
+      -- Latest measurement: within last 7 days (for chart eligibility)
       cycle_id_var := gen_random_uuid();
       base_date := NOW() - INTERVAL '8 weeks';
       
@@ -199,8 +201,12 @@ BEGIN
     END IF;
     
     -- Create 8 weeks of measurements with progression from baseline to latest
+    -- Ensure latest measurement is within last 7 days for chart eligibility
+    -- Start from 7 weeks ago, end at 0-7 days ago (randomized per task for variety)
     FOR week_offset IN 0..7 LOOP
-      measurement_date := base_date + (INTERVAL '1 week' * week_offset);
+      -- Calculate date: start from 7 weeks ago, progress to recent (within last 7 days)
+      -- This ensures all tasks have measurements in the last 30 days for the chart
+      measurement_date := (NOW() - INTERVAL '7 weeks') + (INTERVAL '1 week' * week_offset) + (INTERVAL '1 day' * (pattern_num % 7));
       
       -- Interpolate between baseline and latest
       INSERT INTO public.optimisation_task_events (
