@@ -8509,67 +8509,81 @@
     
     // Update timeseries charts
     function updateTimeseriesCharts() {
-      let tasks = window.optimisationModuleState.allTasks || [];
+      let timeseries = window.optimisationModuleState.dashboardTimeseries;
       
-      // Filter out test tasks if checkbox is unchecked
+      // If no timeseries data, try to use filtered tasks
+      if (!timeseries) {
+        let tasks = window.optimisationModuleState.allTasks || [];
+        
+        // Filter out test tasks if checkbox is unchecked
+        const includeTestCheckbox = document.getElementById('optimisation-filter-include-test');
+        if (!includeTestCheckbox || !includeTestCheckbox.checked) {
+          tasks = tasks.filter(t => !t.is_test_task);
+        }
+        
+        // Recalculate median deltas by KPI from filtered tasks
+        const medianDeltaByKpi = {};
+        const deltasByKpi = {};
+        
+        for (const task of tasks) {
+          if (task.objectiveKpiKey && task.delta != null) {
+            if (!deltasByKpi[task.objectiveKpiKey]) {
+              deltasByKpi[task.objectiveKpiKey] = [];
+            }
+            deltasByKpi[task.objectiveKpiKey].push(task.delta);
+          }
+        }
+        
+        for (const [kpi, deltas] of Object.entries(deltasByKpi)) {
+          if (deltas.length > 0) {
+            deltas.sort((a, b) => a - b);
+            const mid = Math.floor(deltas.length / 2);
+            const median = deltas.length % 2 === 0
+              ? (deltas[mid - 1] + deltas[mid]) / 2
+              : deltas[mid];
+            medianDeltaByKpi[kpi] = median;
+          }
+        }
+        
+        timeseries = {
+          measurementsPerWeek: [], // Will be empty - need to reload from API
+          medianDeltaByKpi: Object.entries(medianDeltaByKpi).map(([kpi, value]) => ({ kpi, value })),
+        };
+      }
+      
+      // Filter timeseries if test tasks are excluded (recalculate median deltas)
       const includeTestCheckbox = document.getElementById('optimisation-filter-include-test');
-      if (!includeTestCheckbox || !includeTestCheckbox.checked) {
-        tasks = tasks.filter(t => !t.is_test_task);
-      }
-      
-      // Recalculate measurements per week from filtered tasks
-      const measurementsPerWeek = [];
-      const weekMap = new Map();
-      
-      for (const task of tasks) {
-        // Get measurement events for this task
-        if (task.latest_metrics && task.latest_metrics.captured_at) {
-          const date = new Date(task.latest_metrics.captured_at);
-          const weekStart = new Date(date);
-          weekStart.setDate(date.getDate() - date.getDay());
-          weekStart.setHours(0, 0, 0, 0);
-          const weekKey = weekStart.toISOString().split('T')[0];
-          
-          if (!weekMap.has(weekKey)) {
-            weekMap.set(weekKey, 0);
+      if (timeseries && (!includeTestCheckbox || !includeTestCheckbox.checked)) {
+        // Recalculate median deltas excluding test tasks
+        const tasks = (window.optimisationModuleState.allTasks || []).filter(t => !t.is_test_task);
+        const deltasByKpi = {};
+        
+        for (const task of tasks) {
+          if (task.objectiveKpiKey && task.delta != null) {
+            if (!deltasByKpi[task.objectiveKpiKey]) {
+              deltasByKpi[task.objectiveKpiKey] = [];
+            }
+            deltasByKpi[task.objectiveKpiKey].push(task.delta);
           }
-          weekMap.set(weekKey, weekMap.get(weekKey) + 1);
         }
-      }
-      
-      for (const [weekStart, count] of weekMap.entries()) {
-        measurementsPerWeek.push({ weekStart, count });
-      }
-      measurementsPerWeek.sort((a, b) => a.weekStart.localeCompare(b.weekStart));
-      
-      // Recalculate median deltas by KPI from filtered tasks
-      const medianDeltaByKpi = {};
-      const deltasByKpi = {};
-      
-      for (const task of tasks) {
-        if (task.objectiveKpiKey && task.delta != null) {
-          if (!deltasByKpi[task.objectiveKpiKey]) {
-            deltasByKpi[task.objectiveKpiKey] = [];
+        
+        const medianDeltaByKpi = {};
+        for (const [kpi, deltas] of Object.entries(deltasByKpi)) {
+          if (deltas.length > 0) {
+            deltas.sort((a, b) => a - b);
+            const mid = Math.floor(deltas.length / 2);
+            const median = deltas.length % 2 === 0
+              ? (deltas[mid - 1] + deltas[mid]) / 2
+              : deltas[mid];
+            medianDeltaByKpi[kpi] = median;
           }
-          deltasByKpi[task.objectiveKpiKey].push(task.delta);
         }
+        
+        timeseries = {
+          ...timeseries,
+          medianDeltaByKpi: Object.entries(medianDeltaByKpi).map(([kpi, value]) => ({ kpi, value })),
+        };
       }
-      
-      for (const [kpi, deltas] of Object.entries(deltasByKpi)) {
-        if (deltas.length > 0) {
-          deltas.sort((a, b) => a - b);
-          const mid = Math.floor(deltas.length / 2);
-          const median = deltas.length % 2 === 0
-            ? (deltas[mid - 1] + deltas[mid]) / 2
-            : deltas[mid];
-          medianDeltaByKpi[kpi] = median;
-        }
-      }
-      
-      const timeseries = {
-        measurementsPerWeek,
-        medianDeltaByKpi: Object.entries(medianDeltaByKpi).map(([kpi, value]) => ({ kpi, value })),
-      };
       
       // Render Measurements per Week chart (with device pixel ratio for crisp rendering)
       const measurementsCanvas = document.getElementById('chart-measurements-per-week');
@@ -8647,19 +8661,30 @@
             ctx.fillText(Math.round(value).toString(), padding.left - 10, y + 4);
           }
           
-          // Draw x-axis week labels (rotate 45 degrees) - white and larger
+          // Draw x-axis week labels (horizontal, wrapped) - white and larger
           data.forEach((d, i) => {
             const x = padding.left + (i / (data.length - 1 || 1)) * chartWidth;
             const weekDate = new Date(d.weekStart);
-            const weekLabel = `${weekDate.getDate()}/${weekDate.getMonth() + 1}`;
-            ctx.save();
-            ctx.translate(x, displayHeight - padding.bottom + 20);
-            ctx.rotate(Math.PI / 4);
+            const day = weekDate.getDate();
+            const month = weekDate.getMonth() + 1;
+            const weekLabel = `${day}/${month}`;
+            
+            // Calculate max width for label (bar width or spacing)
+            const labelMaxWidth = chartWidth / data.length * 0.9;
+            
             ctx.fillStyle = '#ffffff';
-            ctx.font = 'bold 13px sans-serif';
-            ctx.textAlign = 'left';
-            ctx.fillText(weekLabel, 0, 0);
-            ctx.restore();
+            ctx.font = 'bold 11px sans-serif';
+            ctx.textAlign = 'center';
+            
+            // Simple text wrapping: if label is too long, split it
+            const metrics = ctx.measureText(weekLabel);
+            if (metrics.width > labelMaxWidth) {
+              // Split day and month on separate lines
+              ctx.fillText(day.toString(), x, displayHeight - padding.bottom + 12);
+              ctx.fillText(month.toString(), x, displayHeight - padding.bottom + 24);
+            } else {
+              ctx.fillText(weekLabel, x, displayHeight - padding.bottom + 18);
+            }
           });
           
           // Draw line
@@ -8781,16 +8806,38 @@
             ctx.fillStyle = d.value >= 0 ? '#10b981' : '#ef4444';
             ctx.fillRect(x, y, barWidth, barHeight);
             
-            // Draw KPI label (rotated 45 degrees) - white and much larger
-            ctx.save();
-            ctx.translate(x + barWidth / 2, displayHeight - padding.bottom + 20);
-            ctx.rotate(Math.PI / 4);
+            // Draw KPI label (horizontal, wrapped) - white and much larger
+            const label = kpiLabels[d.kpi] || d.kpi.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            const labelX = x + barWidth / 2;
+            const labelMaxWidth = barWidth * 0.95;
+            
             ctx.fillStyle = '#ffffff';
-            ctx.font = 'bold 13px sans-serif';
-            ctx.textAlign = 'left';
-            const label = kpiLabels[d.kpi] || d.kpi.replace(/_/g, ' ').substring(0, 10);
-            ctx.fillText(label, 0, 0);
-            ctx.restore();
+            ctx.font = 'bold 11px sans-serif';
+            ctx.textAlign = 'center';
+            
+            // Simple word wrapping: split on spaces if needed
+            const words = label.split(' ');
+            const lines = [];
+            let currentLine = '';
+            
+            for (const word of words) {
+              const testLine = currentLine ? `${currentLine} ${word}` : word;
+              const metrics = ctx.measureText(testLine);
+              if (metrics.width > labelMaxWidth && currentLine) {
+                lines.push(currentLine);
+                currentLine = word;
+              } else {
+                currentLine = testLine;
+              }
+            }
+            if (currentLine) lines.push(currentLine);
+            
+            // Draw lines centered under the bar
+            const lineHeight = 12;
+            const startY = displayHeight - padding.bottom + 15;
+            lines.forEach((line, lineIdx) => {
+              ctx.fillText(line, labelX, startY + (lineIdx * lineHeight));
+            });
           });
         }
       }
