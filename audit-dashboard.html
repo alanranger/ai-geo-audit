@@ -27692,7 +27692,10 @@ Final Score: ${score}/100`;
           }
 
           const history = json.data || [];
+          const timeseries = json.timeseries || [];
           cachedAuditHistory = history;
+          
+          debugLog(`[KPI Tracker] Loaded ${history.length} audit records and ${timeseries.length} timeseries records`, 'info');
           
           if (history.length === 0) {
             const card = document.getElementById("money-pages-kpi-card");
@@ -27781,7 +27784,14 @@ Final Score: ${score}/100`;
 
           // Get timeseries data from API response (actual GSC data for all dates)
           const timeseries = json.timeseries || [];
-          debugLog(`✓ Money Pages KPI Tracker: Using ${timeseries.length} timeseries data points from GSC`, 'info');
+          if (timeseries.length === 0) {
+            debugLog(`⚠ Money Pages KPI Tracker: No timeseries data returned from API. Check API logs.`, 'warn');
+            debugLog(`⚠ API response keys: ${Object.keys(json).join(', ')}`, 'warn');
+            debugLog(`⚠ API response status: ${json.status}`, 'warn');
+          } else {
+            debugLog(`✓ Money Pages KPI Tracker: Using ${timeseries.length} timeseries data points from GSC`, 'info');
+            debugLog(`✓ Timeseries date range: ${timeseries[0]?.date} to ${timeseries[timeseries.length - 1]?.date}`, 'info');
+          }
           
           // Get latest audit's moneyPagePriorityData for proportions
           const latestAudit = filteredHistory.length > 0 ? filteredHistory[filteredHistory.length - 1] : null;

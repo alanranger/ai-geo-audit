@@ -94,9 +94,13 @@ export default async function handler(req, res) {
           ctr: parseFloat(record.ctr) || 0,
           position: parseFloat(record.position) || 0
         }));
+        console.log(`[get-audit-history] Fetched ${timeseries.length} timeseries records for ${propertyUrl}`);
+      } else {
+        const errorText = await timeseriesResponse.text();
+        console.error(`[get-audit-history] Failed to fetch timeseries: ${timeseriesResponse.status} - ${errorText}`);
       }
     } catch (error) {
-      console.error('Error fetching timeseries data:', error);
+      console.error('[get-audit-history] Error fetching timeseries data:', error);
       // Continue without timeseries data
     }
 
