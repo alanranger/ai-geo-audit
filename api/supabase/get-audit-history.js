@@ -66,15 +66,29 @@ export default async function handler(req, res) {
     }
     
     // CRITICAL: Also fetch timeseries data from gsc_timeseries table for Score Trends chart
+    // Always fetch last 28 days of timeseries data (matching Money Pages date range)
     let timeseries = [];
     try {
-      let timeseriesQuery = `${supabaseUrl}/rest/v1/gsc_timeseries?property_url=eq.${encodeURIComponent(propertyUrl)}&order=date.asc`;
-      if (startDate) {
-        timeseriesQuery += `&date=gte.${startDate}`;
-      }
-      if (endDate) {
-        timeseriesQuery += `&date=lte.${endDate}`;
-      }
+      // Calculate 28-day range ending today (GSC data is always 1-2 days behind)
+      const today = new Date();
+      const endDateForTimeseries = new Date(today);
+      endDateForTimeseries.setDate(endDateForTimeseries.getDate() - 1); // Yesterday (GSC is 1 day behind)
+      const startDateForTimeseries = new Date(endDateForTimeseries);
+      startDateForTimeseries.setDate(startDateForTimeseries.getDate() - 27); // 27 days back + end date = 28 days total
+      
+      const formatDate = (date) => {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      };
+      
+      const timeseriesStartDate = formatDate(startDateForTimeseries);
+      const timeseriesEndDate = formatDate(endDateForTimeseries);
+      
+      let timeseriesQuery = `${supabaseUrl}/rest/v1/gsc_timeseries?property_url=eq.${encodeURIComponent(propertyUrl)}&date=gte.${timeseriesStartDate}&date=lte.${timeseriesEndDate}&order=date.asc`;
+      
+      console.log(`[get-audit-history] Fetching timeseries for ${propertyUrl} from ${timeseriesStartDate} to ${timeseriesEndDate}`);
       
       const timeseriesResponse = await fetch(timeseriesQuery, {
         method: 'GET',
@@ -94,7 +108,10 @@ export default async function handler(req, res) {
           ctr: parseFloat(record.ctr) || 0,
           position: parseFloat(record.position) || 0
         }));
-        console.log(`[get-audit-history] Fetched ${timeseries.length} timeseries records for ${propertyUrl}`);
+        console.log(`[get-audit-history] Fetched ${timeseries.length} timeseries records for ${propertyUrl} (${timeseriesStartDate} to ${timeseriesEndDate})`);
+        if (timeseries.length === 0) {
+          console.warn(`[get-audit-history] WARNING: No timeseries data found in database for date range ${timeseriesStartDate} to ${timeseriesEndDate}`);
+        }
       } else {
         const errorText = await timeseriesResponse.text();
         console.error(`[get-audit-history] Failed to fetch timeseries: ${timeseriesResponse.status} - ${errorText}`);
