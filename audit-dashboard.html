@@ -22994,7 +22994,7 @@ Final Score: ${score}/100`;
       }
       
       // Function to render Money Pages table (with pagination and sorting, matching Top Pages format)
-      function renderMoneyPagesTable(moneyRows, currentPage = 1, rowsPerPage = 10) {
+      async function renderMoneyPagesTable(moneyRows, currentPage = 1, rowsPerPage = 10) {
         try {
           if (!moneyRows || moneyRows.length === 0) {
             return '<div style="font-size: 0.85rem; color: #999; padding: 1rem; text-align: center;">No money-page data available for this audit period. Check that your money pages have impressions in the selected date range.</div>';
@@ -23612,7 +23612,7 @@ Final Score: ${score}/100`;
       }
       
       // Function to render Money Pages Performance section
-      function renderMoneyPagesSection(moneyPagesMetrics) {
+      async function renderMoneyPagesSection(moneyPagesMetrics) {
         // Get or create the Money Pages panel
         const moneyPanel = document.querySelector('.aigeo-panel[data-panel="money"]');
         if (!moneyPanel) {
@@ -24001,7 +24001,7 @@ Final Score: ${score}/100`;
         updateMoneyPagesSubSegmentCounts(moneyPagesMetrics);
         
         // Function to apply filters and re-render ALL sections (table, chart, KPIs, summaries)
-        const applyFiltersAndRender = () => {
+        const applyFiltersAndRender = async () => {
           const moneyPagesMetrics = window.currentMoneyPagesMetrics;
           const queryPages = window.currentQueryPages || null;
           
@@ -24016,7 +24016,7 @@ Final Score: ${score}/100`;
           // Update table with FILTERED rows
           const currentPage = window.moneyPagesCurrentPage || 1;
           const rowsPerPage = window.moneyPagesRowsPerPage || 10;
-          const tableHtml = renderMoneyPagesTable(filteredRows, currentPage, rowsPerPage);
+          const tableHtml = await renderMoneyPagesTable(filteredRows, currentPage, rowsPerPage);
           if (tableHtml && typeof tableHtml === 'string') {
             tableContainer.innerHTML = tableHtml;
           } else {
@@ -24064,7 +24064,7 @@ Final Score: ${score}/100`;
         // Initial render
         const currentPage = window.moneyPagesCurrentPage || 1;
         const rowsPerPage = window.moneyPagesRowsPerPage || 10;
-        const tableHtml = renderMoneyPagesTable(rows, currentPage, rowsPerPage);
+        const tableHtml = await renderMoneyPagesTable(rows, currentPage, rowsPerPage);
         if (tableHtml && typeof tableHtml === 'string') {
           tableContainer.innerHTML = tableHtml;
         } else {
@@ -24105,7 +24105,7 @@ Final Score: ${score}/100`;
       }
       
       // Handle sorting for Money Pages table
-      function handleMoneyPagesSort(column) {
+      async function handleMoneyPagesSort(column) {
         if (window.moneyPagesSortColumn === column) {
           window.moneyPagesSortDirection = window.moneyPagesSortDirection === 'asc' ? 'desc' : 'asc';
         } else {
@@ -24122,7 +24122,7 @@ Final Score: ${score}/100`;
           const tableContainer = document.getElementById('money-pages-table-container');
           if (tableContainer) {
             const rowsPerPage = window.moneyPagesRowsPerPage || 10;
-            tableContainer.innerHTML = renderMoneyPagesTable(allRows, 1, rowsPerPage);
+            tableContainer.innerHTML = await renderMoneyPagesTable(allRows, 1, rowsPerPage);
             attachMoneyPagesSortHandlers();
             attachMoneyPagesPaginationHandlers(allRows);
             attachMoneyPagesCopyHandler(allRows);
@@ -24151,7 +24151,7 @@ Final Score: ${score}/100`;
               window.moneyPagesCurrentPage = 1; // Reset to first page when changing rows per page
               const tableContainer = document.getElementById('money-pages-table-container');
               if (tableContainer) {
-                tableContainer.innerHTML = renderMoneyPagesTable(sortedRows, 1, newRowsPerPage);
+                tableContainer.innerHTML = await renderMoneyPagesTable(sortedRows, 1, newRowsPerPage);
                 attachMoneyPagesSortHandlers();
                 attachMoneyPagesPaginationHandlers(sortedRows);
                 attachMoneyPagesCopyHandler(sortedRows);
@@ -24162,13 +24162,13 @@ Final Score: ${score}/100`;
           if (prevBtn) {
             const newPrevBtn = prevBtn.cloneNode(true);
             prevBtn.parentNode.replaceChild(newPrevBtn, prevBtn);
-            newPrevBtn.addEventListener('click', () => {
+              newPrevBtn.addEventListener('click', async () => {
               if (window.moneyPagesCurrentPage > 1) {
                 window.moneyPagesCurrentPage--;
                 const tableContainer = document.getElementById('money-pages-table-container');
                 if (tableContainer) {
                   const currentRowsPerPage = window.moneyPagesRowsPerPage || 10;
-                  tableContainer.innerHTML = renderMoneyPagesTable(sortedRows, window.moneyPagesCurrentPage, currentRowsPerPage);
+                  tableContainer.innerHTML = await renderMoneyPagesTable(sortedRows, window.moneyPagesCurrentPage, currentRowsPerPage);
                   attachMoneyPagesSortHandlers();
                   attachMoneyPagesPaginationHandlers(sortedRows);
                   attachMoneyPagesCopyHandler(sortedRows);
@@ -24180,14 +24180,14 @@ Final Score: ${score}/100`;
           if (nextBtn) {
             const newNextBtn = nextBtn.cloneNode(true);
             nextBtn.parentNode.replaceChild(newNextBtn, nextBtn);
-            newNextBtn.addEventListener('click', () => {
+            newNextBtn.addEventListener('click', async () => {
               const currentRowsPerPage = window.moneyPagesRowsPerPage || 10;
               const totalPages = Math.ceil(sortedRows.length / currentRowsPerPage);
               if (window.moneyPagesCurrentPage < totalPages) {
                 window.moneyPagesCurrentPage++;
                 const tableContainer = document.getElementById('money-pages-table-container');
                 if (tableContainer) {
-                  tableContainer.innerHTML = renderMoneyPagesTable(sortedRows, window.moneyPagesCurrentPage, currentRowsPerPage);
+                  tableContainer.innerHTML = await renderMoneyPagesTable(sortedRows, window.moneyPagesCurrentPage, currentRowsPerPage);
                   attachMoneyPagesSortHandlers();
                   attachMoneyPagesPaginationHandlers(sortedRows);
                   attachMoneyPagesCopyHandler(sortedRows);
@@ -24283,7 +24283,7 @@ Final Score: ${score}/100`;
               // Update table with FILTERED rows
               const currentPage = 1;
               const rowsPerPage = window.moneyPagesRowsPerPage || 10;
-              tableContainer.innerHTML = renderMoneyPagesTable(filteredRows, currentPage, rowsPerPage);
+              tableContainer.innerHTML = await renderMoneyPagesTable(filteredRows, currentPage, rowsPerPage);
               attachMoneyPagesSortHandlers();
               attachMoneyPagesPaginationHandlers(filteredRows);
               attachMoneyPagesCopyHandler(filteredRows);
@@ -24591,7 +24591,7 @@ Final Score: ${score}/100`;
             if (moneyPagesContainer) {
               const currentPage = window.moneyPagesCurrentPage || 1;
               const rowsPerPage = window.moneyPagesRowsPerPage || 10;
-              moneyPagesContainer.innerHTML = renderMoneyPagesTable(window.moneyPagesMetrics.rows, currentPage, rowsPerPage);
+              moneyPagesContainer.innerHTML = await renderMoneyPagesTable(window.moneyPagesMetrics.rows, currentPage, rowsPerPage);
               // Re-attach event handlers (they're set up in the render function)
             }
           }
