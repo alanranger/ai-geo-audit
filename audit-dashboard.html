@@ -23064,7 +23064,7 @@ Final Score: ${score}/100`;
                 </label>
                 <label style="display: flex; align-items: center; gap: 0.5rem;" title="Filter out pages with fewer impressions than this threshold. Helps focus on pages with meaningful search visibility.">
                   Min impressions:
-                  <input type="number" id="money-pages-min-impr" value="10" min="0" step="10" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 4px; width: 120px;" title="Filter out pages with fewer impressions than this threshold. Helps focus on pages with meaningful search visibility.">
+                  <input type="number" id="money-pages-min-impr" value="0" min="0" step="10" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 4px; width: 120px;" title="Filter out pages with fewer impressions than this threshold. Helps focus on pages with meaningful search visibility.">
                 </label>
               </div>
 
@@ -23132,14 +23132,14 @@ Final Score: ${score}/100`;
             cardHeader.innerHTML = '';
             cardHeader.appendChild(contentWrapper);
             
-            // Add button
+            // Add bulk create button (secondary/advanced)
             const createBtn = document.createElement('button');
             createBtn.id = 'money-pages-create-tasks-btn';
             createBtn.type = 'button';
-            createBtn.className = 'btn';
-            createBtn.textContent = 'Create optimisation tasks';
-            createBtn.title = 'Create optimisation tasks for all money pages with CTR objective (≥2.5%)';
-            createBtn.style.cssText = 'margin-left: 1rem; padding: 0.5rem 1rem; background: #3b82f6; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; white-space: nowrap;';
+            createBtn.className = 'btn btn-secondary';
+            createBtn.textContent = 'Bulk create…';
+            createBtn.title = 'Create optimisation tasks for all money pages with CTR objective (≥2.5%). Use row-level Track buttons for individual pages.';
+            createBtn.style.cssText = 'margin-left: 1rem; padding: 0.5rem 1rem; background: #64748b; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; white-space: nowrap; font-size: 0.875rem;';
             cardHeader.appendChild(createBtn);
             
             // Wire up button
@@ -23687,7 +23687,7 @@ Final Score: ${score}/100`;
         }
       }
       
-      // Normalize URL for de-dupe matching
+      // Normalize URL for de-dupe matching (reusable helper)
       function normalizeUrlForDedupe(url) {
         if (!url) return '';
         
@@ -23716,6 +23716,78 @@ Final Score: ${score}/100`;
         
         return normalized;
       }
+      
+      // Get task identity key for Money Page (reusable helper)
+      function getMoneyPageTaskKey(pageUrl) {
+        return normalizeUrlForDedupe(pageUrl);
+      }
+      
+      // Find existing optimisation task for URL (reusable helper)
+      function findExistingOptimisationTaskForUrl(tasks, pageUrl) {
+        if (!tasks || !Array.isArray(tasks)) return null;
+        const normalizedUrl = normalizeUrlForDedupe(pageUrl);
+        return tasks.find(task => {
+          if (!task.target_url) return false;
+          return normalizeUrlForDedupe(task.target_url) === normalizedUrl;
+        }) || null;
+      }
+      
+      // Make helper functions globally available (reusable by Ranking & AI and Money Pages)
+      window.getMoneyPageTaskKey = getMoneyPageTaskKey;
+      window.findExistingOptimisationTaskForUrl = findExistingOptimisationTaskForUrl;
+      window.normalizeUrlForDedupe = normalizeUrlForDedupe;
+      
+      // Create optimisation task for URL (reusable helper - used by both Money Pages and Ranking & AI)
+      async function createOptimisationTaskForUrl(pageUrl, pageTitle, source = 'money_pages') {
+        const adminKey = sessionStorage.getItem('aigeo_admin_key') || localStorage.getItem('aigeo_admin_key');
+        if (!adminKey) {
+          throw new Error('Admin key required');
+        }
+        
+        const normalizedUrl = normalizeUrlForDedupe(pageUrl);
+        const title = pageTitle || normalizedUrl;
+        
+        // Build task payload
+        const taskPayload = {
+          keyword_text: normalizedUrl, // API requires non-empty, use URL as placeholder for page-level tasks
+          target_url: normalizedUrl,
+          task_type: 'on_page',
+          status: 'planned',
+          title: source === 'money_pages' ? `MP: ${title}` : title,
+          source: source,
+          is_test: false
+        };
+        
+        // Create task
+        const taskResponse = await fetch('/api/optimisation/task', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-arp-admin-key': adminKey
+          },
+          body: JSON.stringify(taskPayload)
+        });
+        
+        if (!taskResponse.ok) {
+          const errorText = await taskResponse.text();
+          throw new Error(`Failed to create task: ${errorText}`);
+        }
+        
+        const taskData = await taskResponse.json();
+        const taskId = taskData.task?.id || taskData.id;
+        
+        if (!taskId) {
+          throw new Error('Task created but no ID returned');
+        }
+        
+        // Create Cycle 1 with absolute CTR objective (2.5% = 0.025 ratio)
+        await createCycleWithAbsoluteCtrObjective(taskId, adminKey);
+        
+        return taskData;
+      }
+      
+      // Make createOptimisationTaskForUrl globally available
+      window.createOptimisationTaskForUrl = createOptimisationTaskForUrl;
       
       // Step 5: Build optimisation task payload from Money Page row
       // CTR target: 2.5% absolute (stored as 0.025 ratio)
@@ -25157,25 +25229,56 @@ Final Score: ${score}/100`;
         const endIndex = startIndex + rowsPerPage;
         const pageRows = rows.slice(startIndex, endIndex);
         
-        // Render sortable header
-        const sortArrow = (col) => {
+        // Render sortable header with Ranking & AI styling
+        const sortClass = (col) => {
           if (moneyPagesTableSort.column === col) {
-            return moneyPagesTableSort.direction === 'asc' ? ' ↑' : ' ↓';
+            return moneyPagesTableSort.direction === 'asc' ? 'sort-asc' : 'sort-desc';
           }
           return '';
         };
         
         thead.innerHTML = `
           <tr style="background: #f1f5f9;">
-            <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none;" data-sort="page">Page${sortArrow('page')}</th>
-            <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none;" data-sort="type">Type${sortArrow('type')}</th>
-            <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none;" data-sort="priority">Priority${sortArrow('priority')}</th>
-            <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none;" data-sort="impact">Impact${sortArrow('impact')}</th>
-            <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none;" data-sort="difficulty">Difficulty${sortArrow('difficulty')}</th>
-            <th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none;" data-sort="ctr">CTR${sortArrow('ctr')}</th>
-            <th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none;" data-sort="impressions">Impr.${sortArrow('impressions')}</th>
-            <th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none;" data-sort="avgPosition">Avg pos.${sortArrow('avgPosition')}</th>
-            <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0; cursor: pointer; user-select: none;" data-sort="action">Action${sortArrow('action')}</th>
+            <th data-sort="page" class="sortable ${sortClass('page')}" style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;" title="The URL of the money page. Click to open in a new tab.">
+              <div>Page <span class="sort-indicator"></span></div>
+              <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="The URL of the money page. Click to open in a new tab.">ℹ</div>
+            </th>
+            <th data-sort="type" class="sortable ${sortClass('type')}" style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;" title="Segment type: Landing (collection/category pages), Event (workshop/event listings), or Product (service/product offerings).">
+              <div>Type <span class="sort-indicator"></span></div>
+              <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Segment type: Landing (collection/category pages), Event (workshop/event listings), or Product (service/product offerings).">ℹ</div>
+            </th>
+            <th data-sort="priority" class="sortable ${sortClass('priority')}" style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;" title="Priority level (HIGH/MEDIUM/LOW) based on impact and difficulty. HIGH priority = high impact + low/medium difficulty. Click column header to sort.">
+              <div>Priority <span class="sort-indicator"></span></div>
+              <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Priority level (HIGH/MEDIUM/LOW) based on impact and difficulty. HIGH priority = high impact + low/medium difficulty. Click column header to sort.">ℹ</div>
+            </th>
+            <th data-sort="impact" class="sortable ${sortClass('impact')}" style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;" title="Impact level based on lost clicks (expected CTR minus actual CTR). HIGH = significant opportunity to improve clicks. Click column header to sort.">
+              <div>Impact <span class="sort-indicator"></span></div>
+              <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Impact level based on lost clicks (expected CTR minus actual CTR). HIGH = significant opportunity to improve clicks. Click column header to sort.">ℹ</div>
+            </th>
+            <th data-sort="difficulty" class="sortable ${sortClass('difficulty')}" style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;" title="Difficulty level based on current ranking position and schema effort required. LOW = easy to improve, HIGH = requires more work. Click column header to sort.">
+              <div>Difficulty <span class="sort-indicator"></span></div>
+              <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Difficulty level based on current ranking position and schema effort required. LOW = easy to improve, HIGH = requires more work. Click column header to sort.">ℹ</div>
+            </th>
+            <th data-sort="ctr" class="sortable ${sortClass('ctr')}" style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0;" title="Click-through rate: percentage of impressions that resulted in clicks. Higher is better. Click column header to sort.">
+              <div style="text-align: right;">CTR <span class="sort-indicator"></span></div>
+              <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Click-through rate: percentage of impressions that resulted in clicks. Higher is better. Click column header to sort.">ℹ</div>
+            </th>
+            <th data-sort="impressions" class="sortable ${sortClass('impressions')}" style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0;" title="Total impressions: number of times this page appeared in search results. Click column header to sort.">
+              <div style="text-align: right;">Impr. <span class="sort-indicator"></span></div>
+              <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Total impressions: number of times this page appeared in search results. Click column header to sort.">ℹ</div>
+            </th>
+            <th data-sort="avgPosition" class="sortable ${sortClass('avgPosition')}" style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0;" title="Average position: average ranking position in search results (1 = best, lower numbers are better). Click column header to sort.">
+              <div style="text-align: right;">Avg pos. <span class="sort-indicator"></span></div>
+              <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Average position: average ranking position in search results (1 = best, lower numbers are better). Click column header to sort.">ℹ</div>
+            </th>
+            <th data-sort="action" class="sortable ${sortClass('action')}" style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;" title="Recommended action based on priority level. HIGH = Fix CTR & strengthen content, MEDIUM = Improve SERP snippet & schema, LOW = Monitor & maintain.">
+              <div>Action <span class="sort-indicator"></span></div>
+              <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Recommended action based on priority level. HIGH = Fix CTR & strengthen content, MEDIUM = Improve SERP snippet & schema, LOW = Monitor & maintain.">ℹ</div>
+            </th>
+            <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;" title="Optimisation tracking status for this page. Shows whether optimisation work is planned, in progress, being monitored, or completed.">
+              <div>Optimisation</div>
+              <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Optimisation tracking status for this page. Shows whether optimisation work is planned, in progress, being monitored, or completed.">ℹ</div>
+            </th>
           </tr>
         `;
         
@@ -25238,6 +25341,58 @@ Final Score: ${score}/100`;
                 ? `Domain strength: ${authScore != null ? authScore.toFixed(1) : '—'}${authBand ? ` (${authBand})` : ''}`
                 : null;
 
+            // Get optimisation status for this page
+            const taskType = 'on_page';
+            const optimisationStatus = window.getOptimisationStatus ? window.getOptimisationStatus({ targetUrl: p.url, keyword: '' }, taskType) : null;
+            const hasTask = optimisationStatus && optimisationStatus.status && optimisationStatus.status !== 'deleted';
+            const taskId = hasTask ? (optimisationStatus.taskId || null) : null;
+            const statusText = hasTask ? (optimisationStatus.status || 'planned') : null;
+            
+            // Build optimisation column HTML
+            let optimisationHtml = '';
+            if (!hasTask || statusText === 'done' || statusText === 'cancelled') {
+              // Not tracked or done/cancelled - show Track button
+              const statusLabel = !hasTask ? 'Not tracked' : (statusText === 'done' ? 'Done' : 'Cancelled');
+              optimisationHtml = `
+                <td style="padding: 0.75rem;" data-page-url="${p.url}" data-page-title="${p.title || p.url || 'Untitled'}">
+                  <span class="ranking-badge ranking-badge--segment-general" style="margin-right: 0.5rem; display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; background: #f1f5f9; color: #64748b; font-size: 0.75rem; font-weight: 600;">${statusLabel}</span>
+                  <button class="btn btn-small money-pages-track-btn" style="padding: 0.15rem 0.4rem; font-size: 0.75rem; font-weight: 550; background: #2563eb; color: #ffffff; border: 1px solid #1e40af; border-radius: 4px; cursor: pointer;" data-page-url="${p.url}" data-page-title="${p.title || p.url || 'Untitled'}">${!hasTask ? 'Track' : 'Track again'}</button>
+                </td>
+              `;
+            } else {
+              // Tracked - show status badge + Manage button
+              const statusLabels = {
+                'planned': 'Planned',
+                'in_progress': 'In progress',
+                'monitoring': 'Monitoring',
+                'done': 'Done',
+                'cancelled': 'Cancelled'
+              };
+              const statusColors = {
+                'planned': '#64748b',
+                'in_progress': '#2563eb',
+                'monitoring': '#10b981',
+                'done': '#10b981',
+                'cancelled': '#ef4444'
+              };
+              const statusBg = {
+                'planned': '#f1f5f9',
+                'in_progress': '#dbeafe',
+                'monitoring': '#ecfdf5',
+                'done': '#ecfdf5',
+                'cancelled': '#fee2e2'
+              };
+              const statusLabel = statusLabels[statusText] || statusText;
+              const statusColor = statusColors[statusText] || '#64748b';
+              const statusBgColor = statusBg[statusText] || '#f1f5f9';
+              optimisationHtml = `
+                <td style="padding: 0.75rem;" data-page-url="${p.url}" data-task-id="${taskId || ''}">
+                  <span class="ranking-badge ranking-badge--segment-general" style="margin-right: 0.5rem; display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; background: ${statusBgColor}; color: ${statusColor}; font-size: 0.75rem; font-weight: 600;">${statusLabel}</span>
+                  <button class="btn btn-small money-pages-manage-btn" style="padding: 0.15rem 0.4rem; font-size: 0.75rem; font-weight: 550; background: #10b981; color: #ffffff; border: 1px solid #059669; border-radius: 4px; cursor: pointer;" data-task-id="${taskId || ''}" data-page-url="${p.url}">Manage</button>
+                </td>
+              `;
+            }
+            
             return `
               <tr style="border-bottom: 1px solid #e2e8f0;">
                 <td style="padding: 0.75rem;">
@@ -25252,6 +25407,7 @@ Final Score: ${score}/100`;
                 <td style="padding: 0.75rem; text-align: right;">${isAuthorityAction ? '—' : `${(p.impressions || 0).toLocaleString()}`}</td>
                 <td style="padding: 0.75rem; text-align: right;">${isAuthorityAction ? '—' : (p.avgPosition ? p.avgPosition.toFixed(1) : "—")}</td>
                 <td style="padding: 0.75rem;">${action}</td>
+                ${optimisationHtml}
               </tr>
             `;
           })
@@ -25270,6 +25426,107 @@ Final Score: ${score}/100`;
             });
           };
         }
+        
+        // Wire Track/Manage buttons after table is rendered
+        setTimeout(() => {
+          // Track buttons
+          tbody.querySelectorAll('.money-pages-track-btn').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+              e.stopPropagation();
+              if (window.isShareMode) {
+                alert('Write operations are not available in share mode (read-only).');
+                return;
+              }
+              if (!window.hasAdminKey()) {
+                alert('Admin key required. Please set your admin key in the "Optimisation Tracking Security" section.');
+                return;
+              }
+              
+              const pageUrl = btn.getAttribute('data-page-url');
+              const pageTitle = btn.getAttribute('data-page-title');
+              
+              try {
+                btn.disabled = true;
+                btn.textContent = 'Creating...';
+                
+                // Check if task already exists (de-dupe)
+                const existingTasks = window.optimisationTasksMap || {};
+                const existingTask = findExistingOptimisationTaskForUrl(Object.values(existingTasks), pageUrl);
+                
+                if (existingTask) {
+                  // Task exists - open Manage instead
+                  const taskId = existingTask.id;
+                  if (window.openOptimisationTaskDrawer && typeof window.openOptimisationTaskDrawer === 'function') {
+                    window.openOptimisationTaskDrawer(taskId);
+                  } else {
+                    // Fallback: navigate to Optimisation Tracking
+                    const optimisationTab = document.querySelector('[data-panel="optimisation"]');
+                    if (optimisationTab) {
+                      const tabBtn = document.querySelector(`button[data-tab="optimisation"]`);
+                      if (tabBtn) tabBtn.click();
+                      setTimeout(() => {
+                        if (window.openOptimisationTaskDrawer && typeof window.openOptimisationTaskDrawer === 'function') {
+                          window.openOptimisationTaskDrawer(taskId);
+                        }
+                      }, 500);
+                    }
+                  }
+                  return;
+                }
+                
+                // Create task
+                await createOptimisationTaskForUrl(pageUrl, pageTitle, 'money_pages');
+                
+                // Refresh optimisation tasks map
+                if (window.refreshOptimisationTasks && typeof window.refreshOptimisationTasks === 'function') {
+                  await window.refreshOptimisationTasks();
+                }
+                
+                // Re-render table to show Manage button
+                renderMoneyPagesTable(moneyPages, filters);
+                
+                // Show toast
+                if (window.showToast && typeof window.showToast === 'function') {
+                  window.showToast(`Created optimisation task for ${pageTitle}`, 'success');
+                }
+              } catch (error) {
+                console.error('[Money Pages] Error creating task:', error);
+                alert(`Failed to create task: ${error.message}`);
+                btn.disabled = false;
+                btn.textContent = btn.getAttribute('data-page-url') ? 'Track' : 'Track again';
+              }
+            });
+          });
+          
+          // Manage buttons
+          tbody.querySelectorAll('.money-pages-manage-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              const taskId = btn.getAttribute('data-task-id');
+              if (!taskId) {
+                alert('Task ID not found');
+                return;
+              }
+              
+              // Open task drawer
+              if (window.openOptimisationTaskDrawer && typeof window.openOptimisationTaskDrawer === 'function') {
+                window.openOptimisationTaskDrawer(taskId);
+              } else {
+                // Fallback: navigate to Optimisation Tracking
+                const optimisationTab = document.querySelector('[data-panel="optimisation"]');
+                if (optimisationTab) {
+                  const tabBtn = document.querySelector(`button[data-tab="optimisation"]`);
+                  if (tabBtn) tabBtn.click();
+                  setTimeout(() => {
+                    if (window.openOptimisationTaskDrawer && typeof window.openOptimisationTaskDrawer === 'function') {
+                      window.openOptimisationTaskDrawer(taskId);
+                    }
+                  }, 500);
+                }
+              }
+            });
+          });
+        }, 100);
         
         // Render pagination controls
         renderMoneyPagesPriorityPagination(totalRows, currentPage, totalPages, rowsPerPage);
@@ -27638,7 +27895,7 @@ Final Score: ${score}/100`;
                 </label>
                 <label style="display: flex; align-items: center; gap: 0.5rem;" title="Filter out pages with fewer impressions than this threshold. Helps focus on pages with meaningful search visibility.">
                   Min impressions:
-                  <input type="number" id="money-pages-min-impr" value="10" min="0" step="10" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 4px; width: 120px;" title="Filter out pages with fewer impressions than this threshold. Helps focus on pages with meaningful search visibility.">
+                  <input type="number" id="money-pages-min-impr" value="0" min="0" step="10" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 4px; width: 120px;" title="Filter out pages with fewer impressions than this threshold. Helps focus on pages with meaningful search visibility.">
                 </label>
               </div>
 
