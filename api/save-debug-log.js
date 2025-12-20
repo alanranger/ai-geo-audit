@@ -79,8 +79,8 @@ Generated: ${new Date().toISOString()}
     if (supabaseUrl && supabaseKey) {
       try {
         // Save to Supabase using REST API (same pattern as other endpoints)
-        // Insert into debug_logs table (will be created automatically or we can create it)
-        const saveResponse = await fetch(`${supabaseUrl}/rest/v1/debug_logs`, {
+        // Insert into audit_debug_logs table
+        const saveResponse = await fetch(`${supabaseUrl}/rest/v1/audit_debug_logs`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
