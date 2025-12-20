@@ -12179,23 +12179,50 @@
                     });
                     
                     if (matchingQueries.length > 0) {
-                      // Use the first matching query or aggregate if multiple
-                      const qt = matchingQueries[0];
-                      console.log('[Optimisation] Found matching query totals:', qt);
-                      currentMetrics = {
-                        gsc_clicks_28d: qt.clicks || null,
-                        gsc_impressions_28d: qt.impressions || null,
-                        gsc_ctr_28d: qt.ctr != null ? (qt.ctr / 100) : null, // Convert percentage to ratio
-                        current_rank: qt.best_rank || qt.avg_position || null,
-                        opportunity_score: qt.opportunityScore || null,
-                        ai_overview: qt.has_ai_overview || false,
-                        ai_citations: qt.ai_alan_citations_count || 0,
-                        ai_citations_total: qt.ai_total_citations || 0,
-                        classic_ranking_url: qt.best_url || qt.targetUrl || taskUrl,
-                        page_type: qt.pageType || null,
-                        segment: qt.segment || null,
-                        captured_at: new Date().toISOString()
-                      };
+                      // For URL-based matching, aggregate all queries for that URL (page-level data)
+                      // For keyword-based matching, use the first match (query-level data)
+                      if (normalizedTaskUrl && normalizedTaskUrl.length > 0 && matchingQueries.length > 1) {
+                        // URL-based: aggregate all queries for this URL
+                        const totalClicks = matchingQueries.reduce((sum, qt) => sum + (qt.clicks || 0), 0);
+                        const totalImpressions = matchingQueries.reduce((sum, qt) => sum + (qt.impressions || 0), 0);
+                        const weightedCtr = totalImpressions > 0 ? totalClicks / totalImpressions : null;
+                        // Use best rank from the query with highest clicks
+                        const bestQuery = matchingQueries.reduce((best, qt) => 
+                          (qt.clicks || 0) > (best.clicks || 0) ? qt : best, matchingQueries[0]);
+                        console.log(`[Optimisation] Aggregated ${matchingQueries.length} queries for URL: ${totalClicks} clicks, ${totalImpressions} impressions`);
+                        currentMetrics = {
+                          gsc_clicks_28d: totalClicks || null,
+                          gsc_impressions_28d: totalImpressions || null,
+                          gsc_ctr_28d: weightedCtr, // Already a ratio (0-1)
+                          current_rank: bestQuery.best_rank || bestQuery.avg_position || null,
+                          opportunity_score: bestQuery.opportunityScore || null,
+                          ai_overview: matchingQueries.some(qt => qt.has_ai_overview) || false,
+                          ai_citations: matchingQueries.reduce((sum, qt) => sum + (qt.ai_alan_citations_count || 0), 0),
+                          ai_citations_total: matchingQueries.reduce((sum, qt) => sum + (qt.ai_total_citations || 0), 0),
+                          classic_ranking_url: bestQuery.best_url || bestQuery.targetUrl || taskUrl,
+                          page_type: bestQuery.pageType || null,
+                          segment: bestQuery.segment || null,
+                          captured_at: new Date().toISOString()
+                        };
+                      } else {
+                        // Keyword-based or single match: use first query
+                        const qt = matchingQueries[0];
+                        console.log('[Optimisation] Found matching query totals:', qt);
+                        currentMetrics = {
+                          gsc_clicks_28d: qt.clicks || null,
+                          gsc_impressions_28d: qt.impressions || null,
+                          gsc_ctr_28d: qt.ctr != null ? (qt.ctr / 100) : null, // Convert percentage to ratio
+                          current_rank: qt.best_rank || qt.avg_position || null,
+                          opportunity_score: qt.opportunityScore || null,
+                          ai_overview: qt.has_ai_overview || false,
+                          ai_citations: qt.ai_alan_citations_count || 0,
+                          ai_citations_total: qt.ai_total_citations || 0,
+                          classic_ranking_url: qt.best_url || qt.targetUrl || taskUrl,
+                          page_type: qt.pageType || null,
+                          segment: qt.segment || null,
+                          captured_at: new Date().toISOString()
+                        };
+                      }
                       console.log('[Optimisation] Built currentMetrics from query totals:', currentMetrics);
                     }
                   }
@@ -12314,22 +12341,50 @@
                       });
                       
                       if (matchingQueries.length > 0) {
-                        const qt = matchingQueries[0];
-                        console.log('[Optimisation] Found matching query totals in Supabase:', qt);
-                        currentMetrics = {
-                          gsc_clicks_28d: qt.clicks || null,
-                          gsc_impressions_28d: qt.impressions || null,
-                          gsc_ctr_28d: qt.ctr != null ? (qt.ctr / 100) : null,
-                          current_rank: qt.best_rank || qt.avg_position || null,
-                          opportunity_score: qt.opportunityScore || null,
-                          ai_overview: qt.has_ai_overview || false,
-                          ai_citations: qt.ai_alan_citations_count || 0,
-                          ai_citations_total: qt.ai_total_citations || 0,
-                          classic_ranking_url: qt.best_url || qt.targetUrl || taskUrl,
-                          page_type: qt.pageType || null,
-                          segment: qt.segment || null,
-                          captured_at: new Date().toISOString()
-                        };
+                        // For URL-based matching, aggregate all queries for that URL (page-level data)
+                        // For keyword-based matching, use the first match (query-level data)
+                        if (normalizedTaskUrl && normalizedTaskUrl.length > 0 && matchingQueries.length > 1) {
+                          // URL-based: aggregate all queries for this URL
+                          const totalClicks = matchingQueries.reduce((sum, qt) => sum + (qt.clicks || 0), 0);
+                          const totalImpressions = matchingQueries.reduce((sum, qt) => sum + (qt.impressions || 0), 0);
+                          const weightedCtr = totalImpressions > 0 ? totalClicks / totalImpressions : null;
+                          // Use best rank from the query with highest clicks
+                          const bestQuery = matchingQueries.reduce((best, qt) => 
+                            (qt.clicks || 0) > (best.clicks || 0) ? qt : best, matchingQueries[0]);
+                          console.log(`[Optimisation] Aggregated ${matchingQueries.length} queries from Supabase for URL: ${totalClicks} clicks, ${totalImpressions} impressions`);
+                          currentMetrics = {
+                            gsc_clicks_28d: totalClicks || null,
+                            gsc_impressions_28d: totalImpressions || null,
+                            gsc_ctr_28d: weightedCtr, // Already a ratio (0-1)
+                            current_rank: bestQuery.best_rank || bestQuery.avg_position || null,
+                            opportunity_score: bestQuery.opportunityScore || null,
+                            ai_overview: matchingQueries.some(qt => qt.has_ai_overview) || false,
+                            ai_citations: matchingQueries.reduce((sum, qt) => sum + (qt.ai_alan_citations_count || 0), 0),
+                            ai_citations_total: matchingQueries.reduce((sum, qt) => sum + (qt.ai_total_citations || 0), 0),
+                            classic_ranking_url: bestQuery.best_url || bestQuery.targetUrl || taskUrl,
+                            page_type: bestQuery.pageType || null,
+                            segment: bestQuery.segment || null,
+                            captured_at: new Date().toISOString()
+                          };
+                        } else {
+                          // Keyword-based or single match: use first query
+                          const qt = matchingQueries[0];
+                          console.log('[Optimisation] Found matching query totals in Supabase:', qt);
+                          currentMetrics = {
+                            gsc_clicks_28d: qt.clicks || null,
+                            gsc_impressions_28d: qt.impressions || null,
+                            gsc_ctr_28d: qt.ctr != null ? (qt.ctr / 100) : null,
+                            current_rank: qt.best_rank || qt.avg_position || null,
+                            opportunity_score: qt.opportunityScore || null,
+                            ai_overview: qt.has_ai_overview || false,
+                            ai_citations: qt.ai_alan_citations_count || 0,
+                            ai_citations_total: qt.ai_total_citations || 0,
+                            classic_ranking_url: qt.best_url || qt.targetUrl || taskUrl,
+                            page_type: qt.pageType || null,
+                            segment: qt.segment || null,
+                            captured_at: new Date().toISOString()
+                          };
+                        }
                         console.log('[Optimisation] Built currentMetrics from Supabase query totals:', currentMetrics);
                       }
                     }
@@ -12648,21 +12703,48 @@
                     });
                     
                     if (matchingQueries.length > 0) {
-                      const qt = matchingQueries[0];
-                      currentMetrics = {
-                        gsc_clicks_28d: qt.clicks || null,
-                        gsc_impressions_28d: qt.impressions || null,
-                        gsc_ctr_28d: qt.ctr != null ? (qt.ctr / 100) : null,
-                        current_rank: qt.best_rank || qt.avg_position || null,
-                        opportunity_score: qt.opportunityScore || null,
-                        ai_overview: qt.has_ai_overview || false,
-                        ai_citations: qt.ai_alan_citations_count || 0,
-                        ai_citations_total: qt.ai_total_citations || 0,
-                        classic_ranking_url: qt.best_url || qt.targetUrl || taskUrl,
-                        page_type: qt.pageType || null,
-                        segment: qt.segment || null,
-                        captured_at: new Date().toISOString()
-                      };
+                      // For URL-based matching, aggregate all queries for that URL (page-level data)
+                      if (matchingQueries.length > 1) {
+                        // Aggregate all queries for this URL
+                        const totalClicks = matchingQueries.reduce((sum, qt) => sum + (qt.clicks || 0), 0);
+                        const totalImpressions = matchingQueries.reduce((sum, qt) => sum + (qt.impressions || 0), 0);
+                        const weightedCtr = totalImpressions > 0 ? totalClicks / totalImpressions : null;
+                        // Use best rank from the query with highest clicks
+                        const bestQuery = matchingQueries.reduce((best, qt) => 
+                          (qt.clicks || 0) > (best.clicks || 0) ? qt : best, matchingQueries[0]);
+                        console.log(`[Optimisation] Aggregated ${matchingQueries.length} queries for URL in bulk update: ${totalClicks} clicks, ${totalImpressions} impressions`);
+                        currentMetrics = {
+                          gsc_clicks_28d: totalClicks || null,
+                          gsc_impressions_28d: totalImpressions || null,
+                          gsc_ctr_28d: weightedCtr, // Already a ratio (0-1)
+                          current_rank: bestQuery.best_rank || bestQuery.avg_position || null,
+                          opportunity_score: bestQuery.opportunityScore || null,
+                          ai_overview: matchingQueries.some(qt => qt.has_ai_overview) || false,
+                          ai_citations: matchingQueries.reduce((sum, qt) => sum + (qt.ai_alan_citations_count || 0), 0),
+                          ai_citations_total: matchingQueries.reduce((sum, qt) => sum + (qt.ai_total_citations || 0), 0),
+                          classic_ranking_url: bestQuery.best_url || bestQuery.targetUrl || taskUrl,
+                          page_type: bestQuery.pageType || null,
+                          segment: bestQuery.segment || null,
+                          captured_at: new Date().toISOString()
+                        };
+                      } else {
+                        // Single match: use first query
+                        const qt = matchingQueries[0];
+                        currentMetrics = {
+                          gsc_clicks_28d: qt.clicks || null,
+                          gsc_impressions_28d: qt.impressions || null,
+                          gsc_ctr_28d: qt.ctr != null ? (qt.ctr / 100) : null,
+                          current_rank: qt.best_rank || qt.avg_position || null,
+                          opportunity_score: qt.opportunityScore || null,
+                          ai_overview: qt.has_ai_overview || false,
+                          ai_citations: qt.ai_alan_citations_count || 0,
+                          ai_citations_total: qt.ai_total_citations || 0,
+                          classic_ranking_url: qt.best_url || qt.targetUrl || taskUrl,
+                          page_type: qt.pageType || null,
+                          segment: qt.segment || null,
+                          captured_at: new Date().toISOString()
+                        };
+                      }
                     }
                   }
                 }
