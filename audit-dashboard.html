@@ -7249,8 +7249,11 @@
                   targetType: targetType
                 });
                 
-                const deltaColor = (progress.delta != null && progress.delta >= 0) ? '#34d399' : '#f87171'; // Brighter colors
-                goalText += `<div style="font-size: 0.7rem; color: ${deltaColor}; margin-top: 0.125rem; font-weight: 600;">${goalProgress.deltaLabel} vs target ${goalProgress.targetLabel}</div>`;
+                const delta = progress.delta != null ? progress.delta : 0;
+                let deltaColor = '#f59e0b'; // Amber for no change (default)
+                if (delta > 0) deltaColor = '#10b981'; // Green for positive/improvement
+                else if (delta < 0) deltaColor = '#ef4444'; // Red for negative/worsening
+                goalText += `<div style="font-size: 0.7rem; color: ${deltaColor} !important; margin-top: 0.125rem; font-weight: 600;">${goalProgress.deltaLabel} vs target ${goalProgress.targetLabel}</div>`;
                 if (goalProgress.remainingToTarget != null && goalProgress.remainingToTarget > 0) {
                   const displayMeta = KPI_DISPLAY_METADATA[taskKpi];
                   const remainingLabel = displayMeta ? displayMeta.formatDelta(goalProgress.remainingToTarget) : String(goalProgress.remainingToTarget);
@@ -8040,8 +8043,11 @@
                 targetType: targetType
               });
               
-              const deltaColor = (objectiveProgress.delta != null && objectiveProgress.delta >= 0) ? '#10b981' : '#ef4444';
-              rightColumn += `<div style="margin-bottom: 0.4rem;"><strong>Progress:</strong> ${progress.baselineLabel} → ${progress.latestLabel} (<span style="color: ${deltaColor}; font-weight: 600;">${progress.deltaLabel}</span>) vs target ${progress.targetLabel}</div>`;
+              const delta = objectiveProgress.delta != null ? objectiveProgress.delta : (latestVal - baselineVal);
+              let deltaColor = '#f59e0b'; // Amber for no change (default)
+              if (delta > 0) deltaColor = '#10b981'; // Green for positive/improvement
+              else if (delta < 0) deltaColor = '#ef4444'; // Red for negative/worsening
+              rightColumn += `<div style="margin-bottom: 0.4rem;"><strong>Progress:</strong> ${progress.baselineLabel} → ${progress.latestLabel} (<span style="color: ${deltaColor} !important; font-weight: 600;">${progress.deltaLabel}</span>) vs target ${progress.targetLabel}</div>`;
               if (progress.remainingToTarget != null && progress.remainingToTarget > 0) {
                 const displayMeta = KPI_DISPLAY_METADATA[kpiKey];
                 const remainingLabel = displayMeta ? displayMeta.formatDelta(progress.remainingToTarget) : String(progress.remainingToTarget);
@@ -8056,7 +8062,9 @@
             const targetDelta = task.objective_target_delta != null ? task.objective_target_delta : (task.objective_target_value != null ? task.objective_target_value : null);
             
             if (targetDelta != null) {
-              const deltaColor = delta >= 0 ? '#10b981' : '#ef4444';
+              let deltaColor = '#f59e0b'; // Amber for no change (default)
+              if (delta > 0) deltaColor = '#10b981'; // Green for positive/improvement
+              else if (delta < 0) deltaColor = '#ef4444'; // Red for negative/worsening
               const deltaSign = delta >= 0 ? '+' : '';
               const kpiLabel = (objectiveKpi || objectiveMetric).replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
               
@@ -8066,7 +8074,7 @@
               const formattedDelta = formatProgressValue(delta, objectiveKpi || objectiveMetric);
               const formattedTarget = formatProgressValue(targetDelta, objectiveKpi || objectiveMetric);
               
-              rightColumn += `<div style="margin-bottom: 0.4rem;"><strong>Progress:</strong> ${formattedBaseline} → ${formattedLatest} (<span style="color: ${deltaColor}; font-weight: 600;">${deltaSign}${formattedDelta}</span>) vs target ${targetDelta > 0 ? '+' : ''}${formattedTarget}</div>`;
+              rightColumn += `<div style="margin-bottom: 0.4rem;"><strong>Progress:</strong> ${formattedBaseline} → ${formattedLatest} (<span style="color: ${deltaColor} !important; font-weight: 600;">${deltaSign}${formattedDelta}</span>) vs target ${targetDelta > 0 ? '+' : ''}${formattedTarget}</div>`;
             }
           }
           
@@ -8403,7 +8411,9 @@
               const target = objectiveProgress.target != null ? objectiveProgress.target : objectiveTargetValue;
               
               if (target != null) {
-                const deltaColor = delta >= 0 ? '#10b981' : '#ef4444';
+                let deltaColor = '#f59e0b'; // Amber for no change (default)
+                if (delta > 0) deltaColor = '#10b981'; // Green for positive/improvement
+                else if (delta < 0) deltaColor = '#ef4444'; // Red for negative/worsening
                 const deltaSign = delta >= 0 ? '+' : '';
                 const targetType = objective?.target_type || 'delta';
                 
@@ -8416,7 +8426,7 @@
                 const targetText = targetType === 'delta' 
                   ? `target ${delta >= 0 ? '+' : ''}${formattedTarget}`
                   : `target ${formattedTarget}`;
-                rightColumn += `<div style="margin-bottom: 0.4rem;"><strong>Progress:</strong> ${formattedBaseline} → ${formattedLatest} (<span style="color: ${deltaColor}; font-weight: 600;">${deltaSign}${formattedDelta}</span>) vs ${targetText}</div>`;
+                rightColumn += `<div style="margin-bottom: 0.4rem;"><strong>Progress:</strong> ${formattedBaseline} → ${formattedLatest} (<span style="color: ${deltaColor} !important; font-weight: 600;">${deltaSign}${formattedDelta}</span>) vs ${targetText}</div>`;
               }
             }
             
