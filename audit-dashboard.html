@@ -1466,8 +1466,6 @@
     #optimisation-task-drawer button.btn-primary,
     #optimisation-task-drawer button.btn-secondary,
     #optimisation-task-drawer button.btn-small,
-    #optimisation-task-drawer button.force-black-text,
-    #optimisation-task-drawer button[data-force-black],
     #optimisation-task-drawer button[style],
     #optimisation-task-drawer button[style*="color"],
     #optimisation-task-drawer button[style*="background"],
@@ -5066,8 +5064,8 @@
           
           <!-- Cancel Task, Delete Task, and Title (moved to header area) -->
           <div style="padding: 0.75rem 1.5rem; border-bottom: 1px solid var(--dark-border); background: var(--dark-panel); display: flex; gap: 0.5rem; align-items: center;">
-            <button id="optimisation-cancel-task-btn" class="btn" style="background: #ef4444; border: 1px solid #ef4444; padding: 0.5rem 1rem; font-size: 0.875rem; color: #000000; font-weight: 700;" title="Stop tracking (keeps history).">Cancel Task</button>
-            <button id="optimisation-delete-task-btn" class="btn" style="background: #991b1b; border: 1px solid #991b1b; padding: 0.5rem 1rem; font-size: 0.875rem; color: #000000; font-weight: 700;" title="Permanently remove task and events (cannot be undone).">Delete Task</button>
+            <button id="optimisation-cancel-task-btn" class="btn" style="background: #dc2626; border: 1px solid #dc2626; padding: 0.5rem 1rem; font-size: 0.875rem; color: #ffffff; font-weight: 700;" title="Stop tracking (keeps history).">Cancel Task</button>
+            <button id="optimisation-delete-task-btn" class="btn" style="background: #991b1b; border: 1px solid #991b1b; padding: 0.5rem 1rem; font-size: 0.875rem; color: #ffffff; font-weight: 700;" title="Permanently remove task and events (cannot be undone).">Delete Task</button>
             <div style="flex: 1; display: flex; align-items: center; gap: 0.5rem; margin-left: 1rem;">
               <strong style="white-space: nowrap; color: var(--dark-text);">Title:</strong>
               <input type="text" id="optimisation-drawer-title" style="flex: 1; padding: 0.5rem; border: 1px solid var(--dark-border); border-radius: 4px; font-size: 0.875rem; background: var(--dark-bg); color: var(--dark-text);" placeholder="Enter task title...">
@@ -5231,8 +5229,8 @@
                 <div style="padding: 0.75rem; background: var(--dark-panel); border-radius: 4px; border: 1px solid var(--dark-border);">
                   <h4 style="margin-bottom: 0.75rem; font-size: 0.95rem; color: var(--dark-text);">Cycle Management</h4>
                   <div style="display: flex; flex-direction: column; gap: 0.5rem;">
-                    <button id="optimisation-complete-cycle-btn" class="btn" style="width: 100%; padding: 0.5rem; font-size: 0.875rem; background: #10b981; border-color: #10b981; color: #000000; font-weight: 700;" title="Mark the current cycle as completed. This closes the cycle and makes it viewable in history.">Complete Cycle</button>
-                    <button id="optimisation-archive-cycle-btn" class="btn btn-secondary" style="width: 100%; padding: 0.5rem; font-size: 0.875rem; background: rgba(156, 163, 175, 0.6); color: #000000; font-weight: 700; border: 1px solid var(--dark-border);" title="Archive the current cycle (for abandoned work). The cycle remains in history but is marked as archived.">Archive Cycle</button>
+                    <button id="optimisation-complete-cycle-btn" class="btn" style="width: 100%; padding: 0.5rem; font-size: 0.875rem; background: #059669; border-color: #059669; color: #ffffff; font-weight: 700;" title="Mark the current cycle as completed. This closes the cycle and makes it viewable in history.">Complete Cycle</button>
+                    <button id="optimisation-archive-cycle-btn" class="btn btn-secondary" style="width: 100%; padding: 0.5rem; font-size: 0.875rem; background: #4b5563; color: #ffffff; font-weight: 700; border: 1px solid #4b5563;" title="Archive the current cycle (for abandoned work). The cycle remains in history but is marked as archived.">Archive Cycle</button>
                     <button id="optimisation-start-cycle-btn" class="btn btn-secondary" style="width: 100%; padding: 0.5rem; font-size: 0.875rem; background: rgba(156, 163, 175, 0.6); color: #000000; font-weight: 700; border: 1px solid var(--dark-border);" title="Begins a new optimisation attempt while preserving history from previous cycles.">Start New Cycle</button>
                   </div>
                 </div>
@@ -8218,76 +8216,6 @@
       // Update button states
       document.getElementById('optimisation-drawer-minimize').textContent = '−';
       document.getElementById('optimisation-drawer-maximize').textContent = '□';
-      
-      // Force ALL buttons to have black text (override inline styles) - EFFICIENT VERSION
-      const forceBlackText = () => {
-        const drawer = document.getElementById('optimisation-task-drawer');
-        if (!drawer) return;
-        
-        const allButtons = drawer.querySelectorAll('button');
-        // Use a single loop and batch DOM operations
-        allButtons.forEach(btn => {
-          // Skip if already processed
-          if (btn.dataset.forceBlack === 'true') return;
-          
-          // Remove color property if it's not black
-          const currentColor = btn.style.color;
-          if (currentColor && currentColor !== 'rgb(0, 0, 0)' && currentColor !== '#000000' && currentColor !== '#000') {
-            btn.style.removeProperty('color');
-          }
-          
-          // Force black text - single operation
-          btn.style.setProperty('color', '#000000', 'important');
-          btn.style.setProperty('font-weight', '700', 'important');
-          
-          // Mark as processed to avoid re-processing
-          btn.dataset.forceBlack = 'true';
-          btn.classList.add('force-black-text');
-          
-          // Force on direct text children only (not all descendants to reduce overhead)
-          const textNodes = Array.from(btn.childNodes).filter(node => node.nodeType === 1);
-          textNodes.forEach(child => {
-            if (child.style) {
-              child.style.setProperty('color', '#000000', 'important');
-            }
-          });
-        });
-      };
-      
-      // Run immediately and a few times to catch all buttons - EFFICIENT VERSION
-      forceBlackText();
-      requestAnimationFrame(() => {
-        forceBlackText();
-        setTimeout(forceBlackText, 50);
-        setTimeout(forceBlackText, 200);
-      });
-      
-      // Also use MutationObserver to catch buttons added later - EFFICIENT
-      const drawerForObserver = document.getElementById('optimisation-task-drawer');
-      if (drawerForObserver) {
-        // Debounce the observer callback to avoid excessive calls
-        let observerTimeout = null;
-        const observer = new MutationObserver(() => {
-          // Debounce: only run after mutations stop for 100ms
-          if (observerTimeout) clearTimeout(observerTimeout);
-          observerTimeout = setTimeout(() => {
-            forceBlackText();
-          }, 100);
-        });
-        observer.observe(drawerForObserver, { 
-          childList: true, 
-          subtree: true,
-          attributes: false // Don't watch attributes to reduce overhead
-        });
-        // Store observer to clean up later if needed
-        window.optimisationDrawerObserver = observer;
-      }
-      
-      // Clean up any existing interval if drawer closes
-      if (window.optimisationDrawerInterval) {
-        clearInterval(window.optimisationDrawerInterval);
-        window.optimisationDrawerInterval = null;
-      }
       
       // Phase 7: Show/hide Complete/Archive buttons based on active cycle
       const completeCycleBtn = document.getElementById('optimisation-complete-cycle-btn');
