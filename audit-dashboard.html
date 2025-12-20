@@ -18800,9 +18800,10 @@
       let pageLevelDataFetched = false;
       let gscRange = null;
       
-      // Check if we're in a fresh audit run (queryPages is fresh data from current audit)
-      // vs loading from history (queryPages is null or from Supabase)
-      const isFreshAudit = queryPages && queryPages.length > 0 && !queryPages._fromHistory;
+      // CRITICAL: During a fresh audit run, ALWAYS fetch fresh data from GSC API
+      // Only use persisted data when loading historical audits from Supabase
+      // Check global flag set by runAudit() to determine if we're in a fresh audit
+      const isFreshAudit = window._isFreshAuditRun === true;
       
       // Only check localStorage for persisted data if we're NOT in a fresh audit run
       // During fresh audits, we must fetch fresh data to ensure accuracy
@@ -19602,6 +19603,9 @@
 
     // Run the audit
     async function runAudit() {
+      // CRITICAL: Set flag to indicate we're in a fresh audit run
+      // This ensures page-level GSC data is always fetched fresh, not from stale localStorage
+      window._isFreshAuditRun = true;
       debugLog('=== AUDIT START: Beginning audit scan ===', 'info');
       
       // Get API key - prioritize Vercel env var, then loaded key, then localStorage
@@ -20044,6 +20048,8 @@
         showStatus('Error running audit: ' + error.message, 'error');
         console.error(error);
       } finally {
+        // Clear the fresh audit flag after audit completes (success or error)
+        window._isFreshAuditRun = false;
         debugLog('Hiding loading indicator...', 'info');
         document.getElementById('loading').classList.remove('show');
         
