@@ -4796,10 +4796,15 @@
         <!-- Phase 9: Time-based Charts -->
         <div class="optimisation-timeseries-charts" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 1.5rem; margin: 1.5rem 0;">
           <div class="card" style="padding: 1.5rem;">
+            <div id="chart-left-title-container" style="margin-bottom: 0.75rem;">
+              <h3 id="chart-left-title" style="margin: 0 0 0.25rem 0; font-size: 1.1rem; font-weight: 600; color: var(--dark-text);">Estimated Gap to Target (28d) — Clicks Potential</h3>
+              <p id="chart-left-subtitle" style="margin: 0; font-size: 0.75rem; color: rgba(255, 255, 255, 0.7); line-height: 1.3;">Sum of remaining clicks needed to hit each task's objective (traffic KPIs only). This is a target gap, not last-30d performance.</p>
+            </div>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-              <div style="display: flex; gap: 0.5rem;">
-                <button id="chart-left-toggle-clicks" class="chart-toggle-btn active" data-chart="clicks" style="padding: 0.5rem 1rem; background: var(--dark-brand); color: #000; border: 1px solid var(--dark-brand); border-radius: 4px; font-weight: 600; cursor: pointer;">Estimated Extra Clicks (28d) by KPI</button>
-                <button id="chart-left-toggle-trend" class="chart-toggle-btn" data-chart="trend" style="padding: 0.5rem 1rem; background: var(--dark-panel); color: var(--dark-text); border: 1px solid var(--dark-border); border-radius: 4px; font-weight: 600; cursor: pointer;">Median Delta Over Time</button>
+              <div style="display: flex; gap: 0.5rem; align-items: center;">
+                <button id="chart-left-toggle-clicks" class="chart-toggle-btn active" data-chart="clicks" style="padding: 0.5rem 1rem; background: var(--dark-brand); color: #000; border: 1px solid var(--dark-brand); border-radius: 4px; font-weight: 600; cursor: pointer;">Gap to Target</button>
+                <button id="chart-left-toggle-trend" class="chart-toggle-btn" data-chart="trend" style="padding: 0.5rem 1rem; background: var(--dark-panel); color: var(--dark-text); border: 1px solid var(--dark-border); border-radius: 4px; font-weight: 600; cursor: pointer;">Weekly Trend</button>
+                <span id="chart-trend-kpi-label" style="display: none; font-size: 0.875rem; color: var(--dark-text); margin-left: 0.5rem;">KPI: <strong id="chart-trend-kpi-label-value"></strong></span>
               </div>
               <select id="chart-trend-kpi-select" style="display: none; padding: 0.5rem; background: var(--dark-panel); color: var(--dark-text); border: 1px solid var(--dark-border); border-radius: 4px; font-size: 0.875rem;">
                 <option value="ctr_28d">CTR (pp)</option>
@@ -4815,7 +4820,8 @@
             </div>
           </div>
           <div class="card" style="padding: 1.5rem;">
-            <h3 style="margin: 0 0 1rem 0; font-size: 1.1rem; font-weight: 600;">Median Delta by KPI (Last 30d)</h3>
+            <h3 style="margin: 0 0 0.25rem 0; font-size: 1.1rem; font-weight: 600; color: var(--dark-text);">Median Delta by KPI (Last 30d)</h3>
+            <p style="margin: 0 0 1rem 0; font-size: 0.75rem; color: rgba(255, 255, 255, 0.7); line-height: 1.3;">Median change from baseline → latest (within last 30d) across filtered tasks. Negative for Rank can be good (lower rank).</p>
             <div style="position: relative; height: 280px;">
               <canvas id="chart-median-delta" style="width: 100%; height: 280px;"></canvas>
             </div>
@@ -6833,7 +6839,7 @@
 
         // Get active cycle if scope is 'active_cycle'
         const activeCycle = scope === 'active_cycle' 
-          ? (task.cycles?.find(c => c.is_active || c.id === task.active_cycle_id) || null)
+          ? ((task.cycles && task.cycles.find(c => c.is_active || c.id === task.active_cycle_id)) || null)
           : null;
 
         // Get measurements
@@ -8120,7 +8126,7 @@
 
       // Phase 6: Load data for selected cycle (defaults to active cycle)
       const selectedCycleId = window.optimisationModuleState?.selectedCycleId || task.active_cycle_id;
-      const selectedCycle = task.cycles?.find(c => c.id === selectedCycleId) || null;
+      const selectedCycle = (task.cycles && task.cycles.find(c => c.id === selectedCycleId)) || null;
       const selectedCycleNo = selectedCycle?.cycle_no || task.cycle_no || task.cycle_active || 1;
       
       await loadCycleData(taskId, selectedCycleId, task.cycles, selectedCycle, selectedCycleNo, task);
@@ -9367,7 +9373,7 @@
           
           // Get active cycle if scope is 'active_cycle'
           const activeCycle = scope === 'active_cycle' 
-            ? (task.cycles?.find(c => c.is_active || c.id === task.active_cycle_id) || null)
+            ? ((task.cycles && task.cycles.find(c => c.is_active || c.id === task.active_cycle_id)) || null)
             : null;
           
           // Get measurements
@@ -9534,7 +9540,7 @@
       
       for (const task of filteredTasks) {
         const activeCycle = scope === 'active_cycle' 
-          ? (task.cycles?.find(c => c.is_active || c.id === task.active_cycle_id) || null)
+          ? ((task.cycles && task.cycles.find(c => c.is_active || c.id === task.active_cycle_id)) || null)
           : null;
         const measurements = task.measurements || [];
         
@@ -9667,7 +9673,7 @@
       
       for (const task of eligibleTasks) {
         const activeCycle = scope === 'active_cycle' 
-          ? (task.cycles?.find(c => c.is_active || c.id === task.active_cycle_id) || null)
+          ? ((task.cycles && task.cycles.find(c => c.is_active || c.id === task.active_cycle_id)) || null)
           : null;
         const measurements = task.measurements || [];
         const baselineLatest = getBaselineLatest(measurements, scope, activeCycle);
@@ -9688,13 +9694,13 @@
         }
       }
       
-      // Compute medians
+      // Compute medians and include task counts
       const medianDeltaByKpi = [];
       for (const [kpi, deltas] of Object.entries(deltasByKpi)) {
         if (deltas.length > 0) {
           const med = median(deltas);
           if (med != null) {
-            medianDeltaByKpi.push({ kpi, value: med });
+            medianDeltaByKpi.push({ kpi, value: med, count: deltas.length });
           }
         }
       }
@@ -9766,7 +9772,7 @@
           ctx.fillStyle = '#ffffff';
           ctx.font = 'bold 18px sans-serif';
           ctx.textAlign = 'center';
-          ctx.fillText('Estimated Extra Clicks (28d)', 0, 0);
+          ctx.fillText('Estimated Remaining Clicks (28d)', 0, 0);
           ctx.restore();
           
           // Draw y-axis ticks and labels
@@ -9798,10 +9804,15 @@
             ctx.fillStyle = '#10b981';
             ctx.fillRect(x, y, barWidth, barHeight);
             
-            // Label below bar
+            // Value label on top of bar
             ctx.fillStyle = '#ffffff';
-            ctx.font = 'bold 11px sans-serif';
+            ctx.font = 'bold 12px sans-serif';
             ctx.textAlign = 'center';
+            const valueText = d.sum >= 1000 ? (d.sum / 1000).toFixed(1) + 'k' : Math.round(d.sum).toString();
+            ctx.fillText(valueText, x + barWidth / 2, y - 5);
+            
+            // Label below bar
+            ctx.font = 'bold 11px sans-serif';
             const labelLines = d.label.split(' ');
             labelLines.forEach((line, lineIdx) => {
               ctx.fillText(line, x + barWidth / 2, displayHeight - padding.bottom + 12 + (lineIdx * 12));
@@ -9874,15 +9885,29 @@
             ctx.lineTo(displayWidth - padding.right, zeroY);
             ctx.stroke();
             
-            // Draw y-axis label
+            // Draw y-axis label based on KPI unit
             ctx.save();
             ctx.translate(15, displayHeight / 2);
             ctx.rotate(-Math.PI / 2);
             ctx.fillStyle = '#ffffff';
             ctx.font = 'bold 18px sans-serif';
             ctx.textAlign = 'center';
-            const yLabel = kpiLabels[timeseries.selectedKpiForTrend] || 'Median Delta';
-            ctx.fillText(`Median Delta (${yLabel})`, 0, 0);
+            const selectedKpi = timeseries.selectedKpiForTrend;
+            let yAxisLabel = 'Median Delta';
+            if (selectedKpi === 'ctr_28d') {
+              yAxisLabel = 'Δ CTR (pp)';
+            } else if (selectedKpi === 'current_rank') {
+              yAxisLabel = 'Δ Rank (lower is better)';
+            } else if (selectedKpi === 'impressions_28d') {
+              yAxisLabel = 'Δ Impressions';
+            } else if (selectedKpi === 'clicks_28d') {
+              yAxisLabel = 'Δ Clicks';
+            } else if (selectedKpi === 'ai_citations') {
+              yAxisLabel = 'Δ AI Citations';
+            } else if (selectedKpi === 'opportunity_score') {
+              yAxisLabel = 'Δ Opportunity Score';
+            }
+            ctx.fillText(yAxisLabel, 0, 0);
             ctx.restore();
             
             // Draw y-axis ticks and labels
@@ -9936,7 +9961,7 @@
             });
             ctx.stroke();
             
-            // Draw points
+            // Draw points with value labels
             ctx.fillStyle = '#3b82f6';
             trend.medians.forEach((med, i) => {
               if (med != null) {
@@ -9945,6 +9970,17 @@
                 ctx.beginPath();
                 ctx.arc(x, y, 4, 0, Math.PI * 2);
                 ctx.fill();
+                
+                // Show value label on last point, or all points if not too many
+                const showLabel = (i === trend.medians.length - 1) || (trend.medians.length <= 8);
+                if (showLabel) {
+                  ctx.fillStyle = '#ffffff';
+                  ctx.font = 'bold 10px sans-serif';
+                  ctx.textAlign = 'center';
+                  const valueText = med >= 0 ? `+${med.toFixed(1)}` : med.toFixed(1);
+                  ctx.fillText(valueText, x, y - 10);
+                  ctx.fillStyle = '#3b82f6'; // Reset for next point
+                }
               }
             });
           }
@@ -10048,14 +10084,30 @@
             ctx.fillStyle = d.value >= 0 ? '#10b981' : '#ef4444';
             ctx.fillRect(x, y, barWidth, barHeight);
             
+            // Value label on bar
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 11px sans-serif';
+            ctx.textAlign = 'center';
+            let valueText = '';
+            if (d.kpi === 'ctr_28d') {
+              // CTR is in decimal, convert to percentage points
+              const deltaPp = d.value * 100;
+              valueText = (deltaPp >= 0 ? '+' : '') + deltaPp.toFixed(2) + 'pp';
+            } else if (d.kpi === 'current_rank') {
+              valueText = (d.value >= 0 ? '+' : '') + d.value.toFixed(1);
+            } else {
+              valueText = (d.value >= 0 ? '+' : '') + Math.round(d.value).toString();
+            }
+            // Position label above or below bar depending on direction
+            const labelY = d.value >= 0 ? y - 5 : y + barHeight + 15;
+            ctx.fillText(valueText, x + barWidth / 2, labelY);
+            
             // Draw KPI label (horizontal, wrapped) - white and much larger
             const label = kpiLabels[d.kpi] || d.kpi.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
             const labelX = x + barWidth / 2;
             const labelMaxWidth = barWidth * 0.95;
             
-            ctx.fillStyle = '#ffffff';
             ctx.font = 'bold 11px sans-serif';
-            ctx.textAlign = 'center';
             
             // Simple word wrapping: split on spaces if needed
             const words = label.split(' ');
@@ -10098,6 +10150,8 @@
           if (clicksCanvasEl) clicksCanvasEl.style.display = 'block';
           if (trendCanvasEl) trendCanvasEl.style.display = 'none';
           if (kpiSelect) kpiSelect.style.display = 'none';
+          const kpiLabelEl = document.getElementById('chart-trend-kpi-label');
+          if (kpiLabelEl) kpiLabelEl.style.display = 'none';
           clicksToggle.classList.add('active');
           clicksToggle.style.background = 'var(--dark-brand)';
           clicksToggle.style.color = '#000';
@@ -10108,6 +10162,8 @@
           if (clicksCanvasEl) clicksCanvasEl.style.display = 'none';
           if (trendCanvasEl) trendCanvasEl.style.display = 'block';
           if (kpiSelect) kpiSelect.style.display = 'block';
+          const kpiLabelEl = document.getElementById('chart-trend-kpi-label');
+          if (kpiLabelEl) kpiLabelEl.style.display = 'inline';
           trendToggle.classList.add('active');
           trendToggle.style.background = 'var(--dark-brand)';
           trendToggle.style.color = '#000';
@@ -10126,12 +10182,20 @@
           }
           if (trendCanvasEl) trendCanvasEl.style.display = 'none';
           if (kpiSelect) kpiSelect.style.display = 'none';
+          const kpiLabelEl = document.getElementById('chart-trend-kpi-label');
+          if (kpiLabelEl) kpiLabelEl.style.display = 'none';
           clicksToggle.classList.add('active');
           clicksToggle.style.background = 'var(--dark-brand)';
           clicksToggle.style.color = '#000';
           trendToggle.classList.remove('active');
           trendToggle.style.background = 'var(--dark-panel)';
           trendToggle.style.color = 'var(--dark-text)';
+          
+          // Update title and subtitle
+          const titleEl = document.getElementById('chart-left-title');
+          const subtitleEl = document.getElementById('chart-left-subtitle');
+          if (titleEl) titleEl.textContent = 'Estimated Gap to Target (28d) — Clicks Potential';
+          if (subtitleEl) subtitleEl.textContent = 'Sum of remaining clicks needed to hit each task\'s objective (traffic KPIs only). This is a target gap, not last-30d performance.';
         });
         
         // Handle trend toggle
@@ -10144,22 +10208,65 @@
             setTimeout(() => updateTimeseriesCharts(), 10);
           }
           if (kpiSelect) kpiSelect.style.display = 'block';
+          const kpiLabelEl = document.getElementById('chart-trend-kpi-label');
+          if (kpiLabelEl) kpiLabelEl.style.display = 'inline';
           trendToggle.classList.add('active');
           trendToggle.style.background = 'var(--dark-brand)';
           trendToggle.style.color = '#000';
           clicksToggle.classList.remove('active');
           clicksToggle.style.background = 'var(--dark-panel)';
           clicksToggle.style.color = 'var(--dark-text)';
+          
+          // Update title and subtitle
+          const titleEl = document.getElementById('chart-left-title');
+          const subtitleEl = document.getElementById('chart-left-subtitle');
+          if (titleEl) titleEl.textContent = 'Weekly Median Change — Selected KPI';
+          if (subtitleEl) subtitleEl.textContent = 'Median week-to-week delta across tasks with measurements in that week (scope + filters apply).';
+          
+          // Update KPI label
+          updateKpiLabel();
         });
+      }
+      
+      // Function to update KPI label
+      function updateKpiLabel() {
+        const kpiLabelValueEl = document.getElementById('chart-trend-kpi-label-value');
+        const selectedKpi = window.optimisationModuleState.selectedKpiForTrend || 'ctr_28d';
+        const kpiLabelMap = {
+          'ctr_28d': 'CTR (pp)',
+          'impressions_28d': 'Impressions',
+          'clicks_28d': 'Clicks',
+          'current_rank': 'Rank',
+          'ai_citations': 'AI Citations',
+          'opportunity_score': 'Opportunity Score'
+        };
+        if (kpiLabelValueEl) {
+          kpiLabelValueEl.textContent = kpiLabelMap[selectedKpi] || selectedKpi;
+        }
       }
       
       // Handle KPI select change
       if (kpiSelect) {
         kpiSelect.value = window.optimisationModuleState.selectedKpiForTrend || 'ctr_28d';
+        updateKpiLabel();
         kpiSelect.addEventListener('change', (e) => {
           window.optimisationModuleState.selectedKpiForTrend = e.target.value;
+          updateKpiLabel();
           updateTimeseriesCharts();
         });
+      }
+      
+      // Set initial title/subtitle based on current view
+      const currentView = window.optimisationModuleState.leftChartView || 'clicks';
+      const titleEl = document.getElementById('chart-left-title');
+      const subtitleEl = document.getElementById('chart-left-subtitle');
+      if (currentView === 'clicks') {
+        if (titleEl) titleEl.textContent = 'Estimated Gap to Target (28d) — Clicks Potential';
+        if (subtitleEl) subtitleEl.textContent = 'Sum of remaining clicks needed to hit each task\'s objective (traffic KPIs only). This is a target gap, not last-30d performance.';
+      } else {
+        if (titleEl) titleEl.textContent = 'Weekly Median Change — Selected KPI';
+        if (subtitleEl) subtitleEl.textContent = 'Median week-to-week delta across tasks with measurements in that week (scope + filters apply).';
+        updateKpiLabel();
       }
     }
     
