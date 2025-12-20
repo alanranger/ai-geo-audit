@@ -18763,10 +18763,113 @@
         };
       }
       
+      // ============================================
+      // STEP 1: Build pageTotalsByUrl (single source of truth for page-level GSC data)
+      // ============================================
+      // Fetch page-level data from GSC API (unfiltered, all positions)
+      // This matches GSC "Pages" tab totals exactly
+      let pageTotalsByUrl = new Map();
+      let pageLevelDataFetched = false;
+      
+      try {
+        const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+        const dateRange = parseInt(localStorage.getItem('gsc_date_range') || '28');
+        
+        if (propertyUrl) {
+          debugLog(`📊 Fetching page-level GSC data (unfiltered, all positions) for ${dateRange} days...`, 'info');
+          const pageLevelResponse = await fetch(apiUrl(`/api/aigeo/gsc-page-level?property=${encodeURIComponent(propertyUrl)}&days=${dateRange}`));
+          
+          if (pageLevelResponse.ok) {
+            const pageLevelData = await pageLevelResponse.json();
+            if (pageLevelData.status === 'ok' && pageLevelData.data && Array.isArray(pageLevelData.data.pages)) {
+              // Build pageTotalsByUrl map from page-level data
+              pageLevelData.data.pages.forEach(page => {
+                const url = page.page || page.url || '';
+                if (!url) return;
+                
+                // Normalize URL for consistent lookup
+                const normalizedUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(url) : url.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+                
+                const clicks = page.clicks || 0;
+                const impressions = page.impressions || 0;
+                const ctr = page.ctr != null ? (page.ctr > 1 ? page.ctr / 100 : page.ctr) : (impressions > 0 ? clicks / impressions : 0);
+                const avgPosition = page.position || page.avgPosition || null;
+                
+                pageTotalsByUrl.set(normalizedUrl, {
+                  clicks28: clicks,
+                  impr28: impressions,
+                  ctr28: ctr, // Store as ratio (0-1)
+                  avgPos28: avgPosition,
+                  dateRange: dateRange,
+                  asOf: new Date().toISOString()
+                });
+              });
+              
+              debugLog(`✓ Built pageTotalsByUrl from GSC page-level API: ${pageTotalsByUrl.size} pages`, 'success');
+              pageLevelDataFetched = true;
+            } else {
+              debugLog(`⚠ GSC page-level API did not return page data, falling back to queryPages aggregation`, 'warn');
+            }
+          } else {
+            debugLog(`⚠ Failed to fetch page-level data from GSC API (${pageLevelResponse.status}), falling back to queryPages aggregation`, 'warn');
+          }
+        }
+      } catch (pageLevelError) {
+        debugLog(`⚠ Error fetching page-level GSC data: ${pageLevelError.message}, falling back to queryPages aggregation`, 'warn');
+      }
+      
+      // Fallback: If page-level API not available, aggregate from queryPages (but note it's filtered to pos 1-20)
+      if (!pageLevelDataFetched && queryPages && queryPages.length > 0) {
+        debugLog(`⚠ Using queryPages aggregation as fallback (NOTE: This is filtered to position 1-20, may not match GSC page totals)`, 'warn');
+        const pageMap = new Map();
+        queryPages.forEach(row => {
+          const url = row.page || row.url || '';
+          if (!url) return;
+          
+          const normalizedUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(url) : url.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+          
+          if (!pageMap.has(normalizedUrl)) {
+            pageMap.set(normalizedUrl, {
+              clicks28: 0,
+              impr28: 0,
+              totalPositionWeight: 0,
+              totalImpressions: 0
+            });
+          }
+          
+          const page = pageMap.get(normalizedUrl);
+          page.clicks28 += row.clicks || 0;
+          page.impr28 += row.impressions || 0;
+          page.totalPositionWeight += (row.position || 0) * (row.impressions || 0);
+          page.totalImpressions += row.impressions || 0;
+        });
+        
+        // Convert to pageTotalsByUrl format
+        pageMap.forEach((totals, normalizedUrl) => {
+          const avgPos = totals.totalImpressions > 0 ? totals.totalPositionWeight / totals.totalImpressions : null;
+          const ctr = totals.impr28 > 0 ? totals.clicks28 / totals.impr28 : 0;
+          
+          pageTotalsByUrl.set(normalizedUrl, {
+            clicks28: totals.clicks28,
+            impr28: totals.impr28,
+            ctr28: ctr,
+            avgPos28: avgPos,
+            dateRange: parseInt(localStorage.getItem('gsc_date_range') || '28'),
+            asOf: new Date().toISOString(),
+            _source: 'queryPages_fallback' // Flag to indicate this is from filtered data
+          });
+        });
+        
+        debugLog(`✓ Built pageTotalsByUrl from queryPages fallback: ${pageTotalsByUrl.size} pages (WARNING: filtered to pos 1-20)`, 'warn');
+      }
+      
+      // Store pageTotalsByUrl globally for use in Money Pages and other modules
+      window.pageTotalsByUrl = pageTotalsByUrl;
+      
       // Compute money pages metrics if we have queryPages data
       let moneyPagesMetrics = null;
       if (queryPages && queryPages.length > 0) {
-        // Aggregate all pages from queryPages (not just top 10)
+        // Aggregate all pages from queryPages (not just top 10) - KEEP for secondary analytics (pos 1-20 filtered)
         const pageMap = new Map();
         queryPages.forEach(row => {
           const url = row.page || row.url || '';
@@ -18787,7 +18890,7 @@
           page.totalPositionWeight += (row.position || 0) * (row.impressions || 0);
         });
         
-        // Convert to topPages format
+        // Convert to topPages format (for secondary analytics only - pos 1-20 filtered)
         const allTopPages = Array.from(pageMap.values())
           .map(page => ({
             url: page.url,
@@ -18795,7 +18898,8 @@
             impressions: page.impressions,
             ctr: page.impressions > 0 ? (page.clicks / page.impressions) : 0,
             avgPosition: page.impressions > 0 ? page.totalPositionWeight / page.impressions : 0,
-            position: page.impressions > 0 ? page.totalPositionWeight / page.impressions : 0
+            position: page.impressions > 0 ? page.totalPositionWeight / page.impressions : 0,
+            _source: 'queryPages_pos1_20' // Flag to indicate this is filtered data
           }))
           .filter(page => page.impressions > 0); // Only pages with impressions
         
@@ -18842,11 +18946,13 @@
           }
         }
         
+        // ============================================
+        // STEP 2: Update Money Pages to use pageTotalsByUrl (page-level totals, not filtered)
+        // ============================================
         // Compute money pages metrics
-        // Use CSV as source of truth for all pages, then match GSC data to CSV URLs
+        // Use CSV as source of truth for all pages, then match GSC page-level data to CSV URLs
         // This ensures we segment ALL pages (433 URLs) not just those in GSC data (78 pages)
-        const allGSCPages = data.queryPages || [];
-        const allPagesAggregated = computeAllPagesForSegment(allGSCPages); // Aggregate GSC data by page
+        // AND use page-level totals (unfiltered) instead of queryPages aggregation (filtered to pos 1-20)
         
         // Fetch CSV and segment all URLs
         // First check for manually loaded URL list, then try GitHub/fallback
@@ -18869,89 +18975,117 @@
             debugLog(`✓ Fetched ${csvUrls.length} URLs from CSV (GitHub/fallback)`, 'info');
           }
           
-          // Segment all CSV URLs
+          // Segment all CSV URLs and match with pageTotalsByUrl (page-level totals)
           const allCsvPages = csvUrls.map(url => {
             const segment = classifyPageSegment(url);
-            return {
-              url: url,
-              segment: segment,
-              // GSC data will be matched below
-              clicks: 0,
-              impressions: 0,
-              ctr: 0,
-              avgPosition: null,
-              position: null
-            };
-          });
-          
-          // Create a map of GSC data by URL (normalized)
-          const gscDataMap = new Map();
-          allPagesAggregated.forEach(page => {
-            const normalizedUrl = (page.url || page.page || '').replace(/\/$/, '');
-            gscDataMap.set(normalizedUrl, page);
-          });
-          
-          // Match GSC data to CSV URLs (normalize URLs for matching)
-          const csvPagesWithGsc = allCsvPages.map(csvPage => {
-            const normalizedCsvUrl = csvPage.url.replace(/\/$/, '');
+            const normalizedUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(url) : url.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
             
-            // Try to find matching GSC data (check both with and without trailing slash)
-            let gscData = gscDataMap.get(normalizedCsvUrl);
-            if (!gscData) {
-              // Try with trailing slash
-              gscData = gscDataMap.get(normalizedCsvUrl + '/');
-            }
-            if (!gscData) {
-              // Try without trailing slash (if CSV had one)
-              gscData = gscDataMap.get(normalizedCsvUrl.replace(/\/$/, ''));
-            }
+            // Get page-level totals from pageTotalsByUrl (unfiltered, matches GSC page totals)
+            const pageTotals = pageTotalsByUrl.get(normalizedUrl);
             
-            if (gscData) {
-              // Merge GSC data - format expected by computeMoneyPagesMetrics
+            if (pageTotals) {
+              // Use page-level totals (matches GSC "Pages" tab exactly)
               return {
-                url: csvPage.url,
-                page: csvPage.url, // Also set page property for compatibility
-                segment: csvPage.segment,
-                clicks: gscData.clicks || 0,
-                impressions: gscData.impressions || 0,
-                ctr: gscData.ctr || 0,
-                avgPosition: gscData.avgPosition || gscData.position || null,
-                position: gscData.position || gscData.avgPosition || null
+                url: url,
+                page: url, // Also set page property for compatibility
+                segment: segment,
+                clicks: pageTotals.clicks28 || 0,
+                impressions: pageTotals.impr28 || 0,
+                ctr: pageTotals.ctr28 || 0, // Already a ratio (0-1)
+                avgPosition: pageTotals.avgPos28 || null,
+                position: pageTotals.avgPos28 || null,
+                _source: 'pageTotalsByUrl' // Flag to indicate this is from page-level data
               };
             } else {
               // No GSC data for this URL (zero impressions or never appeared in search)
-              // Format expected by computeMoneyPagesMetrics
               return {
-                url: csvPage.url,
-                page: csvPage.url, // Also set page property for compatibility
-                segment: csvPage.segment,
+                url: url,
+                page: url, // Also set page property for compatibility
+                segment: segment,
                 clicks: 0,
                 impressions: 0,
                 ctr: 0,
                 avgPosition: null,
-                position: null
+                position: null,
+                _source: 'no_data'
               };
             }
           });
           
           // Filter to money pages only and compute metrics
-          const moneyPagesFromCsv = csvPagesWithGsc.filter(page => page.segment === PageSegment.MONEY);
+          const moneyPagesFromCsv = allCsvPages.filter(page => page.segment === PageSegment.MONEY);
           debugLog(`✓ Segmented ${moneyPagesFromCsv.length} money pages from CSV (out of ${csvUrls.length} total URLs)`, 'info');
+          debugLog(`✓ Using pageTotalsByUrl for Money Pages metrics (matches GSC page-level totals)`, 'success');
+          
+          // Recompute site aggregates from pageTotalsByUrl (all pages, not just money pages)
+          let siteAggFromPageTotals = { totalClicks: 0, totalImpressions: 0, avgCtr: 0, avgPosition: null };
+          let totalPositionWeight = 0;
+          pageTotalsByUrl.forEach(totals => {
+            siteAggFromPageTotals.totalClicks += totals.clicks28 || 0;
+            siteAggFromPageTotals.totalImpressions += totals.impr28 || 0;
+            if (totals.avgPos28 != null && totals.impr28 > 0) {
+              totalPositionWeight += totals.avgPos28 * totals.impr28;
+            }
+          });
+          siteAggFromPageTotals.avgCtr = siteAggFromPageTotals.totalImpressions > 0 
+            ? siteAggFromPageTotals.totalClicks / siteAggFromPageTotals.totalImpressions 
+            : 0;
+          siteAggFromPageTotals.avgPosition = siteAggFromPageTotals.totalImpressions > 0
+            ? totalPositionWeight / siteAggFromPageTotals.totalImpressions
+            : null;
           
           moneyPagesMetrics = computeMoneyPagesMetrics(
-            moneyPagesFromCsv, // Use CSV URLs with matched GSC data
+            moneyPagesFromCsv, // Use CSV URLs with page-level GSC data from pageTotalsByUrl
             classifyPageSegment,
-            siteAgg,
+            siteAggFromPageTotals, // Use site aggregates from page-level data
             pageMetadataLookup, // Pass metadata lookup
             schemaAudit // Pass schema audit data to check for schema presence
           );
         } catch (csvError) {
-          debugLog(`⚠ Failed to fetch CSV, falling back to GSC data only: ${csvError.message}`, 'warn');
-          // Fallback to GSC data only if CSV fetch fails
+          debugLog(`⚠ Failed to fetch CSV, falling back to pageTotalsByUrl only: ${csvError.message}`, 'warn');
+          // Fallback: Build pages from pageTotalsByUrl directly (no CSV)
+          const pagesFromPageTotals = Array.from(pageTotalsByUrl.entries()).map(([normalizedUrl, totals]) => {
+            // Try to reconstruct full URL from normalized URL
+            let fullUrl = normalizedUrl;
+            if (!fullUrl.startsWith('http')) {
+              const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || 'https://www.alanranger.com';
+              fullUrl = propertyUrl.replace(/\/$/, '') + (normalizedUrl.startsWith('/') ? normalizedUrl : '/' + normalizedUrl);
+            }
+            
+            return {
+              url: fullUrl,
+              page: fullUrl,
+              segment: classifyPageSegment(fullUrl),
+              clicks: totals.clicks28 || 0,
+              impressions: totals.impr28 || 0,
+              ctr: totals.ctr28 || 0,
+              avgPosition: totals.avgPos28 || null,
+              position: totals.avgPos28 || null,
+              _source: 'pageTotalsByUrl_fallback'
+            };
+          }).filter(page => page.segment === PageSegment.MONEY);
+          
+          // Recompute site aggregates from pageTotalsByUrl
+          let siteAggFromPageTotals = { totalClicks: 0, totalImpressions: 0, avgCtr: 0, avgPosition: null };
+          let totalPositionWeight = 0;
+          pageTotalsByUrl.forEach(totals => {
+            siteAggFromPageTotals.totalClicks += totals.clicks28 || 0;
+            siteAggFromPageTotals.totalImpressions += totals.impr28 || 0;
+            if (totals.avgPos28 != null && totals.impr28 > 0) {
+              totalPositionWeight += totals.avgPos28 * totals.impr28;
+            }
+          });
+          siteAggFromPageTotals.avgCtr = siteAggFromPageTotals.totalImpressions > 0 
+            ? siteAggFromPageTotals.totalClicks / siteAggFromPageTotals.totalImpressions 
+            : 0;
+          siteAggFromPageTotals.avgPosition = siteAggFromPageTotals.totalImpressions > 0
+            ? totalPositionWeight / siteAggFromPageTotals.totalImpressions
+            : null;
+          
           moneyPagesMetrics = computeMoneyPagesMetrics(
-            allPagesAggregated,
+            pagesFromPageTotals,
             classifyPageSegment,
-            siteAgg,
+            siteAggFromPageTotals,
             pageMetadataLookup,
             schemaAudit
           );
@@ -23015,10 +23149,42 @@ Final Score: ${score}/100`;
                   </th>
                   <th style="text-align: left; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; width: 200px; min-width: 200px;">Schema Types</th>
                   <th style="text-align: left; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Recommended action</th>
+                  <th style="text-align: center; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; width: 120px; min-width: 120px;">Track / Manage</th>
                 </tr>
               </thead>
               <tbody>
         `;
+        
+        // ============================================
+        // STEP 3: Build existingOptTaskByUrl lookup for Track/Manage buttons
+        // ============================================
+        const existingOptTaskByUrl = new Map();
+        try {
+          // Fetch existing optimisation tasks
+          const adminKey = window.getAdminKey ? window.getAdminKey() : (sessionStorage.getItem('arp_admin_key') || localStorage.getItem('arp_admin_key') || '');
+          if (adminKey) {
+            const tasksResponse = await fetch(apiUrl('/api/optimisation/tasks'), {
+              headers: {
+                'x-arp-admin-key': adminKey
+              }
+            });
+            if (tasksResponse.ok) {
+              const tasksData = await tasksResponse.json();
+              if (tasksData.tasks && Array.isArray(tasksData.tasks)) {
+                tasksData.tasks.forEach(task => {
+                  const taskUrl = task.target_url_clean || task.target_url || '';
+                  if (taskUrl) {
+                    const normalizedTaskUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(taskUrl) : taskUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+                    existingOptTaskByUrl.set(normalizedTaskUrl, task);
+                  }
+                });
+                debugLog(`✓ Built existingOptTaskByUrl lookup: ${existingOptTaskByUrl.size} tasks`, 'info');
+              }
+            }
+          }
+        } catch (taskLookupError) {
+          debugLog(`⚠ Error building existingOptTaskByUrl lookup: ${taskLookupError.message}`, 'warn');
+        }
         
         pageRows.forEach((row, idx) => {
           const isEven = idx % 2 === 0;
@@ -23109,6 +23275,51 @@ Final Score: ${score}/100`;
                 })()}
               </td>
               <td style="padding: 0.75rem; color: #475569; font-size: 0.8rem; line-height: 1.5; vertical-align: top;">${row.recommendation}</td>
+              <td style="padding: 0.75rem; text-align: center; vertical-align: top;">
+                ${(() => {
+                  const normalizedRowUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(row.url) : row.url.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+                  const existingTask = existingOptTaskByUrl.get(normalizedRowUrl);
+                  
+                  if (existingTask) {
+                    // Task exists - show Manage button
+                    const taskId = existingTask.id || existingTask.task_id;
+                    const taskStatus = existingTask.status || 'planned';
+                    const statusColor = taskStatus === 'active' ? '#10b981' : taskStatus === 'completed' ? '#2563eb' : '#f59e0b';
+                    return `
+                      <div style="display: flex; flex-direction: column; gap: 0.25rem; align-items: center;">
+                        <span style="display: inline-block; padding: 0.125rem 0.5rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600; background: ${statusColor}20; color: ${statusColor}; border: 1px solid ${statusColor}40; text-transform: capitalize;">
+                          ${taskStatus}
+                        </span>
+                        <button 
+                          onclick="window.openOptimisationTaskDrawer(${taskId})"
+                          style="font-size: 0.75rem; padding: 0.375rem 0.75rem; border-radius: 4px; border: 1px solid #2563eb; background: #2563eb; cursor: pointer; color: white; font-weight: 600; transition: all 0.2s; white-space: nowrap;"
+                          onmouseover="this.style.background='#1d4ed8'; this.style.borderColor='#1d4ed8';"
+                          onmouseout="this.style.background='#2563eb'; this.style.borderColor='#2563eb';"
+                          title="Open optimisation task for ${row.url}">
+                          Manage
+                        </button>
+                      </div>
+                    `;
+                  } else {
+                    // No task - show Track button
+                    return `
+                      <div style="display: flex; flex-direction: column; gap: 0.25rem; align-items: center;">
+                        <span style="display: inline-block; padding: 0.125rem 0.5rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600; background: #94a3b820; color: #94a3b8; border: 1px solid #94a3b840;">
+                          Not tracked
+                        </span>
+                        <button 
+                          onclick="window.trackMoneyPage('${row.url.replace(/'/g, "\\'")}', '${(row.title || row.url).replace(/'/g, "\\'")}')"
+                          style="font-size: 0.75rem; padding: 0.375rem 0.75rem; border-radius: 4px; border: 1px solid #10b981; background: #10b981; cursor: pointer; color: white; font-weight: 600; transition: all 0.2s; white-space: nowrap;"
+                          onmouseover="this.style.background='#059669'; this.style.borderColor='#059669';"
+                          onmouseout="this.style.background='#10b981'; this.style.borderColor='#10b981';"
+                          title="Create optimisation task for ${row.url} (CTR ≥ 2.5%)">
+                          Track
+                        </button>
+                      </div>
+                    `;
+                  }
+                })()}
+              </td>
             </tr>
           `;
         });
@@ -23716,8 +23927,8 @@ Final Score: ${score}/100`;
             createBtn.type = 'button';
             createBtn.className = 'btn btn-secondary';
             createBtn.textContent = 'Bulk create…';
-            createBtn.title = 'Create optimisation tasks for all money pages with CTR objective (≥2.5%). Use row-level Track buttons for individual pages.';
-            createBtn.style.cssText = 'margin-left: 1rem; padding: 0.5rem 1rem; background: #64748b; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; white-space: nowrap; font-size: 0.875rem;';
+            createBtn.title = '⚠️ BULK OPERATION: Creates optimisation tasks for ALL money pages (CTR ≥ 2.5%). This will create hundreds of tasks. Use row-level Track buttons for individual pages instead.';
+            createBtn.style.cssText = 'margin-left: 1rem; padding: 0.5rem 1rem; background: #f59e0b; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; white-space: nowrap; font-size: 0.875rem;';
             cardHeader.appendChild(createBtn);
             
             // Wire up button
@@ -24366,6 +24577,32 @@ Final Score: ${score}/100`;
       
       // Make createOptimisationTaskForUrl globally available
       window.createOptimisationTaskForUrl = createOptimisationTaskForUrl;
+      
+      // Track Money Page - per-row function (creates single task)
+      window.trackMoneyPage = async function(pageUrl, pageTitle) {
+        try {
+          debugLog(`📊 Tracking Money Page: ${pageUrl}`, 'info');
+          await createOptimisationTaskForUrl(pageUrl, pageTitle, 'money_pages');
+          debugLog(`✓ Created optimisation task for ${pageUrl}`, 'success');
+          
+          // Refresh Money Pages table to show updated Track/Manage status
+          if (typeof renderMoneyPagesTable === 'function' && window.moneyPagesMetrics) {
+            const moneyPagesContainer = document.getElementById('money-pages-table-container');
+            if (moneyPagesContainer) {
+              const currentPage = window.moneyPagesCurrentPage || 1;
+              const rowsPerPage = window.moneyPagesRowsPerPage || 10;
+              moneyPagesContainer.innerHTML = renderMoneyPagesTable(window.moneyPagesMetrics.rows, currentPage, rowsPerPage);
+              // Re-attach event handlers (they're set up in the render function)
+            }
+          }
+          
+          // Show success message
+          showStatus(`✓ Created optimisation task for ${pageTitle || pageUrl}`, 'success');
+        } catch (error) {
+          debugLog(`✗ Error tracking Money Page: ${error.message}`, 'error');
+          showStatus(`✗ Failed to create task: ${error.message}`, 'error');
+        }
+      };
       
       // Step 5: Build optimisation task payload from Money Page row
       // CTR target: 2.5% absolute (stored as 0.025 ratio)
