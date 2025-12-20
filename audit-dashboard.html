@@ -6982,12 +6982,23 @@
       const done = tasks.filter(t => t.status === 'done');
       const paused = tasks.filter(t => t.status === 'paused');
       const cancelled = tasks.filter(t => t.status === 'cancelled');
+      
+      // Updated (30d): Count distinct tasks with latest measurement in last 30 days
+      // Must use the same task set and scope as other status tiles
+      const scope = window.optimisationModuleState.scope || 'active_cycle';
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-      const recent = tasks.filter(t => {
-        const lastActivity = t.last_activity_at ? new Date(t.last_activity_at) : new Date(t.updated_at);
-        return lastActivity >= thirtyDaysAgo;
-      });
+      const updatedTaskIds = new Set();
+      for (const task of tasks) {
+        const latestMeasurement = getLatestMeasurementInScope(task, scope);
+        if (latestMeasurement && latestMeasurement.captured_at) {
+          const latestDate = new Date(latestMeasurement.captured_at);
+          if (latestDate >= thirtyDaysAgo) {
+            updatedTaskIds.add(task.id);
+          }
+        }
+      }
+      const recent = Array.from(updatedTaskIds).length;
 
       document.getElementById('optimisation-summary-active').textContent = active.length;
       document.getElementById('optimisation-summary-planned').textContent = planned.length;
@@ -8025,7 +8036,7 @@
             }
           }
           
-          // Show progress: baseline → latest (Δ) vs target (Phase 8: use computeGoalProgress)
+          // Show progress: baseline → latest (Δ) vs target (using single source of truth helper)
           if (objectiveProgress && objectiveProgress.baseline_value != null && objectiveProgress.latest_value != null) {
             const baselineVal = objectiveProgress.baseline_value;
             const latestVal = objectiveProgress.latest_value;
@@ -8033,48 +8044,45 @@
             const targetType = objective?.target_type || 'delta';
             const kpiKey = objectiveKpi || objectiveMetric;
             
-            if (target != null && kpiKey) {
-              // Use Phase 8 helper for proper formatting
-              const progress = computeGoalProgress({
+            if (kpiKey) {
+              // Use single source of truth helper for correct delta math
+              const progressLine = computeObjectiveProgressLine({
                 kpiKey: kpiKey,
-                baseline: baselineVal,
-                latest: latestVal,
+                baselineValue: baselineVal,
+                latestValue: latestVal,
                 targetValue: target,
-                targetType: targetType
+                direction: targetType
               });
               
-              const delta = objectiveProgress.delta != null ? objectiveProgress.delta : (latestVal - baselineVal);
-              let deltaColor = '#f59e0b'; // Amber for no change (default)
-              if (delta > 0) deltaColor = '#10b981'; // Green for positive/improvement
-              else if (delta < 0) deltaColor = '#ef4444'; // Red for negative/worsening
-              rightColumn += `<div style="margin-bottom: 0.4rem;"><strong>Progress:</strong> ${progress.baselineLabel} → ${progress.latestLabel} (<span style="color: ${deltaColor} !important; font-weight: 600;">${progress.deltaLabel}</span>) vs target ${progress.targetLabel}</div>`;
-              if (progress.remainingToTarget != null && progress.remainingToTarget > 0) {
-                const displayMeta = KPI_DISPLAY_METADATA[kpiKey];
-                const remainingLabel = displayMeta ? displayMeta.formatDelta(progress.remainingToTarget) : String(progress.remainingToTarget);
-                rightColumn += `<div style="font-size: 0.85rem; color: #666; margin-top: 0.25rem;">Remaining: ${remainingLabel}</div>`;
+              rightColumn += `<div style="margin-bottom: 0.4rem;"><strong>${progressLine.text}</strong></div>`;
+              
+              // Show remaining to target if applicable
+              if (target != null && targetType === 'delta' && progressLine.delta != null) {
+                const remaining = Math.max(0, target - progressLine.delta);
+                if (remaining > 0) {
+                  const displayMeta = KPI_DISPLAY_METADATA[kpiKey];
+                  const remainingLabel = displayMeta ? displayMeta.formatDelta(remaining) : String(remaining);
+                  rightColumn += `<div style="font-size: 0.85rem; color: #666; margin-top: 0.25rem;">Remaining: ${remainingLabel}</div>`;
+                }
               }
             }
           } else if (progress && progress.baseline_value != null && progress.latest_value != null && objectiveMetric) {
-            // Legacy fallback
+            // Legacy fallback - use helper function for consistency
             const baselineVal = progress.baseline_value;
             const latestVal = progress.latest_value;
-            const delta = progress.objective_delta != null ? progress.objective_delta : (latestVal - baselineVal);
             const targetDelta = task.objective_target_delta != null ? task.objective_target_delta : (task.objective_target_value != null ? task.objective_target_value : null);
+            const targetType = task.objective_target_type || 'delta';
             
-            if (targetDelta != null) {
-              let deltaColor = '#f59e0b'; // Amber for no change (default)
-              if (delta > 0) deltaColor = '#10b981'; // Green for positive/improvement
-              else if (delta < 0) deltaColor = '#ef4444'; // Red for negative/worsening
-              const deltaSign = delta >= 0 ? '+' : '';
-              const kpiLabel = (objectiveKpi || objectiveMetric).replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            if (objectiveMetric) {
+              const progressLine = computeObjectiveProgressLine({
+                kpiKey: objectiveMetric,
+                baselineValue: baselineVal,
+                latestValue: latestVal,
+                targetValue: targetDelta,
+                direction: targetType
+              });
               
-              // Format values based on KPI type
-              const formattedBaseline = formatProgressValue(baselineVal, objectiveKpi || objectiveMetric);
-              const formattedLatest = formatProgressValue(latestVal, objectiveKpi || objectiveMetric);
-              const formattedDelta = formatProgressValue(delta, objectiveKpi || objectiveMetric);
-              const formattedTarget = formatProgressValue(targetDelta, objectiveKpi || objectiveMetric);
-              
-              rightColumn += `<div style="margin-bottom: 0.4rem;"><strong>Progress:</strong> ${formattedBaseline} → ${formattedLatest} (<span style="color: ${deltaColor} !important; font-weight: 600;">${deltaSign}${formattedDelta}</span>) vs target ${targetDelta > 0 ? '+' : ''}${formattedTarget}</div>`;
+              rightColumn += `<div style="margin-bottom: 0.4rem;"><strong>${progressLine.text}</strong></div>`;
             }
           }
           
@@ -8407,26 +8415,21 @@
             if (objectiveProgress && objectiveProgress.baseline_value != null && objectiveProgress.latest_value != null) {
               const baselineVal = objectiveProgress.baseline_value;
               const latestVal = objectiveProgress.latest_value;
-              const delta = objectiveProgress.delta != null ? objectiveProgress.delta : (latestVal - baselineVal);
               const target = objectiveProgress.target != null ? objectiveProgress.target : objectiveTargetValue;
+              const targetType = objective?.target_type || 'delta';
+              const kpiKey = objectiveKpi || objectiveMetric;
               
-              if (target != null) {
-                let deltaColor = '#f59e0b'; // Amber for no change (default)
-                if (delta > 0) deltaColor = '#10b981'; // Green for positive/improvement
-                else if (delta < 0) deltaColor = '#ef4444'; // Red for negative/worsening
-                const deltaSign = delta >= 0 ? '+' : '';
-                const targetType = objective?.target_type || 'delta';
+              if (kpiKey) {
+                // Use single source of truth helper for correct delta math
+                const progressLine = computeObjectiveProgressLine({
+                  kpiKey: kpiKey,
+                  baselineValue: baselineVal,
+                  latestValue: latestVal,
+                  targetValue: target,
+                  direction: targetType
+                });
                 
-                // Format values based on KPI type
-                const formattedBaseline = formatProgressValue(baselineVal, objectiveKpi || objectiveMetric);
-                const formattedLatest = formatProgressValue(latestVal, objectiveKpi || objectiveMetric);
-                const formattedDelta = formatProgressValue(delta, objectiveKpi || objectiveMetric);
-                const formattedTarget = formatProgressValue(target, objectiveKpi || objectiveMetric);
-                
-                const targetText = targetType === 'delta' 
-                  ? `target ${delta >= 0 ? '+' : ''}${formattedTarget}`
-                  : `target ${formattedTarget}`;
-                rightColumn += `<div style="margin-bottom: 0.4rem;"><strong>Progress:</strong> ${formattedBaseline} → ${formattedLatest} (<span style="color: ${deltaColor} !important; font-weight: 600;">${deltaSign}${formattedDelta}</span>) vs ${targetText}</div>`;
+                rightColumn += `<div style="margin-bottom: 0.4rem;"><strong>Progress:</strong> ${progressLine.baselineDisp} → ${progressLine.latestDisp} (<span style="color: ${progressLine.deltaColor} !important; font-weight: 600;">${progressLine.deltaDisp}</span>) vs target ${progressLine.targetDisp}</div>`;
               }
             }
             
@@ -8728,6 +8731,84 @@
       }
     };
 
+    // Helper: Compute objective progress line with correct delta math (single source of truth)
+    // Always calculates delta as latest - baseline (or baseline - latest for rank)
+    function computeObjectiveProgressLine({ kpiKey, baselineValue, latestValue, targetValue, direction }) {
+      // If baseline/latest missing, return placeholder
+      if (baselineValue == null || latestValue == null) {
+        return { text: 'Progress: —', delta: null, deltaColor: '#666' };
+      }
+      
+      // Calculate raw delta (always from baseline to latest)
+      let deltaRaw = latestValue - baselineValue;
+      
+      // For rank, lower is better, so invert: improvement = baseline - latest (positive when rank decreases)
+      if (kpiKey === 'current_rank') {
+        deltaRaw = baselineValue - latestValue;
+      }
+      
+      // Format values based on KPI type
+      let baselineDisp, latestDisp, deltaDisp;
+      
+      if (kpiKey === 'ctr_28d') {
+        baselineDisp = (baselineValue * 100).toFixed(2) + '%';
+        latestDisp = (latestValue * 100).toFixed(2) + '%';
+        const deltaPp = (latestValue - baselineValue) * 100;
+        deltaDisp = (deltaPp >= 0 ? '+' : '') + deltaPp.toFixed(2) + 'pp';
+      } else if (kpiKey === 'current_rank') {
+        baselineDisp = baselineValue.toFixed(1);
+        latestDisp = latestValue.toFixed(1);
+        // For rank, deltaRaw is already inverted (baseline - latest), so positive = improvement
+        deltaDisp = (deltaRaw >= 0 ? '+' : '') + deltaRaw.toFixed(1);
+      } else {
+        // For other metrics, use number formatting
+        const displayMeta = KPI_DISPLAY_METADATA[kpiKey];
+        if (displayMeta) {
+          baselineDisp = displayMeta.formatValue(baselineValue);
+          latestDisp = displayMeta.formatValue(latestValue);
+          deltaDisp = displayMeta.formatDelta(deltaRaw);
+        } else {
+          baselineDisp = baselineValue.toLocaleString('en-GB');
+          latestDisp = latestValue.toLocaleString('en-GB');
+          deltaDisp = (deltaRaw >= 0 ? '+' : '') + deltaRaw.toLocaleString('en-GB');
+        }
+      }
+      
+      // Determine color: green for positive, red for negative, amber for zero
+      let deltaColor = '#f59e0b'; // Amber for no change
+      if (deltaRaw > 0) deltaColor = '#10b981'; // Green for positive/improvement
+      else if (deltaRaw < 0) deltaColor = '#ef4444'; // Red for negative/worsening
+      
+      // Format target display
+      let targetDisp = '—';
+      if (targetValue != null) {
+        const displayMeta = KPI_DISPLAY_METADATA[kpiKey];
+        if (displayMeta && displayMeta.formatTarget) {
+          targetDisp = displayMeta.formatTarget(targetValue, direction || 'delta', baselineValue);
+        } else {
+          // Fallback formatting
+          if (direction === 'delta') {
+            targetDisp = (targetValue >= 0 ? '+' : '') + targetValue.toLocaleString('en-GB');
+          } else {
+            targetDisp = targetValue.toLocaleString('en-GB');
+          }
+        }
+      }
+      
+      // Build progress line text with colored delta
+      const text = `Progress: ${baselineDisp} → ${latestDisp} (<span style="color: ${deltaColor} !important; font-weight: 600;">${deltaDisp}</span>) vs target ${targetDisp}`;
+      
+      return {
+        text,
+        delta: deltaRaw,
+        deltaColor,
+        baselineDisp,
+        latestDisp,
+        deltaDisp,
+        targetDisp
+      };
+    }
+    
     // Legacy formatProgressValue function (kept for backward compatibility)
     function formatProgressValue(value, kpi) {
       if (value == null || value === undefined) return '—';
