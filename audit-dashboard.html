@@ -1279,34 +1279,34 @@
       justify-content: center;
     }
     
-    /* Bronze/Silver/Gold backgrounds for Estimated Extra Clicks ONLY */
-    #impact-extra-clicks-card.impact-bronze {
+    /* Bronze/Silver/Gold backgrounds for Potential Extra Clicks tile */
+    #impact-potential-clicks-card.impact-bronze {
       background: linear-gradient(135deg, #cd7f32 0%, #b87333 100%) !important;
       border: 1px solid #a0652a !important;
       color: #ffffff !important;
     }
     
-    #impact-extra-clicks-card.impact-bronze * {
+    #impact-potential-clicks-card.impact-bronze * {
       color: #ffffff !important;
     }
     
-    #impact-extra-clicks-card.impact-silver {
+    #impact-potential-clicks-card.impact-silver {
       background: linear-gradient(135deg, #c0c0c0 0%, #a8a8a8 100%) !important;
       border: 1px solid #909090 !important;
       color: #1a1a1a !important;
     }
     
-    #impact-extra-clicks-card.impact-silver * {
+    #impact-potential-clicks-card.impact-silver * {
       color: #1a1a1a !important;
     }
     
-    #impact-extra-clicks-card.impact-gold {
+    #impact-potential-clicks-card.impact-gold {
       background: linear-gradient(135deg, #ffd700 0%, #ffb700 100%) !important;
       border: 1px solid #e6a600 !important;
       color: #1a1a1a !important;
     }
     
-    #impact-extra-clicks-card.impact-gold * {
+    #impact-potential-clicks-card.impact-gold * {
       color: #1a1a1a !important;
     }
     
@@ -4775,12 +4775,19 @@
           </div>
         </div>
 
-        <!-- Phase 9: Estimated Impact Tiles -->
-        <div class="optimisation-impact-tiles" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; margin: 1.5rem 0;">
-          <div class="card" id="impact-extra-clicks-card" title="Sum of remaining clicks needed to hit each task's objective (traffic KPIs only). This is a target gap, not last-30d performance.">
-            <div style="font-size: 1.5rem; font-weight: bold;" id="impact-extra-clicks">0</div>
-            <div style="margin-top: 0.25rem; font-size: 0.875rem;">Estimated Gap to Target (28d)</div>
-            <div style="margin-top: 0.125rem; font-size: 0.75rem; color: rgba(255, 255, 255, 0.7);">Clicks potential (sum of remaining clicks needed to hit targets)</div>
+        <!-- Phase 9: Estimated Impact Tiles - Split into Potential and Actual -->
+        <div class="optimisation-impact-tiles" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.5rem 0;">
+          <!-- Left Tile: Potential Extra Clicks -->
+          <div class="card" id="impact-potential-clicks-card" title="Projection: assumes objectives met for CTR/Impressions/Clicks tasks. Uses latest measurements. Excludes Rank/AI metrics.">
+            <div style="font-size: 1.5rem; font-weight: bold;" id="impact-potential-clicks">0</div>
+            <div style="margin-top: 0.25rem; font-size: 0.875rem;">Potential Extra Clicks (28d)</div>
+            <div style="margin-top: 0.125rem; font-size: 0.75rem; color: rgba(255, 255, 255, 0.7);">If all CTR/Impressions/Clicks objectives are met</div>
+          </div>
+          <!-- Right Tile: Actual Click Change -->
+          <div class="card" id="impact-actual-clicks-card" title="Observed: baseline → latest click change across traffic KPI tasks. Uses measured clicks (or CTR×Impressions fallback).">
+            <div style="font-size: 1.5rem; font-weight: bold;" id="impact-actual-clicks">0</div>
+            <div style="margin-top: 0.25rem; font-size: 0.875rem;">Actual Click Change (28d)</div>
+            <div style="margin-top: 0.125rem; font-size: 0.75rem; color: rgba(255, 255, 255, 0.7);">Measured baseline → latest across click-related tasks</div>
           </div>
         </div>
 
@@ -9079,16 +9086,17 @@
         tasks = tasks.filter(t => !t.is_test_task);
       }
       
-      // Recalculate impact from filtered tasks
-      let estimatedExtraClicks = 0;
-      let aiCitationGapCount = 0;
+      // Get current scope (respects the scope filter)
+      const scope = window.optimisationModuleState.scope || 'active_cycle';
       
+      // Compute potential and actual clicks with deduplication
+      const { potential, actual } = computePotentialAndActualClicks28d(tasks, scope);
+      
+      // Also compute per-task values for chart aggregation (still needed for charts)
+      let aiCitationGapCount = 0;
       for (const task of tasks) {
-        // Use the centralized helper function for all traffic KPIs
-        const extraClicks = computeEstimatedExtraClicks28d(task);
-        estimatedExtraClicks += extraClicks;
-        
         // Store per-task value for chart aggregation
+        const extraClicks = computeEstimatedExtraClicks28d(task);
         task.estimated_extra_clicks_28d = extraClicks;
         
         // AI Citation Gap
@@ -9098,29 +9106,38 @@
         }
       }
       
-      const extraClicksEl = document.getElementById('impact-extra-clicks');
-      const extraClicksCard = document.getElementById('impact-extra-clicks-card');
-      if (extraClicksEl) {
-        extraClicksEl.textContent = estimatedExtraClicks >= 1000 
-          ? (estimatedExtraClicks / 1000).toFixed(1) + 'k' 
-          : Math.round(estimatedExtraClicks).toLocaleString('en-GB');
+      // Update Potential Extra Clicks tile
+      const potentialClicksEl = document.getElementById('impact-potential-clicks');
+      const potentialClicksCard = document.getElementById('impact-potential-clicks-card');
+      if (potentialClicksEl) {
+        potentialClicksEl.textContent = potential >= 1000 
+          ? (potential / 1000).toFixed(1) + 'k' 
+          : Math.round(potential).toLocaleString('en-GB');
       }
       
-      // Set bronze/silver/gold background based on impact
-      if (extraClicksCard) {
-        // Remove existing medal classes
-        extraClicksCard.classList.remove('impact-bronze', 'impact-silver', 'impact-gold');
-        
-        // Bronze: < 50 clicks (low impact)
-        // Silver: 50-200 clicks (medium impact)
-        // Gold: > 200 clicks (high impact)
-        if (estimatedExtraClicks < 50) {
-          extraClicksCard.classList.add('impact-bronze');
-        } else if (estimatedExtraClicks >= 50 && estimatedExtraClicks < 200) {
-          extraClicksCard.classList.add('impact-silver');
+      // Set bronze/silver/gold background for potential tile
+      if (potentialClicksCard) {
+        potentialClicksCard.classList.remove('impact-bronze', 'impact-silver', 'impact-gold');
+        if (potential < 50) {
+          potentialClicksCard.classList.add('impact-bronze');
+        } else if (potential >= 50 && potential < 200) {
+          potentialClicksCard.classList.add('impact-silver');
         } else {
-          extraClicksCard.classList.add('impact-gold');
+          potentialClicksCard.classList.add('impact-gold');
         }
+      }
+      
+      // Update Actual Click Change tile
+      const actualClicksEl = document.getElementById('impact-actual-clicks');
+      if (actualClicksEl) {
+        // Format with sign (+ or -)
+        const sign = actual >= 0 ? '+' : '';
+        actualClicksEl.textContent = sign + (Math.abs(actual) >= 1000 
+          ? (Math.abs(actual) / 1000).toFixed(1) + 'k' 
+          : Math.round(Math.abs(actual)).toLocaleString('en-GB'));
+        
+        // Color code: green for positive, red for negative
+        actualClicksEl.style.color = actual >= 0 ? '#10b981' : '#ef4444';
       }
       
       const aiGapEl = document.getElementById('impact-ai-gap');
@@ -9452,26 +9469,28 @@
     // Helper: Compute estimated extra clicks (28d) for a single task
     // Supports traffic KPIs: ctr_28d, impressions_28d, clicks_28d
     function computeEstimatedExtraClicks28d(task) {
-      const objectiveKpiKey = task.objectiveKpiKey || (task.objective && task.objective.kpi);
+      // Try multiple sources for objective
+      const objective = task.objective || (task.cycle && task.cycle.objective) || null;
+      const objectiveKpiKey = task.objectiveKpiKey || (objective && objective.kpi);
       const baselineValue = task.baselineValue;
       const latestValue = task.latestValue;
       const latestMetrics = task.latest_metrics || {};
       
       // Must have objective and latest value
-      if (!objectiveKpiKey || !task.objective || latestValue == null) {
+      if (!objectiveKpiKey || !objective || latestValue == null) {
         return 0;
       }
       
       // Calculate target value (normalize delta vs absolute)
       let targetValue = null;
-      if (task.objective.target_type === 'delta') {
+      if (objective.target_type === 'delta') {
         // Delta: target = baseline + delta
         if (baselineValue != null) {
-          targetValue = baselineValue + task.objective.target;
+          targetValue = baselineValue + objective.target;
         }
       } else {
         // Absolute: target = target value directly
-        targetValue = task.objective.target;
+        targetValue = objective.target;
       }
       
       if (targetValue == null) {
@@ -9518,6 +9537,113 @@
         default:
           return 0;
       }
+    }
+
+    // Compute potential extra clicks (28d) with deduplication
+    // Groups by target_url to prevent double-counting when multiple tasks target the same page
+    // Returns: { potential: number, actual: number }
+    function computePotentialAndActualClicks28d(tasks, scope) {
+      const trafficKpis = new Set(['ctr_28d', 'impressions_28d', 'clicks_28d']);
+      
+      // Group tasks by target_url for deduplication
+      // Deduplication strategy:
+      // - Potential: MAX per URL (avoids fantasy stacking when multiple tasks target same page)
+      // - Actual: SUM per URL (measured changes can legitimately stack across tasks)
+      const tasksByUrl = {};
+      for (const task of tasks) {
+        const objectiveKpiKey = task.objectiveKpiKey || (task.objective && task.objective.kpi) || 
+                                (task.cycle && task.cycle.objective && task.cycle.objective.kpi);
+        if (!objectiveKpiKey || !trafficKpis.has(objectiveKpiKey)) {
+          continue; // Skip non-traffic KPIs
+        }
+        
+        const targetUrl = task.target_url_clean || task.target_url || 'unknown';
+        if (!tasksByUrl[targetUrl]) {
+          tasksByUrl[targetUrl] = [];
+        }
+        tasksByUrl[targetUrl].push(task);
+      }
+      
+      let totalPotential = 0;
+      let totalActual = 0;
+      
+      // Process each URL group
+      for (const [url, urlTasks] of Object.entries(tasksByUrl)) {
+        // For potential: take MAX per URL (avoid fantasy stacking)
+        // For actual: sum within group (it's measured, so multiple tasks can contribute)
+        let maxPotential = 0;
+        let sumActual = 0;
+        
+        for (const task of urlTasks) {
+          // Get active cycle if scope is 'active_cycle'
+          const activeCycle = scope === 'active_cycle' 
+            ? ((task.cycles && task.cycles.find(c => c.is_active || c.id === task.active_cycle_id)) || null)
+            : null;
+          const measurements = task.measurements || [];
+          const baselineLatest = getBaselineLatest(measurements, scope, activeCycle);
+          
+          // Potential: compute estimated extra clicks (uses task.objective and task.baselineValue/latestValue)
+          const potential = computeEstimatedExtraClicks28d(task);
+          maxPotential = Math.max(maxPotential, potential);
+          
+          // Actual: compute measured click delta
+          // Priority: 1) measurements with getBaselineLatest, 2) task.baseline_metrics/latest_metrics, 3) task.baselineValue/latestValue (if clicks_28d)
+          let actual = 0;
+          if (baselineLatest && baselineLatest.baseline && baselineLatest.latest) {
+            // Use measurements if available
+            actual = computeActualClickDeltaForTask(task, baselineLatest.baseline, baselineLatest.latest);
+          } else if (task.baseline_metrics && task.latest_metrics) {
+            // Fallback to task's baseline_metrics/latest_metrics
+            actual = computeActualClickDeltaForTask(task, task.baseline_metrics, task.latest_metrics);
+          } else if (task.baselineValue != null && task.latestValue != null) {
+            // Last resort: use task's baselineValue/latestValue if this is for clicks_28d KPI
+            const objectiveKpiKey = task.objectiveKpiKey || (task.objective && task.objective.kpi) || 
+                                    (task.cycle && task.cycle.objective && task.cycle.objective.kpi);
+            if (objectiveKpiKey === 'clicks_28d') {
+              actual = task.latestValue - task.baselineValue;
+            }
+            // For CTR/Impressions, we can't compute clicks from just baselineValue/latestValue
+            // (we'd need impressions or CTR separately), so actual remains 0
+          }
+          sumActual += actual;
+        }
+        
+        totalPotential += maxPotential;
+        totalActual += sumActual;
+      }
+      
+      return {
+        potential: Math.round(totalPotential),
+        actual: Math.round(totalActual)
+      };
+    }
+    
+    // Compute actual click delta for a single task
+    // Returns click change from baseline → latest (can be negative)
+    // Accepts either measurement objects or metric objects
+    function computeActualClickDeltaForTask(task, baseline, latest) {
+      // Prefer direct clicks_28d if available
+      const baselineClicks = getMetricValue(baseline, 'clicks_28d');
+      const latestClicks = getMetricValue(latest, 'clicks_28d');
+      
+      if (baselineClicks != null && latestClicks != null) {
+        return latestClicks - baselineClicks;
+      }
+      
+      // Fallback: compute from CTR × Impressions
+      const baselineCtr = getMetricValue(baseline, 'ctr_28d');
+      const latestCtr = getMetricValue(latest, 'ctr_28d');
+      const baselineImpr = getMetricValue(baseline, 'impressions_28d');
+      const latestImpr = getMetricValue(latest, 'impressions_28d');
+      
+      if (baselineCtr != null && baselineImpr != null && latestCtr != null && latestImpr != null) {
+        // CTR is stored as ratio (0-1), so multiply by impressions to get clicks
+        const baselineComputedClicks = baselineImpr * baselineCtr;
+        const latestComputedClicks = latestImpr * latestCtr;
+        return latestComputedClicks - baselineComputedClicks;
+      }
+      
+      return 0; // No data available
     }
 
     // Build Chart 1: Estimated Extra Clicks (28d) by KPI
@@ -11201,6 +11327,9 @@
               ? 'Showing metrics for tasks with active cycles only'
               : 'Showing metrics for all tasks';
           }
+          // Update impact tiles immediately (they depend on scope)
+          updateImpactTiles();
+          // Then reload all tasks (which will also call updateImpactTiles, but this ensures immediate update)
           window.loadAllOptimisationTasks();
         });
         if (scopeDescription) {
