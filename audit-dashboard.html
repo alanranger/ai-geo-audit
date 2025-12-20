@@ -8219,93 +8219,74 @@
       document.getElementById('optimisation-drawer-minimize').textContent = '−';
       document.getElementById('optimisation-drawer-maximize').textContent = '□';
       
-      // Force ALL buttons to have black text (override inline styles) - MOST AGGRESSIVE VERSION
+      // Force ALL buttons to have black text (override inline styles) - EFFICIENT VERSION
       const forceBlackText = () => {
         const drawer = document.getElementById('optimisation-task-drawer');
-        if (drawer) {
-          const allButtons = drawer.querySelectorAll('button');
-          allButtons.forEach(btn => {
-            // Remove ALL color-related inline styles
+        if (!drawer) return;
+        
+        const allButtons = drawer.querySelectorAll('button');
+        // Use a single loop and batch DOM operations
+        allButtons.forEach(btn => {
+          // Skip if already processed
+          if (btn.dataset.forceBlack === 'true') return;
+          
+          // Remove color property if it's not black
+          const currentColor = btn.style.color;
+          if (currentColor && currentColor !== 'rgb(0, 0, 0)' && currentColor !== '#000000' && currentColor !== '#000') {
             btn.style.removeProperty('color');
-            btn.style.removeProperty('--color');
-            // Force black text with !important - multiple ways
-            btn.style.cssText += '; color: #000000 !important;';
-            btn.style.setProperty('color', '#000000', 'important');
-            btn.style.setProperty('--color', '#000000', 'important');
-            btn.style.setProperty('font-weight', '700', 'important');
-            // Force on computed style
-            if (btn.ownerDocument && btn.ownerDocument.defaultView) {
-              const computed = btn.ownerDocument.defaultView.getComputedStyle(btn);
-              if (computed.color !== 'rgb(0, 0, 0)') {
-                btn.style.setProperty('color', '#000000', 'important');
-              }
+          }
+          
+          // Force black text - single operation
+          btn.style.setProperty('color', '#000000', 'important');
+          btn.style.setProperty('font-weight', '700', 'important');
+          
+          // Mark as processed to avoid re-processing
+          btn.dataset.forceBlack = 'true';
+          btn.classList.add('force-black-text');
+          
+          // Force on direct text children only (not all descendants to reduce overhead)
+          const textNodes = Array.from(btn.childNodes).filter(node => node.nodeType === 1);
+          textNodes.forEach(child => {
+            if (child.style) {
+              child.style.setProperty('color', '#000000', 'important');
             }
-            // Also force on any child elements (spans, divs, etc.)
-            const children = btn.querySelectorAll('*');
-            children.forEach(child => {
-              if (child.style) {
-                child.style.removeProperty('color');
-                child.style.cssText += '; color: #000000 !important;';
-                child.style.setProperty('color', '#000000', 'important');
-              }
-              // Also set textContent color via CSS variable
-              child.setAttribute('style', (child.getAttribute('style') || '') + '; color: #000000 !important;');
-            });
-            // Add class for CSS targeting
-            btn.classList.add('force-black-text');
-            // Set attribute for additional CSS targeting
-            btn.setAttribute('data-force-black', 'true');
           });
-        }
+        });
       };
       
-      // Run immediately and multiple times to catch all buttons - EXTREME VERSION
+      // Run immediately and a few times to catch all buttons - EFFICIENT VERSION
       forceBlackText();
-      requestAnimationFrame(forceBlackText);
-      setTimeout(forceBlackText, 0);
-      setTimeout(forceBlackText, 10);
-      setTimeout(forceBlackText, 25);
-      setTimeout(forceBlackText, 50);
-      setTimeout(forceBlackText, 75);
-      setTimeout(forceBlackText, 100);
-      setTimeout(forceBlackText, 200);
-      setTimeout(forceBlackText, 300);
-      setTimeout(forceBlackText, 500);
-      setTimeout(forceBlackText, 750);
-      setTimeout(forceBlackText, 1000);
-      setTimeout(forceBlackText, 2000);
+      requestAnimationFrame(() => {
+        forceBlackText();
+        setTimeout(forceBlackText, 50);
+        setTimeout(forceBlackText, 200);
+      });
       
-      // Also use MutationObserver to catch buttons added later - AGGRESSIVE
+      // Also use MutationObserver to catch buttons added later - EFFICIENT
       const drawerForObserver = document.getElementById('optimisation-task-drawer');
       if (drawerForObserver) {
-        const observer = new MutationObserver((mutations) => {
-          forceBlackText();
-          // Also force on any newly added buttons immediately
-          mutations.forEach(mutation => {
-            mutation.addedNodes.forEach(node => {
-              if (node.nodeType === 1) { // Element node
-                if (node.tagName === 'BUTTON') {
-                  forceBlackText();
-                }
-                const buttons = node.querySelectorAll && node.querySelectorAll('button');
-                if (buttons && buttons.length > 0) {
-                  forceBlackText();
-                }
-              }
-            });
-          });
+        // Debounce the observer callback to avoid excessive calls
+        let observerTimeout = null;
+        const observer = new MutationObserver(() => {
+          // Debounce: only run after mutations stop for 100ms
+          if (observerTimeout) clearTimeout(observerTimeout);
+          observerTimeout = setTimeout(() => {
+            forceBlackText();
+          }, 100);
         });
         observer.observe(drawerForObserver, { 
           childList: true, 
-          subtree: true, 
-          attributes: true,
-          attributeFilter: ['style', 'class']
+          subtree: true,
+          attributes: false // Don't watch attributes to reduce overhead
         });
         // Store observer to clean up later if needed
         window.optimisationDrawerObserver = observer;
-        
-        // Also set up an interval as a backup
-        window.optimisationDrawerInterval = setInterval(forceBlackText, 500);
+      }
+      
+      // Clean up any existing interval if drawer closes
+      if (window.optimisationDrawerInterval) {
+        clearInterval(window.optimisationDrawerInterval);
+        window.optimisationDrawerInterval = null;
       }
       
       // Phase 7: Show/hide Complete/Archive buttons based on active cycle
