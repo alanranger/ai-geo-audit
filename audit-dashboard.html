@@ -16293,6 +16293,19 @@
               if (hasMoneyPages) {
                 const rows = result.data?.scores?.moneyPagesMetrics?.rows || result.data?.moneyPagesMetrics?.rows || [];
                 debugLog(`✓ Supabase moneyPagesMetrics has ${rows.length} rows`, 'success');
+                // CRITICAL: Reconstruct scores.moneyPages from moneyPagesMetrics if gscPageTotals28d exists
+                const moneyPagesMetrics = result.data?.scores?.moneyPagesMetrics || result.data?.moneyPagesMetrics;
+                if (moneyPagesMetrics && (moneyPagesMetrics.gscPageTotals28d || moneyPagesMetrics.gscRange)) {
+                  if (!result.data.scores) result.data.scores = {};
+                  if (!result.data.scores.moneyPages) result.data.scores.moneyPages = {};
+                  if (moneyPagesMetrics.gscRange) {
+                    result.data.scores.moneyPages.gscRange = moneyPagesMetrics.gscRange;
+                  }
+                  if (moneyPagesMetrics.gscPageTotals28d) {
+                    result.data.scores.moneyPages.gscPageTotals28d = moneyPagesMetrics.gscPageTotals28d;
+                    debugLog(`✓ Reconstructed scores.moneyPages.gscPageTotals28d from moneyPagesMetrics (${moneyPagesMetrics.gscPageTotals28d.length} pages)`, 'success');
+                  }
+                }
               } else {
                 debugLog(`⚠ Supabase data missing moneyPagesMetrics!`, 'warn');
               }
@@ -19100,6 +19113,17 @@
           if (csvUrls.length === 0) {
             csvUrls = await fetchAndParseSiteUrlsCsv();
             debugLog(`✓ Fetched ${csvUrls.length} URLs from CSV (GitHub/fallback)`, 'info');
+          }
+          
+          // Debug: Check if landscape page is in CSV
+          const landscapeInCsv = csvUrls.find(u => u.includes('landscape-photography-workshops'));
+          if (landscapeInCsv) {
+            debugLog(`✓ Landscape page found in CSV: "${landscapeInCsv}"`, 'info');
+          } else {
+            debugLog(`⚠ Landscape page NOT found in CSV! Total CSV URLs: ${csvUrls.length}`, 'warn');
+            // Log sample CSV URLs for debugging
+            const sampleCsvUrls = csvUrls.slice(0, 10);
+            debugLog(`📊 Sample CSV URLs: ${sampleCsvUrls.join(', ')}`, 'info');
           }
           
           // Segment all CSV URLs and match with pageTotalsByKey (page-level totals)
