@@ -18794,53 +18794,63 @@
       // Fetch page-level data from GSC API (unfiltered, all positions)
       // This matches GSC "Pages" tab totals exactly
       // Always uses rolling "last 28d" range for consistency
-      // First check if persisted values exist from a saved audit
+      // CRITICAL: During a fresh audit run, ALWAYS fetch fresh data from GSC API
+      // Only use persisted data when explicitly loading a historical audit from Supabase
       let pageTotalsByKey = new Map();
       let pageLevelDataFetched = false;
       let gscRange = null;
       
-      // Check for persisted page totals from saved audit (when loading from history)
-      try {
-        const saved = loadAuditResultsSync();
-        if (saved && saved.scores) {
-          // Check scores.moneyPages namespace first (new format)
-          const moneyPagesData = saved.scores.moneyPages || {};
-          if (moneyPagesData.gscPageTotals28d && Array.isArray(moneyPagesData.gscPageTotals28d) && moneyPagesData.gscPageTotals28d.length > 0) {
-            debugLog(`✓ Using persisted page totals from saved audit (${moneyPagesData.gscPageTotals28d.length} pages)`, 'success');
-            gscRange = moneyPagesData.gscRange || getGscDateRange(28, 2);
-            moneyPagesData.gscPageTotals28d.forEach(pageData => {
-              const key = normalizeGscPageKey(pageData.url);
-              pageTotalsByKey.set(key, {
-                url: pageData.url,
-                clicks: pageData.clicks || 0,
-                impressions: pageData.impressions || 0,
-                ctr: pageData.ctr || 0,
-                position: pageData.position || 0
+      // Check if we're in a fresh audit run (queryPages is fresh data from current audit)
+      // vs loading from history (queryPages is null or from Supabase)
+      const isFreshAudit = queryPages && queryPages.length > 0 && !queryPages._fromHistory;
+      
+      // Only check localStorage for persisted data if we're NOT in a fresh audit run
+      // During fresh audits, we must fetch fresh data to ensure accuracy
+      if (!isFreshAudit) {
+        try {
+          const saved = loadAuditResultsSync();
+          if (saved && saved.scores) {
+            // Check scores.moneyPages namespace first (new format)
+            const moneyPagesData = saved.scores.moneyPages || {};
+            if (moneyPagesData.gscPageTotals28d && Array.isArray(moneyPagesData.gscPageTotals28d) && moneyPagesData.gscPageTotals28d.length > 0) {
+              debugLog(`✓ Using persisted page totals from saved audit (${moneyPagesData.gscPageTotals28d.length} pages)`, 'success');
+              gscRange = moneyPagesData.gscRange || getGscDateRange(28, 2);
+              moneyPagesData.gscPageTotals28d.forEach(pageData => {
+                const key = normalizeGscPageKey(pageData.url);
+                pageTotalsByKey.set(key, {
+                  url: pageData.url,
+                  clicks: pageData.clicks || 0,
+                  impressions: pageData.impressions || 0,
+                  ctr: pageData.ctr || 0,
+                  position: pageData.position || 0
+                });
               });
-            });
-            pageLevelDataFetched = true;
-          } else if (saved.scores.moneyPagesMetrics && saved.scores.moneyPagesMetrics.gscPageTotals28d && Array.isArray(saved.scores.moneyPagesMetrics.gscPageTotals28d)) {
-            // Fallback: check moneyPagesMetrics directly (backwards compatibility)
-            debugLog(`✓ Using persisted page totals from moneyPagesMetrics (${saved.scores.moneyPagesMetrics.gscPageTotals28d.length} pages)`, 'success');
-            gscRange = saved.scores.moneyPagesMetrics.gscRange || getGscDateRange(28, 2);
-            saved.scores.moneyPagesMetrics.gscPageTotals28d.forEach(pageData => {
-              const key = normalizeGscPageKey(pageData.url);
-              pageTotalsByKey.set(key, {
-                url: pageData.url,
-                clicks: pageData.clicks || 0,
-                impressions: pageData.impressions || 0,
-                ctr: pageData.ctr || 0,
-                position: pageData.position || 0
+              pageLevelDataFetched = true;
+            } else if (saved.scores.moneyPagesMetrics && saved.scores.moneyPagesMetrics.gscPageTotals28d && Array.isArray(saved.scores.moneyPagesMetrics.gscPageTotals28d)) {
+              // Fallback: check moneyPagesMetrics directly (backwards compatibility)
+              debugLog(`✓ Using persisted page totals from moneyPagesMetrics (${saved.scores.moneyPagesMetrics.gscPageTotals28d.length} pages)`, 'success');
+              gscRange = saved.scores.moneyPagesMetrics.gscRange || getGscDateRange(28, 2);
+              saved.scores.moneyPagesMetrics.gscPageTotals28d.forEach(pageData => {
+                const key = normalizeGscPageKey(pageData.url);
+                pageTotalsByKey.set(key, {
+                  url: pageData.url,
+                  clicks: pageData.clicks || 0,
+                  impressions: pageData.impressions || 0,
+                  ctr: pageData.ctr || 0,
+                  position: pageData.position || 0
+                });
               });
-            });
-            pageLevelDataFetched = true;
+              pageLevelDataFetched = true;
+            }
           }
+        } catch (persistError) {
+          debugLog(`⚠ Error loading persisted page totals: ${persistError.message}, will fetch fresh data`, 'warn');
         }
-      } catch (persistError) {
-        debugLog(`⚠ Error loading persisted page totals: ${persistError.message}, will fetch fresh data`, 'warn');
+      } else {
+        debugLog(`📊 Fresh audit run detected - will fetch fresh page-level data from GSC API (skipping localStorage check)`, 'info');
       }
       
-      // If persisted data not available, fetch from GSC API
+      // If persisted data not available (or we're in a fresh audit), fetch from GSC API
       if (!pageLevelDataFetched) {
         try {
           const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
