@@ -1,8 +1,9 @@
 /**
  * Save Debug Log API
  * 
- * Saves debug logs from audit runs to a file in the repo for easy access
- * Uses GitHub API to create/update files in the repository
+ * Saves debug logs from audit runs for easy access
+ * Primary: Saves to Supabase (already configured)
+ * Optional: Also saves to GitHub repo if GITHUB_TOKEN is available
  */
 
 import fs from 'fs';
@@ -70,7 +71,48 @@ Generated: ${new Date().toISOString()}
     const fullLogText = header + logText;
     const contentBase64 = Buffer.from(fullLogText, 'utf8').toString('base64');
     
-    // Try GitHub API first (for production/Vercel)
+    // PRIMARY: Save to Supabase (already configured, no new tokens needed)
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    let supabaseSaved = false;
+    
+    if (supabaseUrl && supabaseKey) {
+      try {
+        // Save to Supabase using REST API (same pattern as other endpoints)
+        // Insert into debug_logs table (will be created automatically or we can create it)
+        const saveResponse = await fetch(`${supabaseUrl}/rest/v1/debug_logs`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': supabaseKey,
+            'Authorization': `Bearer ${supabaseKey}`,
+            'Prefer': 'return=minimal'
+          },
+          body: JSON.stringify({
+            property_url: propertyUrl || 'unknown',
+            audit_date: timestamp,
+            log_text: fullLogText,
+            filename: filename,
+            entries_count: debugLogEntries.length,
+            created_at: new Date().toISOString()
+          })
+        });
+        
+        if (saveResponse.ok || saveResponse.status === 201) {
+          supabaseSaved = true;
+          console.log(`[save-debug-log] Saved debug log to Supabase: ${filename} (${debugLogEntries.length} entries)`);
+        } else {
+          const errorText = await saveResponse.text();
+          console.log(`[save-debug-log] Supabase table may not exist yet (${saveResponse.status}), will try GitHub API or local file`);
+          console.log(`[save-debug-log] Error: ${errorText.substring(0, 200)}`);
+        }
+      } catch (supabaseError) {
+        console.error('[save-debug-log] Supabase save error:', supabaseError);
+        // Continue to try other methods
+      }
+    }
+    
+    // OPTIONAL: Try GitHub API if token is available (no token needed if Supabase works)
     const githubToken = process.env.GITHUB_TOKEN;
     if (githubToken) {
       try {
@@ -122,32 +164,79 @@ Generated: ${new Date().toISOString()}
           return res.status(200).json({
             status: 'ok',
             source: 'save-debug-log',
-            message: 'Debug log saved successfully to GitHub',
+            message: supabaseSaved 
+              ? 'Debug log saved to Supabase and GitHub' 
+              : 'Debug log saved successfully to GitHub',
             data: {
               filename,
               filepath,
               entriesCount: debugLogEntries.length,
               timestamp,
-              githubUrl: result.content.html_url
+              githubUrl: result.content.html_url,
+              supabaseSaved
             },
             meta: {
               generatedAt: new Date().toISOString(),
               propertyUrl: propertyUrl || 'N/A',
-              method: 'github'
+              method: supabaseSaved ? 'supabase+github' : 'github'
             }
           });
         } else {
           const errorText = await githubResponse.text();
           console.error(`[save-debug-log] GitHub API error: ${githubResponse.status} - ${errorText}`);
-          throw new Error(`GitHub API failed: ${githubResponse.status}`);
+          // Don't throw - if Supabase worked, that's fine
+          if (!supabaseSaved) {
+            throw new Error(`GitHub API failed: ${githubResponse.status}`);
+          }
         }
       } catch (githubError) {
         console.error('[save-debug-log] GitHub API error:', githubError);
+        // If Supabase already saved, that's fine - just return success
+        if (supabaseSaved) {
+          return res.status(200).json({
+            status: 'ok',
+            source: 'save-debug-log',
+            message: 'Debug log saved to Supabase (GitHub API unavailable)',
+            data: {
+              filename,
+              filepath,
+              entriesCount: debugLogEntries.length,
+              timestamp,
+              supabaseSaved: true
+            },
+            meta: {
+              generatedAt: new Date().toISOString(),
+              propertyUrl: propertyUrl || 'N/A',
+              method: 'supabase'
+            }
+          });
+        }
         // Fall through to file system write for local dev
       }
     }
     
-    // Fallback: Try file system write (for local development)
+    // If Supabase saved successfully, return success even if GitHub failed
+    if (supabaseSaved) {
+      return res.status(200).json({
+        status: 'ok',
+        source: 'save-debug-log',
+        message: 'Debug log saved successfully to Supabase',
+        data: {
+          filename,
+          filepath,
+          entriesCount: debugLogEntries.length,
+          timestamp,
+          supabaseSaved: true
+        },
+        meta: {
+          generatedAt: new Date().toISOString(),
+          propertyUrl: propertyUrl || 'N/A',
+          method: 'supabase'
+        }
+      });
+    }
+    
+    // Fallback: Try file system write (for local development only)
     try {
       const debugLogsDir = path.join(process.cwd(), 'debug-logs');
       if (!fs.existsSync(debugLogsDir)) {
