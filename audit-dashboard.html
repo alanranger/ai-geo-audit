@@ -4796,9 +4796,23 @@
         <!-- Phase 9: Time-based Charts -->
         <div class="optimisation-timeseries-charts" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 1.5rem; margin: 1.5rem 0;">
           <div class="card" style="padding: 1.5rem;">
-            <h3 style="margin: 0 0 1rem 0; font-size: 1.1rem; font-weight: 600;">Tasks Updated per Week</h3>
-            <div style="position: relative; height: 280px;">
-              <canvas id="chart-measurements-per-week" style="width: 100%; height: 280px;"></canvas>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+              <div style="display: flex; gap: 0.5rem;">
+                <button id="chart-left-toggle-clicks" class="chart-toggle-btn active" data-chart="clicks" style="padding: 0.5rem 1rem; background: var(--dark-brand); color: #000; border: 1px solid var(--dark-brand); border-radius: 4px; font-weight: 600; cursor: pointer;">Estimated Extra Clicks (28d) by KPI</button>
+                <button id="chart-left-toggle-trend" class="chart-toggle-btn" data-chart="trend" style="padding: 0.5rem 1rem; background: var(--dark-panel); color: var(--dark-text); border: 1px solid var(--dark-border); border-radius: 4px; font-weight: 600; cursor: pointer;">Median Delta Over Time</button>
+              </div>
+              <select id="chart-trend-kpi-select" style="display: none; padding: 0.5rem; background: var(--dark-panel); color: var(--dark-text); border: 1px solid var(--dark-border); border-radius: 4px; font-size: 0.875rem;">
+                <option value="ctr_28d">CTR (pp)</option>
+                <option value="impressions_28d">Impressions</option>
+                <option value="clicks_28d">Clicks</option>
+                <option value="current_rank">Rank</option>
+                <option value="ai_citations">AI Citations</option>
+                <option value="opportunity_score">Opportunity Score</option>
+              </select>
+            </div>
+            <div id="chart-left-container" style="position: relative; height: 280px;">
+              <canvas id="chart-estimated-clicks-by-kpi" style="width: 100%; height: 280px;"></canvas>
+              <canvas id="chart-median-delta-trend" style="width: 100%; height: 280px; display: none;"></canvas>
             </div>
           </div>
           <div class="card" style="padding: 1.5rem;">
@@ -6555,7 +6569,9 @@
       authError: null,
       activeObjectiveFilter: null, // 'not_set' | 'on_track' | 'overdue' | 'met' | null
       scope: 'active_cycle', // 'active_cycle' | 'all_tasks'
-      metricTrafficFilter: null // { metricKey: string, bucket: 'better'|'same'|'worse' } | null
+      metricTrafficFilter: null, // { metricKey: string, bucket: 'better'|'same'|'worse' } | null
+      selectedKpiForTrend: 'ctr_28d', // KPI selected for trend chart
+      leftChartView: 'clicks' // 'clicks' | 'trend'
     };
     
     // Traffic Light Utility Functions (inline from lib/optimisation/metricTraffic.js)
@@ -9414,35 +9430,190 @@
       window.optimisationModuleState.filteredTasks = tasks;
     }
     
+    // Helper: Compute estimated extra clicks (28d) for a single task
+    function computeEstimatedExtraClicks28d(task) {
+      const objectiveKpiKey = task.objectiveKpiKey || task.objective?.kpi;
+      const baselineValue = task.baselineValue;
+      const latestValue = task.latestValue;
+      const latestMetrics = task.latest_metrics || {};
+      
+      // Only compute for CTR tasks with objectives
+      if (objectiveKpiKey === 'ctr_28d' && baselineValue != null && latestValue != null) {
+        const impressions = latestMetrics.impressions_28d || 0;
+        if (impressions > 0 && task.objective) {
+          let goalCtr = null;
+          if (task.objective.target_type === 'delta') {
+            goalCtr = baselineValue + task.objective.target;
+          } else {
+            goalCtr = task.objective.target;
+          }
+          if (goalCtr != null && goalCtr > latestValue) {
+            return impressions * (goalCtr - latestValue);
+          }
+        }
+      }
+      return 0;
+    }
+
+    // Build Chart 1: Estimated Extra Clicks (28d) by KPI
+    function buildEstimatedClicksByKpi(filteredTasks) {
+      const kpiBuckets = {
+        'ctr_28d': { label: 'CTR (28d)', sum: 0, count: 0 },
+        'impressions_28d': { label: 'Impressions (28d)', sum: 0, count: 0 },
+        'clicks_28d': { label: 'Clicks (28d)', sum: 0, count: 0 },
+        'current_rank': { label: 'Rank', sum: 0, count: 0 },
+        'ai_citations': { label: 'AI Citations', sum: 0, count: 0 },
+        'ai_overview': { label: 'AI Overview', sum: 0, count: 0 },
+        'opportunity_score': { label: 'Opportunity Score', sum: 0, count: 0 },
+        'no_objective': { label: 'No objective KPI', sum: 0, count: 0 }
+      };
+      
+      for (const task of filteredTasks) {
+        const extraClicks = computeEstimatedExtraClicks28d(task);
+        const objectiveKpiKey = task.objectiveKpiKey || task.objective?.kpi;
+        
+        if (objectiveKpiKey && kpiBuckets[objectiveKpiKey]) {
+          kpiBuckets[objectiveKpiKey].sum += extraClicks;
+          kpiBuckets[objectiveKpiKey].count += 1;
+        } else {
+          kpiBuckets['no_objective'].sum += extraClicks;
+          kpiBuckets['no_objective'].count += 1;
+        }
+      }
+      
+      // Filter out buckets with zero sum and zero count, but keep "no_objective" if it has tasks
+      const result = [];
+      for (const [kpi, data] of Object.entries(kpiBuckets)) {
+        if (data.sum > 0 || data.count > 0) {
+          result.push({ kpi, label: data.label, sum: data.sum, count: data.count });
+        }
+      }
+      
+      return result;
+    }
+
+    // Build Chart 2: Median Delta Over Time for Selected KPI
+    function buildMedianDeltaTrend(filteredTasks, selectedKpi, scope, weeks = 12) {
+      if (!selectedKpi) return { weeks: [], medians: [], sampleSizes: [] };
+      
+      // Get measurements for all tasks in scope
+      const weekDeltas = new Map(); // weekKey -> [deltas from all tasks]
+      
+      for (const task of filteredTasks) {
+        const activeCycle = scope === 'active_cycle' 
+          ? (task.cycles?.find(c => c.is_active || c.id === task.active_cycle_id) || null)
+          : null;
+        const measurements = task.measurements || [];
+        
+        // Filter measurements by scope
+        let eligibleMeasurements = [...measurements];
+        if (scope === 'active_cycle' && activeCycle) {
+          const cycleStartDate = activeCycle.start_date ? new Date(activeCycle.start_date) : 
+                                (activeCycle.started_at ? new Date(activeCycle.started_at) : null);
+          if (cycleStartDate) {
+            eligibleMeasurements = eligibleMeasurements.filter(m => {
+              const mDate = m.captured_at ? new Date(m.captured_at) : null;
+              return mDate && mDate >= cycleStartDate;
+            });
+          }
+        }
+        
+        if (eligibleMeasurements.length < 2) continue;
+        
+        // Sort by date
+        eligibleMeasurements.sort((a, b) => {
+          const dateA = a.captured_at ? new Date(a.captured_at) : new Date(0);
+          const dateB = b.captured_at ? new Date(b.captured_at) : new Date(0);
+          return dateA - dateB;
+        });
+        
+        // Group measurements by week
+        const measurementsByWeek = new Map();
+        for (const m of eligibleMeasurements) {
+          if (!m.captured_at) continue;
+          const weekKey = weekStartISO(m.captured_at);
+          if (!measurementsByWeek.has(weekKey)) {
+            measurementsByWeek.set(weekKey, []);
+          }
+          measurementsByWeek.get(weekKey).push(m);
+        }
+        
+        // For each week, compute delta if we have at least 2 measurements
+        for (const [weekKey, weekMeasurements] of measurementsByWeek.entries()) {
+          if (weekMeasurements.length < 2) continue;
+          
+          // Sort by date within week
+          weekMeasurements.sort((a, b) => {
+            const dateA = a.captured_at ? new Date(a.captured_at) : new Date(0);
+            const dateB = b.captured_at ? new Date(b.captured_at) : new Date(0);
+            return dateA - dateB;
+          });
+          
+          const startValue = getMetricValue(weekMeasurements[0], selectedKpi);
+          const endValue = getMetricValue(weekMeasurements[weekMeasurements.length - 1], selectedKpi);
+          
+          if (startValue == null || endValue == null) continue;
+          
+          // Compute delta with correct units
+          let delta;
+          if (selectedKpi === 'ctr_28d') {
+            delta = (endValue - startValue) * 100; // percentage points
+          } else if (selectedKpi === 'current_rank') {
+            delta = startValue - endValue; // lower is better, so invert
+          } else {
+            delta = endValue - startValue;
+          }
+          
+          if (!weekDeltas.has(weekKey)) {
+            weekDeltas.set(weekKey, []);
+          }
+          weekDeltas.get(weekKey).push(delta);
+        }
+      }
+      
+      // Get last N weeks
+      const now = new Date();
+      const weekKeys = [];
+      for (let i = weeks - 1; i >= 0; i--) {
+        const weekDate = new Date(now);
+        weekDate.setDate(weekDate.getDate() - (i * 7));
+        weekKeys.push(weekStartISO(weekDate));
+      }
+      
+      // Compute medians for each week
+      const result = {
+        weeks: [],
+        medians: [],
+        sampleSizes: []
+      };
+      
+      for (const weekKey of weekKeys) {
+        const deltas = weekDeltas.get(weekKey) || [];
+        result.weeks.push(weekKey);
+        if (deltas.length > 0) {
+          result.medians.push(median(deltas));
+          result.sampleSizes.push(deltas.length);
+        } else {
+          result.medians.push(null);
+          result.sampleSizes.push(0);
+        }
+      }
+      
+      return result;
+    }
+
     // Update timeseries charts
     function updateTimeseriesCharts() {
       // Use the SAME filteredTasks as the table (includes all filters + scope + traffic-pill filter)
       let filteredTasks = window.optimisationModuleState.filteredTasks || [];
       const scope = window.optimisationModuleState.scope || 'active_cycle';
       
-      // PART 1: Tasks Updated per Week (distinct tasks per week)
-      const tasksUpdatedPerWeek = [];
-      const weekTaskMap = new Map(); // weekKey -> Set(taskId)
+      // PART 1: Estimated Extra Clicks (28d) by KPI
+      const estimatedClicksByKpi = buildEstimatedClicksByKpi(filteredTasks);
       
-      for (const task of filteredTasks) {
-        const latestMeasurement = getLatestMeasurementInScope(task, scope);
-        if (latestMeasurement && latestMeasurement.captured_at) {
-          const weekKey = weekStartISO(latestMeasurement.captured_at);
-          if (!weekTaskMap.has(weekKey)) {
-            weekTaskMap.set(weekKey, new Set());
-          }
-          weekTaskMap.get(weekKey).add(task.id || task.task_id);
-        }
-      }
-      
-      // Convert to sorted array
-      for (const [weekKey, taskIds] of weekTaskMap.entries()) {
-        tasksUpdatedPerWeek.push({
-          weekStart: weekKey,
-          count: taskIds.size
-        });
-      }
-      tasksUpdatedPerWeek.sort((a, b) => a.weekStart.localeCompare(b.weekStart));
+      // PART 1B: Median Delta Over Time for Selected KPI
+      const selectedKpiForTrend = window.optimisationModuleState?.selectedKpiForTrend || 'ctr_28d';
+      const medianDeltaTrend = buildMedianDeltaTrend(filteredTasks, selectedKpiForTrend, scope, 12);
       
       // PART 2: Median Delta by KPI (Last 30d) - only tasks with latest measurement in last 30 days
       const thirtyDaysAgo = new Date();
@@ -9508,44 +9679,43 @@
       });
       
       const timeseries = {
-        tasksUpdatedPerWeek,
+        estimatedClicksByKpi,
+        medianDeltaTrend,
+        selectedKpiForTrend,
         medianDeltaByKpi
       };
       
-      // Render Tasks Updated per Week chart (with device pixel ratio for crisp rendering)
-      const measurementsCanvas = document.getElementById('chart-measurements-per-week');
-      if (measurementsCanvas && timeseries.tasksUpdatedPerWeek) {
-        const ctx = measurementsCanvas.getContext('2d');
+      // Render Chart 1: Estimated Extra Clicks (28d) by KPI
+      const clicksCanvas = document.getElementById('chart-estimated-clicks-by-kpi');
+      if (clicksCanvas && timeseries.estimatedClicksByKpi) {
+        const ctx = clicksCanvas.getContext('2d');
         const dpr = window.devicePixelRatio || 1;
-        const displayWidth = measurementsCanvas.offsetWidth || 400;
+        const displayWidth = clicksCanvas.offsetWidth || 400;
         const displayHeight = 280;
         
-        // Set canvas internal size accounting for device pixel ratio for crisp rendering
-        measurementsCanvas.width = displayWidth * dpr;
-        measurementsCanvas.height = displayHeight * dpr;
-        
-        // Scale canvas CSS size to display size
-        measurementsCanvas.style.width = displayWidth + 'px';
-        measurementsCanvas.style.height = displayHeight + 'px';
-        
-        // Scale context to match device pixel ratio
+        clicksCanvas.width = displayWidth * dpr;
+        clicksCanvas.height = displayHeight * dpr;
+        clicksCanvas.style.width = displayWidth + 'px';
+        clicksCanvas.style.height = displayHeight + 'px';
         ctx.scale(dpr, dpr);
         
         ctx.clearRect(0, 0, displayWidth, displayHeight);
         
-        const data = timeseries.tasksUpdatedPerWeek;
+        const data = timeseries.estimatedClicksByKpi;
         if (!data || data.length === 0) {
           ctx.fillStyle = '#ffffff';
           ctx.font = '16px sans-serif';
           ctx.textAlign = 'center';
           ctx.fillText('No data', displayWidth / 2, displayHeight / 2);
         } else {
-          const maxCount = Math.max(...data.map(d => d.count), 1);
-          const padding = { top: 20, right: 20, bottom: 50, left: 60 };
+          const maxSum = Math.max(...data.map(d => d.sum), 1);
+          const padding = { top: 20, right: 20, bottom: 70, left: 60 };
           const chartWidth = displayWidth - padding.left - padding.right;
           const chartHeight = displayHeight - padding.top - padding.bottom;
+          const barWidth = chartWidth / data.length * 0.7;
+          const barSpacing = chartWidth / data.length * 0.3;
           
-          // Draw axes - white
+          // Draw axes
           ctx.strokeStyle = '#ffffff';
           ctx.lineWidth = 1;
           ctx.beginPath();
@@ -9554,26 +9724,20 @@
           ctx.lineTo(displayWidth - padding.right, displayHeight - padding.bottom);
           ctx.stroke();
           
-          // Draw y-axis label - bright white and much larger
+          // Draw y-axis label
           ctx.save();
           ctx.translate(15, displayHeight / 2);
           ctx.rotate(-Math.PI / 2);
           ctx.fillStyle = '#ffffff';
           ctx.font = 'bold 18px sans-serif';
           ctx.textAlign = 'center';
-          ctx.fillText('Tasks updated', 0, 0);
+          ctx.fillText('Estimated Extra Clicks (28d)', 0, 0);
           ctx.restore();
           
-          // Draw x-axis label - bright white and much larger
-          ctx.fillStyle = '#ffffff';
-          ctx.font = 'bold 18px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillText('Week starting', displayWidth / 2, displayHeight - 10);
-          
-          // Draw y-axis ticks and labels - white and larger
+          // Draw y-axis ticks and labels
           const yTicks = 5;
           for (let i = 0; i <= yTicks; i++) {
-            const value = (maxCount / yTicks) * i;
+            const value = (maxSum / yTicks) * i;
             const y = displayHeight - padding.bottom - (i / yTicks) * chartHeight;
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
             ctx.lineWidth = 0.5;
@@ -9585,59 +9749,168 @@
             ctx.fillStyle = '#ffffff';
             ctx.font = 'bold 14px sans-serif';
             ctx.textAlign = 'right';
-            ctx.fillText(Math.round(value).toString(), padding.left - 10, y + 4);
+            const labelText = value >= 1000 ? (value / 1000).toFixed(1) + 'k' : Math.round(value).toString();
+            ctx.fillText(labelText, padding.left - 10, y + 4);
           }
           
-          // Draw x-axis week labels (horizontal, wrapped) - white and larger
+          // Draw bars
           data.forEach((d, i) => {
-            const x = padding.left + (i / (data.length - 1 || 1)) * chartWidth;
-            const weekDate = new Date(d.weekStart);
-            const day = weekDate.getDate();
-            const month = weekDate.getMonth() + 1;
-            const weekLabel = `${day}/${month}`;
+            const x = padding.left + i * (barWidth + barSpacing) + barSpacing / 2;
+            const barHeight = (d.sum / maxSum) * chartHeight;
+            const y = displayHeight - padding.bottom - barHeight;
             
-            // Calculate max width for label (bar width or spacing)
-            const labelMaxWidth = chartWidth / data.length * 0.9;
+            // Green bars
+            ctx.fillStyle = '#10b981';
+            ctx.fillRect(x, y, barWidth, barHeight);
             
+            // Label below bar
             ctx.fillStyle = '#ffffff';
             ctx.font = 'bold 11px sans-serif';
             ctx.textAlign = 'center';
+            const labelLines = d.label.split(' ');
+            labelLines.forEach((line, lineIdx) => {
+              ctx.fillText(line, x + barWidth / 2, displayHeight - padding.bottom + 12 + (lineIdx * 12));
+            });
+          });
+        }
+      }
+      
+      // Render Chart 2: Median Delta Over Time for Selected KPI
+      const trendCanvas = document.getElementById('chart-median-delta-trend');
+      if (trendCanvas && timeseries.medianDeltaTrend) {
+        const ctx = trendCanvas.getContext('2d');
+        const dpr = window.devicePixelRatio || 1;
+        const displayWidth = trendCanvas.offsetWidth || 400;
+        const displayHeight = 280;
+        
+        trendCanvas.width = displayWidth * dpr;
+        trendCanvas.height = displayHeight * dpr;
+        trendCanvas.style.width = displayWidth + 'px';
+        trendCanvas.style.height = displayHeight + 'px';
+        ctx.scale(dpr, dpr);
+        
+        ctx.clearRect(0, 0, displayWidth, displayHeight);
+        
+        const trend = timeseries.medianDeltaTrend;
+        const kpiLabels = {
+          'ctr_28d': 'CTR (pp)',
+          'impressions_28d': 'Impressions',
+          'clicks_28d': 'Clicks',
+          'current_rank': 'Rank Δ (lower better)',
+          'ai_citations': 'AI Citations',
+          'opportunity_score': 'Opportunity Score'
+        };
+        
+        if (!trend.weeks || trend.weeks.length === 0 || trend.medians.every(m => m == null)) {
+          ctx.fillStyle = '#ffffff';
+          ctx.font = '16px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('Not enough history', displayWidth / 2, displayHeight / 2);
+        } else {
+          const validMedians = trend.medians.filter(m => m != null);
+          if (validMedians.length === 0) {
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '16px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('Not enough history', displayWidth / 2, displayHeight / 2);
+          } else {
+            const maxAbs = Math.max(...validMedians.map(m => Math.abs(m)), 1);
+            const padding = { top: 20, right: 20, bottom: 70, left: 60 };
+            const chartWidth = displayWidth - padding.left - padding.right;
+            const chartHeight = displayHeight - padding.top - padding.bottom;
+            const zeroY = displayHeight - padding.bottom - (maxAbs / (maxAbs * 2)) * chartHeight;
             
-            // Simple text wrapping: if label is too long, split it
-            const metrics = ctx.measureText(weekLabel);
-            if (metrics.width > labelMaxWidth) {
-              // Split day and month on separate lines
-              ctx.fillText(day.toString(), x, displayHeight - padding.bottom + 12);
-              ctx.fillText(month.toString(), x, displayHeight - padding.bottom + 24);
-            } else {
-              ctx.fillText(weekLabel, x, displayHeight - padding.bottom + 18);
-            }
-          });
-          
-          // Draw line
-          ctx.strokeStyle = '#3b82f6';
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          data.forEach((d, i) => {
-            const x = padding.left + (i / (data.length - 1 || 1)) * chartWidth;
-            const y = displayHeight - padding.bottom - (d.count / maxCount) * chartHeight;
-            if (i === 0) {
-              ctx.moveTo(x, y);
-            } else {
-              ctx.lineTo(x, y);
-            }
-          });
-          ctx.stroke();
-          
-          // Draw points
-          ctx.fillStyle = '#3b82f6';
-          data.forEach((d, i) => {
-            const x = padding.left + (i / (data.length - 1 || 1)) * chartWidth;
-            const y = displayHeight - padding.bottom - (d.count / maxCount) * chartHeight;
+            // Draw axes
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1;
             ctx.beginPath();
-            ctx.arc(x, y, 4, 0, Math.PI * 2);
-            ctx.fill();
-          });
+            ctx.moveTo(padding.left, padding.top);
+            ctx.lineTo(padding.left, displayHeight - padding.bottom);
+            ctx.lineTo(displayWidth - padding.right, displayHeight - padding.bottom);
+            ctx.stroke();
+            
+            // Draw zero line
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(padding.left, zeroY);
+            ctx.lineTo(displayWidth - padding.right, zeroY);
+            ctx.stroke();
+            
+            // Draw y-axis label
+            ctx.save();
+            ctx.translate(15, displayHeight / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 18px sans-serif';
+            ctx.textAlign = 'center';
+            const yLabel = kpiLabels[timeseries.selectedKpiForTrend] || 'Median Delta';
+            ctx.fillText(`Median Delta (${yLabel})`, 0, 0);
+            ctx.restore();
+            
+            // Draw y-axis ticks and labels
+            const yTicks = 5;
+            for (let i = 0; i <= yTicks; i++) {
+              const value = (maxAbs * 2 / yTicks) * i - maxAbs;
+              const y = displayHeight - padding.bottom - (i / yTicks) * chartHeight;
+              ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+              ctx.lineWidth = 0.5;
+              ctx.beginPath();
+              ctx.moveTo(padding.left, y);
+              ctx.lineTo(displayWidth - padding.right, y);
+              ctx.stroke();
+              
+              ctx.fillStyle = '#ffffff';
+              ctx.font = 'bold 14px sans-serif';
+              ctx.textAlign = 'right';
+              ctx.fillText(value.toFixed(1), padding.left - 10, y + 4);
+            }
+            
+            // Draw x-axis week labels
+            trend.weeks.forEach((weekKey, i) => {
+              const x = padding.left + (i / (trend.weeks.length - 1 || 1)) * chartWidth;
+              const weekDate = new Date(weekKey);
+              const day = weekDate.getDate();
+              const month = weekDate.getMonth() + 1;
+              const weekLabel = `${day}/${month}`;
+              
+              ctx.fillStyle = '#ffffff';
+              ctx.font = 'bold 11px sans-serif';
+              ctx.textAlign = 'center';
+              ctx.fillText(weekLabel, x, displayHeight - padding.bottom + 18);
+            });
+            
+            // Draw line
+            ctx.strokeStyle = '#3b82f6';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            let hasMoved = false;
+            trend.medians.forEach((med, i) => {
+              if (med != null) {
+                const x = padding.left + (i / (trend.weeks.length - 1 || 1)) * chartWidth;
+                const y = displayHeight - padding.bottom - ((med + maxAbs) / (maxAbs * 2)) * chartHeight;
+                if (!hasMoved) {
+                  ctx.moveTo(x, y);
+                  hasMoved = true;
+                } else {
+                  ctx.lineTo(x, y);
+                }
+              }
+            });
+            ctx.stroke();
+            
+            // Draw points
+            ctx.fillStyle = '#3b82f6';
+            trend.medians.forEach((med, i) => {
+              if (med != null) {
+                const x = padding.left + (i / (trend.weeks.length - 1 || 1)) * chartWidth;
+                const y = displayHeight - padding.bottom - ((med + maxAbs) / (maxAbs * 2)) * chartHeight;
+                ctx.beginPath();
+                ctx.arc(x, y, 4, 0, Math.PI * 2);
+                ctx.fill();
+              }
+            });
+          }
         }
       }
 
@@ -9772,6 +10045,80 @@
             });
           });
         }
+      }
+      
+      // Setup toggle buttons for left chart
+      const clicksToggle = document.getElementById('chart-left-toggle-clicks');
+      const trendToggle = document.getElementById('chart-left-toggle-trend');
+      const kpiSelect = document.getElementById('chart-trend-kpi-select');
+      const clicksCanvas = document.getElementById('chart-estimated-clicks-by-kpi');
+      const trendCanvas = document.getElementById('chart-median-delta-trend');
+      
+      if (clicksToggle && trendToggle) {
+        // Set initial state
+        const currentView = window.optimisationModuleState.leftChartView || 'clicks';
+        if (currentView === 'clicks') {
+          if (clicksCanvas) clicksCanvas.style.display = 'block';
+          if (trendCanvas) trendCanvas.style.display = 'none';
+          if (kpiSelect) kpiSelect.style.display = 'none';
+          clicksToggle.classList.add('active');
+          clicksToggle.style.background = 'var(--dark-brand)';
+          clicksToggle.style.color = '#000';
+          trendToggle.classList.remove('active');
+          trendToggle.style.background = 'var(--dark-panel)';
+          trendToggle.style.color = 'var(--dark-text)';
+        } else {
+          if (clicksCanvas) clicksCanvas.style.display = 'none';
+          if (trendCanvas) trendCanvas.style.display = 'block';
+          if (kpiSelect) kpiSelect.style.display = 'block';
+          trendToggle.classList.add('active');
+          trendToggle.style.background = 'var(--dark-brand)';
+          trendToggle.style.color = '#000';
+          clicksToggle.classList.remove('active');
+          clicksToggle.style.background = 'var(--dark-panel)';
+          clicksToggle.style.color = 'var(--dark-text)';
+        }
+        
+        // Handle clicks toggle
+        clicksToggle.addEventListener('click', () => {
+          window.optimisationModuleState.leftChartView = 'clicks';
+          if (clicksCanvas) clicksCanvas.style.display = 'block';
+          if (trendCanvas) trendCanvas.style.display = 'none';
+          if (kpiSelect) kpiSelect.style.display = 'none';
+          clicksToggle.classList.add('active');
+          clicksToggle.style.background = 'var(--dark-brand)';
+          clicksToggle.style.color = '#000';
+          trendToggle.classList.remove('active');
+          trendToggle.style.background = 'var(--dark-panel)';
+          trendToggle.style.color = 'var(--dark-text)';
+          // Re-render chart
+          updateTimeseriesCharts();
+        });
+        
+        // Handle trend toggle
+        trendToggle.addEventListener('click', () => {
+          window.optimisationModuleState.leftChartView = 'trend';
+          if (clicksCanvas) clicksCanvas.style.display = 'none';
+          if (trendCanvas) trendCanvas.style.display = 'block';
+          if (kpiSelect) kpiSelect.style.display = 'block';
+          trendToggle.classList.add('active');
+          trendToggle.style.background = 'var(--dark-brand)';
+          trendToggle.style.color = '#000';
+          clicksToggle.classList.remove('active');
+          clicksToggle.style.background = 'var(--dark-panel)';
+          clicksToggle.style.color = 'var(--dark-text)';
+          // Re-render chart
+          updateTimeseriesCharts();
+        });
+      }
+      
+      // Handle KPI select change
+      if (kpiSelect) {
+        kpiSelect.value = window.optimisationModuleState.selectedKpiForTrend || 'ctr_28d';
+        kpiSelect.addEventListener('change', (e) => {
+          window.optimisationModuleState.selectedKpiForTrend = e.target.value;
+          updateTimeseriesCharts();
+        });
       }
     }
     
