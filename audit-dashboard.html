@@ -13116,8 +13116,8 @@
      * @param {number} endOffsetDays - Days to subtract from today for end date (default: 1 = yesterday)
      * @returns {Object} { startDate, endDate } as ISO strings (YYYY-MM-DD)
      */
-    function getGscDateRange(daysBack = GSC_WINDOW_DAYS, endOffsetDays = 1) {
-      // End date = yesterday (matches GSC UI behavior - today is often partial)
+    function getGscDateRange(daysBack = GSC_WINDOW_DAYS, endOffsetDays = 2) {
+      // End date = 2 days ago (GSC data is typically 2-3 days behind today)
       const end = new Date();
       end.setDate(end.getDate() - endOffsetDays);
       end.setHours(0, 0, 0, 0);
@@ -18807,7 +18807,7 @@
           const moneyPagesData = saved.scores.moneyPages || {};
           if (moneyPagesData.gscPageTotals28d && Array.isArray(moneyPagesData.gscPageTotals28d) && moneyPagesData.gscPageTotals28d.length > 0) {
             debugLog(`✓ Using persisted page totals from saved audit (${moneyPagesData.gscPageTotals28d.length} pages)`, 'success');
-            gscRange = moneyPagesData.gscRange || getGscDateRange(28);
+            gscRange = moneyPagesData.gscRange || getGscDateRange(28, 2);
             moneyPagesData.gscPageTotals28d.forEach(pageData => {
               const key = normalizeGscPageKey(pageData.url);
               pageTotalsByKey.set(key, {
@@ -18822,7 +18822,7 @@
           } else if (saved.scores.moneyPagesMetrics && saved.scores.moneyPagesMetrics.gscPageTotals28d && Array.isArray(saved.scores.moneyPagesMetrics.gscPageTotals28d)) {
             // Fallback: check moneyPagesMetrics directly (backwards compatibility)
             debugLog(`✓ Using persisted page totals from moneyPagesMetrics (${saved.scores.moneyPagesMetrics.gscPageTotals28d.length} pages)`, 'success');
-            gscRange = saved.scores.moneyPagesMetrics.gscRange || getGscDateRange(28);
+            gscRange = saved.scores.moneyPagesMetrics.gscRange || getGscDateRange(28, 2);
             saved.scores.moneyPagesMetrics.gscPageTotals28d.forEach(pageData => {
               const key = normalizeGscPageKey(pageData.url);
               pageTotalsByKey.set(key, {
@@ -18847,7 +18847,8 @@
           
           if (propertyUrl) {
           // Force Money Pages to always use a rolling "last 28d" range for page totals
-          gscRange = getGscDateRange(28);
+          // CRITICAL: Use endOffsetDays=2 to account for GSC being 2-3 days behind
+          gscRange = getGscDateRange(28, 2);
           debugLog(`📊 Fetching page-level GSC data (unfiltered, all positions) for last 28d: ${gscRange.startDate} to ${gscRange.endDate}...`, 'info');
           
           debugLog(`📊 Calling GSC page-level API: ${apiUrl('/api/aigeo/gsc-page-level')}`, 'info');
@@ -18936,70 +18937,32 @@
               debugLog(`✓ Built pageTotalsByKey from GSC page-level API (legacy format): ${pageTotalsByKey.size} pages`, 'success');
               pageLevelDataFetched = true;
             } else {
-              debugLog(`⚠ GSC page-level API did not return page data, falling back to queryPages aggregation`, 'warn');
+              debugLog(`⚠ GSC page-level API did not return page data in expected format. Response structure: ${JSON.stringify(Object.keys(pageLevelData.data || {}))}`, 'error');
+              debugLog(`⚠ CRITICAL: Cannot use queryPages fallback for Money Pages - it's filtered to position 1-20 and will show incorrect totals!`, 'error');
             }
           } else {
-            debugLog(`⚠ Failed to fetch page-level data from GSC API (${pageLevelResponse.status}), falling back to queryPages aggregation`, 'warn');
+            const errorText = await pageLevelResponse.text().catch(() => 'Unknown error');
+            debugLog(`⚠ Failed to fetch page-level data from GSC API (${pageLevelResponse.status}): ${errorText}`, 'error');
+            debugLog(`⚠ CRITICAL: Cannot use queryPages fallback for Money Pages - it's filtered to position 1-20 and will show incorrect totals!`, 'error');
           }
-        }
         } catch (pageLevelError) {
-          debugLog(`⚠ Error fetching page-level GSC data: ${pageLevelError.message}, falling back to queryPages aggregation`, 'warn');
+          debugLog(`⚠ Error fetching page-level GSC data: ${pageLevelError.message}`, 'error');
+          debugLog(`⚠ CRITICAL: Cannot use queryPages fallback for Money Pages - it's filtered to position 1-20 and will show incorrect totals!`, 'error');
         }
       }
       
-      // Fallback: If page-level API not available and no persisted data, aggregate from queryPages (but note it's filtered to pos 1-20)
-      if (!pageLevelDataFetched && queryPages && queryPages.length > 0) {
-        debugLog(`⚠ Using queryPages aggregation as fallback (NOTE: This is filtered to position 1-20, may not match GSC page totals)`, 'warn');
-        if (!gscRange) {
-          gscRange = getGscDateRange(28);
-        }
-        const pageMap = new Map();
-        queryPages.forEach(row => {
-          const url = row.page || row.url || '';
-          if (!url) return;
-          
-          const key = normalizeGscPageKey(url);
-          
-          if (!pageMap.has(key)) {
-            pageMap.set(key, {
-              clicks: 0,
-              impressions: 0,
-              totalPositionWeight: 0,
-              totalImpressions: 0
-            });
-          }
-          
-          const page = pageMap.get(key);
-          page.clicks += row.clicks || 0;
-          page.impressions += row.impressions || 0;
-          page.totalPositionWeight += (row.position || 0) * (row.impressions || 0);
-          page.totalImpressions += row.impressions || 0;
-        });
-        
-        // Convert to pageTotalsByKey format
-        pageMap.forEach((totals, key) => {
-          const position = totals.totalImpressions > 0 ? totals.totalPositionWeight / totals.totalImpressions : 0;
-          const ctr = totals.impressions > 0 ? totals.clicks / totals.impressions : 0;
-          
-          // Try to get original URL from queryPages
-          const originalUrl = queryPages.find(row => {
-            const rowKey = normalizeGscPageKey(row.page || row.url || '');
-            return rowKey === key;
-          });
-          const url = originalUrl ? (originalUrl.page || originalUrl.url || '') : key;
-          
-          pageTotalsByKey.set(key, {
-            url: url,
-            clicks: totals.clicks,
-            impressions: totals.impressions,
-            ctr: ctr,
-            position: position,
-            _source: 'queryPages_fallback' // Flag to indicate this is from filtered data
-          });
-        });
-        
-        debugLog(`✓ Built pageTotalsByKey from queryPages fallback: ${pageTotalsByKey.size} pages (WARNING: filtered to pos 1-20)`, 'warn');
+      // CRITICAL: Do NOT fall back to queryPages aggregation for Money Pages
+      // queryPages is filtered to position 1-20 and will give incorrect page totals
+      // If page-level API failed, we must log an error and use empty data rather than wrong data
+      if (!pageLevelDataFetched) {
+        debugLog(`⚠ CRITICAL: Page-level GSC data not available. Money Pages metrics will be incomplete.`, 'error');
+        debugLog(`⚠ This means the /api/aigeo/gsc-page-level API either failed or returned no data.`, 'error');
+        debugLog(`⚠ Money Pages will show zero/incorrect metrics until page-level data is available.`, 'error');
+        debugLog(`⚠ Check Vercel function logs for /api/aigeo/gsc-page-level to diagnose the issue.`, 'error');
       }
+      
+      // REMOVED: Fallback to queryPages aggregation (this was causing incorrect data)
+      // The old fallback code has been removed to prevent showing filtered (position 1-20) data as page totals
       
       // Store pageTotalsByKey globally for use in Money Pages and other modules
       window.pageTotalsByKey = pageTotalsByKey;
@@ -19310,7 +19273,7 @@
         });
         
         // Store GSC range and page totals in moneyPagesMetrics for persistence
-        moneyPagesMetrics.gscRange = gscRange || getGscDateRange(28);
+        moneyPagesMetrics.gscRange = gscRange || getGscDateRange(28, 2);
         moneyPagesMetrics.gscPageTotals28d = moneyPagesGscTotals28d;
         
         debugLog(`Money Pages Metrics: ${moneyPagesMetrics.rows.length} money pages found, ${moneyPagesMetrics.overview.moneyClicks} clicks, ${moneyPagesMetrics.overview.moneyImpressions} impressions`, 'info');

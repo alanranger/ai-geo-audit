@@ -5,13 +5,13 @@
 
 /**
  * Get GSC date range for last 28 days (matching GSC UI behavior)
- * Uses yesterday as end date (GSC UI typically shows data up to yesterday, not today)
+ * Uses 2 days ago as end date (GSC data is typically 2-3 days behind today)
  * @param {Object} options - Configuration options
  * @param {number} options.daysBack - Number of days to look back (default: 28)
- * @param {number} options.endOffsetDays - Days to subtract from today for end date (default: 1 = yesterday)
+ * @param {number} options.endOffsetDays - Days to subtract from today for end date (default: 2 = 2 days ago, accounts for GSC delay)
  * @returns {Object} { startDate, endDate, label } as ISO strings (YYYY-MM-DD) and label string
  */
-export function getGscDateRange({ daysBack = 28, endOffsetDays = 1 } = {}) {
+export function getGscDateRange({ daysBack = 28, endOffsetDays = 2 } = {}) {
   // End date = yesterday (matches GSC UI behavior - today is often partial)
   const end = new Date();
   end.setDate(end.getDate() - endOffsetDays);

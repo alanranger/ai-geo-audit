@@ -43,9 +43,10 @@ export default async function handler(req, res) {
     }
     
     // Use provided dates or default to 28-day window
+    // CRITICAL: Use endOffsetDays=2 to account for GSC being 2-3 days behind
     let { startDate, endDate } = startDateParam && endDateParam 
       ? { startDate: startDateParam, endDate: endDateParam }
-      : getGscDateRange({ daysBack: 28, endOffsetDays: 1 });
+      : getGscDateRange({ daysBack: 28, endOffsetDays: 2 });
     
     // Normalize property URL
     const siteUrl = normalizePropertyUrl(propertyUrl);
