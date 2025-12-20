@@ -105,60 +105,64 @@ BEGIN
     -- This creates tasks with mixed positive/negative changes across metrics
     
     -- CTR: Use pattern_num % 3 to get 0=worse, 1=same, 2=better
+    -- Increase magnitude significantly for visibility (1-3pp instead of 0.2-0.5pp)
     CASE (pattern_num % 3)
       WHEN 0 THEN
-        -- Worse: decrease by 0.20-0.50 percentage points (exceeds threshold)
+        -- Worse: decrease by 1.0-3.0 percentage points (exceeds threshold, highly visible)
         ctr_baseline := baseline_ctr;
-        ctr_latest := baseline_ctr - (0.002 + ((pattern_num % 6) * 0.0005));
+        ctr_latest := baseline_ctr - (0.01 + ((pattern_num % 6) * 0.003)); -- 1.0-2.8pp decrease
       WHEN 1 THEN
         -- Same: change by less than 0.10 percentage points (within threshold)
         ctr_baseline := baseline_ctr;
         ctr_latest := baseline_ctr + (((pattern_num % 5) - 2) * 0.00008);
       ELSE
-        -- Better: increase by 0.20-0.50 percentage points (exceeds threshold)
+        -- Better: increase by 1.0-3.0 percentage points (exceeds threshold, highly visible)
         ctr_baseline := baseline_ctr;
-        ctr_latest := baseline_ctr + (0.002 + ((pattern_num % 6) * 0.0005));
+        ctr_latest := baseline_ctr + (0.01 + ((pattern_num % 6) * 0.003)); -- 1.0-2.8pp increase
     END CASE;
     
     -- Impressions: Use (pattern_num + 1) % 3 for independent variation
+    -- Increase magnitude for better visibility
     CASE ((pattern_num + 1) % 3)
       WHEN 0 THEN
-        -- Worse: decrease by 50-150
+        -- Worse: decrease by 80-200
         impressions_baseline := baseline_impressions;
-        impressions_latest := baseline_impressions - (50 + ((pattern_num % 5) * 20));
+        impressions_latest := baseline_impressions - (80 + ((pattern_num % 5) * 24));
       WHEN 1 THEN
         -- Same: change by less than 20 (within threshold)
         impressions_baseline := baseline_impressions;
         impressions_latest := baseline_impressions + (((pattern_num % 5) - 2) * 5);
       ELSE
-        -- Better: increase by 50-150
+        -- Better: increase by 80-200
         impressions_baseline := baseline_impressions;
-        impressions_latest := baseline_impressions + (50 + ((pattern_num % 5) * 20));
+        impressions_latest := baseline_impressions + (80 + ((pattern_num % 5) * 24));
     END CASE;
     
     -- Clicks: Use (pattern_num + 2) % 3 for independent variation
+    -- Increase magnitude for better visibility
     CASE ((pattern_num + 2) % 3)
       WHEN 0 THEN
-        -- Worse: decrease by 8-20
+        -- Worse: decrease by 12-30
         clicks_baseline := baseline_clicks;
-        clicks_latest := baseline_clicks - (8 + (pattern_num % 6));
+        clicks_latest := baseline_clicks - (12 + (pattern_num % 6) * 3);
       WHEN 1 THEN
         -- Same: change by less than 5 (within threshold)
         clicks_baseline := baseline_clicks;
         clicks_latest := baseline_clicks + (((pattern_num % 5) - 2) * 1);
       ELSE
-        -- Better: increase by 8-20
+        -- Better: increase by 12-30
         clicks_baseline := baseline_clicks;
-        clicks_latest := baseline_clicks + (8 + (pattern_num % 6));
+        clicks_latest := baseline_clicks + (12 + (pattern_num % 6) * 3);
     END CASE;
     
     -- Rank: Use (pattern_num + 3) % 3 for independent variation
     -- Lower rank is better, so negative delta (baseline - latest) = improvement
+    -- Increase magnitude for better visibility (2-6 instead of 1.5-4.0)
     CASE ((pattern_num + 3) % 3)
       WHEN 0 THEN
         -- Worse: rank increases (higher number = worse)
         rank_baseline := baseline_rank;
-        rank_latest := baseline_rank + (1.5 + ((pattern_num % 5) * 0.5)); -- 1.5-4.0 increase
+        rank_latest := baseline_rank + (2.0 + ((pattern_num % 5) * 0.8)); -- 2.0-5.2 increase
       WHEN 1 THEN
         -- Same: change by less than 0.5 (within threshold)
         rank_baseline := baseline_rank;
@@ -166,7 +170,7 @@ BEGIN
       ELSE
         -- Better: rank decreases (lower number = better)
         rank_baseline := baseline_rank;
-        rank_latest := baseline_rank - (1.5 + ((pattern_num % 5) * 0.5)); -- 1.5-4.0 decrease
+        rank_latest := baseline_rank - (2.0 + ((pattern_num % 5) * 0.8)); -- 2.0-5.2 decrease
     END CASE;
     
     -- AI Citations: Use (pattern_num + 4) % 3 for independent variation
