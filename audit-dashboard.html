@@ -12014,6 +12014,7 @@
           if (!currentMetrics) {
             console.log('[Optimisation] No Ranking & AI data found, checking Money Pages data...');
             const taskUrl = task.target_url_clean || task.target_url || '';
+            const taskKeyword = task.keyword_text || '';
             const normalizedTaskUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(taskUrl) : taskUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
             
             // Check window.moneyPagesMetrics
@@ -12086,13 +12087,26 @@
                   
                   // Also check searchData.queryTotals for URL-based matching
                   if (!currentMetrics && parsed.searchData && parsed.searchData.queryTotals) {
-                    // Find query totals that match the URL
+                    // Find query totals that match the URL (for page-level tasks) OR keyword (for keyword-based tasks)
                     const matchingQueries = parsed.searchData.queryTotals.filter(qt => {
-                      const qtUrl = (qt.best_url || qt.targetUrl || '').toLowerCase();
-                      const normalizedQtUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(qtUrl) : qtUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
-                      return normalizedQtUrl === normalizedTaskUrl || 
-                             normalizedQtUrl.includes(normalizedTaskUrl) ||
-                             normalizedTaskUrl.includes(normalizedQtUrl);
+                      // URL-based matching (for page-level tasks)
+                      if (normalizedTaskUrl && normalizedTaskUrl.length > 0) {
+                        const qtUrl = (qt.best_url || qt.targetUrl || '').toLowerCase();
+                        const normalizedQtUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(qtUrl) : qtUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+                        if (normalizedQtUrl === normalizedTaskUrl || 
+                            normalizedQtUrl.includes(normalizedTaskUrl) ||
+                            normalizedTaskUrl.includes(normalizedQtUrl)) {
+                          return true;
+                        }
+                      }
+                      // Keyword-based matching (for keyword-based tasks)
+                      if (taskKeyword && taskKeyword.length > 0) {
+                        const qtKeyword = (qt.query || qt.keyword || '').toLowerCase();
+                        if (qtKeyword === taskKeyword.toLowerCase()) {
+                          return true;
+                        }
+                      }
+                      return false;
                     });
                     
                     if (matchingQueries.length > 0) {
@@ -12116,9 +12130,162 @@
                       console.log('[Optimisation] Built currentMetrics from query totals:', currentMetrics);
                     }
                   }
+                  
+                  // Also check query_pages for URL-based matching (query+page level data)
+                  if (!currentMetrics && parsed.scores && parsed.scores.query_pages) {
+                    const queryPages = Array.isArray(parsed.scores.query_pages) ? parsed.scores.query_pages : [];
+                    const matchingQueryPage = queryPages.find(qp => {
+                      const qpUrl = (qp.page || qp.url || '').toLowerCase();
+                      const normalizedQpUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(qpUrl) : qpUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+                      return normalizedQpUrl === normalizedTaskUrl || 
+                             normalizedQpUrl.includes(normalizedTaskUrl) ||
+                             normalizedTaskUrl.includes(normalizedQpUrl);
+                    });
+                    
+                    if (matchingQueryPage) {
+                      console.log('[Optimisation] Found matching query_pages entry:', matchingQueryPage);
+                      currentMetrics = {
+                        gsc_clicks_28d: matchingQueryPage.clicks || null,
+                        gsc_impressions_28d: matchingQueryPage.impressions || null,
+                        gsc_ctr_28d: matchingQueryPage.ctr != null ? (matchingQueryPage.ctr / 100) : null,
+                        current_rank: matchingQueryPage.position || matchingQueryPage.avg_position || null,
+                        opportunity_score: null,
+                        ai_overview: false,
+                        ai_citations: 0,
+                        ai_citations_total: 0,
+                        classic_ranking_url: matchingQueryPage.page || matchingQueryPage.url || taskUrl,
+                        page_type: null,
+                        segment: null,
+                        captured_at: new Date().toISOString()
+                      };
+                      console.log('[Optimisation] Built currentMetrics from query_pages:', currentMetrics);
+                    }
+                  }
                 }
               } catch (e) {
                 console.warn('[Optimisation] Error checking localStorage:', e);
+              }
+            }
+            
+            // If still no data, query Supabase directly for latest audit data
+            if (!currentMetrics) {
+              console.log('[Optimisation] Querying Supabase for latest audit data...');
+              try {
+                const propertyUrl = document.getElementById('propertyUrl')?.value || localStorage.getItem('gsc_property_url') || 'https://www.alanranger.com';
+                if (typeof fetchLatestAuditFromSupabase === 'function') {
+                  const supabaseData = await fetchLatestAuditFromSupabase(propertyUrl);
+                  if (supabaseData) {
+                    console.log('[Optimisation] Fetched latest audit from Supabase, searching for URL/keyword match...');
+                    
+                    // Check Money Pages data from Supabase
+                    const moneyPagesData = supabaseData.scores?.moneyPagesMetrics || supabaseData.moneyPagesMetrics;
+                    if (moneyPagesData && moneyPagesData.rows) {
+                      const moneyPageRow = moneyPagesData.rows.find(row => {
+                        const rowUrl = row.url || row.page_url || '';
+                        const normalizedRowUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(rowUrl) : rowUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+                        return normalizedRowUrl === normalizedTaskUrl || 
+                               normalizedRowUrl.includes(normalizedTaskUrl) ||
+                               normalizedTaskUrl.includes(normalizedRowUrl);
+                      });
+                      
+                      if (moneyPageRow) {
+                        console.log('[Optimisation] Found matching Money Page row in Supabase:', moneyPageRow);
+                        currentMetrics = {
+                          gsc_clicks_28d: moneyPageRow.clicks || moneyPageRow.clicks_28d || null,
+                          gsc_impressions_28d: moneyPageRow.impressions || moneyPageRow.impressions_28d || null,
+                          gsc_ctr_28d: moneyPageRow.ctr || moneyPageRow.ctr_28d || null,
+                          current_rank: moneyPageRow.avg_position || moneyPageRow.position || null,
+                          opportunity_score: null,
+                          ai_overview: false,
+                          ai_citations: 0,
+                          ai_citations_total: 0,
+                          classic_ranking_url: moneyPageRow.url || moneyPageRow.page_url || taskUrl,
+                          page_type: moneyPageRow.page_type || moneyPageRow.type || null,
+                          segment: 'money_pages',
+                          captured_at: new Date().toISOString()
+                        };
+                        console.log('[Optimisation] Built currentMetrics from Supabase Money Page row:', currentMetrics);
+                      }
+                    }
+                    
+                    // Check queryTotals from Supabase (supports both keyword and URL matching)
+                    if (!currentMetrics && supabaseData.searchData && supabaseData.searchData.queryTotals) {
+                      const matchingQueries = supabaseData.searchData.queryTotals.filter(qt => {
+                        // URL-based matching (for page-level tasks)
+                        if (normalizedTaskUrl && normalizedTaskUrl.length > 0) {
+                          const qtUrl = (qt.best_url || qt.targetUrl || '').toLowerCase();
+                          const normalizedQtUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(qtUrl) : qtUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+                          if (normalizedQtUrl === normalizedTaskUrl || 
+                              normalizedQtUrl.includes(normalizedTaskUrl) ||
+                              normalizedTaskUrl.includes(normalizedQtUrl)) {
+                            return true;
+                          }
+                        }
+                        // Keyword-based matching (for keyword-based tasks)
+                        if (taskKeyword && taskKeyword.length > 0) {
+                          const qtKeyword = (qt.query || qt.keyword || '').toLowerCase();
+                          if (qtKeyword === taskKeyword.toLowerCase()) {
+                            return true;
+                          }
+                        }
+                        return false;
+                      });
+                      
+                      if (matchingQueries.length > 0) {
+                        const qt = matchingQueries[0];
+                        console.log('[Optimisation] Found matching query totals in Supabase:', qt);
+                        currentMetrics = {
+                          gsc_clicks_28d: qt.clicks || null,
+                          gsc_impressions_28d: qt.impressions || null,
+                          gsc_ctr_28d: qt.ctr != null ? (qt.ctr / 100) : null,
+                          current_rank: qt.best_rank || qt.avg_position || null,
+                          opportunity_score: qt.opportunityScore || null,
+                          ai_overview: qt.has_ai_overview || false,
+                          ai_citations: qt.ai_alan_citations_count || 0,
+                          ai_citations_total: qt.ai_total_citations || 0,
+                          classic_ranking_url: qt.best_url || qt.targetUrl || taskUrl,
+                          page_type: qt.pageType || null,
+                          segment: qt.segment || null,
+                          captured_at: new Date().toISOString()
+                        };
+                        console.log('[Optimisation] Built currentMetrics from Supabase query totals:', currentMetrics);
+                      }
+                    }
+                    
+                    // Check query_pages from Supabase (query+page level data)
+                    if (!currentMetrics && supabaseData.scores && supabaseData.scores.query_pages) {
+                      const queryPages = Array.isArray(supabaseData.scores.query_pages) ? supabaseData.scores.query_pages : [];
+                      const matchingQueryPage = queryPages.find(qp => {
+                        const qpUrl = (qp.page || qp.url || '').toLowerCase();
+                        const normalizedQpUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(qpUrl) : qpUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+                        return normalizedQpUrl === normalizedTaskUrl || 
+                               normalizedQpUrl.includes(normalizedTaskUrl) ||
+                               normalizedTaskUrl.includes(normalizedQpUrl);
+                      });
+                      
+                      if (matchingQueryPage) {
+                        console.log('[Optimisation] Found matching query_pages in Supabase:', matchingQueryPage);
+                        currentMetrics = {
+                          gsc_clicks_28d: matchingQueryPage.clicks || null,
+                          gsc_impressions_28d: matchingQueryPage.impressions || null,
+                          gsc_ctr_28d: matchingQueryPage.ctr != null ? (matchingQueryPage.ctr / 100) : null,
+                          current_rank: matchingQueryPage.position || matchingQueryPage.avg_position || null,
+                          opportunity_score: null,
+                          ai_overview: false,
+                          ai_citations: 0,
+                          ai_citations_total: 0,
+                          classic_ranking_url: matchingQueryPage.page || matchingQueryPage.url || taskUrl,
+                          page_type: null,
+                          segment: null,
+                          captured_at: new Date().toISOString()
+                        };
+                        console.log('[Optimisation] Built currentMetrics from Supabase query_pages:', currentMetrics);
+                      }
+                    }
+                  }
+                }
+              } catch (e) {
+                console.warn('[Optimisation] Error querying Supabase:', e);
               }
             }
           }
@@ -12271,28 +12438,134 @@
               bulkUpdateBtn.textContent = `Updating ${taskNum}/${activeTasks.length}...`;
             }
 
-          // Find matching row
-          const taskUrlClean = (task.target_url_clean || task.target_url || '').replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
-          const taskUrlPath = taskUrlClean.includes('/') ? taskUrlClean.split('/').slice(1).join('/') : '';
+          // Find matching row - search by both keyword AND URL
+          const taskUrl = task.target_url_clean || task.target_url || '';
+          const taskKeyword = task.keyword_text || '';
+          const normalizedTaskUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(taskUrl) : taskUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
           
-          const matchingRow = combinedRows.find(r => {
-            const keywordMatch = (r.keyword || '').toLowerCase() === (task.keyword_text || '').toLowerCase();
-            if (!keywordMatch) return false;
-            
-            const rowUrl = (r.best_url || r.targetUrl || r.ranking_url || '').toLowerCase();
-            const rowUrlClean = rowUrl.replace(/^https?:\/\//, '').replace(/^www\./, '');
-            const rowUrlPath = rowUrlClean.includes('/') ? rowUrlClean.split('/').slice(1).join('/') : '';
-            
-            return rowUrl === taskUrlClean || 
-                   rowUrlClean === taskUrlClean ||
-                   rowUrlPath === taskUrlPath ||
-                   rowUrl.includes(taskUrlClean) ||
-                   taskUrlClean.includes(rowUrlClean);
-          });
-
+          let matchingRow = null;
           let currentMetrics = null;
+          
+          // First try Ranking & AI data (keyword-based matching)
+          if (taskKeyword && taskKeyword.length > 0) {
+            matchingRow = combinedRows.find(r => {
+              const keywordMatch = (r.keyword || '').toLowerCase() === taskKeyword.toLowerCase();
+              if (!keywordMatch) return false;
+              
+              // Also check URL match if URL is provided
+              if (normalizedTaskUrl && normalizedTaskUrl.length > 0) {
+                const rowUrl = (r.best_url || r.targetUrl || r.ranking_url || '').toLowerCase();
+                const normalizedRowUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(rowUrl) : rowUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+                return normalizedRowUrl === normalizedTaskUrl || 
+                       normalizedRowUrl.includes(normalizedTaskUrl) ||
+                       normalizedTaskUrl.includes(normalizedRowUrl);
+              }
+              return true; // Keyword match is enough if no URL
+            });
+          }
+          
+          // If no keyword match, try URL-based matching in Money Pages data
+          if (!matchingRow && normalizedTaskUrl && normalizedTaskUrl.length > 0) {
+            // Check window.moneyPagesMetrics
+            if (window.moneyPagesMetrics && window.moneyPagesMetrics.rows) {
+              const moneyPageRow = window.moneyPagesMetrics.rows.find(row => {
+                const rowUrl = row.url || row.page_url || '';
+                const normalizedRowUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(rowUrl) : rowUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+                return normalizedRowUrl === normalizedTaskUrl || 
+                       normalizedRowUrl.includes(normalizedTaskUrl) ||
+                       normalizedTaskUrl.includes(normalizedRowUrl);
+              });
+              
+              if (moneyPageRow) {
+                currentMetrics = {
+                  gsc_clicks_28d: moneyPageRow.clicks || moneyPageRow.clicks_28d || null,
+                  gsc_impressions_28d: moneyPageRow.impressions || moneyPageRow.impressions_28d || null,
+                  gsc_ctr_28d: moneyPageRow.ctr || moneyPageRow.ctr_28d || null,
+                  current_rank: moneyPageRow.avg_position || moneyPageRow.position || null,
+                  opportunity_score: null,
+                  ai_overview: false,
+                  ai_citations: 0,
+                  ai_citations_total: 0,
+                  classic_ranking_url: moneyPageRow.url || moneyPageRow.page_url || taskUrl,
+                  page_type: moneyPageRow.page_type || moneyPageRow.type || null,
+                  segment: 'money_pages',
+                  captured_at: new Date().toISOString()
+                };
+              }
+            }
+            
+            // If still no data, check localStorage/Supabase audit results
+            if (!currentMetrics) {
+              try {
+                const savedAudit = localStorage.getItem('aigeo_audit_data');
+                if (savedAudit) {
+                  const parsed = JSON.parse(savedAudit);
+                  const moneyPagesData = parsed.scores?.moneyPagesMetrics || parsed.moneyPagesMetrics;
+                  
+                  if (moneyPagesData && moneyPagesData.rows) {
+                    const moneyPageRow = moneyPagesData.rows.find(row => {
+                      const rowUrl = row.url || row.page_url || '';
+                      const normalizedRowUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(rowUrl) : rowUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+                      return normalizedRowUrl === normalizedTaskUrl || 
+                             normalizedRowUrl.includes(normalizedTaskUrl) ||
+                             normalizedTaskUrl.includes(normalizedRowUrl);
+                    });
+                    
+                    if (moneyPageRow) {
+                      currentMetrics = {
+                        gsc_clicks_28d: moneyPageRow.clicks || moneyPageRow.clicks_28d || null,
+                        gsc_impressions_28d: moneyPageRow.impressions || moneyPageRow.impressions_28d || null,
+                        gsc_ctr_28d: moneyPageRow.ctr || moneyPageRow.ctr_28d || null,
+                        current_rank: moneyPageRow.avg_position || moneyPageRow.position || null,
+                        opportunity_score: null,
+                        ai_overview: false,
+                        ai_citations: 0,
+                        ai_citations_total: 0,
+                        classic_ranking_url: moneyPageRow.url || moneyPageRow.page_url || taskUrl,
+                        page_type: moneyPageRow.page_type || moneyPageRow.type || null,
+                        segment: 'money_pages',
+                        captured_at: new Date().toISOString()
+                      };
+                    }
+                  }
+                  
+                  // Check queryTotals for URL-based matching
+                  if (!currentMetrics && parsed.searchData && parsed.searchData.queryTotals) {
+                    const matchingQueries = parsed.searchData.queryTotals.filter(qt => {
+                      const qtUrl = (qt.best_url || qt.targetUrl || '').toLowerCase();
+                      const normalizedQtUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(qtUrl) : qtUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+                      return normalizedQtUrl === normalizedTaskUrl || 
+                             normalizedQtUrl.includes(normalizedTaskUrl) ||
+                             normalizedTaskUrl.includes(normalizedQtUrl);
+                    });
+                    
+                    if (matchingQueries.length > 0) {
+                      const qt = matchingQueries[0];
+                      currentMetrics = {
+                        gsc_clicks_28d: qt.clicks || null,
+                        gsc_impressions_28d: qt.impressions || null,
+                        gsc_ctr_28d: qt.ctr != null ? (qt.ctr / 100) : null,
+                        current_rank: qt.best_rank || qt.avg_position || null,
+                        opportunity_score: qt.opportunityScore || null,
+                        ai_overview: qt.has_ai_overview || false,
+                        ai_citations: qt.ai_alan_citations_count || 0,
+                        ai_citations_total: qt.ai_total_citations || 0,
+                        classic_ranking_url: qt.best_url || qt.targetUrl || taskUrl,
+                        page_type: qt.pageType || null,
+                        segment: qt.segment || null,
+                        captured_at: new Date().toISOString()
+                      };
+                    }
+                  }
+                }
+              } catch (e) {
+                console.warn(`[Optimisation] Error checking localStorage for task ${task.id}:`, e);
+              }
+            }
+          }
 
-          if (matchingRow) {
+          // If found matching row in Ranking & AI, use that data
+          if (matchingRow && !currentMetrics) {
             // Get queryTotal data for clicks, impressions, and CTR
             let queryTotal = null;
             if (typeof getQueryTotalForKeyword === 'function') {
@@ -12313,9 +12586,11 @@
               segment: matchingRow.segment || null,
               captured_at: new Date().toISOString()
             };
-          } else if (task.baseline_metrics) {
-            // Fallback to baseline if no current data found
-            console.log(`[Optimisation] No current data for ${task.keyword_text}, using baseline`);
+          }
+          
+          // Fallback to baseline if no current data found
+          if (!currentMetrics && task.baseline_metrics) {
+            console.log(`[Optimisation] No current data for ${task.keyword_text || taskUrl}, using baseline`);
             currentMetrics = { ...task.baseline_metrics, captured_at: new Date().toISOString() };
             // Remove null GSC metrics to avoid stale nulls
             if (currentMetrics.gsc_clicks_28d === null) delete currentMetrics.gsc_clicks_28d;
@@ -12325,7 +12600,7 @@
 
           if (!currentMetrics) {
             failCount++;
-            errors.push(`${task.keyword_text}: No data found`);
+            errors.push(`${task.keyword_text || taskUrl}: No data found in Ranking & AI, Money Pages, or audit results`);
             return;
           }
 
