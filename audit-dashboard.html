@@ -6796,7 +6796,34 @@
 
       // CTR: return as percentage points
       if (kpi === 'ctr_28d') {
-        return (latestValue - baselineValue) * 100;
+        // TEMP: Log raw values to debug scaling issue
+        console.log("[computeDeltaForKPI] CTR baselineValue:", baselineValue, "latestValue:", latestValue);
+        
+        // Normalize: CTR should be stored as ratio (0-1), but check if it's in percentage format (0-100)
+        // If value > 1, assume it's already in percentage format and convert to ratio
+        let baselineRatio = baselineValue;
+        let latestRatio = latestValue;
+        if (Math.abs(baselineValue) > 1) {
+          console.warn("[computeDeltaForKPI] CTR baselineValue appears to be in percentage format, converting:", baselineValue, "->", baselineValue / 100);
+          baselineRatio = baselineValue / 100;
+        }
+        if (Math.abs(latestValue) > 1) {
+          console.warn("[computeDeltaForKPI] CTR latestValue appears to be in percentage format, converting:", latestValue, "->", latestValue / 100);
+          latestRatio = latestValue / 100;
+        }
+        
+        console.log("[computeDeltaForKPI] CTR normalized ratios - baseline:", baselineRatio, "latest:", latestRatio);
+        const rawDelta = latestRatio - baselineRatio;
+        console.log("[computeDeltaForKPI] CTR raw delta (ratio):", rawDelta);
+        const deltaPp = rawDelta * 100; // Convert ratio delta to percentage points
+        console.log("[computeDeltaForKPI] CTR delta in pp (FINAL):", deltaPp);
+        
+        // Sanity check: CTR deltas should typically be small (a few percentage points)
+        if (Math.abs(deltaPp) > 20) {
+          console.error("[computeDeltaForKPI] CTR delta seems too large:", deltaPp, "pp. Check if values are in correct format.");
+        }
+        
+        return deltaPp;
       }
 
       // Rank: lower is better, so invert the delta (baseline - latest)
@@ -9695,6 +9722,12 @@
         }
       }
       
+      // TEMP: Log raw CTR deltas for debugging
+      if (deltasByKpi.ctr_28d && deltasByKpi.ctr_28d.length > 0) {
+        console.log("[KPI MEDIAN] CTR raw deltas (from computeDeltaForKPI):", deltasByKpi.ctr_28d);
+        console.log("[KPI MEDIAN] CTR raw deltas sample (first 5):", deltasByKpi.ctr_28d.slice(0, 5));
+      }
+      
       // Compute medians and include task counts
       const medianDeltaByKpi = [];
       for (const [kpi, deltas] of Object.entries(deltasByKpi)) {
@@ -9702,6 +9735,14 @@
           const med = median(deltas);
           if (med != null) {
             medianDeltaByKpi.push({ kpi, value: med, count: deltas.length });
+            // TEMP: Log CTR median before formatting
+            if (kpi === 'ctr_28d') {
+              console.log("[KPI MEDIAN] CTR median BEFORE format:", med);
+              console.log("[KPI MEDIAN] CTR median absolute value:", Math.abs(med));
+              if (Math.abs(med) > 20) {
+                console.warn("[KPI MEDIAN] CTR delta seems too large:", med, "pp. Contributing deltas:", deltas.slice(0, 10));
+              }
+            }
           }
         }
       }
@@ -10092,10 +10133,16 @@
             let valueText = '';
             if (d.kpi === 'ctr_28d') {
               // CTR delta is already in percentage points from computeDeltaForKPI
-              // (it multiplies by 100: (latestValue - baselineValue) * 100)
-              // So use the value directly, but detect if somehow it's still in ratio format
-              const deltaPp = Math.abs(d.value) <= 1 ? d.value * 100 : d.value;
+              // computeDeltaForKPI returns: (latestRatio - baselineRatio) * 100
+              // So d.value is already in pp, NO further multiplication needed
+              // TEMP: Log the value being formatted
+              console.log("[KPI MEDIAN] CTR dataset value for bar label:", d.value);
+              if (Math.abs(d.value) > 20) {
+                console.error("[KPI MEDIAN] CTR delta seems too large - possible double scaling bug:", d.value, "pp");
+              }
+              const deltaPp = d.value; // Already in pp, use directly - NO multiplication
               valueText = (deltaPp >= 0 ? '+' : '') + deltaPp.toFixed(2) + 'pp';
+              console.log("[KPI MEDIAN] CTR formatted label:", valueText);
             } else if (d.kpi === 'current_rank') {
               valueText = (d.value >= 0 ? '+' : '') + d.value.toFixed(1);
             } else {
