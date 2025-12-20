@@ -104,21 +104,26 @@ BEGIN
     -- Each metric uses a different hash offset to get independent variation
     -- This creates tasks with mixed positive/negative changes across metrics
     
-    -- CTR: Use pattern_num % 3 to get 0=worse, 1=same, 2=better
+    -- CTR: Use pattern_num % 4 to get 0,1=worse (50%), 2=same (25%), 3=better (25%)
+    -- This ensures median is not near zero - more worse/better cases than same
     -- Increase magnitude significantly for visibility (1-3pp instead of 0.2-0.5pp)
-    CASE (pattern_num % 3)
+    CASE (pattern_num % 4)
       WHEN 0 THEN
-        -- Worse: decrease by 1.0-3.0 percentage points (exceeds threshold, highly visible)
+        -- Worse: decrease by 1.5-3.0 percentage points (exceeds threshold, highly visible)
         ctr_baseline := baseline_ctr;
-        ctr_latest := baseline_ctr - (0.01 + ((pattern_num % 6) * 0.003)); -- 1.0-2.8pp decrease
+        ctr_latest := baseline_ctr - (0.015 + ((pattern_num % 4) * 0.003)); -- 1.5-2.7pp decrease
       WHEN 1 THEN
+        -- Worse: decrease by 1.0-1.5 percentage points
+        ctr_baseline := baseline_ctr;
+        ctr_latest := baseline_ctr - (0.01 + ((pattern_num % 3) * 0.0015)); -- 1.0-1.45pp decrease
+      WHEN 2 THEN
         -- Same: change by less than 0.10 percentage points (within threshold)
         ctr_baseline := baseline_ctr;
         ctr_latest := baseline_ctr + (((pattern_num % 5) - 2) * 0.00008);
       ELSE
-        -- Better: increase by 1.0-3.0 percentage points (exceeds threshold, highly visible)
+        -- Better: increase by 1.5-3.0 percentage points (exceeds threshold, highly visible)
         ctr_baseline := baseline_ctr;
-        ctr_latest := baseline_ctr + (0.01 + ((pattern_num % 6) * 0.003)); -- 1.0-2.8pp increase
+        ctr_latest := baseline_ctr + (0.015 + ((pattern_num % 4) * 0.003)); -- 1.5-2.7pp increase
     END CASE;
     
     -- Impressions: Use (pattern_num + 1) % 3 for independent variation
@@ -155,22 +160,27 @@ BEGIN
         clicks_latest := baseline_clicks + (12 + (pattern_num % 6) * 3);
     END CASE;
     
-    -- Rank: Use (pattern_num + 3) % 3 for independent variation
+    -- Rank: Use (pattern_num + 3) % 4 for independent variation
     -- Lower rank is better, so negative delta (baseline - latest) = improvement
+    -- Use % 4 to get 0,1=worse (50%), 2=same (25%), 3=better (25%) - ensures median not near zero
     -- Increase magnitude for better visibility (2-6 instead of 1.5-4.0)
-    CASE ((pattern_num + 3) % 3)
+    CASE ((pattern_num + 3) % 4)
       WHEN 0 THEN
         -- Worse: rank increases (higher number = worse)
         rank_baseline := baseline_rank;
-        rank_latest := baseline_rank + (2.0 + ((pattern_num % 5) * 0.8)); -- 2.0-5.2 increase
+        rank_latest := baseline_rank + (2.5 + ((pattern_num % 4) * 0.7)); -- 2.5-4.9 increase
       WHEN 1 THEN
+        -- Worse: rank increases (higher number = worse)
+        rank_baseline := baseline_rank;
+        rank_latest := baseline_rank + (2.0 + ((pattern_num % 3) * 0.5)); -- 2.0-3.5 increase
+      WHEN 2 THEN
         -- Same: change by less than 0.5 (within threshold)
         rank_baseline := baseline_rank;
         rank_latest := baseline_rank + (((pattern_num % 5) - 2) * 0.1);
       ELSE
         -- Better: rank decreases (lower number = better)
         rank_baseline := baseline_rank;
-        rank_latest := baseline_rank - (2.0 + ((pattern_num % 5) * 0.8)); -- 2.0-5.2 decrease
+        rank_latest := baseline_rank - (2.5 + ((pattern_num % 4) * 0.7)); -- 2.5-4.9 decrease
     END CASE;
     
     -- AI Citations: Use (pattern_num + 4) % 3 for independent variation
