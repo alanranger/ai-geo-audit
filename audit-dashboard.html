@@ -20062,6 +20062,44 @@
         setTimeout(() => {
           updateProgress(0, 'Initializing audit scan...');
         }, 500);
+        
+        // Save debug log to repo after audit completes
+        try {
+          const auditDate = new Date().toISOString().split('T')[0];
+          const currentPropertyUrl = propertyUrl || document.getElementById('propertyUrl')?.value || '';
+          
+          if (debugLogEntries && debugLogEntries.length > 0) {
+            debugLog('Saving debug log to repo...', 'info');
+            
+            fetch(apiUrl('/api/save-debug-log'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                propertyUrl: currentPropertyUrl,
+                auditDate: auditDate,
+                debugLogEntries: debugLogEntries
+              })
+            }).then(response => {
+              if (response.ok) {
+                return response.json();
+              } else {
+                throw new Error(`HTTP ${response.status}`);
+              }
+            }).then(result => {
+              if (result.status === 'ok') {
+                debugLog(`✓ Debug log saved to repo: ${result.data.filename} (${result.data.entriesCount} entries)`, 'success');
+              } else {
+                debugLog(`⚠ Failed to save debug log: ${result.message}`, 'warn');
+              }
+            }).catch(err => {
+              debugLog(`⚠ Error saving debug log to repo (non-critical): ${err.message}`, 'warn');
+            });
+          } else {
+            debugLog('⚠ No debug log entries to save', 'warn');
+          }
+        } catch (saveLogError) {
+          debugLog(`⚠ Error preparing debug log save (non-critical): ${saveLogError.message}`, 'warn');
+        }
       }
     }
 
