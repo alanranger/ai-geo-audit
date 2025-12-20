@@ -55,18 +55,26 @@ export default async function handler(req, res) {
     const searchConsoleUrl = `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`;
     
     // Fetch ALL pages without filter (unfiltered, all positions, all queries)
+    const requestBody = {
+      startDate,
+      endDate,
+      dimensions: dimensions, // ['page'] for page-level data
+      rowLimit: rowLimit, // Fetch up to rowLimit pages
+    };
+    
+    console.log(`[gsc-page-level] Request to GSC API:`, {
+      url: searchConsoleUrl,
+      body: requestBody,
+      propertyUrl: siteUrl
+    });
+    
     const pageResponse = await fetch(searchConsoleUrl, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        startDate,
-        endDate,
-        dimensions: dimensions, // ['page'] for page-level data
-        rowLimit: rowLimit, // Fetch up to rowLimit pages
-      }),
+      body: JSON.stringify(requestBody),
     });
     
     if (!pageResponse.ok) {
@@ -93,6 +101,25 @@ export default async function handler(req, res) {
     }));
     
     console.log(`[gsc-page-level] Fetched ${rows.length} pages from GSC for ${siteUrl} (${startDate} to ${endDate})`);
+    
+    // Debug: Log specific page if it matches landscape-photography-workshops
+    const landscapePage = rows.find(row => 
+      row.keys?.[0]?.includes('landscape-photography-workshops')
+    );
+    if (landscapePage) {
+      console.log(`[gsc-page-level] 🔍 Landscape page found in GSC response:`, {
+        url: landscapePage.keys[0],
+        clicks: landscapePage.clicks,
+        impressions: landscapePage.impressions,
+        ctr: landscapePage.ctr,
+        position: landscapePage.position
+      });
+    } else {
+      console.log(`[gsc-page-level] ⚠ Landscape page NOT found in GSC response. Total pages: ${rows.length}`);
+      // Log first 10 URLs for debugging
+      const sampleUrls = rows.slice(0, 10).map(r => r.keys?.[0] || 'N/A');
+      console.log(`[gsc-page-level] Sample URLs from GSC:`, sampleUrls);
+    }
     
     return res.status(200).json({
       status: 'ok',
