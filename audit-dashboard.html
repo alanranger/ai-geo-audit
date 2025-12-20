@@ -9404,8 +9404,17 @@
         }
       }
       
-      // Sort by KPI name for consistent display
-      medianDeltaByKpi.sort((a, b) => a.kpi.localeCompare(b.kpi));
+      // Sort to match traffic light order: CTR, Impressions, Clicks, Rank, AI Citations, AI Overview
+      const kpiOrder = ['ctr_28d', 'impressions_28d', 'clicks_28d', 'current_rank', 'ai_citations', 'ai_overview'];
+      medianDeltaByKpi.sort((a, b) => {
+        const indexA = kpiOrder.indexOf(a.kpi);
+        const indexB = kpiOrder.indexOf(b.kpi);
+        // If KPI not in order list, put it at the end
+        if (indexA === -1 && indexB === -1) return a.kpi.localeCompare(b.kpi);
+        if (indexA === -1) return 1;
+        if (indexB === -1) return -1;
+        return indexA - indexB;
+      });
       
       const timeseries = {
         tasksUpdatedPerWeek,
