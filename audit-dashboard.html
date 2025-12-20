@@ -18837,6 +18837,9 @@
           gscRange = getGscDateRange(28);
           debugLog(`📊 Fetching page-level GSC data (unfiltered, all positions) for last 28d: ${gscRange.startDate} to ${gscRange.endDate}...`, 'info');
           
+          debugLog(`📊 Calling GSC page-level API: ${apiUrl('/api/aigeo/gsc-page-level')}`, 'info');
+          debugLog(`📊 Request body: propertyUrl=${propertyUrl}, startDate=${gscRange.startDate}, endDate=${gscRange.endDate}`, 'info');
+          
           const pageLevelResponse = await fetch(apiUrl('/api/aigeo/gsc-page-level'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -18849,12 +18852,19 @@
             })
           });
           
+          debugLog(`📊 GSC page-level API response status: ${pageLevelResponse.status} ${pageLevelResponse.statusText}`, 'info');
+          
           if (pageLevelResponse.ok) {
             const pageLevelData = await pageLevelResponse.json();
             debugLog(`📊 GSC page-level API response: status=${pageLevelData.status}, hasData=${!!pageLevelData.data}, rowsCount=${pageLevelData.data?.rows?.length || 0}`, 'info');
             
+            if (pageLevelData.status !== 'ok') {
+              debugLog(`⚠ GSC page-level API returned error status: ${JSON.stringify(pageLevelData)}`, 'warn');
+            }
+            
             if (pageLevelData.status === 'ok' && pageLevelData.data && Array.isArray(pageLevelData.data.rows)) {
               // Build pageTotalsByKey map from page-level data using normalized page key
+              let landscapePageFound = false;
               for (const row of (pageLevelData.data.rows || [])) {
                 const rawPageUrl = row.keys?.[0];
                 if (!rawPageUrl) continue;
@@ -18866,8 +18876,9 @@
                 const position = row.position || 0;
 
                 // Debug: Log specific URL if it matches the one we're looking for
-                if (rawPageUrl.includes('landscape-photography-workshops')) {
-                  debugLog(`🔍 Found landscape-photography-workshops in page-level API: url=${rawPageUrl}, key=${key}, clicks=${clicks}, impressions=${impressions}, ctr=${ctr}, position=${position}`, 'info');
+                if (rawPageUrl.includes('landscape-photography-workshops') || key.includes('landscape-photography-workshops')) {
+                  debugLog(`🔍 Found landscape-photography-workshops in page-level API: rawUrl=${rawPageUrl}, normalizedKey=${key}, clicks=${clicks}, impressions=${impressions}, ctr=${(ctr * 100).toFixed(2)}%, position=${position}`, 'info');
+                  landscapePageFound = true;
                 }
 
                 pageTotalsByKey.set(key, {
@@ -18877,6 +18888,13 @@
                   ctr: ctr, // Store as ratio (0-1)
                   position: position
                 });
+              }
+              
+              if (!landscapePageFound) {
+                debugLog(`⚠ landscape-photography-workshops NOT found in page-level API response. Total pages fetched: ${pageLevelData.data.rows?.length || 0}`, 'warn');
+                // Log first 5 URLs for debugging
+                const sampleUrls = (pageLevelData.data.rows || []).slice(0, 5).map(r => r.keys?.[0] || 'N/A');
+                debugLog(`📊 Sample URLs from API: ${sampleUrls.join(', ')}`, 'info');
               }
               
               debugLog(`✓ Built pageTotalsByKey from GSC page-level API: ${pageTotalsByKey.size} pages`, 'success');
@@ -19098,12 +19116,24 @@
             };
             
             // Debug: Log if this is the URL we're looking for
-            if (url.includes('landscape-photography-workshops')) {
-              debugLog(`🔍 Money Pages lookup: url=${url}, normalizedKey=${pageKey}, found=${pageTotalsByKey.has(pageKey)}, clicks=${gscMetrics.clicks}, impressions=${gscMetrics.impressions}, ctr=${gscMetrics.ctr}, position=${gscMetrics.position}`, 'info');
+            if (url.includes('landscape-photography-workshops') || pageKey.includes('landscape-photography-workshops')) {
+              debugLog(`🔍 Money Pages lookup: url=${url}, normalizedKey=${pageKey}, found=${pageTotalsByKey.has(pageKey)}, clicks=${gscMetrics.clicks}, impressions=${gscMetrics.impressions}, ctr=${(gscMetrics.ctr * 100).toFixed(2)}%, position=${gscMetrics.position}`, 'info');
               // Also log all keys in pageTotalsByKey that contain 'landscape' for debugging
               const matchingKeys = Array.from(pageTotalsByKey.keys()).filter(k => k.includes('landscape'));
               if (matchingKeys.length > 0) {
                 debugLog(`🔍 Available keys containing 'landscape': ${matchingKeys.join(', ')}`, 'info');
+                // Also log the actual data for these keys
+                matchingKeys.forEach(k => {
+                  const data = pageTotalsByKey.get(k);
+                  if (data) {
+                    debugLog(`🔍 Key "${k}": clicks=${data.clicks}, impressions=${data.impressions}, ctr=${(data.ctr * 100).toFixed(2)}%, position=${data.position}`, 'info');
+                  }
+                });
+              } else {
+                debugLog(`⚠ No keys found containing 'landscape'. Total keys in pageTotalsByKey: ${pageTotalsByKey.size}`, 'warn');
+                // Log first 10 keys for debugging
+                const firstKeys = Array.from(pageTotalsByKey.keys()).slice(0, 10);
+                debugLog(`📊 First 10 keys in pageTotalsByKey: ${firstKeys.join(', ')}`, 'info');
               }
             }
             
