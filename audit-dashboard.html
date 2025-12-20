@@ -15950,6 +15950,18 @@
           debugLog(`⚠ saveAuditToSupabase: Error loading rankingAiData: ${rankingErr.message}`, 'warn');
         }
         
+        // Ensure scores.moneyPages namespace exists and includes GSC page totals
+        scores.moneyPages = scores.moneyPages || {};
+        if (scores.moneyPagesMetrics) {
+          // Add GSC range and page totals for persistence (if available)
+          if (scores.moneyPagesMetrics.gscRange) {
+            scores.moneyPages.gscRange = scores.moneyPagesMetrics.gscRange;
+          }
+          if (scores.moneyPagesMetrics.gscPageTotals28d) {
+            scores.moneyPages.gscPageTotals28d = scores.moneyPagesMetrics.gscPageTotals28d;
+          }
+        }
+        
         // Prepare payload
         const payload = {
           propertyUrl,
@@ -18170,7 +18182,7 @@
         // Iterate over topPages
         // Note: topPages is already aggregated by page from queryPages
         // The Segment Overview uses query+page level data filtered to position 1-20
-        // For Money Pages, we want to show ALL money pages (not just position 1-20)
+        // Money Pages uses page-level GSC totals (unfiltered, all positions) to match GSC "Pages" tab exactly
         // to give a complete view of money page performance
         topPages.forEach(page => {
           const url = page.page || page.url || '';
@@ -18764,48 +18776,126 @@
       }
       
       // ============================================
-      // STEP 1: Build pageTotalsByUrl (single source of truth for page-level GSC data)
+      // STEP 1: Build pageTotalsByKey (single source of truth for page-level GSC data)
       // ============================================
       // Fetch page-level data from GSC API (unfiltered, all positions)
       // This matches GSC "Pages" tab totals exactly
-      let pageTotalsByUrl = new Map();
+      // Always uses rolling "last 28d" range for consistency
+      // First check if persisted values exist from a saved audit
+      let pageTotalsByKey = new Map();
       let pageLevelDataFetched = false;
+      let gscRange = null;
       
+      // Check for persisted page totals from saved audit (when loading from history)
       try {
-        const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
-        const dateRange = parseInt(localStorage.getItem('gsc_date_range') || '28');
-        
-        if (propertyUrl) {
-          debugLog(`📊 Fetching page-level GSC data (unfiltered, all positions) for ${dateRange} days...`, 'info');
-          const pageLevelResponse = await fetch(apiUrl(`/api/aigeo/gsc-page-level?property=${encodeURIComponent(propertyUrl)}&days=${dateRange}`));
+        const saved = loadAuditResultsSync();
+        if (saved && saved.scores) {
+          // Check scores.moneyPages namespace first (new format)
+          const moneyPagesData = saved.scores.moneyPages || {};
+          if (moneyPagesData.gscPageTotals28d && Array.isArray(moneyPagesData.gscPageTotals28d) && moneyPagesData.gscPageTotals28d.length > 0) {
+            debugLog(`✓ Using persisted page totals from saved audit (${moneyPagesData.gscPageTotals28d.length} pages)`, 'success');
+            gscRange = moneyPagesData.gscRange || getGscDateRange(28);
+            moneyPagesData.gscPageTotals28d.forEach(pageData => {
+              const key = normalizeGscPageKey(pageData.url);
+              pageTotalsByKey.set(key, {
+                url: pageData.url,
+                clicks: pageData.clicks || 0,
+                impressions: pageData.impressions || 0,
+                ctr: pageData.ctr || 0,
+                position: pageData.position || 0
+              });
+            });
+            pageLevelDataFetched = true;
+          } else if (saved.scores.moneyPagesMetrics && saved.scores.moneyPagesMetrics.gscPageTotals28d && Array.isArray(saved.scores.moneyPagesMetrics.gscPageTotals28d)) {
+            // Fallback: check moneyPagesMetrics directly (backwards compatibility)
+            debugLog(`✓ Using persisted page totals from moneyPagesMetrics (${saved.scores.moneyPagesMetrics.gscPageTotals28d.length} pages)`, 'success');
+            gscRange = saved.scores.moneyPagesMetrics.gscRange || getGscDateRange(28);
+            saved.scores.moneyPagesMetrics.gscPageTotals28d.forEach(pageData => {
+              const key = normalizeGscPageKey(pageData.url);
+              pageTotalsByKey.set(key, {
+                url: pageData.url,
+                clicks: pageData.clicks || 0,
+                impressions: pageData.impressions || 0,
+                ctr: pageData.ctr || 0,
+                position: pageData.position || 0
+              });
+            });
+            pageLevelDataFetched = true;
+          }
+        }
+      } catch (persistError) {
+        debugLog(`⚠ Error loading persisted page totals: ${persistError.message}, will fetch fresh data`, 'warn');
+      }
+      
+      // If persisted data not available, fetch from GSC API
+      if (!pageLevelDataFetched) {
+        try {
+          const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+          
+          if (propertyUrl) {
+          // Force Money Pages to always use a rolling "last 28d" range for page totals
+          gscRange = getGscDateRange(28);
+          debugLog(`📊 Fetching page-level GSC data (unfiltered, all positions) for last 28d: ${gscRange.startDate} to ${gscRange.endDate}...`, 'info');
+          
+          const pageLevelResponse = await fetch(apiUrl('/api/aigeo/gsc-page-level'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              propertyUrl,
+              startDate: gscRange.startDate,
+              endDate: gscRange.endDate,
+              dimensions: ['page'],
+              rowLimit: 25000
+            })
+          });
           
           if (pageLevelResponse.ok) {
             const pageLevelData = await pageLevelResponse.json();
-            if (pageLevelData.status === 'ok' && pageLevelData.data && Array.isArray(pageLevelData.data.pages)) {
-              // Build pageTotalsByUrl map from page-level data
+            if (pageLevelData.status === 'ok' && pageLevelData.data && Array.isArray(pageLevelData.data.rows)) {
+              // Build pageTotalsByKey map from page-level data using normalized page key
+              for (const row of (pageLevelData.data.rows || [])) {
+                const rawPageUrl = row.keys?.[0];
+                if (!rawPageUrl) continue;
+
+                const key = normalizeGscPageKey(rawPageUrl);
+                const clicks = row.clicks || 0;
+                const impressions = row.impressions || 0;
+                const ctr = row.ctr != null ? (row.ctr > 1 ? row.ctr / 100 : row.ctr) : (impressions > 0 ? clicks / impressions : 0);
+                const position = row.position || 0;
+
+                pageTotalsByKey.set(key, {
+                  url: rawPageUrl,
+                  clicks: clicks,
+                  impressions: impressions,
+                  ctr: ctr, // Store as ratio (0-1)
+                  position: position
+                });
+              }
+              
+              debugLog(`✓ Built pageTotalsByKey from GSC page-level API: ${pageTotalsByKey.size} pages`, 'success');
+              pageLevelDataFetched = true;
+            } else if (pageLevelData.status === 'ok' && pageLevelData.data && Array.isArray(pageLevelData.data.pages)) {
+              // Fallback: handle old API response format
               pageLevelData.data.pages.forEach(page => {
-                const url = page.page || page.url || '';
-                if (!url) return;
-                
-                // Normalize URL for consistent lookup
-                const normalizedUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(url) : url.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
-                
+                const rawPageUrl = page.page || page.url || '';
+                if (!rawPageUrl) return;
+
+                const key = normalizeGscPageKey(rawPageUrl);
                 const clicks = page.clicks || 0;
                 const impressions = page.impressions || 0;
                 const ctr = page.ctr != null ? (page.ctr > 1 ? page.ctr / 100 : page.ctr) : (impressions > 0 ? clicks / impressions : 0);
-                const avgPosition = page.position || page.avgPosition || null;
-                
-                pageTotalsByUrl.set(normalizedUrl, {
-                  clicks28: clicks,
-                  impr28: impressions,
-                  ctr28: ctr, // Store as ratio (0-1)
-                  avgPos28: avgPosition,
-                  dateRange: dateRange,
-                  asOf: new Date().toISOString()
+                const position = page.position || page.avgPosition || 0;
+
+                pageTotalsByKey.set(key, {
+                  url: rawPageUrl,
+                  clicks: clicks,
+                  impressions: impressions,
+                  ctr: ctr,
+                  position: position
                 });
               });
               
-              debugLog(`✓ Built pageTotalsByUrl from GSC page-level API: ${pageTotalsByUrl.size} pages`, 'success');
+              debugLog(`✓ Built pageTotalsByKey from GSC page-level API (legacy format): ${pageTotalsByKey.size} pages`, 'success');
               pageLevelDataFetched = true;
             } else {
               debugLog(`⚠ GSC page-level API did not return page data, falling back to queryPages aggregation`, 'warn');
@@ -18814,62 +18904,74 @@
             debugLog(`⚠ Failed to fetch page-level data from GSC API (${pageLevelResponse.status}), falling back to queryPages aggregation`, 'warn');
           }
         }
-      } catch (pageLevelError) {
-        debugLog(`⚠ Error fetching page-level GSC data: ${pageLevelError.message}, falling back to queryPages aggregation`, 'warn');
+        } catch (pageLevelError) {
+          debugLog(`⚠ Error fetching page-level GSC data: ${pageLevelError.message}, falling back to queryPages aggregation`, 'warn');
+        }
       }
       
-      // Fallback: If page-level API not available, aggregate from queryPages (but note it's filtered to pos 1-20)
+      // Fallback: If page-level API not available and no persisted data, aggregate from queryPages (but note it's filtered to pos 1-20)
       if (!pageLevelDataFetched && queryPages && queryPages.length > 0) {
         debugLog(`⚠ Using queryPages aggregation as fallback (NOTE: This is filtered to position 1-20, may not match GSC page totals)`, 'warn');
+        if (!gscRange) {
+          gscRange = getGscDateRange(28);
+        }
         const pageMap = new Map();
         queryPages.forEach(row => {
           const url = row.page || row.url || '';
           if (!url) return;
           
-          const normalizedUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(url) : url.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+          const key = normalizeGscPageKey(url);
           
-          if (!pageMap.has(normalizedUrl)) {
-            pageMap.set(normalizedUrl, {
-              clicks28: 0,
-              impr28: 0,
+          if (!pageMap.has(key)) {
+            pageMap.set(key, {
+              clicks: 0,
+              impressions: 0,
               totalPositionWeight: 0,
               totalImpressions: 0
             });
           }
           
-          const page = pageMap.get(normalizedUrl);
-          page.clicks28 += row.clicks || 0;
-          page.impr28 += row.impressions || 0;
+          const page = pageMap.get(key);
+          page.clicks += row.clicks || 0;
+          page.impressions += row.impressions || 0;
           page.totalPositionWeight += (row.position || 0) * (row.impressions || 0);
           page.totalImpressions += row.impressions || 0;
         });
         
-        // Convert to pageTotalsByUrl format
-        pageMap.forEach((totals, normalizedUrl) => {
-          const avgPos = totals.totalImpressions > 0 ? totals.totalPositionWeight / totals.totalImpressions : null;
-          const ctr = totals.impr28 > 0 ? totals.clicks28 / totals.impr28 : 0;
+        // Convert to pageTotalsByKey format
+        pageMap.forEach((totals, key) => {
+          const position = totals.totalImpressions > 0 ? totals.totalPositionWeight / totals.totalImpressions : 0;
+          const ctr = totals.impressions > 0 ? totals.clicks / totals.impressions : 0;
           
-          pageTotalsByUrl.set(normalizedUrl, {
-            clicks28: totals.clicks28,
-            impr28: totals.impr28,
-            ctr28: ctr,
-            avgPos28: avgPos,
-            dateRange: parseInt(localStorage.getItem('gsc_date_range') || '28'),
-            asOf: new Date().toISOString(),
+          // Try to get original URL from queryPages
+          const originalUrl = queryPages.find(row => {
+            const rowKey = normalizeGscPageKey(row.page || row.url || '');
+            return rowKey === key;
+          });
+          const url = originalUrl ? (originalUrl.page || originalUrl.url || '') : key;
+          
+          pageTotalsByKey.set(key, {
+            url: url,
+            clicks: totals.clicks,
+            impressions: totals.impressions,
+            ctr: ctr,
+            position: position,
             _source: 'queryPages_fallback' // Flag to indicate this is from filtered data
           });
         });
         
-        debugLog(`✓ Built pageTotalsByUrl from queryPages fallback: ${pageTotalsByUrl.size} pages (WARNING: filtered to pos 1-20)`, 'warn');
+        debugLog(`✓ Built pageTotalsByKey from queryPages fallback: ${pageTotalsByKey.size} pages (WARNING: filtered to pos 1-20)`, 'warn');
       }
       
-      // Store pageTotalsByUrl globally for use in Money Pages and other modules
-      window.pageTotalsByUrl = pageTotalsByUrl;
+      // Store pageTotalsByKey globally for use in Money Pages and other modules
+      window.pageTotalsByKey = pageTotalsByKey;
+      // Also store as pageTotalsByUrl for backwards compatibility
+      window.pageTotalsByUrl = pageTotalsByKey;
       
       // Compute money pages metrics if we have queryPages data
       let moneyPagesMetrics = null;
       if (queryPages && queryPages.length > 0) {
-        // Aggregate all pages from queryPages (not just top 10) - KEEP for secondary analytics (pos 1-20 filtered)
+          // Aggregate all pages from queryPages (not just top 10) - KEEP for secondary analytics only (pos 1-20 filtered, not used for Money Pages totals)
         const pageMap = new Map();
         queryPages.forEach(row => {
           const url = row.page || row.url || '';
@@ -18890,7 +18992,7 @@
           page.totalPositionWeight += (row.position || 0) * (row.impressions || 0);
         });
         
-        // Convert to topPages format (for secondary analytics only - pos 1-20 filtered)
+          // Convert to topPages format (for secondary analytics only - pos 1-20 filtered, not used for Money Pages totals)
         const allTopPages = Array.from(pageMap.values())
           .map(page => ({
             url: page.url,
@@ -18952,7 +19054,7 @@
         // Compute money pages metrics
         // Use CSV as source of truth for all pages, then match GSC page-level data to CSV URLs
         // This ensures we segment ALL pages (433 URLs) not just those in GSC data (78 pages)
-        // AND use page-level totals (unfiltered) instead of queryPages aggregation (filtered to pos 1-20)
+          // Use page-level totals (unfiltered, all positions) from pageTotalsByKey to match GSC "Pages" tab exactly
         
         // Fetch CSV and segment all URLs
         // First check for manually loaded URL list, then try GitHub/fallback
@@ -18975,26 +19077,31 @@
             debugLog(`✓ Fetched ${csvUrls.length} URLs from CSV (GitHub/fallback)`, 'info');
           }
           
-          // Segment all CSV URLs and match with pageTotalsByUrl (page-level totals)
+          // Segment all CSV URLs and match with pageTotalsByKey (page-level totals)
           const allCsvPages = csvUrls.map(url => {
             const segment = classifyPageSegment(url);
-            const normalizedUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(url) : url.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+            const pageKey = normalizeGscPageKey(url);
             
-            // Get page-level totals from pageTotalsByUrl (unfiltered, matches GSC page totals)
-            const pageTotals = pageTotalsByUrl.get(normalizedUrl);
+            // Get page-level totals from pageTotalsByKey (unfiltered, matches GSC page totals)
+            const gscMetrics = pageTotalsByKey.get(pageKey) || {
+              clicks: 0,
+              impressions: 0,
+              ctr: 0,
+              position: 0
+            };
             
-            if (pageTotals) {
+            if (gscMetrics.impressions > 0 || gscMetrics.clicks > 0) {
               // Use page-level totals (matches GSC "Pages" tab exactly)
               return {
                 url: url,
                 page: url, // Also set page property for compatibility
                 segment: segment,
-                clicks: pageTotals.clicks28 || 0,
-                impressions: pageTotals.impr28 || 0,
-                ctr: pageTotals.ctr28 || 0, // Already a ratio (0-1)
-                avgPosition: pageTotals.avgPos28 || null,
-                position: pageTotals.avgPos28 || null,
-                _source: 'pageTotalsByUrl' // Flag to indicate this is from page-level data
+                clicks: gscMetrics.clicks || 0,
+                impressions: gscMetrics.impressions || 0,
+                ctr: gscMetrics.ctr || 0, // Already a ratio (0-1)
+                avgPosition: gscMetrics.position || null,
+                position: gscMetrics.position || null,
+                _source: 'pageTotalsByKey' // Flag to indicate this is from page-level data
               };
             } else {
               // No GSC data for this URL (zero impressions or never appeared in search)
@@ -19017,14 +19124,14 @@
           debugLog(`✓ Segmented ${moneyPagesFromCsv.length} money pages from CSV (out of ${csvUrls.length} total URLs)`, 'info');
           debugLog(`✓ Using pageTotalsByUrl for Money Pages metrics (matches GSC page-level totals)`, 'success');
           
-          // Recompute site aggregates from pageTotalsByUrl (all pages, not just money pages)
+          // Recompute site aggregates from pageTotalsByKey (all pages, not just money pages)
           let siteAggFromPageTotals = { totalClicks: 0, totalImpressions: 0, avgCtr: 0, avgPosition: null };
           let totalPositionWeight = 0;
-          pageTotalsByUrl.forEach(totals => {
-            siteAggFromPageTotals.totalClicks += totals.clicks28 || 0;
-            siteAggFromPageTotals.totalImpressions += totals.impr28 || 0;
-            if (totals.avgPos28 != null && totals.impr28 > 0) {
-              totalPositionWeight += totals.avgPos28 * totals.impr28;
+          pageTotalsByKey.forEach(gscMetrics => {
+            siteAggFromPageTotals.totalClicks += gscMetrics.clicks || 0;
+            siteAggFromPageTotals.totalImpressions += gscMetrics.impressions || 0;
+            if (gscMetrics.position != null && gscMetrics.impressions > 0) {
+              totalPositionWeight += gscMetrics.position * gscMetrics.impressions;
             }
           });
           siteAggFromPageTotals.avgCtr = siteAggFromPageTotals.totalImpressions > 0 
@@ -19042,37 +19149,37 @@
             schemaAudit // Pass schema audit data to check for schema presence
           );
         } catch (csvError) {
-          debugLog(`⚠ Failed to fetch CSV, falling back to pageTotalsByUrl only: ${csvError.message}`, 'warn');
-          // Fallback: Build pages from pageTotalsByUrl directly (no CSV)
-          const pagesFromPageTotals = Array.from(pageTotalsByUrl.entries()).map(([normalizedUrl, totals]) => {
-            // Try to reconstruct full URL from normalized URL
-            let fullUrl = normalizedUrl;
+          debugLog(`⚠ Failed to fetch CSV, falling back to pageTotalsByKey only: ${csvError.message}`, 'warn');
+          // Fallback: Build pages from pageTotalsByKey directly (no CSV)
+          const pagesFromPageTotals = Array.from(pageTotalsByKey.entries()).map(([pageKey, gscMetrics]) => {
+            // Use the stored URL from gscMetrics, or reconstruct from pageKey
+            let fullUrl = gscMetrics.url || pageKey;
             if (!fullUrl.startsWith('http')) {
               const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || 'https://www.alanranger.com';
-              fullUrl = propertyUrl.replace(/\/$/, '') + (normalizedUrl.startsWith('/') ? normalizedUrl : '/' + normalizedUrl);
+              fullUrl = propertyUrl.replace(/\/$/, '') + (pageKey.startsWith('/') ? pageKey : '/' + pageKey);
             }
             
             return {
               url: fullUrl,
               page: fullUrl,
               segment: classifyPageSegment(fullUrl),
-              clicks: totals.clicks28 || 0,
-              impressions: totals.impr28 || 0,
-              ctr: totals.ctr28 || 0,
-              avgPosition: totals.avgPos28 || null,
-              position: totals.avgPos28 || null,
-              _source: 'pageTotalsByUrl_fallback'
+              clicks: gscMetrics.clicks || 0,
+              impressions: gscMetrics.impressions || 0,
+              ctr: gscMetrics.ctr || 0,
+              avgPosition: gscMetrics.position || null,
+              position: gscMetrics.position || null,
+              _source: 'pageTotalsByKey_fallback'
             };
           }).filter(page => page.segment === PageSegment.MONEY);
           
-          // Recompute site aggregates from pageTotalsByUrl
+          // Recompute site aggregates from pageTotalsByKey
           let siteAggFromPageTotals = { totalClicks: 0, totalImpressions: 0, avgCtr: 0, avgPosition: null };
           let totalPositionWeight = 0;
-          pageTotalsByUrl.forEach(totals => {
-            siteAggFromPageTotals.totalClicks += totals.clicks28 || 0;
-            siteAggFromPageTotals.totalImpressions += totals.impr28 || 0;
-            if (totals.avgPos28 != null && totals.impr28 > 0) {
-              totalPositionWeight += totals.avgPos28 * totals.impr28;
+          pageTotalsByKey.forEach(gscMetrics => {
+            siteAggFromPageTotals.totalClicks += gscMetrics.clicks || 0;
+            siteAggFromPageTotals.totalImpressions += gscMetrics.impressions || 0;
+            if (gscMetrics.position != null && gscMetrics.impressions > 0) {
+              totalPositionWeight += gscMetrics.position * gscMetrics.impressions;
             }
           });
           siteAggFromPageTotals.avgCtr = siteAggFromPageTotals.totalImpressions > 0 
@@ -19098,6 +19205,24 @@
           moneyPagesList
         );
         moneyPagesMetrics.behaviour = moneyBehaviour;
+        
+        // Add page-level GSC totals (filtered to money pages) for persistence
+        // This ensures Money Pages metrics remain consistent when loading from history
+        const moneyPagesGscTotals28d = moneyPagesList.map(mp => {
+          const k = normalizeGscPageKey(mp.url);
+          const m = pageTotalsByKey.get(k);
+          return {
+            url: mp.url,
+            clicks: m?.clicks ?? 0,
+            impressions: m?.impressions ?? 0,
+            ctr: m?.ctr ?? 0,
+            position: m?.position ?? 0
+          };
+        });
+        
+        // Store GSC range and page totals in moneyPagesMetrics for persistence
+        moneyPagesMetrics.gscRange = gscRange || getGscDateRange(28);
+        moneyPagesMetrics.gscPageTotals28d = moneyPagesGscTotals28d;
         
         debugLog(`Money Pages Metrics: ${moneyPagesMetrics.rows.length} money pages found, ${moneyPagesMetrics.overview.moneyClicks} clicks, ${moneyPagesMetrics.overview.moneyImpressions} impressions`, 'info');
         if (moneyBehaviour) {
@@ -24506,6 +24631,29 @@ Final Score: ${score}/100`;
         return normalized;
       }
       
+      // Normalize GSC page URL for page key matching (dedicated helper for page-level totals)
+      // This avoids mismatches caused by full URL vs path-only, trailing slashes, query strings/fragments
+      function normalizeGscPageKey(inputUrl) {
+        if (!inputUrl) return "";
+
+        let u = ("" + inputUrl).trim();
+
+        // Accept path-only
+        if (u.startsWith("/")) u = "https://www.alanranger.com" + u;
+        else if (!u.startsWith("http")) u = "https://www.alanranger.com/" + u.replace(/^\/+/, "");
+
+        try {
+          const urlObj = new URL(u);
+          let path = urlObj.pathname || "/";
+          // remove trailing slash (except root)
+          if (path.length > 1) path = path.replace(/\/+$/, "");
+          return urlObj.origin.toLowerCase() + path;
+        } catch {
+          // fallback: best-effort normalise
+          return u.toLowerCase().replace(/\/+$/, "");
+        }
+      }
+      
       // Get task identity key for Money Page (reusable helper)
       function getMoneyPageTaskKey(pageUrl) {
         return normalizeUrlForDedupe(pageUrl);
@@ -24525,6 +24673,7 @@ Final Score: ${score}/100`;
       window.getMoneyPageTaskKey = getMoneyPageTaskKey;
       window.findExistingOptimisationTaskForUrl = findExistingOptimisationTaskForUrl;
       window.normalizeUrlForDedupe = normalizeUrlForDedupe;
+      window.normalizeGscPageKey = normalizeGscPageKey;
       
       // Create optimisation task for URL (reusable helper - used by both Money Pages and Ranking & AI)
       async function createOptimisationTaskForUrl(pageUrl, pageTitle, source = 'money_pages') {
