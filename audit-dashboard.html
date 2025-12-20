@@ -4778,17 +4778,26 @@
         <!-- Phase 9: Estimated Impact Tiles - Split into Potential and Actual -->
         <div class="optimisation-impact-tiles" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.5rem 0;">
           <!-- Left Tile: Potential Extra Clicks -->
-          <div class="card" id="impact-potential-clicks-card" title="Projection: assumes objectives met for CTR/Impressions/Clicks tasks. Uses latest measurements. Excludes Rank/AI metrics.">
+          <div class="card" id="impact-potential-clicks-card" style="cursor: pointer; position: relative;" title="Projection: assumes objectives met for CTR/Impressions/Clicks tasks. Uses latest measurements. Excludes Rank/AI metrics. Click to filter table to traffic KPI tasks.">
             <div style="font-size: 1.5rem; font-weight: bold;" id="impact-potential-clicks">0</div>
             <div style="margin-top: 0.25rem; font-size: 0.875rem;">Potential Extra Clicks (28d)</div>
             <div style="margin-top: 0.125rem; font-size: 0.75rem; color: rgba(255, 255, 255, 0.7);">If all CTR/Impressions/Clicks objectives are met</div>
+            <div id="impact-potential-clicks-clear" style="display: none; position: absolute; top: 0.5rem; right: 0.5rem; font-size: 0.75rem; color: rgba(255, 255, 255, 0.8); cursor: pointer; padding: 0.25rem 0.5rem; background: rgba(0, 0, 0, 0.2); border-radius: 4px;" title="Clear filter">× Clear</div>
           </div>
           <!-- Right Tile: Actual Click Change -->
-          <div class="card" id="impact-actual-clicks-card" title="Observed: baseline → latest click change across traffic KPI tasks. Uses measured clicks (or CTR×Impressions fallback).">
+          <div class="card" id="impact-actual-clicks-card" style="cursor: pointer; position: relative;" title="Observed: baseline → latest click change across traffic KPI tasks. Uses measured clicks (or CTR×Impressions fallback). Click to filter table to click-related tasks.">
             <div style="font-size: 1.5rem; font-weight: bold;" id="impact-actual-clicks">0</div>
             <div style="margin-top: 0.25rem; font-size: 0.875rem;">Actual Click Change (28d)</div>
             <div style="margin-top: 0.125rem; font-size: 0.75rem; color: rgba(255, 255, 255, 0.7);">Measured baseline → latest across click-related tasks</div>
+            <div id="impact-actual-clicks-clear" style="display: none; position: absolute; top: 0.5rem; right: 0.5rem; font-size: 0.75rem; color: rgba(255, 255, 255, 0.8); cursor: pointer; padding: 0.25rem 0.5rem; background: rgba(0, 0, 0, 0.2); border-radius: 4px;" title="Clear filter">× Clear</div>
           </div>
+        </div>
+        
+        <!-- Context strip showing task counts -->
+        <div id="impact-tiles-context" style="margin-top: 0.5rem; margin-bottom: 1rem; font-size: 0.75rem; color: rgba(255, 255, 255, 0.6); text-align: center;">
+          <span id="traffic-kpi-count">Traffic KPI tasks included: 0</span>
+          <span style="margin: 0 1rem;">|</span>
+          <span id="click-related-count">Click-related tasks included: 0</span>
         </div>
 
         <!-- Phase 9: Scope Toggle -->
@@ -4806,7 +4815,7 @@
           <div class="card" style="padding: 1.5rem;">
             <div id="chart-left-title-container" style="margin-bottom: 0.75rem;">
               <h3 id="chart-left-title" style="margin: 0 0 0.25rem 0; font-size: 1.1rem; font-weight: 600; color: var(--dark-text);">Estimated Gap to Target (28d) — Clicks Potential</h3>
-              <p id="chart-left-subtitle" style="margin: 0; font-size: 0.75rem; color: rgba(255, 255, 255, 0.7); line-height: 1.3;">Sum of remaining clicks needed to hit each task's objective (traffic KPIs only). This is a target gap, not last-30d performance.</p>
+              <p id="chart-left-subtitle" style="margin: 0; font-size: 0.75rem; color: rgba(255, 255, 255, 0.7); line-height: 1.3;">Sum of remaining click-equivalent gap to targets (traffic KPIs only).</p>
             </div>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
               <div style="display: flex; gap: 0.5rem; align-items: center;">
@@ -4829,7 +4838,7 @@
           </div>
           <div class="card" style="padding: 1.5rem;">
             <h3 style="margin: 0 0 0.25rem 0; font-size: 1.1rem; font-weight: 600; color: var(--dark-text);">Median Delta by KPI (Last 30d)</h3>
-            <p style="margin: 0 0 1rem 0; font-size: 0.75rem; color: rgba(255, 255, 255, 0.7); line-height: 1.3;">Median change from baseline → latest (within last 30d) across filtered tasks. CTR shown as percentage points (pp). Negative for Rank can be good (lower rank).</p>
+            <p style="margin: 0 0 1rem 0; font-size: 0.75rem; color: rgba(255, 255, 255, 0.7); line-height: 1.3;">Median baseline → latest change per KPI across filtered tasks. (Median ≠ net change.) CTR shown in pp. Negative for Rank can be good (lower rank).</p>
             <div style="position: relative; height: 280px;">
               <canvas id="chart-median-delta" style="width: 100%; height: 280px;"></canvas>
             </div>
@@ -6583,6 +6592,8 @@
       activeObjectiveFilter: null, // 'not_set' | 'on_track' | 'overdue' | 'met' | null
       scope: 'active_cycle', // 'active_cycle' | 'all_tasks'
       metricTrafficFilter: null, // { metricKey: string, bucket: 'better'|'same'|'worse' } | null
+      trafficKpiOnly: false, // Filter to tasks with CTR/Impressions/Clicks objectives
+      clickRelatedOnly: false // Filter to tasks where clicks delta is computable
       selectedKpiForTrend: 'ctr_28d', // KPI selected for trend chart
       leftChartView: 'clicks' // 'clicks' | 'trend'
     };
@@ -9090,7 +9101,43 @@
       const scope = window.optimisationModuleState.scope || 'active_cycle';
       
       // Compute potential and actual clicks with deduplication
-      const { potential, actual } = computePotentialAndActualClicks28d(tasks, scope);
+      const { potential, actual, includedTasksCount } = computePotentialAndActualClicks28d(tasks, scope);
+      
+      // Count traffic KPI tasks and click-related tasks for context strip
+      const trafficKpis = new Set(['ctr_28d', 'impressions_28d', 'clicks_28d']);
+      let trafficKpiCount = 0;
+      let clickRelatedCount = 0;
+      
+      for (const task of tasks) {
+        const objectiveKpiKey = task.objectiveKpiKey || (task.objective && task.objective.kpi) || 
+                                (task.cycle && task.cycle.objective && task.cycle.objective.kpi);
+        
+        // Count traffic KPI tasks
+        if (objectiveKpiKey && trafficKpis.has(objectiveKpiKey)) {
+          trafficKpiCount++;
+          
+          // Check if click-related (can compute clicks delta)
+          const activeCycle = scope === 'active_cycle' 
+            ? ((task.cycles && task.cycles.find(c => c.is_active || c.id === task.active_cycle_id)) || null)
+            : null;
+          const measurements = task.measurements || [];
+          const baselineLatest = getBaselineLatest(measurements, scope, activeCycle);
+          
+          if (baselineLatest && baselineLatest.baseline && baselineLatest.latest) {
+            const delta = computeActualClickDeltaForTask(task, baselineLatest.baseline, baselineLatest.latest);
+            if (delta != null) {
+              clickRelatedCount++;
+            }
+          } else if (task.baseline_metrics && task.latest_metrics) {
+            const delta = computeActualClickDeltaForTask(task, task.baseline_metrics, task.latest_metrics);
+            if (delta != null) {
+              clickRelatedCount++;
+            }
+          } else if (task.baselineValue != null && task.latestValue != null && objectiveKpiKey === 'clicks_28d') {
+            clickRelatedCount++;
+          }
+        }
+      }
       
       // Also compute per-task values for chart aggregation (still needed for charts)
       let aiCitationGapCount = 0;
@@ -9109,10 +9156,16 @@
       // Update Potential Extra Clicks tile
       const potentialClicksEl = document.getElementById('impact-potential-clicks');
       const potentialClicksCard = document.getElementById('impact-potential-clicks-card');
+      const potentialClicksClear = document.getElementById('impact-potential-clicks-clear');
       if (potentialClicksEl) {
         potentialClicksEl.textContent = potential >= 1000 
           ? (potential / 1000).toFixed(1) + 'k' 
           : Math.round(potential).toLocaleString('en-GB');
+      }
+      
+      // Show/hide clear button for potential tile
+      if (potentialClicksClear) {
+        potentialClicksClear.style.display = window.optimisationModuleState.trafficKpiOnly ? 'block' : 'none';
       }
       
       // Set bronze/silver/gold background for potential tile
@@ -9129,6 +9182,7 @@
       
       // Update Actual Click Change tile
       const actualClicksEl = document.getElementById('impact-actual-clicks');
+      const actualClicksClear = document.getElementById('impact-actual-clicks-clear');
       if (actualClicksEl) {
         // Format with sign (+ or -)
         const sign = actual >= 0 ? '+' : '';
@@ -9138,6 +9192,21 @@
         
         // Color code: green for positive, red for negative
         actualClicksEl.style.color = actual >= 0 ? '#10b981' : '#ef4444';
+      }
+      
+      // Show/hide clear button for actual tile
+      if (actualClicksClear) {
+        actualClicksClear.style.display = window.optimisationModuleState.clickRelatedOnly ? 'block' : 'none';
+      }
+      
+      // Update context strip
+      const trafficKpiCountEl = document.getElementById('traffic-kpi-count');
+      const clickRelatedCountEl = document.getElementById('click-related-count');
+      if (trafficKpiCountEl) {
+        trafficKpiCountEl.textContent = `Traffic KPI tasks included: ${trafficKpiCount}`;
+      }
+      if (clickRelatedCountEl) {
+        clickRelatedCountEl.textContent = `Click-related tasks included: ${clickRelatedCount}`;
       }
       
       const aiGapEl = document.getElementById('impact-ai-gap');
@@ -9404,6 +9473,74 @@
         tasks = tasks.filter(t => t.status === statusFilter);
       }
       
+      // Apply trafficKpiOnly filter (CTR/Impressions/Clicks objectives only)
+      if (window.optimisationModuleState.trafficKpiOnly) {
+        const trafficKpis = new Set(['ctr_28d', 'impressions_28d', 'clicks_28d']);
+        tasks = tasks.filter(task => {
+          const objectiveKpiKey = task.objectiveKpiKey || (task.objective && task.objective.kpi) || 
+                                  (task.cycle && task.cycle.objective && task.cycle.objective.kpi);
+          return objectiveKpiKey && trafficKpis.has(objectiveKpiKey);
+        });
+      }
+      
+      // Apply clickRelatedOnly filter (tasks where clicks delta is computable)
+      if (window.optimisationModuleState.clickRelatedOnly) {
+        const scope = window.optimisationModuleState.scope || 'active_cycle';
+        const trafficKpis = new Set(['ctr_28d', 'impressions_28d', 'clicks_28d']);
+        tasks = tasks.filter(task => {
+          // Must have traffic KPI objective
+          const objectiveKpiKey = task.objectiveKpiKey || (task.objective && task.objective.kpi) || 
+                                  (task.cycle && task.cycle.objective && task.cycle.objective.kpi);
+          if (!objectiveKpiKey || !trafficKpis.has(objectiveKpiKey)) {
+            return false;
+          }
+          
+          // Must be able to compute clicks delta
+          const activeCycle = scope === 'active_cycle' 
+            ? ((task.cycles && task.cycles.find(c => c.is_active || c.id === task.active_cycle_id)) || null)
+            : null;
+          const measurements = task.measurements || [];
+          const baselineLatest = getBaselineLatest(measurements, scope, activeCycle);
+          
+          if (baselineLatest && baselineLatest.baseline && baselineLatest.latest) {
+            // Check if clicks can be computed
+            const baselineClicks = getMetricValue(baselineLatest.baseline, 'clicks_28d');
+            const latestClicks = getMetricValue(baselineLatest.latest, 'clicks_28d');
+            if (baselineClicks != null && latestClicks != null) {
+              return true; // Direct clicks available
+            }
+            
+            // Check CTR × Impressions fallback
+            const baselineCtr = getMetricValue(baselineLatest.baseline, 'ctr_28d');
+            const latestCtr = getMetricValue(baselineLatest.latest, 'ctr_28d');
+            const baselineImpr = getMetricValue(baselineLatest.baseline, 'impressions_28d');
+            const latestImpr = getMetricValue(baselineLatest.latest, 'impressions_28d');
+            if (baselineCtr != null && baselineImpr != null && latestCtr != null && latestImpr != null) {
+              return true; // Can compute from CTR × Impressions
+            }
+          }
+          
+          // Fallback: check task.baseline_metrics/latest_metrics
+          if (task.baseline_metrics && task.latest_metrics) {
+            const baselineClicks = getMetricValue(task.baseline_metrics, 'clicks_28d');
+            const latestClicks = getMetricValue(task.latest_metrics, 'clicks_28d');
+            if (baselineClicks != null && latestClicks != null) {
+              return true;
+            }
+            
+            const baselineCtr = getMetricValue(task.baseline_metrics, 'ctr_28d');
+            const latestCtr = getMetricValue(task.latest_metrics, 'ctr_28d');
+            const baselineImpr = getMetricValue(task.baseline_metrics, 'impressions_28d');
+            const latestImpr = getMetricValue(task.latest_metrics, 'impressions_28d');
+            if (baselineCtr != null && baselineImpr != null && latestCtr != null && latestImpr != null) {
+              return true;
+            }
+          }
+          
+          return false; // Cannot compute clicks delta
+        });
+      }
+      
       // Apply metric traffic filter
       const metricTrafficFilter = window.optimisationModuleState.metricTrafficFilter;
       if (metricTrafficFilter) {
@@ -9567,6 +9704,9 @@
       let totalPotential = 0;
       let totalActual = 0;
       
+      // Debug: count included tasks for Actual calculation
+      let includedTasksCount = 0;
+      
       // Process each URL group
       for (const [url, urlTasks] of Object.entries(tasksByUrl)) {
         // For potential: take MAX per URL (avoid fantasy stacking)
@@ -9587,8 +9727,9 @@
           maxPotential = Math.max(maxPotential, potential);
           
           // Actual: compute measured click delta
-          // Priority: 1) measurements with getBaselineLatest, 2) task.baseline_metrics/latest_metrics, 3) task.baselineValue/latestValue (if clicks_28d)
-          let actual = 0;
+          // Only include if clicks can be computed (exclude if neither clicks nor CTR×Impressions available)
+          let actual = null; // null means cannot compute
+          
           if (baselineLatest && baselineLatest.baseline && baselineLatest.latest) {
             // Use measurements if available
             actual = computeActualClickDeltaForTask(task, baselineLatest.baseline, baselineLatest.latest);
@@ -9603,23 +9744,34 @@
               actual = task.latestValue - task.baselineValue;
             }
             // For CTR/Impressions, we can't compute clicks from just baselineValue/latestValue
-            // (we'd need impressions or CTR separately), so actual remains 0
+            // (we'd need impressions or CTR separately), so actual remains null
           }
-          sumActual += actual;
+          
+          // Only include if actual is not null (clicks can be computed)
+          if (actual != null) {
+            sumActual += actual;
+            includedTasksCount++;
+          }
+          // If actual is null, exclude this task (don't treat as 0)
         }
         
         totalPotential += maxPotential;
         totalActual += sumActual;
       }
       
+      // Debug log (not shown in UI, but available in console)
+      console.log('[computePotentialAndActualClicks28d] Included tasks for Actual:', includedTasksCount);
+      
       return {
         potential: Math.round(totalPotential),
-        actual: Math.round(totalActual)
+        actual: Math.round(totalActual),
+        includedTasksCount // For debugging
       };
     }
     
     // Compute actual click delta for a single task
     // Returns click change from baseline → latest (can be negative)
+    // Returns null if clicks cannot be computed (neither clicks nor CTR×Impressions available)
     // Accepts either measurement objects or metric objects
     function computeActualClickDeltaForTask(task, baseline, latest) {
       // Prefer direct clicks_28d if available
@@ -9643,7 +9795,7 @@
         return latestComputedClicks - baselineComputedClicks;
       }
       
-      return 0; // No data available
+      return null; // Cannot compute clicks delta (exclude from sum)
     }
 
     // Build Chart 1: Estimated Extra Clicks (28d) by KPI
@@ -9656,28 +9808,30 @@
         'ctr_28d': { label: 'CTR (28d)', sum: 0, count: 0 },
         'impressions_28d': { label: 'Impressions (28d)', sum: 0, count: 0 },
         'clicks_28d': { label: 'Clicks (28d)', sum: 0, count: 0 },
-        'no_objective': { label: 'No objective KPI', sum: 0, count: 0 }
+        'no_objective': { label: 'No Traffic Objective', sum: 0, count: 0 }
       };
       
       for (const task of filteredTasks) {
         const extraClicks = computeEstimatedExtraClicks28d(task);
-        const objectiveKpiKey = task.objectiveKpiKey || (task.objective && task.objective.kpi);
+        const objectiveKpiKey = task.objectiveKpiKey || (task.objective && task.objective.kpi) ||
+                                (task.cycle && task.cycle.objective && task.cycle.objective.kpi);
         
         // Only include if objective KPI is a traffic KPI
         if (objectiveKpiKey && allowedTrafficKpis.has(objectiveKpiKey) && kpiBuckets[objectiveKpiKey]) {
           kpiBuckets[objectiveKpiKey].sum += extraClicks;
           kpiBuckets[objectiveKpiKey].count += 1;
         } else {
-          // Tasks with no objective, or non-traffic KPIs (Rank, AI Citations, AI Overview, etc.) go to "No objective KPI"
+          // Tasks with no objective, or non-traffic KPIs (Rank, AI Citations, AI Overview, etc.) go to "No Traffic Objective"
           kpiBuckets['no_objective'].sum += extraClicks;
           kpiBuckets['no_objective'].count += 1;
         }
       }
       
-      // Filter out buckets with zero sum and zero count, but keep "no_objective" if it has tasks
+      // Filter out buckets with zero sum (remove "No Traffic Objective" if always 0)
       const result = [];
       for (const [kpi, data] of Object.entries(kpiBuckets)) {
-        if (data.sum > 0 || data.count > 0) {
+        // Only include if sum > 0 (exclude zero-sum buckets)
+        if (data.sum > 0) {
           result.push({ kpi, label: data.label, sum: data.sum, count: data.count });
         }
       }
@@ -11298,8 +11452,11 @@
             includeTestCheckbox.checked = false;
           }
           window.optimisationModuleState.activeObjectiveFilter = null;
+          window.optimisationModuleState.trafficKpiOnly = false;
+          window.optimisationModuleState.clickRelatedOnly = false;
           updateObjectiveFilterUI();
           applyFilters();
+          updateImpactTiles();
         });
       }
       
@@ -11311,6 +11468,75 @@
           updateOptimisationSummaryCards();
           updateKPITiles();
           updateImpactTiles();
+          updateTimeseriesCharts();
+        });
+      }
+      
+      // Hero tile click handlers
+      const potentialClicksCard = document.getElementById('impact-potential-clicks-card');
+      const potentialClicksClear = document.getElementById('impact-potential-clicks-clear');
+      if (potentialClicksCard) {
+        potentialClicksCard.addEventListener('click', (e) => {
+          // Don't trigger if clicking the clear button
+          if (e.target === potentialClicksClear || e.target.closest('#impact-potential-clicks-clear')) {
+            return;
+          }
+          
+          // Toggle trafficKpiOnly filter
+          window.optimisationModuleState.trafficKpiOnly = !window.optimisationModuleState.trafficKpiOnly;
+          window.optimisationModuleState.clickRelatedOnly = false; // Clear the other filter
+          
+          // Clear metric traffic filter (conflicting)
+          window.optimisationModuleState.metricTrafficFilter = null;
+          
+          updateImpactTiles();
+          applyOptimisationFilters();
+          renderOptimisationTasksTable();
+          updateTimeseriesCharts();
+        });
+      }
+      
+      if (potentialClicksClear) {
+        potentialClicksClear.addEventListener('click', (e) => {
+          e.stopPropagation();
+          window.optimisationModuleState.trafficKpiOnly = false;
+          updateImpactTiles();
+          applyOptimisationFilters();
+          renderOptimisationTasksTable();
+          updateTimeseriesCharts();
+        });
+      }
+      
+      const actualClicksCard = document.getElementById('impact-actual-clicks-card');
+      const actualClicksClear = document.getElementById('impact-actual-clicks-clear');
+      if (actualClicksCard) {
+        actualClicksCard.addEventListener('click', (e) => {
+          // Don't trigger if clicking the clear button
+          if (e.target === actualClicksClear || e.target.closest('#impact-actual-clicks-clear')) {
+            return;
+          }
+          
+          // Toggle clickRelatedOnly filter
+          window.optimisationModuleState.clickRelatedOnly = !window.optimisationModuleState.clickRelatedOnly;
+          window.optimisationModuleState.trafficKpiOnly = false; // Clear the other filter
+          
+          // Clear metric traffic filter (conflicting)
+          window.optimisationModuleState.metricTrafficFilter = null;
+          
+          updateImpactTiles();
+          applyOptimisationFilters();
+          renderOptimisationTasksTable();
+          updateTimeseriesCharts();
+        });
+      }
+      
+      if (actualClicksClear) {
+        actualClicksClear.addEventListener('click', (e) => {
+          e.stopPropagation();
+          window.optimisationModuleState.clickRelatedOnly = false;
+          updateImpactTiles();
+          applyOptimisationFilters();
+          renderOptimisationTasksTable();
           updateTimeseriesCharts();
         });
       }
