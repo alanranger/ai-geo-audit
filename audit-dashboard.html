@@ -18851,6 +18851,8 @@
           
           if (pageLevelResponse.ok) {
             const pageLevelData = await pageLevelResponse.json();
+            debugLog(`📊 GSC page-level API response: status=${pageLevelData.status}, hasData=${!!pageLevelData.data}, rowsCount=${pageLevelData.data?.rows?.length || 0}`, 'info');
+            
             if (pageLevelData.status === 'ok' && pageLevelData.data && Array.isArray(pageLevelData.data.rows)) {
               // Build pageTotalsByKey map from page-level data using normalized page key
               for (const row of (pageLevelData.data.rows || [])) {
@@ -18862,6 +18864,11 @@
                 const impressions = row.impressions || 0;
                 const ctr = row.ctr != null ? (row.ctr > 1 ? row.ctr / 100 : row.ctr) : (impressions > 0 ? clicks / impressions : 0);
                 const position = row.position || 0;
+
+                // Debug: Log specific URL if it matches the one we're looking for
+                if (rawPageUrl.includes('landscape-photography-workshops')) {
+                  debugLog(`🔍 Found landscape-photography-workshops in page-level API: url=${rawPageUrl}, key=${key}, clicks=${clicks}, impressions=${impressions}, ctr=${ctr}, position=${position}`, 'info');
+                }
 
                 pageTotalsByKey.set(key, {
                   url: rawPageUrl,
@@ -19089,6 +19096,16 @@
               ctr: 0,
               position: 0
             };
+            
+            // Debug: Log if this is the URL we're looking for
+            if (url.includes('landscape-photography-workshops')) {
+              debugLog(`🔍 Money Pages lookup: url=${url}, normalizedKey=${pageKey}, found=${pageTotalsByKey.has(pageKey)}, clicks=${gscMetrics.clicks}, impressions=${gscMetrics.impressions}, ctr=${gscMetrics.ctr}, position=${gscMetrics.position}`, 'info');
+              // Also log all keys in pageTotalsByKey that contain 'landscape' for debugging
+              const matchingKeys = Array.from(pageTotalsByKey.keys()).filter(k => k.includes('landscape'));
+              if (matchingKeys.length > 0) {
+                debugLog(`🔍 Available keys containing 'landscape': ${matchingKeys.join(', ')}`, 'info');
+              }
+            }
             
             if (gscMetrics.impressions > 0 || gscMetrics.clicks > 0) {
               // Use page-level totals (matches GSC "Pages" tab exactly)
@@ -27724,6 +27741,12 @@ Final Score: ${score}/100`;
           cachedAuditHistory = history;
           
           debugLog(`[KPI Tracker] Loaded ${history.length} audit records and ${timeseries.length} timeseries records`, 'info');
+          debugLog(`[KPI Tracker] API response structure: hasData=${!!json.data}, hasTimeseries=${!!json.timeseries}, timeseriesType=${typeof json.timeseries}, timeseriesIsArray=${Array.isArray(json.timeseries)}`, 'info');
+          if (timeseries.length > 0) {
+            debugLog(`[KPI Tracker] Timeseries sample: first=${JSON.stringify(timeseries[0])}, last=${JSON.stringify(timeseries[timeseries.length - 1])}`, 'info');
+          } else {
+            debugLog(`[KPI Tracker] WARNING: timeseries is empty. API response keys: ${Object.keys(json).join(', ')}`, 'warn');
+          }
           
           if (history.length === 0) {
             const card = document.getElementById("money-pages-kpi-card");
@@ -29285,9 +29308,14 @@ Final Score: ${score}/100`;
             metricSelect.addEventListener('change', (e) => {
               const metricKey = e.target.value;
               if (cachedAuditHistory) {
-                const historyData = buildMoneyKpiHistory(cachedAuditHistory, metricKey);
-                renderMoneyKpiTable(historyData, metricKey);
-                renderMoneyKpiSparkline(historyData, metricKey);
+                // Reload full history with timeseries when metric changes
+                const propertyUrl = document.getElementById('propertyUrl')?.value;
+                if (propertyUrl) {
+                  loadAuditHistoryAndRenderKpis(propertyUrl);
+                } else {
+                  // Fallback: use cached data but still need timeseries
+                  debugLog('⚠ Metric selector: No propertyUrl available, cannot reload timeseries', 'warn');
+                }
               }
             });
           }
