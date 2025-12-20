@@ -257,3 +257,88 @@ CREATE INDEX idx_audit_results_property_date ON audit_results(property_url, audi
 
 **This addresses the major gaps** - Content/Schema and Authority pillars now show real historical trends when Supabase is configured.
 
+---
+
+## Money Pages GSC Page-Level Totals Persistence (Latest Update)
+
+### Overview
+Money Pages now uses GSC page-level totals (unfiltered, all positions) instead of queryPages aggregation (filtered to positions 1-20). This ensures Money Pages metrics match GSC "Pages" tab exactly.
+
+### What Changed
+
+**1. Data Source:**
+- **Before:** Money Pages used `queryPages` aggregated data (filtered to positions 1-20)
+- **After:** Money Pages uses GSC page-level API data (unfiltered, all positions)
+- **Result:** Metrics now match GSC "Pages" tab totals exactly
+
+**2. Date Range:**
+- **Before:** Used user-selected date range (28/60/90 days, etc.)
+- **After:** Always uses rolling "last 28d" range for consistency
+- **Result:** Money Pages metrics are consistent across all audits
+
+**3. URL Normalization:**
+- Added `normalizeGscPageKey()` helper function for consistent page key matching
+- Handles full URLs vs path-only, trailing slashes, query strings/fragments
+- **Result:** Prevents mismatches when matching URLs across different data sources
+
+**4. Persistence:**
+- Page totals (filtered to money pages) are now saved to Supabase
+- Stored in `scores.moneyPages.gscRange` and `scores.moneyPages.gscPageTotals28d`
+- **Result:** Historical audits show exact same metrics as when they were run
+
+### Storage Structure
+
+```javascript
+{
+  scores: {
+    moneyPages: {
+      gscRange: {
+        startDate: "2025-01-01",
+        endDate: "2025-01-28"
+      },
+      gscPageTotals28d: [
+        {
+          url: "https://www.alanranger.com/landscape-photography-workshops",
+          clicks: 17,
+          impressions: 1780,
+          ctr: 0.01,  // Ratio (0-1)
+          position: 12.5
+        },
+        // ... more money pages
+      ]
+    },
+    moneyPagesMetrics: {
+      // ... existing structure
+      gscRange: { ... },  // Also stored here for backwards compatibility
+      gscPageTotals28d: [ ... ]  // Also stored here for backwards compatibility
+    }
+  }
+}
+```
+
+### Loading from History
+
+When loading a saved audit from Supabase:
+1. **First:** Check for persisted values in `scores.moneyPages.gscPageTotals28d`
+2. **Fallback:** Check `scores.moneyPagesMetrics.gscPageTotals28d` (backwards compatibility)
+3. **Last resort:** Fetch fresh data from GSC API (for older audits without persisted data)
+
+**Result:** Historical audits maintain exact metrics from when they were run, ensuring consistency for trend analysis.
+
+### Validation
+
+To verify Money Pages metrics match GSC:
+1. Pick a specific page (e.g., `/landscape-photography-workshops`)
+2. In GSC "Pages" tab (last 28 days), note: Clicks, Impressions, CTR, Avg position
+3. In Money Pages table, the same page should match exactly
+4. Run an audit → open History → reload the saved audit
+5. Money Pages values should remain identical (confirm persistence worked)
+
+### Impact
+
+- ✅ Money Pages metrics now match GSC "Pages" tab exactly
+- ✅ No more "position 1-20 only" distortion
+- ✅ Historical audits show consistent metrics
+- ✅ Better accuracy for optimization task creation
+- ✅ Improved data integrity for trend tracking
+
