@@ -6083,7 +6083,15 @@
         document.getElementById('optimisation-edit-objective-kpi').value = ''; // KPI label not used in Phase 5
         document.getElementById('optimisation-edit-objective-metric').value = objective.kpi || '';
         document.getElementById('optimisation-edit-objective-direction').value = objective.target_type === 'absolute' ? 'at_least' : 'increase'; // Default
-        document.getElementById('optimisation-edit-objective-target-value').value = objective.target != null ? objective.target : '';
+        // For CTR, convert from ratio (0-1) to percentage for display in input field
+        let displayTarget = objective.target;
+        if (objective.kpi === 'ctr_28d' && displayTarget != null) {
+          // If target is stored as ratio (0-1), multiply by 100 for display
+          if (displayTarget < 1 && displayTarget > 0) {
+            displayTarget = displayTarget * 100;
+          }
+        }
+        document.getElementById('optimisation-edit-objective-target-value').value = displayTarget != null ? displayTarget : '';
         document.getElementById('optimisation-edit-objective-plan').value = objective.plan || '';
         
         // Calculate timeframe from due_at if available
@@ -6159,7 +6167,18 @@
       const title = document.getElementById('optimisation-edit-objective-title').value.trim();
       const kpi = document.getElementById('optimisation-edit-objective-metric').value || null;
       const targetValue = document.getElementById('optimisation-edit-objective-target-value').value;
-      const target = targetValue ? (kpi === 'ai_overview' ? targetValue === 'true' : parseFloat(targetValue)) : null;
+      let target = targetValue ? (kpi === 'ai_overview' ? targetValue === 'true' : parseFloat(targetValue)) : null;
+      // For CTR, convert from percentage to ratio (0-1) for storage
+      if (kpi === 'ctr_28d' && target != null) {
+        // If value is >= 1, assume it's a percentage and convert to ratio
+        if (target >= 1) {
+          target = target / 100;
+        }
+        // If value is < 1, assume it's already a ratio (but warn if it seems wrong)
+        if (target < 0.01 && target > 0) {
+          console.warn('[Optimisation] CTR target value seems very small. Expected percentage (e.g., 2.5 for 2.5%) or ratio (e.g., 0.025). Got:', target);
+        }
+      }
       const direction = document.getElementById('optimisation-edit-objective-direction').value || null;
       
       // Determine target_type based on KPI
@@ -12029,10 +12048,23 @@
               
               if (moneyPageRow) {
                 console.log('[Optimisation] Found matching Money Page row:', moneyPageRow);
+                // Normalize CTR: Money Pages stores CTR as ratio (0-1), but check if it's actually a percentage
+                let ctrValue = moneyPageRow.ctr || moneyPageRow.ctr_28d || null;
+                if (ctrValue != null) {
+                  // If CTR is > 1, assume it's a percentage and convert to ratio
+                  if (ctrValue > 1 && ctrValue <= 100) {
+                    console.warn('[Optimisation] Money Pages CTR appears to be percentage, converting to ratio:', ctrValue, '->', ctrValue / 100);
+                    ctrValue = ctrValue / 100;
+                  } else if (ctrValue > 100) {
+                    console.error('[Optimisation] Money Pages CTR value seems invalid (>100%):', ctrValue);
+                    ctrValue = null;
+                  }
+                  // If CTR is <= 1, assume it's already a ratio (0-1)
+                }
                 currentMetrics = {
                   gsc_clicks_28d: moneyPageRow.clicks || moneyPageRow.clicks_28d || null,
                   gsc_impressions_28d: moneyPageRow.impressions || moneyPageRow.impressions_28d || null,
-                  gsc_ctr_28d: moneyPageRow.ctr || moneyPageRow.ctr_28d || null, // Already a ratio (0-1)
+                  gsc_ctr_28d: ctrValue, // Normalized to ratio (0-1)
                   current_rank: moneyPageRow.avg_position || moneyPageRow.position || null,
                   opportunity_score: null,
                   ai_overview: false,
@@ -12067,10 +12099,23 @@
                     
                     if (moneyPageRow) {
                       console.log('[Optimisation] Found matching Money Page row in localStorage:', moneyPageRow);
+                      // Normalize CTR: Money Pages stores CTR as ratio (0-1), but check if it's actually a percentage
+                      let ctrValue = moneyPageRow.ctr || moneyPageRow.ctr_28d || null;
+                      if (ctrValue != null) {
+                        // If CTR is > 1, assume it's a percentage and convert to ratio
+                        if (ctrValue > 1 && ctrValue <= 100) {
+                          console.warn('[Optimisation] Money Pages CTR appears to be percentage, converting to ratio:', ctrValue, '->', ctrValue / 100);
+                          ctrValue = ctrValue / 100;
+                        } else if (ctrValue > 100) {
+                          console.error('[Optimisation] Money Pages CTR value seems invalid (>100%):', ctrValue);
+                          ctrValue = null;
+                        }
+                        // If CTR is <= 1, assume it's already a ratio (0-1)
+                      }
                       currentMetrics = {
                         gsc_clicks_28d: moneyPageRow.clicks || moneyPageRow.clicks_28d || null,
                         gsc_impressions_28d: moneyPageRow.impressions || moneyPageRow.impressions_28d || null,
-                        gsc_ctr_28d: moneyPageRow.ctr || moneyPageRow.ctr_28d || null,
+                        gsc_ctr_28d: ctrValue, // Normalized to ratio (0-1)
                         current_rank: moneyPageRow.avg_position || moneyPageRow.position || null,
                         opportunity_score: null,
                         ai_overview: false,
@@ -12190,10 +12235,23 @@
                       
                       if (moneyPageRow) {
                         console.log('[Optimisation] Found matching Money Page row in Supabase:', moneyPageRow);
+                        // Normalize CTR: Money Pages stores CTR as ratio (0-1), but check if it's actually a percentage
+                        let ctrValue = moneyPageRow.ctr || moneyPageRow.ctr_28d || null;
+                        if (ctrValue != null) {
+                          // If CTR is > 1, assume it's a percentage and convert to ratio
+                          if (ctrValue > 1 && ctrValue <= 100) {
+                            console.warn('[Optimisation] Money Pages CTR appears to be percentage, converting to ratio:', ctrValue, '->', ctrValue / 100);
+                            ctrValue = ctrValue / 100;
+                          } else if (ctrValue > 100) {
+                            console.error('[Optimisation] Money Pages CTR value seems invalid (>100%):', ctrValue);
+                            ctrValue = null;
+                          }
+                          // If CTR is <= 1, assume it's already a ratio (0-1)
+                        }
                         currentMetrics = {
                           gsc_clicks_28d: moneyPageRow.clicks || moneyPageRow.clicks_28d || null,
                           gsc_impressions_28d: moneyPageRow.impressions || moneyPageRow.impressions_28d || null,
-                          gsc_ctr_28d: moneyPageRow.ctr || moneyPageRow.ctr_28d || null,
+                          gsc_ctr_28d: ctrValue, // Normalized to ratio (0-1)
                           current_rank: moneyPageRow.avg_position || moneyPageRow.position || null,
                           opportunity_score: null,
                           ai_overview: false,
@@ -12477,10 +12535,23 @@
               });
               
               if (moneyPageRow) {
+                // Normalize CTR: Money Pages stores CTR as ratio (0-1), but check if it's actually a percentage
+                let ctrValue = moneyPageRow.ctr || moneyPageRow.ctr_28d || null;
+                if (ctrValue != null) {
+                  // If CTR is > 1, assume it's a percentage and convert to ratio
+                  if (ctrValue > 1 && ctrValue <= 100) {
+                    console.warn('[Optimisation] Money Pages CTR appears to be percentage, converting to ratio:', ctrValue, '->', ctrValue / 100);
+                    ctrValue = ctrValue / 100;
+                  } else if (ctrValue > 100) {
+                    console.error('[Optimisation] Money Pages CTR value seems invalid (>100%):', ctrValue);
+                    ctrValue = null;
+                  }
+                  // If CTR is <= 1, assume it's already a ratio (0-1)
+                }
                 currentMetrics = {
                   gsc_clicks_28d: moneyPageRow.clicks || moneyPageRow.clicks_28d || null,
                   gsc_impressions_28d: moneyPageRow.impressions || moneyPageRow.impressions_28d || null,
-                  gsc_ctr_28d: moneyPageRow.ctr || moneyPageRow.ctr_28d || null,
+                  gsc_ctr_28d: ctrValue, // Normalized to ratio (0-1)
                   current_rank: moneyPageRow.avg_position || moneyPageRow.position || null,
                   opportunity_score: null,
                   ai_overview: false,
@@ -12512,10 +12583,23 @@
                     });
                     
                     if (moneyPageRow) {
+                      // Normalize CTR: Money Pages stores CTR as ratio (0-1), but check if it's actually a percentage
+                      let ctrValue = moneyPageRow.ctr || moneyPageRow.ctr_28d || null;
+                      if (ctrValue != null) {
+                        // If CTR is > 1, assume it's a percentage and convert to ratio
+                        if (ctrValue > 1 && ctrValue <= 100) {
+                          console.warn('[Optimisation] Money Pages CTR appears to be percentage, converting to ratio:', ctrValue, '->', ctrValue / 100);
+                          ctrValue = ctrValue / 100;
+                        } else if (ctrValue > 100) {
+                          console.error('[Optimisation] Money Pages CTR value seems invalid (>100%):', ctrValue);
+                          ctrValue = null;
+                        }
+                        // If CTR is <= 1, assume it's already a ratio (0-1)
+                      }
                       currentMetrics = {
                         gsc_clicks_28d: moneyPageRow.clicks || moneyPageRow.clicks_28d || null,
                         gsc_impressions_28d: moneyPageRow.impressions || moneyPageRow.impressions_28d || null,
-                        gsc_ctr_28d: moneyPageRow.ctr || moneyPageRow.ctr_28d || null,
+                        gsc_ctr_28d: ctrValue, // Normalized to ratio (0-1)
                         current_rank: moneyPageRow.avg_position || moneyPageRow.position || null,
                         opportunity_score: null,
                         ai_overview: false,
