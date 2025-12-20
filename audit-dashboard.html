@@ -23108,6 +23108,48 @@ Final Score: ${score}/100`;
           
         debugLog('✓ Money Pages section HTML structure created/updated', 'success');
         
+        // Add Create Tasks button to Priority & Actions header if not already present
+        const priorityCard = document.getElementById('money-pages-priority-card');
+        if (priorityCard) {
+          const cardHeader = priorityCard.querySelector('.card-header');
+          if (cardHeader && !document.getElementById('money-pages-create-tasks-btn')) {
+            // Check if header already has flex layout
+            if (!cardHeader.style.display || cardHeader.style.display !== 'flex') {
+              cardHeader.style.display = 'flex';
+              cardHeader.style.justifyContent = 'space-between';
+              cardHeader.style.alignItems = 'flex-start';
+            }
+            
+            // Wrap existing content in a div
+            const existingContent = Array.from(cardHeader.childNodes);
+            const contentWrapper = document.createElement('div');
+            contentWrapper.style.flex = '1';
+            existingContent.forEach(node => {
+              if (node.nodeType === Node.ELEMENT_NODE || node.nodeType === Node.TEXT_NODE) {
+                contentWrapper.appendChild(node.cloneNode(true));
+              }
+            });
+            cardHeader.innerHTML = '';
+            cardHeader.appendChild(contentWrapper);
+            
+            // Add button
+            const createBtn = document.createElement('button');
+            createBtn.id = 'money-pages-create-tasks-btn';
+            createBtn.type = 'button';
+            createBtn.className = 'btn';
+            createBtn.textContent = 'Create optimisation tasks';
+            createBtn.title = 'Create optimisation tasks for all money pages with CTR objective (≥2.5%)';
+            createBtn.style.cssText = 'margin-left: 1rem; padding: 0.5rem 1rem; background: #3b82f6; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; white-space: nowrap;';
+            cardHeader.appendChild(createBtn);
+            
+            // Wire up button
+            wireMoneyPagesCreateTasksButton();
+          } else if (document.getElementById('money-pages-create-tasks-btn')) {
+            // Button exists, just wire it up
+            wireMoneyPagesCreateTasksButton();
+          }
+        }
+        
         // Always show section, even if no data (will show "No data" message)
         section.style.display = 'block';
         
@@ -23200,6 +23242,11 @@ Final Score: ${score}/100`;
           attachMoneyPagesPaginationHandlers(filteredRows);
           attachMoneyPagesCopyHandler(filteredRows);
           attachMoneyPagesFilterHandlers(rows, applyFiltersAndRender);
+          
+          // Wire up Create Tasks button if it exists
+          if (typeof wireMoneyPagesCreateTasksButton === 'function') {
+            wireMoneyPagesCreateTasksButton();
+          }
           
           // Update all other sections with filtered data
           setTimeout(() => {
@@ -23547,10 +23594,386 @@ Final Score: ${score}/100`;
             });
           }
         }, 50);
+        
+        // Wire up Create Tasks button after rendering completes
+        setTimeout(() => {
+          if (typeof wireMoneyPagesCreateTasksButton === 'function') {
+            wireMoneyPagesCreateTasksButton();
+          }
+        }, 100);
       }
       
       // Make renderMoneyPagesSection globally available
       window.renderMoneyPagesSection = renderMoneyPagesSection;
+      
+      // ========================================
+      // Money Pages → Create Optimisation Tasks Feature
+      // ========================================
+      
+      // Step 2: Fetch all Money Pages segment (ignores current UI filters)
+      // Returns array of rows with: url, page_type, ctr, impressions, clicks, avg_position
+      async function fetchMoneyPagesSegmentAll() {
+        // Money Pages data is stored in window.moneyPagesMetrics or from localStorage/Supabase
+        // Get the raw data source (before any filtering)
+        let moneyPagesData = null;
+        
+        // Try window.moneyPagesMetrics first (if already loaded)
+        if (window.moneyPagesMetrics && window.moneyPagesMetrics.rows) {
+          moneyPagesData = window.moneyPagesMetrics;
+        } else {
+          // Try localStorage
+          const savedAudit = localStorage.getItem('aigeo_audit_data');
+          if (savedAudit) {
+            try {
+              const parsed = JSON.parse(savedAudit);
+              moneyPagesData = parsed.scores?.moneyPagesMetrics || parsed.moneyPagesMetrics || null;
+            } catch (e) {
+              console.error('[Money Pages Tasks] Error parsing localStorage:', e);
+            }
+          }
+        }
+        
+        if (!moneyPagesData || !moneyPagesData.rows || moneyPagesData.rows.length === 0) {
+          console.warn('[Money Pages Tasks] No money pages data available');
+          return [];
+        }
+        
+        // Return all rows (ignoring filters)
+        return moneyPagesData.rows.map(row => ({
+          url: row.url || row.page_url || '',
+          page_type: row.page_type || row.type || '',
+          ctr: row.ctr || row.ctr_28d || null,
+          impressions: row.impressions || row.impressions_28d || null,
+          clicks: row.clicks || row.clicks_28d || null,
+          avg_position: row.avg_position || row.position || null,
+          page_title: row.page_title || row.title || row.slug || null
+        }));
+      }
+      
+      // Step 4: Fetch existing optimisation task URLs for de-dupe
+      async function fetchExistingOptimizationTaskUrls() {
+        try {
+          const adminKey = sessionStorage.getItem('aigeo_admin_key') || localStorage.getItem('aigeo_admin_key');
+          if (!adminKey) {
+            throw new Error('Admin key required');
+          }
+          
+          const response = await fetch('/api/optimisation/tasks', {
+            headers: {
+              'x-arp-admin-key': adminKey
+            }
+          });
+          
+          if (!response.ok) {
+            throw new Error(`Failed to fetch tasks: ${response.statusText}`);
+          }
+          
+          const data = await response.json();
+          const tasks = data.tasks || [];
+          
+          // Normalize URLs and return as Set
+          const urlSet = new Set();
+          for (const task of tasks) {
+            if (task.target_url) {
+              const normalized = normalizeUrlForDedupe(task.target_url);
+              urlSet.add(normalized);
+            }
+          }
+          
+          return urlSet;
+        } catch (error) {
+          console.error('[Money Pages Tasks] Error fetching existing tasks:', error);
+          return new Set(); // Return empty set on error
+        }
+      }
+      
+      // Normalize URL for de-dupe matching
+      function normalizeUrlForDedupe(url) {
+        if (!url) return '';
+        
+        let normalized = url.trim();
+        
+        // Ensure leading https://www.alanranger.com if stored as path
+        if (normalized.startsWith('/')) {
+          normalized = 'https://www.alanranger.com' + normalized;
+        } else if (!normalized.startsWith('http')) {
+          normalized = 'https://www.alanranger.com/' + normalized;
+        }
+        
+        // Remove trailing slash (except root)
+        if (normalized.endsWith('/') && normalized !== 'https://www.alanranger.com/') {
+          normalized = normalized.slice(0, -1);
+        }
+        
+        // Lowercase hostname only (keep path case as-is)
+        try {
+          const urlObj = new URL(normalized);
+          normalized = urlObj.origin.toLowerCase() + urlObj.pathname + urlObj.search + urlObj.hash;
+        } catch (e) {
+          // If URL parsing fails, just lowercase the whole thing
+          normalized = normalized.toLowerCase();
+        }
+        
+        return normalized;
+      }
+      
+      // Step 5: Build optimisation task payload from Money Page row
+      // CTR target: 2.5% absolute (stored as 0.025 ratio)
+      function buildOptimizationTaskFromMoneyPage(row) {
+        const normalizedUrl = normalizeUrlForDedupe(row.url);
+        const title = row.page_title || row.slug || normalizedUrl;
+        
+        return {
+          keyword_text: normalizedUrl, // Use URL as keyword (API requires non-empty, but task is page-level)
+          target_url: normalizedUrl,
+          task_type: 'on_page',
+          status: 'planned',
+          title: `MP: ${title}`,
+          // Don't provide objective fields here - we'll create Cycle 1 manually with proper objective
+          // This avoids creating a cycle with legacy fields
+        };
+      }
+      
+      // Create cycle with absolute CTR objective
+      async function createCycleWithAbsoluteCtrObjective(taskId, adminKey) {
+        // CTR target: 2.5% = 0.025 as ratio (CTR is stored as 0-1 in DB)
+        const ctrTargetRatio = 0.025;
+        
+        const objectiveData = {
+          title: 'CTR ≥ 2.5%',
+          kpi: 'ctr_28d',
+          target: ctrTargetRatio,
+          target_type: 'absolute',
+          due_at: null,
+          plan: 'Created from Money Pages segment (CTR target: ≥ 2.5%).'
+        };
+        
+        const response = await fetch(`/api/optimisation/task/${taskId}/cycle`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-arp-admin-key': adminKey
+          },
+          body: JSON.stringify({
+            objective: objectiveData
+          })
+        });
+        
+        if (!response.ok) {
+          const error = await response.text();
+          throw new Error(`Failed to create cycle: ${error}`);
+        }
+        
+        return await response.json();
+      }
+      
+      // Step 3 & 5: Create optimisation tasks for Money Pages
+      async function createOptimizationTasksFromMoneyPages() {
+        try {
+          // Step 1: Fetch all Money Pages (ignoring filters)
+          console.info('[Money Pages Tasks] Fetching all money pages...');
+          const moneyPages = await fetchMoneyPagesSegmentAll();
+          console.info(`[Money Pages Tasks] Found ${moneyPages.length} money pages`);
+          
+          if (moneyPages.length === 0) {
+            alert('No money pages data available. Please run an audit first.');
+            return;
+          }
+          
+          // Step 2: Fetch existing task URLs for de-dupe
+          console.info('[Money Pages Tasks] Fetching existing task URLs...');
+          const existingUrls = await fetchExistingOptimizationTaskUrls();
+          console.info(`[Money Pages Tasks] Found ${existingUrls.size} existing tasks`);
+          
+          // Step 3: Filter out duplicates
+          const newPages = [];
+          const skippedPages = [];
+          
+          for (const page of moneyPages) {
+            const normalizedUrl = normalizeUrlForDedupe(page.url);
+            if (existingUrls.has(normalizedUrl)) {
+              skippedPages.push(page);
+            } else {
+              newPages.push(page);
+            }
+          }
+          
+          console.info(`[Money Pages Tasks] ${newPages.length} new tasks to create, ${skippedPages.length} duplicates to skip`);
+          
+          // Show confirmation modal
+          const confirmed = await showCreateTasksModal(newPages.length, skippedPages.length);
+          if (!confirmed) {
+            return;
+          }
+          
+          // Step 4: Create tasks
+          const adminKey = sessionStorage.getItem('aigeo_admin_key') || localStorage.getItem('aigeo_admin_key');
+          if (!adminKey) {
+            throw new Error('Admin key required. Please set your admin key in the configuration section.');
+          }
+          
+          let createdCount = 0;
+          let errorCount = 0;
+          const createdTasks = [];
+          
+          for (const page of newPages) {
+            try {
+              const taskPayload = buildOptimizationTaskFromMoneyPage(page);
+              
+              // Create task
+              const taskResponse = await fetch('/api/optimisation/task', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'x-arp-admin-key': adminKey
+                },
+                body: JSON.stringify(taskPayload)
+              });
+              
+              if (!taskResponse.ok) {
+                const error = await taskResponse.text();
+                throw new Error(`Failed to create task: ${error}`);
+              }
+              
+              const taskResult = await taskResponse.json();
+              const taskId = taskResult.task?.id;
+              
+              if (taskId) {
+                // Create Cycle 1 with absolute CTR objective
+                // Task creation API doesn't create a cycle if we don't provide objective fields
+                try {
+                  await createCycleWithAbsoluteCtrObjective(taskId, adminKey);
+                } catch (cycleError) {
+                  console.warn(`[Money Pages Tasks] Cycle creation failed for task ${taskId}, but task was created:`, cycleError);
+                  // Continue - task is created even if cycle creation fails
+                }
+                
+                createdCount++;
+                if (createdTasks.length < 3) {
+                  createdTasks.push(taskPayload);
+                }
+              }
+            } catch (error) {
+              console.error(`[Money Pages Tasks] Error creating task for ${page.url}:`, error);
+              errorCount++;
+            }
+          }
+          
+          // Step 7: Show toast and refresh
+          showCreateTasksToast(createdCount, skippedPages.length, errorCount);
+          
+          // Log summary (dev-only)
+          console.info('[Money Pages Tasks] Summary:', {
+            totalMoneyPages: moneyPages.length,
+            duplicatesFound: skippedPages.length,
+            insertedCount: createdCount,
+            errorCount: errorCount,
+            firstThreePayloads: createdTasks
+          });
+          
+          // Refresh Optimisation Tracking if available
+          if (typeof window.loadAllOptimisationTasks === 'function') {
+            await window.loadAllOptimisationTasks();
+          }
+          
+        } catch (error) {
+          console.error('[Money Pages Tasks] Error:', error);
+          alert(`Error creating tasks: ${error.message}`);
+        }
+      }
+      
+      // Show confirmation modal
+      function showCreateTasksModal(newCount, skippedCount) {
+        return new Promise((resolve) => {
+          const modal = document.createElement('div');
+          modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;';
+          
+          modal.innerHTML = `
+            <div style="background: white; padding: 2rem; border-radius: 8px; max-width: 500px; width: 90%; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+              <h3 style="margin: 0 0 1rem 0; font-size: 1.25rem; font-weight: 700; color: #1e293b;">Create optimisation tasks for ${newCount} money pages</h3>
+              <div style="margin-bottom: 1.5rem; font-size: 0.95rem; color: #475569; line-height: 1.6;">
+                <p style="margin: 0 0 0.75rem 0;">This will create one optimisation task per money page with:</p>
+                <ul style="margin: 0 0 0.75rem 0; padding-left: 1.5rem;">
+                  <li>CTR objective (absolute target: ≥ 2.5%)</li>
+                  <li>No keyword (page-level optimisation)</li>
+                  <li>Status: Planned</li>
+                </ul>
+                <p style="margin: 0;"><strong>Existing tasks are skipped:</strong> ${skippedCount} duplicate${skippedCount !== 1 ? 's' : ''} found.</p>
+              </div>
+              <div style="display: flex; gap: 1rem; justify-content: flex-end;">
+                <button id="create-tasks-cancel" style="padding: 0.5rem 1.5rem; background: #e2e8f0; color: #475569; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Cancel</button>
+                <button id="create-tasks-confirm" style="padding: 0.5rem 1.5rem; background: #3b82f6; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Create</button>
+              </div>
+            </div>
+          `;
+          
+          document.body.appendChild(modal);
+          
+          modal.querySelector('#create-tasks-cancel').onclick = () => {
+            document.body.removeChild(modal);
+            resolve(false);
+          };
+          
+          modal.querySelector('#create-tasks-confirm').onclick = () => {
+            document.body.removeChild(modal);
+            resolve(true);
+          };
+        });
+      }
+      
+      // Show toast notification
+      function showCreateTasksToast(created, skipped, errors) {
+        const toast = document.createElement('div');
+        toast.style.cssText = 'position: fixed; bottom: 2rem; right: 2rem; background: #10b981; color: white; padding: 1rem 1.5rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.2); z-index: 10001; max-width: 400px;';
+        
+        let message = `Created ${created} task${created !== 1 ? 's' : ''}`;
+        if (skipped > 0) {
+          message += ` • Skipped ${skipped} duplicate${skipped !== 1 ? 's' : ''}`;
+        }
+        if (errors > 0) {
+          message += ` • ${errors} error${errors !== 1 ? 's' : ''}`;
+        }
+        
+        toast.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem;">
+            <span style="font-weight: 600;">${message}</span>
+            <button id="toast-view-tasks" style="background: rgba(255,255,255,0.2); color: white; border: 1px solid rgba(255,255,255,0.3); padding: 0.25rem 0.75rem; border-radius: 4px; cursor: pointer; font-size: 0.875rem; font-weight: 600;">View in Optimisation Tracking</button>
+            <button id="toast-close" style="background: none; border: none; color: white; cursor: pointer; font-size: 1.25rem; padding: 0; line-height: 1;">×</button>
+          </div>
+        `;
+        
+        document.body.appendChild(toast);
+        
+        toast.querySelector('#toast-close').onclick = () => {
+          document.body.removeChild(toast);
+        };
+        
+        toast.querySelector('#toast-view-tasks').onclick = () => {
+          // Navigate to Optimisation Tracking module
+          if (typeof setActivePanel === 'function') {
+            setActivePanel('optimisation');
+          }
+          document.body.removeChild(toast);
+        };
+        
+        // Auto-remove after 5 seconds
+        setTimeout(() => {
+          if (document.body.contains(toast)) {
+            document.body.removeChild(toast);
+          }
+        }, 5000);
+      }
+      
+      // Wire up button click handler (called after Money Pages section is rendered)
+      function wireMoneyPagesCreateTasksButton() {
+        const btn = document.getElementById('money-pages-create-tasks-btn');
+        if (btn && !btn.dataset.wired) {
+          btn.dataset.wired = 'true';
+          btn.addEventListener('click', () => {
+            createOptimizationTasksFromMoneyPages();
+          });
+        }
+      }
       
       // Helper function to filter money pages data by sub-segment
       // Apply all filters and calculate filtered metrics
