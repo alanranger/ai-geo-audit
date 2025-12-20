@@ -19117,23 +19117,25 @@
             
             // Debug: Log if this is the URL we're looking for
             if (url.includes('landscape-photography-workshops') || pageKey.includes('landscape-photography-workshops')) {
-              debugLog(`🔍 Money Pages lookup: url=${url}, normalizedKey=${pageKey}, found=${pageTotalsByKey.has(pageKey)}, clicks=${gscMetrics.clicks}, impressions=${gscMetrics.impressions}, ctr=${(gscMetrics.ctr * 100).toFixed(2)}%, position=${gscMetrics.position}`, 'info');
+              debugLog(`🔍 Money Pages CSV lookup: csvUrl=${url}, normalizedKey=${pageKey}, found=${pageTotalsByKey.has(pageKey)}, clicks=${gscMetrics.clicks}, impressions=${gscMetrics.impressions}, ctr=${(gscMetrics.ctr * 100).toFixed(2)}%, position=${gscMetrics.position}`, 'info');
+              debugLog(`🔍 CSV URL format: "${url}", normalized to: "${pageKey}"`, 'info');
+              
               // Also log all keys in pageTotalsByKey that contain 'landscape' for debugging
-              const matchingKeys = Array.from(pageTotalsByKey.keys()).filter(k => k.includes('landscape'));
+              const matchingKeys = Array.from(pageTotalsByKey.keys()).filter(k => k.includes('landscape') || k.includes('workshop'));
               if (matchingKeys.length > 0) {
-                debugLog(`🔍 Available keys containing 'landscape': ${matchingKeys.join(', ')}`, 'info');
+                debugLog(`🔍 Available keys containing 'landscape' or 'workshop': ${matchingKeys.join(', ')}`, 'info');
                 // Also log the actual data for these keys
                 matchingKeys.forEach(k => {
                   const data = pageTotalsByKey.get(k);
                   if (data) {
-                    debugLog(`🔍 Key "${k}": clicks=${data.clicks}, impressions=${data.impressions}, ctr=${(data.ctr * 100).toFixed(2)}%, position=${data.position}`, 'info');
+                    debugLog(`🔍 Key "${k}": clicks=${data.clicks}, impressions=${data.impressions}, ctr=${(data.ctr * 100).toFixed(2)}%, position=${data.position}, rawUrl=${data.url}`, 'info');
                   }
                 });
               } else {
-                debugLog(`⚠ No keys found containing 'landscape'. Total keys in pageTotalsByKey: ${pageTotalsByKey.size}`, 'warn');
-                // Log first 10 keys for debugging
-                const firstKeys = Array.from(pageTotalsByKey.keys()).slice(0, 10);
-                debugLog(`📊 First 10 keys in pageTotalsByKey: ${firstKeys.join(', ')}`, 'info');
+                debugLog(`⚠ No keys found containing 'landscape' or 'workshop'. Total keys in pageTotalsByKey: ${pageTotalsByKey.size}`, 'warn');
+                // Log first 20 keys for debugging
+                const firstKeys = Array.from(pageTotalsByKey.keys()).slice(0, 20);
+                debugLog(`📊 First 20 keys in pageTotalsByKey: ${firstKeys.join(', ')}`, 'info');
               }
             }
             
@@ -19260,6 +19262,20 @@
         const moneyPagesGscTotals28d = moneyPagesList.map(mp => {
           const k = normalizeGscPageKey(mp.url);
           const m = pageTotalsByKey.get(k);
+          
+          // Debug: Log if this is the landscape page
+          if (mp.url.includes('landscape-photography-workshops') || k.includes('landscape-photography-workshops')) {
+            debugLog(`💾 Saving landscape page to DB: mp.url=${mp.url}, normalizedKey=${k}, foundInPageTotals=${!!m}, clicks=${m?.clicks ?? 0}, impressions=${m?.impressions ?? 0}, ctr=${m?.ctr ? (m.ctr * 100).toFixed(2) : 0}%, position=${m?.position ?? 0}`, 'info');
+            if (!m) {
+              debugLog(`⚠ landscape page NOT found in pageTotalsByKey! Total keys: ${pageTotalsByKey.size}`, 'warn');
+              // Log similar keys
+              const similarKeys = Array.from(pageTotalsByKey.keys()).filter(key => key.includes('landscape') || key.includes('workshop'));
+              if (similarKeys.length > 0) {
+                debugLog(`📊 Similar keys in pageTotalsByKey: ${similarKeys.join(', ')}`, 'info');
+              }
+            }
+          }
+          
           return {
             url: mp.url,
             clicks: m?.clicks ?? 0,
