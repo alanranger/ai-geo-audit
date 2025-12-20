@@ -1265,6 +1265,22 @@
     /* Optimisation module tiles - dark theme with green centered counts and orange hover animation */
     .optimisation-summary-cards .card,
     .optimisation-kpi-tiles .card,
+    /* Bronze/Silver/Gold backgrounds for Estimated Extra Clicks based on impact */
+    .optimisation-impact-tiles .card.impact-bronze {
+      background: linear-gradient(135deg, #cd7f32 0%, #b87333 100%);
+      border: 1px solid #a0652a;
+    }
+    
+    .optimisation-impact-tiles .card.impact-silver {
+      background: linear-gradient(135deg, #c0c0c0 0%, #a8a8a8 100%);
+      border: 1px solid #909090;
+    }
+    
+    .optimisation-impact-tiles .card.impact-gold {
+      background: linear-gradient(135deg, #ffd700 0%, #ffb700 100%);
+      border: 1px solid #e6a600;
+    }
+    
     .optimisation-impact-tiles .card {
       background: var(--dark-panel) !important;
       border: 2px solid var(--dark-border) !important;
@@ -4664,6 +4680,9 @@
 
         </div>
 
+        <!-- Faint gray line separator after traffic lights -->
+        <div style="height: 1px; background: rgba(156, 163, 175, 0.3); margin: 2rem 0;"></div>
+
         <!-- Phase 9: KPI Tiles (RAG) -->
         <div class="optimisation-kpi-tiles" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin: 1.5rem 0;">
           <div class="card" style="cursor: pointer;" id="kpi-tile-ctr-on-track" onclick="filterByKPIRAG('ctr', 'on_track')" title="CTR objectives that are on track. Click to filter.">
@@ -4706,7 +4725,7 @@
 
         <!-- Phase 9: Estimated Impact Tiles -->
         <div class="optimisation-impact-tiles" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; margin: 1.5rem 0;">
-          <div class="card" title="Estimated extra clicks available if all CTR objectives meet their targets.">
+          <div class="card" id="impact-extra-clicks-card" title="Estimated extra clicks available if all CTR objectives meet their targets.">
             <div style="font-size: 1.5rem; font-weight: bold;" id="impact-extra-clicks">0</div>
             <div style="margin-top: 0.25rem; font-size: 0.875rem;">Estimated Extra Clicks (28d)</div>
           </div>
@@ -8902,10 +8921,28 @@
       }
       
       const extraClicksEl = document.getElementById('impact-extra-clicks');
+      const extraClicksCard = document.getElementById('impact-extra-clicks-card');
       if (extraClicksEl) {
         extraClicksEl.textContent = estimatedExtraClicks >= 1000 
           ? (estimatedExtraClicks / 1000).toFixed(1) + 'k' 
           : Math.round(estimatedExtraClicks).toLocaleString('en-GB');
+      }
+      
+      // Set bronze/silver/gold background based on impact
+      if (extraClicksCard) {
+        // Remove existing medal classes
+        extraClicksCard.classList.remove('impact-bronze', 'impact-silver', 'impact-gold');
+        
+        // Bronze: < 50 clicks (low impact)
+        // Silver: 50-200 clicks (medium impact)
+        // Gold: > 200 clicks (high impact)
+        if (estimatedExtraClicks < 50) {
+          extraClicksCard.classList.add('impact-bronze');
+        } else if (estimatedExtraClicks >= 50 && estimatedExtraClicks < 200) {
+          extraClicksCard.classList.add('impact-silver');
+        } else {
+          extraClicksCard.classList.add('impact-gold');
+        }
       }
       
       const aiGapEl = document.getElementById('impact-ai-gap');
