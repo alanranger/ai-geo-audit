@@ -20,8 +20,6 @@ DECLARE
   baseline_rank NUMERIC := 20.0;
   baseline_ai_citations NUMERIC := 0;
   baseline_ai_overview BOOLEAN := false;
-  baseline_opportunity NUMERIC := 40.0;
-  
   -- Pattern for creating varied outcomes
   -- Each task will have a pattern number (0-18) that determines its metric outcomes
   pattern_num INTEGER;
@@ -39,8 +37,6 @@ DECLARE
   ai_citations_latest NUMERIC;
   ai_overview_baseline BOOLEAN;
   ai_overview_latest BOOLEAN;
-  opportunity_baseline NUMERIC;
-  opportunity_latest NUMERIC;
 BEGIN
   -- Get all test tasks with their active cycles
   FOR task_record IN 
@@ -100,105 +96,110 @@ BEGIN
     DELETE FROM public.optimisation_task_events 
     WHERE task_id = task_id_var AND event_type = 'measurement';
     
-    -- Use task ID hash to create consistent pattern (0-18)
-    -- This ensures each task gets a unique but consistent pattern
+    -- Use task ID hash to create independent patterns for each metric
+    -- This ensures we get varied combinations: some metrics positive, some negative
     pattern_num := abs(hashtext(task_id_var::text)) % 19;
     
-    -- Calculate metric values based on pattern
-    -- Pattern determines which metrics are better/same/worse
-    -- We want good distribution across all combinations
+    -- Calculate metric values with INDEPENDENT patterns for each metric
+    -- Each metric uses a different hash offset to get independent variation
+    -- This creates tasks with mixed positive/negative changes across metrics
     
-    -- CTR: Pattern 0-5 = worse, 6-11 = same, 12-18 = better
-    -- Threshold: >= 0.10 percentage points (0.001 in ratio)
-    IF pattern_num <= 5 THEN
-      -- Worse: decrease by 0.15-0.40 percentage points (exceeds threshold)
-      ctr_baseline := baseline_ctr;
-      ctr_latest := baseline_ctr - (0.0015 + (pattern_num * 0.0003));
-    ELSIF pattern_num <= 11 THEN
-      -- Same: change by less than 0.10 percentage points (within threshold)
-      ctr_baseline := baseline_ctr;
-      ctr_latest := baseline_ctr + ((pattern_num - 6) * 0.00008);
-    ELSE
-      -- Better: increase by 0.15-0.40 percentage points (exceeds threshold)
-      ctr_baseline := baseline_ctr;
-      ctr_latest := baseline_ctr + (0.0015 + ((pattern_num - 12) * 0.0003));
-    END IF;
+    -- CTR: Use pattern_num % 3 to get 0=worse, 1=same, 2=better
+    CASE (pattern_num % 3)
+      WHEN 0 THEN
+        -- Worse: decrease by 0.20-0.50 percentage points (exceeds threshold)
+        ctr_baseline := baseline_ctr;
+        ctr_latest := baseline_ctr - (0.002 + ((pattern_num % 6) * 0.0005));
+      WHEN 1 THEN
+        -- Same: change by less than 0.10 percentage points (within threshold)
+        ctr_baseline := baseline_ctr;
+        ctr_latest := baseline_ctr + (((pattern_num % 5) - 2) * 0.00008);
+      ELSE
+        -- Better: increase by 0.20-0.50 percentage points (exceeds threshold)
+        ctr_baseline := baseline_ctr;
+        ctr_latest := baseline_ctr + (0.002 + ((pattern_num % 6) * 0.0005));
+    END CASE;
     
-    -- Impressions: Pattern 0-5 = worse, 6-11 = same, 12-18 = better
-    -- Threshold: >= max(20, baseline * 0.02) = 20 for baseline 1000
-    IF pattern_num <= 5 THEN
-      impressions_baseline := baseline_impressions;
-      impressions_latest := baseline_impressions - (30 + (pattern_num * 10)); -- 30-80 decrease
-    ELSIF pattern_num <= 11 THEN
-      impressions_baseline := baseline_impressions;
-      impressions_latest := baseline_impressions + ((pattern_num - 6) * 3); -- 0-15 change (within threshold)
-    ELSE
-      impressions_baseline := baseline_impressions;
-      impressions_latest := baseline_impressions + (30 + ((pattern_num - 12) * 10)); -- 30-80 increase
-    END IF;
+    -- Impressions: Use (pattern_num + 1) % 3 for independent variation
+    CASE ((pattern_num + 1) % 3)
+      WHEN 0 THEN
+        -- Worse: decrease by 50-150
+        impressions_baseline := baseline_impressions;
+        impressions_latest := baseline_impressions - (50 + ((pattern_num % 5) * 20));
+      WHEN 1 THEN
+        -- Same: change by less than 20 (within threshold)
+        impressions_baseline := baseline_impressions;
+        impressions_latest := baseline_impressions + (((pattern_num % 5) - 2) * 5);
+      ELSE
+        -- Better: increase by 50-150
+        impressions_baseline := baseline_impressions;
+        impressions_latest := baseline_impressions + (50 + ((pattern_num % 5) * 20));
+    END CASE;
     
-    -- Clicks: Pattern 0-5 = worse, 6-11 = same, 12-18 = better
-    -- Threshold: >= max(5, baseline * 0.05) = 5 for baseline 50
-    IF pattern_num <= 5 THEN
-      clicks_baseline := baseline_clicks;
-      clicks_latest := baseline_clicks - (6 + pattern_num); -- 6-11 decrease
-    ELSIF pattern_num <= 11 THEN
-      clicks_baseline := baseline_clicks;
-      clicks_latest := baseline_clicks + ((pattern_num - 6) * 0.8); -- 0-4 change (within threshold)
-    ELSE
-      clicks_baseline := baseline_clicks;
-      clicks_latest := baseline_clicks + (6 + (pattern_num - 12)); -- 6-11 increase
-    END IF;
+    -- Clicks: Use (pattern_num + 2) % 3 for independent variation
+    CASE ((pattern_num + 2) % 3)
+      WHEN 0 THEN
+        -- Worse: decrease by 8-20
+        clicks_baseline := baseline_clicks;
+        clicks_latest := baseline_clicks - (8 + (pattern_num % 6));
+      WHEN 1 THEN
+        -- Same: change by less than 5 (within threshold)
+        clicks_baseline := baseline_clicks;
+        clicks_latest := baseline_clicks + (((pattern_num % 5) - 2) * 1);
+      ELSE
+        -- Better: increase by 8-20
+        clicks_baseline := baseline_clicks;
+        clicks_latest := baseline_clicks + (8 + (pattern_num % 6));
+    END CASE;
     
-    -- Rank: Pattern 0-5 = worse (higher rank), 6-11 = same, 12-18 = better (lower rank)
-    -- Threshold: >= 0.5 change
-    IF pattern_num <= 5 THEN
-      rank_baseline := baseline_rank;
-      rank_latest := baseline_rank + (0.8 + (pattern_num * 0.3)); -- 0.8-2.3 increase (worse)
-    ELSIF pattern_num <= 11 THEN
-      rank_baseline := baseline_rank;
-      rank_latest := baseline_rank + ((pattern_num - 6) * 0.08); -- 0-0.4 change (within threshold)
-    ELSE
-      rank_baseline := baseline_rank;
-      rank_latest := baseline_rank - (0.8 + ((pattern_num - 12) * 0.3)); -- 0.8-2.3 decrease (better)
-    END IF;
+    -- Rank: Use (pattern_num + 3) % 3 for independent variation
+    -- Lower rank is better, so negative delta (baseline - latest) = improvement
+    CASE ((pattern_num + 3) % 3)
+      WHEN 0 THEN
+        -- Worse: rank increases (higher number = worse)
+        rank_baseline := baseline_rank;
+        rank_latest := baseline_rank + (1.5 + ((pattern_num % 5) * 0.5)); -- 1.5-4.0 increase
+      WHEN 1 THEN
+        -- Same: change by less than 0.5 (within threshold)
+        rank_baseline := baseline_rank;
+        rank_latest := baseline_rank + (((pattern_num % 5) - 2) * 0.1);
+      ELSE
+        -- Better: rank decreases (lower number = better)
+        rank_baseline := baseline_rank;
+        rank_latest := baseline_rank - (1.5 + ((pattern_num % 5) * 0.5)); -- 1.5-4.0 decrease
+    END CASE;
     
-    -- AI Citations: Pattern 0-5 = worse, 6-11 = same, 12-18 = better
-    IF pattern_num <= 5 THEN
-      ai_citations_baseline := 2;
-      ai_citations_latest := 0;
-    ELSIF pattern_num <= 11 THEN
-      ai_citations_baseline := 1;
-      ai_citations_latest := 1;
-    ELSE
-      ai_citations_baseline := 0;
-      ai_citations_latest := 2 + (pattern_num - 12);
-    END IF;
+    -- AI Citations: Use (pattern_num + 4) % 3 for independent variation
+    CASE ((pattern_num + 4) % 3)
+      WHEN 0 THEN
+        -- Worse: decrease from 3 to 0
+        ai_citations_baseline := 3;
+        ai_citations_latest := 0;
+      WHEN 1 THEN
+        -- Same: no change
+        ai_citations_baseline := 1 + (pattern_num % 2);
+        ai_citations_latest := ai_citations_baseline;
+      ELSE
+        -- Better: increase from 0 to 3-8
+        ai_citations_baseline := 0;
+        ai_citations_latest := 3 + (pattern_num % 6);
+    END CASE;
     
-    -- AI Overview: Pattern 0-5 = worse, 6-11 = same, 12-18 = better
-    IF pattern_num <= 5 THEN
-      ai_overview_baseline := true;
-      ai_overview_latest := false;
-    ELSIF pattern_num <= 11 THEN
-      ai_overview_baseline := (pattern_num % 2) = 0;
-      ai_overview_latest := ai_overview_baseline;
-    ELSE
-      ai_overview_baseline := false;
-      ai_overview_latest := true;
-    END IF;
-    
-    -- Opportunity Score: Pattern 0-5 = worse, 6-11 = same, 12-18 = better
-    -- Threshold: >= 2 change
-    IF pattern_num <= 5 THEN
-      opportunity_baseline := baseline_opportunity;
-      opportunity_latest := baseline_opportunity - (3 + pattern_num); -- 3-8 decrease
-    ELSIF pattern_num <= 11 THEN
-      opportunity_baseline := baseline_opportunity;
-      opportunity_latest := baseline_opportunity + ((pattern_num - 6) * 0.3); -- 0-1.5 change (within threshold)
-    ELSE
-      opportunity_baseline := baseline_opportunity;
-      opportunity_latest := baseline_opportunity + (3 + (pattern_num - 12)); -- 3-8 increase
-    END IF;
+    -- AI Overview: Use (pattern_num + 5) % 3 for independent variation
+    CASE ((pattern_num + 5) % 3)
+      WHEN 0 THEN
+        -- Worse: goes from true to false
+        ai_overview_baseline := true;
+        ai_overview_latest := false;
+      WHEN 1 THEN
+        -- Same: no change
+        ai_overview_baseline := (pattern_num % 2) = 0;
+        ai_overview_latest := ai_overview_baseline;
+      ELSE
+        -- Better: goes from false to true
+        ai_overview_baseline := false;
+        ai_overview_latest := true;
+    END CASE;
     
     -- Create 8 weeks of measurements with progression from baseline to latest
     -- Ensure latest measurement is within last 7 days for chart eligibility
@@ -239,7 +240,6 @@ BEGIN
             WHEN week_offset < 4 THEN ai_overview_baseline 
             ELSE ai_overview_latest 
           END,
-          'opportunity_score', ROUND(opportunity_baseline + ((opportunity_latest - opportunity_baseline) * (week_offset::NUMERIC / 7.0))),
           'captured_at', measurement_date::text
         ),
         test_user_id,
@@ -252,6 +252,6 @@ BEGIN
       ai_citations_baseline, ai_citations_latest;
   END LOOP;
   
-  RAISE NOTICE 'Updated all test tasks with comprehensive measurements across all 7 metrics';
+  RAISE NOTICE 'Updated all test tasks with comprehensive measurements across all 6 metrics (CTR, Impressions, Clicks, Rank, AI Citations, AI Overview)';
 END $$;
 
