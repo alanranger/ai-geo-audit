@@ -25654,19 +25654,35 @@ Final Score: ${score}/100`;
                 ? { impact: window.moneyMatrixFilterState.impact, diff: window.moneyMatrixFilterState.diff }
                 : null;
               
-              renderMoneyPagesMatrix(pagesOnly, matrixEl, (impact, diff) => {
-                // Update filter state
-                window.moneyMatrixFilterState = { impact, diff };
-                // Re-render table with matrix filter
+              const handleMatrixCellClick = (impact, diff) => {
+                // Toggle filter: if clicking the same cell, clear the filter
+                const currentFilter = window.moneyMatrixFilterState;
+                if (currentFilter && currentFilter.impact === impact && currentFilter.diff === diff) {
+                  // Same cell clicked - clear filter
+                  window.moneyMatrixFilterState = null;
+                } else {
+                  // Different cell clicked - set new filter
+                  window.moneyMatrixFilterState = { impact, diff };
+                }
+                
+                // Re-render matrix with updated active filter
+                const newActiveFilter = window.moneyMatrixFilterState && window.moneyMatrixFilterState.impact && window.moneyMatrixFilterState.diff
+                  ? { impact: window.moneyMatrixFilterState.impact, diff: window.moneyMatrixFilterState.diff }
+                  : null;
+                renderMoneyPagesMatrix(pagesOnly, matrixEl, handleMatrixCellClick, newActiveFilter);
+                
+                // Re-render table with matrix filter (or no filter if cleared)
                 const filters = {
                   typeFilter,
                   minImpr,
-                  matrixFilter: { impact, diff }
+                  matrixFilter: newActiveFilter
                 };
                 if (typeof renderMoneyPagesTable === 'function') {
                   renderMoneyPagesTable(filteredPages, filters);
                 }
-              }, activeFilter);
+              };
+              
+              renderMoneyPagesMatrix(pagesOnly, matrixEl, handleMatrixCellClick, activeFilter);
             } else {
               debugLog('⚠ renderMoneyPagesMatrix function or matrix element not found', 'warn');
             }
@@ -27854,17 +27870,30 @@ Final Score: ${score}/100`;
               // Re-render matrix with filtered pages
               const matrixEl = document.getElementById('money-pages-matrix');
               if (matrixEl && typeof renderMoneyPagesMatrix === 'function') {
+                const handleMatrixCellClick = (impact, diff) => {
+                  // Toggle filter: if clicking the same cell, clear the filter
+                  const currentFilter = window.moneyMatrixFilterState;
+                  if (currentFilter && currentFilter.impact === impact && currentFilter.diff === diff) {
+                    // Same cell clicked - clear filter
+                    window.moneyMatrixFilterState = null;
+                    debugLog(`Money Pages Matrix: Cell clicked again - clearing filter`, 'info');
+                  } else {
+                    // Different cell clicked - set new filter
+                    window.moneyMatrixFilterState = { impact, diff };
+                    debugLog(`Money Pages Matrix: Cell clicked - Impact: ${impact}, Difficulty: ${diff}`, 'info');
+                  }
+                  window.moneyPagesPriorityCurrentPage = 1; // Reset pagination when matrix cell clicked
+                  // Re-render matrix to show active state
+                  updateMatrixAndTable();
+                };
+                
                 renderMoneyPagesMatrix(
                   pagesOnly,
                   matrixEl,
-                  (impact, diff) => {
-                    window.moneyMatrixFilterState = { impact, diff };
-                    window.moneyPagesPriorityCurrentPage = 1; // Reset pagination when matrix cell clicked
-                    debugLog(`Money Pages Matrix: Cell clicked - Impact: ${impact}, Difficulty: ${diff}`, 'info');
-                    // Re-render matrix to show active state
-                    updateMatrixAndTable();
-                  },
-                  window.moneyMatrixFilterState
+                  handleMatrixCellClick,
+                  window.moneyMatrixFilterState && window.moneyMatrixFilterState.impact && window.moneyMatrixFilterState.diff
+                    ? window.moneyMatrixFilterState
+                    : null
                 );
               }
               
