@@ -19926,6 +19926,34 @@
         // Note: saveAuditToSupabase is async, so we can await it or use .then()
         (async () => {
           try {
+            // Save GSC timeseries data to database (for last 28 days, updated each audit)
+            if (searchData.timeseries && Array.isArray(searchData.timeseries) && searchData.timeseries.length > 0) {
+              try {
+                debugLog(`Saving ${searchData.timeseries.length} GSC timeseries records to database...`, 'info');
+                const timeseriesResponse = await fetch(apiUrl('/api/supabase/save-gsc-timeseries'), {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    propertyUrl: propertyUrl,
+                    timeseries: searchData.timeseries
+                  })
+                });
+                if (timeseriesResponse.ok) {
+                  const timeseriesResult = await timeseriesResponse.json();
+                  debugLog(`✓ Saved ${timeseriesResult.saved || searchData.timeseries.length} GSC timeseries records to database`, 'success');
+                } else {
+                  const errorText = await timeseriesResponse.text();
+                  debugLog(`⚠ Failed to save timeseries data: ${timeseriesResponse.status} - ${errorText.substring(0, 200)}`, 'warn');
+                }
+              } catch (timeseriesError) {
+                debugLog(`⚠ Error saving timeseries data (non-critical): ${timeseriesError.message}`, 'warn');
+              }
+            } else {
+              debugLog('⚠ No timeseries data to save (searchData.timeseries is missing or empty)', 'warn');
+            }
+            
             await saveAuditToSupabase(propertyUrl, scores, searchData, snippetReadiness, schemaAudit, localSignals, new Date().toISOString().split('T')[0]);
             // After saving to Supabase, refresh the trend chart to show the latest audit
             debugLog('Refreshing Score Trends chart after saving audit...', 'info');
