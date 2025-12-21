@@ -5400,6 +5400,26 @@
         }
 
         const data = await response.json();
+        
+        // CRITICAL: Preserve immediate cache entries (newly created tasks) that are very recent
+        // (within last 10 seconds) to avoid losing them if the API hasn't refreshed yet
+        const now = Date.now();
+        const immediateEntryAgeLimit = 10000; // 10 seconds
+        const preservedEntries = new Map();
+        
+        if (window.optimisationStatusCache && window.optimisationStatusCache.size > 0) {
+          window.optimisationStatusCache.forEach((value, key) => {
+            if (value._immediateCache && value._cacheTimestamp) {
+              const age = now - value._cacheTimestamp;
+              if (age < immediateEntryAgeLimit) {
+                preservedEntries.set(key, value);
+                console.log(`[Optimisation] Preserving immediate cache entry: key="${key}", age=${age}ms`);
+              }
+            }
+          });
+        }
+        
+        // Clear cache and repopulate from API
         window.optimisationStatusCache.clear();
 
         // Build cache map: key = keyword_key::target_url_clean::task_type
@@ -5413,12 +5433,25 @@
           // For page-level tasks (empty keyword_key), use :: prefix to match getOptimisationStatus format
           // For keyword-level tasks, use keyword_key:: prefix
           const key = keywordKey ? `${keywordKey}::${normalizedUrl}::${status.task_type || 'on_page'}` : `::${normalizedUrl}::${status.task_type || 'on_page'}`;
+          // Always update/overwrite with API data (API is source of truth for existing tasks)
           window.optimisationStatusCache.set(key, status);
           // Debug: Log page-level tasks
           if (!keywordKey) {
             console.log(`[Optimisation] Cached page-level task status: key="${key}", original_url="${status.target_url_clean}", normalized_url="${normalizedUrl}", status="${status.status}"`);
           }
         });
+        
+        // Restore preserved immediate entries (only if API didn't return them)
+        preservedEntries.forEach((value, key) => {
+          if (!window.optimisationStatusCache.has(key)) {
+            window.optimisationStatusCache.set(key, value);
+            console.log(`[Optimisation] Restored preserved immediate entry: key="${key}"`);
+          } else {
+            console.log(`[Optimisation] Immediate entry replaced by API: key="${key}"`);
+          }
+        });
+        
+        console.log(`[Optimisation] Cache refreshed: ${window.optimisationStatusCache.size} entries (${preservedEntries.size} preserved immediate entries)`);
 
         console.log(`[Optimisation] Loaded ${window.optimisationStatusCache.size} status records (${(data.statuses || []).filter(s => !s.keyword_key || s.keyword_key.trim() === '').length} page-level)`);
       } catch (error) {
@@ -5801,7 +5834,9 @@
             console.log('[Money Pages] Created new optimisationStatusCache');
           }
           
-          // Add to cache immediately
+          // Add to cache immediately with a timestamp flag so we can preserve it during cache refresh
+          immediateStatus._immediateCache = true;
+          immediateStatus._cacheTimestamp = Date.now();
           window.optimisationStatusCache.set(cacheKey, immediateStatus);
           console.log('[Money Pages] ✓ Immediately cached created task:', {
             cacheKey,
@@ -5846,7 +5881,23 @@
         // Use currentSource (re-read from modal) to ensure we have the correct value
         const finalSource = currentSource || source || '';
         if (finalSource === 'money_pages') {
-          // Small delay to ensure database is updated and view is refreshed
+          // FIRST: Re-render table immediately with immediate cache entry
+          // This ensures the UI updates right away, even before the API refreshes
+          console.log('[Money Pages] Re-rendering table immediately with immediate cache entry...');
+          if (typeof renderMoneyPagesTable === 'function' && window.moneyPagesMetrics) {
+            const moneyPagesContainer = document.getElementById('money-pages-table-container');
+            if (moneyPagesContainer) {
+              const currentPage = window.moneyPagesCurrentPage || 1;
+              const rowsPerPage = window.moneyPagesRowsPerPage || 10;
+              const tableHtml = await renderMoneyPagesTable(window.moneyPagesMetrics.rows, currentPage, rowsPerPage);
+              if (tableHtml && typeof tableHtml === 'string' && tableHtml.trim().length > 0) {
+                moneyPagesContainer.innerHTML = tableHtml;
+                console.log('[Money Pages] ✓ Table re-rendered immediately with immediate cache');
+              }
+            }
+          }
+          
+          // THEN: Small delay to ensure database is updated and view is refreshed
           await new Promise(resolve => setTimeout(resolve, 1000));
           
           // Refresh optimisation statuses cache (same as Ranking & AI)
