@@ -5487,6 +5487,10 @@
           // Debug: Log page-level tasks with id verification
           if (!keywordKey) {
             console.log(`[Optimisation] Cached page-level task status: key="${key}", id="${status.id}", original_url="${status.target_url_clean}", normalized_url="${normalizedUrl}", status="${status.status}"`);
+            // Special debug for landscape page
+            if (normalizedUrl.includes('landscape-photography-workshops') || status.target_url_clean?.includes('landscape-photography-workshops')) {
+              console.log(`[Optimisation] ✓ Landscape page task cached: key="${key}", id="${status.id}", status="${status.status}"`);
+            }
           }
         });
         
@@ -14384,10 +14388,32 @@
             
             // Fetch statuses for ALL rows at once (prevents multiple cache clears)
             if (allStatusRows.length > 0 && typeof window.fetchOptimisationStatuses === 'function') {
-              console.log('[Money Pages] Fetching statuses for', allStatusRows.length, 'rows (combined from both tables) on tab switch...');
+              console.log('[Money Pages] Tab switch: Fetching statuses for', allStatusRows.length, 'rows (combined from both tables)...');
+              console.log('[Money Pages] Tab switch: Cache BEFORE fetch:', {
+                size: window.optimisationStatusCache?.size || 0,
+                hasLandscape: (() => {
+                  const testUrl = 'https://www.alanranger.com/landscape-photography-workshops';
+                  const urlKey = window.cleanUrlForKey ? window.cleanUrlForKey(testUrl) : testUrl.toLowerCase().trim();
+                  const key = `::${urlKey}::on_page`;
+                  const found = window.optimisationStatusCache?.has(key);
+                  const value = window.optimisationStatusCache?.get(key);
+                  return { found, key, value: value ? { id: value.id, status: value.status } : null };
+                })()
+              });
+              
               try {
                 await window.fetchOptimisationStatuses(allStatusRows);
-                console.log('[Money Pages] ✓ Status cache refreshed for both tables:', window.optimisationStatusCache?.size || 0, 'entries');
+                console.log('[Money Pages] Tab switch: Cache AFTER fetch:', {
+                  size: window.optimisationStatusCache?.size || 0,
+                  hasLandscape: (() => {
+                    const testUrl = 'https://www.alanranger.com/landscape-photography-workshops';
+                    const urlKey = window.cleanUrlForKey ? window.cleanUrlForKey(testUrl) : testUrl.toLowerCase().trim();
+                    const key = `::${urlKey}::on_page`;
+                    const found = window.optimisationStatusCache?.has(key);
+                    const value = window.optimisationStatusCache?.get(key);
+                    return { found, key, value: value ? { id: value.id, status: value.status } : null };
+                  })()
+                });
               } catch (err) {
                 console.error('[Money Pages] Error re-fetching statuses:', err);
               }
@@ -27456,6 +27482,26 @@ Final Score: ${score}/100`;
             const taskType = 'on_page';
             const optimisationStatus = window.getOptimisationStatus ? window.getOptimisationStatus({ targetUrl: p.url, keyword: '' }, taskType) : null;
             const hasTask = optimisationStatus && optimisationStatus.status && optimisationStatus.status !== 'deleted';
+            
+            // Debug logging for landscape page
+            if (p.url && p.url.includes('landscape-photography-workshops')) {
+              const urlKey = window.cleanUrlForKey ? window.cleanUrlForKey(p.url) : p.url.toLowerCase().trim();
+              const expectedKey = `::${urlKey}::${taskType}`;
+              console.log('[Money Pages Priority] Landscape page status lookup:', {
+                url: p.url,
+                urlKey,
+                expectedKey,
+                found: !!optimisationStatus,
+                status: optimisationStatus?.status,
+                id: optimisationStatus?.id,
+                cacheSize: window.optimisationStatusCache?.size || 0,
+                cacheHasKey: window.optimisationStatusCache?.has(expectedKey),
+                cachedValue: window.optimisationStatusCache?.get(expectedKey) ? {
+                  id: window.optimisationStatusCache.get(expectedKey).id,
+                  status: window.optimisationStatusCache.get(expectedKey).status
+                } : null
+              });
+            }
             // CRITICAL: Use id field (not taskId) - API returns 'id', not 'taskId'
             const taskId = hasTask ? (optimisationStatus.id || optimisationStatus.task_id || null) : null;
             const statusText = hasTask ? (optimisationStatus.status || 'planned') : null;
