@@ -71,9 +71,20 @@ export default async function handler(req, res) {
       cycle_started_at
     } = req.body;
 
-    if (!keyword_text || !target_url) {
-      return sendJSON(res, 400, { error: 'keyword_text and target_url required' });
+    // For page-level tasks (on_page), keyword_text can be empty - use target_url as fallback
+    // For keyword-level tasks, both are required
+    if (!target_url) {
+      return sendJSON(res, 400, { error: 'target_url is required' });
     }
+    
+    // If keyword_text is empty and this is a page-level task, use target_url as keyword_text
+    // Otherwise, keyword_text is required for keyword-level tasks
+    if (!keyword_text && task_type !== 'on_page') {
+      return sendJSON(res, 400, { error: 'keyword_text is required for non-page-level tasks' });
+    }
+    
+    // For page-level tasks with empty keyword_text, use target_url as keyword_text (API requires non-empty)
+    const final_keyword_text = keyword_text || (task_type === 'on_page' ? target_url : '');
 
     const supabase = createClient(
       need('SUPABASE_URL'),
@@ -100,7 +111,7 @@ export default async function handler(req, res) {
     const { data: task, error: taskError } = await supabase
       .from('optimisation_tasks')
       .insert({
-        keyword_text,
+        keyword_text: final_keyword_text,
         target_url,
         task_type: task_type || 'on_page',
         status: status || 'planned',
