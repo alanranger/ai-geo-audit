@@ -19,3 +19,4 @@ To delete old logs:
 
 Debug logs are automatically saved after each audit scan completes (success or failure). No manual action required.
 
+

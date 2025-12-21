@@ -5535,7 +5535,9 @@
       
       // Get objective fields (Phase B)
       const objective_title = document.getElementById('track-objective-title').value.trim();
-      const objective_kpi = document.getElementById('track-primary-kpi').value.trim(); // Map primary_kpi to objective_kpi
+      const primary_kpi = document.getElementById('track-primary-kpi').value.trim();
+      // Map primary_kpi to objective_kpi (ctr_28d for Money Pages, ctr for Ranking & AI)
+      const objective_kpi = primary_kpi === 'ctr_28d' ? 'ctr_28d' : (primary_kpi === 'ctr' ? 'ctr' : primary_kpi);
       const objective_metric = objective_kpi; // Use same value for metric
       const objective_direction = document.getElementById('track-target-direction').value.trim();
       const objective_target_delta = document.getElementById('track-target-value').value.trim() ? parseFloat(document.getElementById('track-target-value').value) : null;
@@ -5556,48 +5558,67 @@
 
       // Build baseline metrics from row data (stored in modal dataset)
       const rowDataStr = modal.dataset.rowData;
+      const source = modal.dataset.source || '';
       let baselineMetrics = null;
       if (rowDataStr) {
         try {
           const rowData = JSON.parse(rowDataStr);
           
-          // Get queryTotal data for clicks, impressions, and CTR
-          let queryTotal = null;
-          if (typeof getQueryTotalForKeyword === 'function') {
-            queryTotal = getQueryTotalForKeyword(keyword);
+          // Check if this is a Money Pages task (page-level)
+          if (source === 'money_pages' || !keyword) {
+            // Money Pages: use page-level metrics directly from row data
+            baselineMetrics = {
+              gsc_clicks_28d: rowData.clicks || rowData.clicks_28d || null,
+              gsc_impressions_28d: rowData.impressions || rowData.impressions_28d || null,
+              // rowData.ctr is already a ratio (0-1) from pageTotalsByKey
+              gsc_ctr_28d: rowData.ctr != null ? rowData.ctr : (rowData.ctr_28d || null),
+              gsc_position_28d: rowData.avgPosition != null ? rowData.avgPosition : (rowData.position || rowData.position_28d || null),
+              classic_ranking_url: rowData.url || rowData.targetUrl || targetUrl || null,
+              segment: rowData.segment || 'money_pages',
+              captured_at: new Date().toISOString()
+            };
+          } else {
+            // Ranking & AI: use keyword-based metrics
+            // Get queryTotal data for clicks, impressions, and CTR
+            let queryTotal = null;
+            if (typeof getQueryTotalForKeyword === 'function') {
+              queryTotal = getQueryTotalForKeyword(keyword);
+            }
+            
+            baselineMetrics = {
+              gsc_clicks_28d: (queryTotal && queryTotal.clicks) || rowData.gsc_clicks_28d || rowData.clicks_28d || null,
+              gsc_impressions_28d: (queryTotal && queryTotal.impressions) || rowData.gsc_impressions_28d || rowData.impressions_28d || null,
+              // queryTotal.ctr is a percentage (0-100), convert to decimal for storage
+              gsc_ctr_28d: (queryTotal && queryTotal.ctr != null) ? (queryTotal.ctr / 100) : (rowData.gsc_ctr_28d || rowData.ctr_28d || null),
+              current_rank: rowData.best_rank_group || rowData.current_rank || null,
+              opportunity_score: rowData.opportunityScore || null,
+              ai_overview: rowData.has_ai_overview || false,
+              ai_citations: rowData.ai_alan_citations_count || 0,
+              ai_citations_total: rowData.ai_total_citations || 0,
+              classic_ranking_url: rowData.best_url || rowData.targetUrl || rowData.ranking_url || null,
+              page_type: rowData.pageType || null,
+              segment: rowData.segment || null,
+              captured_at: new Date().toISOString()
+            };
           }
-          
-          baselineMetrics = {
-            gsc_clicks_28d: (queryTotal && queryTotal.clicks) || rowData.gsc_clicks_28d || rowData.clicks_28d || null,
-            gsc_impressions_28d: (queryTotal && queryTotal.impressions) || rowData.gsc_impressions_28d || rowData.impressions_28d || null,
-            // queryTotal.ctr is a percentage (0-100), convert to decimal for storage
-            gsc_ctr_28d: (queryTotal && queryTotal.ctr != null) ? (queryTotal.ctr / 100) : (rowData.gsc_ctr_28d || rowData.ctr_28d || null),
-            current_rank: rowData.best_rank_group || rowData.current_rank || null,
-            opportunity_score: rowData.opportunityScore || null,
-            ai_overview: rowData.has_ai_overview || false,
-            ai_citations: rowData.ai_alan_citations_count || 0,
-            ai_citations_total: rowData.ai_total_citations || 0,
-            classic_ranking_url: rowData.best_url || rowData.targetUrl || rowData.ranking_url || null,
-            page_type: rowData.pageType || null,
-            segment: rowData.segment || null,
-            captured_at: new Date().toISOString()
-          };
         } catch (e) {
           console.error('[Optimisation] Failed to parse row data for baseline metrics:', e);
         }
       }
 
       try {
+        const source = modal.dataset.source || '';
         const response = await fetch(apiUrl('/api/optimisation/task'), {
           method: 'POST',
           headers: window.getOptimisationHeaders(),
           body: JSON.stringify({
-            keyword_text: keyword,
+            keyword_text: keyword || '', // Empty for page-level tasks
             target_url: targetUrl,
             task_type: taskType,
             status: status,
             title: title || null,
             notes: notes || null,
+            source: source, // Pass source to API
             baselineMetrics: baselineMetrics,
             // Phase B objective fields
             objective_title: objective_title || null,
@@ -5623,9 +5644,10 @@
 
         const result = await response.json();
         const createdTask = result.task;
+        const source = modal.dataset.source || '';
 
         // Refresh status cache
-        await window.fetchOptimisationStatuses([{ keyword, best_url: targetUrl }]);
+        await window.fetchOptimisationStatuses([{ keyword: keyword || targetUrl, best_url: targetUrl }]);
         
         // Reload all tasks so the new task is available for the drawer
         if (typeof window.loadAllOptimisationTasks === 'function') {
@@ -5635,46 +5657,64 @@
         // Close modal
         modal.style.display = 'none';
         
-        // Ensure Ranking & AI tab stays active and refresh table
-        const rankingTab = document.querySelector('[data-panel="ranking"]');
-        if (rankingTab) {
-          // Use setActivePanel to properly show the panel
-          if (typeof setActivePanel === 'function') {
-            setActivePanel('ranking');
-          } else {
-            // Fallback: manually set active state
-            document.querySelectorAll('.aigeo-panel').forEach(panel => {
-              panel.classList.remove('is-active');
-              panel.hidden = true;
-            });
-          rankingTab.classList.add('is-active');
-            rankingTab.hidden = false;
+        // Handle Money Pages vs Ranking & AI differently
+        if (source === 'money_pages') {
+          // Refresh Money Pages table to show updated Track/Manage status
+          if (typeof renderMoneyPagesTable === 'function' && window.moneyPagesMetrics) {
+            const moneyPagesContainer = document.getElementById('money-pages-table-container');
+            if (moneyPagesContainer) {
+              const currentPage = window.moneyPagesCurrentPage || 1;
+              const rowsPerPage = window.moneyPagesRowsPerPage || 10;
+              moneyPagesContainer.innerHTML = await renderMoneyPagesTable(window.moneyPagesMetrics.rows, currentPage, rowsPerPage);
+              // Re-attach event handlers (they're set up in the render function)
+            }
           }
           
-          // Update nav button states
-          document.querySelectorAll('.aigeo-nav-item').forEach(btn => btn.classList.remove('is-active'));
-          const rankingNavBtn = Array.from(document.querySelectorAll('.aigeo-nav-item')).find(btn => 
-            btn.getAttribute('data-panel') === 'ranking'
-          );
-          if (rankingNavBtn) rankingNavBtn.classList.add('is-active');
-          
-          // Ensure panel is rendered
-          if (typeof ensurePanelRendered === 'function') {
-            ensurePanelRendered('ranking');
-          }
-        }
-        
-        // Trigger table re-render
-        if (typeof renderRankingAiTab === 'function') {
-          await renderRankingAiTab();
-        } else if (typeof window.renderRankingAiTab === 'function') {
-          await window.renderRankingAiTab();
+          // Show success message
+          const pageTitle = title ? title.replace(/^MP: /, '') : targetUrl;
+          showStatus(`✓ Created optimisation task for ${pageTitle} with baseline snapshot`, 'success');
         } else {
-          console.warn('[Optimisation] renderRankingAiTab not found, refreshing page');
-          // Preserve Ranking & AI tab state before reload
-          sessionStorage.setItem('activeTab', 'ranking');
-          window.location.hash = '#ranking';
-          location.reload();
+          // Ranking & AI: refresh Ranking & AI table
+          const rankingTab = document.querySelector('[data-panel="ranking"]');
+          if (rankingTab) {
+            // Use setActivePanel to properly show the panel
+            if (typeof setActivePanel === 'function') {
+              setActivePanel('ranking');
+            } else {
+              // Fallback: manually set active state
+              document.querySelectorAll('.aigeo-panel').forEach(panel => {
+                panel.classList.remove('is-active');
+                panel.hidden = true;
+              });
+            rankingTab.classList.add('is-active');
+              rankingTab.hidden = false;
+            }
+            
+            // Update nav button states
+            document.querySelectorAll('.aigeo-nav-item').forEach(btn => btn.classList.remove('is-active'));
+            const rankingNavBtn = Array.from(document.querySelectorAll('.aigeo-nav-item')).find(btn => 
+              btn.getAttribute('data-panel') === 'ranking'
+            );
+            if (rankingNavBtn) rankingNavBtn.classList.add('is-active');
+            
+            // Ensure panel is rendered
+            if (typeof ensurePanelRendered === 'function') {
+              ensurePanelRendered('ranking');
+            }
+          }
+          
+          // Trigger table re-render
+          if (typeof renderRankingAiTab === 'function') {
+            await renderRankingAiTab();
+          } else if (typeof window.renderRankingAiTab === 'function') {
+            await window.renderRankingAiTab();
+          } else {
+            console.warn('[Optimisation] renderRankingAiTab not found, refreshing page');
+            // Preserve Ranking & AI tab state before reload
+            sessionStorage.setItem('activeTab', 'ranking');
+            window.location.hash = '#ranking';
+            location.reload();
+          }
         }
       } catch (error) {
         console.error('[Optimisation] Error creating task:', error);
@@ -23421,6 +23461,8 @@ Final Score: ${score}/100`;
         // STEP 3: Build existingOptTaskByUrl lookup for Track/Manage buttons
         // ============================================
         const existingOptTaskByUrl = new Map();
+        // Store row data by normalized URL for Track button access
+        window.moneyPagesRowDataByUrl = window.moneyPagesRowDataByUrl || new Map();
         try {
           // Fetch existing optimisation tasks
           const adminKey = window.getAdminKey ? window.getAdminKey() : (sessionStorage.getItem('arp_admin_key') || localStorage.getItem('arp_admin_key') || '');
@@ -23474,6 +23516,10 @@ Final Score: ${score}/100`;
           
           // Meta description from row data
           const metaDescription = row.metaDescription || null;
+          
+          // Store row data by normalized URL for Track button access
+          const normalizedRowUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(row.url) : row.url.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+          window.moneyPagesRowDataByUrl.set(normalizedRowUrl, row);
           
           tableHtml += `
             <tr style="border-bottom: 1px solid #f1f5f9; background: ${rowBg}; transition: background 0.2s;" onmouseover="this.style.background='#f8f9fa';" onmouseout="this.style.background='${rowBg}';">
@@ -24864,29 +24910,141 @@ Final Score: ${score}/100`;
       // Make createOptimisationTaskForUrl globally available
       window.createOptimisationTaskForUrl = createOptimisationTaskForUrl;
       
-      // Track Money Page - per-row function (creates single task)
+      // Open Track Money Page Modal (reuses Ranking & AI modal pattern)
+      window.openTrackMoneyPageModal = function openTrackMoneyPageModal(row) {
+        const modal = document.getElementById('optimisation-track-modal');
+        if (!modal) {
+          console.error('[Money Pages] Track modal not found');
+          alert('Track modal not found. Please refresh the page.');
+          return;
+        }
+
+        // Get and clean URL
+        const rawUrl = row.url || '';
+        const cleanedUrl = window.cleanUrlForDisplay ? window.cleanUrlForDisplay(rawUrl) : rawUrl;
+        
+        // For Money Pages, keyword is empty (page-level task)
+        document.getElementById('track-keyword-text').textContent = '(Page-level task)';
+        
+        // Make URL clickable in Track modal
+        const trackUrlContainer = document.getElementById('track-url-text');
+        trackUrlContainer.innerHTML = '';
+        if (cleanedUrl) {
+          let fullUrl = cleanedUrl;
+          if (!fullUrl.startsWith('http://') && !fullUrl.startsWith('https://')) {
+            fullUrl = 'https://' + fullUrl;
+          }
+          const urlLink = document.createElement('a');
+          urlLink.href = fullUrl;
+          urlLink.target = '_blank';
+          urlLink.rel = 'noopener noreferrer';
+          urlLink.textContent = cleanedUrl;
+          urlLink.style.color = '#0284c7';
+          urlLink.style.textDecoration = 'none';
+          urlLink.style.fontWeight = '600';
+          urlLink.style.wordBreak = 'break-all';
+          urlLink.addEventListener('mouseenter', () => {
+            urlLink.style.textDecoration = 'underline';
+          });
+          urlLink.addEventListener('mouseleave', () => {
+            urlLink.style.textDecoration = 'none';
+          });
+          trackUrlContainer.appendChild(urlLink);
+        } else {
+          trackUrlContainer.textContent = 'No URL available';
+        }
+        
+        // Set task type to on_page
+        document.getElementById('track-task-type').value = 'on_page';
+        document.getElementById('track-status').value = 'planned';
+        
+        // Prefill title
+        const pageTitle = row.title || cleanedUrl;
+        document.getElementById('track-title').value = `MP: ${pageTitle}`;
+        document.getElementById('track-notes').value = '';
+        
+        // Prefill objective for Money Pages (CTR ≥ 2.5%)
+        document.getElementById('track-objective-title').value = 'CTR ≥ 2.5%';
+        document.getElementById('track-primary-kpi').value = 'ctr_28d';
+        document.getElementById('track-target-direction').value = 'at_least';
+        document.getElementById('track-target-value').value = '2.5';
+        document.getElementById('track-timeframe-days').value = '';
+        document.getElementById('track-plan').value = 'Created from Money Pages segment (CTR target: ≥ 2.5%).';
+        
+        // Store row data for baseline metrics (needed in submitTrackKeyword)
+        modal.dataset.rowKeyword = ''; // Empty for page-level tasks
+        modal.dataset.rowUrl = cleanedUrl;
+        modal.dataset.taskType = 'on_page';
+        modal.dataset.source = 'money_pages';
+        modal.dataset.rowData = JSON.stringify(row);
+        
+        // Update modal title and subtitle to indicate Money Pages
+        const modalTitle = modal.querySelector('h3');
+        if (modalTitle) {
+          modalTitle.textContent = 'Create optimisation task';
+          // Add subtitle if it doesn't exist
+          let subtitle = modal.querySelector('#money-pages-modal-subtitle');
+          if (!subtitle) {
+            subtitle = document.createElement('div');
+            subtitle.id = 'money-pages-modal-subtitle';
+            subtitle.style.cssText = 'margin: -0.5rem 0 1rem 0; font-size: 0.875rem; color: #64748b; font-weight: 400;';
+            modalTitle.insertAdjacentElement('afterend', subtitle);
+          }
+          subtitle.textContent = 'Money Pages → CTR target (absolute): ≥ 2.5%';
+        }
+        
+        // Add baseline preview section if it doesn't exist
+        let baselinePreview = modal.querySelector('#money-pages-baseline-preview');
+        if (!baselinePreview) {
+          baselinePreview = document.createElement('div');
+          baselinePreview.id = 'money-pages-baseline-preview';
+          baselinePreview.style.cssText = 'margin-bottom: 1.5rem; padding: 1rem; background: #fef3c7; border-radius: 4px; border: 1px solid #fbbf24;';
+          const objectiveSection = modal.querySelector('#track-objective-title').closest('div').parentElement;
+          objectiveSection.insertAdjacentElement('beforebegin', baselinePreview);
+        }
+        
+        // Populate baseline preview
+        const ctrPct = (row.ctr || 0) * 100;
+        baselinePreview.innerHTML = `
+          <div style="font-weight: 600; color: #92400e; margin-bottom: 0.5rem; font-size: 0.875rem;">Baseline that will be captured on create:</div>
+          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; font-size: 0.875rem; color: #78350f;">
+            <div><strong>Clicks (28d):</strong> ${(row.clicks || 0).toLocaleString()}</div>
+            <div><strong>Impressions (28d):</strong> ${(row.impressions || 0).toLocaleString()}</div>
+            <div><strong>CTR (28d):</strong> ${ctrPct.toFixed(2)}%</div>
+            <div><strong>Avg position (28d):</strong> ${row.avgPosition ? row.avgPosition.toFixed(1) : 'N/A'}</div>
+          </div>
+        `;
+        
+        modal.style.display = 'flex';
+      };
+      
+      // Track Money Page - per-row function (opens modal instead of auto-creating)
       window.trackMoneyPage = async function(pageUrl, pageTitle) {
         try {
-          debugLog(`📊 Tracking Money Page: ${pageUrl}`, 'info');
-          await createOptimisationTaskForUrl(pageUrl, pageTitle, 'money_pages');
-          debugLog(`✓ Created optimisation task for ${pageUrl}`, 'success');
+          debugLog(`📊 Opening Track modal for Money Page: ${pageUrl}`, 'info');
           
-          // Refresh Money Pages table to show updated Track/Manage status
-          if (typeof renderMoneyPagesTable === 'function' && window.moneyPagesMetrics) {
-            const moneyPagesContainer = document.getElementById('money-pages-table-container');
-            if (moneyPagesContainer) {
-              const currentPage = window.moneyPagesCurrentPage || 1;
-              const rowsPerPage = window.moneyPagesRowsPerPage || 10;
-              moneyPagesContainer.innerHTML = await renderMoneyPagesTable(window.moneyPagesMetrics.rows, currentPage, rowsPerPage);
-              // Re-attach event handlers (they're set up in the render function)
-            }
+          // Look up full row data from stored map
+          const normalizedUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(pageUrl) : pageUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+          const rowData = window.moneyPagesRowDataByUrl ? window.moneyPagesRowDataByUrl.get(normalizedUrl) : null;
+          
+          if (!rowData) {
+            // Fallback: create minimal row data from URL and title
+            debugLog(`⚠ Row data not found for ${pageUrl}, using fallback data`, 'warn');
+            const fallbackRow = {
+              url: pageUrl,
+              title: pageTitle,
+              clicks: 0,
+              impressions: 0,
+              ctr: 0,
+              avgPosition: null
+            };
+            window.openTrackMoneyPageModal(fallbackRow);
+          } else {
+            window.openTrackMoneyPageModal(rowData);
           }
-          
-          // Show success message
-          showStatus(`✓ Created optimisation task for ${pageTitle || pageUrl}`, 'success');
         } catch (error) {
-          debugLog(`✗ Error tracking Money Page: ${error.message}`, 'error');
-          showStatus(`✗ Failed to create task: ${error.message}`, 'error');
+          debugLog(`✗ Error opening Track modal: ${error.message}`, 'error');
+          showStatus(`✗ Failed to open modal: ${error.message}`, 'error');
         }
       };
       
@@ -44051,7 +44209,7 @@ Final Score: ${score}/100`;
       
       <div style="display: flex; gap: 0.75rem; justify-content: flex-end;">
         <button type="button" onclick="document.getElementById('optimisation-track-modal').style.display='none'" style="padding: 0.5rem 1rem; border: 1px solid #cbd5e1; border-radius: 4px; background: white; cursor: pointer;">Cancel</button>
-        <button type="button" onclick="window.submitTrackKeyword()" style="padding: 0.5rem 1rem; border: none; border-radius: 4px; background: #2563eb; color: white; cursor: pointer; font-weight: 500;">Create Task</button>
+        <button type="button" onclick="window.submitTrackKeyword()" style="padding: 0.5rem 1rem; border: none; border-radius: 4px; background: #2563eb; color: white; cursor: pointer; font-weight: 500;">Create</button>
       </div>
     </div>
   </div>

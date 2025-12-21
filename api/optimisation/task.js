@@ -163,15 +163,18 @@ export default async function handler(req, res) {
       // Don't fail, but log
     }
 
+    // Determine source from request body or default to 'ranking_ai'
+    const source = req.body.source || 'ranking_ai';
+    
     // Insert created event
     const createdEventData = {
         task_id: task.id,
         event_type: 'created',
-        note: 'Created from Ranking & AI module',
+        note: source === 'money_pages' ? 'Created from Money Pages module' : 'Created from Ranking & AI module',
       owner_user_id: userId,
       cycle_id: cycle.id,
       cycle_number: 1,
-      source: 'ranking_ai'
+      source: source
     };
 
     const { error: createdEventError } = await supabase
@@ -192,7 +195,8 @@ export default async function handler(req, res) {
         owner_user_id: userId,
         cycle_id: cycle.id,
         cycle_number: 1,
-        source: 'ranking_ai',
+        source: source,
+        is_baseline: true, // Mark as baseline measurement
         metrics: {
           ...baselineMetrics,
           captured_at: baselineMetrics.captured_at || new Date().toISOString()
