@@ -5414,8 +5414,23 @@
         const immediateEntryAgeLimit = 10000; // 10 seconds
         const preservedEntries = new Map();
         
+        // Also preserve ALL existing entries for the keys we're about to fetch
+        // This prevents clearing the cache for keys that aren't in this fetch
+        const keysBeingFetched = new Set();
+        rows.forEach(row => {
+          const kwKey = window.keywordKey ? window.keywordKey(row.keyword || '') : (row.keyword || '').toLowerCase().trim();
+          const url = row.best_url || row.targetUrl || row.ranking_url || '';
+          const urlKey = window.cleanUrlForKey ? window.cleanUrlForKey(url) : url.toLowerCase().trim();
+          // Build all possible cache keys for this row (different task types)
+          ['on_page', 'keyword', 'ai'].forEach(taskType => {
+            const cacheKey = `${kwKey || ''}::${urlKey}::${taskType}`;
+            keysBeingFetched.add(cacheKey);
+          });
+        });
+        
         if (window.optimisationStatusCache && window.optimisationStatusCache.size > 0) {
           window.optimisationStatusCache.forEach((value, key) => {
+            // Preserve immediate cache entries (very recent)
             if (value._immediateCache && value._cacheTimestamp) {
               const age = now - value._cacheTimestamp;
               if (age < immediateEntryAgeLimit) {
@@ -5423,10 +5438,15 @@
                 console.log(`[Optimisation] Preserving immediate cache entry: key="${key}", age=${age}ms`);
               }
             }
+            // Also preserve entries that are NOT being fetched in this call
+            // This prevents clearing cache for other rows that aren't part of this fetch
+            if (!keysBeingFetched.has(key)) {
+              preservedEntries.set(key, value);
+            }
           });
         }
         
-        // Clear cache and repopulate from API
+        // Clear cache and repopulate from API (preserved entries will be restored after)
         window.optimisationStatusCache.clear();
 
         // Build cache map: key = keyword_key::target_url_clean::task_type
@@ -14330,64 +14350,70 @@
           
           // Use setTimeout to ensure panel is fully visible before fetching
           setTimeout(async () => {
-            // Re-fetch statuses for Opportunity table (if data exists)
+            // CRITICAL: Fetch statuses for BOTH tables at once to avoid clearing cache multiple times
+            // Build combined list of all rows from both tables
+            const allStatusRows = [];
+            
+            // Add Opportunity table rows
             if (window.moneyPagesMetrics && window.moneyPagesMetrics.rows && window.moneyPagesMetrics.rows.length > 0) {
-              console.log('[Money Pages] Re-fetching statuses for Opportunity table on tab switch...');
-              if (typeof window.fetchOptimisationStatuses === 'function') {
-                const allStatusRows = window.moneyPagesMetrics.rows.map(row => ({
+              window.moneyPagesMetrics.rows.forEach(row => {
+                allStatusRows.push({
                   keyword: '', // Empty for page-level tasks
                   best_url: row.url,
                   targetUrl: row.url,
                   ranking_url: row.url
-                }));
-                try {
-                  await window.fetchOptimisationStatuses(allStatusRows);
-                  console.log('[Money Pages] ✓ Status cache refreshed for Opportunity table:', window.optimisationStatusCache?.size || 0, 'entries');
-                  
-                  // Re-render Opportunity table to show updated statuses
-                  const tableContainer = document.getElementById('money-pages-table-container');
-                  if (tableContainer && typeof renderMoneyPagesTable === 'function') {
-                    const currentPage = window.moneyPagesCurrentPage || 1;
-                    const rowsPerPage = window.moneyPagesRowsPerPage || 10;
-                    const tableHtml = await renderMoneyPagesTable(window.moneyPagesMetrics.rows, currentPage, rowsPerPage);
-                    if (tableHtml && typeof tableHtml === 'string' && tableHtml.trim().length > 0) {
-                      tableContainer.innerHTML = tableHtml;
-                      console.log('[Money Pages] ✓ Opportunity table re-rendered after tab switch');
-                    }
-                  }
-                } catch (err) {
-                  console.error('[Money Pages] Error re-fetching statuses for Opportunity table:', err);
-                }
-              }
+                });
+              });
             }
             
-            // Re-fetch statuses for Priority table (if data exists)
+            // Add Priority table rows
             if (window.moneyPagePriorityData && window.moneyPagePriorityData.length > 0) {
-              console.log('[Money Pages] Re-fetching statuses for Priority table on tab switch...');
-              if (typeof window.fetchOptimisationStatuses === 'function') {
-                const allStatusRows = window.moneyPagePriorityData.map(p => ({
+              window.moneyPagePriorityData.forEach(p => {
+                allStatusRows.push({
                   keyword: '', // Empty for page-level tasks
                   best_url: p.url,
                   targetUrl: p.url,
                   ranking_url: p.url
-                }));
-                try {
-                  await window.fetchOptimisationStatuses(allStatusRows);
-                  console.log('[Money Pages] ✓ Status cache refreshed for Priority table:', window.optimisationStatusCache?.size || 0, 'entries');
-                  
-                  // Re-render Priority table to show updated statuses
-                  if (typeof renderMoneyPagesTable === 'function') {
-                    const filters = {
-                      typeFilter: window.moneyPagesTypeFilter || 'all',
-                      minImpr: window.moneyPagesMinImpr || 0,
-                      matrixFilter: window.moneyPagesMatrixFilter || null
-                    };
-                    await renderMoneyPagesTable(null, filters);
-                    console.log('[Money Pages] ✓ Priority table re-rendered after tab switch');
-                  }
-                } catch (err) {
-                  console.error('[Money Pages] Error re-fetching statuses for Priority table:', err);
+                });
+              });
+            }
+            
+            // Fetch statuses for ALL rows at once (prevents multiple cache clears)
+            if (allStatusRows.length > 0 && typeof window.fetchOptimisationStatuses === 'function') {
+              console.log('[Money Pages] Fetching statuses for', allStatusRows.length, 'rows (combined from both tables) on tab switch...');
+              try {
+                await window.fetchOptimisationStatuses(allStatusRows);
+                console.log('[Money Pages] ✓ Status cache refreshed for both tables:', window.optimisationStatusCache?.size || 0, 'entries');
+              } catch (err) {
+                console.error('[Money Pages] Error re-fetching statuses:', err);
+              }
+            }
+            
+            // NOW re-render both tables (statuses are already fetched)
+            // Re-render Opportunity table
+            if (window.moneyPagesMetrics && window.moneyPagesMetrics.rows && window.moneyPagesMetrics.rows.length > 0) {
+              const tableContainer = document.getElementById('money-pages-table-container');
+              if (tableContainer && typeof renderMoneyPagesTable === 'function') {
+                const currentPage = window.moneyPagesCurrentPage || 1;
+                const rowsPerPage = window.moneyPagesRowsPerPage || 10;
+                const tableHtml = await renderMoneyPagesTable(window.moneyPagesMetrics.rows, currentPage, rowsPerPage);
+                if (tableHtml && typeof tableHtml === 'string' && tableHtml.trim().length > 0) {
+                  tableContainer.innerHTML = tableHtml;
+                  console.log('[Money Pages] ✓ Opportunity table re-rendered after tab switch');
                 }
+              }
+            }
+            
+            // Re-render Priority table
+            if (window.moneyPagePriorityData && window.moneyPagePriorityData.length > 0) {
+              if (typeof renderMoneyPagesTable === 'function') {
+                const filters = {
+                  typeFilter: window.moneyPagesTypeFilter || 'all',
+                  minImpr: window.moneyPagesMinImpr || 0,
+                  matrixFilter: window.moneyPagesMatrixFilter || null
+                };
+                await renderMoneyPagesTable(null, filters);
+                console.log('[Money Pages] ✓ Priority table re-rendered after tab switch');
               }
             }
           }, 100); // Small delay to ensure panel is visible
