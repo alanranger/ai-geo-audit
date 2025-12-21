@@ -7499,21 +7499,26 @@
         const taskClassifications = [];
 
         if (baselineLatest) {
+          // DEBUG: Log measurement structure for all tasks with objectives
+          if (typeof debugLog === 'function' && task.objectiveKpiKey) {
+            const baselineKeys = Object.keys(baselineLatest.baseline || {}).filter(k => k.includes('ctr') || k.includes('citation') || k.includes('clicks') || k.includes('impression') || k.includes('rank') || k.includes('overview'));
+            const latestKeys = Object.keys(baselineLatest.latest || {}).filter(k => k.includes('ctr') || k.includes('citation') || k.includes('clicks') || k.includes('impression') || k.includes('rank') || k.includes('overview'));
+            debugLog(`[Traffic Lights] Task "${task.title || task.id}": objectiveKpiKey=${task.objectiveKpiKey}, baselineFields=[${baselineKeys.join(', ')}], latestFields=[${latestKeys.join(', ')}]`, 'info');
+          }
+          
           // Classify each metric
           for (const metricKey of metricKeys) {
+            const baselineValue = getMetricValue(baselineLatest.baseline, metricKey);
+            const latestValue = getMetricValue(baselineLatest.latest, metricKey);
             const classification = classifyMetric(
               metricKey,
               baselineLatest.baseline,
               baselineLatest.latest
             );
 
-            // DEBUG: Log classification for specific tasks
-            if (task.title && (task.title.includes('Landscape') || task.title.includes('photography-courses'))) {
-              const baselineValue = getMetricValue(baselineLatest.baseline, metricKey);
-              const latestValue = getMetricValue(baselineLatest.latest, metricKey);
-              if (typeof debugLog === 'function') {
-                debugLog(`[Traffic Lights] ${metricKey}: baselineValue=${baselineValue}, latestValue=${latestValue}, classification=${classification}`, 'info');
-              }
+            // DEBUG: Log classification for all tasks with objectives
+            if (typeof debugLog === 'function' && task.objectiveKpiKey) {
+              debugLog(`[Traffic Lights] ${metricKey}: baselineValue=${baselineValue}, latestValue=${latestValue}, classification=${classification || 'null'}`, 'info');
             }
 
             if (classification) {
@@ -7521,6 +7526,8 @@
               taskClassifications.push(classification);
             }
           }
+        } else if (typeof debugLog === 'function' && task.objectiveKpiKey) {
+          debugLog(`[Traffic Lights] Task "${task.title || task.id}": No baselineLatest (measurementsCount=${measurements.length}, scope=${scope})`, 'warn');
         } else if (task.title && (task.title.includes('Landscape') || task.title.includes('photography-courses'))) {
           if (typeof debugLog === 'function') {
             debugLog(`[Traffic Lights] No baselineLatest for task: id=${task.id}, title="${task.title}", measurementsCount=${measurements.length}, scope=${scope}, hasActiveCycle=${!!activeCycle}`, 'warn');
