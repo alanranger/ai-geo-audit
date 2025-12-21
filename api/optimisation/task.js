@@ -137,6 +137,28 @@ export default async function handler(req, res) {
       return sendJSON(res, 500, { error: taskError.message });
     }
 
+    // Parse baselineMetrics early so it's available for objective_status calculation
+    // Determine source from request body or default to 'ranking_ai'
+    const source = req.body.source || 'ranking_ai';
+    
+    // Log baseline metrics received
+    console.log('[Optimisation Task] Received baselineMetrics:', baselineMetricsRaw);
+    console.log('[Optimisation Task] Source:', source);
+    
+    // Parse baselineMetrics if it's a string (shouldn't happen, but handle it)
+    const baselineMetrics = typeof baselineMetricsRaw === 'string' ? JSON.parse(baselineMetricsRaw) : baselineMetricsRaw;
+    
+    if (baselineMetrics) {
+      console.log('[Optimisation Task] Parsed baselineMetrics:', {
+        clicks: baselineMetrics.gsc_clicks_28d,
+        impressions: baselineMetrics.gsc_impressions_28d,
+        ctr: baselineMetrics.gsc_ctr_28d,
+        position: baselineMetrics.gsc_position_28d
+      });
+    } else {
+      console.warn('[Optimisation Task] ⚠️ No baselineMetrics provided in request');
+    }
+
     // Create Cycle 1 for new task
     // Note: This is a new task creation, so we always start with Cycle 1
     // If cycles already exist (shouldn't happen for new tasks), log a warning but still create Cycle 1
@@ -263,27 +285,6 @@ export default async function handler(req, res) {
       // Don't fail, but log
     }
 
-    // Determine source from request body or default to 'ranking_ai'
-    const source = req.body.source || 'ranking_ai';
-    
-    // Log baseline metrics received
-    console.log('[Optimisation Task] Received baselineMetrics:', baselineMetricsRaw);
-    console.log('[Optimisation Task] Source:', source);
-    
-    // Parse baselineMetrics if it's a string (shouldn't happen, but handle it)
-    const baselineMetrics = typeof baselineMetricsRaw === 'string' ? JSON.parse(baselineMetricsRaw) : baselineMetricsRaw;
-    
-    if (baselineMetrics) {
-      console.log('[Optimisation Task] Parsed baselineMetrics:', {
-        clicks: baselineMetrics.gsc_clicks_28d,
-        impressions: baselineMetrics.gsc_impressions_28d,
-        ctr: baselineMetrics.gsc_ctr_28d,
-        position: baselineMetrics.gsc_position_28d
-      });
-    } else {
-      console.warn('[Optimisation Task] ⚠️ No baselineMetrics provided in request');
-    }
-    
     // Insert created event
     const createdEventData = {
         task_id: task.id,
