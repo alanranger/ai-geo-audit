@@ -6023,7 +6023,7 @@
               const tableHtml = await renderMoneyPagesTable(window.moneyPagesMetrics.rows, currentPage, rowsPerPage);
               console.log('[Money Pages] Table HTML generated, length:', tableHtml?.length || 0);
               moneyPagesContainer.innerHTML = tableHtml;
-              console.log('[Money Pages] ✓ Table re-rendered successfully');
+              console.log('[Money Pages] ✓ Opportunity table re-rendered successfully');
               // Re-attach event handlers (they're set up in the render function)
               // Note: renderMoneyPagesTable already calls these handlers, but we need to ensure they're attached after re-render
               if (typeof attachMoneyPagesSortHandlers === 'function') {
@@ -6044,6 +6044,24 @@
                     moneyPagesContainer.innerHTML = await renderMoneyPagesTable(window.moneyPagesMetrics.rows, currentPage, rowsPerPage);
                   }
                 });
+              }
+            }
+          }
+          
+          // ALSO: Re-render Priority table if it exists
+          if (window.moneyPagePriorityData && window.moneyPagePriorityData.length > 0) {
+            console.log('[Money Pages] Re-rendering Priority table after task creation...');
+            if (typeof renderMoneyPagesTable === 'function') {
+              const filters = {
+                typeFilter: window.moneyPagesTypeFilter || 'all',
+                minImpr: window.moneyPagesMinImpr || 0,
+                matrixFilter: window.moneyPagesMatrixFilter || null
+              };
+              try {
+                await renderMoneyPagesTable(null, filters);
+                console.log('[Money Pages] ✓ Priority table re-rendered successfully');
+              } catch (err) {
+                console.error('[Money Pages] Error re-rendering Priority table:', err);
               }
             }
           }
@@ -30336,13 +30354,16 @@ Final Score: ${score}/100`;
             window.moneyPagesMinImpr = 1000;
             window.moneyPagesMatrixFilter = null;
             
-            // Render initial table
+            // Render initial table (with await to ensure statuses are fetched)
             if (typeof renderMoneyPagesTable === 'function') {
-              renderMoneyPagesTable(window.moneyPagePriorityData, {
-                typeFilter: 'all',
-                minImpr: 1000,
-                matrixFilter: null
-              });
+              (async () => {
+                await renderMoneyPagesTable(window.moneyPagePriorityData, {
+                  typeFilter: 'all',
+                  minImpr: 1000,
+                  matrixFilter: null
+                });
+                console.log('[Money Pages Priority] ✓ Initial table rendered with statuses fetched');
+              })();
             }
 
             // Load authority actions async and refresh table (non-blocking).
