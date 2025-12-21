@@ -291,14 +291,16 @@ export default async function handler(req, res) {
       // Get baseline and latest measurements
       let baselineMeasurement = null;
       let latestMeasurement = null;
+      let baselineEvent = null;
       if (cycleEvents.length > 0) {
         // First, try to find baseline measurement explicitly marked with is_baseline: true
-        const baselineEvent = cycleEvents.find(e => e.is_baseline === true);
+        baselineEvent = cycleEvents.find(e => e.is_baseline === true);
         if (baselineEvent && baselineEvent.metrics) {
           baselineMeasurement = baselineEvent.metrics;
           console.log(`[Dashboard] Found baseline measurement with is_baseline=true for task ${task.id}`);
         } else {
           // Fallback: Use first measurement chronologically if no explicit baseline found
+          baselineEvent = cycleEvents[0];
           baselineMeasurement = cycleEvents[0].metrics;
           console.log(`[Dashboard] Using first measurement as baseline (no is_baseline flag) for task ${task.id}`);
         }
