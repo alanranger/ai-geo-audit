@@ -5744,22 +5744,21 @@
         }
         
         const createdTask = result.task;
+        const createdTaskId = createdTask?.id;
+        const createdTaskUrl = createdTask?.target_url || targetUrl;
 
-        // Refresh status cache
-        await window.fetchOptimisationStatuses([{ keyword: keyword || targetUrl, best_url: targetUrl }]);
+        // Close modal
+        modal.style.display = 'none';
         
         // Reload all tasks so the new task is available for the drawer
         if (typeof window.loadAllOptimisationTasks === 'function') {
           await window.loadAllOptimisationTasks();
         }
         
-        // Close modal
-        modal.style.display = 'none';
-        
         // Handle Money Pages vs Ranking & AI differently
         if (source === 'money_pages') {
-          // Small delay to ensure database is updated
-          await new Promise(resolve => setTimeout(resolve, 200));
+          // Small delay to ensure database is updated and view is refreshed
+          await new Promise(resolve => setTimeout(resolve, 500));
           
           // Refresh optimisation statuses cache (same as Ranking & AI)
           if (typeof window.fetchOptimisationStatuses === 'function' && window.moneyPagesMetrics && window.moneyPagesMetrics.rows) {
@@ -5773,6 +5772,17 @@
             console.log('[Money Pages] Fetching statuses for', statusRows.length, 'rows after task creation');
             await window.fetchOptimisationStatuses(statusRows);
             console.log('[Money Pages] Status cache size after fetch:', window.optimisationStatusCache ? window.optimisationStatusCache.size : 0);
+            
+            // Verify the created task is in the cache
+            if (createdTaskUrl) {
+              const testRow = { keyword: '', best_url: createdTaskUrl, targetUrl: createdTaskUrl, ranking_url: createdTaskUrl };
+              const testStatus = window.getOptimisationStatus ? window.getOptimisationStatus(testRow, 'on_page') : null;
+              console.log('[Money Pages] Status lookup test for created task:', {
+                url: createdTaskUrl,
+                found: !!testStatus,
+                status: testStatus?.status
+              });
+            }
           }
           
           // Refresh Money Pages table to show updated Track/Manage status
