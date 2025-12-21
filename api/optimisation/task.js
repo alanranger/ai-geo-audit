@@ -107,6 +107,71 @@ export default async function handler(req, res) {
       userId = '00000000-0000-0000-0000-000000000000';
     }
 
+    // Check for existing open task with same (owner_user_id, keyword_key, target_url_clean, task_type)
+    // keyword_key is computed from keyword_text by database trigger, so we need to compute it here too
+    // For page-level tasks (on_page), keyword_key is typically null or empty
+    // For keyword-level tasks, keyword_key is normalized keyword_text
+    const keywordKey = final_keyword_text ? final_keyword_text.toLowerCase().trim() : null;
+    
+    // Normalize target_url for comparison (same logic as database)
+    let targetUrlClean = target_url;
+    if (targetUrlClean) {
+      targetUrlClean = targetUrlClean.trim();
+      // Remove trailing slash except for root
+      if (targetUrlClean.endsWith('/') && targetUrlClean !== '/') {
+        targetUrlClean = targetUrlClean.slice(0, -1);
+      }
+      // Lowercase hostname if it's a full URL
+      try {
+        const urlObj = new URL(targetUrlClean);
+        targetUrlClean = urlObj.origin.toLowerCase() + urlObj.pathname + urlObj.search + urlObj.hash;
+      } catch (e) {
+        // If URL parsing fails, just lowercase the whole thing
+        targetUrlClean = targetUrlClean.toLowerCase();
+      }
+    }
+    
+    // Check for existing open task
+    const { data: existingTasks, error: checkError } = await supabase
+      .from('optimisation_tasks')
+      .select('id, status, title, keyword_text, target_url')
+      .eq('owner_user_id', userId)
+      .eq('task_type', task_type || 'on_page')
+      .not('status', 'in', '(done,cancelled,deleted)');
+    
+    if (checkError) {
+      console.error('[Optimisation Task] Error checking for existing tasks:', checkError);
+      // Continue anyway - the unique constraint will catch it
+    } else if (existingTasks && existingTasks.length > 0) {
+      // Check if any existing task matches (need to compute keyword_key for comparison)
+      for (const existingTask of existingTasks) {
+        const existingKeywordKey = existingTask.keyword_text ? existingTask.keyword_text.toLowerCase().trim() : null;
+        let existingTargetUrlClean = existingTask.target_url;
+        if (existingTargetUrlClean) {
+          existingTargetUrlClean = existingTargetUrlClean.trim();
+          if (existingTargetUrlClean.endsWith('/') && existingTargetUrlClean !== '/') {
+            existingTargetUrlClean = existingTargetUrlClean.slice(0, -1);
+          }
+          try {
+            const urlObj = new URL(existingTargetUrlClean);
+            existingTargetUrlClean = urlObj.origin.toLowerCase() + urlObj.pathname + urlObj.search + urlObj.hash;
+          } catch (e) {
+            existingTargetUrlClean = existingTargetUrlClean.toLowerCase();
+          }
+        }
+        
+        // Match if keyword_key and target_url_clean match
+        if (existingKeywordKey === keywordKey && existingTargetUrlClean === targetUrlClean) {
+          return sendJSON(res, 409, { 
+            error: 'A task already exists for this keyword/URL combination',
+            existingTaskId: existingTask.id,
+            existingTaskTitle: existingTask.title,
+            existingTaskStatus: existingTask.status
+          });
+        }
+      }
+    }
+
     // Insert task with Phase B objective fields
     const { data: task, error: taskError } = await supabase
       .from('optimisation_tasks')

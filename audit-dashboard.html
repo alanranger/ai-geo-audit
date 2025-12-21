@@ -5676,6 +5676,26 @@
           if (response.status === 401) {
             throw new Error('Unauthorized - admin key missing or invalid. Please set your admin key in the configuration section.');
           }
+          
+          // Handle duplicate task error (409 Conflict)
+          if (response.status === 409) {
+            try {
+              const errorData = await response.json();
+              if (errorData.existingTaskId) {
+                // Task already exists - open it instead
+                alert(`A task already exists for this page. Opening existing task...`);
+                if (typeof window.openOptimisationTaskDrawer === 'function') {
+                  window.openOptimisationTaskDrawer(errorData.existingTaskId);
+                }
+                modal.style.display = 'none';
+                return;
+              }
+              throw new Error(errorData.error || 'A task already exists for this keyword/URL combination');
+            } catch (e) {
+              throw new Error('A task already exists for this keyword/URL combination. Please use the "Manage" button instead.');
+            }
+          }
+          
           const error = await response.text();
           throw new Error(error || 'Failed to create task');
         }
