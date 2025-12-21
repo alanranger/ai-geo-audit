@@ -5401,6 +5401,13 @@
 
         const data = await response.json();
         
+        // DEBUG: Log raw API response structure
+        console.log('[Optimisation] API response received:', {
+          statusCount: data.statuses?.length || 0,
+          sampleStatus: data.statuses?.[0] || null,
+          sampleStatusKeys: data.statuses?.[0] ? Object.keys(data.statuses[0]) : []
+        });
+        
         // CRITICAL: Preserve immediate cache entries (newly created tasks) that are very recent
         // (within last 10 seconds) to avoid losing them if the API hasn't refreshed yet
         const now = Date.now();
@@ -14294,33 +14301,46 @@
         p.classList.toggle('is-active', isActive);
         
         // CRITICAL: When Money Pages tab becomes active, re-fetch statuses from database
-        if (isActive && panelId === 'money' && window.moneyPagesMetrics && window.moneyPagesMetrics.rows) {
-          console.log('[Money Pages] Tab activated - re-fetching statuses from database...');
-          // Re-fetch statuses for all rows to ensure cache is up-to-date
-          if (typeof window.fetchOptimisationStatuses === 'function') {
-            const allStatusRows = window.moneyPagesMetrics.rows.map(row => ({
-              keyword: '', // Empty for page-level tasks
-              best_url: row.url,
-              targetUrl: row.url,
-              ranking_url: row.url
-            }));
-            window.fetchOptimisationStatuses(allStatusRows).then(() => {
-              console.log('[Money Pages] ✓ Status cache refreshed from database on tab switch');
-              // Re-render table to show updated statuses
-              const tableContainer = document.getElementById('money-pages-table-container');
-              if (tableContainer && typeof renderMoneyPagesTable === 'function') {
-                const currentPage = window.moneyPagesCurrentPage || 1;
-                const rowsPerPage = window.moneyPagesRowsPerPage || 10;
-                renderMoneyPagesTable(window.moneyPagesMetrics.rows, currentPage, rowsPerPage).then(tableHtml => {
-                  if (tableHtml && typeof tableHtml === 'string' && tableHtml.trim().length > 0) {
-                    tableContainer.innerHTML = tableHtml;
+        if (isActive && panelId === 'money') {
+          console.log('[Money Pages] Tab activated - checking if re-fetch needed...', {
+            hasMetrics: !!window.moneyPagesMetrics,
+            hasRows: !!(window.moneyPagesMetrics && window.moneyPagesMetrics.rows),
+            rowCount: window.moneyPagesMetrics?.rows?.length || 0
+          });
+          
+          // Use setTimeout to ensure panel is fully visible before fetching
+          setTimeout(async () => {
+            if (window.moneyPagesMetrics && window.moneyPagesMetrics.rows && window.moneyPagesMetrics.rows.length > 0) {
+              console.log('[Money Pages] Re-fetching statuses from database on tab switch...');
+              // Re-fetch statuses for all rows to ensure cache is up-to-date
+              if (typeof window.fetchOptimisationStatuses === 'function') {
+                const allStatusRows = window.moneyPagesMetrics.rows.map(row => ({
+                  keyword: '', // Empty for page-level tasks
+                  best_url: row.url,
+                  targetUrl: row.url,
+                  ranking_url: row.url
+                }));
+                try {
+                  await window.fetchOptimisationStatuses(allStatusRows);
+                  console.log('[Money Pages] ✓ Status cache refreshed from database on tab switch:', window.optimisationStatusCache?.size || 0, 'entries');
+                  
+                  // Re-render table to show updated statuses
+                  const tableContainer = document.getElementById('money-pages-table-container');
+                  if (tableContainer && typeof renderMoneyPagesTable === 'function') {
+                    const currentPage = window.moneyPagesCurrentPage || 1;
+                    const rowsPerPage = window.moneyPagesRowsPerPage || 10;
+                    const tableHtml = await renderMoneyPagesTable(window.moneyPagesMetrics.rows, currentPage, rowsPerPage);
+                    if (tableHtml && typeof tableHtml === 'string' && tableHtml.trim().length > 0) {
+                      tableContainer.innerHTML = tableHtml;
+                      console.log('[Money Pages] ✓ Table re-rendered after tab switch');
+                    }
                   }
-                });
+                } catch (err) {
+                  console.error('[Money Pages] Error re-fetching statuses on tab switch:', err);
+                }
               }
-            }).catch(err => {
-              console.error('[Money Pages] Error re-fetching statuses on tab switch:', err);
-            });
-          }
+            }
+          }, 100); // Small delay to ensure panel is visible
         }
         p.hidden = !isActive; // Explicitly set hidden attribute
       });
@@ -24078,15 +24098,43 @@ Final Score: ${score}/100`;
                   // First check the main cache
                   let status = window.getOptimisationStatus ? window.getOptimisationStatus(statusRow, taskType) : null;
                   
-                  // Debug: Log status object structure for landscape page
-                  if (row.url && row.url.includes('landscape-photography-workshops') && status) {
-                    console.log('[Money Pages] Status object structure for landscape page:', {
+                  // Debug: Log status lookup for ALL pages (not just landscape) to trace the issue
+                  if (status) {
+                    console.log('[Money Pages] Status lookup result:', {
+                      url: row.url,
                       hasId: 'id' in status,
                       hasTaskId: 'task_id' in status,
                       id: status.id,
                       task_id: status.task_id,
                       status: status.status,
-                      allKeys: Object.keys(status)
+                      allKeys: Object.keys(status).slice(0, 10) // First 10 keys
+                    });
+                    
+                    // CRITICAL: Ensure id field exists - if not, try to get it from task_id or log error
+                    if (!status.id) {
+                      console.error('[Money Pages] Status object missing id field:', {
+                        url: row.url,
+                        status,
+                        hasTaskId: 'task_id' in status,
+                        task_id: status.task_id
+                      });
+                      // Try to use task_id as fallback
+                      if (status.task_id) {
+                        status.id = status.task_id;
+                        console.warn('[Money Pages] Using task_id as fallback for id');
+                      }
+                    }
+                  } else {
+                    // Log when status is not found
+                    const urlKey = window.cleanUrlForKey ? window.cleanUrlForKey(row.url) : row.url.toLowerCase().trim();
+                    const expectedKey = `::${urlKey}::on_page`;
+                    const cacheHasKey = window.optimisationStatusCache ? window.optimisationStatusCache.has(expectedKey) : false;
+                    console.log('[Money Pages] Status not found for:', {
+                      url: row.url,
+                      urlKey,
+                      expectedKey,
+                      cacheHasKey,
+                      cacheSize: window.optimisationStatusCache?.size || 0
                     });
                   }
                   
