@@ -7488,6 +7488,21 @@
         const measurements = task.measurements || [];
         const baselineLatest = getBaselineLatest(measurements, scope, activeCycle);
 
+        // DEBUG: Log task details for troubleshooting
+        if (task.title && (task.title.includes('Landscape') || task.title.includes('photography-courses'))) {
+          console.log('[Traffic Lights] Task:', {
+            id: task.id,
+            title: task.title,
+            status: task.status,
+            objectiveKpiKey: task.objectiveKpiKey,
+            measurementsCount: measurements.length,
+            hasBaselineLatest: !!baselineLatest,
+            baseline: baselineLatest?.baseline,
+            latest: baselineLatest?.latest,
+            activeCycle: activeCycle ? { id: activeCycle.id, is_active: activeCycle.is_active } : null
+          });
+        }
+
         // Track classifications for all metrics to compute aggregated count
         const taskClassifications = [];
 
@@ -7500,11 +7515,30 @@
               baselineLatest.latest
             );
 
+            // DEBUG: Log classification for specific tasks
+            if (task.title && (task.title.includes('Landscape') || task.title.includes('photography-courses'))) {
+              const baselineValue = getMetricValue(baselineLatest.baseline, metricKey);
+              const latestValue = getMetricValue(baselineLatest.latest, metricKey);
+              console.log(`[Traffic Lights] ${metricKey}:`, {
+                baselineValue,
+                latestValue,
+                classification
+              });
+            }
+
             if (classification) {
               counts[metricKey][classification]++;
               taskClassifications.push(classification);
             }
           }
+        } else if (task.title && (task.title.includes('Landscape') || task.title.includes('photography-courses'))) {
+          console.warn('[Traffic Lights] No baselineLatest for task:', {
+            id: task.id,
+            title: task.title,
+            measurementsCount: measurements.length,
+            scope,
+            hasActiveCycle: !!activeCycle
+          });
         }
 
         // For aggregated "all_metrics": count ALL active tasks
