@@ -26750,7 +26750,7 @@ Final Score: ${score}/100`;
               optimisationHtml = `
                 <td style="padding: 0.75rem;" data-page-url="${p.url}" data-page-title="${p.title || p.url || 'Untitled'}">
                   <span class="ranking-badge ranking-badge--segment-general" style="margin-right: 0.5rem; display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; background: #f1f5f9; color: #64748b; font-size: 0.75rem; font-weight: 600;">${statusLabel}</span>
-                  <button class="btn btn-small money-pages-track-btn" style="padding: 0.15rem 0.4rem; font-size: 0.75rem; font-weight: 550; background: #2563eb; color: #ffffff; border: 1px solid #1e40af; border-radius: 4px; cursor: pointer;" data-page-url="${p.url}" data-page-title="${p.title || p.url || 'Untitled'}">${!hasTask ? 'Track' : 'Track again'}</button>
+                  <button onclick="window.trackMoneyPage('${p.url.replace(/'/g, "\\'")}', '${(p.title || p.url || 'Untitled').replace(/'/g, "\\'")}')" style="padding: 0.15rem 0.4rem; font-size: 0.75rem; font-weight: 550; background: #2563eb; color: #ffffff; border: 1px solid #1e40af; border-radius: 4px; cursor: pointer;" title="Create optimisation task for ${p.url} (CTR ≥ 2.5%)">${!hasTask ? 'Track' : 'Track again'}</button>
                 </td>
               `;
             } else {
@@ -26822,11 +26822,17 @@ Final Score: ${score}/100`;
         }
         
         // Wire Track/Manage buttons after table is rendered
+        // NOTE: The new renderMoneyPagesTable function uses onclick attributes directly
+        // This old handler is only for legacy table rendering that uses .money-pages-track-btn class
+        // If you see "Old handler detected" warnings, it means there's a button with the old class
+        // that should be using onclick="window.trackMoneyPage(...)" instead
         setTimeout(() => {
-          // Track buttons
+          // Track buttons (legacy - should not be used in new table rendering)
           tbody.querySelectorAll('.money-pages-track-btn').forEach(btn => {
             btn.addEventListener('click', async (e) => {
               e.stopPropagation();
+              e.preventDefault(); // Prevent any default behavior
+              
               if (window.isShareMode) {
                 alert('Write operations are not available in share mode (read-only).');
                 return;
@@ -26839,40 +26845,21 @@ Final Score: ${score}/100`;
               const pageUrl = btn.getAttribute('data-page-url');
               const pageTitle = btn.getAttribute('data-page-title');
               
-              try {
-                btn.disabled = true;
-                btn.textContent = 'Creating...';
-                
-                // Check if task already exists (de-dupe)
-                const existingTasks = window.optimisationTasksMap || {};
-                const existingTask = findExistingOptimisationTaskForUrl(Object.values(existingTasks), pageUrl);
-                
-                if (existingTask) {
-                  // Task exists - open Manage instead
-                  const taskId = existingTask.id;
-                  if (window.openOptimisationTaskDrawer && typeof window.openOptimisationTaskDrawer === 'function') {
-                    window.openOptimisationTaskDrawer(taskId);
-                  } else {
-                    // Fallback: navigate to Optimisation Tracking
-                    const optimisationTab = document.querySelector('[data-panel="optimisation"]');
-                    if (optimisationTab) {
-                      const tabBtn = document.querySelector(`button[data-tab="optimisation"]`);
-                      if (tabBtn) tabBtn.click();
-                      setTimeout(() => {
-                        if (window.openOptimisationTaskDrawer && typeof window.openOptimisationTaskDrawer === 'function') {
-                          window.openOptimisationTaskDrawer(taskId);
-                        }
-                      }, 500);
-                    }
-                  }
-                  return;
-                }
-                
-                // Open modal instead of auto-creating (per-row Track should use modal)
-                // This code path should not be reached for per-row Track buttons
-                // But if it is, open the modal instead
-                debugLog(`⚠ Old handler detected for ${pageUrl}, redirecting to modal`, 'warn');
-                const rowData = {
+              console.warn('[Money Pages] ⚠️ Legacy .money-pages-track-btn handler triggered. This should not happen with new table rendering.');
+              debugLog(`⚠ Legacy handler detected for ${pageUrl}, redirecting to modal`, 'warn');
+              
+              // Immediately redirect to the new modal path
+              // Look up row data from stored map
+              let rowData = null;
+              if (window.moneyPagesRowDataByUrl && pageUrl) {
+                const normalizedUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(pageUrl) : pageUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+                rowData = window.moneyPagesRowDataByUrl.get(normalizedUrl);
+                console.log('[Money Pages] Legacy handler: Found row data from map:', !!rowData);
+              }
+              
+              // If row data not found, create minimal fallback
+              if (!rowData) {
+                rowData = {
                   url: pageUrl,
                   title: pageTitle,
                   clicks: 0,
@@ -26880,17 +26867,16 @@ Final Score: ${score}/100`;
                   ctr: 0,
                   avgPosition: null
                 };
-                if (window.openTrackMoneyPageModal) {
-                  window.openTrackMoneyPageModal(rowData);
-                } else {
-                  // Fallback: use trackMoneyPage which will open modal
-                  window.trackMoneyPage(pageUrl, pageTitle);
-                }
-              } catch (error) {
-                console.error('[Money Pages] Error creating task:', error);
-                alert(`Failed to create task: ${error.message}`);
-                btn.disabled = false;
-                btn.textContent = btn.getAttribute('data-page-url') ? 'Track' : 'Track again';
+                console.warn('[Money Pages] Legacy handler: Row data not found, using fallback (metrics will be 0)');
+              }
+              
+              // Use the new modal path
+              if (window.openTrackMoneyPageModal) {
+                window.openTrackMoneyPageModal(rowData);
+              } else if (window.trackMoneyPage) {
+                window.trackMoneyPage(pageUrl, pageTitle);
+              } else {
+                alert('Error: Modal function not found. Please refresh the page.');
               }
             });
           });
