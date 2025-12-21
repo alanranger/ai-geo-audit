@@ -7490,17 +7490,9 @@
 
         // DEBUG: Log task details for troubleshooting
         if (task.title && (task.title.includes('Landscape') || task.title.includes('photography-courses'))) {
-          console.log('[Traffic Lights] Task:', {
-            id: task.id,
-            title: task.title,
-            status: task.status,
-            objectiveKpiKey: task.objectiveKpiKey,
-            measurementsCount: measurements.length,
-            hasBaselineLatest: !!baselineLatest,
-            baseline: baselineLatest?.baseline,
-            latest: baselineLatest?.latest,
-            activeCycle: activeCycle ? { id: activeCycle.id, is_active: activeCycle.is_active } : null
-          });
+          if (typeof debugLog === 'function') {
+            debugLog(`[Traffic Lights] Task: id=${task.id}, title="${task.title}", status=${task.status}, objectiveKpiKey=${task.objectiveKpiKey}, measurementsCount=${measurements.length}, hasBaselineLatest=${!!baselineLatest}`, 'info');
+          }
         }
 
         // Track classifications for all metrics to compute aggregated count
@@ -7519,11 +7511,9 @@
             if (task.title && (task.title.includes('Landscape') || task.title.includes('photography-courses'))) {
               const baselineValue = getMetricValue(baselineLatest.baseline, metricKey);
               const latestValue = getMetricValue(baselineLatest.latest, metricKey);
-              console.log(`[Traffic Lights] ${metricKey}:`, {
-                baselineValue,
-                latestValue,
-                classification
-              });
+              if (typeof debugLog === 'function') {
+                debugLog(`[Traffic Lights] ${metricKey}: baselineValue=${baselineValue}, latestValue=${latestValue}, classification=${classification}`, 'info');
+              }
             }
 
             if (classification) {
@@ -7532,13 +7522,9 @@
             }
           }
         } else if (task.title && (task.title.includes('Landscape') || task.title.includes('photography-courses'))) {
-          console.warn('[Traffic Lights] No baselineLatest for task:', {
-            id: task.id,
-            title: task.title,
-            measurementsCount: measurements.length,
-            scope,
-            hasActiveCycle: !!activeCycle
-          });
+          if (typeof debugLog === 'function') {
+            debugLog(`[Traffic Lights] No baselineLatest for task: id=${task.id}, title="${task.title}", measurementsCount=${measurements.length}, scope=${scope}, hasActiveCycle=${!!activeCycle}`, 'warn');
+          }
         }
 
         // For aggregated "all_metrics": count ALL active tasks
@@ -13204,9 +13190,15 @@
       }
 
       // Get active tasks (not done/cancelled/deleted)
-      const activeTasks = window.optimisationModuleState.allTasks.filter(
+      let activeTasks = window.optimisationModuleState.allTasks.filter(
         t => !['done', 'cancelled', 'deleted'].includes(t.status)
       );
+
+      // Filter out test tasks if checkbox is unchecked
+      const includeTestCheckbox = document.getElementById('optimisation-filter-include-test');
+      if (!includeTestCheckbox || !includeTestCheckbox.checked) {
+        activeTasks = activeTasks.filter(t => !t.is_test_task);
+      }
 
       if (activeTasks.length === 0) {
         alert('No active tasks to update.');
