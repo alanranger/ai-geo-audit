@@ -3389,8 +3389,8 @@
                 <div>
                   <label for="portfolio-segment-select" style="display: block; margin-bottom: 0.25rem; font-weight: 600;">Segment:</label>
                   <select id="portfolio-segment-select" style="padding: 0.5rem; min-width: 150px;">
-                    <option value="all">All tracked</option>
-                    <option value="money_pages">Money Pages</option>
+                    <option value="all_tracked">All tracked</option>
+                    <option value="money">Money Pages</option>
                     <option value="landing">Landing</option>
                     <option value="event">Event</option>
                     <option value="product">Product</option>
@@ -15163,28 +15163,86 @@
     }
 
     async function loadPortfolioData() {
-      const kpi = document.getElementById('portfolio-kpi-select')?.value || 'ctr_28d';
-      const segment = document.getElementById('portfolio-segment-select')?.value || 'all';
-      const scope = document.getElementById('portfolio-scope-toggle')?.value || 'all';
+      const kpiSelect = document.getElementById('portfolio-kpi-select')?.value || 'ctr_28d';
+      const segment = document.getElementById('portfolio-segment-select')?.value || 'all_tracked';
+      const scope = document.getElementById('portfolio-scope-toggle')?.value || 'active_only';
       const timeGrain = document.getElementById('portfolio-time-grain')?.value || 'weekly';
 
+      // Map UI KPI to median_delta_* KPI key
+      const kpiMap = {
+        'ctr_28d': 'median_delta_ctr_28d',
+        'clicks_28d': 'median_delta_clicks_28d',
+        'impressions_28d': 'median_delta_impressions_28d',
+        'avg_position': 'median_delta_avg_position',
+        'ai_citations': 'median_delta_ai_citations',
+        'ai_overview': 'median_delta_ai_overview'
+      };
+      
+      const medianKpi = kpiMap[kpiSelect] || `median_delta_${kpiSelect}`;
+      
+      // Map segment names
+      const segmentMap = {
+        'all': 'all_tracked',
+        'money_pages': 'money',
+        'landing': 'landing',
+        'event': 'event',
+        'product': 'product'
+      };
+      const mappedSegment = segmentMap[segment] || segment;
+
       try {
-        const params = new URLSearchParams({ kpi, segment, scope, timeGrain });
-        const response = await fetch(`/api/portfolio/snapshots?${params}`);
+        const params = new URLSearchParams({ 
+          kpi: medianKpi, 
+          segment: mappedSegment, 
+          scope, 
+          timeGrain 
+        });
+        const response = await fetch(apiUrl(`/api/portfolio/get-snapshots?${params}`));
+        
+        if (!response.ok) {
+          throw new Error(`API error: ${response.status}`);
+        }
+        
         const data = await response.json();
 
         if (data.snapshots && portfolioDeltaChart) {
+          if (data.snapshots.length < 2) {
+            // Show empty state
+            portfolioDeltaChart.data.labels = [];
+            portfolioDeltaChart.data.datasets[0].data = [];
+            portfolioDeltaChart.update();
+            
+            // Show empty state message
+            const canvas = document.getElementById('portfolio-delta-chart');
+            if (canvas) {
+              const ctx = canvas.getContext('2d');
+              ctx.clearRect(0, 0, canvas.width, canvas.height);
+              ctx.fillStyle = '#666';
+              ctx.font = '14px Arial';
+              ctx.textAlign = 'center';
+              ctx.fillText('No historical snapshots yet. Run the audit on multiple days to build trend history.', 
+                canvas.width / 2, canvas.height / 2);
+            }
+            return;
+          }
+          
           const labels = data.snapshots.map(s => {
-            const date = new Date(s.period_start);
-            return timeGrain === 'weekly' 
-              ? date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
-              : date.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+            const date = new Date(s.created_at);
+            if (timeGrain === 'weekly') {
+              // Format as week start date
+              const dayOfWeek = date.getDay();
+              const diff = date.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+              const monday = new Date(date.setDate(diff));
+              return monday.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+            } else {
+              return date.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+            }
           });
-          const values = data.snapshots.map(s => parseFloat(s.median_delta || 0));
+          const values = data.snapshots.map(s => parseFloat(s.value || 0));
 
           portfolioDeltaChart.data.labels = labels;
           portfolioDeltaChart.data.datasets[0].data = values;
-          portfolioDeltaChart.data.datasets[0].label = `Median Delta (${kpi})`;
+          portfolioDeltaChart.data.datasets[0].label = `Median Delta (${kpiSelect})`;
           portfolioDeltaChart.update();
         }
       } catch (err) {
@@ -15194,7 +15252,14 @@
 
     async function renderPortfolioTable() {
       const kpi = document.getElementById('portfolio-table-kpi-select')?.value || 'ctr_28d';
-      const segments = ['money_pages', 'landing', 'event', 'product', 'all'];
+      const segments = ['money', 'landing', 'event', 'product', 'all_tracked'];
+      const segmentLabels = {
+        'money': 'Money Pages',
+        'landing': 'Landing',
+        'event': 'Event',
+        'product': 'Product',
+        'all_tracked': 'All tracked'
+      };
       
       try {
         // Fetch data for all segments
@@ -15203,12 +15268,17 @@
           const params = new URLSearchParams({ 
             kpi, 
             segment, 
-            scope: 'all',
+            scope: 'active_only',
             timeGrain: 'monthly'
           });
-          const response = await fetch(`/api/portfolio/snapshots?${params}`);
-          const data = await response.json();
-          allData[segment] = data.snapshots || [];
+          const response = await fetch(apiUrl(`/api/portfolio/get-snapshots?${params}`));
+          
+          if (response.ok) {
+            const data = await response.json();
+            allData[segment] = data.snapshots || [];
+          } else {
+            allData[segment] = [];
+          }
         }
 
         // Generate last 12 months
@@ -15243,6 +15313,24 @@
         sparklineTh.textContent = 'Trend';
         thead.appendChild(sparklineTh);
 
+        // Format value based on KPI
+        const formatValue = (value, kpiKey) => {
+          if (value === null || value === undefined) return '—';
+          
+          if (kpiKey === 'ctr_28d') {
+            // CTR is stored as ratio (0-1), display as percentage
+            return (parseFloat(value) * 100).toFixed(1) + '%';
+          } else if (kpiKey === 'clicks_28d' || kpiKey === 'impressions_28d') {
+            // Counts - format with separators
+            return parseInt(value).toLocaleString();
+          } else if (kpiKey === 'avg_position') {
+            // Position - 1 decimal
+            return parseFloat(value).toFixed(1);
+          } else {
+            return parseFloat(value).toFixed(2);
+          }
+        };
+
         // Add rows for each segment
         segments.forEach(segment => {
           const row = document.createElement('tr');
@@ -15250,7 +15338,7 @@
           // Segment name
           const segmentCell = document.createElement('td');
           segmentCell.style.cssText = 'padding: 0.75rem; border-bottom: 1px solid #eee; font-weight: 600;';
-          segmentCell.textContent = segment === 'all' ? 'All tracked' : segment.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+          segmentCell.textContent = segmentLabels[segment] || segment;
           row.appendChild(segmentCell);
 
           // Month values
@@ -15259,25 +15347,55 @@
             const cell = document.createElement('td');
             cell.style.cssText = 'text-align: center; padding: 0.75rem; border-bottom: 1px solid #eee;';
             
-            const snapshot = allData[segment]?.find(s => s.period_start.startsWith(month));
-            if (snapshot && snapshot.median_value !== null) {
-              const value = parseFloat(snapshot.median_value);
-              cell.textContent = value.toFixed(2);
+            // Find snapshot for this month (bucket by YYYY-MM)
+            const snapshot = allData[segment]?.find(s => {
+              const snapshotDate = new Date(s.created_at);
+              const snapshotMonth = `${snapshotDate.getFullYear()}-${String(snapshotDate.getMonth() + 1).padStart(2, '0')}`;
+              return snapshotMonth === month;
+            });
+            
+            if (snapshot && snapshot.value !== null && snapshot.value !== undefined) {
+              const value = parseFloat(snapshot.value);
+              const formatted = formatValue(value, kpi);
               monthValues.push(value);
               
-              // Add trend indicator
+              // Find previous month snapshot for trend
+              const prevMonth = new Date(month + '-01');
+              prevMonth.setMonth(prevMonth.getMonth() - 1);
+              const prevMonthStr = `${prevMonth.getFullYear()}-${String(prevMonth.getMonth() + 1).padStart(2, '0')}`;
+              
               const prevSnapshot = allData[segment]?.find(s => {
-                const prevMonth = new Date(month + '-01');
-                prevMonth.setMonth(prevMonth.getMonth() - 1);
-                return s.period_start.startsWith(prevMonth.toISOString().substring(0, 7));
+                const snapshotDate = new Date(s.created_at);
+                const snapshotMonth = `${snapshotDate.getFullYear()}-${String(snapshotDate.getMonth() + 1).padStart(2, '0')}`;
+                return snapshotMonth === prevMonthStr;
               });
               
-              if (prevSnapshot && prevSnapshot.median_value !== null) {
-                const prevValue = parseFloat(prevSnapshot.median_value);
+              if (prevSnapshot && prevSnapshot.value !== null && prevSnapshot.value !== undefined) {
+                const prevValue = parseFloat(prevSnapshot.value);
                 const delta = value - prevValue;
                 const indicator = delta >= 0 ? '▲' : '▼';
                 const color = delta >= 0 ? '#10b981' : '#ef4444';
-                cell.innerHTML = `${value.toFixed(2)} <span style="color: ${color};">${indicator} ${Math.abs(delta).toFixed(2)}</span>`;
+                
+                // Format delta based on KPI
+                let deltaFormatted;
+                if (kpi === 'ctr_28d') {
+                  deltaFormatted = (delta * 100).toFixed(1) + 'pp';
+                } else if (kpi === 'avg_position') {
+                  deltaFormatted = delta.toFixed(1);
+                  // For position, lower is better, so flip the indicator
+                  const actualIndicator = delta < 0 ? '▲' : '▼';
+                  const actualColor = delta < 0 ? '#10b981' : '#ef4444';
+                  cell.innerHTML = `${formatted} <span style="color: ${actualColor};">${actualIndicator} ${Math.abs(deltaFormatted)}</span>`;
+                } else {
+                  deltaFormatted = Math.abs(delta).toLocaleString();
+                  cell.innerHTML = `${formatted} <span style="color: ${color};">${indicator} ${deltaFormatted}</span>`;
+                }
+                
+                if (kpi !== 'avg_position') {
+                  cell.innerHTML = `${formatted} <span style="color: ${color};">${indicator} ${deltaFormatted}</span>`;
+                }
+              } else {
+                cell.textContent = formatted;
               }
             } else {
               cell.textContent = '—';
@@ -15286,17 +15404,18 @@
             row.appendChild(cell);
           });
 
-          // Sparkline (simple text representation for now)
+          // Sparkline (simple text representation)
           const sparklineCell = document.createElement('td');
           sparklineCell.style.cssText = 'text-align: center; padding: 0.75rem; border-bottom: 1px solid #eee;';
-          if (monthValues.filter(v => v !== null).length > 0) {
-            const min = Math.min(...monthValues.filter(v => v !== null));
-            const max = Math.max(...monthValues.filter(v => v !== null));
+          const validValues = monthValues.filter(v => v !== null);
+          if (validValues.length > 0) {
+            const min = Math.min(...validValues);
+            const max = Math.max(...validValues);
             const range = max - min || 1;
             const sparkline = monthValues.map(v => {
               if (v === null) return ' ';
-              const height = Math.round(((v - min) / range) * 5);
-              return '▁▂▃▄▅▆▇█'[height] || '▁';
+              const height = Math.round(((v - min) / range) * 7);
+              return '▁▂▃▄▅▆▇█'[Math.min(height, 7)] || '▁';
             }).join('');
             sparklineCell.textContent = sparkline;
           } else {
@@ -15339,66 +15458,144 @@
       }
     }
 
-    // Calculate and save portfolio snapshots from task measurements
-    async function calculateAndSavePortfolioSnapshots(auditDate) {
+    // Calculate and save portfolio snapshots (Phase 3 - Real History)
+    async function calculateAndSavePortfolioSnapshots(auditDate, windowDays = 28) {
       try {
         debugLog('📊 Calculating portfolio snapshots...', 'info');
         
-        // Fetch all tasks with measurements
-        const response = await fetch('/api/optimisation/status?includeDeleted=false');
-        if (!response.ok) {
-          throw new Error(`Failed to fetch tasks: ${response.status}`);
+        // Get money segment metrics (for level KPIs)
+        const moneySegmentMetrics = window.moneySegmentMetrics || {};
+        
+        // Calculate window dates
+        const endDate = new Date(auditDate);
+        const startDate = new Date(endDate);
+        startDate.setDate(startDate.getDate() - windowDays);
+        
+        // Build snapshots array
+        const snapshots = [];
+        
+        // Segment mapping: moneySegmentMetrics keys -> portfolio segment names
+        const segmentMap = {
+          'allMoney': 'money',
+          'landingPages': 'landing',
+          'eventPages': 'event',
+          'productPages': 'product'
+        };
+        
+        // Level KPIs (for Monthly KPI Tracker) - from moneySegmentMetrics
+        const levelKpis = ['ctr_28d', 'clicks_28d', 'impressions_28d', 'avg_position'];
+        const segments = ['money', 'landing', 'event', 'product'];
+        const scopes = ['active_only']; // Start with active_only only
+        
+        for (const segment of segments) {
+          const segmentKey = Object.keys(segmentMap).find(k => segmentMap[k] === segment);
+          const segmentData = moneySegmentMetrics[segmentKey];
+          
+          if (!segmentData) continue;
+          
+          for (const kpi of levelKpis) {
+            let value = null;
+            let unit = null;
+            
+            if (kpi === 'ctr_28d') {
+              value = segmentData.ctr || 0; // Already a ratio (0-1)
+              unit = 'ratio';
+            } else if (kpi === 'clicks_28d') {
+              value = segmentData.clicks || 0;
+              unit = 'count';
+            } else if (kpi === 'impressions_28d') {
+              value = segmentData.impressions || 0;
+              unit = 'count';
+            } else if (kpi === 'avg_position') {
+              value = segmentData.avgPosition || 0;
+              unit = 'position';
+            }
+            
+            if (value !== null) {
+              for (const scope of scopes) {
+                snapshots.push({
+                  segment,
+                  scope,
+                  kpi,
+                  value,
+                  unit,
+                  meta: { taskCount: 0 } // Will be updated if we have task data
+                });
+              }
+            }
+          }
         }
         
-        const { tasks } = await response.json();
-        if (!tasks || tasks.length === 0) {
-          debugLog('⚠ No tasks found for portfolio snapshots', 'warn');
-          return;
-        }
-
-        // Calculate period start (weekly: start of week, monthly: start of month)
-        const date = new Date(auditDate);
-        const weeklyStart = new Date(date);
-        weeklyStart.setDate(date.getDate() - date.getDay()); // Start of week (Sunday)
-        const monthlyStart = new Date(date.getFullYear(), date.getMonth(), 1);
-
-        const segments = ['all', 'money_pages', 'landing', 'event', 'product'];
-        const kpis = ['ctr_28d', 'clicks_28d', 'impressions_28d', 'avg_position', 'ai_citations', 'ai_overview'];
-        const scopes = ['active_only', 'all'];
-        const periodTypes = ['weekly', 'monthly'];
-
-        // Calculate snapshots for each combination
-        for (const segment of segments) {
-          for (const kpi of kpis) {
+        // All tracked segment (aggregate of all segments)
+        const allTrackedData = {
+          clicks: (moneySegmentMetrics.allMoney?.clicks || 0) + 
+                  (moneySegmentMetrics.landingPages?.clicks || 0) +
+                  (moneySegmentMetrics.eventPages?.clicks || 0) +
+                  (moneySegmentMetrics.productPages?.clicks || 0),
+          impressions: (moneySegmentMetrics.allMoney?.impressions || 0) +
+                      (moneySegmentMetrics.landingPages?.impressions || 0) +
+                      (moneySegmentMetrics.eventPages?.impressions || 0) +
+                      (moneySegmentMetrics.productPages?.impressions || 0),
+          avgPosition: 0 // Would need weighted average
+        };
+        allTrackedData.ctr = allTrackedData.impressions > 0 
+          ? allTrackedData.clicks / allTrackedData.impressions 
+          : 0;
+        
+        for (const kpi of levelKpis) {
+          let value = null;
+          let unit = null;
+          
+          if (kpi === 'ctr_28d') {
+            value = allTrackedData.ctr;
+            unit = 'ratio';
+          } else if (kpi === 'clicks_28d') {
+            value = allTrackedData.clicks;
+            unit = 'count';
+          } else if (kpi === 'impressions_28d') {
+            value = allTrackedData.impressions;
+            unit = 'count';
+          } else if (kpi === 'avg_position') {
+            value = allTrackedData.avgPosition;
+            unit = 'position';
+          }
+          
+          if (value !== null) {
             for (const scope of scopes) {
-              for (const periodType of periodTypes) {
-                // Filter tasks by segment and scope
-                let filteredTasks = tasks;
-                
-                // Filter by scope
-                if (scope === 'active_only') {
-                  filteredTasks = filteredTasks.filter(t => 
-                    t.status && !['done', 'cancelled', 'deleted'].includes(t.status)
-                  );
-                }
-                
-                // Filter by segment (simplified - would need URL categorization logic)
-                if (segment !== 'all') {
-                  // TODO: Implement segment filtering based on URL patterns
-                  // For now, skip segment filtering
-                }
-
-                // Calculate median delta for this KPI
+              snapshots.push({
+                segment: 'all_tracked',
+                scope,
+                kpi,
+                value,
+                unit
+              });
+            }
+          }
+        }
+        
+        // Median Delta KPIs (for Median Delta Over Time chart) - from tasks
+        try {
+          const tasksResponse = await fetch(apiUrl('/api/optimisation/status?includeDeleted=false'));
+          if (tasksResponse.ok) {
+            const { tasks } = await tasksResponse.json();
+            
+            if (tasks && tasks.length > 0) {
+              // Filter to active tasks only
+              const activeTasks = tasks.filter(t => 
+                t.status && !['done', 'cancelled', 'deleted'].includes(t.status)
+              );
+              
+              const medianDeltaKpis = ['ctr_28d', 'clicks_28d', 'impressions_28d', 'avg_position', 'ai_citations', 'ai_overview'];
+              
+              for (const kpi of medianDeltaKpis) {
                 const deltas = [];
-                const values = [];
                 
-                filteredTasks.forEach(task => {
+                activeTasks.forEach(task => {
                   if (!task.baseline_metrics || !task.latest_metrics) return;
                   
                   let baselineValue = null;
                   let latestValue = null;
                   
-                  // Extract KPI value from metrics
                   if (kpi === 'ctr_28d') {
                     baselineValue = task.baseline_metrics.ctr_28d;
                     latestValue = task.latest_metrics.ctr_28d;
@@ -15420,46 +15617,50 @@
                   }
                   
                   if (baselineValue !== null && latestValue !== null) {
-                    const delta = latestValue - baselineValue;
-                    deltas.push(delta);
-                    values.push(latestValue);
+                    deltas.push(latestValue - baselineValue);
                   }
                 });
-
-                if (deltas.length === 0) continue;
-
-                // Calculate median
-                const sortedDeltas = [...deltas].sort((a, b) => a - b);
-                const sortedValues = [...values].sort((a, b) => a - b);
-                const medianDelta = sortedDeltas[Math.floor(sortedDeltas.length / 2)];
-                const medianValue = sortedValues[Math.floor(sortedValues.length / 2)];
-
-                // Determine period start
-                const periodStart = periodType === 'weekly' 
-                  ? weeklyStart.toISOString().split('T')[0]
-                  : monthlyStart.toISOString().split('T')[0];
-
-                // Save snapshot
-                await fetch('/api/portfolio/save-snapshot', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    periodStart,
-                    periodType,
-                    segment,
-                    kpi,
-                    scope,
-                    medianDelta,
-                    medianValue,
-                    taskCount: filteredTasks.length
-                  })
-                });
-
-                debugLog(`✓ Saved snapshot: ${segment}/${kpi}/${scope}/${periodType} (${deltas.length} tasks)`, 'info');
+                
+                if (deltas.length > 0) {
+                  const sortedDeltas = [...deltas].sort((a, b) => a - b);
+                  const medianDelta = sortedDeltas[Math.floor(sortedDeltas.length / 2)];
+                  
+                  snapshots.push({
+                    segment: 'all_tracked',
+                    scope: 'active_only',
+                    kpi: `median_delta_${kpi}`,
+                    value: medianDelta,
+                    unit: kpi === 'ctr_28d' ? 'pp' : (kpi === 'avg_position' ? 'position' : 'count'),
+                    meta: { taskCount: activeTasks.length }
+                  });
+                }
               }
             }
           }
+        } catch (taskError) {
+          debugLog(`⚠ Error fetching tasks for median deltas: ${taskError.message}`, 'warn');
         }
+        
+        // Save audit run and snapshots in one API call
+        const saveResponse = await fetch(apiUrl('/api/portfolio/save-run'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            windowDays,
+            windowStart: startDate.toISOString().split('T')[0],
+            windowEnd: endDate.toISOString().split('T')[0],
+            note: `Audit run for ${auditDate}`,
+            snapshots
+          })
+        });
+        
+        if (!saveResponse.ok) {
+          const errorText = await saveResponse.text();
+          throw new Error(`Failed to save portfolio run: ${saveResponse.status} - ${errorText}`);
+        }
+        
+        const result = await saveResponse.json();
+        debugLog(`✓ Created portfolio audit run: ${result.run.id} with ${result.snapshotsCount} snapshots`, 'success');
 
         debugLog('✓ Portfolio snapshots calculated and saved', 'success');
       } catch (err) {
