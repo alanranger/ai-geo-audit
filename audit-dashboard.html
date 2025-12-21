@@ -5731,6 +5731,41 @@
             await window.loadAllOptimisationTasks();
           }
           
+          // Add the newly created task to the moneyPagesRowDataByUrl map so it's available immediately
+          // This ensures the table shows "Manage" instead of "Track" right away
+          if (createdTask && createdTask.target_url) {
+            const normalizeUrlForDedupe = window.normalizeUrlForDedupe || ((url) => {
+              if (!url) return '';
+              let normalized = url.trim();
+              if (normalized.startsWith('/')) {
+                normalized = 'https://www.alanranger.com' + normalized;
+              } else if (!normalized.startsWith('http')) {
+                normalized = 'https://www.alanranger.com/' + normalized;
+              }
+              if (normalized.endsWith('/') && normalized !== 'https://www.alanranger.com/') {
+                normalized = normalized.slice(0, -1);
+              }
+              try {
+                const urlObj = new URL(normalized);
+                normalized = urlObj.origin.toLowerCase() + urlObj.pathname + urlObj.search + urlObj.hash;
+              } catch (e) {
+                normalized = normalized.toLowerCase();
+              }
+              return normalized;
+            });
+            
+            const normalizedTaskUrl = normalizeUrlForDedupe(createdTask.target_url);
+            // Store the task in a temporary cache that renderMoneyPagesTable can use
+            if (!window.moneyPagesTaskCache) {
+              window.moneyPagesTaskCache = new Map();
+            }
+            window.moneyPagesTaskCache.set(normalizedTaskUrl, createdTask);
+            console.log('[Money Pages] Added newly created task to cache:', normalizedTaskUrl, createdTask.id);
+          }
+          
+          // Small delay to ensure database is updated
+          await new Promise(resolve => setTimeout(resolve, 100));
+          
           // Refresh Money Pages table to show updated Track/Manage status
           if (typeof renderMoneyPagesTable === 'function' && window.moneyPagesMetrics) {
             const moneyPagesContainer = document.getElementById('money-pages-table-container');
@@ -23616,6 +23651,15 @@ Final Score: ${score}/100`;
         const existingOptTaskByUrl = new Map();
         // Store row data by normalized URL for Track button access
         window.moneyPagesRowDataByUrl = window.moneyPagesRowDataByUrl || new Map();
+        
+        // First, add any tasks from the temporary cache (newly created tasks)
+        if (window.moneyPagesTaskCache && window.moneyPagesTaskCache.size > 0) {
+          window.moneyPagesTaskCache.forEach((task, normalizedUrl) => {
+            existingOptTaskByUrl.set(normalizedUrl, task);
+          });
+          debugLog(`✓ Added ${window.moneyPagesTaskCache.size} tasks from cache to existingOptTaskByUrl`, 'info');
+        }
+        
         try {
           // Fetch existing optimisation tasks
           const adminKey = window.getAdminKey ? window.getAdminKey() : (sessionStorage.getItem('arp_admin_key') || localStorage.getItem('arp_admin_key') || '');
@@ -23632,10 +23676,13 @@ Final Score: ${score}/100`;
                   const taskUrl = task.target_url_clean || task.target_url || '';
                   if (taskUrl) {
                     const normalizedTaskUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(taskUrl) : taskUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
-                    existingOptTaskByUrl.set(normalizedTaskUrl, task);
+                    // Only add if not already in map (cache takes precedence for newly created tasks)
+                    if (!existingOptTaskByUrl.has(normalizedTaskUrl)) {
+                      existingOptTaskByUrl.set(normalizedTaskUrl, task);
+                    }
                   }
                 });
-                debugLog(`✓ Built existingOptTaskByUrl lookup: ${existingOptTaskByUrl.size} tasks`, 'info');
+                debugLog(`✓ Built existingOptTaskByUrl lookup: ${existingOptTaskByUrl.size} tasks total`, 'info');
               }
             }
           }
