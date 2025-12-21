@@ -5445,9 +5445,15 @@
         preservedEntries.forEach((value, key) => {
           if (!window.optimisationStatusCache.has(key)) {
             window.optimisationStatusCache.set(key, value);
-            console.log(`[Optimisation] Restored preserved immediate entry: key="${key}"`);
+            console.log(`[Optimisation] Restored preserved immediate entry: key="${key}", id="${value.id}", task_id="${value.task_id}"`);
           } else {
-            console.log(`[Optimisation] Immediate entry replaced by API: key="${key}"`);
+            const apiStatus = window.optimisationStatusCache.get(key);
+            console.log(`[Optimisation] Immediate entry replaced by API: key="${key}", immediateId="${value.id}", apiId="${apiStatus?.id}", apiTaskId="${apiStatus?.task_id}"`);
+            // Ensure API status has id field - if not, keep the immediate entry
+            if (!apiStatus?.id && !apiStatus?.task_id && value.id) {
+              console.warn(`[Optimisation] API status missing id field, keeping immediate entry: key="${key}"`);
+              window.optimisationStatusCache.set(key, value);
+            }
           }
         });
         
@@ -5784,6 +5790,16 @@
         const createdTaskId = createdTask?.id;
         const createdTaskUrl = createdTask?.target_url || targetUrl;
         
+        // Validate task was created successfully
+        if (!createdTaskId) {
+          console.error('[Money Pages] Task creation failed: no task ID returned', {
+            result,
+            createdTask,
+            response: result
+          });
+          throw new Error('Task creation failed: no task ID returned. Please try again.');
+        }
+        
         // Re-read source from modal (in case it was lost)
         const currentSource = modal.dataset.source || source || '';
 
@@ -5792,7 +5808,8 @@
           url: createdTaskUrl,
           source: currentSource,
           originalSource: source,
-          task: createdTask
+          task: createdTask,
+          taskKeys: createdTask ? Object.keys(createdTask) : []
         });
 
         // Close modal
@@ -5814,8 +5831,10 @@
           });
           
           // Build a status object that matches what the API would return
+          // CRITICAL: Ensure id field is set (API uses 'id', not 'task_id')
           const immediateStatus = {
-            id: createdTaskId,
+            id: createdTaskId, // This is the primary key field used by the API
+            task_id: createdTaskId, // Also include task_id for compatibility
             keyword_key: null,
             target_url: createdTaskUrl,
             target_url_clean: urlKey, // Use normalized URL
@@ -5824,9 +5843,19 @@
             objective_state: 'on_track', // Default for new tasks with baseline
             cycle_id: createdTask.current_cycle_id || null,
             cycle_number: 1,
+            cycle_active: 1, // Active cycle number
             due_at: createdTask.due_at || null,
-            days_remaining: null
+            days_remaining: null,
+            last_activity_at: new Date().toISOString() // Set to now for immediate entries
           };
+          
+          console.log('[Money Pages] Immediate status object created:', {
+            id: immediateStatus.id,
+            task_id: immediateStatus.task_id,
+            hasId: 'id' in immediateStatus,
+            hasTaskId: 'task_id' in immediateStatus,
+            status: immediateStatus.status
+          });
           
           // Ensure cache exists
           if (!window.optimisationStatusCache) {
@@ -24120,8 +24149,25 @@ Final Score: ${score}/100`;
                   
                   // Validate taskId exists
                   if (!taskId) {
-                    console.error('[Money Pages] Task ID missing in status object:', status);
+                    console.error('[Money Pages] Task ID missing in status object:', {
+                      status,
+                      hasId: 'id' in status,
+                      hasTaskId: 'task_id' in status,
+                      statusKeys: Object.keys(status),
+                      url: row.url
+                    });
                     return '<div style="display: flex; flex-direction: column; gap: 0.25rem; align-items: center;"><span style="color: #ef4444; font-size: 0.7rem;">Error: Task ID missing</span></div>';
+                  }
+                  
+                  // Debug: Log taskId extraction for landscape page
+                  if (row.url && row.url.includes('landscape-photography-workshops')) {
+                    console.log('[Money Pages] TaskId extraction for landscape page:', {
+                      url: row.url,
+                      statusId: status.id,
+                      statusTaskId: status.task_id,
+                      extractedTaskId: taskId,
+                      statusType: typeof taskId
+                    });
                   }
                   
                   // Escape taskId for use in onclick attribute (it's a UUID string, so needs quotes)
