@@ -177,6 +177,23 @@ export default async function handler(req, res) {
       days_remaining: progressData[status.id]?.days_remaining || null
     }));
 
+    // Debug logging for page-level tasks
+    const pageLevelTasks = enrichedStatuses.filter(s => !s.keyword_key || s.keyword_key.trim() === '');
+    if (pageLevelTasks.length > 0) {
+      console.log('[Optimisation Status] API returning', pageLevelTasks.length, 'page-level tasks');
+      pageLevelTasks.forEach(task => {
+        if (task.target_url_clean && task.target_url_clean.includes('landscape-photography-workshops')) {
+          console.log('[Optimisation Status] Landscape page task in API response:', {
+            id: task.id,
+            target_url_clean: task.target_url_clean,
+            keyword_key: task.keyword_key,
+            task_type: task.task_type,
+            status: task.status
+          });
+        }
+      });
+    }
+
     return sendJSON(res, 200, { statuses: enrichedStatuses });
   } catch (error) {
     console.error('[Optimisation Status] Error:', error);
