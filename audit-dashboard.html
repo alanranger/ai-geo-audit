@@ -5440,7 +5440,8 @@
           const url = row.best_url || row.targetUrl || row.ranking_url || '';
           const urlKey = window.cleanUrlForKey ? window.cleanUrlForKey(url) : url.toLowerCase().trim();
           // Build all possible cache keys for this row (different task types)
-          ['on_page', 'keyword', 'ai'].forEach(taskType => {
+          // 'on_page' for page-level tasks, 'content' for keyword-level tasks from Ranking & AI
+          ['on_page', 'content'].forEach(taskType => {
             const cacheKey = kwKey ? `${kwKey}::${urlKey}::${taskType}` : `::${urlKey}::${taskType}`;
             keysBeingFetched.add(cacheKey);
           });
@@ -5577,7 +5578,7 @@
       const urlKey = window.cleanUrlForKey ? window.cleanUrlForKey(url) : url.toLowerCase().trim();
       
       // For page-level tasks (on_page), keyword can be empty - only require urlKey
-      // For keyword-level tasks, require both kwKey and urlKey
+      // For keyword-level tasks (content, keyword, etc.), require both kwKey and urlKey
       if (taskType === 'on_page') {
         if (!urlKey) return null;
         // For page-level tasks, use empty string for keyword_key
@@ -5701,7 +5702,9 @@
       
       document.getElementById('track-task-type').value = taskType;
       document.getElementById('track-status').value = 'planned';
-      document.getElementById('track-title').value = '';
+      // For keyword-level tasks, suggest keyword as title; for page-level, leave empty
+      const suggestedTitle = (taskType !== 'on_page' && row.keyword) ? row.keyword : '';
+      document.getElementById('track-title').value = suggestedTitle;
       document.getElementById('track-notes').value = '';
       // Reset objective fields
       document.getElementById('track-objective-title').value = '';
@@ -7188,10 +7191,20 @@
         const cycleStartDate = activeCycle.start_date ? new Date(activeCycle.start_date) : 
                               (activeCycle.started_at ? new Date(activeCycle.started_at) : null);
         if (cycleStartDate) {
-          eligibleMeasurements = eligibleMeasurements.filter(m => {
+          const filtered = eligibleMeasurements.filter(m => {
             const mDate = m.captured_at ? new Date(m.captured_at) : null;
             return mDate && mDate >= cycleStartDate;
           });
+          // If filtering by cycle date results in no measurements, but we only have 1 measurement total,
+          // use that measurement anyway (it's likely the baseline captured at task creation)
+          if (filtered.length > 0) {
+            eligibleMeasurements = filtered;
+          } else if (eligibleMeasurements.length === 1) {
+            // Keep the single measurement even if it's before cycle start (baseline case)
+            // Don't filter it out
+          } else {
+            eligibleMeasurements = filtered;
+          }
         }
       }
 
@@ -39958,7 +39971,9 @@ Final Score: ${score}/100`;
         const tdOptimisation = document.createElement("td");
         tdOptimisation.style.position = "relative";
         
-        const taskType = 'on_page'; // Default task type for this integration
+        // Ranking & AI tasks are keyword-level tasks, use 'content' task type
+        // (not 'on_page' which is for page-level tasks without keywords)
+        const taskType = 'content';
         const status = window.getOptimisationStatus(row, taskType);
         
         // Safety check: ensure status object has expected structure
