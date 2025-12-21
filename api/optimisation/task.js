@@ -126,10 +126,26 @@ export default async function handler(req, res) {
       return sendJSON(res, 500, { error: taskError.message });
     }
 
-    // Create Cycle 1
+    // Create Cycle 1 - check if cycles already exist for this task
+    // If cycles exist, find the max cycle_no and increment, otherwise start at 1
+    let cycleNo = 1;
+    const { data: existingCycles } = await supabase
+      .from('optimisation_task_cycles')
+      .select('cycle_no')
+      .eq('task_id', task.id)
+      .order('cycle_no', { ascending: false })
+      .limit(1);
+    
+    if (existingCycles && existingCycles.length > 0) {
+      cycleNo = (existingCycles[0].cycle_no || 0) + 1;
+      console.log(`[Optimisation Task] Existing cycles found, creating Cycle ${cycleNo}`);
+    } else {
+      console.log(`[Optimisation Task] No existing cycles, creating Cycle 1`);
+    }
+    
     const cycleData = {
       task_id: task.id,
-      cycle_no: 1,
+      cycle_no: cycleNo,
       status: status || 'planned',
       objective_title: objective_title || null,
       primary_kpi: primary_kpi || null,
