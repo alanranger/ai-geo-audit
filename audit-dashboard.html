@@ -5750,6 +5750,54 @@
         // Close modal
         modal.style.display = 'none';
         
+        // Handle Money Pages vs Ranking & AI differently
+        if (source === 'money_pages' && createdTask && createdTaskUrl) {
+          // CRITICAL: Immediately add the created task to the cache so the table can find it
+          // This avoids waiting for the database view to refresh
+          const urlKey = window.cleanUrlForKey ? window.cleanUrlForKey(createdTaskUrl) : createdTaskUrl.toLowerCase().trim();
+          const cacheKey = `::${urlKey}::on_page`;
+          
+          // Build a status object that matches what the API would return
+          const immediateStatus = {
+            id: createdTaskId,
+            keyword_key: null,
+            target_url: createdTaskUrl,
+            target_url_clean: urlKey, // Use normalized URL
+            task_type: 'on_page',
+            status: createdTask.status || 'planned',
+            objective_state: 'on_track', // Default for new tasks with baseline
+            cycle_id: createdTask.current_cycle_id || null,
+            cycle_number: 1,
+            due_at: createdTask.due_at || null,
+            days_remaining: null
+          };
+          
+          // Ensure cache exists
+          if (!window.optimisationStatusCache) {
+            window.optimisationStatusCache = new Map();
+          }
+          
+          // Add to cache immediately
+          window.optimisationStatusCache.set(cacheKey, immediateStatus);
+          console.log('[Money Pages] ✓ Immediately cached created task:', {
+            cacheKey,
+            taskId: createdTaskId,
+            url: createdTaskUrl,
+            urlKey,
+            status: immediateStatus.status
+          });
+          
+          // Also add to temporary cache for immediate UI update
+          if (!window.moneyPagesTaskCache) {
+            window.moneyPagesTaskCache = new Map();
+          }
+          window.moneyPagesTaskCache.set(urlKey, {
+            id: createdTaskId,
+            status: immediateStatus.status,
+            cycle_number: 1
+          });
+        }
+        
         // Reload all tasks so the new task is available for the drawer
         if (typeof window.loadAllOptimisationTasks === 'function') {
           await window.loadAllOptimisationTasks();
@@ -5758,9 +5806,10 @@
         // Handle Money Pages vs Ranking & AI differently
         if (source === 'money_pages') {
           // Small delay to ensure database is updated and view is refreshed
-          await new Promise(resolve => setTimeout(resolve, 500));
+          await new Promise(resolve => setTimeout(resolve, 1000));
           
           // Refresh optimisation statuses cache (same as Ranking & AI)
+          // This will update the cache with the latest from the database
           if (typeof window.fetchOptimisationStatuses === 'function' && window.moneyPagesMetrics && window.moneyPagesMetrics.rows) {
             // Create row-like objects for fetchOptimisationStatuses
             const statusRows = window.moneyPagesMetrics.rows.map(row => ({
@@ -5780,7 +5829,8 @@
               console.log('[Money Pages] Status lookup test for created task:', {
                 url: createdTaskUrl,
                 found: !!testStatus,
-                status: testStatus?.status
+                status: testStatus?.status,
+                taskId: testStatus?.id
               });
             }
           }
@@ -23811,7 +23861,38 @@ Final Score: ${score}/100`;
                     targetUrl: row.url,
                     ranking_url: row.url
                   };
-                  const status = window.getOptimisationStatus ? window.getOptimisationStatus(statusRow, taskType) : null;
+                  
+                  // First check the main cache
+                  let status = window.getOptimisationStatus ? window.getOptimisationStatus(statusRow, taskType) : null;
+                  
+                  // If not found, check temporary cache (for newly created tasks)
+                  if (!status && window.moneyPagesTaskCache) {
+                    const urlKey = window.cleanUrlForKey ? window.cleanUrlForKey(row.url) : row.url.toLowerCase().trim();
+                    const tempTask = window.moneyPagesTaskCache.get(urlKey);
+                    if (tempTask) {
+                      // Build a status object from the temporary cache
+                      status = {
+                        id: tempTask.id,
+                        status: tempTask.status || 'planned',
+                        cycle_number: tempTask.cycle_number || 1,
+                        cycle_id: tempTask.cycle_id || null,
+                        objective_state: 'on_track'
+                      };
+                      console.log('[Money Pages] Using temporary cache for:', row.url, status);
+                    }
+                  }
+                  
+                  // Debug logging for landscape page
+                  if (row.url && row.url.includes('landscape-photography-workshops')) {
+                    console.log('[Money Pages] Status lookup for landscape page:', {
+                      url: row.url,
+                      found: !!status,
+                      status: status?.status,
+                      taskId: status?.id,
+                      cacheSize: window.optimisationStatusCache ? window.optimisationStatusCache.size : 0,
+                      tempCacheSize: window.moneyPagesTaskCache ? window.moneyPagesTaskCache.size : 0
+                    });
+                  }
                   
                   // Debug logging
                   if (row.url && row.url.includes('landscape-photography-workshops')) {
