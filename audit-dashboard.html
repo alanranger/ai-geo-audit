@@ -24931,6 +24931,20 @@ Final Score: ${score}/100`;
           }, 100);
         };
         
+        // CRITICAL: Fetch optimisation statuses for ALL rows before initial render
+        // This ensures the cache is populated on page load/refresh
+        if (typeof window.fetchOptimisationStatuses === 'function' && rows.length > 0) {
+          console.log('[Money Pages] Fetching optimisation statuses for all rows on page load...', rows.length);
+          const allStatusRows = rows.map(row => ({
+            keyword: '', // Empty for page-level tasks
+            best_url: row.url,
+            targetUrl: row.url,
+            ranking_url: row.url
+          }));
+          await window.fetchOptimisationStatuses(allStatusRows);
+          console.log('[Money Pages] ✓ Status cache populated on page load:', window.optimisationStatusCache?.size || 0, 'entries');
+        }
+        
         // Initial render
         const currentPage = window.moneyPagesCurrentPage || 1;
         const rowsPerPage = window.moneyPagesRowsPerPage || 10;
