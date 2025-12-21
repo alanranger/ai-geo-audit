@@ -30,13 +30,18 @@ export default async function handler(req, res) {
   try {
     const { keyword_keys, url_keys } = req.body;
 
-    if (!keyword_keys || !Array.isArray(keyword_keys) || keyword_keys.length === 0) {
+    if (!keyword_keys || !Array.isArray(keyword_keys)) {
       return sendJSON(res, 400, { error: 'keyword_keys array required' });
     }
 
     if (!url_keys || !Array.isArray(url_keys)) {
       return sendJSON(res, 400, { error: 'url_keys array required' });
     }
+    
+    // For page-level tasks, keyword_keys can contain empty strings
+    // Filter out empty strings and null values, but keep the array structure
+    const validKeywordKeys = keyword_keys.filter(k => k && k.trim() !== '');
+    const hasPageLevelTasks = keyword_keys.some(k => !k || k.trim() === '');
 
     const supabase = createClient(
       need('SUPABASE_URL'),
@@ -59,8 +64,37 @@ export default async function handler(req, res) {
     let query = supabase
       .from('vw_optimisation_task_status')
       .select('*')
-      .in('keyword_key', keyword_keys)
       .neq('status', 'deleted'); // Exclude deleted tasks
+
+    // Handle keyword_keys: if we have valid keyword keys, filter by them
+    // If we have page-level tasks (empty keyword_key), we need to query differently
+    if (validKeywordKeys.length > 0) {
+      query = query.in('keyword_key', validKeywordKeys);
+    }
+    
+    // For page-level tasks (empty keyword_key), we need to query separately
+    // and combine results. If we have both keyword-level and page-level tasks,
+    // we'll need to do two queries and merge.
+    let pageLevelStatuses = [];
+    if (hasPageLevelTasks && url_keys.length > 0) {
+      // Query for page-level tasks (keyword_key is null or empty string)
+      const pageLevelQuery = supabase
+        .from('vw_optimisation_task_status')
+        .select('*')
+        .in('target_url_clean', url_keys)
+        .neq('status', 'deleted')
+        .eq('task_type', 'on_page');
+      
+      // Filter for tasks where keyword_key is null or empty
+      // PostgreSQL: use OR condition for null/empty keyword_key
+      const { data: pageLevelData, error: pageLevelError } = await pageLevelQuery.or('keyword_key.is.null,keyword_key.eq.');
+      
+      if (pageLevelError) {
+        console.error('[Optimisation Status] Page-level query error:', pageLevelError);
+      } else if (pageLevelData) {
+        pageLevelStatuses = pageLevelData.filter(s => !s.keyword_key || s.keyword_key.trim() === '');
+      }
+    }
 
     if (url_keys.length > 0) {
       query = query.in('target_url_clean', url_keys);
@@ -70,12 +104,28 @@ export default async function handler(req, res) {
       query = query.eq('owner_user_id', userId);
     }
 
-    const { data: statuses, error: statusError } = await query;
+    let statuses = [];
+    if (validKeywordKeys.length > 0 || url_keys.length > 0) {
+      const { data: keywordStatuses, error: statusError } = await query;
 
-    if (statusError) {
-      console.error('[Optimisation Status] Query error:', statusError);
-      return sendJSON(res, 500, { error: statusError.message });
+      if (statusError) {
+        console.error('[Optimisation Status] Query error:', statusError);
+        return sendJSON(res, 500, { error: statusError.message });
+      }
+      
+      statuses = keywordStatuses || [];
     }
+    
+    // Merge page-level statuses with keyword-level statuses
+    // Deduplicate by task id
+    const statusMap = new Map();
+    statuses.forEach(s => statusMap.set(s.id, s));
+    pageLevelStatuses.forEach(s => {
+      if (!statusMap.has(s.id)) {
+        statusMap.set(s.id, s);
+      }
+    });
+    statuses = Array.from(statusMap.values());
 
     // Get progress data for all tasks
     const taskIds = (statuses || []).map(s => s.id).filter(Boolean);
