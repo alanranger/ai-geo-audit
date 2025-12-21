@@ -5406,11 +5406,14 @@
         // For page-level tasks, keyword_key is null or empty string - use empty string for consistency
         (data.statuses || []).forEach(status => {
           const keywordKey = status.keyword_key || '';
-          const key = `${keywordKey}::${status.target_url_clean}::${status.task_type || 'on_page'}`;
+          // Normalize target_url_clean using cleanUrlForKey to ensure consistent lookup
+          // The API returns target_url_clean, but we need to normalize it the same way we normalize URLs in getOptimisationStatus
+          const normalizedUrl = window.cleanUrlForKey ? window.cleanUrlForKey(status.target_url_clean || status.target_url || '') : (status.target_url_clean || status.target_url || '').toLowerCase().trim();
+          const key = `${keywordKey}::${normalizedUrl}::${status.task_type || 'on_page'}`;
           window.optimisationStatusCache.set(key, status);
           // Debug: Log page-level tasks
           if (!status.keyword_key || status.keyword_key.trim() === '') {
-            console.log(`[Optimisation] Cached page-level task status: key="${key}", url="${status.target_url_clean}", status="${status.status}"`);
+            console.log(`[Optimisation] Cached page-level task status: key="${key}", original_url="${status.target_url_clean}", normalized_url="${normalizedUrl}", status="${status.status}"`);
           }
         });
 
@@ -5755,6 +5758,9 @@
         
         // Handle Money Pages vs Ranking & AI differently
         if (source === 'money_pages') {
+          // Small delay to ensure database is updated
+          await new Promise(resolve => setTimeout(resolve, 200));
+          
           // Refresh optimisation statuses cache (same as Ranking & AI)
           if (typeof window.fetchOptimisationStatuses === 'function' && window.moneyPagesMetrics && window.moneyPagesMetrics.rows) {
             // Create row-like objects for fetchOptimisationStatuses
@@ -5764,7 +5770,9 @@
               targetUrl: row.url,
               ranking_url: row.url
             }));
+            console.log('[Money Pages] Fetching statuses for', statusRows.length, 'rows after task creation');
             await window.fetchOptimisationStatuses(statusRows);
+            console.log('[Money Pages] Status cache size after fetch:', window.optimisationStatusCache ? window.optimisationStatusCache.size : 0);
           }
           
           // Refresh Money Pages table to show updated Track/Manage status
@@ -5773,6 +5781,7 @@
             if (moneyPagesContainer) {
               const currentPage = window.moneyPagesCurrentPage || 1;
               const rowsPerPage = window.moneyPagesRowsPerPage || 10;
+              console.log('[Money Pages] Re-rendering table after task creation...');
               moneyPagesContainer.innerHTML = await renderMoneyPagesTable(window.moneyPagesMetrics.rows, currentPage, rowsPerPage);
               // Re-attach event handlers (they're set up in the render function)
               // Note: renderMoneyPagesTable already calls these handlers, but we need to ensure they're attached after re-render
