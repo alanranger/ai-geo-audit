@@ -5486,10 +5486,10 @@
           window.optimisationStatusCache.set(key, status);
           // Debug: Log page-level tasks with id verification
           if (!keywordKey) {
-            console.log(`[Optimisation] Cached page-level task status: key="${key}", id="${status.id}", original_url="${status.target_url_clean}", normalized_url="${normalizedUrl}", status="${status.status}"`);
+            debugLog(`[Optimisation] Cached page-level task: key="${key}", id="${status.id}", url="${status.target_url_clean}", normalized="${normalizedUrl}", status="${status.status}"`, 'info');
             // Special debug for landscape page
             if (normalizedUrl.includes('landscape-photography-workshops') || status.target_url_clean?.includes('landscape-photography-workshops')) {
-              console.log(`[Optimisation] ✓ Landscape page task cached: key="${key}", id="${status.id}", status="${status.status}"`);
+              debugLog(`[Optimisation] ✓ Landscape page task cached: key="${key}", id="${status.id}", status="${status.status}"`, 'success');
             }
           }
         });
@@ -24064,10 +24064,7 @@ Final Score: ${score}/100`;
         // CRITICAL: DO NOT fetch statuses here - the caller should fetch before calling renderMoneyPagesTable
         // Fetching here causes the cache to be cleared every time the table renders, losing status information
         // Instead, we rely on the cache that was populated by the caller
-        console.log('[Money Pages Opportunity] Rendering table using existing cache:', {
-          cacheSize: window.optimisationStatusCache?.size || 0,
-          rowsCount: moneyRows.length
-        });
+        debugLog(`[Money Pages Opportunity] Rendering table using existing cache: cacheSize=${window.optimisationStatusCache?.size || 0}, rowsCount=${moneyRows.length}`, 'info');
         
         pageRows.forEach((row, idx) => {
           const isEven = idx % 2 === 0;
@@ -27487,20 +27484,8 @@ Final Score: ${score}/100`;
             if (p.url && p.url.includes('landscape-photography-workshops')) {
               const urlKey = window.cleanUrlForKey ? window.cleanUrlForKey(p.url) : p.url.toLowerCase().trim();
               const expectedKey = `::${urlKey}::${taskType}`;
-              console.log('[Money Pages Priority] Landscape page status lookup:', {
-                url: p.url,
-                urlKey,
-                expectedKey,
-                found: !!optimisationStatus,
-                status: optimisationStatus?.status,
-                id: optimisationStatus?.id,
-                cacheSize: window.optimisationStatusCache?.size || 0,
-                cacheHasKey: window.optimisationStatusCache?.has(expectedKey),
-                cachedValue: window.optimisationStatusCache?.get(expectedKey) ? {
-                  id: window.optimisationStatusCache.get(expectedKey).id,
-                  status: window.optimisationStatusCache.get(expectedKey).status
-                } : null
-              });
+              const cacheValue = window.optimisationStatusCache?.get(expectedKey);
+              debugLog(`[Money Pages Priority] Landscape page status lookup: url="${p.url}", urlKey="${urlKey}", expectedKey="${expectedKey}", found=${!!optimisationStatus}, status="${optimisationStatus?.status || 'null'}", id="${optimisationStatus?.id || 'null'}", cacheSize=${window.optimisationStatusCache?.size || 0}, cacheHasKey=${window.optimisationStatusCache?.has(expectedKey)}, cachedId="${cacheValue?.id || 'null'}", cachedStatus="${cacheValue?.status || 'null'}"`, optimisationStatus ? 'success' : 'warn');
             }
             // CRITICAL: Use id field (not taskId) - API returns 'id', not 'taskId'
             const taskId = hasTask ? (optimisationStatus.id || optimisationStatus.task_id || null) : null;
