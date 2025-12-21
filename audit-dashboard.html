@@ -27304,11 +27304,13 @@ Final Score: ${score}/100`;
         const endIndex = startIndex + rowsPerPage;
         const pageRows = rows.slice(startIndex, endIndex);
         
-        // CRITICAL: Fetch optimisation statuses from database for ALL rows (not just current page)
+        // CRITICAL: Fetch optimisation statuses from database for ALL source pages (not just filtered rows)
         // This ensures status is always up-to-date and persists across tab switches
-        if (typeof window.fetchOptimisationStatuses === 'function' && rows.length > 0) {
-          console.log('[Money Pages Priority] Fetching optimisation statuses from database for all rows:', rows.length);
-          const allStatusRows = rows.map(p => ({
+        // Use sourcePages (all data) not rows (filtered) to ensure we fetch for all pages
+        const allSourcePages = sourcePages || [];
+        if (typeof window.fetchOptimisationStatuses === 'function' && allSourcePages.length > 0) {
+          console.log('[Money Pages Priority] Fetching optimisation statuses from database for all source pages:', allSourcePages.length, '(filtered rows:', rows.length, ')');
+          const allStatusRows = allSourcePages.map(p => ({
             keyword: '', // Empty for page-level tasks
             best_url: p.url,
             targetUrl: p.url,
@@ -27317,6 +27319,12 @@ Final Score: ${score}/100`;
           // Wait for statuses to be fetched before rendering table
           await window.fetchOptimisationStatuses(allStatusRows);
           console.log('[Money Pages Priority] ✓ Status cache populated from database:', window.optimisationStatusCache?.size || 0, 'entries');
+        } else {
+          console.log('[Money Pages Priority] Skipping status fetch:', {
+            hasFunction: typeof window.fetchOptimisationStatuses === 'function',
+            sourcePagesCount: allSourcePages.length,
+            rowsCount: rows.length
+          });
         }
         
         // Render sortable header with Ranking & AI styling
