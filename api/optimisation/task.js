@@ -256,16 +256,30 @@ export default async function handler(req, res) {
         }
       };
 
-      const { error: measurementEventError } = await supabase
+      const { data: insertedMeasurement, error: measurementEventError } = await supabase
         .from('optimisation_task_events')
-        .insert(measurementEventData);
+        .insert(measurementEventData)
+        .select()
+        .single();
 
       if (measurementEventError) {
         console.error('[Optimisation Task] Baseline measurement event insert error:', measurementEventError);
-        console.error('[Optimisation Task] Measurement event data that failed:', measurementEventData);
-        // Don't fail the request, just log
+        console.error('[Optimisation Task] Measurement event data that failed:', JSON.stringify(measurementEventData, null, 2));
+        console.error('[Optimisation Task] Full error details:', {
+          code: measurementEventError.code,
+          message: measurementEventError.message,
+          details: measurementEventError.details,
+          hint: measurementEventError.hint
+        });
+        // Don't fail the request, but log extensively for debugging
       } else {
         console.log('[Optimisation Task] ✓ Baseline measurement created successfully');
+        console.log('[Optimisation Task] Inserted measurement event:', {
+          id: insertedMeasurement?.id,
+          event_type: insertedMeasurement?.event_type,
+          is_baseline: insertedMeasurement?.is_baseline,
+          metrics: insertedMeasurement?.metrics
+        });
       }
     } else {
       console.warn('[Optimisation Task] ⚠️ No baselineMetrics provided - baseline measurement will not be created');
