@@ -5446,8 +5446,12 @@
           });
         }
         
-        // Clear cache and repopulate from API (preserved entries will be restored after)
-        window.optimisationStatusCache.clear();
+        // CRITICAL: Instead of clearing the entire cache, only clear entries for keys we're fetching
+        // This preserves all other entries (e.g., from other tabs, other tables)
+        keysBeingFetched.forEach(key => {
+          window.optimisationStatusCache.delete(key);
+        });
+        console.log(`[Optimisation] Cleared ${keysBeingFetched.size} keys from cache, preserved ${preservedEntries.size} entries`);
 
         // Build cache map: key = keyword_key::target_url_clean::task_type
         // For page-level tasks, keyword_key is null or empty string - use empty string for consistency
