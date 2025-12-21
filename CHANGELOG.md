@@ -2,6 +2,43 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2025-12-21] - v1.7.1 - Traffic Lights & Ranking & AI Task Creation Fixes
+
+### Fixed
+- **Traffic Lights Classification**: Fixed traffic lights showing tasks in multiple metric columns
+  - Now only counts tasks that have the matching metric as their objective KPI
+  - CTR task only appears in CTR column, not in Impressions/Clicks/Rank columns
+  - AI Citations task only appears in AI Citations column
+  - Prevents double-counting and confusion
+- **Traffic Lights Baseline Detection**: Fixed "No baselineLatest" warnings for tasks with single measurement
+  - Updated `getBaselineLatest` to handle single measurement case when filtered by cycle start date
+  - If only 1 measurement exists and it's filtered out by cycle date, use it anyway (baseline case)
+  - Ensures traffic lights can classify tasks with baseline-only measurements
+- **Ranking & AI Task Creation**: Fixed missing keyword and title when creating tasks from Ranking & AI
+  - Changed task type from `'on_page'` to `'content'` for keyword-level tasks
+  - API now preserves keyword_text for non-page-level tasks (only forces empty for `'on_page'`)
+  - Modal now suggests keyword as title for keyword-level tasks (doesn't reset to empty)
+  - Updated cache key building to include `'content'` task type
+  - Status lookup now correctly finds tasks created from Ranking & AI
+- **Bulk Update Button**: Fixed to respect "Include Test Tasks" checkbox
+  - Excludes test tasks from bulk update if checkbox is unchecked
+  - Confirmation message shows correct count (excluding test tasks if unchecked)
+
+### Changed
+- **Debug Logging**: Moved from browser console to UI debug panel
+  - All traffic lights debug logs now appear in UI debug panel
+  - Easier to diagnose issues without opening browser console
+
+### Technical
+- **Task Type Mapping**: 
+  - Ranking & AI tasks now use `'content'` task type (keyword-level)
+  - Money Pages tasks use `'on_page'` task type (page-level)
+  - Status API handles both types correctly
+- **Traffic Lights Logic**:
+  - Added objective KPI to metric key mapping
+  - Only classifies metrics that match task's objective KPI
+  - Prevents tasks from appearing in irrelevant metric columns
+
 ## [2025-12-19] - v1.7.0 - Optimisation Tracking Module (Phases 1-8 Complete)
 
 ### Added
