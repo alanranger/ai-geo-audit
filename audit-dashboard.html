@@ -2932,6 +2932,10 @@
         <span class="aigeo-nav-icon">📊</span>
         <span>Overview</span>
       </button>
+      <button class="aigeo-nav-item" data-panel="portfolio">
+        <span class="aigeo-nav-icon">📈</span>
+        <span>Portfolio</span>
+      </button>
       <button class="aigeo-nav-item" data-panel="authority">
         <span class="aigeo-nav-icon">🎯</span>
         <span>Authority</span>
@@ -3356,6 +3360,101 @@
       <!-- Authority Panel -->
       <section class="aigeo-panel" data-panel="authority">
         <!-- Authority - Behaviour & Ranking section will be inserted here by JS -->
+      </section>
+
+      <!-- Portfolio Panel -->
+      <section class="aigeo-panel" data-panel="portfolio">
+        <div class="portfolio-container" style="padding: 2rem;">
+          <h1 style="margin-bottom: 2rem;">Portfolio Optimisation Trends</h1>
+          
+          <!-- Chart A: Median Delta Over Time -->
+          <div class="portfolio-chart-section" style="margin-bottom: 3rem;">
+            <div class="card" style="padding: 1.5rem;">
+              <h2 style="margin-top: 0; margin-bottom: 1rem;">Median Delta Over Time</h2>
+              <p style="color: #666; margin-bottom: 1.5rem;">Portfolio movement over time using rolling 28d snapshots</p>
+              
+              <!-- Controls -->
+              <div class="portfolio-controls" style="display: flex; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; align-items: center;">
+                <div>
+                  <label for="portfolio-kpi-select" style="display: block; margin-bottom: 0.25rem; font-weight: 600;">KPI:</label>
+                  <select id="portfolio-kpi-select" style="padding: 0.5rem; min-width: 180px;">
+                    <option value="ctr_28d">CTR (28d)</option>
+                    <option value="clicks_28d">Clicks (28d)</option>
+                    <option value="impressions_28d">Impressions (28d)</option>
+                    <option value="avg_position">Avg Position</option>
+                    <option value="ai_citations">AI Citations</option>
+                    <option value="ai_overview">AI Overview</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="portfolio-segment-select" style="display: block; margin-bottom: 0.25rem; font-weight: 600;">Segment:</label>
+                  <select id="portfolio-segment-select" style="padding: 0.5rem; min-width: 150px;">
+                    <option value="all">All tracked</option>
+                    <option value="money_pages">Money Pages</option>
+                    <option value="landing">Landing</option>
+                    <option value="event">Event</option>
+                    <option value="product">Product</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="portfolio-scope-toggle" style="display: block; margin-bottom: 0.25rem; font-weight: 600;">Scope:</label>
+                  <select id="portfolio-scope-toggle" style="padding: 0.5rem; min-width: 150px;">
+                    <option value="active_only">Active cycles only</option>
+                    <option value="all">All</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="portfolio-time-grain" style="display: block; margin-bottom: 0.25rem; font-weight: 600;">Time Grain:</label>
+                  <select id="portfolio-time-grain" style="padding: 0.5rem; min-width: 120px;">
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                </div>
+              </div>
+              
+              <!-- Chart Canvas -->
+              <div style="position: relative; height: 400px;">
+                <canvas id="portfolio-delta-chart"></canvas>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Table B: Monthly KPI Tracker -->
+          <div class="portfolio-table-section">
+            <div class="card" style="padding: 1.5rem;">
+              <h2 style="margin-top: 0; margin-bottom: 1rem;">Monthly KPI Tracker</h2>
+              <p style="color: #666; margin-bottom: 1.5rem;">Executive summary by segment over time (rolling 12 months)</p>
+              
+              <!-- KPI Selector for Table -->
+              <div style="margin-bottom: 1.5rem;">
+                <label for="portfolio-table-kpi-select" style="display: block; margin-bottom: 0.25rem; font-weight: 600;">KPI:</label>
+                <select id="portfolio-table-kpi-select" style="padding: 0.5rem; min-width: 180px;">
+                  <option value="ctr_28d">CTR (28d)</option>
+                  <option value="clicks_28d">Clicks (28d)</option>
+                  <option value="impressions_28d">Impressions (28d)</option>
+                  <option value="avg_position">Avg Position</option>
+                  <option value="ai_citations">AI Citations</option>
+                  <option value="ai_overview">AI Overview</option>
+                </select>
+              </div>
+              
+              <!-- Table Container -->
+              <div style="overflow-x: auto;">
+                <table id="portfolio-monthly-table" class="portfolio-table" style="width: 100%; border-collapse: collapse;">
+                  <thead>
+                    <tr>
+                      <th style="text-align: left; padding: 0.75rem; border-bottom: 2px solid #ddd; font-weight: 600;">Segment</th>
+                      <!-- Month columns will be inserted here by JS -->
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <!-- Rows will be inserted here by JS -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- Overview Panel -->
@@ -14536,6 +14635,15 @@
         const isActive = p.dataset.panel === panelId;
         p.classList.toggle('is-active', isActive);
         
+        // CRITICAL: When Portfolio tab becomes active, initialize charts
+        if (isActive && panelId === 'portfolio') {
+          setTimeout(() => {
+            if (typeof window.renderPortfolioTab === 'function') {
+              window.renderPortfolioTab();
+            }
+          }, 100);
+        }
+        
         // CRITICAL: When Money Pages tab becomes active, re-fetch statuses from database
         if (isActive && panelId === 'money') {
           console.log('[Money Pages] Tab activated - checking if re-fetch needed...', {
@@ -14959,6 +15067,410 @@
 
       // Mark panel as initialized
       panelInitDone.add(panelId);
+    }
+
+    // Portfolio Tab Functions
+    let portfolioDeltaChart = null;
+    
+    window.renderPortfolioTab = async function() {
+      debugLog('📈 Rendering Portfolio tab...', 'info');
+      
+      // Initialize chart if not already done
+      if (!portfolioDeltaChart) {
+        await initializePortfolioChart();
+      }
+      
+      // Load and render data
+      await loadPortfolioData();
+      await renderPortfolioTable();
+    };
+
+    async function initializePortfolioChart() {
+      const canvas = document.getElementById('portfolio-delta-chart');
+      if (!canvas) {
+        debugLog('⚠ Portfolio chart canvas not found', 'warn');
+        return;
+      }
+
+      const ctx = canvas.getContext('2d');
+      
+      // Destroy existing chart if it exists
+      if (portfolioDeltaChart) {
+        portfolioDeltaChart.destroy();
+      }
+
+      portfolioDeltaChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: [],
+          datasets: [{
+            label: 'Median Delta',
+            data: [],
+            borderColor: 'rgb(59, 130, 246)',
+            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+            tension: 0.4,
+            fill: true
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              display: true,
+              position: 'top'
+            },
+            tooltip: {
+              mode: 'index',
+              intersect: false
+            }
+          },
+          scales: {
+            x: {
+              display: true,
+              title: {
+                display: true,
+                text: 'Date',
+                font: { size: 14, weight: 'bold' }
+              },
+              ticks: {
+                font: { size: 12, weight: 'bold' }
+              }
+            },
+            y: {
+              display: true,
+              title: {
+                display: true,
+                text: 'Median Delta',
+                font: { size: 14, weight: 'bold' }
+              },
+              ticks: {
+                font: { size: 12, weight: 'bold' }
+              }
+            }
+          }
+        }
+      });
+    }
+
+    async function loadPortfolioData() {
+      const kpi = document.getElementById('portfolio-kpi-select')?.value || 'ctr_28d';
+      const segment = document.getElementById('portfolio-segment-select')?.value || 'all';
+      const scope = document.getElementById('portfolio-scope-toggle')?.value || 'all';
+      const timeGrain = document.getElementById('portfolio-time-grain')?.value || 'weekly';
+
+      try {
+        const params = new URLSearchParams({ kpi, segment, scope, timeGrain });
+        const response = await fetch(`/api/portfolio/snapshots?${params}`);
+        const data = await response.json();
+
+        if (data.snapshots && portfolioDeltaChart) {
+          const labels = data.snapshots.map(s => {
+            const date = new Date(s.period_start);
+            return timeGrain === 'weekly' 
+              ? date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
+              : date.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+          });
+          const values = data.snapshots.map(s => parseFloat(s.median_delta || 0));
+
+          portfolioDeltaChart.data.labels = labels;
+          portfolioDeltaChart.data.datasets[0].data = values;
+          portfolioDeltaChart.data.datasets[0].label = `Median Delta (${kpi})`;
+          portfolioDeltaChart.update();
+        }
+      } catch (err) {
+        debugLog(`Error loading portfolio data: ${err.message}`, 'error');
+      }
+    }
+
+    async function renderPortfolioTable() {
+      const kpi = document.getElementById('portfolio-table-kpi-select')?.value || 'ctr_28d';
+      const segments = ['money_pages', 'landing', 'event', 'product', 'all'];
+      
+      try {
+        // Fetch data for all segments
+        const allData = {};
+        for (const segment of segments) {
+          const params = new URLSearchParams({ 
+            kpi, 
+            segment, 
+            scope: 'all',
+            timeGrain: 'monthly'
+          });
+          const response = await fetch(`/api/portfolio/snapshots?${params}`);
+          const data = await response.json();
+          allData[segment] = data.snapshots || [];
+        }
+
+        // Generate last 12 months
+        const months = [];
+        const today = new Date();
+        for (let i = 11; i >= 0; i--) {
+          const date = new Date(today.getFullYear(), today.getMonth() - i, 1);
+          months.push(date.toISOString().substring(0, 7)); // YYYY-MM format
+        }
+
+        // Build table
+        const table = document.getElementById('portfolio-monthly-table');
+        if (!table) return;
+
+        // Clear existing content
+        const thead = table.querySelector('thead tr');
+        const tbody = table.querySelector('tbody');
+        thead.innerHTML = '<th style="text-align: left; padding: 0.75rem; border-bottom: 2px solid #ddd; font-weight: 600;">Segment</th>';
+        tbody.innerHTML = '';
+
+        // Add month headers
+        months.forEach(month => {
+          const th = document.createElement('th');
+          th.style.cssText = 'text-align: center; padding: 0.75rem; border-bottom: 2px solid #ddd; font-weight: 600;';
+          th.textContent = new Date(month + '-01').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+          thead.appendChild(th);
+        });
+
+        // Add sparkline column
+        const sparklineTh = document.createElement('th');
+        sparklineTh.style.cssText = 'text-align: center; padding: 0.75rem; border-bottom: 2px solid #ddd; font-weight: 600;';
+        sparklineTh.textContent = 'Trend';
+        thead.appendChild(sparklineTh);
+
+        // Add rows for each segment
+        segments.forEach(segment => {
+          const row = document.createElement('tr');
+          
+          // Segment name
+          const segmentCell = document.createElement('td');
+          segmentCell.style.cssText = 'padding: 0.75rem; border-bottom: 1px solid #eee; font-weight: 600;';
+          segmentCell.textContent = segment === 'all' ? 'All tracked' : segment.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+          row.appendChild(segmentCell);
+
+          // Month values
+          const monthValues = [];
+          months.forEach(month => {
+            const cell = document.createElement('td');
+            cell.style.cssText = 'text-align: center; padding: 0.75rem; border-bottom: 1px solid #eee;';
+            
+            const snapshot = allData[segment]?.find(s => s.period_start.startsWith(month));
+            if (snapshot && snapshot.median_value !== null) {
+              const value = parseFloat(snapshot.median_value);
+              cell.textContent = value.toFixed(2);
+              monthValues.push(value);
+              
+              // Add trend indicator
+              const prevSnapshot = allData[segment]?.find(s => {
+                const prevMonth = new Date(month + '-01');
+                prevMonth.setMonth(prevMonth.getMonth() - 1);
+                return s.period_start.startsWith(prevMonth.toISOString().substring(0, 7));
+              });
+              
+              if (prevSnapshot && prevSnapshot.median_value !== null) {
+                const prevValue = parseFloat(prevSnapshot.median_value);
+                const delta = value - prevValue;
+                const indicator = delta >= 0 ? '▲' : '▼';
+                const color = delta >= 0 ? '#10b981' : '#ef4444';
+                cell.innerHTML = `${value.toFixed(2)} <span style="color: ${color};">${indicator} ${Math.abs(delta).toFixed(2)}</span>`;
+              }
+            } else {
+              cell.textContent = '—';
+              monthValues.push(null);
+            }
+            row.appendChild(cell);
+          });
+
+          // Sparkline (simple text representation for now)
+          const sparklineCell = document.createElement('td');
+          sparklineCell.style.cssText = 'text-align: center; padding: 0.75rem; border-bottom: 1px solid #eee;';
+          if (monthValues.filter(v => v !== null).length > 0) {
+            const min = Math.min(...monthValues.filter(v => v !== null));
+            const max = Math.max(...monthValues.filter(v => v !== null));
+            const range = max - min || 1;
+            const sparkline = monthValues.map(v => {
+              if (v === null) return ' ';
+              const height = Math.round(((v - min) / range) * 5);
+              return '▁▂▃▄▅▆▇█'[height] || '▁';
+            }).join('');
+            sparklineCell.textContent = sparkline;
+          } else {
+            sparklineCell.textContent = '—';
+          }
+          row.appendChild(sparklineCell);
+
+          tbody.appendChild(row);
+        });
+
+      } catch (err) {
+        debugLog(`Error rendering portfolio table: ${err.message}`, 'error');
+      }
+    }
+
+    // Wire up Portfolio controls
+    function wirePortfolioControls() {
+      const kpiSelect = document.getElementById('portfolio-kpi-select');
+      const segmentSelect = document.getElementById('portfolio-segment-select');
+      const scopeToggle = document.getElementById('portfolio-scope-toggle');
+      const timeGrain = document.getElementById('portfolio-time-grain');
+      const tableKpiSelect = document.getElementById('portfolio-table-kpi-select');
+
+      const updateChart = () => {
+        if (typeof loadPortfolioData === 'function') {
+          loadPortfolioData();
+        }
+      };
+
+      if (kpiSelect) kpiSelect.addEventListener('change', updateChart);
+      if (segmentSelect) segmentSelect.addEventListener('change', updateChart);
+      if (scopeToggle) scopeToggle.addEventListener('change', updateChart);
+      if (timeGrain) timeGrain.addEventListener('change', updateChart);
+      if (tableKpiSelect) {
+        tableKpiSelect.addEventListener('change', () => {
+          if (typeof renderPortfolioTable === 'function') {
+            renderPortfolioTable();
+          }
+        });
+      }
+    }
+
+    // Wire up Portfolio controls on panel initialization
+    const originalEnsurePanelRendered = ensurePanelRendered;
+    ensurePanelRendered = function(panelId) {
+      originalEnsurePanelRendered(panelId);
+      if (panelId === 'portfolio') {
+        setTimeout(() => {
+          wirePortfolioControls();
+          if (typeof window.renderPortfolioTab === 'function') {
+            window.renderPortfolioTab();
+          }
+        }, 100);
+      }
+    };
+
+    // Calculate and save portfolio snapshots from task measurements
+    async function calculateAndSavePortfolioSnapshots(auditDate) {
+      try {
+        debugLog('📊 Calculating portfolio snapshots...', 'info');
+        
+        // Fetch all tasks with measurements
+        const response = await fetch('/api/optimisation/status?includeDeleted=false');
+        if (!response.ok) {
+          throw new Error(`Failed to fetch tasks: ${response.status}`);
+        }
+        
+        const { tasks } = await response.json();
+        if (!tasks || tasks.length === 0) {
+          debugLog('⚠ No tasks found for portfolio snapshots', 'warn');
+          return;
+        }
+
+        // Calculate period start (weekly: start of week, monthly: start of month)
+        const date = new Date(auditDate);
+        const weeklyStart = new Date(date);
+        weeklyStart.setDate(date.getDate() - date.getDay()); // Start of week (Sunday)
+        const monthlyStart = new Date(date.getFullYear(), date.getMonth(), 1);
+
+        const segments = ['all', 'money_pages', 'landing', 'event', 'product'];
+        const kpis = ['ctr_28d', 'clicks_28d', 'impressions_28d', 'avg_position', 'ai_citations', 'ai_overview'];
+        const scopes = ['active_only', 'all'];
+        const periodTypes = ['weekly', 'monthly'];
+
+        // Calculate snapshots for each combination
+        for (const segment of segments) {
+          for (const kpi of kpis) {
+            for (const scope of scopes) {
+              for (const periodType of periodTypes) {
+                // Filter tasks by segment and scope
+                let filteredTasks = tasks;
+                
+                // Filter by scope
+                if (scope === 'active_only') {
+                  filteredTasks = filteredTasks.filter(t => 
+                    t.status && !['done', 'cancelled', 'deleted'].includes(t.status)
+                  );
+                }
+                
+                // Filter by segment (simplified - would need URL categorization logic)
+                if (segment !== 'all') {
+                  // TODO: Implement segment filtering based on URL patterns
+                  // For now, skip segment filtering
+                }
+
+                // Calculate median delta for this KPI
+                const deltas = [];
+                const values = [];
+                
+                filteredTasks.forEach(task => {
+                  if (!task.baseline_metrics || !task.latest_metrics) return;
+                  
+                  let baselineValue = null;
+                  let latestValue = null;
+                  
+                  // Extract KPI value from metrics
+                  if (kpi === 'ctr_28d') {
+                    baselineValue = task.baseline_metrics.ctr_28d;
+                    latestValue = task.latest_metrics.ctr_28d;
+                  } else if (kpi === 'clicks_28d') {
+                    baselineValue = task.baseline_metrics.clicks_28d;
+                    latestValue = task.latest_metrics.clicks_28d;
+                  } else if (kpi === 'impressions_28d') {
+                    baselineValue = task.baseline_metrics.impressions_28d;
+                    latestValue = task.latest_metrics.impressions_28d;
+                  } else if (kpi === 'avg_position') {
+                    baselineValue = task.baseline_metrics.avg_position;
+                    latestValue = task.latest_metrics.avg_position;
+                  } else if (kpi === 'ai_citations') {
+                    baselineValue = task.baseline_metrics.ai_citations;
+                    latestValue = task.latest_metrics.ai_citations;
+                  } else if (kpi === 'ai_overview') {
+                    baselineValue = task.baseline_metrics.ai_overview ? 1 : 0;
+                    latestValue = task.latest_metrics.ai_overview ? 1 : 0;
+                  }
+                  
+                  if (baselineValue !== null && latestValue !== null) {
+                    const delta = latestValue - baselineValue;
+                    deltas.push(delta);
+                    values.push(latestValue);
+                  }
+                });
+
+                if (deltas.length === 0) continue;
+
+                // Calculate median
+                const sortedDeltas = [...deltas].sort((a, b) => a - b);
+                const sortedValues = [...values].sort((a, b) => a - b);
+                const medianDelta = sortedDeltas[Math.floor(sortedDeltas.length / 2)];
+                const medianValue = sortedValues[Math.floor(sortedValues.length / 2)];
+
+                // Determine period start
+                const periodStart = periodType === 'weekly' 
+                  ? weeklyStart.toISOString().split('T')[0]
+                  : monthlyStart.toISOString().split('T')[0];
+
+                // Save snapshot
+                await fetch('/api/portfolio/save-snapshot', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    periodStart,
+                    periodType,
+                    segment,
+                    kpi,
+                    scope,
+                    medianDelta,
+                    medianValue,
+                    taskCount: filteredTasks.length
+                  })
+                });
+
+                debugLog(`✓ Saved snapshot: ${segment}/${kpi}/${scope}/${periodType} (${deltas.length} tasks)`, 'info');
+              }
+            }
+          }
+        }
+
+        debugLog('✓ Portfolio snapshots calculated and saved', 'success');
+      } catch (err) {
+        debugLog(`Error calculating portfolio snapshots: ${err.message}`, 'error');
+        throw err;
+      }
     }
 
     // Fix ranking panel DOM structure - ensure sections are siblings, not nested
@@ -16864,6 +17376,13 @@
           } catch (verifyError) {
             debugLog(`⚠ Verification error (non-critical): ${verifyError.message}`, 'warn');
             showStatus(`✓ Audit saved to Supabase (${auditDate})`, 'success');
+          }
+          
+          // Calculate and save portfolio snapshots (Phase 3)
+          try {
+            await calculateAndSavePortfolioSnapshots(auditDate);
+          } catch (portfolioError) {
+            debugLog(`⚠ Error saving portfolio snapshots (non-critical): ${portfolioError.message}`, 'warn');
           }
           
           // After saving, refresh Money Pages charts with updated history
