@@ -14305,14 +14305,16 @@
           console.log('[Money Pages] Tab activated - checking if re-fetch needed...', {
             hasMetrics: !!window.moneyPagesMetrics,
             hasRows: !!(window.moneyPagesMetrics && window.moneyPagesMetrics.rows),
-            rowCount: window.moneyPagesMetrics?.rows?.length || 0
+            rowCount: window.moneyPagesMetrics?.rows?.length || 0,
+            hasPriorityData: !!window.moneyPagePriorityData,
+            priorityDataCount: window.moneyPagePriorityData?.length || 0
           });
           
           // Use setTimeout to ensure panel is fully visible before fetching
           setTimeout(async () => {
+            // Re-fetch statuses for Opportunity table (if data exists)
             if (window.moneyPagesMetrics && window.moneyPagesMetrics.rows && window.moneyPagesMetrics.rows.length > 0) {
-              console.log('[Money Pages] Re-fetching statuses from database on tab switch...');
-              // Re-fetch statuses for all rows to ensure cache is up-to-date
+              console.log('[Money Pages] Re-fetching statuses for Opportunity table on tab switch...');
               if (typeof window.fetchOptimisationStatuses === 'function') {
                 const allStatusRows = window.moneyPagesMetrics.rows.map(row => ({
                   keyword: '', // Empty for page-level tasks
@@ -14322,9 +14324,9 @@
                 }));
                 try {
                   await window.fetchOptimisationStatuses(allStatusRows);
-                  console.log('[Money Pages] ✓ Status cache refreshed from database on tab switch:', window.optimisationStatusCache?.size || 0, 'entries');
+                  console.log('[Money Pages] ✓ Status cache refreshed for Opportunity table:', window.optimisationStatusCache?.size || 0, 'entries');
                   
-                  // Re-render table to show updated statuses
+                  // Re-render Opportunity table to show updated statuses
                   const tableContainer = document.getElementById('money-pages-table-container');
                   if (tableContainer && typeof renderMoneyPagesTable === 'function') {
                     const currentPage = window.moneyPagesCurrentPage || 1;
@@ -14332,11 +14334,41 @@
                     const tableHtml = await renderMoneyPagesTable(window.moneyPagesMetrics.rows, currentPage, rowsPerPage);
                     if (tableHtml && typeof tableHtml === 'string' && tableHtml.trim().length > 0) {
                       tableContainer.innerHTML = tableHtml;
-                      console.log('[Money Pages] ✓ Table re-rendered after tab switch');
+                      console.log('[Money Pages] ✓ Opportunity table re-rendered after tab switch');
                     }
                   }
                 } catch (err) {
-                  console.error('[Money Pages] Error re-fetching statuses on tab switch:', err);
+                  console.error('[Money Pages] Error re-fetching statuses for Opportunity table:', err);
+                }
+              }
+            }
+            
+            // Re-fetch statuses for Priority table (if data exists)
+            if (window.moneyPagePriorityData && window.moneyPagePriorityData.length > 0) {
+              console.log('[Money Pages] Re-fetching statuses for Priority table on tab switch...');
+              if (typeof window.fetchOptimisationStatuses === 'function') {
+                const allStatusRows = window.moneyPagePriorityData.map(p => ({
+                  keyword: '', // Empty for page-level tasks
+                  best_url: p.url,
+                  targetUrl: p.url,
+                  ranking_url: p.url
+                }));
+                try {
+                  await window.fetchOptimisationStatuses(allStatusRows);
+                  console.log('[Money Pages] ✓ Status cache refreshed for Priority table:', window.optimisationStatusCache?.size || 0, 'entries');
+                  
+                  // Re-render Priority table to show updated statuses
+                  if (typeof renderMoneyPagesTable === 'function') {
+                    const filters = {
+                      typeFilter: window.moneyPagesTypeFilter || 'all',
+                      minImpr: window.moneyPagesMinImpr || 0,
+                      matrixFilter: window.moneyPagesMatrixFilter || null
+                    };
+                    await renderMoneyPagesTable(null, filters);
+                    console.log('[Money Pages] ✓ Priority table re-rendered after tab switch');
+                  }
+                } catch (err) {
+                  console.error('[Money Pages] Error re-fetching statuses for Priority table:', err);
                 }
               }
             }
@@ -27173,7 +27205,7 @@ Final Score: ${score}/100`;
         window.moneyPagesPriorityRowsPerPage = 10;
       }
 
-      function renderMoneyPagesTable(moneyPages, filters = {}) {
+      async function renderMoneyPagesTable(moneyPages, filters = {}) {
         const tbody = document.querySelector("#money-pages-priority-table tbody");
         const thead = document.querySelector("#money-pages-priority-table thead");
         if (!tbody || !thead) {
@@ -27254,6 +27286,21 @@ Final Score: ${score}/100`;
         const endIndex = startIndex + rowsPerPage;
         const pageRows = rows.slice(startIndex, endIndex);
         
+        // CRITICAL: Fetch optimisation statuses from database for ALL rows (not just current page)
+        // This ensures status is always up-to-date and persists across tab switches
+        if (typeof window.fetchOptimisationStatuses === 'function' && rows.length > 0) {
+          console.log('[Money Pages Priority] Fetching optimisation statuses from database for all rows:', rows.length);
+          const allStatusRows = rows.map(p => ({
+            keyword: '', // Empty for page-level tasks
+            best_url: p.url,
+            targetUrl: p.url,
+            ranking_url: p.url
+          }));
+          // Wait for statuses to be fetched before rendering table
+          await window.fetchOptimisationStatuses(allStatusRows);
+          console.log('[Money Pages Priority] ✓ Status cache populated from database:', window.optimisationStatusCache?.size || 0, 'entries');
+        }
+        
         // Render sortable header with Ranking & AI styling
         const sortClass = (col) => {
           if (moneyPagesTableSort.column === col) {
@@ -27319,7 +27366,9 @@ Final Score: ${score}/100`;
             }
             // Reset to page 1 when sorting changes
             window.moneyPagesPriorityCurrentPage = 1;
-            renderMoneyPagesTable(moneyPages, filters);
+            (async () => {
+              await renderMoneyPagesTable(moneyPages, filters);
+            })();
           });
           
           th.addEventListener('mouseenter', () => {
@@ -27370,8 +27419,32 @@ Final Score: ${score}/100`;
             const taskType = 'on_page';
             const optimisationStatus = window.getOptimisationStatus ? window.getOptimisationStatus({ targetUrl: p.url, keyword: '' }, taskType) : null;
             const hasTask = optimisationStatus && optimisationStatus.status && optimisationStatus.status !== 'deleted';
-            const taskId = hasTask ? (optimisationStatus.taskId || null) : null;
+            // CRITICAL: Use id field (not taskId) - API returns 'id', not 'taskId'
+            const taskId = hasTask ? (optimisationStatus.id || optimisationStatus.task_id || null) : null;
             const statusText = hasTask ? (optimisationStatus.status || 'planned') : null;
+            
+            // Debug: Log status lookup for troubleshooting
+            if (p.url && p.url.includes('landscape-photography-workshops')) {
+              console.log('[Money Pages Priority] Status lookup for landscape page:', {
+                url: p.url,
+                hasStatus: !!optimisationStatus,
+                hasId: optimisationStatus ? ('id' in optimisationStatus) : false,
+                hasTaskId: optimisationStatus ? ('task_id' in optimisationStatus) : false,
+                id: optimisationStatus?.id,
+                task_id: optimisationStatus?.task_id,
+                extractedTaskId: taskId,
+                status: optimisationStatus?.status
+              });
+            }
+            
+            // Validate taskId exists before rendering Manage button
+            if (hasTask && !taskId) {
+              console.error('[Money Pages Priority] Task exists but missing id field:', {
+                url: p.url,
+                optimisationStatus,
+                statusKeys: optimisationStatus ? Object.keys(optimisationStatus) : []
+              });
+            }
             
             // Build optimisation column HTML
             let optimisationHtml = '';
@@ -27410,12 +27483,27 @@ Final Score: ${score}/100`;
               const statusLabel = statusLabels[statusText] || statusText;
               const statusColor = statusColors[statusText] || '#64748b';
               const statusBgColor = statusBg[statusText] || '#f1f5f9';
-              optimisationHtml = `
-                <td style="padding: 0.75rem;" data-page-url="${p.url}" data-task-id="${taskId || ''}">
-                  <span class="ranking-badge ranking-badge--segment-general" style="margin-right: 0.5rem; display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; background: ${statusBgColor}; color: ${statusColor}; font-size: 0.75rem; font-weight: 600;">${statusLabel}</span>
-                  <button class="btn btn-small money-pages-manage-btn" style="padding: 0.15rem 0.4rem; font-size: 0.75rem; font-weight: 550; background: #10b981; color: #ffffff; border: 1px solid #059669; border-radius: 4px; cursor: pointer;" data-task-id="${taskId || ''}" data-page-url="${p.url}">Manage</button>
-                </td>
-              `;
+              // Validate taskId before rendering Manage button
+              if (!taskId) {
+                console.error('[Money Pages Priority] Cannot render Manage button - taskId is missing:', {
+                  url: p.url,
+                  optimisationStatus
+                });
+                optimisationHtml = `
+                  <td style="padding: 0.75rem;" data-page-url="${p.url}">
+                    <span style="color: #ef4444; font-size: 0.7rem;">Error: Task ID missing</span>
+                  </td>
+                `;
+              } else {
+                // Escape taskId for use in onclick attribute
+                const taskIdEscaped = String(taskId).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                optimisationHtml = `
+                  <td style="padding: 0.75rem;" data-page-url="${p.url}" data-task-id="${taskIdEscaped}">
+                    <span class="ranking-badge ranking-badge--segment-general" style="margin-right: 0.5rem; display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; background: ${statusBgColor}; color: ${statusColor}; font-size: 0.75rem; font-weight: 600;">${statusLabel}</span>
+                    <button class="btn btn-small money-pages-manage-btn" style="padding: 0.15rem 0.4rem; font-size: 0.75rem; font-weight: 550; background: #10b981; color: #ffffff; border: 1px solid #059669; border-radius: 4px; cursor: pointer;" onclick="window.openOptimisationTaskDrawer('${taskIdEscaped}')" data-task-id="${taskIdEscaped}" data-page-url="${p.url}">Manage</button>
+                  </td>
+                `;
+              }
             }
 
             return `
@@ -27627,7 +27715,9 @@ Final Score: ${score}/100`;
               minImpr: window.moneyPagesMinImpr || 0,
               matrixFilter: window.moneyPagesMatrixFilter || null
             };
-            renderMoneyPagesTable(null, filters);
+            (async () => {
+              await renderMoneyPagesTable(null, filters);
+            })();
           });
         }
         
@@ -27640,7 +27730,9 @@ Final Score: ${score}/100`;
                 minImpr: window.moneyPagesMinImpr || 0,
                 matrixFilter: window.moneyPagesMatrixFilter || null
               };
-              renderMoneyPagesTable(null, filters);
+              (async () => {
+              await renderMoneyPagesTable(null, filters);
+            })();
             }
           });
         }
@@ -27657,7 +27749,9 @@ Final Score: ${score}/100`;
                 minImpr: window.moneyPagesMinImpr || 0,
                 matrixFilter: window.moneyPagesMatrixFilter || null
               };
-              renderMoneyPagesTable(null, filters);
+              (async () => {
+              await renderMoneyPagesTable(null, filters);
+            })();
             }
           });
         }
@@ -27673,7 +27767,9 @@ Final Score: ${score}/100`;
               minImpr: window.moneyPagesMinImpr || 0,
               matrixFilter: window.moneyPagesMatrixFilter || null
             };
-            renderMoneyPagesTable(null, filters);
+            (async () => {
+              await renderMoneyPagesTable(null, filters);
+            })();
           });
         }
         
@@ -27687,7 +27783,9 @@ Final Score: ${score}/100`;
               minImpr: window.moneyPagesMinImpr || 0,
               matrixFilter: window.moneyPagesMatrixFilter || null
             };
-            renderMoneyPagesTable(null, filters);
+            (async () => {
+              await renderMoneyPagesTable(null, filters);
+            })();
           });
         }
       }
@@ -27949,7 +28047,9 @@ Final Score: ${score}/100`;
                   matrixFilter: newActiveFilter
                 };
                 if (typeof renderMoneyPagesTable === 'function') {
-                  renderMoneyPagesTable(filteredPages, filters);
+                  (async () => {
+                    await renderMoneyPagesTable(filteredPages, filters);
+                  })();
                 }
               };
               
@@ -27967,7 +28067,9 @@ Final Score: ${score}/100`;
                   ? { impact: window.moneyMatrixFilterState.impact, diff: window.moneyMatrixFilterState.diff }
                   : null
               };
-              renderMoneyPagesTable(filteredPages, filters);
+              (async () => {
+                await renderMoneyPagesTable(filteredPages, filters);
+              })();
             } else {
               debugLog('⚠ renderMoneyPagesTable function not found', 'warn');
             }
