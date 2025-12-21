@@ -79,14 +79,15 @@ Generated: ${new Date().toISOString()}
     if (supabaseUrl && supabaseKey) {
       try {
         // Save to Supabase using REST API (same pattern as other endpoints)
-        // Insert into audit_debug_logs table
+        // Use UPSERT to overwrite existing logs for the same property_url and audit_date
+        // This prevents hundreds of log files from accumulating
         const saveResponse = await fetch(`${supabaseUrl}/rest/v1/audit_debug_logs`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'apikey': supabaseKey,
             'Authorization': `Bearer ${supabaseKey}`,
-            'Prefer': 'return=minimal'
+            'Prefer': 'resolution=merge-duplicates' // UPSERT: merge on conflict
           },
           body: JSON.stringify({
             property_url: propertyUrl || 'unknown',
@@ -94,7 +95,8 @@ Generated: ${new Date().toISOString()}
             log_text: fullLogText,
             filename: filename,
             entries_count: debugLogEntries.length,
-            created_at: new Date().toISOString()
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString() // Update timestamp on overwrite
           })
         });
         
