@@ -8651,23 +8651,52 @@
         const measurements = data.events || [];
         
         if (measurements.length > 0) {
-          // Sort by created_at ascending
+          // First, try to find baseline measurement explicitly marked with is_baseline: true
+          const baselineEvent = measurements.find(m => m.is_baseline === true);
+          
+          if (baselineEvent && baselineEvent.metrics) {
+            baselineMetrics = { ...baselineEvent.metrics };
+            if (baselineEvent.created_at) {
+              baselineMetrics.captured_at = baselineEvent.created_at;
+            }
+            console.log('[Performance Snapshot] Found baseline measurement with is_baseline=true:', baselineMetrics);
+          } else {
+            // Fallback: Use first measurement chronologically if no explicit baseline found
+            const sorted = [...measurements].sort((a, b) => {
+              const dateA = new Date(a.created_at || a.event_at || 0);
+              const dateB = new Date(b.created_at || b.event_at || 0);
+              return dateA - dateB;
+            });
+            
+            if (sorted[0] && sorted[0].metrics) {
+              baselineMetrics = { ...sorted[0].metrics };
+              if (sorted[0].created_at) {
+                baselineMetrics.captured_at = sorted[0].created_at;
+              }
+              console.log('[Performance Snapshot] Using first measurement as baseline (no is_baseline flag found):', baselineMetrics);
+            }
+          }
+          
+          // Latest is always the most recent measurement
           const sorted = [...measurements].sort((a, b) => {
             const dateA = new Date(a.created_at || a.event_at || 0);
             const dateB = new Date(b.created_at || b.event_at || 0);
             return dateA - dateB;
           });
           
-          baselineMetrics = (sorted[0] && sorted[0].metrics) || null;
-          latestMetrics = (sorted[sorted.length - 1] && sorted[sorted.length - 1].metrics) || null;
+          if (sorted[sorted.length - 1] && sorted[sorted.length - 1].metrics) {
+            latestMetrics = { ...sorted[sorted.length - 1].metrics };
+            if (sorted[sorted.length - 1].created_at) {
+              latestMetrics.captured_at = sorted[sorted.length - 1].created_at;
+            }
+          }
           
-          // Add captured_at to metrics
-          if (baselineMetrics && sorted[0].created_at) {
-            baselineMetrics.captured_at = sorted[0].created_at;
-          }
-          if (latestMetrics && sorted[sorted.length - 1].created_at) {
-            latestMetrics.captured_at = sorted[sorted.length - 1].created_at;
-          }
+          // Debug logging
+          console.log('[Performance Snapshot] Measurements found:', measurements.length);
+          console.log('[Performance Snapshot] Baseline metrics:', baselineMetrics);
+          console.log('[Performance Snapshot] Latest metrics:', latestMetrics);
+        } else {
+          console.warn('[Performance Snapshot] No measurements found for cycle', cycleId || cycleNo);
         }
       }
 
