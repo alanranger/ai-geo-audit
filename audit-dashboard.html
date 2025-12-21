@@ -5498,6 +5498,12 @@
             status.task_id = status.id;
           }
           
+          // Normalize keyword_key: convert null/undefined to empty string, trim whitespace
+          const keywordKey = (status.keyword_key || '').trim();
+          // Normalize target_url_clean using cleanUrlForKey to ensure consistent lookup
+          // The API returns target_url_clean, but we need to normalize it the same way we normalize URLs in getOptimisationStatus
+          const normalizedUrl = window.cleanUrlForKey ? window.cleanUrlForKey(status.target_url_clean || status.target_url || '') : (status.target_url_clean || status.target_url || '').toLowerCase().trim();
+          
           // DEBUG: Log every status being cached (especially page-level tasks)
           if (!status.keyword_key || status.keyword_key.trim() === '') {
             console.log('[Optimisation] Caching page-level task:', {
@@ -5511,12 +5517,6 @@
               hasTaskId: 'task_id' in status
             });
           }
-          
-          // Normalize keyword_key: convert null/undefined to empty string, trim whitespace
-          const keywordKey = (status.keyword_key || '').trim();
-          // Normalize target_url_clean using cleanUrlForKey to ensure consistent lookup
-          // The API returns target_url_clean, but we need to normalize it the same way we normalize URLs in getOptimisationStatus
-          const normalizedUrl = window.cleanUrlForKey ? window.cleanUrlForKey(status.target_url_clean || status.target_url || '') : (status.target_url_clean || status.target_url || '').toLowerCase().trim();
           // For page-level tasks (empty keyword_key), use :: prefix to match getOptimisationStatus format
           // For keyword-level tasks, use keyword_key:: prefix
           const key = keywordKey ? `${keywordKey}::${normalizedUrl}::${status.task_type || 'on_page'}` : `::${normalizedUrl}::${status.task_type || 'on_page'}`;
