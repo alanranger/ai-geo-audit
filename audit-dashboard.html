@@ -5726,45 +5726,17 @@
         
         // Handle Money Pages vs Ranking & AI differently
         if (source === 'money_pages') {
-          // Reload all tasks first so the new task is available for the lookup
-          if (typeof window.loadAllOptimisationTasks === 'function') {
-            await window.loadAllOptimisationTasks();
+          // Refresh optimisation statuses cache (same as Ranking & AI)
+          if (typeof window.fetchOptimisationStatuses === 'function' && window.moneyPagesMetrics && window.moneyPagesMetrics.rows) {
+            // Create row-like objects for fetchOptimisationStatuses
+            const statusRows = window.moneyPagesMetrics.rows.map(row => ({
+              keyword: '', // Empty for page-level tasks
+              best_url: row.url,
+              targetUrl: row.url,
+              ranking_url: row.url
+            }));
+            await window.fetchOptimisationStatuses(statusRows);
           }
-          
-          // Add the newly created task to the moneyPagesRowDataByUrl map so it's available immediately
-          // This ensures the table shows "Manage" instead of "Track" right away
-          if (createdTask && createdTask.target_url) {
-            const normalizeUrlForDedupe = window.normalizeUrlForDedupe || ((url) => {
-              if (!url) return '';
-              let normalized = url.trim();
-              if (normalized.startsWith('/')) {
-                normalized = 'https://www.alanranger.com' + normalized;
-              } else if (!normalized.startsWith('http')) {
-                normalized = 'https://www.alanranger.com/' + normalized;
-              }
-              if (normalized.endsWith('/') && normalized !== 'https://www.alanranger.com/') {
-                normalized = normalized.slice(0, -1);
-              }
-              try {
-                const urlObj = new URL(normalized);
-                normalized = urlObj.origin.toLowerCase() + urlObj.pathname + urlObj.search + urlObj.hash;
-              } catch (e) {
-                normalized = normalized.toLowerCase();
-              }
-              return normalized;
-            });
-            
-            const normalizedTaskUrl = normalizeUrlForDedupe(createdTask.target_url);
-            // Store the task in a temporary cache that renderMoneyPagesTable can use
-            if (!window.moneyPagesTaskCache) {
-              window.moneyPagesTaskCache = new Map();
-            }
-            window.moneyPagesTaskCache.set(normalizedTaskUrl, createdTask);
-            console.log('[Money Pages] Added newly created task to cache:', normalizedTaskUrl, createdTask.id);
-          }
-          
-          // Small delay to ensure database is updated
-          await new Promise(resolve => setTimeout(resolve, 100));
           
           // Refresh Money Pages table to show updated Track/Manage status
           if (typeof renderMoneyPagesTable === 'function' && window.moneyPagesMetrics) {
@@ -23646,48 +23618,21 @@ Final Score: ${score}/100`;
         `;
         
         // ============================================
-        // STEP 3: Build existingOptTaskByUrl lookup for Track/Manage buttons
+        // STEP 3: Fetch optimisation statuses (same as Ranking & AI)
         // ============================================
-        const existingOptTaskByUrl = new Map();
         // Store row data by normalized URL for Track button access
         window.moneyPagesRowDataByUrl = window.moneyPagesRowDataByUrl || new Map();
         
-        // First, add any tasks from the temporary cache (newly created tasks)
-        if (window.moneyPagesTaskCache && window.moneyPagesTaskCache.size > 0) {
-          window.moneyPagesTaskCache.forEach((task, normalizedUrl) => {
-            existingOptTaskByUrl.set(normalizedUrl, task);
-          });
-          debugLog(`✓ Added ${window.moneyPagesTaskCache.size} tasks from cache to existingOptTaskByUrl`, 'info');
-        }
-        
-        try {
-          // Fetch existing optimisation tasks
-          const adminKey = window.getAdminKey ? window.getAdminKey() : (sessionStorage.getItem('arp_admin_key') || localStorage.getItem('arp_admin_key') || '');
-          if (adminKey) {
-            const tasksResponse = await fetch(apiUrl('/api/optimisation/tasks'), {
-              headers: {
-                'x-arp-admin-key': adminKey
-              }
-            });
-            if (tasksResponse.ok) {
-              const tasksData = await tasksResponse.json();
-              if (tasksData.tasks && Array.isArray(tasksData.tasks)) {
-                tasksData.tasks.forEach(task => {
-                  const taskUrl = task.target_url_clean || task.target_url || '';
-                  if (taskUrl) {
-                    const normalizedTaskUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(taskUrl) : taskUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
-                    // Only add if not already in map (cache takes precedence for newly created tasks)
-                    if (!existingOptTaskByUrl.has(normalizedTaskUrl)) {
-                      existingOptTaskByUrl.set(normalizedTaskUrl, task);
-                    }
-                  }
-                });
-                debugLog(`✓ Built existingOptTaskByUrl lookup: ${existingOptTaskByUrl.size} tasks total`, 'info');
-              }
-            }
-          }
-        } catch (taskLookupError) {
-          debugLog(`⚠ Error building existingOptTaskByUrl lookup: ${taskLookupError.message}`, 'warn');
+        // Fetch optimisation statuses for all money pages rows (same approach as Ranking & AI)
+        if (typeof window.fetchOptimisationStatuses === 'function' && pageRows.length > 0) {
+          const statusRows = pageRows.map(row => ({
+            keyword: '', // Empty for page-level tasks
+            best_url: row.url,
+            targetUrl: row.url,
+            ranking_url: row.url
+          }));
+          await window.fetchOptimisationStatuses(statusRows);
+          debugLog(`✓ Fetched optimisation statuses for ${statusRows.length} money pages`, 'info');
         }
         
         pageRows.forEach((row, idx) => {
@@ -23806,31 +23751,19 @@ Final Score: ${score}/100`;
               <td style="padding: 0.75rem; color: #475569; font-size: 0.8rem; line-height: 1.5; vertical-align: top;">${row.recommendation}</td>
               <td style="padding: 0.75rem; text-align: center; vertical-align: top;">
                 ${(() => {
-                  const normalizedRowUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(row.url) : row.url.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
-                  const existingTask = existingOptTaskByUrl.get(normalizedRowUrl);
+                  // Use the same status lookup as Ranking & AI for consistency
+                  const taskType = 'on_page';
+                  // Create a row-like object for getOptimisationStatus (it expects keyword and best_url/targetUrl)
+                  const statusRow = {
+                    keyword: '', // Empty for page-level tasks
+                    best_url: row.url,
+                    targetUrl: row.url,
+                    ranking_url: row.url
+                  };
+                  const status = window.getOptimisationStatus ? window.getOptimisationStatus(statusRow, taskType) : null;
                   
-                  if (existingTask) {
-                    // Task exists - show Manage button
-                    const taskId = existingTask.id || existingTask.task_id;
-                    const taskStatus = existingTask.status || 'planned';
-                    const statusColor = taskStatus === 'active' ? '#10b981' : taskStatus === 'completed' ? '#2563eb' : '#f59e0b';
-                    return `
-                      <div style="display: flex; flex-direction: column; gap: 0.25rem; align-items: center;">
-                        <span style="display: inline-block; padding: 0.125rem 0.5rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600; background: ${statusColor}20; color: ${statusColor}; border: 1px solid ${statusColor}40; text-transform: capitalize;">
-                          ${taskStatus}
-                        </span>
-                        <button 
-                          onclick="window.openOptimisationTaskDrawer(${taskId})"
-                          style="font-size: 0.75rem; padding: 0.375rem 0.75rem; border-radius: 4px; border: 1px solid #2563eb; background: #2563eb; cursor: pointer; color: white; font-weight: 600; transition: all 0.2s; white-space: nowrap;"
-                          onmouseover="this.style.background='#1d4ed8'; this.style.borderColor='#1d4ed8';"
-                          onmouseout="this.style.background='#2563eb'; this.style.borderColor='#2563eb';"
-                          title="Open optimisation task for ${row.url}">
-                          Manage
-                        </button>
-                      </div>
-                    `;
-                  } else {
-                    // No task - show Track button
+                  if (!status || typeof status !== 'object' || !status.status) {
+                    // Not tracked - show Track button
                     return `
                       <div style="display: flex; flex-direction: column; gap: 0.25rem; align-items: center;">
                         <span style="display: inline-block; padding: 0.125rem 0.5rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600; background: #94a3b820; color: #94a3b8; border: 1px solid #94a3b840;">
@@ -23848,6 +23781,73 @@ Final Score: ${score}/100`;
                       </div>
                     `;
                   }
+                  
+                  // Tracked - show status pill + cycle info + Manage button (same as Ranking & AI)
+                  const statusText = {
+                    'planned': 'Planned',
+                    'in_progress': 'In progress',
+                    'monitoring': 'Monitoring',
+                    'done': 'Done',
+                    'paused': 'Paused',
+                    'cancelled': 'Cancelled'
+                  }[status.status] || status.status;
+                  
+                  // Status colors (matching Ranking & AI)
+                  let statusBg, statusColor;
+                  if (status.status === 'planned') {
+                    statusBg = '#e9d5ff';
+                    statusColor = '#6b21a8';
+                  } else if (status.status === 'in_progress') {
+                    statusBg = '#fed7aa';
+                    statusColor = '#9a3412';
+                  } else if (status.status === 'monitoring') {
+                    statusBg = '#a7f3d0';
+                    statusColor = '#065f46';
+                  } else if (status.status === 'done') {
+                    statusBg = '#dcfce7';
+                    statusColor = '#166534';
+                  } else if (status.status === 'paused') {
+                    statusBg = '#e5e7eb';
+                    statusColor = '#374151';
+                  } else if (status.status === 'cancelled') {
+                    statusBg = '#fee2e2';
+                    statusColor = '#991b1b';
+                  } else {
+                    statusBg = '#f9fafb';
+                    statusColor = '#4b5563';
+                  }
+                  
+                  // Cycle info
+                  const cycleNo = status.cycle_active || 1;
+                  let cycleText = \`Cycle \${cycleNo}\`;
+                  if (status.last_activity_at) {
+                    const lastActivity = new Date(status.last_activity_at);
+                    const now = new Date();
+                    const daysAgo = Math.floor((now - lastActivity) / (1000 * 60 * 60 * 24));
+                    const timeText = daysAgo === 0 ? 'Today' : daysAgo === 1 ? '1 day ago' : \`\${daysAgo} days ago\`;
+                    cycleText += \` \${timeText}\`;
+                  }
+                  
+                  const taskId = status.id || status.task_id;
+                  
+                  return \`
+                    <div style="display: flex; flex-direction: column; gap: 0.25rem; align-items: center;">
+                      <span style="display: inline-block; padding: 0.125rem 0.5rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600; background: \${statusBg}; color: \${statusColor}; border: 1px solid \${statusColor}40; text-transform: capitalize;">
+                        \${statusText}
+                      </span>
+                      <div style="font-size: 0.65rem; color: #64748b; margin: 0.125rem 0;">
+                        \${cycleText}
+                      </div>
+                      <button 
+                        onclick="window.openOptimisationTaskDrawer('\${taskId}')"
+                        style="font-size: 0.75rem; padding: 0.375rem 0.75rem; border-radius: 4px; border: 1px solid #a3d977; background: #E5FFCC; cursor: pointer; color: #000000; font-weight: 600; transition: all 0.2s; white-space: nowrap;"
+                        onmouseover="this.style.background='#d4f5a8'; this.style.borderColor='#8bc34a';"
+                        onmouseout="this.style.background='#E5FFCC'; this.style.borderColor='#a3d977';"
+                        title="Open task details, update status, add notes, record measurements, start new cycle.">
+                        Manage
+                      </button>
+                    </div>
+                  \`;
                 })()}
               </td>
             </tr>
