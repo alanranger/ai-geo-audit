@@ -25083,18 +25083,60 @@ Final Score: ${score}/100`;
           console.log('[Money Pages] trackMoneyPage called', { pageUrl, pageTitle });
           debugLog(`📊 Opening Track modal for Money Page: ${pageUrl}`, 'info');
           
-          // Look up full row data from stored map
+          // Try multiple methods to find row data with metrics
+          let rowData = null;
+          
+          // Method 1: Look up from stored map
           const normalizedUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(pageUrl) : pageUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
           console.log('[Money Pages] Normalized URL:', normalizedUrl);
-          console.log('[Money Pages] moneyPagesRowDataByUrl:', window.moneyPagesRowDataByUrl);
           
-          const rowData = window.moneyPagesRowDataByUrl ? window.moneyPagesRowDataByUrl.get(normalizedUrl) : null;
-          console.log('[Money Pages] Row data found:', !!rowData);
+          if (window.moneyPagesRowDataByUrl) {
+            rowData = window.moneyPagesRowDataByUrl.get(normalizedUrl);
+            console.log('[Money Pages] Row data from map:', rowData ? 'found' : 'not found');
+            if (rowData) {
+              console.log('[Money Pages] Row data metrics:', {
+                clicks: rowData.clicks,
+                impressions: rowData.impressions,
+                ctr: rowData.ctr,
+                avgPosition: rowData.avgPosition
+              });
+            }
+          }
           
+          // Method 2: If not found in map, search directly in moneyPagesMetrics.rows
+          if (!rowData && window.moneyPagesMetrics && window.moneyPagesMetrics.rows) {
+            console.log('[Money Pages] Searching in moneyPagesMetrics.rows...');
+            const matchingRow = window.moneyPagesMetrics.rows.find(row => {
+              const rowNormalized = normalizeUrlForDedupe ? normalizeUrlForDedupe(row.url) : row.url.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+              return rowNormalized === normalizedUrl;
+            });
+            
+            if (matchingRow) {
+              console.log('[Money Pages] Found row in moneyPagesMetrics.rows:', matchingRow);
+              rowData = {
+                url: matchingRow.url,
+                title: matchingRow.title || pageTitle,
+                clicks: matchingRow.clicks || 0,
+                impressions: matchingRow.impressions || 0,
+                ctr: matchingRow.ctr || 0,
+                avgPosition: matchingRow.avgPosition != null ? matchingRow.avgPosition : (matchingRow.position || null),
+                position: matchingRow.position || matchingRow.avgPosition || null,
+                segment: matchingRow.segment || 'money_pages',
+                metaDescription: matchingRow.metaDescription || null
+              };
+              console.log('[Money Pages] Extracted row data:', rowData);
+            } else {
+              console.log('[Money Pages] Row not found in moneyPagesMetrics.rows. Total rows:', window.moneyPagesMetrics.rows.length);
+              // Log sample URLs for debugging
+              const sampleUrls = window.moneyPagesMetrics.rows.slice(0, 5).map(r => r.url);
+              console.log('[Money Pages] Sample URLs in rows:', sampleUrls);
+            }
+          }
+          
+          // Method 3: Fallback - create minimal row data
           if (!rowData) {
-            // Fallback: create minimal row data from URL and title
-            debugLog(`⚠ Row data not found for ${pageUrl}, using fallback data`, 'warn');
-            const fallbackRow = {
+            debugLog(`⚠ Row data not found for ${pageUrl}, using fallback data (metrics will be 0)`, 'warn');
+            rowData = {
               url: pageUrl,
               title: pageTitle,
               clicks: 0,
@@ -25102,21 +25144,15 @@ Final Score: ${score}/100`;
               ctr: 0,
               avgPosition: null
             };
-            console.log('[Money Pages] Using fallback row data, opening modal...');
-            if (window.openTrackMoneyPageModal) {
-              window.openTrackMoneyPageModal(fallbackRow);
-            } else {
-              console.error('[Money Pages] openTrackMoneyPageModal function not found!');
-              alert('Error: Modal function not found. Please refresh the page.');
-            }
+          }
+          
+          // Open modal with row data
+          if (window.openTrackMoneyPageModal) {
+            console.log('[Money Pages] Opening modal with row data:', rowData);
+            window.openTrackMoneyPageModal(rowData);
           } else {
-            console.log('[Money Pages] Using row data, opening modal...');
-            if (window.openTrackMoneyPageModal) {
-              window.openTrackMoneyPageModal(rowData);
-            } else {
-              console.error('[Money Pages] openTrackMoneyPageModal function not found!');
-              alert('Error: Modal function not found. Please refresh the page.');
-            }
+            console.error('[Money Pages] openTrackMoneyPageModal function not found!');
+            alert('Error: Modal function not found. Please refresh the page.');
           }
         } catch (error) {
           console.error('[Money Pages] Error in trackMoneyPage:', error);
