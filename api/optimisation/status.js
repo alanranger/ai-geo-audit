@@ -78,21 +78,38 @@ export default async function handler(req, res) {
     let pageLevelStatuses = [];
     if (hasPageLevelTasks && url_keys.length > 0) {
       // Query for page-level tasks (keyword_key is null or empty string)
-      const pageLevelQuery = supabase
+      // Use two separate queries: one for null, one for empty string
+      const pageLevelQueryNull = supabase
         .from('vw_optimisation_task_status')
         .select('*')
         .in('target_url_clean', url_keys)
         .neq('status', 'deleted')
-        .eq('task_type', 'on_page');
+        .eq('task_type', 'on_page')
+        .is('keyword_key', null);
       
-      // Filter for tasks where keyword_key is null or empty
-      // PostgreSQL: use OR condition for null/empty keyword_key
-      const { data: pageLevelData, error: pageLevelError } = await pageLevelQuery.or('keyword_key.is.null,keyword_key.eq.');
+      const pageLevelQueryEmpty = supabase
+        .from('vw_optimisation_task_status')
+        .select('*')
+        .in('target_url_clean', url_keys)
+        .neq('status', 'deleted')
+        .eq('task_type', 'on_page')
+        .eq('keyword_key', '');
       
-      if (pageLevelError) {
-        console.error('[Optimisation Status] Page-level query error:', pageLevelError);
-      } else if (pageLevelData) {
-        pageLevelStatuses = pageLevelData.filter(s => !s.keyword_key || s.keyword_key.trim() === '');
+      const [nullResult, emptyResult] = await Promise.all([
+        pageLevelQueryNull,
+        pageLevelQueryEmpty
+      ]);
+      
+      if (nullResult.error) {
+        console.error('[Optimisation Status] Page-level (null) query error:', nullResult.error);
+      } else if (nullResult.data) {
+        pageLevelStatuses.push(...nullResult.data);
+      }
+      
+      if (emptyResult.error) {
+        console.error('[Optimisation Status] Page-level (empty) query error:', emptyResult.error);
+      } else if (emptyResult.data) {
+        pageLevelStatuses.push(...emptyResult.data);
       }
     }
 
