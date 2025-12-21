@@ -337,3 +337,31 @@
 - [x] Goal status calculation (on_track/overdue/met)
 - [x] KPI formatting (CTR as pp, rank lower better, etc.)
 
+---
+
+## Recent Fixes (2025-12-21) - v1.7.1
+
+### Traffic Lights Classification Fix
+- **Issue**: Tasks were appearing in multiple metric columns (CTR task showing in CTR, Impressions, Clicks, Rank)
+- **Fix**: Only classify and count metrics that match the task's objective KPI
+- **Result**: CTR task only appears in CTR column, AI Citations task only in AI Citations column
+
+### Traffic Lights Baseline Detection Fix
+- **Issue**: "No baselineLatest" warnings for tasks with single measurement
+- **Fix**: Updated `getBaselineLatest` to handle single measurement case when filtered by cycle start date
+- **Result**: Traffic lights can now classify tasks with baseline-only measurements
+
+### Ranking & AI Task Creation Fix
+- **Issue**: Tasks created from Ranking & AI were missing keyword and title
+- **Root Cause**: Task type was hardcoded to `'on_page'`, which forced `keyword_text` to empty string
+- **Fix**: 
+  - Changed Ranking & AI task type from `'on_page'` to `'content'` (keyword-level tasks)
+  - Modal now suggests keyword as title for keyword-level tasks
+  - API preserves keyword_text for non-page-level tasks
+- **Result**: Tasks created from Ranking & AI now have correct keyword and title
+
+### Bulk Update Button Fix
+- **Issue**: Bulk update was including test tasks even when checkbox was unchecked
+- **Fix**: Added check to filter out test tasks if "Include Test Tasks" checkbox is unchecked
+- **Result**: Bulk update respects the test tasks filter
+
