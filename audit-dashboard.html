@@ -24035,19 +24035,13 @@ Final Score: ${score}/100`;
           window.moneyPagesRowDataByUrl = new Map();
         }
         
-        // CRITICAL: Always fetch from database for ALL rows (not just current page)
-        // This ensures status is always up-to-date and persists across tab switches
-        if (typeof window.fetchOptimisationStatuses === 'function' && moneyRows.length > 0) {
-          const allStatusRows = moneyRows.map(row => ({
-            keyword: '', // Empty for page-level tasks
-            best_url: row.url,
-            targetUrl: row.url,
-            ranking_url: row.url
-          }));
-          console.log('[Money Pages] Fetching optimisation statuses from database for all rows:', allStatusRows.length);
-          await window.fetchOptimisationStatuses(allStatusRows);
-          console.log('[Money Pages] ✓ Status cache populated from database:', window.optimisationStatusCache?.size || 0, 'entries');
-        }
+        // CRITICAL: DO NOT fetch statuses here - the caller should fetch before calling renderMoneyPagesTable
+        // Fetching here causes the cache to be cleared every time the table renders, losing status information
+        // Instead, we rely on the cache that was populated by the caller
+        console.log('[Money Pages Opportunity] Rendering table using existing cache:', {
+          cacheSize: window.optimisationStatusCache?.size || 0,
+          rowsCount: moneyRows.length
+        });
         
         pageRows.forEach((row, idx) => {
           const isEven = idx % 2 === 0;
