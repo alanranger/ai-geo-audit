@@ -5551,9 +5551,21 @@
         objective_due_at = new Date(startDate.getTime() + objective_timeframe_days * 24 * 60 * 60 * 1000).toISOString();
       }
 
-      if (!keyword || !targetUrl) {
-        alert('Missing keyword or URL');
-        return;
+      // For Money Pages (page-level tasks), keyword is empty - only require targetUrl
+      // For Ranking & AI (keyword-level tasks), both keyword and targetUrl are required
+      const source = modal.dataset.source || '';
+      if (source === 'money_pages') {
+        // Money Pages: only require targetUrl (keyword is empty for page-level tasks)
+        if (!targetUrl) {
+          alert('Missing target URL');
+          return;
+        }
+      } else {
+        // Ranking & AI: require both keyword and targetUrl
+        if (!keyword || !targetUrl) {
+          alert('Missing keyword or URL');
+          return;
+        }
       }
 
       // Build baseline metrics from row data (stored in modal dataset)
@@ -5567,16 +5579,28 @@
           // Check if this is a Money Pages task (page-level)
           if (source === 'money_pages' || !keyword) {
             // Money Pages: use page-level metrics directly from row data
+            // Debug: Log row data to see what we're working with
+            console.log('[Money Pages] Building baseline metrics from row data:', {
+              clicks: rowData.clicks,
+              impressions: rowData.impressions,
+              ctr: rowData.ctr,
+              avgPosition: rowData.avgPosition,
+              position: rowData.position,
+              url: rowData.url
+            });
+            
             baselineMetrics = {
-              gsc_clicks_28d: rowData.clicks || rowData.clicks_28d || null,
-              gsc_impressions_28d: rowData.impressions || rowData.impressions_28d || null,
+              gsc_clicks_28d: rowData.clicks != null ? rowData.clicks : (rowData.clicks_28d || 0),
+              gsc_impressions_28d: rowData.impressions != null ? rowData.impressions : (rowData.impressions_28d || 0),
               // rowData.ctr is already a ratio (0-1) from pageTotalsByKey
-              gsc_ctr_28d: rowData.ctr != null ? rowData.ctr : (rowData.ctr_28d || null),
-              gsc_position_28d: rowData.avgPosition != null ? rowData.avgPosition : (rowData.position || rowData.position_28d || null),
+              gsc_ctr_28d: rowData.ctr != null ? rowData.ctr : (rowData.ctr_28d != null ? rowData.ctr_28d : 0),
+              gsc_position_28d: rowData.avgPosition != null ? rowData.avgPosition : (rowData.position != null ? rowData.position : (rowData.position_28d || null)),
               classic_ranking_url: rowData.url || rowData.targetUrl || targetUrl || null,
               segment: rowData.segment || 'money_pages',
               captured_at: new Date().toISOString()
             };
+            
+            console.log('[Money Pages] Built baseline metrics:', baselineMetrics);
           } else {
             // Ranking & AI: use keyword-based metrics
             // Get queryTotal data for clicks, impressions, and CTR
@@ -25003,14 +25027,29 @@ Final Score: ${score}/100`;
         }
         
         // Populate baseline preview
+        // Debug: Log row data to see what we have
+        console.log('[Money Pages Modal] Row data for baseline:', {
+          clicks: row.clicks,
+          impressions: row.impressions,
+          ctr: row.ctr,
+          avgPosition: row.avgPosition,
+          position: row.position,
+          url: row.url
+        });
+        
         const ctrPct = (row.ctr || 0) * 100;
+        const clicks = row.clicks || row.clicks_28d || 0;
+        const impressions = row.impressions || row.impressions_28d || 0;
+        const ctr = row.ctr != null ? row.ctr : (row.ctr_28d || 0);
+        const position = row.avgPosition != null ? row.avgPosition : (row.position || row.position_28d || null);
+        
         baselinePreview.innerHTML = `
           <div style="font-weight: 600; color: #92400e; margin-bottom: 0.5rem; font-size: 0.875rem;">Baseline that will be captured on create:</div>
           <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; font-size: 0.875rem; color: #78350f;">
-            <div><strong>Clicks (28d):</strong> ${(row.clicks || 0).toLocaleString()}</div>
-            <div><strong>Impressions (28d):</strong> ${(row.impressions || 0).toLocaleString()}</div>
-            <div><strong>CTR (28d):</strong> ${ctrPct.toFixed(2)}%</div>
-            <div><strong>Avg position (28d):</strong> ${row.avgPosition ? row.avgPosition.toFixed(1) : 'N/A'}</div>
+            <div><strong>Clicks (28d):</strong> ${clicks.toLocaleString()}</div>
+            <div><strong>Impressions (28d):</strong> ${impressions.toLocaleString()}</div>
+            <div><strong>CTR (28d):</strong> ${(ctr * 100).toFixed(2)}%</div>
+            <div><strong>Avg position (28d):</strong> ${position ? position.toFixed(1) : 'N/A'}</div>
           </div>
         `;
         
