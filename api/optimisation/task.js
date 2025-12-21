@@ -44,14 +44,14 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { 
-      keyword_text, 
-      target_url, 
+    const {
+      keyword_text,
+      target_url,
       task_type, 
       status, 
       title, 
       notes, 
-      baselineMetrics,
+      baselineMetrics: baselineMetricsRaw,
       // Cycle 1 objective fields (Phase 4)
       objective_title,
       primary_kpi,
@@ -192,6 +192,24 @@ export default async function handler(req, res) {
     // Determine source from request body or default to 'ranking_ai'
     const source = req.body.source || 'ranking_ai';
     
+    // Log baseline metrics received
+    console.log('[Optimisation Task] Received baselineMetrics:', baselineMetricsRaw);
+    console.log('[Optimisation Task] Source:', source);
+    
+    // Parse baselineMetrics if it's a string (shouldn't happen, but handle it)
+    const baselineMetrics = typeof baselineMetricsRaw === 'string' ? JSON.parse(baselineMetricsRaw) : baselineMetricsRaw;
+    
+    if (baselineMetrics) {
+      console.log('[Optimisation Task] Parsed baselineMetrics:', {
+        clicks: baselineMetrics.gsc_clicks_28d,
+        impressions: baselineMetrics.gsc_impressions_28d,
+        ctr: baselineMetrics.gsc_ctr_28d,
+        position: baselineMetrics.gsc_position_28d
+      });
+    } else {
+      console.warn('[Optimisation Task] ⚠️ No baselineMetrics provided in request');
+    }
+    
     // Insert created event
     const createdEventData = {
         task_id: task.id,
@@ -214,6 +232,15 @@ export default async function handler(req, res) {
 
     // Insert baseline measurement event if baseline metrics provided
     if (baselineMetrics) {
+      console.log('[Optimisation Task] Creating baseline measurement with metrics:', {
+        task_id: task.id,
+        cycle_id: cycle.id,
+        clicks: baselineMetrics.gsc_clicks_28d,
+        impressions: baselineMetrics.gsc_impressions_28d,
+        ctr: baselineMetrics.gsc_ctr_28d,
+        position: baselineMetrics.gsc_position_28d
+      });
+      
       const measurementEventData = {
         task_id: task.id,
         event_type: 'measurement',
@@ -235,8 +262,13 @@ export default async function handler(req, res) {
 
       if (measurementEventError) {
         console.error('[Optimisation Task] Baseline measurement event insert error:', measurementEventError);
+        console.error('[Optimisation Task] Measurement event data that failed:', measurementEventData);
         // Don't fail the request, just log
+      } else {
+        console.log('[Optimisation Task] ✓ Baseline measurement created successfully');
       }
+    } else {
+      console.warn('[Optimisation Task] ⚠️ No baselineMetrics provided - baseline measurement will not be created');
     }
 
     // Fetch updated task with cycle info

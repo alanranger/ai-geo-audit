@@ -5634,6 +5634,7 @@
         const source = modal.dataset.source || '';
         // Debug: Log what we're sending to API
         console.log('[Money Pages] Sending task creation request with baselineMetrics:', baselineMetrics);
+        debugLog(`📤 Creating task with baseline: clicks=${baselineMetrics?.gsc_clicks_28d || 0}, impressions=${baselineMetrics?.gsc_impressions_28d || 0}, CTR=${((baselineMetrics?.gsc_ctr_28d || 0) * 100).toFixed(2)}%`, 'info');
         
         const response = await fetch(apiUrl('/api/optimisation/task'), {
           method: 'POST',
@@ -23663,7 +23664,8 @@ Final Score: ${score}/100`;
                           Not tracked
                         </span>
                         <button 
-                          onclick="window.trackMoneyPage('${row.url.replace(/'/g, "\\'")}', '${(row.title || row.url).replace(/'/g, "\\'")}', ${JSON.stringify(row).replace(/'/g, "\\'")})"
+                          onclick="window.trackMoneyPage('${row.url.replace(/'/g, "\\'")}', '${(row.title || row.url).replace(/'/g, "\\'")}')"
+                          data-row-url="${row.url.replace(/"/g, '&quot;')}"
                           style="font-size: 0.75rem; padding: 0.375rem 0.75rem; border-radius: 4px; border: 1px solid #10b981; background: #10b981; cursor: pointer; color: white; font-weight: 600; transition: all 0.2s; white-space: nowrap;"
                           onmouseover="this.style.background='#059669'; this.style.borderColor='#059669';"
                           onmouseout="this.style.background='#10b981'; this.style.borderColor='#10b981';"
@@ -25081,49 +25083,44 @@ Final Score: ${score}/100`;
       };
       
       // Track Money Page - per-row function (opens modal instead of auto-creating)
-      window.trackMoneyPage = function(pageUrl, pageTitle, rowDataFromButton = null) {
+      window.trackMoneyPage = function(pageUrl, pageTitle) {
         try {
           console.log('[Money Pages] trackMoneyPage called', { pageUrl, pageTitle });
           debugLog(`📊 Opening Track modal for Money Page: ${pageUrl}`, 'info');
           
-          // Try multiple methods to find row data with metrics
+          // Look up row data from stored map (most reliable - populated during table render)
           let rowData = null;
+          const normalizedUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(pageUrl) : pageUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+          console.log('[Money Pages] Looking up row data for normalized URL:', normalizedUrl);
           
-          // Method 0: Use row data passed directly from button (most reliable - comes from table render)
-          if (rowDataFromButton) {
-            try {
-              // If it's a string (JSON), parse it; otherwise use directly
-              rowData = typeof rowDataFromButton === 'string' ? JSON.parse(rowDataFromButton) : rowDataFromButton;
-              console.log('[Money Pages] Using row data from button onclick:', rowData);
-              console.log('[Money Pages] Row data metrics from button:', {
+          if (window.moneyPagesRowDataByUrl) {
+            rowData = window.moneyPagesRowDataByUrl.get(normalizedUrl);
+            console.log('[Money Pages] Row data from map:', rowData ? '✓ FOUND' : '✗ NOT FOUND');
+            if (rowData) {
+              console.log('[Money Pages] ✓ Row data metrics from map:', {
                 clicks: rowData.clicks,
                 impressions: rowData.impressions,
                 ctr: rowData.ctr,
-                avgPosition: rowData.avgPosition
+                avgPosition: rowData.avgPosition,
+                position: rowData.position,
+                url: rowData.url
               });
-            } catch (e) {
-              console.error('[Money Pages] Failed to parse row data from button:', e);
-              rowData = null;
-            }
-          }
-          
-          // Method 1: Look up from stored map
-          if (!rowData) {
-            const normalizedUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(pageUrl) : pageUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
-            console.log('[Money Pages] Normalized URL:', normalizedUrl);
-            
-            if (window.moneyPagesRowDataByUrl) {
-              rowData = window.moneyPagesRowDataByUrl.get(normalizedUrl);
-              console.log('[Money Pages] Row data from map:', rowData ? 'found' : 'not found');
-              if (rowData) {
-                console.log('[Money Pages] Row data metrics:', {
-                  clicks: rowData.clicks,
-                  impressions: rowData.impressions,
-                  ctr: rowData.ctr,
-                  avgPosition: rowData.avgPosition
-                });
+              
+              // Validate that we have actual metrics (not all zeros)
+              if (rowData.clicks === 0 && rowData.impressions === 0) {
+                console.warn('[Money Pages] ⚠️ WARNING: Row data has 0 clicks and 0 impressions! This might be incorrect.');
+                debugLog(`⚠ Row data has 0 metrics - clicks=${rowData.clicks}, impressions=${rowData.impressions}`, 'warn');
+              } else {
+                console.log('[Money Pages] ✓ Row data has valid metrics');
               }
+            } else {
+              console.warn('[Money Pages] ⚠️ Row data not found in map. Map size:', window.moneyPagesRowDataByUrl.size);
+              // Log sample keys for debugging
+              const sampleKeys = Array.from(window.moneyPagesRowDataByUrl.keys()).slice(0, 5);
+              console.log('[Money Pages] Sample keys in map:', sampleKeys);
             }
+          } else {
+            console.warn('[Money Pages] ⚠️ window.moneyPagesRowDataByUrl map does not exist!');
           }
           
           // Method 2: If not found in map, search directly in moneyPagesMetrics.rows
