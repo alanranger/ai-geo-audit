@@ -5401,11 +5401,20 @@
 
         const data = await response.json();
         
-        // DEBUG: Log raw API response structure
+        // DEBUG: Log raw API response structure with full details
         console.log('[Optimisation] API response received:', {
           statusCount: data.statuses?.length || 0,
           sampleStatus: data.statuses?.[0] || null,
-          sampleStatusKeys: data.statuses?.[0] ? Object.keys(data.statuses[0]) : []
+          sampleStatusKeys: data.statuses?.[0] ? Object.keys(data.statuses[0]) : [],
+          allStatusesWithId: (data.statuses || []).map(s => ({
+            id: s.id,
+            task_id: s.task_id,
+            hasId: 'id' in s,
+            hasTaskId: 'task_id' in s,
+            keyword_key: s.keyword_key,
+            target_url_clean: s.target_url_clean,
+            status: s.status
+          }))
         });
         
         // CRITICAL: Preserve immediate cache entries (newly created tasks) that are very recent
@@ -5463,12 +5472,15 @@
               console.warn('[Optimisation] API response missing id field, using task_id as fallback:', {
                 task_id: status.task_id,
                 url: status.target_url_clean,
-                status: status.status
+                status: status.status,
+                allKeys: Object.keys(status)
               });
             } else {
               console.error('[Optimisation] Status object missing both id and task_id fields - skipping:', {
                 status,
-                keys: Object.keys(status)
+                keys: Object.keys(status),
+                keyword_key: status.keyword_key,
+                target_url_clean: status.target_url_clean
               });
               return; // Skip this status entry
             }
@@ -5477,6 +5489,20 @@
           // CRITICAL: Also ensure task_id is set if missing (for backward compatibility)
           if (!status.task_id && status.id) {
             status.task_id = status.id;
+          }
+          
+          // DEBUG: Log every status being cached (especially page-level tasks)
+          if (!status.keyword_key || status.keyword_key.trim() === '') {
+            console.log('[Optimisation] Caching page-level task:', {
+              key: `::${normalizedUrl}::${status.task_type || 'on_page'}`,
+              id: status.id,
+              task_id: status.task_id,
+              url: status.target_url_clean,
+              normalizedUrl: normalizedUrl,
+              status: status.status,
+              hasId: 'id' in status,
+              hasTaskId: 'task_id' in status
+            });
           }
           
           // Normalize keyword_key: convert null/undefined to empty string, trim whitespace
@@ -5559,13 +5585,32 @@
         
         // Debug logging for landscape page
         if (url && url.includes('landscape-photography-workshops')) {
-          console.log(`[Optimisation] getOptimisationStatus lookup: key="${key}", found=${!!status}, cacheSize=${window.optimisationStatusCache.size}, id="${status?.id || 'null'}"`);
-          if (!status) {
+          console.log(`[Optimisation] getOptimisationStatus lookup: key="${key}", found=${!!status}, cacheSize=${window.optimisationStatusCache.size}, id="${status?.id || 'null'}", task_id="${status?.task_id || 'null'}"`);
+          if (status) {
+            console.log(`[Optimisation] Status object retrieved:`, {
+              id: status.id,
+              task_id: status.task_id,
+              hasId: 'id' in status,
+              hasTaskId: 'task_id' in status,
+              status: status.status,
+              allKeys: Object.keys(status).slice(0, 15)
+            });
+          } else {
             // Log all keys in cache for debugging
             const allKeys = Array.from(window.optimisationStatusCache.keys());
             console.log(`[Optimisation] Cache keys (first 10):`, allKeys.slice(0, 10));
             const matchingKeys = allKeys.filter(k => k.includes('landscape') || k.includes(urlKey));
             console.log(`[Optimisation] Matching keys:`, matchingKeys);
+            // Also log what's in the cache for matching keys
+            matchingKeys.forEach(mk => {
+              const cached = window.optimisationStatusCache.get(mk);
+              console.log(`[Optimisation] Cached entry for "${mk}":`, {
+                id: cached?.id,
+                task_id: cached?.task_id,
+                status: cached?.status,
+                hasId: cached ? ('id' in cached) : false
+              });
+            });
           }
         }
         return status;
@@ -8240,9 +8285,26 @@
 
     // Open task drawer (B3, B4)
     window.openOptimisationTaskDrawer = async function openOptimisationTaskDrawer(taskId) {
+      // DEBUG: Log what we received
+      console.log('[Optimisation Drawer] openOptimisationTaskDrawer called with:', {
+        taskId: taskId,
+        taskIdType: typeof taskId,
+        taskIdLength: taskId ? String(taskId).length : 0,
+        taskIdValue: String(taskId),
+        isUndefined: taskId === undefined,
+        isNull: taskId === null,
+        isEmptyString: taskId === '',
+        isFalsy: !taskId
+      });
+      
       // Validate taskId
       if (!taskId) {
-        console.error('[Optimisation Drawer] Task ID is missing or invalid:', taskId);
+        console.error('[Optimisation Drawer] Task ID is missing or invalid:', {
+          taskId: taskId,
+          type: typeof taskId,
+          value: String(taskId),
+          stack: new Error().stack
+        });
         alert('Task ID not found. Please try refreshing the page or creating the task again.');
         return;
       }
@@ -24387,12 +24449,30 @@ Final Score: ${score}/100`;
                       statusId: status.id,
                       statusTaskId: status.task_id,
                       extractedTaskId: taskId,
-                      statusType: typeof taskId
+                      statusType: typeof taskId,
+                      statusObject: {
+                        id: status.id,
+                        task_id: status.task_id,
+                        hasId: 'id' in status,
+                        hasTaskId: 'task_id' in status,
+                        allKeys: Object.keys(status).slice(0, 15)
+                      }
                     });
                   }
                   
                   // Escape taskId for use in onclick attribute (it's a UUID string, so needs quotes)
                   const taskIdEscaped = String(taskId).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                  
+                  // DEBUG: Log the onclick handler that will be generated
+                  if (row.url && row.url.includes('landscape-photography-workshops')) {
+                    const onclickHandler = `window.openOptimisationTaskDrawer('${taskIdEscaped}')`;
+                    console.log('[Money Pages] Generated onclick handler for landscape page:', {
+                      taskId: taskId,
+                      taskIdEscaped: taskIdEscaped,
+                      onclickHandler: onclickHandler,
+                      onclickLength: onclickHandler.length
+                    });
+                  }
                   return '<div style="display: flex; flex-direction: column; gap: 0.25rem; align-items: center;">' +
                     '<span style="display: inline-block; padding: 0.125rem 0.5rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600; background: ' + statusBg + '; color: ' + statusColor + '; border: 1px solid ' + statusColor + '40; text-transform: capitalize;">' +
                       escapeHtml(statusText) +
@@ -27566,8 +27646,24 @@ Final Score: ${score}/100`;
                 id: optimisationStatus?.id,
                 task_id: optimisationStatus?.task_id,
                 extractedTaskId: taskId,
-                status: optimisationStatus?.status
+                status: optimisationStatus?.status,
+                statusObject: optimisationStatus ? {
+                  id: optimisationStatus.id,
+                  task_id: optimisationStatus.task_id,
+                  allKeys: Object.keys(optimisationStatus).slice(0, 15)
+                } : null
               });
+              
+              // Also log the onclick handler that will be generated
+              if (taskId) {
+                const taskIdEscaped = String(taskId).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                const onclickHandler = `window.openOptimisationTaskDrawer('${taskIdEscaped}')`;
+                console.log('[Money Pages Priority] Generated onclick handler:', {
+                  taskId: taskId,
+                  taskIdEscaped: taskIdEscaped,
+                  onclickHandler: onclickHandler
+                });
+              }
             }
             
             // Validate taskId exists before rendering Manage button
