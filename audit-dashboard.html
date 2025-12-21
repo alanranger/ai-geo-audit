@@ -5405,14 +5405,17 @@
         // Build cache map: key = keyword_key::target_url_clean::task_type
         // For page-level tasks, keyword_key is null or empty string - use empty string for consistency
         (data.statuses || []).forEach(status => {
-          const keywordKey = status.keyword_key || '';
+          // Normalize keyword_key: convert null/undefined to empty string, trim whitespace
+          const keywordKey = (status.keyword_key || '').trim();
           // Normalize target_url_clean using cleanUrlForKey to ensure consistent lookup
           // The API returns target_url_clean, but we need to normalize it the same way we normalize URLs in getOptimisationStatus
           const normalizedUrl = window.cleanUrlForKey ? window.cleanUrlForKey(status.target_url_clean || status.target_url || '') : (status.target_url_clean || status.target_url || '').toLowerCase().trim();
-          const key = `${keywordKey}::${normalizedUrl}::${status.task_type || 'on_page'}`;
+          // For page-level tasks (empty keyword_key), use :: prefix to match getOptimisationStatus format
+          // For keyword-level tasks, use keyword_key:: prefix
+          const key = keywordKey ? `${keywordKey}::${normalizedUrl}::${status.task_type || 'on_page'}` : `::${normalizedUrl}::${status.task_type || 'on_page'}`;
           window.optimisationStatusCache.set(key, status);
           // Debug: Log page-level tasks
-          if (!status.keyword_key || status.keyword_key.trim() === '') {
+          if (!keywordKey) {
             console.log(`[Optimisation] Cached page-level task status: key="${key}", original_url="${status.target_url_clean}", normalized_url="${normalizedUrl}", status="${status.status}"`);
           }
         });
@@ -5864,12 +5867,30 @@
             if (createdTaskUrl) {
               const testRow = { keyword: '', best_url: createdTaskUrl, targetUrl: createdTaskUrl, ranking_url: createdTaskUrl };
               const testStatus = window.getOptimisationStatus ? window.getOptimisationStatus(testRow, 'on_page') : null;
+              const urlKey = window.cleanUrlForKey ? window.cleanUrlForKey(createdTaskUrl) : createdTaskUrl.toLowerCase().trim();
+              const expectedKey = `::${urlKey}::on_page`;
+              const cacheHasKey = window.optimisationStatusCache ? window.optimisationStatusCache.has(expectedKey) : false;
+              const cachedValue = window.optimisationStatusCache ? window.optimisationStatusCache.get(expectedKey) : null;
+              
               console.log('[Money Pages] Status lookup test for created task:', {
                 url: createdTaskUrl,
+                urlKey,
+                expectedKey,
                 found: !!testStatus,
                 status: testStatus?.status,
-                taskId: testStatus?.id
+                taskId: testStatus?.id,
+                cacheHasKey,
+                cachedValueStatus: cachedValue?.status,
+                cachedValueId: cachedValue?.id
               });
+              
+              // If not found, log all cache keys for debugging
+              if (!testStatus && window.optimisationStatusCache) {
+                const allKeys = Array.from(window.optimisationStatusCache.keys());
+                const matchingKeys = allKeys.filter(k => k.includes(urlKey) || k.includes('landscape'));
+                console.log('[Money Pages] Cache keys containing URL:', matchingKeys);
+                console.log('[Money Pages] All cache keys (first 20):', allKeys.slice(0, 20));
+              }
             }
           }
           
@@ -23939,23 +23960,23 @@ Final Score: ${score}/100`;
                   
                   // Debug logging for landscape page
                   if (row.url && row.url.includes('landscape-photography-workshops')) {
+                    const urlKey = window.cleanUrlForKey ? window.cleanUrlForKey(row.url) : row.url.toLowerCase().trim();
+                    const expectedKey = `::${urlKey}::on_page`;
+                    const cacheHasKey = window.optimisationStatusCache ? window.optimisationStatusCache.has(expectedKey) : false;
+                    const allKeys = window.optimisationStatusCache ? Array.from(window.optimisationStatusCache.keys()) : [];
+                    const matchingKeys = allKeys.filter(k => k.includes(urlKey) || k.includes('landscape'));
+                    
                     console.log('[Money Pages] Status lookup for landscape page:', {
                       url: row.url,
+                      urlKey,
+                      expectedKey,
                       found: !!status,
                       status: status?.status,
                       taskId: status?.id,
                       cacheSize: window.optimisationStatusCache ? window.optimisationStatusCache.size : 0,
-                      tempCacheSize: window.moneyPagesTaskCache ? window.moneyPagesTaskCache.size : 0
-                    });
-                  }
-                  
-                  // Debug logging
-                  if (row.url && row.url.includes('landscape-photography-workshops')) {
-                    console.log('[Money Pages] Status lookup for landscape page:', {
-                      url: row.url,
-                      statusRow: statusRow,
-                      status: status,
-                      cacheSize: window.optimisationStatusCache ? window.optimisationStatusCache.size : 0
+                      tempCacheSize: window.moneyPagesTaskCache ? window.moneyPagesTaskCache.size : 0,
+                      cacheHasKey,
+                      matchingKeys: matchingKeys.slice(0, 5)
                     });
                   }
                   
