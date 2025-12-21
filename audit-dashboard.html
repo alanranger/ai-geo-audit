@@ -5739,7 +5739,26 @@
               const rowsPerPage = window.moneyPagesRowsPerPage || 10;
               moneyPagesContainer.innerHTML = await renderMoneyPagesTable(window.moneyPagesMetrics.rows, currentPage, rowsPerPage);
               // Re-attach event handlers (they're set up in the render function)
-              await attachMoneyPagesTableHandlers();
+              // Note: renderMoneyPagesTable already calls these handlers, but we need to ensure they're attached after re-render
+              if (typeof attachMoneyPagesSortHandlers === 'function') {
+                attachMoneyPagesSortHandlers();
+              }
+              if (typeof attachMoneyPagesPaginationHandlers === 'function') {
+                attachMoneyPagesPaginationHandlers(window.moneyPagesMetrics.rows);
+              }
+              if (typeof attachMoneyPagesCopyHandler === 'function') {
+                attachMoneyPagesCopyHandler(window.moneyPagesMetrics.rows);
+              }
+              if (typeof attachMoneyPagesFilterHandlers === 'function') {
+                attachMoneyPagesFilterHandlers(window.moneyPagesMetrics.rows, async () => {
+                  // Re-apply filters and re-render
+                  const currentPage = window.moneyPagesCurrentPage || 1;
+                  const rowsPerPage = window.moneyPagesRowsPerPage || 10;
+                  if (moneyPagesContainer && typeof renderMoneyPagesTable === 'function') {
+                    moneyPagesContainer.innerHTML = await renderMoneyPagesTable(window.moneyPagesMetrics.rows, currentPage, rowsPerPage);
+                  }
+                });
+              }
             }
           }
           
