@@ -7938,9 +7938,21 @@
           } else if (task.objective && task.objective.kpi && task.objective.target != null) {
             // Use objective from cycle
             const kpiLabel = task.objective.kpi.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            // Format target value: for CTR KPIs, convert ratio to percentage
+            let formattedTarget = task.objective.target;
+            const isCtrKpi = task.objective.kpi === 'ctr_28d' || task.objective.kpi === 'ctr';
+            if (isCtrKpi && task.objective.target_type === 'absolute' && formattedTarget < 1 && formattedTarget > 0) {
+              // Convert ratio (0.025) to percentage (2.5%)
+              formattedTarget = (formattedTarget * 100).toFixed(1) + '%';
+            } else if (isCtrKpi && task.objective.target_type === 'delta') {
+              // For delta targets, also format as percentage if it's a small value
+              if (Math.abs(formattedTarget) < 1 && Math.abs(formattedTarget) > 0) {
+                formattedTarget = (formattedTarget * 100).toFixed(1) + '%';
+              }
+            }
             const targetText = task.objective.target_type === 'delta' 
-              ? `${kpiLabel} ${task.objective.target >= 0 ? '+' : ''}${task.objective.target}`
-              : `${kpiLabel} → ${task.objective.target}`;
+              ? `${kpiLabel} ${task.objective.target >= 0 ? '+' : ''}${formattedTarget}`
+              : `${kpiLabel} → ${formattedTarget}`;
             let dueText = '';
             if (task.objective.due_at || task.objective_due_at) {
               const dueDate = new Date(task.objective.due_at || task.objective_due_at).toLocaleDateString('en-GB');
@@ -7950,8 +7962,15 @@
           } else if (task.objective_kpi && task.objective_target_delta != null) {
             // Legacy fallback
             const kpiLabel = task.objective_kpi.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            // Format target value: for CTR KPIs, convert ratio to percentage
+            let formattedTarget = Math.abs(task.objective_target_delta);
+            const isCtrKpi = task.objective_kpi === 'ctr_28d' || task.objective_kpi === 'ctr';
+            if (isCtrKpi && formattedTarget < 1 && formattedTarget > 0) {
+              // Convert ratio (0.025) to percentage (2.5%)
+              formattedTarget = (formattedTarget * 100).toFixed(1) + '%';
+            }
             const direction = task.objective_direction === 'decrease' ? '-' : '+';
-            const targetText = `${kpiLabel} ${direction}${Math.abs(task.objective_target_delta)}`;
+            const targetText = `${kpiLabel} ${direction}${formattedTarget}`;
             let dueText = '';
             if (task.objective_due_at) {
               const dueDate = new Date(task.objective_due_at).toLocaleDateString('en-GB');
