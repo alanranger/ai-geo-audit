@@ -5456,22 +5456,27 @@
         // Build cache map: key = keyword_key::target_url_clean::task_type
         // For page-level tasks, keyword_key is null or empty string - use empty string for consistency
         (data.statuses || []).forEach(status => {
-          // CRITICAL: Verify API response includes id field
+          // CRITICAL: Ensure id field is always present - use task_id as fallback if needed
           if (!status.id) {
-            console.error('[Optimisation] API response missing id field:', {
-              status,
-              hasId: 'id' in status,
-              hasTaskId: 'task_id' in status,
-              keys: Object.keys(status)
-            });
-            // Try to use task_id as fallback, but log warning
             if (status.task_id) {
               status.id = status.task_id;
-              console.warn('[Optimisation] Using task_id as fallback for id field');
+              console.warn('[Optimisation] API response missing id field, using task_id as fallback:', {
+                task_id: status.task_id,
+                url: status.target_url_clean,
+                status: status.status
+              });
             } else {
-              console.error('[Optimisation] Status object missing both id and task_id fields - skipping');
+              console.error('[Optimisation] Status object missing both id and task_id fields - skipping:', {
+                status,
+                keys: Object.keys(status)
+              });
               return; // Skip this status entry
             }
+          }
+          
+          // CRITICAL: Also ensure task_id is set if missing (for backward compatibility)
+          if (!status.task_id && status.id) {
+            status.task_id = status.id;
           }
           
           // Normalize keyword_key: convert null/undefined to empty string, trim whitespace
@@ -5532,9 +5537,29 @@
         // For page-level tasks, use empty string for keyword_key
         const key = `::${urlKey}::${taskType}`;
         const status = window.optimisationStatusCache.get(key) || null;
+        
+        // CRITICAL: Ensure status object has id field (use task_id as fallback)
+        if (status && !status.id) {
+          if (status.task_id) {
+            status.id = status.task_id;
+            console.warn('[Optimisation] Status object missing id field, using task_id as fallback:', {
+              task_id: status.task_id,
+              url: status.target_url_clean || url,
+              key
+            });
+          } else {
+            console.error('[Optimisation] Status object missing both id and task_id fields:', {
+              status,
+              url,
+              key
+            });
+            return null; // Return null if no id available
+          }
+        }
+        
         // Debug logging for landscape page
         if (url && url.includes('landscape-photography-workshops')) {
-          console.log(`[Optimisation] getOptimisationStatus lookup: key="${key}", found=${!!status}, cacheSize=${window.optimisationStatusCache.size}`);
+          console.log(`[Optimisation] getOptimisationStatus lookup: key="${key}", found=${!!status}, cacheSize=${window.optimisationStatusCache.size}, id="${status?.id || 'null'}"`);
           if (!status) {
             // Log all keys in cache for debugging
             const allKeys = Array.from(window.optimisationStatusCache.keys());
@@ -24679,6 +24704,45 @@ Final Score: ${score}/100`;
       
       // Function to render Money Pages Performance section
       async function renderMoneyPagesSection(moneyPagesMetrics) {
+        // CRITICAL: Fetch optimisation statuses BEFORE rendering tables to ensure cache is populated
+        if (typeof window.fetchOptimisationStatuses === 'function') {
+          const allStatusRows = [];
+          
+          // Add Opportunity table rows
+          if (moneyPagesMetrics && moneyPagesMetrics.rows && moneyPagesMetrics.rows.length > 0) {
+            moneyPagesMetrics.rows.forEach(row => {
+              allStatusRows.push({
+                keyword: '', // Empty for page-level tasks
+                best_url: row.url,
+                targetUrl: row.url,
+                ranking_url: row.url
+              });
+            });
+          }
+          
+          // Add Priority table rows
+          if (window.moneyPagePriorityData && window.moneyPagePriorityData.length > 0) {
+            window.moneyPagePriorityData.forEach(p => {
+              allStatusRows.push({
+                keyword: '', // Empty for page-level tasks
+                best_url: p.url,
+                targetUrl: p.url,
+                ranking_url: p.url
+              });
+            });
+          }
+          
+          if (allStatusRows.length > 0) {
+            debugLog(`[Money Pages] Fetching statuses for ${allStatusRows.length} rows before initial render`, 'info');
+            try {
+              await window.fetchOptimisationStatuses(allStatusRows);
+              debugLog(`[Money Pages] Status cache populated: ${window.optimisationStatusCache?.size || 0} entries`, 'success');
+            } catch (err) {
+              debugLog(`[Money Pages] Error fetching statuses before render: ${err.message}`, 'error');
+            }
+          }
+        }
+        
         // Get or create the Money Pages panel
         const moneyPanel = document.querySelector('.aigeo-panel[data-panel="money"]');
         if (!moneyPanel) {
