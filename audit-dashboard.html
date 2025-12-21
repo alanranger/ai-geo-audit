@@ -14388,34 +14388,35 @@
             
             // Fetch statuses for ALL rows at once (prevents multiple cache clears)
             if (allStatusRows.length > 0 && typeof window.fetchOptimisationStatuses === 'function') {
-              console.log('[Money Pages] Tab switch: Fetching statuses for', allStatusRows.length, 'rows (combined from both tables)...');
-              console.log('[Money Pages] Tab switch: Cache BEFORE fetch:', {
+              const testUrl = 'https://www.alanranger.com/landscape-photography-workshops';
+              const urlKey = window.cleanUrlForKey ? window.cleanUrlForKey(testUrl) : testUrl.toLowerCase().trim();
+              const key = `::${urlKey}::on_page`;
+              const cacheBefore = {
                 size: window.optimisationStatusCache?.size || 0,
-                hasLandscape: (() => {
-                  const testUrl = 'https://www.alanranger.com/landscape-photography-workshops';
-                  const urlKey = window.cleanUrlForKey ? window.cleanUrlForKey(testUrl) : testUrl.toLowerCase().trim();
-                  const key = `::${urlKey}::on_page`;
-                  const found = window.optimisationStatusCache?.has(key);
-                  const value = window.optimisationStatusCache?.get(key);
-                  return { found, key, value: value ? { id: value.id, status: value.status } : null };
-                })()
-              });
+                hasLandscape: window.optimisationStatusCache?.has(key),
+                landscapeValue: window.optimisationStatusCache?.get(key) ? {
+                  id: window.optimisationStatusCache.get(key).id,
+                  status: window.optimisationStatusCache.get(key).status
+                } : null
+              };
+              
+              debugLog(`[Money Pages] Tab switch: Fetching statuses for ${allStatusRows.length} rows (combined from both tables). Cache BEFORE: size=${cacheBefore.size}, hasLandscape=${cacheBefore.hasLandscape}, landscapeId=${cacheBefore.landscapeValue?.id || 'null'}`, 'info');
               
               try {
                 await window.fetchOptimisationStatuses(allStatusRows);
-                console.log('[Money Pages] Tab switch: Cache AFTER fetch:', {
+                
+                const cacheAfter = {
                   size: window.optimisationStatusCache?.size || 0,
-                  hasLandscape: (() => {
-                    const testUrl = 'https://www.alanranger.com/landscape-photography-workshops';
-                    const urlKey = window.cleanUrlForKey ? window.cleanUrlForKey(testUrl) : testUrl.toLowerCase().trim();
-                    const key = `::${urlKey}::on_page`;
-                    const found = window.optimisationStatusCache?.has(key);
-                    const value = window.optimisationStatusCache?.get(key);
-                    return { found, key, value: value ? { id: value.id, status: value.status } : null };
-                  })()
-                });
+                  hasLandscape: window.optimisationStatusCache?.has(key),
+                  landscapeValue: window.optimisationStatusCache?.get(key) ? {
+                    id: window.optimisationStatusCache.get(key).id,
+                    status: window.optimisationStatusCache.get(key).status
+                  } : null
+                };
+                
+                debugLog(`[Money Pages] Tab switch: Cache AFTER fetch: size=${cacheAfter.size}, hasLandscape=${cacheAfter.hasLandscape}, landscapeId=${cacheAfter.landscapeValue?.id || 'null'}, status=${cacheAfter.landscapeValue?.status || 'null'}`, cacheAfter.hasLandscape ? 'success' : 'warn');
               } catch (err) {
-                console.error('[Money Pages] Error re-fetching statuses:', err);
+                debugLog(`[Money Pages] Error re-fetching statuses: ${err.message}`, 'error');
               }
             }
             
