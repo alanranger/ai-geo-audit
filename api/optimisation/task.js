@@ -153,17 +153,79 @@ export default async function handler(req, res) {
       console.log(`[Optimisation Task] Creating Cycle 1 for new task ${task.id}`);
     }
     
+    // Build Phase 5 objective JSONB object if objective fields are provided
+    let objectiveJsonb = null;
+    if (objective_title || objective_kpi || objective_metric) {
+      // Determine target value (prefer objective_target_delta, fallback to objective_target_value or target_value)
+      let targetVal = objective_target_delta != null ? parseFloat(objective_target_delta) : 
+                     (objective_target_value != null ? parseFloat(objective_target_value) : 
+                     (target_value != null ? parseFloat(target_value) : null));
+      
+      // Determine target_type based on KPI and direction
+      const kpiKey = objective_kpi || objective_metric || primary_kpi;
+      const direction = objective_direction || target_direction;
+      
+      // For "at_least" or "at_most" direction, it's an absolute target
+      // For "increase" or "decrease" direction, it's a delta target
+      let targetType = 'delta'; // default
+      if (direction === 'at_least' || direction === 'at_most') {
+        targetType = 'absolute';
+      } else if (direction === 'increase' || direction === 'decrease') {
+        targetType = 'delta';
+      } else if (kpiKey && (kpiKey.includes('rank') || kpiKey === 'ai_overview')) {
+        // Rank and AI overview are always absolute
+        targetType = 'absolute';
+      }
+      
+      // Convert CTR percentage to ratio if needed (for absolute targets)
+      // If target is > 1 and KPI is CTR-related, assume it's a percentage and convert to ratio
+      if (targetType === 'absolute' && targetVal != null && targetVal > 1 && 
+          kpiKey && (kpiKey.includes('ctr') || kpiKey === 'ctr_28d')) {
+        targetVal = targetVal / 100;
+        console.log(`[Optimisation Task] Converted CTR target from percentage (${targetVal * 100}%) to ratio (${targetVal})`);
+      }
+      
+      // Calculate due_at from objective_due_at or timeframe
+      let dueAt = null;
+      if (objective_due_at) {
+        dueAt = objective_due_at;
+      } else if (objective_timeframe_days != null || timeframe_days != null) {
+        const days = objective_timeframe_days != null ? parseInt(objective_timeframe_days) : parseInt(timeframe_days);
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() + days);
+        dueAt = startDate.toISOString();
+      }
+      
+      objectiveJsonb = {
+        title: objective_title || null,
+        kpi: objective_kpi || objective_metric || primary_kpi || null,
+        target: targetVal,
+        target_type: targetType,
+        due_at: dueAt,
+        plan: objective_plan || plan || null
+      };
+      
+      console.log('[Optimisation Task] Building Phase 5 objective JSONB:', objectiveJsonb);
+    }
+    
     const cycleData = {
       task_id: task.id,
       cycle_no: 1, // Always create Cycle 1 for new tasks
       status: status || 'planned',
+      // Phase 4 fields (for backward compatibility)
       objective_title: objective_title || null,
-      primary_kpi: primary_kpi || null,
-      target_value: target_value != null ? parseFloat(target_value) : null,
-      target_direction: target_direction || null,
-      timeframe_days: timeframe_days != null ? parseInt(timeframe_days) : null,
+      primary_kpi: primary_kpi || objective_kpi || objective_metric || null,
+      target_value: objective_target_delta != null ? parseFloat(objective_target_delta) : 
+                   (objective_target_value != null ? parseFloat(objective_target_value) : 
+                   (target_value != null ? parseFloat(target_value) : null)),
+      target_direction: objective_direction || target_direction || null,
+      timeframe_days: objective_timeframe_days != null ? parseInt(objective_timeframe_days) : 
+                      (timeframe_days != null ? parseInt(timeframe_days) : null),
       hypothesis: hypothesis || null,
-      plan: plan || null,
+      plan: objective_plan || plan || null,
+      // Phase 5 objective JSONB
+      objective: objectiveJsonb,
+      due_at: objectiveJsonb?.due_at || null,
       start_date: new Date().toISOString()
     };
 
