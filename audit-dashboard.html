@@ -30261,7 +30261,7 @@ Final Score: ${score}/100`;
             };
             
             // Helper function to update summary strip, matrix, and table
-            const updateMatrixAndTable = () => {
+            const updateMatrixAndTable = async () => {
               const typeFilter = document.getElementById('money-pages-type-filter')?.value || 'all';
               const minImpr = Number(document.getElementById('money-pages-min-impr')?.value) || 0;
               
@@ -30294,7 +30294,7 @@ Final Score: ${score}/100`;
               // Re-render matrix with filtered pages
               const matrixEl = document.getElementById('money-pages-matrix');
               if (matrixEl && typeof renderMoneyPagesMatrix === 'function') {
-                const handleMatrixCellClick = (impact, diff) => {
+                const handleMatrixCellClick = async (impact, diff) => {
                   // Toggle filter: if clicking the same cell, clear the filter
                   const currentFilter = window.moneyMatrixFilterState;
                   if (currentFilter && currentFilter.impact === impact && currentFilter.diff === diff) {
@@ -30308,7 +30308,7 @@ Final Score: ${score}/100`;
                   }
                   window.moneyPagesPriorityCurrentPage = 1; // Reset pagination when matrix cell clicked
                     // Re-render matrix to show active state
-                    updateMatrixAndTable();
+                    await updateMatrixAndTable();
                 };
                 
                 renderMoneyPagesMatrix(
@@ -30326,13 +30326,16 @@ Final Score: ${score}/100`;
               window.moneyPagesMinImpr = minImpr;
               window.moneyPagesMatrixFilter = window.moneyMatrixFilterState;
               
-              // Re-render table with filters
+              // CRITICAL: Re-render table with filters, but WAIT for status fetch to complete
+              // This ensures the cache is populated before rendering, preventing "Track" from showing when task exists
               if (typeof renderMoneyPagesTable === 'function') {
-                renderMoneyPagesTable(filteredPages, {
+                console.log('[Money Pages Priority] updateMatrixAndTable: Re-rendering table with filters, waiting for status fetch...');
+                await renderMoneyPagesTable(filteredPages, {
                   typeFilter: typeFilter,
                   minImpr: minImpr,
                   matrixFilter: window.moneyMatrixFilterState
                 });
+                console.log('[Money Pages Priority] updateMatrixAndTable: ✓ Table re-rendered with statuses fetched');
               }
             };
             
@@ -30348,10 +30351,10 @@ Final Score: ${score}/100`;
               renderMoneyPagesMatrix(
                 window.moneyPagePriorityData,
                 matrixEl,
-                (impact, diff) => {
+                async (impact, diff) => {
                   window.moneyMatrixFilterState = { impact, diff };
                   debugLog(`Money Pages Matrix: Cell clicked - Impact: ${impact}, Difficulty: ${diff}`, 'info');
-                  updateMatrixAndTable();
+                  await updateMatrixAndTable();
                 },
                 null // No active filter initially
               );
@@ -30376,8 +30379,8 @@ Final Score: ${score}/100`;
 
             // Load authority actions async and refresh table (non-blocking).
             window.refreshAuthorityActionsForMoneyPages()
-              .then(() => {
-                updateMatrixAndTable();
+              .then(async () => {
+                await updateMatrixAndTable();
               })
               .catch(() => {
                 // ignore
@@ -30396,7 +30399,9 @@ Final Score: ${score}/100`;
                 // Clear matrix filter when type filter changes
                 window.moneyMatrixFilterState = { impact: null, diff: null };
                 window.moneyPagesMatrixFilter = null;
-                updateMatrixAndTable();
+                (async () => {
+                  await updateMatrixAndTable();
+                })();
               });
             }
             
@@ -30409,7 +30414,9 @@ Final Score: ${score}/100`;
                 // Clear matrix filter when min impressions filter changes
                 window.moneyMatrixFilterState = { impact: null, diff: null };
                 window.moneyPagesMatrixFilter = null;
-                updateMatrixAndTable();
+                (async () => {
+                  await updateMatrixAndTable();
+                })();
               });
             }
           } else {
