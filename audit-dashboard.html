@@ -5425,6 +5425,24 @@
         // Build cache map: key = keyword_key::target_url_clean::task_type
         // For page-level tasks, keyword_key is null or empty string - use empty string for consistency
         (data.statuses || []).forEach(status => {
+          // CRITICAL: Verify API response includes id field
+          if (!status.id) {
+            console.error('[Optimisation] API response missing id field:', {
+              status,
+              hasId: 'id' in status,
+              hasTaskId: 'task_id' in status,
+              keys: Object.keys(status)
+            });
+            // Try to use task_id as fallback, but log warning
+            if (status.task_id) {
+              status.id = status.task_id;
+              console.warn('[Optimisation] Using task_id as fallback for id field');
+            } else {
+              console.error('[Optimisation] Status object missing both id and task_id fields - skipping');
+              return; // Skip this status entry
+            }
+          }
+          
           // Normalize keyword_key: convert null/undefined to empty string, trim whitespace
           const keywordKey = (status.keyword_key || '').trim();
           // Normalize target_url_clean using cleanUrlForKey to ensure consistent lookup
@@ -5435,9 +5453,9 @@
           const key = keywordKey ? `${keywordKey}::${normalizedUrl}::${status.task_type || 'on_page'}` : `::${normalizedUrl}::${status.task_type || 'on_page'}`;
           // Always update/overwrite with API data (API is source of truth for existing tasks)
           window.optimisationStatusCache.set(key, status);
-          // Debug: Log page-level tasks
+          // Debug: Log page-level tasks with id verification
           if (!keywordKey) {
-            console.log(`[Optimisation] Cached page-level task status: key="${key}", original_url="${status.target_url_clean}", normalized_url="${normalizedUrl}", status="${status.status}"`);
+            console.log(`[Optimisation] Cached page-level task status: key="${key}", id="${status.id}", original_url="${status.target_url_clean}", normalized_url="${normalizedUrl}", status="${status.status}"`);
           }
         });
         
@@ -14274,6 +14292,36 @@
       document.querySelectorAll('.aigeo-panel').forEach(p => {
         const isActive = p.dataset.panel === panelId;
         p.classList.toggle('is-active', isActive);
+        
+        // CRITICAL: When Money Pages tab becomes active, re-fetch statuses from database
+        if (isActive && panelId === 'money' && window.moneyPagesMetrics && window.moneyPagesMetrics.rows) {
+          console.log('[Money Pages] Tab activated - re-fetching statuses from database...');
+          // Re-fetch statuses for all rows to ensure cache is up-to-date
+          if (typeof window.fetchOptimisationStatuses === 'function') {
+            const allStatusRows = window.moneyPagesMetrics.rows.map(row => ({
+              keyword: '', // Empty for page-level tasks
+              best_url: row.url,
+              targetUrl: row.url,
+              ranking_url: row.url
+            }));
+            window.fetchOptimisationStatuses(allStatusRows).then(() => {
+              console.log('[Money Pages] ✓ Status cache refreshed from database on tab switch');
+              // Re-render table to show updated statuses
+              const tableContainer = document.getElementById('money-pages-table-container');
+              if (tableContainer && typeof renderMoneyPagesTable === 'function') {
+                const currentPage = window.moneyPagesCurrentPage || 1;
+                const rowsPerPage = window.moneyPagesRowsPerPage || 10;
+                renderMoneyPagesTable(window.moneyPagesMetrics.rows, currentPage, rowsPerPage).then(tableHtml => {
+                  if (tableHtml && typeof tableHtml === 'string' && tableHtml.trim().length > 0) {
+                    tableContainer.innerHTML = tableHtml;
+                  }
+                });
+              }
+            }).catch(err => {
+              console.error('[Money Pages] Error re-fetching statuses on tab switch:', err);
+            });
+          }
+        }
         p.hidden = !isActive; // Explicitly set hidden attribute
       });
     }
@@ -23879,7 +23927,7 @@ Final Score: ${score}/100`;
         `;
         
         // ============================================
-        // STEP 3: Fetch optimisation statuses (same as Ranking & AI)
+        // STEP 3: Fetch optimisation statuses from database (ALWAYS fetch, don't rely on cache)
         // ============================================
         // Store row data by normalized URL for Track button access
         // Always initialize the map if it doesn't exist
@@ -23887,16 +23935,18 @@ Final Score: ${score}/100`;
           window.moneyPagesRowDataByUrl = new Map();
         }
         
-        // Fetch optimisation statuses for all money pages rows (same approach as Ranking & AI)
-        if (typeof window.fetchOptimisationStatuses === 'function' && pageRows.length > 0) {
-          const statusRows = pageRows.map(row => ({
+        // CRITICAL: Always fetch from database for ALL rows (not just current page)
+        // This ensures status is always up-to-date and persists across tab switches
+        if (typeof window.fetchOptimisationStatuses === 'function' && moneyRows.length > 0) {
+          const allStatusRows = moneyRows.map(row => ({
             keyword: '', // Empty for page-level tasks
             best_url: row.url,
             targetUrl: row.url,
             ranking_url: row.url
           }));
-          await window.fetchOptimisationStatuses(statusRows);
-          debugLog(`✓ Fetched optimisation statuses for ${statusRows.length} money pages`, 'info');
+          console.log('[Money Pages] Fetching optimisation statuses from database for all rows:', allStatusRows.length);
+          await window.fetchOptimisationStatuses(allStatusRows);
+          console.log('[Money Pages] ✓ Status cache populated from database:', window.optimisationStatusCache?.size || 0, 'entries');
         }
         
         pageRows.forEach((row, idx) => {
