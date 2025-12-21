@@ -23541,8 +23541,29 @@ Final Score: ${score}/100`;
           const metaDescription = row.metaDescription || null;
           
           // Store row data by normalized URL for Track button access
+          // Ensure we store a complete copy with all metrics
           const normalizedRowUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(row.url) : row.url.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
-          window.moneyPagesRowDataByUrl.set(normalizedRowUrl, row);
+          const rowDataToStore = {
+            url: row.url,
+            title: row.title,
+            clicks: row.clicks || 0,
+            impressions: row.impressions || 0,
+            ctr: row.ctr || 0,
+            avgPosition: row.avgPosition != null ? row.avgPosition : (row.position || null),
+            position: row.position || row.avgPosition || null,
+            segment: row.segment || 'money_pages',
+            metaDescription: row.metaDescription || null,
+            category: row.category,
+            categoryLabel: row.categoryLabel,
+            categoryColor: row.categoryColor,
+            recommendation: row.recommendation,
+            schemaTypes: row.schemaTypes || []
+          };
+          window.moneyPagesRowDataByUrl.set(normalizedRowUrl, rowDataToStore);
+          // Debug: Log if this is the landscape page
+          if (row.url && row.url.includes('landscape-photography-workshops')) {
+            console.log('[Money Pages] Stored row data for landscape page:', rowDataToStore);
+          }
           
           tableHtml += `
             <tr style="border-bottom: 1px solid #f1f5f9; background: ${rowBg}; transition: background 0.2s;" onmouseover="this.style.background='#f8f9fa';" onmouseout="this.style.background='${rowBg}';">
@@ -44226,6 +44247,7 @@ Final Score: ${score}/100`;
           <select id="track-primary-kpi" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.875rem;">
             <option value="">Select KPI...</option>
             <option value="ctr">CTR</option>
+            <option value="ctr_28d">CTR (28d)</option>
             <option value="rank">Rank</option>
             <option value="clicks">Clicks</option>
             <option value="impressions">Impressions</option>
