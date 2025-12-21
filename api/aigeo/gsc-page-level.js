@@ -42,11 +42,23 @@ export default async function handler(req, res) {
       });
     }
     
-    // Use provided dates or default to 28-day window
-    // CRITICAL: Use endOffsetDays=2 to account for GSC being 2-3 days behind
+    // Use provided dates or default to rolling 28-day window
+    // Rolling 28d: endDate = yesterday, startDate = endDate - 27 days (inclusive = 28 days total)
+    // This matches GSC UI "Last 28 days" behavior
     let { startDate, endDate } = startDateParam && endDateParam 
       ? { startDate: startDateParam, endDate: endDateParam }
-      : getGscDateRange({ daysBack: 28, endOffsetDays: 2 });
+      : (() => {
+          const end = new Date();
+          end.setDate(end.getDate() - 1); // Yesterday
+          end.setHours(0, 0, 0, 0);
+          const start = new Date(end);
+          start.setDate(start.getDate() - 27); // 27 days back = 28 days total (inclusive)
+          start.setHours(0, 0, 0, 0);
+          return {
+            startDate: start.toISOString().split('T')[0],
+            endDate: end.toISOString().split('T')[0]
+          };
+        })();
     
     // Normalize property URL
     const siteUrl = normalizePropertyUrl(propertyUrl);

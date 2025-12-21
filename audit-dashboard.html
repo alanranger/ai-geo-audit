@@ -17574,6 +17574,37 @@
             showStatus(`✓ Audit saved to Supabase (${auditDate})`, 'success');
           }
           
+          // Save GSC page-level 28d metrics to Supabase
+          try {
+            if (window._pendingPageMetrics && window._pendingPageMetrics.pages && window._pendingPageMetrics.pages.length > 0) {
+              debugLog(`📊 Saving ${window._pendingPageMetrics.pages.length} page metrics to Supabase (run_id: ${auditDate})...`, 'info');
+              
+              const saveResponse = await fetch(apiUrl('/api/supabase/save-gsc-page-metrics'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  runId: auditDate,
+                  siteUrl: window._pendingPageMetrics.propertyUrl,
+                  dateStart: window._pendingPageMetrics.gscRange.startDate,
+                  dateEnd: window._pendingPageMetrics.gscRange.endDate,
+                  pages: window._pendingPageMetrics.pages
+                })
+              });
+              
+              if (saveResponse.ok) {
+                const saveResult = await saveResponse.json();
+                debugLog(`✓ Saved ${saveResult.inserted} page metrics to Supabase`, 'success');
+                // Clear pending metrics
+                window._pendingPageMetrics = null;
+              } else {
+                const errorText = await saveResponse.text();
+                debugLog(`⚠ Failed to save page metrics to Supabase: ${saveResponse.status} - ${errorText}`, 'warn');
+              }
+            }
+          } catch (pageMetricsError) {
+            debugLog(`⚠ Error saving page metrics to Supabase (non-critical): ${pageMetricsError.message}`, 'warn');
+          }
+          
           // Calculate and save portfolio snapshots (Phase 3)
           try {
             await calculateAndSavePortfolioSnapshots(auditDate);
@@ -20346,50 +20377,91 @@
       // Check global flag set by runAudit() to determine if we're in a fresh audit
       const isFreshAudit = window._isFreshAuditRun === true;
       
-      // Only check localStorage for persisted data if we're NOT in a fresh audit run
-      // During fresh audits, we must fetch fresh data to ensure accuracy
+      // Try to load from Supabase first (preferred source)
       if (!isFreshAudit) {
         try {
-          const saved = loadAuditResultsSync();
-          if (saved && saved.scores) {
-            // Check scores.moneyPages namespace first (new format)
-            const moneyPagesData = saved.scores.moneyPages || {};
-            if (moneyPagesData.gscPageTotals28d && Array.isArray(moneyPagesData.gscPageTotals28d) && moneyPagesData.gscPageTotals28d.length > 0) {
-              debugLog(`✓ Using persisted page totals from saved audit (${moneyPagesData.gscPageTotals28d.length} pages)`, 'success');
-              gscRange = moneyPagesData.gscRange || getGscDateRange(28, 2);
-              moneyPagesData.gscPageTotals28d.forEach(pageData => {
-                const key = normalizeGscPageKey(pageData.url);
-                pageTotalsByKey.set(key, {
-                  url: pageData.url,
-                  clicks: pageData.clicks || 0,
-                  impressions: pageData.impressions || 0,
-                  ctr: pageData.ctr || 0,
-                  position: pageData.position || 0
+          const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+          if (propertyUrl) {
+            debugLog(`📊 Loading page metrics from Supabase...`, 'info');
+            const supabaseResponse = await fetch(apiUrl(`/api/supabase/get-gsc-page-metrics?siteUrl=${encodeURIComponent(propertyUrl)}`));
+            
+            if (supabaseResponse.ok) {
+              const supabaseData = await supabaseResponse.json();
+              if (supabaseData.pages && supabaseData.pages.length > 0) {
+                debugLog(`✓ Loaded ${supabaseData.pages.length} page metrics from Supabase`, 'success');
+                
+                // Use the date range from the first page (all should have same range)
+                const firstPage = supabaseData.pages[0];
+                gscRange = {
+                  startDate: firstPage.date_start,
+                  endDate: firstPage.date_end
+                };
+                
+                supabaseData.pages.forEach(page => {
+                  // page.page_url is stored as full normalized URL (e.g., "https://www.alanranger.com/path")
+                  // Use it directly with normalizeGscPageKey for consistency
+                  const key = normalizeGscPageKey(page.page_url);
+                  
+                  pageTotalsByKey.set(key, {
+                    url: page.page_url,
+                    clicks: parseFloat(page.clicks_28d) || 0,
+                    impressions: parseFloat(page.impressions_28d) || 0,
+                    ctr: parseFloat(page.ctr_28d) || 0,
+                    position: page.position_28d ? parseFloat(page.position_28d) : null
+                  });
                 });
-              });
-              pageLevelDataFetched = true;
-            } else if (saved.scores.moneyPagesMetrics && saved.scores.moneyPagesMetrics.gscPageTotals28d && Array.isArray(saved.scores.moneyPagesMetrics.gscPageTotals28d)) {
-              // Fallback: check moneyPagesMetrics directly (backwards compatibility)
-              debugLog(`✓ Using persisted page totals from moneyPagesMetrics (${saved.scores.moneyPagesMetrics.gscPageTotals28d.length} pages)`, 'success');
-              gscRange = saved.scores.moneyPagesMetrics.gscRange || getGscDateRange(28, 2);
-              saved.scores.moneyPagesMetrics.gscPageTotals28d.forEach(pageData => {
-                const key = normalizeGscPageKey(pageData.url);
-                pageTotalsByKey.set(key, {
-                  url: pageData.url,
-                  clicks: pageData.clicks || 0,
-                  impressions: pageData.impressions || 0,
-                  ctr: pageData.ctr || 0,
-                  position: pageData.position || 0
-                });
-              });
-              pageLevelDataFetched = true;
+                pageLevelDataFetched = true;
+              }
             }
           }
-        } catch (persistError) {
-          debugLog(`⚠ Error loading persisted page totals: ${persistError.message}, will fetch fresh data`, 'warn');
+        } catch (supabaseError) {
+          debugLog(`⚠ Error loading from Supabase: ${supabaseError.message}, will try localStorage fallback`, 'warn');
+        }
+        
+        // Fallback to localStorage if Supabase didn't have data
+        if (!pageLevelDataFetched) {
+          try {
+            const saved = loadAuditResultsSync();
+            if (saved && saved.scores) {
+              // Check scores.moneyPages namespace first (new format)
+              const moneyPagesData = saved.scores.moneyPages || {};
+              if (moneyPagesData.gscPageTotals28d && Array.isArray(moneyPagesData.gscPageTotals28d) && moneyPagesData.gscPageTotals28d.length > 0) {
+                debugLog(`✓ Using persisted page totals from saved audit (${moneyPagesData.gscPageTotals28d.length} pages)`, 'success');
+                gscRange = moneyPagesData.gscRange || getGscDateRange(28, 2);
+                moneyPagesData.gscPageTotals28d.forEach(pageData => {
+                  const key = normalizeGscPageKey(pageData.url);
+                  pageTotalsByKey.set(key, {
+                    url: pageData.url,
+                    clicks: pageData.clicks || 0,
+                    impressions: pageData.impressions || 0,
+                    ctr: pageData.ctr || 0,
+                    position: pageData.position || 0
+                  });
+                });
+                pageLevelDataFetched = true;
+              } else if (saved.scores.moneyPagesMetrics && saved.scores.moneyPagesMetrics.gscPageTotals28d && Array.isArray(saved.scores.moneyPagesMetrics.gscPageTotals28d)) {
+                // Fallback: check moneyPagesMetrics directly (backwards compatibility)
+                debugLog(`✓ Using persisted page totals from moneyPagesMetrics (${saved.scores.moneyPagesMetrics.gscPageTotals28d.length} pages)`, 'success');
+                gscRange = saved.scores.moneyPagesMetrics.gscRange || getGscDateRange(28, 2);
+                saved.scores.moneyPagesMetrics.gscPageTotals28d.forEach(pageData => {
+                  const key = normalizeGscPageKey(pageData.url);
+                  pageTotalsByKey.set(key, {
+                    url: pageData.url,
+                    clicks: pageData.clicks || 0,
+                    impressions: pageData.impressions || 0,
+                    ctr: pageData.ctr || 0,
+                    position: pageData.position || 0
+                  });
+                });
+                pageLevelDataFetched = true;
+              }
+            }
+          } catch (persistError) {
+            debugLog(`⚠ Error loading persisted page totals: ${persistError.message}, will fetch fresh data`, 'warn');
+          }
         }
       } else {
-        debugLog(`📊 Fresh audit run detected - will fetch fresh page-level data from GSC API (skipping localStorage check)`, 'info');
+        debugLog(`📊 Fresh audit run detected - will fetch fresh page-level data from GSC API`, 'info');
       }
       
       // If persisted data not available (or we're in a fresh audit), fetch from GSC API
@@ -20399,8 +20471,19 @@
           
           if (propertyUrl) {
           // Force Money Pages to always use a rolling "last 28d" range for page totals
-          // CRITICAL: Use endOffsetDays=2 to account for GSC being 2-3 days behind
-          gscRange = getGscDateRange(28, 2);
+          // Rolling 28d: endDate = yesterday, startDate = endDate - 27 days (inclusive = 28 days total)
+          // Use endOffsetDays=1 for yesterday (GSC UI uses yesterday as end date)
+          const endDate = new Date();
+          endDate.setDate(endDate.getDate() - 1); // Yesterday
+          endDate.setHours(0, 0, 0, 0);
+          const startDate = new Date(endDate);
+          startDate.setDate(startDate.getDate() - 27); // 27 days back = 28 days total (inclusive)
+          startDate.setHours(0, 0, 0, 0);
+          
+          gscRange = {
+            startDate: startDate.toISOString().split('T')[0],
+            endDate: endDate.toISOString().split('T')[0]
+          };
           debugLog(`📊 Fetching page-level GSC data (unfiltered, all positions) for last 28d: ${gscRange.startDate} to ${gscRange.endDate}...`, 'info');
           
           debugLog(`📊 Calling GSC page-level API: ${apiUrl('/api/aigeo/gsc-page-level')}`, 'info');
@@ -20464,6 +20547,24 @@
               }
               
               debugLog(`✓ Built pageTotalsByKey from GSC page-level API: ${pageTotalsByKey.size} pages`, 'success');
+              
+              // Save to Supabase for persistence
+              // This will be called after audit is saved, using the audit_date as run_id
+              // Store the data temporarily for later saving
+              window._pendingPageMetrics = {
+                pages: Array.from(pageTotalsByKey.values()).map(metrics => ({
+                  url: metrics.url,
+                  page_url: metrics.url, // Will be normalized in API
+                  clicks: metrics.clicks,
+                  impressions: metrics.impressions,
+                  ctr: metrics.ctr,
+                  position: metrics.position
+                })),
+                gscRange: gscRange,
+                propertyUrl: propertyUrl
+              };
+              debugLog(`📊 Prepared ${window._pendingPageMetrics.pages.length} page metrics for Supabase save (will save after audit completes)`, 'info');
+              
               pageLevelDataFetched = true;
             } else if (pageLevelData.status === 'ok' && pageLevelData.data && Array.isArray(pageLevelData.data.pages)) {
               // Fallback: handle old API response format
