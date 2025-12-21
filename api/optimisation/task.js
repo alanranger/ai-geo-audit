@@ -231,6 +231,7 @@ export default async function handler(req, res) {
     }
 
     // Insert baseline measurement event if baseline metrics provided
+    let baselineMeasurementCreated = false;
     if (baselineMetrics) {
       console.log('[Optimisation Task] Creating baseline measurement with metrics:', {
         task_id: task.id,
@@ -280,6 +281,8 @@ export default async function handler(req, res) {
           is_baseline: insertedMeasurement?.is_baseline,
           metrics: insertedMeasurement?.metrics
         });
+        // Return flag to indicate baseline was created
+        baselineMeasurementCreated = true;
       }
     } else {
       console.warn('[Optimisation Task] ⚠️ No baselineMetrics provided - baseline measurement will not be created');
@@ -296,7 +299,11 @@ export default async function handler(req, res) {
       console.error('[Optimisation Task] Fetch updated task error:', fetchError);
     }
 
-    return sendJSON(res, 201, { task: updatedTask || task, cycle });
+    return sendJSON(res, 201, { 
+      task: updatedTask || task, 
+      cycle,
+      baselineMeasurementCreated: baselineMeasurementCreated
+    });
   } catch (error) {
     console.error('[Optimisation Task] Error:', error);
     return sendJSON(res, 500, { error: error.message || 'Internal server error' });
