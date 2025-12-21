@@ -5376,6 +5376,16 @@
           keywordKeys.add(kwKey || '');
           if (urlKey) urlKeys.add(urlKey);
         });
+        
+        // DEBUG: Log what we're sending to the API
+        if (Array.from(urlKeys).some(u => u.includes('landscape-photography-workshops'))) {
+          console.log('[Optimisation] Sending to API:', {
+            urlKeys: Array.from(urlKeys).filter(u => u.includes('landscape')),
+            keywordKeys: Array.from(keywordKeys),
+            totalUrlKeys: urlKeys.size,
+            totalKeywordKeys: keywordKeys.size
+          });
+        }
 
         // Don't require keywordKeys - page-level tasks have empty keyword keys
         if (urlKeys.size === 0) {
@@ -5417,14 +5427,13 @@
           }))
         });
         
-        // CRITICAL: Preserve immediate cache entries (newly created tasks) that are very recent
-        // (within last 10 seconds) to avoid losing them if the API hasn't refreshed yet
+        // CRITICAL: Preserve ALL existing cache entries BEFORE clearing
+        // We'll restore any that aren't returned by the API
         const now = Date.now();
         const immediateEntryAgeLimit = 10000; // 10 seconds
         const preservedEntries = new Map();
         
-        // Also preserve ALL existing entries for the keys we're about to fetch
-        // This prevents clearing the cache for keys that aren't in this fetch
+        // Build set of keys we're about to fetch
         const keysBeingFetched = new Set();
         rows.forEach(row => {
           const kwKey = window.keywordKey ? window.keywordKey(row.keyword || '') : (row.keyword || '').toLowerCase().trim();
@@ -5432,20 +5441,19 @@
           const urlKey = window.cleanUrlForKey ? window.cleanUrlForKey(url) : url.toLowerCase().trim();
           // Build all possible cache keys for this row (different task types)
           ['on_page', 'keyword', 'ai'].forEach(taskType => {
-            const cacheKey = `${kwKey || ''}::${urlKey}::${taskType}`;
+            const cacheKey = kwKey ? `${kwKey}::${urlKey}::${taskType}` : `::${urlKey}::${taskType}`;
             keysBeingFetched.add(cacheKey);
           });
         });
         
+        // CRITICAL: Preserve ALL existing entries for keys we're fetching
+        // This way, if the API doesn't return them, we keep the existing cache entry
         if (window.optimisationStatusCache && window.optimisationStatusCache.size > 0) {
           window.optimisationStatusCache.forEach((value, key) => {
-            // Preserve immediate cache entries (very recent)
-            if (value._immediateCache && value._cacheTimestamp) {
-              const age = now - value._cacheTimestamp;
-              if (age < immediateEntryAgeLimit) {
-                preservedEntries.set(key, value);
-                console.log(`[Optimisation] Preserving immediate cache entry: key="${key}", age=${age}ms`);
-              }
+            // Always preserve entries for keys we're fetching (in case API doesn't return them)
+            if (keysBeingFetched.has(key)) {
+              preservedEntries.set(key, value);
+              console.log(`[Optimisation] Preserving existing cache entry for key being fetched: key="${key}", id="${value.id || value.task_id || 'null'}"`);
             }
             // Also preserve entries that are NOT being fetched in this call
             // This prevents clearing cache for other rows that aren't part of this fetch
@@ -5455,12 +5463,11 @@
           });
         }
         
-        // CRITICAL: Instead of clearing the entire cache, only clear entries for keys we're fetching
-        // This preserves all other entries (e.g., from other tabs, other tables)
+        // CRITICAL: Clear entries for keys we're fetching (we'll restore them if API doesn't return them)
         keysBeingFetched.forEach(key => {
           window.optimisationStatusCache.delete(key);
         });
-        console.log(`[Optimisation] Cleared ${keysBeingFetched.size} keys from cache, preserved ${preservedEntries.size} entries`);
+        console.log(`[Optimisation] Cleared ${keysBeingFetched.size} keys from cache, preserved ${preservedEntries.size} entries (${Array.from(preservedEntries.keys()).filter(k => keysBeingFetched.has(k)).length} for keys being fetched)`);
 
         // Build cache map: key = keyword_key::target_url_clean::task_type
         // For page-level tasks, keyword_key is null or empty string - use empty string for consistency
@@ -5525,18 +5532,31 @@
           }
         });
         
-        // Restore preserved immediate entries (only if API didn't return them)
+        // CRITICAL: Restore preserved entries that weren't returned by the API
+        // This includes both immediate cache entries AND existing entries that the API didn't return
+        const keysReturnedByApi = new Set();
+        (data.statuses || []).forEach(status => {
+          const keywordKey = (status.keyword_key || '').trim();
+          const normalizedUrl = window.cleanUrlForKey ? window.cleanUrlForKey(status.target_url_clean || status.target_url || '') : (status.target_url_clean || status.target_url || '').toLowerCase().trim();
+          const key = keywordKey ? `${keywordKey}::${normalizedUrl}::${status.task_type || 'on_page'}` : `::${normalizedUrl}::${status.task_type || 'on_page'}`;
+          keysReturnedByApi.add(key);
+        });
+        
         preservedEntries.forEach((value, key) => {
-          if (!window.optimisationStatusCache.has(key)) {
+          if (!keysReturnedByApi.has(key)) {
+            // API didn't return this entry - restore the preserved one
             window.optimisationStatusCache.set(key, value);
-            console.log(`[Optimisation] Restored preserved immediate entry: key="${key}", id="${value.id}", task_id="${value.task_id}"`);
+            console.log(`[Optimisation] Restored preserved entry (not returned by API): key="${key}", id="${value.id || value.task_id || 'null'}", status="${value.status || 'null'}"`);
           } else {
+            // API returned this entry - verify it has id field
             const apiStatus = window.optimisationStatusCache.get(key);
-            console.log(`[Optimisation] Immediate entry replaced by API: key="${key}", immediateId="${value.id}", apiId="${apiStatus?.id}", apiTaskId="${apiStatus?.task_id}"`);
-            // Ensure API status has id field - if not, keep the immediate entry
-            if (!apiStatus?.id && !apiStatus?.task_id && value.id) {
-              console.warn(`[Optimisation] API status missing id field, keeping immediate entry: key="${key}"`);
-              window.optimisationStatusCache.set(key, value);
+            if (apiStatus) {
+              console.log(`[Optimisation] Entry returned by API: key="${key}", apiId="${apiStatus.id || apiStatus.task_id || 'null'}", preservedId="${value.id || value.task_id || 'null'}"`);
+              // Ensure API status has id field - if not, keep the preserved entry
+              if (!apiStatus.id && !apiStatus.task_id && (value.id || value.task_id)) {
+                console.warn(`[Optimisation] API status missing id field, keeping preserved entry: key="${key}"`);
+                window.optimisationStatusCache.set(key, value);
+              }
             }
           }
         });

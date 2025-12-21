@@ -185,6 +185,7 @@ export default async function handler(req, res) {
         if (task.target_url_clean && task.target_url_clean.includes('landscape-photography-workshops')) {
           console.log('[Optimisation Status] Landscape page task in API response:', {
             id: task.id,
+            task_id: task.task_id,
             target_url_clean: task.target_url_clean,
             keyword_key: task.keyword_key,
             task_type: task.task_type,
@@ -193,6 +194,17 @@ export default async function handler(req, res) {
         }
       });
     }
+    
+    // DEBUG: Log what URLs we received vs what we queried
+    console.log('[Optimisation Status] Query details:', {
+      url_keys_received: url_keys.length,
+      url_keys_sample: url_keys.slice(0, 5),
+      keyword_keys_received: keyword_keys.length,
+      hasPageLevelTasks: hasPageLevelTasks,
+      pageLevelStatuses_count: pageLevelStatuses.length,
+      totalStatuses: enrichedStatuses.length,
+      pageLevelTasks_count: pageLevelTasks.length
+    });
 
     return sendJSON(res, 200, { statuses: enrichedStatuses });
   } catch (error) {
