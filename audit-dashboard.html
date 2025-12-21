@@ -5403,12 +5403,18 @@
         window.optimisationStatusCache.clear();
 
         // Build cache map: key = keyword_key::target_url_clean::task_type
+        // For page-level tasks, keyword_key is null or empty string - use empty string for consistency
         (data.statuses || []).forEach(status => {
-          const key = `${status.keyword_key}::${status.target_url_clean}::${status.task_type || 'on_page'}`;
+          const keywordKey = status.keyword_key || '';
+          const key = `${keywordKey}::${status.target_url_clean}::${status.task_type || 'on_page'}`;
           window.optimisationStatusCache.set(key, status);
+          // Debug: Log page-level tasks
+          if (!status.keyword_key || status.keyword_key.trim() === '') {
+            console.log(`[Optimisation] Cached page-level task status: key="${key}", url="${status.target_url_clean}", status="${status.status}"`);
+          }
         });
 
-        console.log(`[Optimisation] Loaded ${window.optimisationStatusCache.size} status records`);
+        console.log(`[Optimisation] Loaded ${window.optimisationStatusCache.size} status records (${(data.statuses || []).filter(s => !s.keyword_key || s.keyword_key.trim() === '').length} page-level)`);
       } catch (error) {
         console.error('[Optimisation] Error fetching statuses:', error);
         window.optimisationStatusCache.clear();
@@ -5427,7 +5433,19 @@
         if (!urlKey) return null;
         // For page-level tasks, use empty string for keyword_key
         const key = `::${urlKey}::${taskType}`;
-        return window.optimisationStatusCache.get(key) || null;
+        const status = window.optimisationStatusCache.get(key) || null;
+        // Debug logging for landscape page
+        if (url && url.includes('landscape-photography-workshops')) {
+          console.log(`[Optimisation] getOptimisationStatus lookup: key="${key}", found=${!!status}, cacheSize=${window.optimisationStatusCache.size}`);
+          if (!status) {
+            // Log all keys in cache for debugging
+            const allKeys = Array.from(window.optimisationStatusCache.keys());
+            console.log(`[Optimisation] Cache keys (first 10):`, allKeys.slice(0, 10));
+            const matchingKeys = allKeys.filter(k => k.includes('landscape') || k.includes(urlKey));
+            console.log(`[Optimisation] Matching keys:`, matchingKeys);
+          }
+        }
+        return status;
       } else {
         // Keyword-level tasks require both
         if (!kwKey || !urlKey) return null;
