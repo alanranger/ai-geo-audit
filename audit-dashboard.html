@@ -25321,12 +25321,18 @@ Final Score: ${score}/100`;
           console.log('[Money Pages] trackMoneyPage called', { pageUrl, pageTitle });
           debugLog(`📊 Opening Track modal for Money Page: ${pageUrl}`, 'info');
           
+          // Ensure the map exists (initialize if needed)
+          if (!window.moneyPagesRowDataByUrl) {
+            window.moneyPagesRowDataByUrl = new Map();
+            console.log('[Money Pages] Initialized window.moneyPagesRowDataByUrl map');
+          }
+          
           // Look up row data from stored map (most reliable - populated during table render)
           let rowData = null;
           const normalizedUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(pageUrl) : pageUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
           console.log('[Money Pages] Looking up row data for normalized URL:', normalizedUrl);
           
-          if (window.moneyPagesRowDataByUrl) {
+          if (window.moneyPagesRowDataByUrl.size > 0) {
             rowData = window.moneyPagesRowDataByUrl.get(normalizedUrl);
             console.log('[Money Pages] Row data from map:', rowData ? '✓ FOUND' : '✗ NOT FOUND');
             if (rowData) {
@@ -25347,13 +25353,13 @@ Final Score: ${score}/100`;
                 console.log('[Money Pages] ✓ Row data has valid metrics');
               }
             } else {
-              console.warn('[Money Pages] ⚠️ Row data not found in map. Map size:', window.moneyPagesRowDataByUrl.size);
+              console.log('[Money Pages] Row data not found in map. Map size:', window.moneyPagesRowDataByUrl.size);
               // Log sample keys for debugging
               const sampleKeys = Array.from(window.moneyPagesRowDataByUrl.keys()).slice(0, 5);
               console.log('[Money Pages] Sample keys in map:', sampleKeys);
             }
           } else {
-            console.warn('[Money Pages] ⚠️ window.moneyPagesRowDataByUrl map does not exist!');
+            console.log('[Money Pages] Map is empty, will search in moneyPagesMetrics.rows');
           }
           
           // Method 2: If not found in map, search directly in moneyPagesMetrics.rows
