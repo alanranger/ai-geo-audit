@@ -27330,28 +27330,15 @@ Final Score: ${score}/100`;
         const endIndex = startIndex + rowsPerPage;
         const pageRows = rows.slice(startIndex, endIndex);
         
-        // CRITICAL: Fetch optimisation statuses from database for ALL source pages (not just filtered rows)
-        // This ensures status is always up-to-date and persists across tab switches
-        // Use sourcePages (all data) not rows (filtered) to ensure we fetch for all pages
+        // CRITICAL: DO NOT fetch statuses here - the caller should fetch before calling renderMoneyPagesTable
+        // Fetching here causes the cache to be cleared every time the table renders, losing status information
+        // Instead, we rely on the cache that was populated by the caller
         const allSourcePages = sourcePages || [];
-        if (typeof window.fetchOptimisationStatuses === 'function' && allSourcePages.length > 0) {
-          console.log('[Money Pages Priority] Fetching optimisation statuses from database for all source pages:', allSourcePages.length, '(filtered rows:', rows.length, ')');
-          const allStatusRows = allSourcePages.map(p => ({
-            keyword: '', // Empty for page-level tasks
-            best_url: p.url,
-            targetUrl: p.url,
-            ranking_url: p.url
-          }));
-          // Wait for statuses to be fetched before rendering table
-          await window.fetchOptimisationStatuses(allStatusRows);
-          console.log('[Money Pages Priority] ✓ Status cache populated from database:', window.optimisationStatusCache?.size || 0, 'entries');
-        } else {
-          console.log('[Money Pages Priority] Skipping status fetch:', {
-            hasFunction: typeof window.fetchOptimisationStatuses === 'function',
-            sourcePagesCount: allSourcePages.length,
-            rowsCount: rows.length
-          });
-        }
+        console.log('[Money Pages Priority] Rendering table using existing cache:', {
+          cacheSize: window.optimisationStatusCache?.size || 0,
+          sourcePagesCount: allSourcePages.length,
+          filteredRowsCount: rows.length
+        });
         
         // Render sortable header with Ranking & AI styling
         const sortClass = (col) => {
