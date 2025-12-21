@@ -22,11 +22,12 @@ const sendJSON = (res, status, obj) => {
 };
 
 // KPI map for extracting values from measurements
+// Handles both gsc_ prefixed fields (from baseline measurements) and regular fields
 const KPI_EXTRACTORS = {
-  clicks_28d: (m) => m?.clicks_28d ?? null,
-  impressions_28d: (m) => m?.impressions_28d ?? null,
-  ctr_28d: (m) => m?.ctr_28d ?? null,
-  current_rank: (m) => m?.current_rank ?? m?.rank ?? null,
+  clicks_28d: (m) => m?.gsc_clicks_28d ?? m?.clicks_28d ?? null,
+  impressions_28d: (m) => m?.gsc_impressions_28d ?? m?.impressions_28d ?? null,
+  ctr_28d: (m) => m?.gsc_ctr_28d ?? m?.ctr_28d ?? null,
+  current_rank: (m) => m?.gsc_position_28d ?? m?.current_rank ?? m?.rank ?? null,
   opportunity_score: (m) => m?.opportunity_score ?? null,
   ai_overview: (m) => m?.ai_overview ?? null,
   ai_citations: (m) => m?.ai_citations ?? null,
@@ -197,7 +198,7 @@ export default async function handler(req, res) {
 
     const { data: events, error: eventsError } = await supabase
       .from('optimisation_task_events')
-      .select('task_id, cycle_id, cycle_number, created_at, metrics')
+      .select('task_id, cycle_id, cycle_number, created_at, metrics, is_baseline')
       .eq('event_type', 'measurement')
       .in('task_id', taskIds)
       .gte('created_at', ninetyDaysAgoIso)
@@ -291,7 +292,18 @@ export default async function handler(req, res) {
       let baselineMeasurement = null;
       let latestMeasurement = null;
       if (cycleEvents.length > 0) {
-        baselineMeasurement = cycleEvents[0].metrics;
+        // First, try to find baseline measurement explicitly marked with is_baseline: true
+        const baselineEvent = cycleEvents.find(e => e.is_baseline === true);
+        if (baselineEvent && baselineEvent.metrics) {
+          baselineMeasurement = baselineEvent.metrics;
+          console.log(`[Dashboard] Found baseline measurement with is_baseline=true for task ${task.id}`);
+        } else {
+          // Fallback: Use first measurement chronologically if no explicit baseline found
+          baselineMeasurement = cycleEvents[0].metrics;
+          console.log(`[Dashboard] Using first measurement as baseline (no is_baseline flag) for task ${task.id}`);
+        }
+        
+        // Latest is always the most recent measurement
         latestMeasurement = cycleEvents[cycleEvents.length - 1].metrics;
       }
 
