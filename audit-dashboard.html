@@ -5664,6 +5664,7 @@
 
       try {
         const source = modal.dataset.source || '';
+        console.log('[Money Pages] Source from modal:', source, 'modal.dataset:', modal.dataset);
         // Debug: Log what we're sending to API
         console.log('[Money Pages] Sending task creation request with baselineMetrics:', baselineMetrics);
         debugLog(`📤 Creating task with baseline: clicks=${baselineMetrics?.gsc_clicks_28d || 0}, impressions=${baselineMetrics?.gsc_impressions_28d || 0}, CTR=${((baselineMetrics?.gsc_ctr_28d || 0) * 100).toFixed(2)}%`, 'info');
@@ -5746,11 +5747,15 @@
         const createdTask = result.task;
         const createdTaskId = createdTask?.id;
         const createdTaskUrl = createdTask?.target_url || targetUrl;
+        
+        // Re-read source from modal (in case it was lost)
+        const currentSource = modal.dataset.source || source || '';
 
         console.log('[Money Pages] Task created successfully:', {
           taskId: createdTaskId,
           url: createdTaskUrl,
-          source,
+          source: currentSource,
+          originalSource: source,
           task: createdTask
         });
 
@@ -5758,7 +5763,7 @@
         modal.style.display = 'none';
         
         // Handle Money Pages vs Ranking & AI differently
-        if (source === 'money_pages' && createdTask && createdTaskUrl) {
+        if (currentSource === 'money_pages' && createdTask && createdTaskUrl) {
           console.log('[Money Pages] Processing Money Pages task creation...');
           
           // CRITICAL: Immediately add the created task to the cache so the table can find it
@@ -5835,7 +5840,9 @@
         }
         
         // Handle Money Pages vs Ranking & AI differently
-        if (source === 'money_pages') {
+        // Use currentSource (re-read from modal) to ensure we have the correct value
+        const finalSource = currentSource || source || '';
+        if (finalSource === 'money_pages') {
           // Small delay to ensure database is updated and view is refreshed
           await new Promise(resolve => setTimeout(resolve, 1000));
           
