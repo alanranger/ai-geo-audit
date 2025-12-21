@@ -5747,15 +5747,30 @@
         const createdTaskId = createdTask?.id;
         const createdTaskUrl = createdTask?.target_url || targetUrl;
 
+        console.log('[Money Pages] Task created successfully:', {
+          taskId: createdTaskId,
+          url: createdTaskUrl,
+          source,
+          task: createdTask
+        });
+
         // Close modal
         modal.style.display = 'none';
         
         // Handle Money Pages vs Ranking & AI differently
         if (source === 'money_pages' && createdTask && createdTaskUrl) {
+          console.log('[Money Pages] Processing Money Pages task creation...');
+          
           // CRITICAL: Immediately add the created task to the cache so the table can find it
           // This avoids waiting for the database view to refresh
           const urlKey = window.cleanUrlForKey ? window.cleanUrlForKey(createdTaskUrl) : createdTaskUrl.toLowerCase().trim();
           const cacheKey = `::${urlKey}::on_page`;
+          
+          console.log('[Money Pages] URL normalization:', {
+            original: createdTaskUrl,
+            normalized: urlKey,
+            cacheKey
+          });
           
           // Build a status object that matches what the API would return
           const immediateStatus = {
@@ -5775,6 +5790,7 @@
           // Ensure cache exists
           if (!window.optimisationStatusCache) {
             window.optimisationStatusCache = new Map();
+            console.log('[Money Pages] Created new optimisationStatusCache');
           }
           
           // Add to cache immediately
@@ -5784,17 +5800,32 @@
             taskId: createdTaskId,
             url: createdTaskUrl,
             urlKey,
-            status: immediateStatus.status
+            status: immediateStatus.status,
+            cacheSize: window.optimisationStatusCache.size
+          });
+          
+          // Verify it's in the cache
+          const verifyCache = window.optimisationStatusCache.get(cacheKey);
+          console.log('[Money Pages] Cache verification:', {
+            cacheKey,
+            found: !!verifyCache,
+            cachedStatus: verifyCache?.status
           });
           
           // Also add to temporary cache for immediate UI update
           if (!window.moneyPagesTaskCache) {
             window.moneyPagesTaskCache = new Map();
+            console.log('[Money Pages] Created new moneyPagesTaskCache');
           }
           window.moneyPagesTaskCache.set(urlKey, {
             id: createdTaskId,
             status: immediateStatus.status,
             cycle_number: 1
+          });
+          console.log('[Money Pages] Added to temporary cache:', {
+            urlKey,
+            taskId: createdTaskId,
+            tempCacheSize: window.moneyPagesTaskCache.size
           });
         }
         
@@ -5836,13 +5867,30 @@
           }
           
           // Refresh Money Pages table to show updated Track/Manage status
+          console.log('[Money Pages] About to re-render table...', {
+            hasRenderFunction: typeof renderMoneyPagesTable === 'function',
+            hasMetrics: !!window.moneyPagesMetrics,
+            metricsRows: window.moneyPagesMetrics?.rows?.length || 0,
+            containerExists: !!document.getElementById('money-pages-table-container')
+          });
+          
           if (typeof renderMoneyPagesTable === 'function' && window.moneyPagesMetrics) {
             const moneyPagesContainer = document.getElementById('money-pages-table-container');
             if (moneyPagesContainer) {
               const currentPage = window.moneyPagesCurrentPage || 1;
               const rowsPerPage = window.moneyPagesRowsPerPage || 10;
-              console.log('[Money Pages] Re-rendering table after task creation...');
-              moneyPagesContainer.innerHTML = await renderMoneyPagesTable(window.moneyPagesMetrics.rows, currentPage, rowsPerPage);
+              console.log('[Money Pages] Re-rendering table after task creation...', {
+                currentPage,
+                rowsPerPage,
+                totalRows: window.moneyPagesMetrics.rows.length,
+                cacheSize: window.optimisationStatusCache?.size || 0,
+                tempCacheSize: window.moneyPagesTaskCache?.size || 0
+              });
+              
+              const tableHtml = await renderMoneyPagesTable(window.moneyPagesMetrics.rows, currentPage, rowsPerPage);
+              console.log('[Money Pages] Table HTML generated, length:', tableHtml?.length || 0);
+              moneyPagesContainer.innerHTML = tableHtml;
+              console.log('[Money Pages] ✓ Table re-rendered successfully');
               // Re-attach event handlers (they're set up in the render function)
               // Note: renderMoneyPagesTable already calls these handlers, but we need to ensure they're attached after re-render
               if (typeof attachMoneyPagesSortHandlers === 'function') {
