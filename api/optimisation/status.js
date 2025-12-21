@@ -95,9 +95,30 @@ export default async function handler(req, res) {
         .eq('task_type', 'on_page')
         .eq('keyword_key', '');
       
-      const [nullResult, emptyResult] = await Promise.all([
+      // FALLBACK: Also query for tasks where keyword_key matches the URL (incorrectly created tasks)
+      // This handles tasks created before the fix where keyword_key was set to target_url
+      // Build a list of keyword_keys that match the URLs (for backward compatibility)
+      const urlKeywordKeys = url_keys.flatMap(url => {
+        // Try multiple variations: normalized URL, with https://, with http://
+        const variations = [url];
+        if (!url.startsWith('http')) {
+          variations.push(`https://${url}`, `http://${url}`);
+        }
+        return variations;
+      });
+      
+      const pageLevelQueryFallback = supabase
+        .from('vw_optimisation_task_status')
+        .select('*')
+        .in('target_url_clean', url_keys)
+        .neq('status', 'deleted')
+        .eq('task_type', 'on_page')
+        .in('keyword_key', urlKeywordKeys);
+      
+      const [nullResult, emptyResult, fallbackResult] = await Promise.all([
         pageLevelQueryNull,
-        pageLevelQueryEmpty
+        pageLevelQueryEmpty,
+        pageLevelQueryFallback
       ]);
       
       if (nullResult.error) {
@@ -110,6 +131,19 @@ export default async function handler(req, res) {
         console.error('[Optimisation Status] Page-level (empty) query error:', emptyResult.error);
       } else if (emptyResult.data) {
         pageLevelStatuses.push(...emptyResult.data);
+      }
+      
+      // Add fallback results (tasks with keyword_key matching URL - incorrectly created)
+      if (fallbackResult.error) {
+        console.error('[Optimisation Status] Page-level (fallback) query error:', fallbackResult.error);
+      } else if (fallbackResult.data && fallbackResult.data.length > 0) {
+        console.warn(`[Optimisation Status] Found ${fallbackResult.data.length} page-level tasks with keyword_key set to URL (incorrectly created). These should be fixed.`);
+        // Deduplicate: only add tasks that weren't already found in null/empty queries
+        const existingIds = new Set(pageLevelStatuses.map(s => s.id));
+        const newTasks = fallbackResult.data.filter(s => !existingIds.has(s.id));
+        if (newTasks.length > 0) {
+          pageLevelStatuses.push(...newTasks);
+        }
       }
     }
 

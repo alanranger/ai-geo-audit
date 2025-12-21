@@ -71,20 +71,22 @@ export default async function handler(req, res) {
       cycle_started_at
     } = req.body;
 
-    // For page-level tasks (on_page), keyword_text can be empty - use target_url as fallback
-    // For keyword-level tasks, both are required
+    // For page-level tasks (on_page), keyword_text should be empty string (NOT target_url)
+    // For keyword-level tasks, keyword_text is required
     if (!target_url) {
       return sendJSON(res, 400, { error: 'target_url is required' });
     }
     
-    // If keyword_text is empty and this is a page-level task, use target_url as keyword_text
-    // Otherwise, keyword_text is required for keyword-level tasks
+    // For page-level tasks, keyword_text must be empty string (not target_url, not null)
+    // For keyword-level tasks, keyword_text is required
     if (!keyword_text && task_type !== 'on_page') {
       return sendJSON(res, 400, { error: 'keyword_text is required for non-page-level tasks' });
     }
     
-    // For page-level tasks with empty keyword_text, use target_url as keyword_text (API requires non-empty)
-    const final_keyword_text = keyword_text || (task_type === 'on_page' ? target_url : '');
+    // For page-level tasks, keyword_text should be empty string (not target_url)
+    // This ensures keyword_key is computed as empty string by the generated column
+    // The database has a NOT NULL constraint on keyword_text, so we use empty string, not null
+    const final_keyword_text = (task_type === 'on_page') ? '' : (keyword_text || '');
 
     const supabase = createClient(
       need('SUPABASE_URL'),
