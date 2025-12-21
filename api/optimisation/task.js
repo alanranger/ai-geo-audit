@@ -208,6 +208,17 @@ export default async function handler(req, res) {
       console.log('[Optimisation Task] Building Phase 5 objective JSONB:', objectiveJsonb);
     }
     
+    // Compute initial objective_status
+    // If we have baseline metrics, status should be 'on_track' (we'll have baseline measurement)
+    // Otherwise, it's 'no_measurement' until first measurement is taken
+    let initialObjectiveStatus = 'not_set';
+    if (objectiveJsonb) {
+      // If baseline metrics are provided, we'll create a baseline measurement, so status should be 'on_track'
+      // Otherwise, it's 'no_measurement' until measurements are taken
+      initialObjectiveStatus = baselineMetrics ? 'on_track' : 'no_measurement';
+      console.log(`[Optimisation Task] Setting initial objective_status to '${initialObjectiveStatus}' (baselineMetrics provided: ${!!baselineMetrics})`);
+    }
+    
     const cycleData = {
       task_id: task.id,
       cycle_no: 1, // Always create Cycle 1 for new tasks
@@ -225,6 +236,7 @@ export default async function handler(req, res) {
       plan: objective_plan || plan || null,
       // Phase 5 objective JSONB
       objective: objectiveJsonb,
+      objective_status: initialObjectiveStatus, // Set initial status
       due_at: objectiveJsonb?.due_at || null,
       start_date: new Date().toISOString()
     };

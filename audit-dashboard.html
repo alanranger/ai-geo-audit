@@ -5706,6 +5706,11 @@
         
         // Handle Money Pages vs Ranking & AI differently
         if (source === 'money_pages') {
+          // Reload all tasks first so the new task is available for the lookup
+          if (typeof window.loadAllOptimisationTasks === 'function') {
+            await window.loadAllOptimisationTasks();
+          }
+          
           // Refresh Money Pages table to show updated Track/Manage status
           if (typeof renderMoneyPagesTable === 'function' && window.moneyPagesMetrics) {
             const moneyPagesContainer = document.getElementById('money-pages-table-container');
@@ -5714,6 +5719,7 @@
               const rowsPerPage = window.moneyPagesRowsPerPage || 10;
               moneyPagesContainer.innerHTML = await renderMoneyPagesTable(window.moneyPagesMetrics.rows, currentPage, rowsPerPage);
               // Re-attach event handlers (they're set up in the render function)
+              await attachMoneyPagesTableHandlers();
             }
           }
           
@@ -6728,8 +6734,9 @@
         }
       }
 
-      // Need at least 2 measurements to compute baseline/latest
-      if (eligibleMeasurements.length < 2) {
+      // Need at least 1 measurement (baseline) to compute baseline/latest
+      // If only 1 measurement, use it as both baseline and latest
+      if (eligibleMeasurements.length < 1) {
         return null;
       }
 
@@ -6741,7 +6748,8 @@
       });
 
       const baseline = eligibleMeasurements[0];
-      const latest = eligibleMeasurements[eligibleMeasurements.length - 1];
+      // If only 1 measurement, use it as both baseline and latest
+      const latest = eligibleMeasurements.length > 1 ? eligibleMeasurements[eligibleMeasurements.length - 1] : baseline;
 
       return { baseline, latest };
     }
@@ -6750,10 +6758,31 @@
       if (!measurement) return null;
 
       const extractors = {
-        ctr_28d: (m) => (m && m.ctr_28d) != null ? m.ctr_28d : null,
-        impressions_28d: (m) => (m && m.impressions_28d) != null ? m.impressions_28d : null,
-        clicks_28d: (m) => (m && m.clicks_28d) != null ? m.clicks_28d : null,
-        current_rank: (m) => (m && m.current_rank) != null ? m.current_rank : ((m && m.rank) != null ? m.rank : null),
+        ctr_28d: (m) => {
+          // Handle both gsc_ prefixed fields (from baseline) and regular fields
+          if (m && (m.gsc_ctr_28d != null || m.ctr_28d != null)) {
+            return m.gsc_ctr_28d != null ? m.gsc_ctr_28d : m.ctr_28d;
+          }
+          return null;
+        },
+        impressions_28d: (m) => {
+          if (m && (m.gsc_impressions_28d != null || m.impressions_28d != null)) {
+            return m.gsc_impressions_28d != null ? m.gsc_impressions_28d : m.impressions_28d;
+          }
+          return null;
+        },
+        clicks_28d: (m) => {
+          if (m && (m.gsc_clicks_28d != null || m.clicks_28d != null)) {
+            return m.gsc_clicks_28d != null ? m.gsc_clicks_28d : m.clicks_28d;
+          }
+          return null;
+        },
+        current_rank: (m) => {
+          if (m && (m.gsc_position_28d != null || m.current_rank != null || m.rank != null)) {
+            return m.gsc_position_28d != null ? m.gsc_position_28d : (m.current_rank != null ? m.current_rank : m.rank);
+          }
+          return null;
+        },
         opportunity_score: (m) => (m && m.opportunity_score) != null ? m.opportunity_score : null,
         ai_overview: (m) => (m && m.ai_overview) != null ? m.ai_overview : null,
         ai_citations: (m) => (m && m.ai_citations) != null ? m.ai_citations : null,
