@@ -454,6 +454,17 @@ export default async function handler(req, res) {
         needsMeasurement,
         sparklinePoints,
         measurements, // Include measurements for traffic light calculations
+        // Include objective from cycle for table display
+        objective: activeCycle?.objective || null,
+        // Include baseline and latest metrics objects for table display
+        baseline_metrics: baselineMeasurement ? {
+          ...baselineMeasurement,
+          captured_at: baselineEvent?.created_at || cycleEvents[0]?.created_at
+        } : null,
+        latest_metrics: latestMeasurement ? {
+          ...latestMeasurement,
+          captured_at: cycleEvents[cycleEvents.length - 1]?.created_at
+        } : null,
         cycles: taskCycles, // Include cycles for scope filtering
       });
     }
