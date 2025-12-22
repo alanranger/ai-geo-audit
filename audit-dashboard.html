@@ -15600,9 +15600,38 @@
     // Calculate and save portfolio segment snapshots (Phase 3a - Using gsc_page_metrics_28d)
     async function calculateAndSavePortfolioSegmentSnapshots(runId, siteUrl, dateStart, dateEnd, pageTotalsByKey) {
       try {
-        debugLog('📊 Calculating portfolio segment snapshots from pageTotalsByKey...', 'info');
+        debugLog('📊 Calculating portfolio segment snapshots...', 'info');
         
+        // If pageTotalsByKey is not available, fetch from Supabase
+        let pageMetrics = new Map();
         if (!pageTotalsByKey || pageTotalsByKey.size === 0) {
+          debugLog('📊 pageTotalsByKey not available, fetching from Supabase...', 'info');
+          try {
+            const response = await fetch(apiUrl(`/api/supabase/get-gsc-page-metrics?runId=${encodeURIComponent(runId)}&siteUrl=${encodeURIComponent(siteUrl)}&dateStart=${dateStart}&dateEnd=${dateEnd}`));
+            if (response.ok) {
+              const data = await response.json();
+              if (data.pages && data.pages.length > 0) {
+                data.pages.forEach(page => {
+                  const key = normalizeGscPageKey(page.page_url);
+                  pageMetrics.set(key, {
+                    url: page.page_url,
+                    clicks: parseFloat(page.clicks_28d) || 0,
+                    impressions: parseFloat(page.impressions_28d) || 0,
+                    ctr: parseFloat(page.ctr_28d) || 0,
+                    position: page.position_28d ? parseFloat(page.position_28d) : null
+                  });
+                });
+                debugLog(`✓ Fetched ${pageMetrics.size} pages from Supabase for segment snapshots`, 'success');
+              }
+            }
+          } catch (fetchError) {
+            debugLog(`⚠ Error fetching page metrics from Supabase: ${fetchError.message}`, 'warn');
+          }
+        } else {
+          pageMetrics = pageTotalsByKey;
+        }
+        
+        if (pageMetrics.size === 0) {
           debugLog('⚠ No page metrics available for segment snapshots', 'warn');
           return;
         }
@@ -15635,7 +15664,7 @@
           all_tracked: []
         };
         
-        pageTotalsByKey.forEach((metrics, normalizedKey) => {
+        pageMetrics.forEach((metrics, normalizedKey) => {
           const pageUrl = metrics.url;
           if (!pageUrl) return;
           
