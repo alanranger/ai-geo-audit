@@ -15364,6 +15364,16 @@
         debugLog(`📊 Portfolio data loaded: ${metrics.length} metrics for segment=${segment}, scope=${mappedScope}, kpi=${kpiSelect}`, 'info');
         debugLog(`📊 API params: siteUrl=${propertyUrl}, segment=${segment}, scope=${mappedScope}, from=${fromDate.toISOString()}, to=${toDate.toISOString()}`, 'info');
         
+        // Debug: Log sample metrics to see what data we have
+        if (metrics.length > 0) {
+          const sampleMetric = metrics[0];
+          debugLog(`📊 Sample metric: run_id=${sampleMetric.run_id}, created_at=${sampleMetric.created_at}, position_28d=${sampleMetric.position_28d}, ctr_28d=${sampleMetric.ctr_28d}`, 'info');
+          
+          // Check for position data
+          const metricsWithPosition = metrics.filter(m => m.position_28d !== null && m.position_28d !== undefined);
+          debugLog(`📊 Metrics with position data: ${metricsWithPosition.length} out of ${metrics.length}`, metricsWithPosition.length > 0 ? 'success' : 'warn');
+        }
+        
         if (metrics.length === 0) {
           debugLog(`⚠ No metrics found. Checking if data exists in database...`, 'warn');
           // Try querying without scope filter to see if data exists
@@ -15431,6 +15441,14 @@
         
         debugLog(`📊 Bucketed into ${buckets.size} time buckets (${timeGrain})`, 'info');
         
+        // Debug: Log bucket details
+        if (buckets.size > 0) {
+          const bucketEntries = Array.from(buckets.entries());
+          bucketEntries.forEach(([key, bucket]) => {
+            debugLog(`📊 Bucket ${key}: value=${bucket.value !== null ? (kpiSelect === 'ctr_28d' ? (bucket.value * 100).toFixed(2) + '%' : bucket.value.toFixed(2)) : 'null'}, date=${bucket.date.toISOString()}`, 'info');
+          });
+        }
+        
         // Sort buckets by date
         const sortedBuckets = Array.from(buckets.entries())
           .sort((a, b) => a[1].date - b[1].date);
@@ -15438,6 +15456,7 @@
         // If we only have 1 bucket, we can't show deltas
         if (sortedBuckets.length < 2) {
           debugLog(`⚠ Only ${sortedBuckets.length} bucket(s) - need at least 2 different ${timeGrain} periods to show deltas`, 'warn');
+          debugLog(`⚠ This usually means: (1) Only one audit has been run, or (2) Multiple audits are in the same ${timeGrain} period`, 'warn');
           if (portfolioDeltaChart) {
             portfolioDeltaChart.data.labels = [];
             portfolioDeltaChart.data.datasets[0].data = [];
@@ -15695,12 +15714,25 @@
             
             if (snapshot) {
               // Extract value based on KPI field
-              const value = kpiField === 'ctr_28d' ? parseFloat(snapshot.ctr_28d || 0) :
-                          kpiField === 'clicks_28d' ? parseFloat(snapshot.clicks_28d || 0) :
-                          kpiField === 'impressions_28d' ? parseFloat(snapshot.impressions_28d || 0) :
-                          kpiField === 'position_28d' ? (snapshot.position_28d ? parseFloat(snapshot.position_28d) : null) :
-                          kpiField === 'ai_citations_28d' ? (snapshot.ai_citations_28d ? parseInt(snapshot.ai_citations_28d) : 0) :
-                          kpiField === 'ai_overview_present_count' ? (snapshot.ai_overview_present_count ? parseInt(snapshot.ai_overview_present_count) : 0) : null;
+              let value = null;
+              if (kpiField === 'ctr_28d') {
+                value = parseFloat(snapshot.ctr_28d || 0);
+              } else if (kpiField === 'clicks_28d') {
+                value = parseFloat(snapshot.clicks_28d || 0);
+              } else if (kpiField === 'impressions_28d') {
+                value = parseFloat(snapshot.impressions_28d || 0);
+              } else if (kpiField === 'position_28d') {
+                // Handle position: check if it's null, undefined, or NaN
+                if (snapshot.position_28d !== null && snapshot.position_28d !== undefined && !isNaN(parseFloat(snapshot.position_28d))) {
+                  value = parseFloat(snapshot.position_28d);
+                } else {
+                  value = null;
+                }
+              } else if (kpiField === 'ai_citations_28d') {
+                value = snapshot.ai_citations_28d ? parseInt(snapshot.ai_citations_28d) : 0;
+              } else if (kpiField === 'ai_overview_present_count') {
+                value = snapshot.ai_overview_present_count ? parseInt(snapshot.ai_overview_present_count) : 0;
+              }
               
               if (value !== null && value !== undefined) {
                 const formatted = formatValue(value, kpi);
@@ -15878,8 +15910,15 @@
                 let positionSum = 0;
                 data.pages.forEach(page => {
                   const key = normalizeGscPageKey(page.page_url);
-                  const position = page.position_28d ? parseFloat(page.position_28d) : null;
-                  if (position !== null && !isNaN(position)) {
+                  // Handle position: check if it's null, undefined, or NaN (but allow 0 as valid)
+                  let position = null;
+                  if (page.position_28d !== null && page.position_28d !== undefined) {
+                    const parsed = parseFloat(page.position_28d);
+                    if (!isNaN(parsed) && isFinite(parsed)) {
+                      position = parsed;
+                    }
+                  }
+                  if (position !== null) {
                     positionCount++;
                     positionSum += position;
                   }
@@ -16085,8 +16124,16 @@
           const avgPosition = totalPositionImpressions > 0 ? totalPositionWeight / totalPositionImpressions : null;
           
           // Debug logging for position calculation
-          if (segment === 'money' || segment === 'landing') {
-            debugLog(`📊 Position calc for ${segment}: ${positionCount} pages with position, total impressions=${totalPositionImpressions}, avgPosition=${avgPosition}`, 'info');
+          debugLog(`📊 Position calc for ${segment}: ${positionCount} pages with position (out of ${pages.length} total), total impressions=${totalPositionImpressions}, avgPosition=${avgPosition !== null ? avgPosition.toFixed(2) : 'N/A'}`, 'info');
+          
+          // Additional debug: log sample positions for first few pages
+          if (segment === 'money' && pages.length > 0) {
+            const samplePositions = pages.slice(0, 5).map(p => {
+              const pos = parseFloat(p.position) || parseFloat(p.position_28d) || parseFloat(p.avgPosition) || null;
+              const imps = parseFloat(p.impressions) || 0;
+              return `pos=${pos !== null ? pos.toFixed(1) : 'null'}, imps=${imps}`;
+            }).join('; ');
+            debugLog(`📊 Sample positions for ${segment}: ${samplePositions}`, 'info');
           }
           
           segmentRows.push({

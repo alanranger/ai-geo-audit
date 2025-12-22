@@ -73,7 +73,9 @@ export default async function handler(req, res) {
       ctr_28d: parseFloat(row.ctr_28d || 0), // Already a ratio (0-1)
       position_28d: row.position_28d !== null && row.position_28d !== undefined 
         ? parseFloat(row.position_28d) 
-        : null
+        : null,
+      ai_citations_28d: parseInt(row.ai_citations_28d || 0, 10),
+      ai_overview_present_count: parseInt(row.ai_overview_present_count || 0, 10)
     }));
 
     // Batch upsert in chunks of 500
