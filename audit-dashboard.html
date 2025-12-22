@@ -3493,6 +3493,9 @@
                     <option value="monthly" title="Group data by month: Shows the last snapshot from each month">Monthly</option>
                   </select>
                 </div>
+                <div style="margin-top: 1.5rem;">
+                  <button id="portfolio-diagnose-btn" onclick="diagnosePortfolioData()" style="padding: 0.5rem 1rem; background: #6366f1; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.875rem;" title="Check database for portfolio segment metrics and position data">🔍 Diagnose Data</button>
+                </div>
               </div>
               
               <!-- Chart Canvas -->
@@ -16048,6 +16051,70 @@
       }
     }
 
+    // Diagnose portfolio data in database
+    async function diagnosePortfolioData() {
+      try {
+        const siteUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || 'https://www.alanranger.com';
+        debugLog('🔍 Diagnosing portfolio segment data...', 'info');
+        
+        const response = await fetch(apiUrl(`/api/supabase/diagnose-portfolio-segments?siteUrl=${encodeURIComponent(siteUrl)}`));
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          debugLog(`❌ Diagnostic failed: ${response.status} - ${errorText}`, 'error');
+          alert(`Diagnostic failed: ${response.status}\n${errorText}`);
+          return;
+        }
+        
+        const data = await response.json();
+        
+        // Log summary to debug panel
+        debugLog(`📊 Portfolio Diagnostic Results:`, 'info');
+        debugLog(`  Total records: ${data.total_records}`, 'info');
+        debugLog(`  Unique run_ids: ${data.summary.unique_run_ids}`, 'info');
+        debugLog(`  Unique segments: ${data.summary.unique_segments} (${data.summary.segments.join(', ')})`, 'info');
+        debugLog(`  Unique scopes: ${data.summary.unique_scopes} (${data.summary.scopes.join(', ')})`, 'info');
+        debugLog(`  Position analysis:`, 'info');
+        debugLog(`    Records with position: ${data.position_analysis.total_with_position}`, 'info');
+        debugLog(`    Records with null position: ${data.position_analysis.total_null_position}`, 'info');
+        debugLog(`    Records with zero position: ${data.position_analysis.total_zero_position}`, 'info');
+        debugLog(`  Average position by segment:`, 'info');
+        Object.keys(data.position_analysis.avg_position_by_segment).forEach(seg => {
+          const avg = data.position_analysis.avg_position_by_segment[seg];
+          debugLog(`    ${seg}: ${avg !== null ? avg.toFixed(2) : 'N/A'}`, 'info');
+        });
+        
+        // Show run_id breakdown
+        debugLog(`  Run IDs:`, 'info');
+        Object.keys(data.by_run_id).slice(0, 10).forEach(runId => {
+          const info = data.by_run_id[runId];
+          debugLog(`    ${runId}: ${info.count} records, created ${info.created_at}, date range ${info.date_start} to ${info.date_end}`, 'info');
+        });
+        
+        // Show sample records
+        if (data.sample_records && data.sample_records.length > 0) {
+          debugLog(`  Sample records (first ${data.sample_records.length}):`, 'info');
+          data.sample_records.forEach((rec, idx) => {
+            debugLog(`    [${idx + 1}] ${rec.segment}/${rec.scope}: clicks=${rec.clicks_28d}, impr=${rec.impressions_28d}, ctr=${(rec.ctr_28d * 100).toFixed(2)}%, pos=${rec.position_28d !== null ? rec.position_28d.toFixed(2) : 'null'}, pages=${rec.pages_count}`, 'info');
+          });
+        }
+        
+        // Also show in alert for quick view
+        const summary = `Portfolio Diagnostic:
+Total records: ${data.total_records}
+Run IDs: ${data.summary.unique_run_ids}
+Segments: ${data.summary.segments.join(', ')}
+Position data: ${data.position_analysis.total_with_position} with position, ${data.position_analysis.total_null_position} null
+Check debug panel for full details.`;
+        
+        alert(summary);
+        
+      } catch (err) {
+        debugLog(`❌ Diagnostic error: ${err.message}`, 'error');
+        alert(`Diagnostic error: ${err.message}`);
+      }
+    }
+
     // Calculate and save portfolio segment snapshots (Phase 3a - Using gsc_page_metrics_28d)
     async function calculateAndSavePortfolioSegmentSnapshots(runId, siteUrl, dateStart, dateEnd, pageTotalsByKey) {
       try {
@@ -16066,11 +16133,11 @@
                 let positionSum = 0;
                 data.pages.forEach(page => {
                   const key = normalizeGscPageKey(page.page_url);
-                  // Handle position: check if it's null, undefined, or NaN (but allow 0 as valid)
+                  // Handle position: check if it's null, undefined, NaN, or 0 (positions start at 1)
                   let position = null;
                   if (page.position_28d !== null && page.position_28d !== undefined) {
                     const parsed = parseFloat(page.position_28d);
-                    if (!isNaN(parsed) && isFinite(parsed)) {
+                    if (!isNaN(parsed) && isFinite(parsed) && parsed > 0) {
                       position = parsed;
                     }
                   }

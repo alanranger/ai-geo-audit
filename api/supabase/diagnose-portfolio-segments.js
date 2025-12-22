@@ -128,8 +128,24 @@ export default async function handler(req, res) {
         impressions_28d: r.impressions_28d,
         ctr_28d: r.ctr_28d,
         position_28d: r.position_28d,
-        pages_count: r.pages_count
-      }))
+        pages_count: r.pages_count,
+        ai_citations_28d: r.ai_citations_28d,
+        ai_overview_present_count: r.ai_overview_present_count
+      })),
+      position_analysis: {
+        total_with_position: (data || []).filter(r => r.position_28d != null && r.position_28d > 0).length,
+        total_null_position: (data || []).filter(r => r.position_28d == null).length,
+        total_zero_position: (data || []).filter(r => r.position_28d === 0).length,
+        avg_position_by_segment: Object.keys(bySegment).reduce((acc, seg) => {
+          const segRows = bySegment[seg].filter(r => r.position_28d != null && r.position_28d > 0);
+          if (segRows.length > 0) {
+            acc[seg] = segRows.reduce((sum, r) => sum + r.position_28d, 0) / segRows.length;
+          } else {
+            acc[seg] = null;
+          }
+          return acc;
+        }, {})
+      }
     });
 
   } catch (err) {
