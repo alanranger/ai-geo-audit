@@ -15520,9 +15520,11 @@
         
         metrics.forEach(m => {
           // Determine the date to use for bucketing:
+          // Priority order:
           // 1. If run_id is in YYYY-MM format, use that for monthly bucketing (historical backfill)
-          // 2. Otherwise, use created_at (when the audit was run) - this ensures different audit runs get different buckets
-          // 3. Fallback to date_end if created_at is not available
+          // 2. If run_id is in YYYY-MM-DD format, use that (most reliable for distinguishing different audit runs)
+          // 3. Otherwise, use created_at (when the record was inserted)
+          // 4. Fallback to date_end if nothing else is available
           let dateForBucket = null;
           let bucketKey = null;
           
@@ -15530,14 +15532,14 @@
             // Monthly: use run_id directly if it's in YYYY-MM format (for historical backfill)
             bucketKey = m.run_id;
             dateForBucket = new Date(m.run_id + '-01');
-          } else if (m.created_at) {
-            // Use created_at (when the audit was run) - this is the most reliable for distinguishing different audit runs
-            dateForBucket = new Date(m.created_at);
           } else if (m.run_id && m.run_id.match(/^\d{4}-\d{2}-\d{2}$/)) {
-            // If run_id is in YYYY-MM-DD format, use that
+            // If run_id is in YYYY-MM-DD format, use that (most reliable - represents when audit was actually run)
             dateForBucket = new Date(m.run_id);
+          } else if (m.created_at) {
+            // Use created_at (when the record was inserted) - less ideal since multiple records might share same created_at
+            dateForBucket = new Date(m.created_at);
           } else if (m.date_end) {
-            // Fallback to date_end (less ideal since all audits may share the same date_end)
+            // Fallback to date_end (least ideal since all audits may share the same date_end)
             dateForBucket = new Date(m.date_end);
           } else {
             debugLog(`⚠ No valid date found for metric: run_id=${m.run_id}, date_end=${m.date_end}, created_at=${m.created_at}`, 'warn');
@@ -15595,12 +15597,14 @@
           // Log date source info for ALL metrics (not just first 5) to diagnose why they're in same bucket
           if (metrics.length > 0) {
             const dateSources = metrics.map(m => {
+              // Use same priority order as bucketing logic
               const source = (timeGrain === 'monthly' && m.run_id && m.run_id.match(/^\d{4}-\d{2}$/)) ? 'run_id (YYYY-MM)' :
-                            m.created_at ? 'created_at' :
                             m.run_id && m.run_id.match(/^\d{4}-\d{2}-\d{2}$/) ? 'run_id (YYYY-MM-DD)' :
+                            m.created_at ? 'created_at' :
                             m.date_end ? 'date_end' :
                             'none';
               const dateUsed = (timeGrain === 'monthly' && m.run_id && m.run_id.match(/^\d{4}-\d{2}$/)) ? m.run_id :
+                              (m.run_id && m.run_id.match(/^\d{4}-\d{2}-\d{2}$/)) ? m.run_id :
                               m.created_at || m.date_end || 'N/A';
               // Calculate what bucket this would go into
               let calculatedBucket = 'N/A';
@@ -15619,16 +15623,16 @@
             }).join('; ');
             debugLog(`📊 Date sources for ALL ${metrics.length} metrics: ${dateSources}`, 'info');
             
-            // Also log unique bucket keys to see if they're all the same
+            // Also log unique bucket keys to see if they're all the same (using same priority order)
             const uniqueBuckets = new Set();
             metrics.forEach(m => {
               let dateForBucket = null;
               if (timeGrain === 'monthly' && m.run_id && m.run_id.match(/^\d{4}-\d{2}$/)) {
                 dateForBucket = new Date(m.run_id + '-01');
-              } else if (m.created_at) {
-                dateForBucket = new Date(m.created_at);
               } else if (m.run_id && m.run_id.match(/^\d{4}-\d{2}-\d{2}$/)) {
                 dateForBucket = new Date(m.run_id);
+              } else if (m.created_at) {
+                dateForBucket = new Date(m.created_at);
               } else if (m.date_end) {
                 dateForBucket = new Date(m.date_end);
               }
