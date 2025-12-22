@@ -15623,8 +15623,11 @@
             // Weekly: show Monday date as "DD MMM"
             label = new Date(bucketKey).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
           } else {
-            // Monthly: show as "MM/YY"
-            label = `${bucketKey.split('-')[1]}/${bucketKey.split('-')[0].slice(2)}`;
+            // Monthly: show as "MMM-YY" (e.g., "Jan 25")
+            const monthDate = new Date(bucketKey + '-01');
+            const monthName = monthDate.toLocaleDateString('en-GB', { month: 'short' });
+            const yearShort = bucketKey.split('-')[0].slice(2);
+            label = `${monthName} ${yearShort}`;
           }
           
           if (index === 0) {
@@ -15642,6 +15645,9 @@
           }
         });
         
+        // Reverse arrays so latest is on the right
+        labels.reverse();
+        deltas.reverse();
 
         if (portfolioDeltaChart) {
           // Format deltas for display
@@ -15745,12 +15751,18 @@
           }
         }
 
-        // Generate last 12 months
+        // Generate last 12 months (always shows all 12 months, even if no data exists)
+        // This ensures consistent table structure regardless of data availability
         const months = [];
         const today = new Date();
         for (let i = 11; i >= 0; i--) {
           const date = new Date(today.getFullYear(), today.getMonth() - i, 1);
-          months.push(date.toISOString().substring(0, 7)); // YYYY-MM format
+          const monthStr = date.toISOString().substring(0, 7); // YYYY-MM format
+          months.push(monthStr);
+        }
+        // Ensure we have exactly 12 months
+        if (months.length !== 12) {
+          debugLog(`⚠ Expected 12 months but got ${months.length}: ${months.join(', ')}`, 'warn');
         }
 
         // Build table
@@ -15773,7 +15785,10 @@
           const th = document.createElement('th');
           th.style.cssText = 'text-align: center; padding: 0.75rem; border-bottom: 2px solid var(--dark-border); font-weight: 600; background: rgba(55, 65, 81, 0.5); color: var(--dark-text);';
           const monthDate = new Date(month + '-01');
-          th.textContent = monthDate.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+          // Format as "MMM-YY" (e.g., "Jan 25")
+          const monthName = monthDate.toLocaleDateString('en-GB', { month: 'short' });
+          const yearShort = month.split('-')[0].slice(2);
+          th.textContent = `${monthName} ${yearShort}`;
           th.title = `Value for ${monthDate.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}: Last snapshot from this month (rolling 28-day window)`;
           thead.appendChild(th);
         });
