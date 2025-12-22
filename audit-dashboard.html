@@ -15596,36 +15596,68 @@
           
           // Log date source info for ALL metrics (not just first 5) to diagnose why they're in same bucket
           if (metrics.length > 0) {
-            const dateSources = metrics.map(m => {
-              // Use same priority order as bucketing logic
-              const source = (timeGrain === 'monthly' && m.run_id && m.run_id.match(/^\d{4}-\d{2}$/)) ? 'run_id (YYYY-MM)' :
-                            m.run_id && m.run_id.match(/^\d{4}-\d{2}-\d{2}$/) ? 'run_id (YYYY-MM-DD)' :
-                            m.created_at ? 'created_at' :
-                            m.date_end ? 'date_end' :
-                            'none';
-              const dateUsed = (timeGrain === 'monthly' && m.run_id && m.run_id.match(/^\d{4}-\d{2}$/)) ? m.run_id :
-                              (m.run_id && m.run_id.match(/^\d{4}-\d{2}-\d{2}$/)) ? m.run_id :
-                              m.created_at || m.date_end || 'N/A';
-              // Calculate what bucket this would go into
-              let calculatedBucket = 'N/A';
-              if (timeGrain === 'weekly' && dateUsed !== 'N/A') {
-                const dateObj = new Date(dateUsed);
-                const dayOfWeek = dateObj.getDay();
-                const diff = dateObj.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
-                const monday = new Date(dateObj);
-                monday.setDate(diff);
-                calculatedBucket = monday.toISOString().split('T')[0];
-              } else if (timeGrain === 'monthly' && dateUsed !== 'N/A') {
-                const dateObj = new Date(dateUsed);
-                calculatedBucket = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`;
-              }
-              return `run_id=${m.run_id}, source=${source}, date=${dateUsed}, bucket=${calculatedBucket}`;
-            }).join('; ');
-            debugLog(`📊 Date sources for ALL ${metrics.length} metrics: ${dateSources}`, 'info');
-            
-            // Also log unique bucket keys to see if they're all the same (using same priority order)
-            const uniqueBuckets = new Set();
+            // Group metrics by bucket to see which run IDs are in each bucket
+            const bucketGroups = new Map();
             metrics.forEach(m => {
+              // Use same priority order as bucketing logic
+              let dateForBucket = null;
+              let source = 'none';
+              if (timeGrain === 'monthly' && m.run_id && m.run_id.match(/^\d{4}-\d{2}$/)) {
+                dateForBucket = new Date(m.run_id + '-01');
+                source = 'run_id (YYYY-MM)';
+              } else if (m.run_id && m.run_id.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                dateForBucket = new Date(m.run_id);
+                source = 'run_id (YYYY-MM-DD)';
+              } else if (m.created_at) {
+                dateForBucket = new Date(m.created_at);
+                source = 'created_at';
+              } else if (m.date_end) {
+                dateForBucket = new Date(m.date_end);
+                source = 'date_end';
+              }
+              
+              if (dateForBucket && !isNaN(dateForBucket.getTime())) {
+                let bucketKey = null;
+                if (timeGrain === 'weekly') {
+                  const dayOfWeek = dateForBucket.getDay();
+                  const diff = dateForBucket.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+                  const monday = new Date(dateForBucket);
+                  monday.setDate(diff);
+                  bucketKey = monday.toISOString().split('T')[0];
+                } else {
+                  bucketKey = `${dateForBucket.getFullYear()}-${String(dateForBucket.getMonth() + 1).padStart(2, '0')}`;
+                }
+                
+                if (!bucketGroups.has(bucketKey)) {
+                  bucketGroups.set(bucketKey, []);
+                }
+                bucketGroups.get(bucketKey).push({
+                  run_id: m.run_id,
+                  source: source,
+                  date: dateForBucket.toISOString().split('T')[0],
+                  created_at: m.created_at,
+                  date_end: m.date_end
+                });
+              }
+            });
+            
+            // Log bucket groups
+            debugLog(`📊 Bucket analysis: ${bucketGroups.size} unique ${timeGrain} bucket(s) from ${metrics.length} metrics`, 'info');
+            bucketGroups.forEach((runIds, bucketKey) => {
+              const uniqueRunIds = [...new Set(runIds.map(r => r.run_id))];
+              const dateRange = runIds.length > 0 
+                ? `${runIds[0].date} to ${runIds[runIds.length - 1].date}`
+                : 'N/A';
+              debugLog(`  Bucket ${bucketKey}: ${runIds.length} metrics, ${uniqueRunIds.length} unique run IDs (${uniqueRunIds.slice(0, 5).join(', ')}${uniqueRunIds.length > 5 ? '...' : ''})`, 'info');
+              debugLog(`    Date range: ${dateRange}, Sources: ${[...new Set(runIds.map(r => r.source))].join(', ')}`, 'info');
+            });
+            
+            // Also log all run IDs and their bucket assignments
+            const runIdBuckets = new Map();
+            metrics.forEach(m => {
+              if (!runIdBuckets.has(m.run_id)) {
+                runIdBuckets.set(m.run_id, []);
+              }
               let dateForBucket = null;
               if (timeGrain === 'monthly' && m.run_id && m.run_id.match(/^\d{4}-\d{2}$/)) {
                 dateForBucket = new Date(m.run_id + '-01');
@@ -15637,18 +15669,28 @@
                 dateForBucket = new Date(m.date_end);
               }
               if (dateForBucket && !isNaN(dateForBucket.getTime())) {
+                let bucketKey = null;
                 if (timeGrain === 'weekly') {
                   const dayOfWeek = dateForBucket.getDay();
                   const diff = dateForBucket.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
                   const monday = new Date(dateForBucket);
                   monday.setDate(diff);
-                  uniqueBuckets.add(monday.toISOString().split('T')[0]);
+                  bucketKey = monday.toISOString().split('T')[0];
                 } else {
-                  uniqueBuckets.add(`${dateForBucket.getFullYear()}-${String(dateForBucket.getMonth() + 1).padStart(2, '0')}`);
+                  bucketKey = `${dateForBucket.getFullYear()}-${String(dateForBucket.getMonth() + 1).padStart(2, '0')}`;
                 }
+                runIdBuckets.get(m.run_id).push(bucketKey);
               }
             });
-            debugLog(`📊 Unique bucket keys calculated: ${Array.from(uniqueBuckets).join(', ')} (${uniqueBuckets.size} unique buckets)`, 'info');
+            
+            debugLog(`📊 Run ID to bucket mapping (${runIdBuckets.size} unique run IDs):`, 'info');
+            Array.from(runIdBuckets.entries()).slice(0, 20).forEach(([runId, buckets]) => {
+              const uniqueBuckets = [...new Set(buckets)];
+              debugLog(`  ${runId} → ${uniqueBuckets.join(', ')}`, 'info');
+            });
+            if (runIdBuckets.size > 20) {
+              debugLog(`  ... and ${runIdBuckets.size - 20} more run IDs`, 'info');
+            }
           }
         }
         
