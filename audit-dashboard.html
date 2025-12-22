@@ -15445,62 +15445,6 @@
         const metrics = data.metrics || [];
         
         debugLog(`📊 Portfolio data loaded: ${metrics.length} metrics for segment=${segment}, scope=${mappedScope}, kpi=${kpiSelect}`, 'info');
-        debugLog(`📊 API params: siteUrl=${propertyUrl}, segment=${segment}, scope=${mappedScope}, from=${fromDate.toISOString()}, to=${toDate.toISOString()}`, 'info');
-        
-        // Debug: Log all metrics with their run_id and created_at to see why they're being bucketed together
-        if (metrics.length > 0) {
-          const metricsInfo = metrics.map(m => ({
-            run_id: m.run_id,
-            created_at: m.created_at,
-            date_end: m.date_end,
-            segment: m.segment,
-            scope: m.scope
-          }));
-          debugLog(`📊 All metrics from API: ${JSON.stringify(metricsInfo)}`, 'info');
-        }
-        
-        // Debug: Log sample metrics to see what data we have
-        if (metrics.length > 0) {
-          const sampleMetric = metrics[0];
-          debugLog(`📊 Sample metric: run_id=${sampleMetric.run_id}, created_at=${sampleMetric.created_at}, date_end=${sampleMetric.date_end}, position_28d=${sampleMetric.position_28d}, ctr_28d=${sampleMetric.ctr_28d}`, 'info');
-          
-          // Check for position data
-          const metricsWithPosition = metrics.filter(m => m.position_28d !== null && m.position_28d !== undefined && !isNaN(parseFloat(m.position_28d)));
-          debugLog(`📊 Metrics with position data: ${metricsWithPosition.length} out of ${metrics.length}`, metricsWithPosition.length > 0 ? 'success' : 'warn');
-          
-          // Log position values for debugging
-          if (metricsWithPosition.length > 0) {
-            const positionValues = metricsWithPosition.slice(0, 5).map(m => m.position_28d).join(', ');
-            debugLog(`📊 Sample position values: ${positionValues}`, 'info');
-          } else {
-            debugLog(`⚠ No valid position data found. Checking raw values...`, 'warn');
-            const rawPositions = metrics.slice(0, 5).map(m => `run_id=${m.run_id}, position_28d=${m.position_28d} (type=${typeof m.position_28d})`).join('; ');
-            debugLog(`📊 Raw position samples: ${rawPositions}`, 'info');
-          }
-        }
-        
-        if (metrics.length === 0) {
-          debugLog(`⚠ No metrics found. Checking if data exists in database...`, 'warn');
-          // Try querying without scope filter to see if data exists
-          const testParams = new URLSearchParams({ 
-            siteUrl: propertyUrl,
-            segment,
-            from: fromDate.toISOString(),
-            to: toDate.toISOString(),
-            order: 'asc'
-          });
-          const testResponse = await fetch(apiUrl(`/api/supabase/get-portfolio-segment-metrics?${testParams}`));
-          if (testResponse.ok) {
-            const testData = await testResponse.json();
-            const testMetrics = testData.metrics || [];
-            if (testMetrics.length > 0) {
-              debugLog(`⚠ Found ${testMetrics.length} metrics WITHOUT scope filter. Scope filter '${mappedScope}' may be excluding all data.`, 'warn');
-              debugLog(`⚠ Available scopes in data: ${[...new Set(testMetrics.map(m => m.scope))].join(', ')}`, 'warn');
-            } else {
-              debugLog(`⚠ No metrics found even without scope filter. Check if portfolio_segment_metrics_28d table has data for this site.`, 'warn');
-            }
-          }
-        }
         
         if (metrics.length === 0) {
           debugLog('⚠ No portfolio metrics found - check segment and scope filters', 'warn');
@@ -15581,127 +15525,60 @@
         });
         
         debugLog(`📊 Bucketed into ${buckets.size} time buckets (${timeGrain}) from ${metrics.length} metrics`, 'info');
-        
-        // Debug: Log bucket details and date sources
-        if (buckets.size > 0) {
-          const bucketEntries = Array.from(buckets.entries());
-          bucketEntries.forEach(([key, bucket]) => {
-            const valueStr = bucket.value !== null 
-              ? (kpiSelect === 'ctr_28d' ? (bucket.value * 100).toFixed(2) + '%' : 
-                 kpiSelect === 'avg_position' ? bucket.value.toFixed(1) : 
-                 bucket.value.toFixed(2))
-              : 'null';
-            debugLog(`📊 Bucket ${key}: value=${valueStr}, date=${bucket.date.toISOString()}`, 'info');
-          });
           
-          // Log date source info for ALL metrics (not just first 5) to diagnose why they're in same bucket
-          if (metrics.length > 0) {
-            // Group metrics by bucket to see which run IDs are in each bucket
-            const bucketGroups = new Map();
-            metrics.forEach(m => {
-              // Use same priority order as bucketing logic
-              let dateForBucket = null;
-              let source = 'none';
-              if (timeGrain === 'monthly' && m.run_id && m.run_id.match(/^\d{4}-\d{2}$/)) {
-                dateForBucket = new Date(m.run_id + '-01');
-                source = 'run_id (YYYY-MM)';
-              } else if (m.run_id && m.run_id.match(/^\d{4}-\d{2}-\d{2}$/)) {
-                dateForBucket = new Date(m.run_id);
-                source = 'run_id (YYYY-MM-DD)';
-              } else if (m.created_at) {
-                dateForBucket = new Date(m.created_at);
-                source = 'created_at';
-              } else if (m.date_end) {
-                dateForBucket = new Date(m.date_end);
-                source = 'date_end';
-              }
-              
-              if (dateForBucket && !isNaN(dateForBucket.getTime())) {
-                let bucketKey = null;
-                if (timeGrain === 'weekly') {
-                  const dayOfWeek = dateForBucket.getDay();
-                  const diff = dateForBucket.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
-                  const monday = new Date(dateForBucket);
-                  monday.setDate(diff);
-                  bucketKey = monday.toISOString().split('T')[0];
-                } else {
-                  bucketKey = `${dateForBucket.getFullYear()}-${String(dateForBucket.getMonth() + 1).padStart(2, '0')}`;
-                }
-                
-                if (!bucketGroups.has(bucketKey)) {
-                  bucketGroups.set(bucketKey, []);
-                }
-                bucketGroups.get(bucketKey).push({
-                  run_id: m.run_id,
-                  source: source,
-                  date: dateForBucket.toISOString().split('T')[0],
-                  created_at: m.created_at,
-                  date_end: m.date_end
-                });
-              }
-            });
-            
-            // Log bucket groups
-            debugLog(`📊 Bucket analysis: ${bucketGroups.size} unique ${timeGrain} bucket(s) from ${metrics.length} metrics`, 'info');
-            bucketGroups.forEach((runIds, bucketKey) => {
-              const uniqueRunIds = [...new Set(runIds.map(r => r.run_id))];
-              const dateRange = runIds.length > 0 
-                ? `${runIds[0].date} to ${runIds[runIds.length - 1].date}`
-                : 'N/A';
-              debugLog(`  Bucket ${bucketKey}: ${runIds.length} metrics, ${uniqueRunIds.length} unique run IDs (${uniqueRunIds.slice(0, 5).join(', ')}${uniqueRunIds.length > 5 ? '...' : ''})`, 'info');
-              debugLog(`    Date range: ${dateRange}, Sources: ${[...new Set(runIds.map(r => r.source))].join(', ')}`, 'info');
-            });
-            
-            // Also log all run IDs and their bucket assignments
-            const runIdBuckets = new Map();
-            metrics.forEach(m => {
-              if (!runIdBuckets.has(m.run_id)) {
-                runIdBuckets.set(m.run_id, []);
-              }
-              let dateForBucket = null;
-              if (timeGrain === 'monthly' && m.run_id && m.run_id.match(/^\d{4}-\d{2}$/)) {
-                dateForBucket = new Date(m.run_id + '-01');
-              } else if (m.run_id && m.run_id.match(/^\d{4}-\d{2}-\d{2}$/)) {
-                dateForBucket = new Date(m.run_id);
-              } else if (m.created_at) {
-                dateForBucket = new Date(m.created_at);
-              } else if (m.date_end) {
-                dateForBucket = new Date(m.date_end);
-              }
-              if (dateForBucket && !isNaN(dateForBucket.getTime())) {
-                let bucketKey = null;
-                if (timeGrain === 'weekly') {
-                  const dayOfWeek = dateForBucket.getDay();
-                  const diff = dateForBucket.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
-                  const monday = new Date(dateForBucket);
-                  monday.setDate(diff);
-                  bucketKey = monday.toISOString().split('T')[0];
-                } else {
-                  bucketKey = `${dateForBucket.getFullYear()}-${String(dateForBucket.getMonth() + 1).padStart(2, '0')}`;
-                }
-                runIdBuckets.get(m.run_id).push(bucketKey);
-              }
-            });
-            
-            debugLog(`📊 Run ID to bucket mapping (${runIdBuckets.size} unique run IDs):`, 'info');
-            Array.from(runIdBuckets.entries()).slice(0, 20).forEach(([runId, buckets]) => {
-              const uniqueBuckets = [...new Set(buckets)];
-              debugLog(`  ${runId} → ${uniqueBuckets.join(', ')}`, 'info');
-            });
-            if (runIdBuckets.size > 20) {
-              debugLog(`  ... and ${runIdBuckets.size - 20} more run IDs`, 'info');
-            }
-          }
         }
         
         // Sort buckets by date
-        const sortedBuckets = Array.from(buckets.entries())
+        let sortedBuckets = Array.from(buckets.entries())
           .sort((a, b) => a[1].date - b[1].date);
         
-        // If we only have 1 bucket, we can't show deltas
+        // If we only have 1 bucket, try daily bucketing instead (if weekly was selected)
+        if (sortedBuckets.length < 2 && timeGrain === 'weekly' && metrics.length >= 2) {
+          debugLog(`⚠ Only 1 weekly bucket from ${metrics.length} metrics - falling back to daily bucketing`, 'warn');
+          
+          // Re-bucket by day instead
+          const dailyBuckets = new Map();
+          metrics.forEach(m => {
+            let dateForBucket = null;
+            if (m.run_id && m.run_id.match(/^\d{4}-\d{2}-\d{2}$/)) {
+              dateForBucket = new Date(m.run_id);
+            } else if (m.created_at) {
+              dateForBucket = new Date(m.created_at);
+            } else if (m.date_end) {
+              dateForBucket = new Date(m.date_end);
+            }
+            
+            if (dateForBucket && !isNaN(dateForBucket.getTime())) {
+              const dayKey = dateForBucket.toISOString().split('T')[0]; // YYYY-MM-DD
+              const comparisonDate = m.created_at ? new Date(m.created_at) : (m.date_end ? new Date(m.date_end) : dateForBucket);
+              
+              if (!dailyBuckets.has(dayKey) || comparisonDate > dailyBuckets.get(dayKey).date) {
+                const value = kpiField === 'ctr_28d' ? parseFloat(m.ctr_28d || 0) :
+                              kpiField === 'clicks_28d' ? parseFloat(m.clicks_28d || 0) :
+                              kpiField === 'impressions_28d' ? parseFloat(m.impressions_28d || 0) :
+                              kpiField === 'position_28d' ? (m.position_28d !== null && m.position_28d !== undefined && !isNaN(parseFloat(m.position_28d)) ? parseFloat(m.position_28d) : null) :
+                              kpiField === 'ai_citations_28d' ? (m.ai_citations_28d ? parseInt(m.ai_citations_28d) : 0) :
+                              kpiField === 'ai_overview_present_count' ? (m.ai_overview_present_count ? parseInt(m.ai_overview_present_count) : 0) : null;
+                
+                dailyBuckets.set(dayKey, { value, date: comparisonDate });
+              }
+            }
+          });
+          
+          const sortedDailyBuckets = Array.from(dailyBuckets.entries())
+            .sort((a, b) => a[1].date - b[1].date);
+          
+          if (sortedDailyBuckets.length >= 2) {
+            debugLog(`✓ Daily bucketing: ${sortedDailyBuckets.length} buckets from ${metrics.length} metrics`, 'success');
+            // Use daily buckets instead
+            sortedBuckets = sortedDailyBuckets;
+            timeGrain = 'daily'; // Update for label formatting
+          }
+        }
+        
+        // If we still only have 1 bucket, we can't show deltas
         if (sortedBuckets.length < 2) {
-          debugLog(`⚠ Only ${sortedBuckets.length} bucket(s) - need at least 2 different ${timeGrain} periods to show deltas`, 'warn');
-          debugLog(`⚠ This usually means: (1) Only one audit has been run, or (2) Multiple audits are in the same ${timeGrain} period`, 'warn');
+          debugLog(`⚠ Only ${sortedBuckets.length} bucket(s) - need at least 2 different time periods to show deltas`, 'warn');
           if (portfolioDeltaChart) {
             portfolioDeltaChart.data.labels = [];
             portfolioDeltaChart.data.datasets[0].data = [];
@@ -15716,7 +15593,7 @@
             ctx.fillStyle = '#ffffff';
             ctx.font = '14px Arial';
             ctx.textAlign = 'center';
-            ctx.fillText(`Need at least 2 different ${timeGrain} periods to show deltas.`, 
+            ctx.fillText(`Need at least 2 different time periods to show deltas.`, 
               canvas.width / 2, canvas.height / 2);
           }
           return;
@@ -15727,11 +15604,21 @@
         const deltas = [];
         
         sortedBuckets.forEach(([bucketKey, bucket], index) => {
+          let label;
+          if (timeGrain === 'daily') {
+            // Daily: show date as "DD MMM"
+            label = new Date(bucketKey).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+          } else if (timeGrain === 'weekly') {
+            // Weekly: show Monday date as "DD MMM"
+            label = new Date(bucketKey).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+          } else {
+            // Monthly: show as "MM/YY"
+            label = `${bucketKey.split('-')[1]}/${bucketKey.split('-')[0].slice(2)}`;
+          }
+          
           if (index === 0) {
             // First bucket: no delta
-            labels.push(timeGrain === 'weekly' 
-              ? new Date(bucketKey).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
-              : `${bucketKey.split('-')[1]}/${bucketKey.split('-')[0].slice(2)}`);
+            labels.push(label);
             deltas.push(null); // No previous value to compare
           } else {
             const prevBucket = sortedBuckets[index - 1][1];
@@ -15739,14 +15626,11 @@
               ? bucket.value - prevBucket.value 
               : null;
             
-            labels.push(timeGrain === 'weekly' 
-              ? new Date(bucketKey).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
-              : `${bucketKey.split('-')[1]}/${bucketKey.split('-')[0].slice(2)}`);
+            labels.push(label);
             deltas.push(delta);
           }
         });
         
-        debugLog(`📊 Computed ${deltas.filter(d => d !== null).length} deltas from ${sortedBuckets.length} buckets`, 'info');
 
         if (portfolioDeltaChart) {
           // Format deltas for display
@@ -15759,8 +15643,6 @@
             // AI citations and AI overview are already integers, no conversion needed
             return d;
           });
-          
-          debugLog(`📊 Chart data: ${labels.length} labels, ${formattedDeltas.filter(d => d !== null).length} non-null deltas`, 'info');
           
           portfolioDeltaChart.data.labels = labels;
           portfolioDeltaChart.data.datasets[0].data = formattedDeltas;
