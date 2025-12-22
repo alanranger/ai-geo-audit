@@ -113,7 +113,7 @@ export default async function handler(req, res) {
         .in('status', ['in_progress', 'monitoring', 'planned'])
         .gt('cycle_active', 0);
       
-      const trackedUrls = new Set();
+      const trackedUrlPatterns = [];
       if (activeTasks) {
         activeTasks.forEach(task => {
           // Normalize URLs - handle both full URLs and relative paths
@@ -130,7 +130,20 @@ export default async function handler(req, res) {
             }
             // Normalize: remove trailing slash, convert to lowercase for matching
             url = url.replace(/\/$/, '').toLowerCase();
-            trackedUrls.add(url);
+            // Extract the path part (everything after domain) for substring matching
+            const pathMatch = url.match(/\/(.+)$/);
+            if (pathMatch) {
+              trackedUrlPatterns.push(pathMatch[1]); // e.g., "photography-workshops"
+            } else if (url.includes('/')) {
+              // If it's a full URL, extract path
+              const parts = url.split('/');
+              if (parts.length > 1) {
+                trackedUrlPatterns.push(parts.slice(1).join('/')); // Everything after domain
+              }
+            } else {
+              // Just the domain, match all pages
+              trackedUrlPatterns.push('');
+            }
           }
         });
       }
@@ -149,12 +162,24 @@ export default async function handler(req, res) {
         }
         
         // Add to all_tracked if this page URL is tracked by an active optimization task
-        // Normalize page URL the same way: remove protocol, www, trailing slash
+        // Normalize page URL: remove protocol, www, trailing slash, extract path
         let pageUrlNormalized = page.page_url;
         pageUrlNormalized = pageUrlNormalized.replace(/^https?:\/\//, '');
         pageUrlNormalized = pageUrlNormalized.replace(/^www\./, '');
         pageUrlNormalized = pageUrlNormalized.replace(/\/$/, '').toLowerCase();
-        if (trackedUrls.has(pageUrlNormalized)) {
+        
+        // Extract path part (everything after domain)
+        const pagePathMatch = pageUrlNormalized.match(/\/(.+)$/);
+        const pagePath = pagePathMatch ? pagePathMatch[1] : '';
+        
+        // Check if page path contains any tracked URL pattern (substring match)
+        const isTracked = trackedUrlPatterns.some(pattern => {
+          if (!pattern) return true; // Empty pattern matches all
+          // Match if page path contains the pattern or pattern is a prefix
+          return pagePath.includes(pattern) || pagePath.startsWith(pattern + '/');
+        });
+        
+        if (isTracked) {
           segmentPages.all_tracked.push(page);
         }
       });
