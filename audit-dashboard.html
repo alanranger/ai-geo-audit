@@ -16208,16 +16208,27 @@
           // Debug logging for position calculation
           debugLog(`📊 Position calc for ${segment}: ${positionCount} pages with position (out of ${pages.length} total), total impressions=${totalPositionImpressions}, avgPosition=${avgPosition !== null ? avgPosition.toFixed(2) : 'N/A'}`, 'info');
           
-          // Additional debug: log sample positions for first few pages
-          if (segment === 'money' && pages.length > 0) {
+          // Additional debug: log sample positions for first few pages (for all segments, not just money)
+          if (pages.length > 0) {
             const samplePositions = pages.slice(0, 5).map(p => {
-              const pos = p.position !== null ? parseFloat(p.position) : 
-                          (p.position_28d !== null ? parseFloat(p.position_28d) : 
-                           (p.avgPosition !== null ? parseFloat(p.avgPosition) : null));
+              const pos = p.position !== null && p.position !== undefined ? parseFloat(p.position) : 
+                          (p.position_28d !== null && p.position_28d !== undefined ? parseFloat(p.position_28d) : 
+                           (p.avgPosition !== null && p.avgPosition !== undefined ? parseFloat(p.avgPosition) : null));
               const imps = parseFloat(p.impressions) || 0;
               return `pos=${pos !== null ? pos.toFixed(1) : 'null'}, imps=${imps}`;
             }).join('; ');
             debugLog(`📊 Sample positions for ${segment}: ${samplePositions}`, 'info');
+            
+            // Also log how many pages have null position
+            const nullPositionCount = pages.filter(p => {
+              const pos = p.position !== null && p.position !== undefined ? parseFloat(p.position) : 
+                          (p.position_28d !== null && p.position_28d !== undefined ? parseFloat(p.position_28d) : 
+                           (p.avgPosition !== null && p.avgPosition !== undefined ? parseFloat(p.avgPosition) : null));
+              return pos === null || isNaN(pos) || pos <= 0;
+            }).length;
+            if (nullPositionCount > 0) {
+              debugLog(`📊 ${segment}: ${nullPositionCount} out of ${pages.length} pages have null/invalid position`, 'warn');
+            }
           }
           
           segmentRows.push({
@@ -21223,12 +21234,15 @@
                 gscRange = moneyPagesData.gscRange || getGscDateRange(28, 2);
                 moneyPagesData.gscPageTotals28d.forEach(pageData => {
                   const key = normalizeGscPageKey(pageData.url);
+                  const position = (pageData.position != null && pageData.position !== undefined && !isNaN(parseFloat(pageData.position)) && parseFloat(pageData.position) > 0) 
+                    ? parseFloat(pageData.position) 
+                    : null;
                   pageTotalsByKey.set(key, {
                     url: pageData.url,
                     clicks: pageData.clicks || 0,
                     impressions: pageData.impressions || 0,
                     ctr: pageData.ctr || 0,
-                    position: pageData.position || 0
+                    position: position
                   });
                 });
                 pageLevelDataFetched = true;
@@ -21238,12 +21252,15 @@
                 gscRange = saved.scores.moneyPagesMetrics.gscRange || getGscDateRange(28, 2);
                 saved.scores.moneyPagesMetrics.gscPageTotals28d.forEach(pageData => {
                   const key = normalizeGscPageKey(pageData.url);
+                  const position = (pageData.position != null && pageData.position !== undefined && !isNaN(parseFloat(pageData.position)) && parseFloat(pageData.position) > 0) 
+                    ? parseFloat(pageData.position) 
+                    : null;
                   pageTotalsByKey.set(key, {
                     url: pageData.url,
                     clicks: pageData.clicks || 0,
                     impressions: pageData.impressions || 0,
                     ctr: pageData.ctr || 0,
-                    position: pageData.position || 0
+                    position: position
                   });
                 });
                 pageLevelDataFetched = true;
@@ -21315,7 +21332,10 @@
                 const clicks = row.clicks || 0;
                 const impressions = row.impressions || 0;
                 const ctr = row.ctr != null ? (row.ctr > 1 ? row.ctr / 100 : row.ctr) : (impressions > 0 ? clicks / impressions : 0);
-                const position = row.position || 0;
+                // Position: use null if not provided (0 is not a valid position, positions start at 1)
+                const position = (row.position != null && row.position !== undefined && !isNaN(parseFloat(row.position)) && parseFloat(row.position) > 0) 
+                  ? parseFloat(row.position) 
+                  : null;
 
                 // Debug: Log specific URL if it matches the one we're looking for
                 if (rawPageUrl.includes('landscape-photography-workshops') || key.includes('landscape-photography-workshops')) {
@@ -21339,7 +21359,17 @@
                 debugLog(`📊 Sample URLs from API: ${sampleUrls.join(', ')}`, 'info');
               }
               
-              debugLog(`✓ Built pageTotalsByKey from GSC page-level API: ${pageTotalsByKey.size} pages`, 'success');
+              // Count pages with valid position data
+              let pagesWithPosition = 0;
+              let totalPositionSum = 0;
+              pageTotalsByKey.forEach((metrics, key) => {
+                if (metrics.position !== null && metrics.position !== undefined && !isNaN(metrics.position) && metrics.position > 0) {
+                  pagesWithPosition++;
+                  totalPositionSum += metrics.position;
+                }
+              });
+              const avgPosition = pagesWithPosition > 0 ? (totalPositionSum / pagesWithPosition).toFixed(2) : 'N/A';
+              debugLog(`✓ Built pageTotalsByKey from GSC page-level API: ${pageTotalsByKey.size} pages (${pagesWithPosition} with position data, avg=${avgPosition})`, 'success');
               
               // Save to Supabase for persistence
               // This will be called after audit is saved, using the audit_date as run_id
@@ -21351,12 +21381,13 @@
                   clicks: metrics.clicks,
                   impressions: metrics.impressions,
                   ctr: metrics.ctr,
-                  position: metrics.position
+                  position: metrics.position // Can be null if not available
                 })),
                 gscRange: gscRange,
                 propertyUrl: propertyUrl
               };
-              debugLog(`📊 Prepared ${window._pendingPageMetrics.pages.length} page metrics for Supabase save (will save after audit completes)`, 'info');
+              const pagesWithPositionInPending = window._pendingPageMetrics.pages.filter(p => p.position !== null && p.position !== undefined && !isNaN(p.position) && p.position > 0).length;
+              debugLog(`📊 Prepared ${window._pendingPageMetrics.pages.length} page metrics for Supabase save (${pagesWithPositionInPending} with position data, will save after audit completes)`, 'info');
               
               pageLevelDataFetched = true;
             } else if (pageLevelData.status === 'ok' && pageLevelData.data && Array.isArray(pageLevelData.data.pages)) {
@@ -21369,7 +21400,11 @@
                 const clicks = page.clicks || 0;
                 const impressions = page.impressions || 0;
                 const ctr = page.ctr != null ? (page.ctr > 1 ? page.ctr / 100 : page.ctr) : (impressions > 0 ? clicks / impressions : 0);
-                const position = page.position || page.avgPosition || 0;
+                // Position: use null if not provided (0 is not a valid position, positions start at 1)
+                const rawPosition = page.position || page.avgPosition;
+                const position = (rawPosition != null && rawPosition !== undefined && !isNaN(parseFloat(rawPosition)) && parseFloat(rawPosition) > 0) 
+                  ? parseFloat(rawPosition) 
+                  : null;
 
                 pageTotalsByKey.set(key, {
                   url: rawPageUrl,
