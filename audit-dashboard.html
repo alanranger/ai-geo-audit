@@ -15165,84 +15165,166 @@
     async function loadPortfolioData() {
       const kpiSelect = document.getElementById('portfolio-kpi-select')?.value || 'ctr_28d';
       const segment = document.getElementById('portfolio-segment-select')?.value || 'all_tracked';
-      const scope = document.getElementById('portfolio-scope-toggle')?.value || 'active_only';
+      const scope = document.getElementById('portfolio-scope-toggle')?.value || 'active_cycles_only';
       const timeGrain = document.getElementById('portfolio-time-grain')?.value || 'weekly';
 
-      // Map UI KPI to median_delta_* KPI key
-      const kpiMap = {
-        'ctr_28d': 'median_delta_ctr_28d',
-        'clicks_28d': 'median_delta_clicks_28d',
-        'impressions_28d': 'median_delta_impressions_28d',
-        'avg_position': 'median_delta_avg_position',
-        'ai_citations': 'median_delta_ai_citations',
-        'ai_overview': 'median_delta_ai_overview'
+      // Map UI KPI to portfolio_segment_metrics_28d field
+      const kpiFieldMap = {
+        'ctr_28d': 'ctr_28d',
+        'clicks_28d': 'clicks_28d',
+        'impressions_28d': 'impressions_28d',
+        'avg_position': 'position_28d',
+        'ai_citations': null, // Not in segment metrics (would need task aggregation)
+        'ai_overview': null  // Not in segment metrics (would need task aggregation)
       };
       
-      const medianKpi = kpiMap[kpiSelect] || `median_delta_${kpiSelect}`;
+      const kpiField = kpiFieldMap[kpiSelect];
+      if (!kpiField && kpiSelect !== 'ai_citations' && kpiSelect !== 'ai_overview') {
+        debugLog(`⚠ KPI ${kpiSelect} not supported in segment metrics`, 'warn');
+        return;
+      }
       
-      // Map segment names
-      const segmentMap = {
-        'all': 'all_tracked',
-        'money_pages': 'money',
-        'landing': 'landing',
-        'event': 'event',
-        'product': 'product'
+      // Map scope
+      const scopeMap = {
+        'active_only': 'active_cycles_only',
+        'all': 'all_tracked'
       };
-      const mappedSegment = segmentMap[segment] || segment;
+      const mappedScope = scopeMap[scope] || scope;
 
       try {
+        const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+        if (!propertyUrl) {
+          debugLog('⚠ No property URL found for portfolio data', 'warn');
+          return;
+        }
+        
+        // Calculate date range (last ~180 days for chart)
+        const toDate = new Date();
+        const fromDate = new Date();
+        fromDate.setDate(fromDate.getDate() - 180);
+        
         const params = new URLSearchParams({ 
-          kpi: medianKpi, 
-          segment: mappedSegment, 
-          scope, 
-          timeGrain 
+          siteUrl: propertyUrl,
+          segment,
+          scope: mappedScope,
+          from: fromDate.toISOString(),
+          to: toDate.toISOString(),
+          order: 'asc' // Chronological for chart
         });
-        const response = await fetch(apiUrl(`/api/portfolio/get-snapshots?${params}`));
+        
+        const response = await fetch(apiUrl(`/api/supabase/get-portfolio-segment-metrics?${params}`));
         
         if (!response.ok) {
           throw new Error(`API error: ${response.status}`);
         }
         
         const data = await response.json();
+        const metrics = data.metrics || [];
 
-        if (data.snapshots && portfolioDeltaChart) {
-          if (data.snapshots.length < 2) {
-            // Show empty state
+        if (metrics.length < 2) {
+          // Show empty state
+          if (portfolioDeltaChart) {
             portfolioDeltaChart.data.labels = [];
             portfolioDeltaChart.data.datasets[0].data = [];
             portfolioDeltaChart.update();
-            
-            // Show empty state message
-            const canvas = document.getElementById('portfolio-delta-chart');
-            if (canvas) {
-              const ctx = canvas.getContext('2d');
-              ctx.clearRect(0, 0, canvas.width, canvas.height);
-              ctx.fillStyle = '#666';
-              ctx.font = '14px Arial';
-              ctx.textAlign = 'center';
-              ctx.fillText('No historical snapshots yet. Run the audit on multiple days to build trend history.', 
-                canvas.width / 2, canvas.height / 2);
-            }
-            return;
           }
           
-          const labels = data.snapshots.map(s => {
-            const date = new Date(s.created_at);
-            if (timeGrain === 'weekly') {
-              // Format as week start date
-              const dayOfWeek = date.getDay();
-              const diff = date.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
-              const monday = new Date(date.setDate(diff));
-              return monday.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
-            } else {
-              return date.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
-            }
-          });
-          const values = data.snapshots.map(s => parseFloat(s.value || 0));
+          // Show empty state message
+          const canvas = document.getElementById('portfolio-delta-chart');
+          if (canvas) {
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#666';
+            ctx.font = '14px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('Run at least 2 audits to show deltas.', 
+              canvas.width / 2, canvas.height / 2);
+          }
+          return;
+        }
+        
+        // Bucket by time grain and compute deltas
+        const buckets = new Map(); // key: bucket label, value: { value, date }
+        
+        metrics.forEach(m => {
+          const date = new Date(m.created_at);
+          let bucketKey;
+          
+          if (timeGrain === 'weekly') {
+            // ISO week: get Monday of the week
+            const dayOfWeek = date.getDay();
+            const diff = date.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+            const monday = new Date(date);
+            monday.setDate(diff);
+            bucketKey = monday.toISOString().split('T')[0]; // Use Monday date as key
+          } else {
+            // Monthly: YYYY-MM
+            bucketKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+          }
+          
+          // Keep the LAST snapshot in each bucket
+          if (!buckets.has(bucketKey) || new Date(m.created_at) > buckets.get(bucketKey).date) {
+            const value = kpiField === 'ctr_28d' ? parseFloat(m.ctr_28d || 0) :
+                          kpiField === 'clicks_28d' ? parseFloat(m.clicks_28d || 0) :
+                          kpiField === 'impressions_28d' ? parseFloat(m.impressions_28d || 0) :
+                          kpiField === 'position_28d' ? (m.position_28d ? parseFloat(m.position_28d) : null) : null;
+            
+            buckets.set(bucketKey, { value, date: new Date(m.created_at) });
+          }
+        });
+        
+        // Sort buckets by date
+        const sortedBuckets = Array.from(buckets.entries())
+          .sort((a, b) => a[1].date - b[1].date);
+        
+        // Compute deltas
+        const labels = [];
+        const deltas = [];
+        
+        sortedBuckets.forEach(([bucketKey, bucket], index) => {
+          if (index === 0) {
+            // First bucket: no delta
+            labels.push(timeGrain === 'weekly' 
+              ? new Date(bucketKey).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
+              : `${bucketKey.split('-')[1]}/${bucketKey.split('-')[0].slice(2)}`);
+            deltas.push(null); // No previous value to compare
+          } else {
+            const prevBucket = sortedBuckets[index - 1][1];
+            const delta = bucket.value !== null && prevBucket.value !== null 
+              ? bucket.value - prevBucket.value 
+              : null;
+            
+            labels.push(timeGrain === 'weekly' 
+              ? new Date(bucketKey).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
+              : `${bucketKey.split('-')[1]}/${bucketKey.split('-')[0].slice(2)}`);
+            deltas.push(delta);
+          }
+        });
 
+        if (portfolioDeltaChart) {
+          // Format deltas for display
+          const formattedDeltas = deltas.map(d => {
+            if (d === null) return null;
+            // CTR delta: convert ratio to percentage points
+            if (kpiSelect === 'ctr_28d') {
+              return d * 100; // Convert ratio delta to percentage points
+            }
+            return d;
+          });
+          
           portfolioDeltaChart.data.labels = labels;
-          portfolioDeltaChart.data.datasets[0].data = values;
-          portfolioDeltaChart.data.datasets[0].label = `Median Delta (${kpiSelect})`;
+          portfolioDeltaChart.data.datasets[0].data = formattedDeltas;
+          portfolioDeltaChart.data.datasets[0].label = `Delta (${kpiSelect})`;
+          
+          // Update Y-axis label
+          if (kpiSelect === 'ctr_28d') {
+            portfolioDeltaChart.options.scales.y.title.text = 'Delta (percentage points)';
+          } else if (kpiSelect === 'avg_position') {
+            portfolioDeltaChart.options.scales.y.title.text = 'Delta (negative is improvement)';
+          } else {
+            portfolioDeltaChart.options.scales.y.title.text = `Delta (${kpiSelect})`;
+          }
+          
           portfolioDeltaChart.update();
         }
       } catch (err) {
@@ -15261,21 +15343,50 @@
         'all_tracked': 'All tracked'
       };
       
+      // Map UI KPI to portfolio_segment_metrics_28d field
+      const kpiFieldMap = {
+        'ctr_28d': 'ctr_28d',
+        'clicks_28d': 'clicks_28d',
+        'impressions_28d': 'impressions_28d',
+        'avg_position': 'position_28d',
+        'ai_citations': null, // Not in segment metrics
+        'ai_overview': null  // Not in segment metrics
+      };
+      
+      const kpiField = kpiFieldMap[kpi];
+      if (!kpiField && kpi !== 'ai_citations' && kpi !== 'ai_overview') {
+        debugLog(`⚠ KPI ${kpi} not supported in segment metrics`, 'warn');
+        return;
+      }
+      
       try {
+        const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+        if (!propertyUrl) {
+          debugLog('⚠ No property URL found for portfolio table', 'warn');
+          return;
+        }
+        
+        // Calculate date range (last 13 months to get previous month for trend)
+        const toDate = new Date();
+        const fromDate = new Date();
+        fromDate.setMonth(fromDate.getMonth() - 13);
+        
         // Fetch data for all segments
         const allData = {};
         for (const segment of segments) {
           const params = new URLSearchParams({ 
-            kpi, 
-            segment, 
-            scope: 'active_only',
-            timeGrain: 'monthly'
+            siteUrl: propertyUrl,
+            segment,
+            scope: 'active_cycles_only',
+            from: fromDate.toISOString(),
+            to: toDate.toISOString(),
+            order: 'desc' // Latest first
           });
-          const response = await fetch(apiUrl(`/api/portfolio/get-snapshots?${params}`));
+          const response = await fetch(apiUrl(`/api/supabase/get-portfolio-segment-metrics?${params}`));
           
           if (response.ok) {
             const data = await response.json();
-            allData[segment] = data.snapshots || [];
+            allData[segment] = data.metrics || [];
           } else {
             allData[segment] = [];
           }
@@ -15347,55 +15458,82 @@
             const cell = document.createElement('td');
             cell.style.cssText = 'text-align: center; padding: 0.75rem; border-bottom: 1px solid #eee;';
             
-            // Find snapshot for this month (bucket by YYYY-MM)
-            const snapshot = allData[segment]?.find(s => {
+            // Find the LAST snapshot in this month (bucket by YYYY-MM)
+            const monthSnapshots = allData[segment]?.filter(s => {
               const snapshotDate = new Date(s.created_at);
               const snapshotMonth = `${snapshotDate.getFullYear()}-${String(snapshotDate.getMonth() + 1).padStart(2, '0')}`;
               return snapshotMonth === month;
             });
             
-            if (snapshot && snapshot.value !== null && snapshot.value !== undefined) {
-              const value = parseFloat(snapshot.value);
-              const formatted = formatValue(value, kpi);
-              monthValues.push(value);
+            // Get the latest snapshot in this month
+            const snapshot = monthSnapshots?.length > 0 
+              ? monthSnapshots.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0]
+              : null;
+            
+            if (snapshot) {
+              // Extract value based on KPI field
+              const value = kpiField === 'ctr_28d' ? parseFloat(snapshot.ctr_28d || 0) :
+                          kpiField === 'clicks_28d' ? parseFloat(snapshot.clicks_28d || 0) :
+                          kpiField === 'impressions_28d' ? parseFloat(snapshot.impressions_28d || 0) :
+                          kpiField === 'position_28d' ? (snapshot.position_28d ? parseFloat(snapshot.position_28d) : null) : null;
               
-              // Find previous month snapshot for trend
-              const prevMonth = new Date(month + '-01');
-              prevMonth.setMonth(prevMonth.getMonth() - 1);
-              const prevMonthStr = `${prevMonth.getFullYear()}-${String(prevMonth.getMonth() + 1).padStart(2, '0')}`;
-              
-              const prevSnapshot = allData[segment]?.find(s => {
-                const snapshotDate = new Date(s.created_at);
-                const snapshotMonth = `${snapshotDate.getFullYear()}-${String(snapshotDate.getMonth() + 1).padStart(2, '0')}`;
-                return snapshotMonth === prevMonthStr;
-              });
-              
-              if (prevSnapshot && prevSnapshot.value !== null && prevSnapshot.value !== undefined) {
-                const prevValue = parseFloat(prevSnapshot.value);
-                const delta = value - prevValue;
-                const indicator = delta >= 0 ? '▲' : '▼';
-                const color = delta >= 0 ? '#10b981' : '#ef4444';
+              if (value !== null && value !== undefined) {
+                const formatted = formatValue(value, kpi);
+                monthValues.push(value);
                 
-                // Format delta based on KPI
-                let deltaFormatted;
-                if (kpi === 'ctr_28d') {
-                  deltaFormatted = (delta * 100).toFixed(1) + 'pp';
-                } else if (kpi === 'avg_position') {
-                  deltaFormatted = delta.toFixed(1);
-                  // For position, lower is better, so flip the indicator
-                  const actualIndicator = delta < 0 ? '▲' : '▼';
-                  const actualColor = delta < 0 ? '#10b981' : '#ef4444';
-                  cell.innerHTML = `${formatted} <span style="color: ${actualColor};">${actualIndicator} ${Math.abs(deltaFormatted)}</span>`;
+                // Find previous month snapshot for trend
+                const prevMonth = new Date(month + '-01');
+                prevMonth.setMonth(prevMonth.getMonth() - 1);
+                const prevMonthStr = `${prevMonth.getFullYear()}-${String(prevMonth.getMonth() + 1).padStart(2, '0')}`;
+                
+                const prevMonthSnapshots = allData[segment]?.filter(s => {
+                  const snapshotDate = new Date(s.created_at);
+                  const snapshotMonth = `${snapshotDate.getFullYear()}-${String(snapshotDate.getMonth() + 1).padStart(2, '0')}`;
+                  return snapshotMonth === prevMonthStr;
+                });
+                
+                const prevSnapshot = prevMonthSnapshots?.length > 0
+                  ? prevMonthSnapshots.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0]
+                  : null;
+                
+                if (prevSnapshot) {
+                  const prevValue = kpiField === 'ctr_28d' ? parseFloat(prevSnapshot.ctr_28d || 0) :
+                                  kpiField === 'clicks_28d' ? parseFloat(prevSnapshot.clicks_28d || 0) :
+                                  kpiField === 'impressions_28d' ? parseFloat(prevSnapshot.impressions_28d || 0) :
+                                  kpiField === 'position_28d' ? (prevSnapshot.position_28d ? parseFloat(prevSnapshot.position_28d) : null) : null;
+                  
+                  if (prevValue !== null && prevValue !== undefined) {
+                    const delta = value - prevValue;
+                    const indicator = delta >= 0 ? '▲' : '▼';
+                    const color = delta >= 0 ? '#10b981' : '#ef4444';
+                    
+                    // Format delta based on KPI
+                    let deltaFormatted;
+                    if (kpi === 'ctr_28d') {
+                      deltaFormatted = (delta * 100).toFixed(1) + 'pp'; // Convert ratio delta to percentage points
+                    } else if (kpi === 'avg_position') {
+                      deltaFormatted = Math.abs(delta).toFixed(1);
+                      // For position, lower is better, so flip the indicator
+                      const actualIndicator = delta < 0 ? '▲' : '▼';
+                      const actualColor = delta < 0 ? '#10b981' : '#ef4444';
+                      cell.innerHTML = `${formatted} <span style="color: ${actualColor};">${actualIndicator} ${deltaFormatted}</span>`;
+                    } else {
+                      deltaFormatted = Math.abs(delta).toLocaleString();
+                      cell.innerHTML = `${formatted} <span style="color: ${color};">${indicator} ${deltaFormatted}</span>`;
+                    }
+                    
+                    if (kpi !== 'avg_position') {
+                      cell.innerHTML = `${formatted} <span style="color: ${color};">${indicator} ${deltaFormatted}</span>`;
+                    }
+                  } else {
+                    cell.textContent = formatted;
+                  }
                 } else {
-                  deltaFormatted = Math.abs(delta).toLocaleString();
-                  cell.innerHTML = `${formatted} <span style="color: ${color};">${indicator} ${deltaFormatted}</span>`;
-                }
-                
-                if (kpi !== 'avg_position') {
-                  cell.innerHTML = `${formatted} <span style="color: ${color};">${indicator} ${deltaFormatted}</span>`;
+                  cell.textContent = formatted;
                 }
               } else {
-                cell.textContent = formatted;
+                cell.textContent = '—';
+                monthValues.push(null);
               }
             } else {
               cell.textContent = '—';
@@ -15431,6 +15569,7 @@
       }
     }
 
+
     // Wire up Portfolio controls
     function wirePortfolioControls() {
       const kpiSelect = document.getElementById('portfolio-kpi-select');
@@ -15455,6 +15594,159 @@
             renderPortfolioTable();
           }
         });
+      }
+    }
+
+    // Calculate and save portfolio segment snapshots (Phase 3a - Using gsc_page_metrics_28d)
+    async function calculateAndSavePortfolioSegmentSnapshots(runId, siteUrl, dateStart, dateEnd, pageTotalsByKey) {
+      try {
+        debugLog('📊 Calculating portfolio segment snapshots from pageTotalsByKey...', 'info');
+        
+        if (!pageTotalsByKey || pageTotalsByKey.size === 0) {
+          debugLog('⚠ No page metrics available for segment snapshots', 'warn');
+          return;
+        }
+        
+        // Get tracked tasks for all_tracked segment
+        const trackedTaskUrls = new Set();
+        try {
+          const tasksResponse = await fetch(apiUrl('/api/optimisation/status?includeDeleted=false'));
+          if (tasksResponse.ok) {
+            const { tasks } = await tasksResponse.json();
+            if (tasks && tasks.length > 0) {
+              tasks.forEach(task => {
+                if (task.target_url) {
+                  const normalizedUrl = normalizeGscPageKey(task.target_url);
+                  trackedTaskUrls.add(normalizedUrl);
+                }
+              });
+            }
+          }
+        } catch (taskError) {
+          debugLog(`⚠ Error fetching tasks for all_tracked segment: ${taskError.message}`, 'warn');
+        }
+        
+        // Classify pages by segment
+        const segmentPages = {
+          money: [],
+          landing: [],
+          event: [],
+          product: [],
+          all_tracked: []
+        };
+        
+        pageTotalsByKey.forEach((metrics, normalizedKey) => {
+          const pageUrl = metrics.url;
+          if (!pageUrl) return;
+          
+          // Classify segment using Money Pages logic
+          let segment = 'money'; // Default
+          let subSegment = 'LANDING'; // Default
+          
+          // Use classifyMoneyPageSubSegment if available
+          if (typeof window.classifyMoneyPageSubSegment === 'function') {
+            subSegment = window.classifyMoneyPageSubSegment(pageUrl);
+          } else if (typeof classifyMoneyPageSubSegment === 'function') {
+            subSegment = classifyMoneyPageSubSegment(pageUrl);
+          }
+          
+          // Map subSegment to segment
+          if (subSegment === 'EVENT') {
+            segment = 'event';
+          } else if (subSegment === 'PRODUCT') {
+            segment = 'product';
+          } else if (subSegment === 'LANDING') {
+            segment = 'landing';
+          } else {
+            segment = 'money'; // Default for all money pages
+          }
+          
+          // Add to segment
+          if (segmentPages[segment]) {
+            segmentPages[segment].push(metrics);
+          }
+          
+          // Add to all_tracked if it's a tracked task URL
+          if (trackedTaskUrls.has(normalizedKey)) {
+            segmentPages.all_tracked.push(metrics);
+          }
+        });
+        
+        // Aggregate metrics per segment
+        const segmentRows = [];
+        const scope = 'active_cycles_only'; // Match UI default
+        
+        ['money', 'landing', 'event', 'product', 'all_tracked'].forEach(segment => {
+          const pages = segmentPages[segment];
+          if (pages.length === 0) {
+            // Still create a row with zeros
+            segmentRows.push({
+              segment,
+              pages_count: 0,
+              clicks_28d: 0,
+              impressions_28d: 0,
+              ctr_28d: 0,
+              position_28d: null
+            });
+            return;
+          }
+          
+          // Aggregate: sum clicks and impressions
+          const totalClicks = pages.reduce((sum, p) => sum + (parseFloat(p.clicks) || 0), 0);
+          const totalImpressions = pages.reduce((sum, p) => sum + (parseFloat(p.impressions) || 0), 0);
+          
+          // Calculate CTR (weighted by impressions): clicks / impressions
+          const ctr = totalImpressions > 0 ? totalClicks / totalImpressions : 0;
+          
+          // Calculate weighted average position
+          let totalPositionWeight = 0;
+          let totalPositionImpressions = 0;
+          pages.forEach(p => {
+            const impressions = parseFloat(p.impressions) || 0;
+            const position = parseFloat(p.position);
+            if (position && impressions > 0) {
+              totalPositionWeight += position * impressions;
+              totalPositionImpressions += impressions;
+            }
+          });
+          const avgPosition = totalPositionImpressions > 0 ? totalPositionWeight / totalPositionImpressions : null;
+          
+          segmentRows.push({
+            segment,
+            pages_count: pages.length,
+            clicks_28d: totalClicks,
+            impressions_28d: totalImpressions,
+            ctr_28d: ctr, // Ratio (0-1)
+            position_28d: avgPosition
+          });
+        });
+        
+        // Save to Supabase
+        debugLog(`📊 Saving ${segmentRows.length} segment snapshots to Supabase...`, 'info');
+        const saveResponse = await fetch(apiUrl('/api/supabase/save-portfolio-segment-metrics'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            siteUrl,
+            runId,
+            dateStart,
+            dateEnd,
+            scope,
+            rows: segmentRows
+          })
+        });
+        
+        if (!saveResponse.ok) {
+          const errorText = await saveResponse.text();
+          throw new Error(`Failed to save segment snapshots: ${saveResponse.status} - ${errorText}`);
+        }
+        
+        const saveResult = await saveResponse.json();
+        debugLog(`✓ Saved ${saveResult.inserted} portfolio segment snapshots to Supabase`, 'success');
+        
+      } catch (err) {
+        debugLog(`Error calculating portfolio segment snapshots: ${err.message}`, 'error');
+        throw err;
       }
     }
 
@@ -17570,6 +17862,20 @@
               if (saveResponse.ok) {
                 const saveResult = await saveResponse.json();
                 debugLog(`✓ Saved ${saveResult.inserted} page metrics to Supabase`, 'success');
+                
+                // Calculate and save portfolio segment snapshots (Phase 3a)
+                try {
+                  await calculateAndSavePortfolioSegmentSnapshots(
+                    auditDate,
+                    window._pendingPageMetrics.propertyUrl,
+                    window._pendingPageMetrics.gscRange.startDate,
+                    window._pendingPageMetrics.gscRange.endDate,
+                    window.pageTotalsByKey || new Map()
+                  );
+                } catch (segmentError) {
+                  debugLog(`⚠ Error saving portfolio segment snapshots (non-critical): ${segmentError.message}`, 'warn');
+                }
+                
                 // Clear pending metrics
                 window._pendingPageMetrics = null;
               } else {

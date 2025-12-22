@@ -64,3 +64,4 @@ FOR UPDATE
 USING (true)
 WITH CHECK (true); -- Service role bypasses RLS
 
+

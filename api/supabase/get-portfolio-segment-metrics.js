@@ -1,5 +1,5 @@
-// /api/portfolio/snapshots.js
-// Fetch portfolio snapshot data for Portfolio tab
+// /api/supabase/get-portfolio-segment-metrics.js
+// Fetch portfolio segment-level 28d metrics from Supabase
 
 export const config = { runtime: 'nodejs' };
 
@@ -34,13 +34,20 @@ export default async function handler(req, res) {
 
   try {
     const { 
-      kpi = 'ctr_28d',
-      segment = 'all',
-      scope = 'all',
-      timeGrain = 'weekly',
-      startDate,
-      endDate
+      siteUrl,
+      scope,
+      segment,
+      from,
+      to,
+      limit,
+      order = 'desc' // 'asc' for chart (chronological), 'desc' for latest
     } = req.query;
+
+    if (!siteUrl) {
+      return sendJSON(res, 400, { 
+        error: 'Missing required field: siteUrl' 
+      });
+    }
 
     const supabase = createClient(
       need('SUPABASE_URL'),
@@ -49,38 +56,50 @@ export default async function handler(req, res) {
 
     // Build query
     let query = supabase
-      .from('portfolio_snapshots')
+      .from('portfolio_segment_metrics_28d')
       .select('*')
-      .eq('kpi', kpi)
-      .eq('segment', segment)
-      .eq('scope', scope)
-      .eq('period_type', timeGrain)
-      .order('period_start', { ascending: true });
+      .eq('site_url', siteUrl);
 
-    // Apply date range if provided
-    if (startDate) {
-      query = query.gte('period_start', startDate);
+    // Apply filters
+    if (scope) {
+      query = query.eq('scope', scope);
     }
-    if (endDate) {
-      query = query.lte('period_start', endDate);
+    if (segment) {
+      query = query.eq('segment', segment);
+    }
+    if (from) {
+      query = query.gte('created_at', from);
+    }
+    if (to) {
+      query = query.lte('created_at', to);
+    }
+
+    // Order by created_at
+    query = query.order('created_at', { ascending: order === 'asc' });
+
+    // Limit results
+    if (limit) {
+      const limitNum = parseInt(limit, 10);
+      if (limitNum > 0) {
+        query = query.limit(limitNum);
+      }
     }
 
     const { data, error } = await query;
 
     if (error) {
-      console.error('[Portfolio Snapshots] Query error:', error);
+      console.error('[Get Portfolio Segment Metrics] Query error:', error);
       return sendJSON(res, 500, { error: error.message });
     }
 
     return sendJSON(res, 200, { 
-      snapshots: data || [],
+      metrics: data || [],
       count: data?.length || 0
     });
 
   } catch (err) {
-    console.error('[Portfolio Snapshots] Error:', err);
+    console.error('[Get Portfolio Segment Metrics] Error:', err);
     return sendJSON(res, 500, { error: err.message });
   }
 }
-
 

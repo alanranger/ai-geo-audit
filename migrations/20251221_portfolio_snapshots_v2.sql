@@ -67,3 +67,4 @@ ON public.portfolio_snapshots_v2
 FOR INSERT
 WITH CHECK (true);
 
+
