@@ -15755,15 +15755,34 @@
         // This ensures consistent table structure regardless of data availability
         const months = [];
         const today = new Date();
+        const currentYear = today.getFullYear();
+        const currentMonth = today.getMonth(); // 0-indexed (0=Jan, 11=Dec)
+        
+        // Generate 12 months going backwards from current month
+        // Calculate explicitly to avoid Date arithmetic issues
         for (let i = 11; i >= 0; i--) {
-          const date = new Date(today.getFullYear(), today.getMonth() - i, 1);
-          const monthStr = date.toISOString().substring(0, 7); // YYYY-MM format
+          let targetMonth = currentMonth - i;
+          let targetYear = currentYear;
+          
+          // Handle negative months (roll back to previous year)
+          if (targetMonth < 0) {
+            targetMonth += 12;
+            targetYear -= 1;
+          }
+          
+          // Format as YYYY-MM
+          const monthStr = `${targetYear}-${String(targetMonth + 1).padStart(2, '0')}`;
           months.push(monthStr);
         }
-        // Ensure we have exactly 12 months
-        if (months.length !== 12) {
-          debugLog(`⚠ Expected 12 months but got ${months.length}: ${months.join(', ')}`, 'warn');
+        
+        // Ensure we have exactly 12 unique months (no duplicates)
+        const uniqueMonths = [...new Set(months)];
+        if (uniqueMonths.length !== 12) {
+          debugLog(`⚠ Expected 12 unique months but got ${uniqueMonths.length}: ${months.join(', ')}`, 'warn');
         }
+        // Use unique months to avoid duplicates, maintain original order
+        months.length = 0;
+        months.push(...uniqueMonths);
 
         // Build table
         const table = document.getElementById('portfolio-monthly-table');
