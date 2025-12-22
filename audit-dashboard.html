@@ -1834,6 +1834,89 @@
       outline: none;
     }
     
+    /* Portfolio Tab Styling - Match Optimisation tab dark theme */
+    section[data-panel="portfolio"] .portfolio-container {
+      background: var(--dark-bg) !important;
+      color: var(--dark-text) !important;
+    }
+    
+    section[data-panel="portfolio"] .portfolio-container h1 {
+      color: var(--dark-text) !important;
+      font-size: 2rem !important;
+      font-weight: 700;
+    }
+    
+    section[data-panel="portfolio"] .portfolio-chart-section .card,
+    section[data-panel="portfolio"] .portfolio-table-section .card {
+      background: var(--dark-panel) !important;
+      border: 1px solid var(--dark-border) !important;
+      color: var(--dark-text) !important;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+    }
+    
+    section[data-panel="portfolio"] .portfolio-chart-section h2,
+    section[data-panel="portfolio"] .portfolio-table-section h2 {
+      color: #ffffff !important;
+      font-size: 1.3rem !important;
+      font-weight: 600;
+    }
+    
+    section[data-panel="portfolio"] .portfolio-chart-section p,
+    section[data-panel="portfolio"] .portfolio-table-section p {
+      color: var(--dark-text-muted) !important;
+    }
+    
+    section[data-panel="portfolio"] .portfolio-controls label {
+      color: var(--dark-text) !important;
+    }
+    
+    section[data-panel="portfolio"] .portfolio-controls select,
+    section[data-panel="portfolio"] #portfolio-table-kpi-select {
+      background: var(--dark-bg) !important;
+      border: 1px solid var(--dark-border) !important;
+      color: var(--dark-text) !important;
+      padding: 0.5rem 0.75rem !important;
+      border-radius: 6px !important;
+      font-size: 0.875rem !important;
+    }
+    
+    section[data-panel="portfolio"] .portfolio-controls select:focus,
+    section[data-panel="portfolio"] #portfolio-table-kpi-select:focus {
+      border-color: var(--dark-brand) !important;
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1) !important;
+    }
+    
+    section[data-panel="portfolio"] .portfolio-controls select:hover,
+    section[data-panel="portfolio"] #portfolio-table-kpi-select:hover {
+      border-color: var(--dark-brand) !important;
+    }
+    
+    section[data-panel="portfolio"] #portfolio-monthly-table {
+      background: var(--dark-panel) !important;
+      color: var(--dark-text) !important;
+    }
+    
+    section[data-panel="portfolio"] #portfolio-monthly-table thead th {
+      background: rgba(55, 65, 81, 0.5) !important;
+      color: var(--dark-text) !important;
+      border-bottom: 2px solid var(--dark-border) !important;
+      font-weight: 600;
+    }
+    
+    section[data-panel="portfolio"] #portfolio-monthly-table tbody td {
+      color: var(--dark-text) !important;
+      border-bottom: 1px solid var(--dark-border) !important;
+    }
+    
+    section[data-panel="portfolio"] #portfolio-monthly-table tbody tr:hover {
+      background: rgba(245, 158, 11, 0.05) !important;
+    }
+    
+    section[data-panel="portfolio"] #portfolio-delta-chart {
+      color: #ffffff !important;
+    }
+    
     /* Remove border-left from inline styles */
     .optimisation-summary-cards .card[style*="border-left"],
     .optimisation-kpi-tiles .card[style*="border-left"],
@@ -15113,12 +15196,18 @@
         data: {
           labels: [],
           datasets: [{
-            label: 'Median Delta',
+            label: 'Delta',
             data: [],
-            borderColor: 'rgb(59, 130, 246)',
-            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+            borderColor: 'var(--dark-brand)',
+            backgroundColor: 'rgba(245, 158, 11, 0.15)',
+            borderWidth: 2,
             tension: 0.4,
-            fill: true
+            fill: true,
+            pointRadius: 4,
+            pointHoverRadius: 6,
+            pointBackgroundColor: 'var(--dark-brand)',
+            pointBorderColor: '#ffffff',
+            pointBorderWidth: 2
           }]
         },
         options: {
@@ -15127,11 +15216,37 @@
           plugins: {
             legend: {
               display: true,
-              position: 'top'
+              position: 'top',
+              labels: {
+                color: 'var(--dark-text)',
+                font: { size: 12, weight: '600' },
+                padding: 15
+              }
             },
             tooltip: {
               mode: 'index',
-              intersect: false
+              intersect: false,
+              backgroundColor: 'rgba(26, 31, 46, 0.95)',
+              titleColor: '#ffffff',
+              bodyColor: 'var(--dark-text)',
+              borderColor: 'var(--dark-border)',
+              borderWidth: 1,
+              padding: 12,
+              displayColors: true,
+              callbacks: {
+                label: function(context) {
+                  const value = context.parsed.y;
+                  if (value === null) return 'No data';
+                  const kpi = document.getElementById('portfolio-kpi-select')?.value || 'ctr_28d';
+                  if (kpi === 'ctr_28d') {
+                    return `${value >= 0 ? '+' : ''}${value.toFixed(2)}pp`;
+                  } else if (kpi === 'avg_position') {
+                    return `${value >= 0 ? '+' : ''}${value.toFixed(1)} (${value < 0 ? 'improved' : 'worsened'})`;
+                  } else {
+                    return `${value >= 0 ? '+' : ''}${value.toLocaleString()}`;
+                  }
+                }
+              }
             }
           },
           scales: {
@@ -15140,21 +15255,44 @@
               title: {
                 display: true,
                 text: 'Date',
-                font: { size: 14, weight: 'bold' }
+                color: 'var(--dark-text)',
+                font: { size: 13, weight: '600' }
               },
               ticks: {
-                font: { size: 12, weight: 'bold' }
+                color: 'var(--dark-text-muted)',
+                font: { size: 11, weight: '500' }
+              },
+              grid: {
+                color: 'rgba(55, 65, 81, 0.3)',
+                drawBorder: false
               }
             },
             y: {
               display: true,
               title: {
                 display: true,
-                text: 'Median Delta',
-                font: { size: 14, weight: 'bold' }
+                text: 'Delta',
+                color: 'var(--dark-text)',
+                font: { size: 13, weight: '600' }
               },
               ticks: {
-                font: { size: 12, weight: 'bold' }
+                color: 'var(--dark-text-muted)',
+                font: { size: 11, weight: '500' },
+                callback: function(value) {
+                  const kpi = document.getElementById('portfolio-kpi-select')?.value || 'ctr_28d';
+                  if (kpi === 'ctr_28d') {
+                    return value.toFixed(1) + 'pp';
+                  }
+                  return value;
+                }
+              },
+              grid: {
+                color: 'rgba(55, 65, 81, 0.3)',
+                drawBorder: false
+              },
+              zeroLine: {
+                color: 'var(--dark-border)',
+                width: 2
               }
             }
           }
@@ -15318,6 +15456,10 @@
           portfolioDeltaChart.data.labels = labels;
           portfolioDeltaChart.data.datasets[0].data = formattedDeltas;
           portfolioDeltaChart.data.datasets[0].label = `Delta (${kpiSelect})`;
+          // Update colors to match dark theme
+          portfolioDeltaChart.data.datasets[0].borderColor = 'var(--dark-brand)';
+          portfolioDeltaChart.data.datasets[0].backgroundColor = 'rgba(245, 158, 11, 0.15)';
+          portfolioDeltaChart.data.datasets[0].pointBackgroundColor = 'var(--dark-brand)';
           
           // Update Y-axis label
           if (kpiSelect === 'ctr_28d') {
@@ -15411,7 +15553,7 @@
         const thead = table.querySelector('thead tr');
         const tbody = table.querySelector('tbody');
         const segmentTh = document.createElement('th');
-        segmentTh.style.cssText = 'text-align: left; padding: 0.75rem; border-bottom: 2px solid #ddd; font-weight: 600;';
+        segmentTh.style.cssText = 'text-align: left; padding: 0.75rem; border-bottom: 2px solid var(--dark-border); font-weight: 600; background: rgba(55, 65, 81, 0.5); color: var(--dark-text);';
         segmentTh.textContent = 'Segment';
         segmentTh.title = 'Page segment: Filter metrics by page type';
         thead.innerHTML = '';
@@ -15421,7 +15563,7 @@
         // Add month headers
         months.forEach(month => {
           const th = document.createElement('th');
-          th.style.cssText = 'text-align: center; padding: 0.75rem; border-bottom: 2px solid #ddd; font-weight: 600;';
+          th.style.cssText = 'text-align: center; padding: 0.75rem; border-bottom: 2px solid var(--dark-border); font-weight: 600; background: rgba(55, 65, 81, 0.5); color: var(--dark-text);';
           const monthDate = new Date(month + '-01');
           th.textContent = monthDate.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
           th.title = `Value for ${monthDate.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}: Last snapshot from this month (rolling 28-day window)`;
@@ -15430,7 +15572,7 @@
 
         // Add sparkline column
         const sparklineTh = document.createElement('th');
-        sparklineTh.style.cssText = 'text-align: center; padding: 0.75rem; border-bottom: 2px solid #ddd; font-weight: 600;';
+        sparklineTh.style.cssText = 'text-align: center; padding: 0.75rem; border-bottom: 2px solid var(--dark-border); font-weight: 600; background: rgba(55, 65, 81, 0.5); color: var(--dark-text);';
         sparklineTh.textContent = 'Trend';
         sparklineTh.title = 'Month-over-month change: Shows the difference between this month and the previous month (▲ = increase, ▼ = decrease)';
         thead.appendChild(sparklineTh);
@@ -15459,7 +15601,7 @@
           
           // Segment name
           const segmentCell = document.createElement('td');
-          segmentCell.style.cssText = 'padding: 0.75rem; border-bottom: 1px solid #eee; font-weight: 600;';
+          segmentCell.style.cssText = 'padding: 0.75rem; border-bottom: 1px solid var(--dark-border); font-weight: 600; color: var(--dark-text);';
           segmentCell.textContent = segmentLabels[segment] || segment;
           // Add tooltip based on segment
           const segmentTooltips = {
@@ -15476,7 +15618,7 @@
           const monthValues = [];
           months.forEach(month => {
             const cell = document.createElement('td');
-            cell.style.cssText = 'text-align: center; padding: 0.75rem; border-bottom: 1px solid #eee;';
+            cell.style.cssText = 'text-align: center; padding: 0.75rem; border-bottom: 1px solid var(--dark-border); color: var(--dark-text);';
             
             // Find the LAST snapshot in this month (bucket by date_end month or run_id)
             // run_id format can be YYYY-MM (month-based) or YYYY-MM-DD (date-based)
@@ -15552,6 +15694,7 @@
                   if (prevValue !== null && prevValue !== undefined) {
                     const delta = value - prevValue;
                     const indicator = delta >= 0 ? '▲' : '▼';
+                    // Use colors that work well on dark background
                     const color = delta >= 0 ? '#10b981' : '#ef4444';
                     
                     // Format delta based on KPI
@@ -15594,7 +15737,7 @@
 
           // Sparkline (simple text representation)
           const sparklineCell = document.createElement('td');
-          sparklineCell.style.cssText = 'text-align: center; padding: 0.75rem; border-bottom: 1px solid #eee;';
+          sparklineCell.style.cssText = 'text-align: center; padding: 0.75rem; border-bottom: 1px solid var(--dark-border); color: var(--dark-text); font-family: monospace;';
           const validValues = monthValues.filter(v => v !== null);
           if (validValues.length > 0) {
             const min = Math.min(...validValues);
