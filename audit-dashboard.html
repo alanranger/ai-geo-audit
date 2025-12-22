@@ -15174,8 +15174,8 @@
         'clicks_28d': 'clicks_28d',
         'impressions_28d': 'impressions_28d',
         'avg_position': 'position_28d',
-        'ai_citations': null, // Not in segment metrics (would need task aggregation)
-        'ai_overview': null  // Not in segment metrics (would need task aggregation)
+        'ai_citations': 'ai_citations_28d',
+        'ai_overview': 'ai_overview_present_count'
       };
       
       const kpiField = kpiFieldMap[kpiSelect];
@@ -15267,7 +15267,9 @@
             const value = kpiField === 'ctr_28d' ? parseFloat(m.ctr_28d || 0) :
                           kpiField === 'clicks_28d' ? parseFloat(m.clicks_28d || 0) :
                           kpiField === 'impressions_28d' ? parseFloat(m.impressions_28d || 0) :
-                          kpiField === 'position_28d' ? (m.position_28d ? parseFloat(m.position_28d) : null) : null;
+                          kpiField === 'position_28d' ? (m.position_28d ? parseFloat(m.position_28d) : null) :
+                          kpiField === 'ai_citations_28d' ? (m.ai_citations_28d ? parseInt(m.ai_citations_28d) : 0) :
+                          kpiField === 'ai_overview_present_count' ? (m.ai_overview_present_count ? parseInt(m.ai_overview_present_count) : 0) : null;
             
             buckets.set(bucketKey, { value, date: new Date(m.created_at) });
           }
@@ -15309,6 +15311,7 @@
             if (kpiSelect === 'ctr_28d') {
               return d * 100; // Convert ratio delta to percentage points
             }
+            // AI citations and AI overview are already integers, no conversion needed
             return d;
           });
           
@@ -15349,8 +15352,8 @@
         'clicks_28d': 'clicks_28d',
         'impressions_28d': 'impressions_28d',
         'avg_position': 'position_28d',
-        'ai_citations': null, // Not in segment metrics
-        'ai_overview': null  // Not in segment metrics
+        'ai_citations': 'ai_citations_28d',
+        'ai_overview': 'ai_overview_present_count'
       };
       
       const kpiField = kpiFieldMap[kpi];
@@ -15431,7 +15434,7 @@
           if (kpiKey === 'ctr_28d') {
             // CTR is stored as ratio (0-1), display as percentage
             return (parseFloat(value) * 100).toFixed(1) + '%';
-          } else if (kpiKey === 'clicks_28d' || kpiKey === 'impressions_28d') {
+          } else if (kpiKey === 'clicks_28d' || kpiKey === 'impressions_28d' || kpiKey === 'ai_citations' || kpiKey === 'ai_overview') {
             // Counts - format with separators
             return parseInt(value).toLocaleString();
           } else if (kpiKey === 'avg_position') {
@@ -15487,7 +15490,9 @@
               const value = kpiField === 'ctr_28d' ? parseFloat(snapshot.ctr_28d || 0) :
                           kpiField === 'clicks_28d' ? parseFloat(snapshot.clicks_28d || 0) :
                           kpiField === 'impressions_28d' ? parseFloat(snapshot.impressions_28d || 0) :
-                          kpiField === 'position_28d' ? (snapshot.position_28d ? parseFloat(snapshot.position_28d) : null) : null;
+                          kpiField === 'position_28d' ? (snapshot.position_28d ? parseFloat(snapshot.position_28d) : null) :
+                          kpiField === 'ai_citations_28d' ? (snapshot.ai_citations_28d ? parseInt(snapshot.ai_citations_28d) : 0) :
+                          kpiField === 'ai_overview_present_count' ? (snapshot.ai_overview_present_count ? parseInt(snapshot.ai_overview_present_count) : 0) : null;
               
               if (value !== null && value !== undefined) {
                 const formatted = formatValue(value, kpi);
