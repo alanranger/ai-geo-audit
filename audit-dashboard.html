@@ -15281,14 +15281,14 @@
           datasets: [{
             label: 'Delta',
             data: [],
-            borderColor: 'var(--dark-brand)',
-            backgroundColor: 'rgba(245, 158, 11, 0.15)',
+            borderColor: 'var(--brand-orange)',
+            backgroundColor: 'rgba(229, 114, 0, 0.15)',
             borderWidth: 2,
             tension: 0.4,
             fill: true,
             pointRadius: 4,
             pointHoverRadius: 6,
-            pointBackgroundColor: 'var(--dark-brand)',
+            pointBackgroundColor: 'var(--brand-orange)',
             pointBorderColor: '#ffffff',
             pointBorderWidth: 2
           }]
@@ -15869,9 +15869,15 @@
               } else if (kpiField === 'impressions_28d') {
                 value = parseFloat(snapshot.impressions_28d || 0);
               } else if (kpiField === 'position_28d') {
-                // Handle position: check if it's null, undefined, or NaN
-                if (snapshot.position_28d !== null && snapshot.position_28d !== undefined && !isNaN(parseFloat(snapshot.position_28d))) {
-                  value = parseFloat(snapshot.position_28d);
+                // Handle position: check if it's null, undefined, NaN, or 0 (positions start at 1)
+                const posValue = snapshot.position_28d;
+                if (posValue !== null && posValue !== undefined && posValue !== '' && posValue !== 0) {
+                  const parsed = parseFloat(posValue);
+                  if (!isNaN(parsed) && isFinite(parsed) && parsed > 0) {
+                    value = parsed;
+                  } else {
+                    value = null;
+                  }
                 } else {
                   value = null;
                 }
