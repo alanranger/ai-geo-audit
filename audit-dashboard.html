@@ -15358,25 +15358,15 @@
         
         const data = await response.json();
         const metrics = data.metrics || [];
-
-        if (metrics.length < 2) {
-          // Show empty state
+        
+        debugLog(`📊 Portfolio data loaded: ${metrics.length} metrics for segment=${segment}, scope=${mappedScope}, kpi=${kpiSelect}`, 'info');
+        
+        if (metrics.length === 0) {
+          debugLog('⚠ No portfolio metrics found - check segment and scope filters', 'warn');
           if (portfolioDeltaChart) {
             portfolioDeltaChart.data.labels = [];
             portfolioDeltaChart.data.datasets[0].data = [];
             portfolioDeltaChart.update();
-          }
-          
-          // Show empty state message
-          const canvas = document.getElementById('portfolio-delta-chart');
-          if (canvas) {
-            const ctx = canvas.getContext('2d');
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.fillStyle = '#666';
-            ctx.font = '14px Arial';
-            ctx.textAlign = 'center';
-            ctx.fillText('Run at least 2 audits to show deltas.', 
-              canvas.width / 2, canvas.height / 2);
           }
           return;
         }
@@ -15413,9 +15403,34 @@
           }
         });
         
+        debugLog(`📊 Bucketed into ${buckets.size} time buckets (${timeGrain})`, 'info');
+        
         // Sort buckets by date
         const sortedBuckets = Array.from(buckets.entries())
           .sort((a, b) => a[1].date - b[1].date);
+        
+        // If we only have 1 bucket, we can't show deltas
+        if (sortedBuckets.length < 2) {
+          debugLog(`⚠ Only ${sortedBuckets.length} bucket(s) - need at least 2 different ${timeGrain} periods to show deltas`, 'warn');
+          if (portfolioDeltaChart) {
+            portfolioDeltaChart.data.labels = [];
+            portfolioDeltaChart.data.datasets[0].data = [];
+            portfolioDeltaChart.update();
+          }
+          
+          // Show empty state message
+          const canvas = document.getElementById('portfolio-delta-chart');
+          if (canvas) {
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '14px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(`Need at least 2 different ${timeGrain} periods to show deltas.`, 
+              canvas.width / 2, canvas.height / 2);
+          }
+          return;
+        }
         
         // Compute deltas
         const labels = [];
@@ -15440,6 +15455,8 @@
             deltas.push(delta);
           }
         });
+        
+        debugLog(`📊 Computed ${deltas.filter(d => d !== null).length} deltas from ${sortedBuckets.length} buckets`, 'info');
 
         if (portfolioDeltaChart) {
           // Format deltas for display
@@ -15452,6 +15469,8 @@
             // AI citations and AI overview are already integers, no conversion needed
             return d;
           });
+          
+          debugLog(`📊 Chart data: ${labels.length} labels, ${formattedDeltas.filter(d => d !== null).length} non-null deltas`, 'info');
           
           portfolioDeltaChart.data.labels = labels;
           portfolioDeltaChart.data.datasets[0].data = formattedDeltas;
@@ -15470,7 +15489,10 @@
             portfolioDeltaChart.options.scales.y.title.text = `Delta (${kpiSelect})`;
           }
           
-          portfolioDeltaChart.update();
+          portfolioDeltaChart.update('none'); // Use 'none' animation mode for faster updates
+          debugLog('✓ Portfolio chart updated', 'success');
+        } else {
+          debugLog('⚠ Portfolio chart not initialized', 'warn');
         }
       } catch (err) {
         debugLog(`Error loading portfolio data: ${err.message}`, 'error');
