@@ -21029,6 +21029,284 @@ Also check "Load from Supabase" for audit debug logs.`;
         return { overview, rows: moneyRows, summaryByCategory, summaryBySubSegment };
       }
       
+      /**
+       * Phase 4: Scoring functions for priority matrix
+       * These functions compute impact, difficulty, priority, and recommended actions
+       * based on page-level metrics from gsc_page_metrics_28d (28d rolling window)
+       */
+      
+      /**
+       * Compute impact scores (0-100) based on CTR gap and click upside
+       * @param {Array} pages - Array of page objects with clicks, impressions, ctr, position
+       * @param {number} targetCtr - Target CTR (default 0.025 = 2.5%)
+       */
+      function computeImpactScores(pages, targetCtr = 0.025) {
+        if (!pages || pages.length === 0) return;
+        
+        // Step 1: Compute upside_clicks for each page
+        const upsideData = [];
+        for (const p of pages) {
+          const impressions = p.impressions || 0;
+          const ctr = p.ctr || 0;
+          
+          // Edge case: impressions < 10 => impact = 0
+          if (impressions < 10) {
+            p.upside_clicks = 0;
+            p.impact_score = 0;
+            upsideData.push({ upside_clicks: 0 });
+            continue;
+          }
+          
+          // Calculate click upside: max(0, impressions * (target_ctr - ctr))
+          const upside_clicks = Math.max(0, impressions * (targetCtr - ctr));
+          p.upside_clicks = upside_clicks;
+          upsideData.push({ upside_clicks });
+        }
+        
+        // Step 2: Find max upside in the set
+        const maxUpside = Math.max(...upsideData.map(d => d.upside_clicks), 0);
+        
+        // Step 3: Normalize to 0-100
+        if (maxUpside <= 0) {
+          // All pages flat → impact = 0 for all
+          for (const p of pages) {
+            p.impact_score = 0;
+          }
+          return;
+        }
+        
+        // Normalize: impact = round(100 * upside_clicks / max_upside_clicks_in_set)
+        for (let i = 0; i < pages.length; i++) {
+          pages[i].impact_score = Math.round(100 * upsideData[i].upside_clicks / maxUpside);
+        }
+      }
+      
+      /**
+       * Compute difficulty score (LOW/MED/HIGH) based on position
+       * @param {Object} page - Page object with avgPosition
+       * @returns {string} 'LOW', 'MED', or 'HIGH'
+       */
+      function computeDifficultyScore(page) {
+        const pos = page.avgPosition || page.position || 99;
+        
+        // Based primarily on position:
+        // pos <= 3      => LOW
+        // 3 < pos <=10  => MED
+        // pos > 10      => HIGH
+        if (pos <= 3) return 'LOW';
+        if (pos <= 10) return 'MED';
+        return 'HIGH';
+      }
+      
+      /**
+       * Compute priority (LOW/MED/HIGH) combining impact and difficulty
+       * @param {number} impactScore - Impact score (0-100)
+       * @param {string} difficulty - Difficulty level ('LOW', 'MED', 'HIGH')
+       * @returns {string} 'LOW', 'MED', or 'HIGH'
+       */
+      function computePriority(impactScore, difficulty) {
+        // Convert impact (0-100) to buckets
+        let impactBucket;
+        if (impactScore >= 70) impactBucket = 'HIGH';
+        else if (impactScore >= 30) impactBucket = 'MED';
+        else impactBucket = 'LOW';
+        
+        // Priority rules:
+        // HIGH priority if impactBucket=HIGH and difficulty in {LOW,MED}
+        // MED priority if impactBucket=HIGH and difficulty=HIGH
+        // MED priority if impactBucket=MED and difficulty=LOW
+        // LOW otherwise
+        if (impactBucket === 'HIGH' && (difficulty === 'LOW' || difficulty === 'MED')) {
+          return 'HIGH';
+        }
+        if (impactBucket === 'HIGH' && difficulty === 'HIGH') {
+          return 'MED';
+        }
+        if (impactBucket === 'MED' && difficulty === 'LOW') {
+          return 'MED';
+        }
+        return 'LOW';
+      }
+      
+      /**
+       * Get recommended action and task type based on page metrics
+       * @param {Object} page - Page object with ctr, avgPosition, impressions, clicks
+       * @returns {Object} { action: string, taskType: string }
+       */
+      function getRecommendedAction(page) {
+        const ctr = (page.ctr || 0) * 100; // Convert to percentage
+        const pos = page.avgPosition || page.position || 99;
+        const impressions = page.impressions || 0;
+        const clicks = page.clicks || 0;
+        const targetCtr = 2.5;
+        
+        // If ctr < 2.5% and pos <= 10:
+        if (ctr < targetCtr && pos <= 10) {
+          return {
+            action: 'Improve CTR (title/meta/snippet) + strengthen content',
+            taskType: 'on_page'
+          };
+        }
+        
+        // If ctr < 2.5% and pos > 10:
+        if (ctr < targetCtr && pos > 10) {
+          return {
+            action: 'Improve relevance + internal links to lift rank',
+            taskType: 'internal_links'
+          };
+        }
+        
+        // If impressions are high but clicks are low AND ctr is near 0:
+        if (impressions > 100 && clicks < 5 && ctr < 0.5) {
+          return {
+            action: 'Rewrite snippet + add intent-matching sections',
+            taskType: 'content'
+          };
+        }
+        
+        // Default: on_page optimization
+        return {
+          action: 'Review page manually',
+          taskType: 'on_page'
+        };
+      }
+      
+      /**
+       * Phase 4: Render Suggested (Top 10) priority pages table
+       * @param {Array} moneyPagesRows - Array of money page row objects
+       */
+      function renderMoneyPagesSuggestedTop10(moneyPagesRows) {
+        const container = document.getElementById('money-pages-suggested-top10-content');
+        if (!container) {
+          debugLog('⚠ Suggested Top 10 container not found', 'warn');
+          return;
+        }
+        
+        if (!moneyPagesRows || moneyPagesRows.length === 0) {
+          container.innerHTML = '<div style="padding: 2rem; text-align: center; color: #64748b; font-size: 0.9rem;">No money pages data available.</div>';
+          return;
+        }
+        
+        // Create a copy of rows to avoid mutating original
+        const pages = moneyPagesRows.map(row => ({
+          url: row.url,
+          title: row.title || row.url,
+          clicks: row.clicks || 0,
+          impressions: row.impressions || 0,
+          ctr: row.ctr || 0,
+          avgPosition: row.avgPosition || row.position || null,
+          subSegment: row.subSegment || 'Landing'
+        }));
+        
+        // Compute Phase 4 scores
+        computeImpactScores(pages, 0.025);
+        for (const page of pages) {
+          page.difficulty = computeDifficultyScore(page);
+          page.priority = computePriority(page.impact_score || 0, page.difficulty);
+          const { action, taskType } = getRecommendedAction(page);
+          page.recommended_action = action;
+          page.recommended_task_type = taskType;
+        }
+        
+        // Sort by priority (HIGH > MED > LOW) then by upside_clicks desc
+        const priorityOrder = { HIGH: 0, MED: 1, LOW: 2 };
+        pages.sort((a, b) => {
+          const priorityDiff = (priorityOrder[a.priority] ?? 99) - (priorityOrder[b.priority] ?? 99);
+          if (priorityDiff !== 0) return priorityDiff;
+          return (b.upside_clicks || 0) - (a.upside_clicks || 0);
+        });
+        
+        // Take top 10
+        const top10 = pages.slice(0, 10);
+        
+        if (top10.length === 0) {
+          container.innerHTML = '<div style="padding: 2rem; text-align: center; color: #64748b; font-size: 0.9rem;">No pages meet the criteria for suggested optimization.</div>';
+          return;
+        }
+        
+        // Render as a grid of cards
+        const html = `
+          <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem;">
+            ${top10.map((page, idx) => {
+              const priority = page.priority || 'LOW';
+              const priorityColor = priority === 'HIGH' ? '#10b981' : priority === 'MED' ? '#f59e0b' : '#64748b';
+              const priorityBg = priority === 'HIGH' ? '#dcfce7' : priority === 'MED' ? '#fef3c7' : '#f1f5f9';
+              const difficulty = page.difficulty || 'MED';
+              const difficultyColor = difficulty === 'LOW' ? '#10b981' : difficulty === 'MED' ? '#f59e0b' : '#ef4444';
+              const ctrPct = ((page.ctr || 0) * 100).toFixed(1);
+              
+              return `
+                <div style="padding: 1rem; background: white; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                  <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.75rem;">
+                    <div style="flex: 1; min-width: 0;">
+                      <div style="font-weight: 600; color: #1e293b; margin-bottom: 0.25rem; font-size: 0.9rem; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;" title="${page.title}">${page.title}</div>
+                      <div style="font-size: 0.75rem; color: #64748b; margin-bottom: 0.25rem;">${page.subSegment}</div>
+                    </div>
+                    <span style="display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600; background: ${priorityBg}; color: ${priorityColor}; border: 1px solid ${priorityColor}40; white-space: nowrap; margin-left: 0.5rem;">${priority}</span>
+                  </div>
+                  <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5rem; margin-bottom: 0.75rem; font-size: 0.8rem;">
+                    <div><span style="color: #64748b;">Pos:</span> <strong>${page.avgPosition ? page.avgPosition.toFixed(1) : '—'}</strong></div>
+                    <div><span style="color: #64748b;">CTR:</span> <strong>${ctrPct}%</strong></div>
+                    <div><span style="color: #64748b;">Impr:</span> <strong>${(page.impressions || 0).toLocaleString()}</strong></div>
+                    <div><span style="color: #64748b;">Upside:</span> <strong>${(page.upside_clicks || 0).toFixed(0)}</strong></div>
+                    <div><span style="color: #64748b;">Impact:</span> <strong>${page.impact_score != null ? page.impact_score : '—'}</strong></div>
+                    <div><span style="color: #64748b;">Difficulty:</span> <strong style="color: ${difficultyColor};">${difficulty}</strong></div>
+                  </div>
+                  <div style="font-size: 0.75rem; color: #475569; margin-bottom: 0.75rem; line-height: 1.4; min-height: 2.5rem;">${page.recommended_action || 'Review page manually'}</div>
+                  <button onclick="window.createMoneyPageTask && window.createMoneyPageTask('${page.url.replace(/'/g, "\\'")}', '${(page.recommended_task_type || 'on_page').replace(/'/g, "\\'")}', ${JSON.stringify({
+                    clicks: page.clicks || 0,
+                    impressions: page.impressions || 0,
+                    ctr: page.ctr || 0,
+                    position: page.avgPosition || null
+                  }).replace(/'/g, "\\'")})" style="width: 100%; padding: 0.6rem; background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; transition: background 0.2s;" onmouseover="this.style.background='#1d4ed8';" onmouseout="this.style.background='#2563eb';" title="Create optimisation task for this page">Create Task</button>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        `;
+        
+        container.innerHTML = html;
+        debugLog(`✓ Suggested Top 10 rendered with ${top10.length} pages`, 'success');
+      }
+      
+      /**
+       * Phase 4: Create optimisation task for Money Page from Suggested panel
+       * @param {string} pageUrl - The page URL
+       * @param {string} taskType - Recommended task type (on_page, internal_links, content, technical)
+       * @param {Object} baselineMetrics - Baseline metrics { clicks, impressions, ctr, position }
+       */
+      window.createMoneyPageTask = async function createMoneyPageTask(pageUrl, taskType = 'on_page', baselineMetrics = {}) {
+        try {
+          // Use existing trackMoneyPage function if available
+          if (window.trackMoneyPage) {
+            const pageTitle = baselineMetrics.title || pageUrl;
+            await window.trackMoneyPage(pageUrl, pageTitle);
+            return;
+          }
+          
+          // Fallback: open track keyword modal
+          if (window.openTrackKeywordModal) {
+            const row = {
+              keyword: '',
+              best_url: pageUrl,
+              targetUrl: pageUrl,
+              ranking_url: pageUrl,
+              title: baselineMetrics.title || pageUrl,
+              clicks: baselineMetrics.clicks || 0,
+              impressions: baselineMetrics.impressions || 0,
+              ctr: baselineMetrics.ctr || 0,
+              avgPosition: baselineMetrics.position || baselineMetrics.avgPosition || null
+            };
+            window.openTrackKeywordModal(row);
+            return;
+          }
+          
+          console.error('[Money Pages] No task creation function available');
+        } catch (error) {
+          console.error('[Money Pages] Error creating task:', error);
+        }
+      };
+      
       // Build compact Money Pages summary for trend tracking (Phase 3)
       // Make buildMoneyPagesSummary globally accessible
       window.buildMoneyPagesSummary = function buildMoneyPagesSummary(moneyPagesMetrics, overview) {
@@ -27196,6 +27474,23 @@ Final Score: ${score}/100`;
               </div>
             </section>
             
+            <!-- Phase 4: Suggested (Top 10) Priority Pages -->
+            <section id="money-pages-suggested-top10" class="card card--full" style="margin-top: 2rem; background: #f0f9ff; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); border: 1px solid #0ea5e9;">
+              <div class="card-header" style="margin-bottom: 1rem;">
+                <h3 style="margin: 0 0 0.5rem 0; font-size: 1.1rem; font-weight: 700; color: #0c4a6e;">Suggested (Top 10)</h3>
+                <p class="card-subtitle" style="margin: 0; font-size: 0.85rem; color: #64748b; line-height: 1.6;">
+                  Top priority pages ranked by impact and difficulty. Click "Create Task" to start optimization tracking.
+                </p>
+              </div>
+              
+              <div id="money-pages-suggested-top10-content" style="min-height: 200px;">
+                <!-- Filled by JavaScript -->
+                <div style="padding: 2rem; text-align: center; color: #64748b; font-size: 0.9rem;">
+                  Loading suggested pages...
+                </div>
+              </div>
+            </section>
+            
             <p class="card-footnote" style="margin-top: 1rem; font-size: 0.85rem; color: #666;">
               Based on the current audit date range and money-page segment only.
               Categories and actions are data-driven and will update each time you run a new audit.
@@ -27308,6 +27603,9 @@ Final Score: ${score}/100`;
         
         // Update sub-segment dropdown counts
         updateMoneyPagesSubSegmentCounts(moneyPagesMetrics);
+        
+        // Phase 4: Render Suggested (Top 10) table
+        renderMoneyPagesSuggestedTop10(rows);
         
         // Function to apply filters and re-render ALL sections (table, chart, KPIs, summaries)
         const applyFiltersAndRender = async () => {
