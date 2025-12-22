@@ -89,6 +89,14 @@ export default async function handler(req, res) {
 
     if (error) {
       console.error('[Get Portfolio Segment Metrics] Query error:', error);
+      // If table doesn't exist yet, return empty array instead of 500
+      if (error.message && error.message.includes('does not exist')) {
+        return sendJSON(res, 200, { 
+          metrics: [],
+          count: 0,
+          message: 'Table not found - migration may not be applied yet'
+        });
+      }
       return sendJSON(res, 500, { error: error.message });
     }
 
@@ -99,6 +107,14 @@ export default async function handler(req, res) {
 
   } catch (err) {
     console.error('[Get Portfolio Segment Metrics] Error:', err);
+    // If table doesn't exist yet, return empty array instead of 500
+    if (err.message && err.message.includes('does not exist')) {
+      return sendJSON(res, 200, { 
+        metrics: [],
+        count: 0,
+        message: 'Table not found - migration may not be applied yet'
+      });
+    }
     return sendJSON(res, 500, { error: err.message });
   }
 }

@@ -94,6 +94,16 @@ export default async function handler(req, res) {
 
       if (error) {
         console.error('[Save Portfolio Segment Metrics] Upsert error:', error);
+        // If table doesn't exist yet, log warning but don't fail the audit
+        if (error.message && error.message.includes('does not exist')) {
+          console.warn('[Save Portfolio Segment Metrics] Table not found - migration may not be applied yet. Skipping save.');
+          return sendJSON(res, 200, { 
+            success: true,
+            inserted: 0,
+            message: 'Table not found - migration may not be applied yet. Segment metrics not saved.',
+            warning: true
+          });
+        }
         throw error;
       }
 
