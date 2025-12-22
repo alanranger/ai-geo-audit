@@ -105,13 +105,21 @@ export default async function handler(req, res) {
     const pageData = await pageResponse.json();
     
     // Transform rows to match expected format
-    const rows = (pageData.rows || []).map(row => ({
-      keys: row.keys || [],
-      clicks: row.clicks || 0,
-      impressions: row.impressions || 0,
-      ctr: row.ctr || 0, // GSC returns CTR as ratio (0-1)
-      position: row.position || 0
-    }));
+    // Note: Position is the average position across all queries for this page
+    // GSC API may return position as null/undefined for pages with no position data
+    // Positions start at 1, so 0 is not a valid position - use null instead
+    const rows = (pageData.rows || []).map(row => {
+      const position = (row.position != null && row.position !== undefined && !isNaN(parseFloat(row.position)) && parseFloat(row.position) > 0)
+        ? parseFloat(row.position)
+        : null;
+      return {
+        keys: row.keys || [],
+        clicks: row.clicks || 0,
+        impressions: row.impressions || 0,
+        ctr: row.ctr || 0, // GSC returns CTR as ratio (0-1)
+        position: position
+      };
+    });
     
     console.log(`[gsc-page-level] Fetched ${rows.length} pages from GSC for ${siteUrl} (${startDate} to ${endDate})`);
     

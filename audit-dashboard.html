@@ -16185,6 +16185,8 @@
           let totalPositionWeight = 0;
           let totalPositionImpressions = 0;
           let positionCount = 0;
+          let nullPositionCount = 0;
+          let zeroPositionCount = 0;
           pages.forEach(p => {
             const impressions = parseFloat(p.impressions) || 0;
             // Try multiple position field names (position, position_28d, avgPosition)
@@ -16194,28 +16196,41 @@
             let position = null;
             if (p.position !== null && p.position !== undefined) {
               const parsed = parseFloat(p.position);
-              if (!isNaN(parsed) && isFinite(parsed)) {
+              if (!isNaN(parsed) && isFinite(parsed) && parsed > 0) {
                 position = parsed;
+              } else {
+                nullPositionCount++;
               }
             } else if (p.position_28d !== null && p.position_28d !== undefined) {
               const parsed = parseFloat(p.position_28d);
-              if (!isNaN(parsed) && isFinite(parsed)) {
+              if (!isNaN(parsed) && isFinite(parsed) && parsed > 0) {
                 position = parsed;
+              } else {
+                nullPositionCount++;
               }
             } else if (p.avgPosition !== null && p.avgPosition !== undefined) {
               const parsed = parseFloat(p.avgPosition);
-              if (!isNaN(parsed) && isFinite(parsed)) {
+              if (!isNaN(parsed) && isFinite(parsed) && parsed > 0) {
                 position = parsed;
+              } else {
+                nullPositionCount++;
               }
+            } else {
+              nullPositionCount++;
             }
             
-            if (position !== null && impressions > 0) {
+            if (position !== null && position > 0 && impressions > 0) {
               totalPositionWeight += position * impressions;
               totalPositionImpressions += impressions;
               positionCount++;
+            } else if (impressions > 0) {
+              zeroPositionCount++;
             }
           });
           const avgPosition = totalPositionImpressions > 0 ? totalPositionWeight / totalPositionImpressions : null;
+          
+          // Enhanced debug logging for position calculation
+          debugLog(`📊 Position calc for ${segment}: ${positionCount} pages with valid position (out of ${pages.length} total), ${nullPositionCount} with null/invalid position, ${zeroPositionCount} with zero impressions, total impressions=${totalPositionImpressions}, avgPosition=${avgPosition !== null ? avgPosition.toFixed(2) : 'N/A'}`, 'info');
           
           // Debug logging for position calculation
           debugLog(`📊 Position calc for ${segment}: ${positionCount} pages with position (out of ${pages.length} total), total impressions=${totalPositionImpressions}, avgPosition=${avgPosition !== null ? avgPosition.toFixed(2) : 'N/A'}`, 'info');

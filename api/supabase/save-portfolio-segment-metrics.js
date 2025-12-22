@@ -60,23 +60,32 @@ export default async function handler(req, res) {
     );
 
     // Prepare rows for upsert
-    const insertRows = rows.map(row => ({
-      run_id: runId,
-      site_url: siteUrl,
-      segment: row.segment,
-      scope: scope,
-      date_start: dateStart,
-      date_end: dateEnd,
-      pages_count: parseInt(row.pages_count || 0, 10),
-      clicks_28d: parseFloat(row.clicks_28d || 0),
-      impressions_28d: parseFloat(row.impressions_28d || 0),
-      ctr_28d: parseFloat(row.ctr_28d || 0), // Already a ratio (0-1)
-      position_28d: row.position_28d !== null && row.position_28d !== undefined 
+    const insertRows = rows.map(row => {
+      const positionValue = row.position_28d !== null && row.position_28d !== undefined 
         ? parseFloat(row.position_28d) 
-        : null,
-      ai_citations_28d: parseInt(row.ai_citations_28d || 0, 10),
-      ai_overview_present_count: parseInt(row.ai_overview_present_count || 0, 10)
-    }));
+        : null;
+      
+      // Log position values for debugging
+      if (row.segment === 'money' || row.segment === 'landing') {
+        console.log(`[Save Portfolio Segment Metrics] ${row.segment}: position_28d=${row.position_28d} (raw), parsed=${positionValue}, pages=${row.pages_count}, impressions=${row.impressions_28d}`);
+      }
+      
+      return {
+        run_id: runId,
+        site_url: siteUrl,
+        segment: row.segment,
+        scope: scope,
+        date_start: dateStart,
+        date_end: dateEnd,
+        pages_count: parseInt(row.pages_count || 0, 10),
+        clicks_28d: parseFloat(row.clicks_28d || 0),
+        impressions_28d: parseFloat(row.impressions_28d || 0),
+        ctr_28d: parseFloat(row.ctr_28d || 0), // Already a ratio (0-1)
+        position_28d: positionValue,
+        ai_citations_28d: parseInt(row.ai_citations_28d || 0, 10),
+        ai_overview_present_count: parseInt(row.ai_overview_present_count || 0, 10)
+      };
+    });
 
     // Batch upsert in chunks of 500
     const BATCH_SIZE = 500;

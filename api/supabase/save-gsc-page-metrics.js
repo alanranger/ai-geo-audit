@@ -93,7 +93,7 @@ export default async function handler(req, res) {
         clicks_28d: page.clicks || 0,
         impressions_28d: page.impressions || 0,
         ctr_28d: page.ctr || 0, // Already a ratio (0-1)
-        position_28d: (page.position !== null && page.position !== undefined && !isNaN(parseFloat(page.position))) 
+        position_28d: (page.position !== null && page.position !== undefined && !isNaN(parseFloat(page.position)) && parseFloat(page.position) > 0) 
           ? parseFloat(page.position) 
           : null
       };
