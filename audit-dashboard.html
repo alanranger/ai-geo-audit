@@ -15525,8 +15525,6 @@
         });
         
         debugLog(`📊 Bucketed into ${buckets.size} time buckets (${timeGrain}) from ${metrics.length} metrics`, 'info');
-          
-        }
         
         // Sort buckets by date
         let sortedBuckets = Array.from(buckets.entries())
@@ -15578,23 +15576,36 @@
         
         // If we still only have 1 bucket, we can't show deltas
         if (sortedBuckets.length < 2) {
-          debugLog(`⚠ Only ${sortedBuckets.length} bucket(s) - need at least 2 different time periods to show deltas`, 'warn');
           if (portfolioDeltaChart) {
             portfolioDeltaChart.data.labels = [];
             portfolioDeltaChart.data.datasets[0].data = [];
             portfolioDeltaChart.update();
           }
           
-          // Show empty state message
+          // Show empty state message with clear explanation
           const canvas = document.getElementById('portfolio-delta-chart');
           if (canvas) {
             const ctx = canvas.getContext('2d');
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.fillStyle = '#ffffff';
+            ctx.fillStyle = 'var(--dark-text)';
             ctx.font = '14px Arial';
             ctx.textAlign = 'center';
-            ctx.fillText(`Need at least 2 different time periods to show deltas.`, 
-              canvas.width / 2, canvas.height / 2);
+            
+            let message = '';
+            if (timeGrain === 'weekly') {
+              message = 'Weekly deltas require audits from different weeks.\nRun audits on different weeks to see weekly trends.';
+            } else if (timeGrain === 'monthly') {
+              message = 'Monthly deltas require audits from different months.\nRun audits across multiple months to see monthly trends.';
+            } else {
+              message = 'Need at least 2 different time periods to show deltas.\nRun another audit to see changes over time.';
+            }
+            
+            const lines = message.split('\n');
+            const lineHeight = 20;
+            const startY = canvas.height / 2 - (lines.length - 1) * lineHeight / 2;
+            lines.forEach((line, i) => {
+              ctx.fillText(line, canvas.width / 2, startY + i * lineHeight);
+            });
           }
           return;
         }
@@ -15647,10 +15658,19 @@
           portfolioDeltaChart.data.labels = labels;
           portfolioDeltaChart.data.datasets[0].data = formattedDeltas;
           portfolioDeltaChart.data.datasets[0].label = `Delta (${kpiSelect})`;
-          // Update colors to match dark theme
-          portfolioDeltaChart.data.datasets[0].borderColor = 'var(--dark-brand)';
-          portfolioDeltaChart.data.datasets[0].backgroundColor = 'rgba(245, 158, 11, 0.15)';
-          portfolioDeltaChart.data.datasets[0].pointBackgroundColor = 'var(--dark-brand)';
+          // Use brand orange for line and points
+          portfolioDeltaChart.data.datasets[0].borderColor = 'var(--brand-orange)';
+          portfolioDeltaChart.data.datasets[0].pointBackgroundColor = 'var(--brand-orange)';
+          portfolioDeltaChart.data.datasets[0].pointBorderColor = '#ffffff';
+          portfolioDeltaChart.data.datasets[0].pointBorderWidth = 2;
+          // Dynamic fill: positive = brand orange (light), negative = red (light)
+          portfolioDeltaChart.data.datasets[0].backgroundColor = (ctx) => {
+            if (!ctx.chart.chartArea) return 'rgba(229, 114, 0, 0.1)';
+            const gradient = ctx.chart.ctx.createLinearGradient(0, ctx.chart.chartArea.top, 0, ctx.chart.chartArea.bottom);
+            gradient.addColorStop(0, 'rgba(229, 114, 0, 0.2)'); // Brand orange at top
+            gradient.addColorStop(1, 'rgba(229, 114, 0, 0.05)'); // Fade at bottom
+            return gradient;
+          };
           
           // Update Y-axis label
           if (kpiSelect === 'ctr_28d') {
@@ -15897,12 +15917,25 @@
                   : null;
                 
                 if (prevSnapshot) {
-                  const prevValue = kpiField === 'ctr_28d' ? parseFloat(prevSnapshot.ctr_28d || 0) :
-                                  kpiField === 'clicks_28d' ? parseFloat(prevSnapshot.clicks_28d || 0) :
-                                  kpiField === 'impressions_28d' ? parseFloat(prevSnapshot.impressions_28d || 0) :
-                                  kpiField === 'position_28d' ? (prevSnapshot.position_28d ? parseFloat(prevSnapshot.position_28d) : null) :
-                                  kpiField === 'ai_citations_28d' ? (prevSnapshot.ai_citations_28d ? parseInt(prevSnapshot.ai_citations_28d) : 0) :
-                                  kpiField === 'ai_overview_present_count' ? (prevSnapshot.ai_overview_present_count ? parseInt(prevSnapshot.ai_overview_present_count) : 0) : null;
+                  let prevValue = null;
+                  if (kpiField === 'ctr_28d') {
+                    prevValue = parseFloat(prevSnapshot.ctr_28d || 0);
+                  } else if (kpiField === 'clicks_28d') {
+                    prevValue = parseFloat(prevSnapshot.clicks_28d || 0);
+                  } else if (kpiField === 'impressions_28d') {
+                    prevValue = parseFloat(prevSnapshot.impressions_28d || 0);
+                  } else if (kpiField === 'position_28d') {
+                    // Handle position: check if it's null, undefined, or NaN
+                    if (prevSnapshot.position_28d !== null && prevSnapshot.position_28d !== undefined && !isNaN(parseFloat(prevSnapshot.position_28d))) {
+                      prevValue = parseFloat(prevSnapshot.position_28d);
+                    } else {
+                      prevValue = null;
+                    }
+                  } else if (kpiField === 'ai_citations_28d') {
+                    prevValue = prevSnapshot.ai_citations_28d ? parseInt(prevSnapshot.ai_citations_28d) : 0;
+                  } else if (kpiField === 'ai_overview_present_count') {
+                    prevValue = prevSnapshot.ai_overview_present_count ? parseInt(prevSnapshot.ai_overview_present_count) : 0;
+                  }
                   
                   if (prevValue !== null && prevValue !== undefined) {
                     const delta = value - prevValue;
