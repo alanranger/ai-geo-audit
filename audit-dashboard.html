@@ -15458,39 +15458,62 @@
       }
     }
 
-    // Calculate and save portfolio snapshots (Phase 3 - Real History)
+    // Calculate and save portfolio snapshots (Phase 3 - Using gsc_page_metrics_28d)
     async function calculateAndSavePortfolioSnapshots(auditDate, windowDays = 28) {
       try {
-        debugLog('📊 Calculating portfolio snapshots...', 'info');
+        debugLog('📊 Calculating portfolio snapshots from gsc_page_metrics_28d...', 'info');
         
-        // Get money segment metrics (for level KPIs)
-        const moneySegmentMetrics = window.moneySegmentMetrics || {};
+        const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+        if (!propertyUrl) {
+          debugLog('⚠ No property URL found, skipping portfolio snapshots', 'warn');
+          return;
+        }
         
-        // Calculate window dates
-        const endDate = new Date(auditDate);
+        // Calculate window dates (rolling 28d ending yesterday)
+        const endDate = new Date();
+        endDate.setDate(endDate.getDate() - 1); // Yesterday
+        endDate.setHours(0, 0, 0, 0);
         const startDate = new Date(endDate);
-        startDate.setDate(startDate.getDate() - windowDays);
+        startDate.setDate(startDate.getDate() - 27); // 27 days back = 28 days total (inclusive)
+        startDate.setHours(0, 0, 0, 0);
+        
+        const dateStartStr = startDate.toISOString().split('T')[0];
+        const dateEndStr = endDate.toISOString().split('T')[0];
+        
+        // Aggregate page metrics by segment from Supabase
+        debugLog(`📊 Aggregating page metrics for run_id: ${auditDate}, date range: ${dateStartStr} to ${dateEndStr}`, 'info');
+        
+        const aggregateResponse = await fetch(apiUrl('/api/portfolio/aggregate-page-metrics'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            runId: auditDate,
+            siteUrl: propertyUrl,
+            dateStart: dateStartStr,
+            dateEnd: dateEndStr
+          })
+        });
+        
+        if (!aggregateResponse.ok) {
+          const errorText = await aggregateResponse.text();
+          throw new Error(`Failed to aggregate page metrics: ${aggregateResponse.status} - ${errorText}`);
+        }
+        
+        const aggregateData = await aggregateResponse.json();
+        const segmentAggregates = aggregateData.segments || {};
+        
+        debugLog(`✓ Aggregated ${aggregateData.pageCount || 0} pages into segments`, 'success');
         
         // Build snapshots array
         const snapshots = [];
         
-        // Segment mapping: moneySegmentMetrics keys -> portfolio segment names
-        const segmentMap = {
-          'allMoney': 'money',
-          'landingPages': 'landing',
-          'eventPages': 'event',
-          'productPages': 'product'
-        };
-        
-        // Level KPIs (for Monthly KPI Tracker) - from moneySegmentMetrics
+        // Level KPIs (for Monthly KPI Tracker) - from aggregated page metrics
         const levelKpis = ['ctr_28d', 'clicks_28d', 'impressions_28d', 'avg_position'];
-        const segments = ['money', 'landing', 'event', 'product'];
+        const segments = ['money', 'landing', 'event', 'product', 'all_tracked'];
         const scopes = ['active_only']; // Start with active_only only
         
         for (const segment of segments) {
-          const segmentKey = Object.keys(segmentMap).find(k => segmentMap[k] === segment);
-          const segmentData = moneySegmentMetrics[segmentKey];
-          
+          const segmentData = segmentAggregates[segment];
           if (!segmentData) continue;
           
           for (const kpi of levelKpis) {
@@ -15498,16 +15521,16 @@
             let unit = null;
             
             if (kpi === 'ctr_28d') {
-              value = segmentData.ctr || 0; // Already a ratio (0-1)
+              value = segmentData.ctr_28d || 0; // Already a ratio (0-1)
               unit = 'ratio';
             } else if (kpi === 'clicks_28d') {
-              value = segmentData.clicks || 0;
+              value = segmentData.clicks_28d || 0;
               unit = 'count';
             } else if (kpi === 'impressions_28d') {
-              value = segmentData.impressions || 0;
+              value = segmentData.impressions_28d || 0;
               unit = 'count';
             } else if (kpi === 'avg_position') {
-              value = segmentData.avgPosition || 0;
+              value = segmentData.avg_position || null;
               unit = 'position';
             }
             
@@ -15519,56 +15542,9 @@
                   kpi,
                   value,
                   unit,
-                  meta: { taskCount: 0 } // Will be updated if we have task data
+                  meta: { pageCount: segmentData.page_count || 0 }
                 });
               }
-            }
-          }
-        }
-        
-        // All tracked segment (aggregate of all segments)
-        const allTrackedData = {
-          clicks: (moneySegmentMetrics.allMoney?.clicks || 0) + 
-                  (moneySegmentMetrics.landingPages?.clicks || 0) +
-                  (moneySegmentMetrics.eventPages?.clicks || 0) +
-                  (moneySegmentMetrics.productPages?.clicks || 0),
-          impressions: (moneySegmentMetrics.allMoney?.impressions || 0) +
-                      (moneySegmentMetrics.landingPages?.impressions || 0) +
-                      (moneySegmentMetrics.eventPages?.impressions || 0) +
-                      (moneySegmentMetrics.productPages?.impressions || 0),
-          avgPosition: 0 // Would need weighted average
-        };
-        allTrackedData.ctr = allTrackedData.impressions > 0 
-          ? allTrackedData.clicks / allTrackedData.impressions 
-          : 0;
-        
-        for (const kpi of levelKpis) {
-          let value = null;
-          let unit = null;
-          
-          if (kpi === 'ctr_28d') {
-            value = allTrackedData.ctr;
-            unit = 'ratio';
-          } else if (kpi === 'clicks_28d') {
-            value = allTrackedData.clicks;
-            unit = 'count';
-          } else if (kpi === 'impressions_28d') {
-            value = allTrackedData.impressions;
-            unit = 'count';
-          } else if (kpi === 'avg_position') {
-            value = allTrackedData.avgPosition;
-            unit = 'position';
-          }
-          
-          if (value !== null) {
-            for (const scope of scopes) {
-              snapshots.push({
-                segment: 'all_tracked',
-                scope,
-                kpi,
-                value,
-                unit
-              });
             }
           }
         }
