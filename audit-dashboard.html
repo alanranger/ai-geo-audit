@@ -5424,6 +5424,7 @@
         <div class="debug-actions">
           <button class="btn btn-small" onclick="event.stopPropagation(); clearDebugLog();" title="Clear all debug log entries. Useful for starting fresh during troubleshooting.">Clear</button>
           <button class="btn btn-small" onclick="event.stopPropagation(); copyDebugLog();" title="Copy the entire debug log to your clipboard. Useful for sharing logs or troubleshooting issues.">Copy Log</button>
+          <button class="btn btn-small" onclick="event.stopPropagation(); loadDebugLogFromSupabase();" title="Load the latest debug log from Supabase (saved after audit completion)">Load from Supabase</button>
           <button class="btn btn-small" id="debugFilterBtn" onclick="event.stopPropagation(); toggleDebugLogFilter();" title="Filter to show only warnings and errors">Filter: All</button>
           <span id="debugToggleIcon" style="color: #fff; font-size: 1.2rem;">▼</span>
         </div>
@@ -14690,6 +14691,85 @@
         debugLog('Failed to copy log: ' + err.message, 'error');
         showStatus('Failed to copy log', 'error');
       });
+    }
+
+    async function loadDebugLogFromSupabase() {
+      try {
+        const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+        if (!propertyUrl) {
+          debugLog('⚠ Cannot load debug log: Property URL not set', 'warn');
+          showStatus('Property URL not set', 'error');
+          return;
+        }
+
+        debugLog('📊 Loading debug log from Supabase...', 'info');
+        showStatus('Loading debug log from Supabase...', 'info');
+
+        const response = await fetch(apiUrl(`/api/supabase/get-debug-log?propertyUrl=${encodeURIComponent(propertyUrl)}`));
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          debugLog(`❌ Failed to load debug log: ${response.status} - ${errorText}`, 'error');
+          showStatus(`Failed to load debug log: ${response.status}`, 'error');
+          return;
+        }
+
+        const data = await response.json();
+        
+        if (data.error || !data.logText) {
+          debugLog(`⚠ ${data.message || 'No debug log found in Supabase'}`, 'warn');
+          showStatus(data.message || 'No debug log found', 'warn');
+          return;
+        }
+
+        // Clear existing log entries
+        debugLogEntries.length = 0;
+        const logElement = document.getElementById('debugLog');
+        if (logElement) {
+          logElement.innerHTML = '';
+        }
+
+        // Parse log text and populate debugLogEntries
+        const lines = data.logText.split('\n');
+        let entryCount = 0;
+        
+        lines.forEach(line => {
+          // Match log format: [timestamp] [TYPE] message
+          const match = line.match(/^\[([^\]]+)\]\s+\[([^\]]+)\]\s+(.+)$/);
+          if (match) {
+            const [, timestamp, type, message] = match;
+            const normalizedType = type.toLowerCase();
+            debugLogEntries.push({
+              timestamp,
+              message,
+              type: normalizedType === 'warn' ? 'warn' : normalizedType === 'error' ? 'error' : normalizedType === 'success' ? 'success' : 'info'
+            });
+            entryCount++;
+          }
+        });
+
+        // Re-render with current filter
+        if (logElement) {
+          logElement.innerHTML = '';
+          debugLogEntries.forEach(entry => {
+            const shouldShow = debugLogFilter === 'all' || (debugLogFilter === 'warnings-errors' && (entry.type === 'warn' || entry.type === 'error'));
+            if (shouldShow) {
+              const entryDiv = document.createElement('div');
+              entryDiv.className = `debug-log-entry ${entry.type}`;
+              entryDiv.innerHTML = `<span class="debug-timestamp">[${new Date(entry.timestamp).toLocaleTimeString()}]</span>${entry.message}`;
+              logElement.appendChild(entryDiv);
+            }
+          });
+          logElement.scrollTop = logElement.scrollHeight;
+        }
+
+        debugLog(`✓ Loaded ${entryCount} debug log entries from Supabase (audit: ${data.auditDate})`, 'success');
+        showStatus(`Loaded ${entryCount} entries from Supabase`, 'success');
+
+      } catch (err) {
+        debugLog(`❌ Error loading debug log: ${err.message}`, 'error');
+        showStatus(`Error: ${err.message}`, 'error');
+      }
     }
 
     function toggleDebugPanel() {
