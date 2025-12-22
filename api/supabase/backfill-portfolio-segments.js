@@ -106,6 +106,30 @@ export default async function handler(req, res) {
         all_tracked: []
       };
 
+      // Get tracked URLs from active optimization tasks for all_tracked segment
+      const { data: activeTasks } = await supabase
+        .from('optimisation_tasks')
+        .select('target_url, target_url_clean')
+        .in('status', ['in_progress', 'monitoring', 'planned'])
+        .gt('cycle_active', 0);
+      
+      const trackedUrls = new Set();
+      if (activeTasks) {
+        activeTasks.forEach(task => {
+          // Normalize URLs - handle both full URLs and relative paths
+          let url = task.target_url_clean || task.target_url;
+          if (url) {
+            // If relative path, make it absolute
+            if (url.startsWith('/')) {
+              url = siteUrl + url;
+            }
+            // Normalize: remove trailing slash, convert to lowercase for matching
+            url = url.replace(/\/$/, '').toLowerCase();
+            trackedUrls.add(url);
+          }
+        });
+      }
+
       pages.forEach(page => {
         const segment = classifyPageSegment(page.page_url);
         
@@ -119,8 +143,11 @@ export default async function handler(req, res) {
           segmentPages.money.push(page);
         }
         
-        // Add to all_tracked if it's a tracked task URL (we'll handle this separately)
-        // For now, all_tracked will be empty unless we fetch tasks
+        // Add to all_tracked if this page URL is tracked by an active optimization task
+        const pageUrlNormalized = page.page_url.replace(/\/$/, '').toLowerCase();
+        if (trackedUrls.has(pageUrlNormalized)) {
+          segmentPages.all_tracked.push(page);
+        }
       });
 
       // Aggregate per segment
