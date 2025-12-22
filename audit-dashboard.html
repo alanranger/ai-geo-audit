@@ -15353,6 +15353,8 @@
         const response = await fetch(apiUrl(`/api/supabase/get-portfolio-segment-metrics?${params}`));
         
         if (!response.ok) {
+          const errorText = await response.text();
+          debugLog(`⚠ Portfolio API error: ${response.status} - ${errorText}`, 'error');
           throw new Error(`API error: ${response.status}`);
         }
         
@@ -15360,6 +15362,30 @@
         const metrics = data.metrics || [];
         
         debugLog(`📊 Portfolio data loaded: ${metrics.length} metrics for segment=${segment}, scope=${mappedScope}, kpi=${kpiSelect}`, 'info');
+        debugLog(`📊 API params: siteUrl=${propertyUrl}, segment=${segment}, scope=${mappedScope}, from=${fromDate.toISOString()}, to=${toDate.toISOString()}`, 'info');
+        
+        if (metrics.length === 0) {
+          debugLog(`⚠ No metrics found. Checking if data exists in database...`, 'warn');
+          // Try querying without scope filter to see if data exists
+          const testParams = new URLSearchParams({ 
+            siteUrl: propertyUrl,
+            segment,
+            from: fromDate.toISOString(),
+            to: toDate.toISOString(),
+            order: 'asc'
+          });
+          const testResponse = await fetch(apiUrl(`/api/supabase/get-portfolio-segment-metrics?${testParams}`));
+          if (testResponse.ok) {
+            const testData = await testResponse.json();
+            const testMetrics = testData.metrics || [];
+            if (testMetrics.length > 0) {
+              debugLog(`⚠ Found ${testMetrics.length} metrics WITHOUT scope filter. Scope filter '${mappedScope}' may be excluding all data.`, 'warn');
+              debugLog(`⚠ Available scopes in data: ${[...new Set(testMetrics.map(m => m.scope))].join(', ')}`, 'warn');
+            } else {
+              debugLog(`⚠ No metrics found even without scope filter. Check if portfolio_segment_metrics_28d table has data for this site.`, 'warn');
+            }
+          }
+        }
         
         if (metrics.length === 0) {
           debugLog('⚠ No portfolio metrics found - check segment and scope filters', 'warn');
