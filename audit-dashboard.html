@@ -15737,21 +15737,77 @@
           }
         });
         
+        // Fetch AI citations and AI overview data from keyword_rankings for this audit date
+        let aiMetricsBySegment = {
+          money: { citations: 0, overviewCount: 0 },
+          landing: { citations: 0, overviewCount: 0 },
+          event: { citations: 0, overviewCount: 0 },
+          product: { citations: 0, overviewCount: 0 },
+          all_tracked: { citations: 0, overviewCount: 0 }
+        };
+        
+        try {
+          const auditDate = dateEnd; // Use dateEnd as audit_date (most recent date in the 28d window)
+          const keywordsResponse = await fetch(apiUrl(`/api/supabase/get-keyword-rankings?auditDate=${auditDate}&propertyUrl=${encodeURIComponent(siteUrl)}`));
+          if (keywordsResponse.ok) {
+            const keywordsData = await keywordsResponse.json();
+            if (keywordsData.keywords && keywordsData.keywords.length > 0) {
+              // Group keywords by segment and aggregate AI metrics
+              keywordsData.keywords.forEach(keyword => {
+                const segment = (keyword.segment || '').toLowerCase();
+                const citations = parseInt(keyword.ai_alan_citations_count) || 0;
+                const hasOverview = keyword.has_ai_overview === true || keyword.ai_overview_present_any === true;
+                
+                // Add to specific segment
+                if (aiMetricsBySegment[segment]) {
+                  aiMetricsBySegment[segment].citations += citations;
+                  if (hasOverview) {
+                    aiMetricsBySegment[segment].overviewCount += 1;
+                  }
+                }
+                
+                // Also add to 'money' if it's a commercial segment
+                if (segment === 'event' || segment === 'product' || segment === 'landing') {
+                  aiMetricsBySegment.money.citations += citations;
+                  if (hasOverview) {
+                    aiMetricsBySegment.money.overviewCount += 1;
+                  }
+                }
+                
+                // Add to all_tracked if URL matches a tracked task
+                if (keyword.best_url && trackedTaskUrls.has(normalizeGscPageKey(keyword.best_url))) {
+                  aiMetricsBySegment.all_tracked.citations += citations;
+                  if (hasOverview) {
+                    aiMetricsBySegment.all_tracked.overviewCount += 1;
+                  }
+                }
+              });
+              debugLog(`✓ Aggregated AI metrics from ${keywordsData.keywords.length} keywords`, 'success');
+            }
+          }
+        } catch (aiError) {
+          debugLog(`⚠ Error fetching AI metrics from keyword_rankings: ${aiError.message}`, 'warn');
+        }
+        
         // Aggregate metrics per segment
         const segmentRows = [];
         const scope = 'active_cycles_only'; // Match UI default
         
         ['money', 'landing', 'event', 'product', 'all_tracked'].forEach(segment => {
           const pages = segmentPages[segment];
+          const aiMetrics = aiMetricsBySegment[segment] || { citations: 0, overviewCount: 0 };
+          
           if (pages.length === 0) {
-            // Still create a row with zeros
+            // Still create a row with zeros (but include AI metrics if available)
             segmentRows.push({
               segment,
               pages_count: 0,
               clicks_28d: 0,
               impressions_28d: 0,
               ctr_28d: 0,
-              position_28d: null
+              position_28d: null,
+              ai_citations_28d: aiMetrics.citations,
+              ai_overview_present_count: aiMetrics.overviewCount
             });
             return;
           }
@@ -15782,7 +15838,9 @@
             clicks_28d: totalClicks,
             impressions_28d: totalImpressions,
             ctr_28d: ctr, // Ratio (0-1)
-            position_28d: avgPosition
+            position_28d: avgPosition,
+            ai_citations_28d: aiMetrics.citations,
+            ai_overview_present_count: aiMetrics.overviewCount
           });
         });
         

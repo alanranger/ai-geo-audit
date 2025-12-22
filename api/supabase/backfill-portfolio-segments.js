@@ -19,60 +19,26 @@ const sendJSON = (res, status, obj) => {
   res.status(status).send(JSON.stringify(obj));
 };
 
-// Classify page segment from URL (matches frontend logic)
+// Classify page segment from URL (matches frontend classifyMoneyPageSubSegment logic)
 function classifyPageSegment(pageUrl) {
-  if (!pageUrl || typeof pageUrl !== 'string') return 'money';
+  if (!pageUrl || typeof pageUrl !== 'string') return 'landing';
   
-  let path = pageUrl.toLowerCase();
-  try {
-    const urlObj = new URL(path);
-    path = urlObj.pathname || '/';
-  } catch {
-    path = path.split('?')[0].split('#')[0];
-  }
+  const urlLower = pageUrl.toLowerCase();
   
-  if (path.length > 1) path = path.replace(/\/+$/, '');
-  
-  // Event pages
-  if (path.startsWith('/beginners-photography-lessons') ||
-      path.startsWith('/photographic-workshops-near-me') ||
-      path === '/photography-workshops' ||
-      path === '/photography-workshops-near-me' ||
-      path === '/landscape-photography-workshops' ||
-      path === '/outdoor-photography-workshops' ||
-      path === '/photography-courses-coventry' ||
-      path === '/course-finder-photography-classes-near-me' ||
-      path.includes('/workshop') || path.includes('/workshops')) {
+  // Event Pages: Use same pattern as frontend (substring match for consistency)
+  if (urlLower.includes('/beginners-photography-lessons') ||
+      urlLower.includes('/photographic-workshops-near-me')) {
     return 'event';
   }
   
-  // Product pages
-  if (path.startsWith('/photo-workshops-uk') ||
-      path.startsWith('/photography-services-near-me') ||
-      path === '/photography-tuition-services' ||
-      path === '/photography-shop-services' ||
-      path === '/hire-a-professional-photographer-in-coventry' ||
-      path === '/professional-commercial-photographer-coventry' ||
-      path === '/professional-photographer-near-me' ||
-      path === '/coventry-photographer' ||
-      path === '/photographer-in-coventry' ||
-      path === '/photography-mentoring-programme' ||
-      path === '/photography-academy-membership' ||
-      path === '/photography-academy' ||
-      path === '/photography-session-vouchers' ||
-      path === '/photography-gift-vouchers' ||
-      path === '/photography-presents-for-photographers' ||
-      path === '/rps-courses-mentoring-distinctions') {
+  // Product Pages: Use same pattern as frontend (substring match for consistency)
+  if (urlLower.includes('/photo-workshops-uk') ||
+      urlLower.includes('/photography-services-near-me')) {
     return 'product';
   }
   
-  // Landing pages
-  if (path === '/' || path === '' || 
-      path.includes('/landing') || path.includes('/lp/')) {
-    return 'landing';
-  }
-  
-  return 'money';
+  // Landing Pages (default - anything not matching above)
+  return 'landing';
 }
 
 export default async function handler(req, res) {
@@ -142,11 +108,19 @@ export default async function handler(req, res) {
 
       pages.forEach(page => {
         const segment = classifyPageSegment(page.page_url);
+        
+        // Add to specific segment (event, product, or landing)
         if (segmentPages[segment]) {
           segmentPages[segment].push(page);
         }
-        // All pages go into all_tracked
-        segmentPages.all_tracked.push(page);
+        
+        // ALSO add to 'money' segment (aggregate of all money pages: event + product + landing)
+        if (segment === 'event' || segment === 'product' || segment === 'landing') {
+          segmentPages.money.push(page);
+        }
+        
+        // Add to all_tracked if it's a tracked task URL (we'll handle this separately)
+        // For now, all_tracked will be empty unless we fetch tasks
       });
 
       // Aggregate per segment
