@@ -16055,57 +16055,115 @@
     async function diagnosePortfolioData() {
       try {
         const siteUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || 'https://www.alanranger.com';
-        debugLog('🔍 Diagnosing portfolio segment data...', 'info');
+        debugLog('🔍 Querying Supabase for portfolio segment records...', 'info');
         
-        const response = await fetch(apiUrl(`/api/supabase/diagnose-portfolio-segments?siteUrl=${encodeURIComponent(siteUrl)}`));
+        // Query Supabase directly using the existing get-portfolio-segment-metrics endpoint
+        const params = new URLSearchParams({
+          siteUrl: siteUrl,
+          from: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString(), // Last year
+          to: new Date().toISOString(),
+          order: 'desc'
+        });
+        
+        const response = await fetch(apiUrl(`/api/supabase/get-portfolio-segment-metrics?${params}`));
         
         if (!response.ok) {
           const errorText = await response.text();
-          debugLog(`❌ Diagnostic failed: ${response.status} - ${errorText}`, 'error');
-          alert(`Diagnostic failed: ${response.status}\n${errorText}`);
+          debugLog(`❌ Query failed: ${response.status} - ${errorText}`, 'error');
+          alert(`Query failed: ${response.status}\n${errorText}`);
           return;
         }
         
         const data = await response.json();
+        const metrics = data.metrics || [];
         
-        // Log summary to debug panel
-        debugLog(`📊 Portfolio Diagnostic Results:`, 'info');
-        debugLog(`  Total records: ${data.total_records}`, 'info');
-        debugLog(`  Unique run_ids: ${data.summary.unique_run_ids}`, 'info');
-        debugLog(`  Unique segments: ${data.summary.unique_segments} (${data.summary.segments.join(', ')})`, 'info');
-        debugLog(`  Unique scopes: ${data.summary.unique_scopes} (${data.summary.scopes.join(', ')})`, 'info');
-        debugLog(`  Position analysis:`, 'info');
-        debugLog(`    Records with position: ${data.position_analysis.total_with_position}`, 'info');
-        debugLog(`    Records with null position: ${data.position_analysis.total_null_position}`, 'info');
-        debugLog(`    Records with zero position: ${data.position_analysis.total_zero_position}`, 'info');
-        debugLog(`  Average position by segment:`, 'info');
-        Object.keys(data.position_analysis.avg_position_by_segment).forEach(seg => {
-          const avg = data.position_analysis.avg_position_by_segment[seg];
-          debugLog(`    ${seg}: ${avg !== null ? avg.toFixed(2) : 'N/A'}`, 'info');
+        // Analyze the records
+        const bySegment = {};
+        const byRunId = {};
+        
+        metrics.forEach(m => {
+          // Group by segment
+          if (!bySegment[m.segment]) {
+            bySegment[m.segment] = [];
+          }
+          bySegment[m.segment].push(m);
+          
+          // Group by run_id
+          if (!byRunId[m.run_id]) {
+            byRunId[m.run_id] = [];
+          }
+          byRunId[m.run_id].push(m);
+        });
+        
+        // Log summary
+        debugLog(`📊 Portfolio Records from Supabase:`, 'info');
+        debugLog(`  Total records: ${metrics.length}`, 'info');
+        debugLog(`  Unique run_ids: ${Object.keys(byRunId).length}`, 'info');
+        debugLog(`  Unique segments: ${Object.keys(bySegment).length} (${Object.keys(bySegment).join(', ')})`, 'info');
+        
+        // Position analysis by segment
+        debugLog(`  Position analysis by segment:`, 'info');
+        Object.keys(bySegment).forEach(seg => {
+          const segRecords = bySegment[seg];
+          const withPosition = segRecords.filter(r => {
+            const pos = r.position_28d;
+            if (pos === null || pos === undefined) return false;
+            const parsed = parseFloat(pos);
+            return !isNaN(parsed) && isFinite(parsed) && parsed > 0;
+          });
+          const withNull = segRecords.filter(r => r.position_28d === null || r.position_28d === undefined);
+          
+          debugLog(`    ${seg}: ${withPosition.length} with position, ${withNull.length} null (out of ${segRecords.length} total)`, 'info');
+          
+          if (withPosition.length > 0) {
+            const samplePositions = withPosition.slice(0, 3).map(r => 
+              `pos=${parseFloat(r.position_28d).toFixed(1)} (run=${r.run_id}, imps=${r.impressions_28d})`
+            ).join('; ');
+            debugLog(`      Sample positions: ${samplePositions}`, 'info');
+          }
+          
+          if (withNull.length > 0) {
+            const sampleNulls = withNull.slice(0, 3).map(r => 
+              `run=${r.run_id}, imps=${r.impressions_28d}, pos=${r.position_28d}`
+            ).join('; ');
+            debugLog(`      Sample null records: ${sampleNulls}`, 'warn');
+          }
         });
         
         // Show run_id breakdown
-        debugLog(`  Run IDs:`, 'info');
-        Object.keys(data.by_run_id).slice(0, 10).forEach(runId => {
-          const info = data.by_run_id[runId];
-          debugLog(`    ${runId}: ${info.count} records, created ${info.created_at}, date range ${info.date_start} to ${info.date_end}`, 'info');
+        debugLog(`  Run IDs (latest 10):`, 'info');
+        Object.keys(byRunId).slice(0, 10).forEach(runId => {
+          const records = byRunId[runId];
+          const firstRecord = records[0];
+          debugLog(`    ${runId}: ${records.length} records, created ${firstRecord.created_at}, date range ${firstRecord.date_start} to ${firstRecord.date_end}`, 'info');
         });
         
         // Show sample records
-        if (data.sample_records && data.sample_records.length > 0) {
-          debugLog(`  Sample records (first ${data.sample_records.length}):`, 'info');
-          data.sample_records.forEach((rec, idx) => {
-            debugLog(`    [${idx + 1}] ${rec.segment}/${rec.scope}: clicks=${rec.clicks_28d}, impr=${rec.impressions_28d}, ctr=${(rec.ctr_28d * 100).toFixed(2)}%, pos=${rec.position_28d !== null ? rec.position_28d.toFixed(2) : 'null'}, pages=${rec.pages_count}`, 'info');
+        if (metrics.length > 0) {
+          debugLog(`  Sample records (latest 5):`, 'info');
+          metrics.slice(0, 5).forEach((rec, idx) => {
+            debugLog(`    [${idx + 1}] ${rec.segment}/${rec.scope}: clicks=${rec.clicks_28d}, impr=${rec.impressions_28d}, ctr=${(rec.ctr_28d * 100).toFixed(2)}%, pos=${rec.position_28d !== null ? parseFloat(rec.position_28d).toFixed(2) : 'null'}, pages=${rec.pages_count}`, 'info');
           });
         }
         
-        // Also show in alert for quick view
-        const summary = `Portfolio Diagnostic:
-Total records: ${data.total_records}
-Run IDs: ${data.summary.unique_run_ids}
-Segments: ${data.summary.segments.join(', ')}
-Position data: ${data.position_analysis.total_with_position} with position, ${data.position_analysis.total_null_position} null
-Check debug panel for full details.`;
+        // Alert summary
+        const positionSummary = Object.keys(bySegment).map(seg => {
+          const segRecords = bySegment[seg];
+          const withPosition = segRecords.filter(r => {
+            const pos = r.position_28d;
+            if (pos === null || pos === undefined) return false;
+            const parsed = parseFloat(pos);
+            return !isNaN(parsed) && isFinite(parsed) && parsed > 0;
+          });
+          return `${seg}: ${withPosition.length}/${segRecords.length} with position`;
+        }).join(', ');
+        
+        const summary = `Portfolio Records from Supabase:
+Total: ${metrics.length} records
+Run IDs: ${Object.keys(byRunId).length}
+Position data: ${positionSummary || 'N/A'}
+Check debug panel for details.
+Also check "Load from Supabase" for audit debug logs.`;
         
         alert(summary);
         
