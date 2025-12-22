@@ -21196,14 +21196,15 @@ Also check "Load from Supabase" for audit debug logs.`;
           console.log('[Money Pages Suggested Top 10] Rendering with', moneyPagesRows.length, 'rows');
         
         // Create a copy of rows to avoid mutating original
+        // Handle both moneyPagesMetrics.rows format and moneyPagePriorityData format
         const pages = moneyPagesRows.map(row => ({
-          url: row.url,
-          title: row.title || row.url,
-          clicks: row.clicks || 0,
-          impressions: row.impressions || 0,
-          ctr: row.ctr || 0,
-          avgPosition: row.avgPosition || row.position || null,
-          subSegment: row.subSegment || 'Landing'
+          url: row.url || row.page_url || '',
+          title: row.title || row.page_title || row.url || '',
+          clicks: row.clicks || row.clicks_28d || 0,
+          impressions: row.impressions || row.impressions_28d || 0,
+          ctr: row.ctr || row.ctr_28d || 0,
+          avgPosition: row.avgPosition || row.position || row.position_28d || null,
+          subSegment: row.subSegment || row.segmentType || 'Landing'
         }));
         
         // Compute Phase 4 scores
@@ -27621,9 +27622,19 @@ Final Score: ${score}/100`;
         updateMoneyPagesSubSegmentCounts(moneyPagesMetrics);
         
         // Phase 4: Render Suggested (Top 10) table (delay to ensure DOM is ready)
+        // Use moneyPagePriorityData if available (same data as Priority & Actions table), otherwise use rows
         setTimeout(() => {
-          renderMoneyPagesSuggestedTop10(rows);
-        }, 100);
+          const dataSource = window.moneyPagePriorityData && window.moneyPagePriorityData.length > 0 
+            ? window.moneyPagePriorityData 
+            : rows;
+          console.log('[Money Pages] Rendering Suggested Top 10 with data source:', {
+            hasPriorityData: !!window.moneyPagePriorityData,
+            priorityDataCount: window.moneyPagePriorityData?.length || 0,
+            rowsCount: rows?.length || 0,
+            usingDataSource: dataSource === window.moneyPagePriorityData ? 'moneyPagePriorityData' : 'rows'
+          });
+          renderMoneyPagesSuggestedTop10(dataSource);
+        }, 200);
         
         // Function to apply filters and re-render ALL sections (table, chart, KPIs, summaries)
         const applyFiltersAndRender = async () => {
