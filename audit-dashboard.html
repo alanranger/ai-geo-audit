@@ -15472,10 +15472,17 @@
           let dateForBucket = null;
           let bucketKey = null;
           
-          if (timeGrain === 'monthly' && m.run_id && m.run_id.match(/^\d{4}-\d{2}$/)) {
-            // Monthly: use run_id directly if it's in YYYY-MM format (for historical backfill)
-            bucketKey = m.run_id;
-            dateForBucket = new Date(m.run_id + '-01');
+          if (timeGrain === 'monthly' && m.run_id) {
+            if (m.run_id.match(/^\d{4}-\d{2}$/)) {
+              // Monthly: use run_id directly if it's in YYYY-MM format (for historical backfill)
+              bucketKey = m.run_id;
+              dateForBucket = new Date(m.run_id + '-01');
+            } else if (m.run_id.match(/^\d{4}-\d{2}-\d{2}$/)) {
+              // If run_id is in YYYY-MM-DD format, extract YYYY-MM for monthly bucketing
+              dateForBucket = new Date(m.run_id);
+              // For monthly bucketing, use the month from the date-based run_id
+              bucketKey = `${dateForBucket.getFullYear()}-${String(dateForBucket.getMonth() + 1).padStart(2, '0')}`;
+            }
           } else if (m.run_id && m.run_id.match(/^\d{4}-\d{2}-\d{2}$/)) {
             // If run_id is in YYYY-MM-DD format, use that (most reliable - represents when audit was actually run)
             dateForBucket = new Date(m.run_id);
@@ -15866,9 +15873,18 @@
             // Find the LAST snapshot in this month (bucket by date_end month or run_id)
             // run_id format can be YYYY-MM (month-based) or YYYY-MM-DD (date-based)
             const monthSnapshots = allData[segment]?.filter(s => {
-              // Try to match by run_id first (if it's in YYYY-MM format)
-              if (s.run_id && s.run_id.match(/^\d{4}-\d{2}$/)) {
-                return s.run_id === month;
+              // Try to match by run_id first
+              if (s.run_id) {
+                // If run_id is in YYYY-MM format, match directly
+                if (s.run_id.match(/^\d{4}-\d{2}$/)) {
+                  return s.run_id === month;
+                }
+                // If run_id is in YYYY-MM-DD format, extract YYYY-MM and match
+                if (s.run_id.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                  const runDate = new Date(s.run_id);
+                  const runMonth = `${runDate.getFullYear()}-${String(runDate.getMonth() + 1).padStart(2, '0')}`;
+                  return runMonth === month;
+                }
               }
               // Otherwise match by date_end month (the actual date range the data represents)
               if (s.date_end) {
