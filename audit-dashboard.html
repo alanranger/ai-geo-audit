@@ -21176,16 +21176,24 @@ Also check "Load from Supabase" for audit debug logs.`;
        * @param {Array} moneyPagesRows - Array of money page row objects
        */
       function renderMoneyPagesSuggestedTop10(moneyPagesRows) {
-        const container = document.getElementById('money-pages-suggested-top10-content');
-        if (!container) {
-          debugLog('⚠ Suggested Top 10 container not found', 'warn');
-          return;
-        }
-        
-        if (!moneyPagesRows || moneyPagesRows.length === 0) {
-          container.innerHTML = '<div style="padding: 2rem; text-align: center; color: #64748b; font-size: 0.9rem;">No money pages data available.</div>';
-          return;
-        }
+        try {
+          const container = document.getElementById('money-pages-suggested-top10-content');
+          if (!container) {
+            console.warn('[Money Pages Suggested Top 10] Container not found, will retry...');
+            // Retry after a short delay in case DOM isn't ready
+            setTimeout(() => {
+              renderMoneyPagesSuggestedTop10(moneyPagesRows);
+            }, 500);
+            return;
+          }
+          
+          if (!moneyPagesRows || moneyPagesRows.length === 0) {
+            container.innerHTML = '<div style="padding: 2rem; text-align: center; color: #64748b; font-size: 0.9rem;">No money pages data available.</div>';
+            console.log('[Money Pages Suggested Top 10] No rows provided');
+            return;
+          }
+          
+          console.log('[Money Pages Suggested Top 10] Rendering with', moneyPagesRows.length, 'rows');
         
         // Create a copy of rows to avoid mutating original
         const pages = moneyPagesRows.map(row => ({
@@ -21266,7 +21274,15 @@ Also check "Load from Supabase" for audit debug logs.`;
         `;
         
         container.innerHTML = html;
+        console.log(`[Money Pages Suggested Top 10] ✓ Rendered ${top10.length} pages`);
         debugLog(`✓ Suggested Top 10 rendered with ${top10.length} pages`, 'success');
+        } catch (error) {
+          console.error('[Money Pages Suggested Top 10] Error rendering:', error);
+          const container = document.getElementById('money-pages-suggested-top10-content');
+          if (container) {
+            container.innerHTML = `<div style="padding: 2rem; text-align: center; color: #ef4444; font-size: 0.9rem;">Error rendering suggested pages: ${error.message}</div>`;
+          }
+        }
       }
       
       /**
@@ -27604,8 +27620,10 @@ Final Score: ${score}/100`;
         // Update sub-segment dropdown counts
         updateMoneyPagesSubSegmentCounts(moneyPagesMetrics);
         
-        // Phase 4: Render Suggested (Top 10) table
-        renderMoneyPagesSuggestedTop10(rows);
+        // Phase 4: Render Suggested (Top 10) table (delay to ensure DOM is ready)
+        setTimeout(() => {
+          renderMoneyPagesSuggestedTop10(rows);
+        }, 100);
         
         // Function to apply filters and re-render ALL sections (table, chart, KPIs, summaries)
         const applyFiltersAndRender = async () => {
