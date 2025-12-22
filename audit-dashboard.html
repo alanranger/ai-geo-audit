@@ -15874,17 +15874,24 @@
             if (response.ok) {
               const data = await response.json();
               if (data.pages && data.pages.length > 0) {
+                let positionCount = 0;
+                let positionSum = 0;
                 data.pages.forEach(page => {
                   const key = normalizeGscPageKey(page.page_url);
+                  const position = page.position_28d ? parseFloat(page.position_28d) : null;
+                  if (position !== null && !isNaN(position)) {
+                    positionCount++;
+                    positionSum += position;
+                  }
                   pageMetrics.set(key, {
                     url: page.page_url,
                     clicks: parseFloat(page.clicks_28d) || 0,
                     impressions: parseFloat(page.impressions_28d) || 0,
                     ctr: parseFloat(page.ctr_28d) || 0,
-                    position: page.position_28d ? parseFloat(page.position_28d) : null
+                    position: position
                   });
                 });
-                debugLog(`✓ Fetched ${pageMetrics.size} pages from Supabase for segment snapshots`, 'success');
+                debugLog(`✓ Fetched ${pageMetrics.size} pages from Supabase (${positionCount} with position, avg=${positionCount > 0 ? (positionSum / positionCount).toFixed(2) : 'N/A'})`, 'success');
               }
             }
           } catch (fetchError) {
@@ -16062,16 +16069,25 @@
           // Calculate weighted average position
           let totalPositionWeight = 0;
           let totalPositionImpressions = 0;
+          let positionCount = 0;
           pages.forEach(p => {
             const impressions = parseFloat(p.impressions) || 0;
             // Try multiple position field names (position, position_28d, avgPosition)
+            // Note: When fetched from Supabase, position is stored in p.position (set from position_28d)
+            // When from pageTotalsByKey, it might be in p.position or p.avgPosition
             const position = parseFloat(p.position) || parseFloat(p.position_28d) || parseFloat(p.avgPosition) || null;
-            if (position && !isNaN(position) && impressions > 0) {
+            if (position !== null && !isNaN(position) && isFinite(position) && impressions > 0) {
               totalPositionWeight += position * impressions;
               totalPositionImpressions += impressions;
+              positionCount++;
             }
           });
           const avgPosition = totalPositionImpressions > 0 ? totalPositionWeight / totalPositionImpressions : null;
+          
+          // Debug logging for position calculation
+          if (segment === 'money' || segment === 'landing') {
+            debugLog(`📊 Position calc for ${segment}: ${positionCount} pages with position, total impressions=${totalPositionImpressions}, avgPosition=${avgPosition}`, 'info');
+          }
           
           segmentRows.push({
             segment,
