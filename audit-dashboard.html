@@ -15255,11 +15255,11 @@
               title: {
                 display: true,
                 text: 'Date',
-                color: 'var(--dark-text)',
+                color: '#ffffff',
                 font: { size: 13, weight: '600' }
               },
               ticks: {
-                color: 'var(--dark-text-muted)',
+                color: '#ffffff',
                 font: { size: 11, weight: '500' }
               },
               grid: {
@@ -15272,11 +15272,11 @@
               title: {
                 display: true,
                 text: 'Delta',
-                color: 'var(--dark-text)',
+                color: '#ffffff',
                 font: { size: 13, weight: '600' }
               },
               ticks: {
-                color: 'var(--dark-text-muted)',
+                color: '#ffffff',
                 font: { size: 11, weight: '500' },
                 callback: function(value) {
                   const kpi = document.getElementById('portfolio-kpi-select')?.value || 'ctr_28d';
@@ -15598,6 +15598,7 @@
         // Add rows for each segment
         segments.forEach(segment => {
           const row = document.createElement('tr');
+          row.style.cursor = 'help';
           
           // Segment name
           const segmentCell = document.createElement('td');
@@ -15657,6 +15658,11 @@
                 const formatted = formatValue(value, kpi);
                 monthValues.push(value);
                 
+                // Build tooltip text
+                const monthDate = new Date(month + '-01');
+                const monthName = monthDate.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+                let tooltipText = `${segmentLabels[segment]}: ${formatted} for ${monthName}`;
+                
                 // Find previous month snapshot for trend
                 const prevMonth = new Date(month + '-01');
                 prevMonth.setMonth(prevMonth.getMonth() - 1);
@@ -15710,13 +15716,18 @@
                       const actualIndicator = delta < 0 ? '▲' : '▼';
                       const actualColor = delta < 0 ? '#10b981' : '#ef4444';
                       cell.innerHTML = `${formatted} <span style="color: ${actualColor};">${actualIndicator} ${deltaFormatted}</span>`;
+                      tooltipText += ` | Change from previous month: ${actualIndicator} ${deltaFormatted}`;
                     } else {
                       deltaFormatted = Math.abs(delta).toLocaleString();
                       cell.innerHTML = `${formatted} <span style="color: ${color};">${indicator} ${deltaFormatted}</span>`;
+                      tooltipText += ` | Change from previous month: ${indicator} ${deltaFormatted}`;
                     }
                     
                     if (kpi !== 'avg_position') {
                       cell.innerHTML = `${formatted} <span style="color: ${color};">${indicator} ${deltaFormatted}</span>`;
+                      if (kpi !== 'ai_citations' && kpi !== 'ai_overview') {
+                        tooltipText += ` | Change from previous month: ${indicator} ${deltaFormatted}`;
+                      }
                     }
                   } else {
                     cell.textContent = formatted;
@@ -15724,13 +15735,22 @@
                 } else {
                   cell.textContent = formatted;
                 }
+                
+                // Add tooltip to cell
+                cell.title = tooltipText;
               } else {
                 cell.textContent = '—';
                 monthValues.push(null);
+                const monthDate = new Date(month + '-01');
+                const monthName = monthDate.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+                cell.title = `${segmentLabels[segment]}: No data for ${monthName}`;
               }
             } else {
               cell.textContent = '—';
               monthValues.push(null);
+              const monthDate = new Date(month + '-01');
+              const monthName = monthDate.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+              cell.title = `${segmentLabels[segment]}: No data for ${monthName}`;
             }
             row.appendChild(cell);
           });
@@ -15749,8 +15769,10 @@
               return '▁▂▃▄▅▆▇█'[Math.min(height, 7)] || '▁';
             }).join('');
             sparklineCell.textContent = sparkline;
+            sparklineCell.title = `${segmentLabels[segment]}: Trend visualization across 12 months. Higher bars indicate higher values.`;
           } else {
             sparklineCell.textContent = '—';
+            sparklineCell.title = `${segmentLabels[segment]}: No trend data available`;
           }
           row.appendChild(sparklineCell);
 
