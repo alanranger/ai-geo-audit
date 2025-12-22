@@ -15303,7 +15303,7 @@
     async function loadPortfolioData() {
       const kpiSelect = document.getElementById('portfolio-kpi-select')?.value || 'ctr_28d';
       const segment = document.getElementById('portfolio-segment-select')?.value || 'all_tracked';
-      const scope = document.getElementById('portfolio-scope-toggle')?.value || 'active_cycles_only';
+      const scope = document.getElementById('portfolio-scope-toggle')?.value || 'active_only';
       const timeGrain = document.getElementById('portfolio-time-grain')?.value || 'weekly';
 
       // Map UI KPI to portfolio_segment_metrics_28d field
@@ -16016,8 +16016,9 @@
           let totalPositionImpressions = 0;
           pages.forEach(p => {
             const impressions = parseFloat(p.impressions) || 0;
-            const position = parseFloat(p.position);
-            if (position && impressions > 0) {
+            // Try multiple position field names (position, position_28d, avgPosition)
+            const position = parseFloat(p.position) || parseFloat(p.position_28d) || parseFloat(p.avgPosition) || null;
+            if (position && !isNaN(position) && impressions > 0) {
               totalPositionWeight += position * impressions;
               totalPositionImpressions += impressions;
             }
