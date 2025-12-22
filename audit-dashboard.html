@@ -16239,6 +16239,13 @@ Also check "Load from Supabase" for audit debug logs.`;
                   trackedTaskUrls.add(normalizedUrl);
                 }
               });
+              debugLog(`📊 all_tracked: Found ${trackedTaskUrls.size} tracked task URLs (from ${tasks.length} tasks)`, 'info');
+              if (trackedTaskUrls.size > 0) {
+                const sampleUrls = Array.from(trackedTaskUrls).slice(0, 3);
+                debugLog(`📊 all_tracked: Sample tracked URLs: ${sampleUrls.join(', ')}`, 'info');
+              }
+            } else {
+              debugLog(`📊 all_tracked: No tasks found`, 'warn');
             }
           }
         } catch (taskError) {
@@ -16303,6 +16310,36 @@ Also check "Load from Supabase" for audit debug logs.`;
             segmentPages.all_tracked.push(metrics);
           }
         });
+        
+        // Debug logging for all_tracked segment
+        debugLog(`📊 all_tracked: Found ${segmentPages.all_tracked.length} pages matching tracked task URLs (out of ${pageMetrics.size} total pages)`, 'info');
+        if (segmentPages.all_tracked.length > 0) {
+          const totalImpressions = segmentPages.all_tracked.reduce((sum, p) => sum + (parseFloat(p.impressions) || 0), 0);
+          const totalClicks = segmentPages.all_tracked.reduce((sum, p) => sum + (parseFloat(p.clicks) || 0), 0);
+          const pagesWithPosition = segmentPages.all_tracked.filter(p => {
+            const pos = p.position !== null && p.position !== undefined ? parseFloat(p.position) : 
+                        (p.position_28d !== null && p.position_28d !== undefined ? parseFloat(p.position_28d) : 
+                         (p.avgPosition !== null && p.avgPosition !== undefined ? parseFloat(p.avgPosition) : null));
+            return pos !== null && !isNaN(pos) && pos > 0;
+          }).length;
+          debugLog(`📊 all_tracked: Total impressions=${totalImpressions}, clicks=${totalClicks}, pages with position=${pagesWithPosition}`, 'info');
+          if (totalImpressions === 0) {
+            const samplePages = segmentPages.all_tracked.slice(0, 3).map(p => {
+              const url = p.url || 'unknown';
+              const imps = parseFloat(p.impressions) || 0;
+              const pos = p.position !== null && p.position !== undefined ? parseFloat(p.position) : 
+                          (p.position_28d !== null && p.position_28d !== undefined ? parseFloat(p.position_28d) : 
+                           (p.avgPosition !== null && p.avgPosition !== undefined ? parseFloat(p.avgPosition) : null));
+              return `${url.substring(0, 50)}: imps=${imps}, pos=${pos !== null ? pos.toFixed(1) : 'null'}`;
+            }).join('; ');
+            debugLog(`📊 all_tracked: Sample pages (why imps=0?): ${samplePages}`, 'warn');
+          }
+        } else if (trackedTaskUrls.size > 0) {
+          // No pages matched, but we have tracked URLs - this is a mismatch issue
+          const samplePageKeys = Array.from(pageMetrics.keys()).slice(0, 3);
+          const sampleTrackedUrls = Array.from(trackedTaskUrls).slice(0, 3);
+          debugLog(`📊 all_tracked: WARNING - No pages matched tracked URLs. Sample page keys: ${samplePageKeys.join(', ')}, Sample tracked URLs: ${sampleTrackedUrls.join(', ')}`, 'warn');
+        }
         
         // Fetch AI citations and AI overview data from keyword_rankings for this audit date
         let aiMetricsBySegment = {
