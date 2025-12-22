@@ -15578,7 +15578,7 @@
           }
         });
         
-        debugLog(`📊 Bucketed into ${buckets.size} time buckets (${timeGrain})`, 'info');
+        debugLog(`📊 Bucketed into ${buckets.size} time buckets (${timeGrain}) from ${metrics.length} metrics`, 'info');
         
         // Debug: Log bucket details and date sources
         if (buckets.size > 0) {
@@ -15592,9 +15592,9 @@
             debugLog(`📊 Bucket ${key}: value=${valueStr}, date=${bucket.date.toISOString()}`, 'info');
           });
           
-          // Log date source info for first few metrics
+          // Log date source info for ALL metrics (not just first 5) to diagnose why they're in same bucket
           if (metrics.length > 0) {
-            const dateSources = metrics.slice(0, 5).map(m => {
+            const dateSources = metrics.map(m => {
               const source = (timeGrain === 'monthly' && m.run_id && m.run_id.match(/^\d{4}-\d{2}$/)) ? 'run_id (YYYY-MM)' :
                             m.created_at ? 'created_at' :
                             m.run_id && m.run_id.match(/^\d{4}-\d{2}-\d{2}$/) ? 'run_id (YYYY-MM-DD)' :
@@ -15602,9 +15602,49 @@
                             'none';
               const dateUsed = (timeGrain === 'monthly' && m.run_id && m.run_id.match(/^\d{4}-\d{2}$/)) ? m.run_id :
                               m.created_at || m.date_end || 'N/A';
-              return `run_id=${m.run_id}, source=${source}, date=${dateUsed}`;
+              // Calculate what bucket this would go into
+              let calculatedBucket = 'N/A';
+              if (timeGrain === 'weekly' && dateUsed !== 'N/A') {
+                const dateObj = new Date(dateUsed);
+                const dayOfWeek = dateObj.getDay();
+                const diff = dateObj.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+                const monday = new Date(dateObj);
+                monday.setDate(diff);
+                calculatedBucket = monday.toISOString().split('T')[0];
+              } else if (timeGrain === 'monthly' && dateUsed !== 'N/A') {
+                const dateObj = new Date(dateUsed);
+                calculatedBucket = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`;
+              }
+              return `run_id=${m.run_id}, source=${source}, date=${dateUsed}, bucket=${calculatedBucket}`;
             }).join('; ');
-            debugLog(`📊 Date sources for bucketing (first 5): ${dateSources}`, 'info');
+            debugLog(`📊 Date sources for ALL ${metrics.length} metrics: ${dateSources}`, 'info');
+            
+            // Also log unique bucket keys to see if they're all the same
+            const uniqueBuckets = new Set();
+            metrics.forEach(m => {
+              let dateForBucket = null;
+              if (timeGrain === 'monthly' && m.run_id && m.run_id.match(/^\d{4}-\d{2}$/)) {
+                dateForBucket = new Date(m.run_id + '-01');
+              } else if (m.created_at) {
+                dateForBucket = new Date(m.created_at);
+              } else if (m.run_id && m.run_id.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                dateForBucket = new Date(m.run_id);
+              } else if (m.date_end) {
+                dateForBucket = new Date(m.date_end);
+              }
+              if (dateForBucket && !isNaN(dateForBucket.getTime())) {
+                if (timeGrain === 'weekly') {
+                  const dayOfWeek = dateForBucket.getDay();
+                  const diff = dateForBucket.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+                  const monday = new Date(dateForBucket);
+                  monday.setDate(diff);
+                  uniqueBuckets.add(monday.toISOString().split('T')[0]);
+                } else {
+                  uniqueBuckets.add(`${dateForBucket.getFullYear()}-${String(dateForBucket.getMonth() + 1).padStart(2, '0')}`);
+                }
+              }
+            });
+            debugLog(`📊 Unique bucket keys calculated: ${Array.from(uniqueBuckets).join(', ')} (${uniqueBuckets.size} unique buckets)`, 'info');
           }
         }
         
