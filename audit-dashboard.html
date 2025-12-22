@@ -15281,14 +15281,14 @@
           datasets: [{
             label: 'Delta',
             data: [],
-            borderColor: 'var(--brand-orange)',
+            borderColor: '#E57200',
             backgroundColor: 'rgba(229, 114, 0, 0.15)',
             borderWidth: 2,
             tension: 0.4,
             fill: true,
             pointRadius: 4,
             pointHoverRadius: 6,
-            pointBackgroundColor: 'var(--brand-orange)',
+            pointBackgroundColor: '#E57200',
             pointBorderColor: '#ffffff',
             pointBorderWidth: 2
           }]
@@ -15658,19 +15658,13 @@
           portfolioDeltaChart.data.labels = labels;
           portfolioDeltaChart.data.datasets[0].data = formattedDeltas;
           portfolioDeltaChart.data.datasets[0].label = `Delta (${kpiSelect})`;
-          // Use brand orange for line and points
-          portfolioDeltaChart.data.datasets[0].borderColor = 'var(--brand-orange)';
-          portfolioDeltaChart.data.datasets[0].pointBackgroundColor = 'var(--brand-orange)';
+          // Use brand orange (#E57200) for line and points - use hex directly, not CSS variable
+          portfolioDeltaChart.data.datasets[0].borderColor = '#E57200';
+          portfolioDeltaChart.data.datasets[0].pointBackgroundColor = '#E57200';
           portfolioDeltaChart.data.datasets[0].pointBorderColor = '#ffffff';
           portfolioDeltaChart.data.datasets[0].pointBorderWidth = 2;
-          // Dynamic fill: positive = brand orange (light), negative = red (light)
-          portfolioDeltaChart.data.datasets[0].backgroundColor = (ctx) => {
-            if (!ctx.chart.chartArea) return 'rgba(229, 114, 0, 0.1)';
-            const gradient = ctx.chart.ctx.createLinearGradient(0, ctx.chart.chartArea.top, 0, ctx.chart.chartArea.bottom);
-            gradient.addColorStop(0, 'rgba(229, 114, 0, 0.2)'); // Brand orange at top
-            gradient.addColorStop(1, 'rgba(229, 114, 0, 0.05)'); // Fade at bottom
-            return gradient;
-          };
+          // Simple brand orange fill (no gradient function - Chart.js can have issues with functions)
+          portfolioDeltaChart.data.datasets[0].backgroundColor = 'rgba(229, 114, 0, 0.15)';
           
           // Update Y-axis label
           if (kpiSelect === 'ctr_28d') {
@@ -15869,17 +15863,13 @@
               } else if (kpiField === 'impressions_28d') {
                 value = parseFloat(snapshot.impressions_28d || 0);
               } else if (kpiField === 'position_28d') {
-                // Handle position: check if it's null, undefined, NaN, or 0 (positions start at 1)
+                // Handle position: can be string or number from database
                 const posValue = snapshot.position_28d;
-                if (posValue !== null && posValue !== undefined && posValue !== '' && posValue !== 0) {
-                  const parsed = parseFloat(posValue);
+                if (posValue != null && posValue !== '' && posValue !== 0) {
+                  const parsed = typeof posValue === 'string' ? parseFloat(posValue) : Number(posValue);
                   if (!isNaN(parsed) && isFinite(parsed) && parsed > 0) {
                     value = parsed;
-                  } else {
-                    value = null;
                   }
-                } else {
-                  value = null;
                 }
               } else if (kpiField === 'ai_citations_28d') {
                 value = snapshot.ai_citations_28d ? parseInt(snapshot.ai_citations_28d) : 0;
@@ -15931,11 +15921,13 @@
                   } else if (kpiField === 'impressions_28d') {
                     prevValue = parseFloat(prevSnapshot.impressions_28d || 0);
                   } else if (kpiField === 'position_28d') {
-                    // Handle position: check if it's null, undefined, or NaN
-                    if (prevSnapshot.position_28d !== null && prevSnapshot.position_28d !== undefined && !isNaN(parseFloat(prevSnapshot.position_28d))) {
-                      prevValue = parseFloat(prevSnapshot.position_28d);
-                    } else {
-                      prevValue = null;
+                    // Handle position: can be string or number from database
+                    const posValue = prevSnapshot.position_28d;
+                    if (posValue != null && posValue !== '' && posValue !== 0) {
+                      const parsed = typeof posValue === 'string' ? parseFloat(posValue) : Number(posValue);
+                      if (!isNaN(parsed) && isFinite(parsed) && parsed > 0) {
+                        prevValue = parsed;
+                      }
                     }
                   } else if (kpiField === 'ai_citations_28d') {
                     prevValue = prevSnapshot.ai_citations_28d ? parseInt(prevSnapshot.ai_citations_28d) : 0;
@@ -15953,9 +15945,15 @@
                     let deltaFormatted;
                     if (kpi === 'ctr_28d') {
                       deltaFormatted = (delta * 100).toFixed(1) + 'pp'; // Convert ratio delta to percentage points
+                      cell.innerHTML = `${formatted} <span style="color: ${color};">${indicator} ${deltaFormatted}</span>`;
+                      tooltipText += ` | Change from previous month: ${indicator} ${deltaFormatted}`;
                     } else if (kpi === 'avg_position') {
                       deltaFormatted = Math.abs(delta).toFixed(1);
-                      // For position, lower is better, so flip the indicator
+                      // For position, lower is better, so flip the indicator (negative delta = improvement)
+                      const posIndicator = delta < 0 ? '▼' : '▲';
+                      const posColor = delta < 0 ? '#10b981' : '#ef4444';
+                      cell.innerHTML = `${formatted} <span style="color: ${posColor};">${posIndicator} ${deltaFormatted}</span>`;
+                      tooltipText += ` | Change from previous month: ${posIndicator} ${deltaFormatted} (${delta < 0 ? 'improved' : 'worsened'})`;
                     } else if (kpi === 'ai_citations' || kpi === 'ai_overview') {
                       // AI metrics are integers, show absolute change
                       deltaFormatted = Math.abs(delta).toString();
@@ -15967,13 +15965,6 @@
                       deltaFormatted = Math.abs(delta).toLocaleString();
                       cell.innerHTML = `${formatted} <span style="color: ${color};">${indicator} ${deltaFormatted}</span>`;
                       tooltipText += ` | Change from previous month: ${indicator} ${deltaFormatted}`;
-                    }
-                    
-                    if (kpi !== 'avg_position') {
-                      cell.innerHTML = `${formatted} <span style="color: ${color};">${indicator} ${deltaFormatted}</span>`;
-                      if (kpi !== 'ai_citations' && kpi !== 'ai_overview') {
-                        tooltipText += ` | Change from previous month: ${indicator} ${deltaFormatted}`;
-                      }
                     }
                   } else {
                     cell.textContent = formatted;
