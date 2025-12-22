@@ -119,9 +119,14 @@ export default async function handler(req, res) {
           // Normalize URLs - handle both full URLs and relative paths
           let url = task.target_url_clean || task.target_url;
           if (url) {
-            // If relative path, make it absolute
+            // Remove protocol if present
+            url = url.replace(/^https?:\/\//, '');
+            // Remove www. if present
+            url = url.replace(/^www\./, '');
+            // If relative path (starts with /), make it absolute by adding domain
             if (url.startsWith('/')) {
-              url = siteUrl + url;
+              const domain = siteUrl.replace(/^https?:\/\//, '').replace(/^www\./, '');
+              url = domain + url;
             }
             // Normalize: remove trailing slash, convert to lowercase for matching
             url = url.replace(/\/$/, '').toLowerCase();
@@ -144,7 +149,11 @@ export default async function handler(req, res) {
         }
         
         // Add to all_tracked if this page URL is tracked by an active optimization task
-        const pageUrlNormalized = page.page_url.replace(/\/$/, '').toLowerCase();
+        // Normalize page URL the same way: remove protocol, www, trailing slash
+        let pageUrlNormalized = page.page_url;
+        pageUrlNormalized = pageUrlNormalized.replace(/^https?:\/\//, '');
+        pageUrlNormalized = pageUrlNormalized.replace(/^www\./, '');
+        pageUrlNormalized = pageUrlNormalized.replace(/\/$/, '').toLowerCase();
         if (trackedUrls.has(pageUrlNormalized)) {
           segmentPages.all_tracked.push(page);
         }
