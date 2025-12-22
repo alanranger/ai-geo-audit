@@ -15367,11 +15367,21 @@
         // Debug: Log sample metrics to see what data we have
         if (metrics.length > 0) {
           const sampleMetric = metrics[0];
-          debugLog(`📊 Sample metric: run_id=${sampleMetric.run_id}, created_at=${sampleMetric.created_at}, position_28d=${sampleMetric.position_28d}, ctr_28d=${sampleMetric.ctr_28d}`, 'info');
+          debugLog(`📊 Sample metric: run_id=${sampleMetric.run_id}, created_at=${sampleMetric.created_at}, date_end=${sampleMetric.date_end}, position_28d=${sampleMetric.position_28d}, ctr_28d=${sampleMetric.ctr_28d}`, 'info');
           
           // Check for position data
-          const metricsWithPosition = metrics.filter(m => m.position_28d !== null && m.position_28d !== undefined);
+          const metricsWithPosition = metrics.filter(m => m.position_28d !== null && m.position_28d !== undefined && !isNaN(parseFloat(m.position_28d)));
           debugLog(`📊 Metrics with position data: ${metricsWithPosition.length} out of ${metrics.length}`, metricsWithPosition.length > 0 ? 'success' : 'warn');
+          
+          // Log position values for debugging
+          if (metricsWithPosition.length > 0) {
+            const positionValues = metricsWithPosition.slice(0, 5).map(m => m.position_28d).join(', ');
+            debugLog(`📊 Sample position values: ${positionValues}`, 'info');
+          } else {
+            debugLog(`⚠ No valid position data found. Checking raw values...`, 'warn');
+            const rawPositions = metrics.slice(0, 5).map(m => `run_id=${m.run_id}, position_28d=${m.position_28d} (type=${typeof m.position_28d})`).join('; ');
+            debugLog(`📊 Raw position samples: ${rawPositions}`, 'info');
+          }
         }
         
         if (metrics.length === 0) {
@@ -15408,45 +15418,99 @@
         }
         
         // Bucket by time grain and compute deltas
+        // Use created_at (when the audit was run) as the primary date for bucketing
+        // This ensures audits run on different days get different buckets, even if they share the same date_end
+        // For monthly bucketing, also check run_id if it's in YYYY-MM format
         const buckets = new Map(); // key: bucket label, value: { value, date }
         
         metrics.forEach(m => {
-          const date = new Date(m.created_at);
-          let bucketKey;
+          // Determine the date to use for bucketing:
+          // 1. If run_id is in YYYY-MM format, use that for monthly bucketing (historical backfill)
+          // 2. Otherwise, use created_at (when the audit was run) - this ensures different audit runs get different buckets
+          // 3. Fallback to date_end if created_at is not available
+          let dateForBucket = null;
+          let bucketKey = null;
           
-          if (timeGrain === 'weekly') {
-            // ISO week: get Monday of the week
-            const dayOfWeek = date.getDay();
-            const diff = date.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
-            const monday = new Date(date);
-            monday.setDate(diff);
-            bucketKey = monday.toISOString().split('T')[0]; // Use Monday date as key
+          if (timeGrain === 'monthly' && m.run_id && m.run_id.match(/^\d{4}-\d{2}$/)) {
+            // Monthly: use run_id directly if it's in YYYY-MM format (for historical backfill)
+            bucketKey = m.run_id;
+            dateForBucket = new Date(m.run_id + '-01');
+          } else if (m.created_at) {
+            // Use created_at (when the audit was run) - this is the most reliable for distinguishing different audit runs
+            dateForBucket = new Date(m.created_at);
+          } else if (m.run_id && m.run_id.match(/^\d{4}-\d{2}-\d{2}$/)) {
+            // If run_id is in YYYY-MM-DD format, use that
+            dateForBucket = new Date(m.run_id);
+          } else if (m.date_end) {
+            // Fallback to date_end (less ideal since all audits may share the same date_end)
+            dateForBucket = new Date(m.date_end);
           } else {
-            // Monthly: YYYY-MM
-            bucketKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+            debugLog(`⚠ No valid date found for metric: run_id=${m.run_id}, date_end=${m.date_end}, created_at=${m.created_at}`, 'warn');
+            return; // Skip this metric
           }
           
-          // Keep the LAST snapshot in each bucket
-          if (!buckets.has(bucketKey) || new Date(m.created_at) > buckets.get(bucketKey).date) {
+          if (!dateForBucket || isNaN(dateForBucket.getTime())) {
+            debugLog(`⚠ Invalid date for metric: run_id=${m.run_id}, date_end=${m.date_end}, created_at=${m.created_at}`, 'warn');
+            return; // Skip this metric
+          }
+          
+          if (!bucketKey) {
+            // Calculate bucket key from date
+            if (timeGrain === 'weekly') {
+              // ISO week: get Monday of the week
+              const dayOfWeek = dateForBucket.getDay();
+              const diff = dateForBucket.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+              const monday = new Date(dateForBucket);
+              monday.setDate(diff);
+              bucketKey = monday.toISOString().split('T')[0]; // Use Monday date as key
+            } else {
+              // Monthly: YYYY-MM
+              bucketKey = `${dateForBucket.getFullYear()}-${String(dateForBucket.getMonth() + 1).padStart(2, '0')}`;
+            }
+          }
+          
+          // Keep the LAST snapshot in each bucket (by created_at, which represents when the audit was run)
+          const comparisonDate = m.created_at ? new Date(m.created_at) : (m.date_end ? new Date(m.date_end) : dateForBucket);
+          if (!buckets.has(bucketKey) || comparisonDate > buckets.get(bucketKey).date) {
             const value = kpiField === 'ctr_28d' ? parseFloat(m.ctr_28d || 0) :
                           kpiField === 'clicks_28d' ? parseFloat(m.clicks_28d || 0) :
                           kpiField === 'impressions_28d' ? parseFloat(m.impressions_28d || 0) :
-                          kpiField === 'position_28d' ? (m.position_28d ? parseFloat(m.position_28d) : null) :
+                          kpiField === 'position_28d' ? (m.position_28d !== null && m.position_28d !== undefined && !isNaN(parseFloat(m.position_28d)) ? parseFloat(m.position_28d) : null) :
                           kpiField === 'ai_citations_28d' ? (m.ai_citations_28d ? parseInt(m.ai_citations_28d) : 0) :
                           kpiField === 'ai_overview_present_count' ? (m.ai_overview_present_count ? parseInt(m.ai_overview_present_count) : 0) : null;
             
-            buckets.set(bucketKey, { value, date: new Date(m.created_at) });
+            buckets.set(bucketKey, { value, date: comparisonDate });
           }
         });
         
         debugLog(`📊 Bucketed into ${buckets.size} time buckets (${timeGrain})`, 'info');
         
-        // Debug: Log bucket details
+        // Debug: Log bucket details and date sources
         if (buckets.size > 0) {
           const bucketEntries = Array.from(buckets.entries());
           bucketEntries.forEach(([key, bucket]) => {
-            debugLog(`📊 Bucket ${key}: value=${bucket.value !== null ? (kpiSelect === 'ctr_28d' ? (bucket.value * 100).toFixed(2) + '%' : bucket.value.toFixed(2)) : 'null'}, date=${bucket.date.toISOString()}`, 'info');
+            const valueStr = bucket.value !== null 
+              ? (kpiSelect === 'ctr_28d' ? (bucket.value * 100).toFixed(2) + '%' : 
+                 kpiSelect === 'avg_position' ? bucket.value.toFixed(1) : 
+                 bucket.value.toFixed(2))
+              : 'null';
+            debugLog(`📊 Bucket ${key}: value=${valueStr}, date=${bucket.date.toISOString()}`, 'info');
           });
+          
+          // Log date source info for first few metrics
+          if (metrics.length > 0) {
+            const dateSources = metrics.slice(0, 5).map(m => {
+              const source = (timeGrain === 'monthly' && m.run_id && m.run_id.match(/^\d{4}-\d{2}$/)) ? 'run_id (YYYY-MM)' :
+                            m.created_at ? 'created_at' :
+                            m.run_id && m.run_id.match(/^\d{4}-\d{2}-\d{2}$/) ? 'run_id (YYYY-MM-DD)' :
+                            m.date_end ? 'date_end' :
+                            'none';
+              const dateUsed = (timeGrain === 'monthly' && m.run_id && m.run_id.match(/^\d{4}-\d{2}$/)) ? m.run_id :
+                              m.created_at || m.date_end || 'N/A';
+              return `run_id=${m.run_id}, source=${source}, date=${dateUsed}`;
+            }).join('; ');
+            debugLog(`📊 Date sources for bucketing (first 5): ${dateSources}`, 'info');
+          }
         }
         
         // Sort buckets by date
@@ -16114,8 +16178,26 @@
             // Try multiple position field names (position, position_28d, avgPosition)
             // Note: When fetched from Supabase, position is stored in p.position (set from position_28d)
             // When from pageTotalsByKey, it might be in p.position or p.avgPosition
-            const position = parseFloat(p.position) || parseFloat(p.position_28d) || parseFloat(p.avgPosition) || null;
-            if (position !== null && !isNaN(position) && isFinite(position) && impressions > 0) {
+            // IMPORTANT: Check p.position first (set from position_28d when fetching from Supabase)
+            let position = null;
+            if (p.position !== null && p.position !== undefined) {
+              const parsed = parseFloat(p.position);
+              if (!isNaN(parsed) && isFinite(parsed)) {
+                position = parsed;
+              }
+            } else if (p.position_28d !== null && p.position_28d !== undefined) {
+              const parsed = parseFloat(p.position_28d);
+              if (!isNaN(parsed) && isFinite(parsed)) {
+                position = parsed;
+              }
+            } else if (p.avgPosition !== null && p.avgPosition !== undefined) {
+              const parsed = parseFloat(p.avgPosition);
+              if (!isNaN(parsed) && isFinite(parsed)) {
+                position = parsed;
+              }
+            }
+            
+            if (position !== null && impressions > 0) {
               totalPositionWeight += position * impressions;
               totalPositionImpressions += impressions;
               positionCount++;
@@ -16129,7 +16211,9 @@
           // Additional debug: log sample positions for first few pages
           if (segment === 'money' && pages.length > 0) {
             const samplePositions = pages.slice(0, 5).map(p => {
-              const pos = parseFloat(p.position) || parseFloat(p.position_28d) || parseFloat(p.avgPosition) || null;
+              const pos = p.position !== null ? parseFloat(p.position) : 
+                          (p.position_28d !== null ? parseFloat(p.position_28d) : 
+                           (p.avgPosition !== null ? parseFloat(p.avgPosition) : null));
               const imps = parseFloat(p.impressions) || 0;
               return `pos=${pos !== null ? pos.toFixed(1) : 'null'}, imps=${imps}`;
             }).join('; ');
