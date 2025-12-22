@@ -15364,6 +15364,18 @@
         debugLog(`📊 Portfolio data loaded: ${metrics.length} metrics for segment=${segment}, scope=${mappedScope}, kpi=${kpiSelect}`, 'info');
         debugLog(`📊 API params: siteUrl=${propertyUrl}, segment=${segment}, scope=${mappedScope}, from=${fromDate.toISOString()}, to=${toDate.toISOString()}`, 'info');
         
+        // Debug: Log all metrics with their run_id and created_at to see why they're being bucketed together
+        if (metrics.length > 0) {
+          const metricsInfo = metrics.map(m => ({
+            run_id: m.run_id,
+            created_at: m.created_at,
+            date_end: m.date_end,
+            segment: m.segment,
+            scope: m.scope
+          }));
+          debugLog(`📊 All metrics from API: ${JSON.stringify(metricsInfo)}`, 'info');
+        }
+        
         // Debug: Log sample metrics to see what data we have
         if (metrics.length > 0) {
           const sampleMetric = metrics[0];
@@ -16245,6 +16257,9 @@
         
         // Save to Supabase
         debugLog(`📊 Saving ${segmentRows.length} segment snapshots to Supabase...`, 'info');
+        debugLog(`📊 Save params: runId=${runId}, siteUrl=${siteUrl}, dateStart=${dateStart}, dateEnd=${dateEnd}, scope=${scope}`, 'info');
+        debugLog(`📊 Segment rows to save: ${JSON.stringify(segmentRows.map(r => ({ segment: r.segment, pages: r.pages_count, clicks: r.clicks_28d, impressions: r.impressions_28d, ctr: r.ctr_28d, position: r.position_28d })))}`, 'info');
+        
         const saveResponse = await fetch(apiUrl('/api/supabase/save-portfolio-segment-metrics'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -16260,11 +16275,15 @@
         
         if (!saveResponse.ok) {
           const errorText = await saveResponse.text();
+          debugLog(`❌ Failed to save segment snapshots: ${saveResponse.status} - ${errorText}`, 'error');
           throw new Error(`Failed to save segment snapshots: ${saveResponse.status} - ${errorText}`);
         }
         
         const saveResult = await saveResponse.json();
-        debugLog(`✓ Saved ${saveResult.inserted} portfolio segment snapshots to Supabase`, 'success');
+        debugLog(`✓ Saved ${saveResult.inserted} portfolio segment snapshots to Supabase (runId=${runId})`, 'success');
+        if (saveResult.warning) {
+          debugLog(`⚠ Warning from save: ${saveResult.message}`, 'warn');
+        }
         
       } catch (err) {
         debugLog(`Error calculating portfolio segment snapshots: ${err.message}`, 'error');
@@ -18365,8 +18384,11 @@
           }
           
           // Save GSC page-level 28d metrics to Supabase
+          let pageMetricsSaved = false;
+          let pageMetricsData = null;
           try {
             if (window._pendingPageMetrics && window._pendingPageMetrics.pages && window._pendingPageMetrics.pages.length > 0) {
+              pageMetricsData = window._pendingPageMetrics;
               debugLog(`📊 Saving ${window._pendingPageMetrics.pages.length} page metrics to Supabase (run_id: ${auditDate})...`, 'info');
               
               const saveResponse = await fetch(apiUrl('/api/supabase/save-gsc-page-metrics'), {
@@ -18384,19 +18406,7 @@
               if (saveResponse.ok) {
                 const saveResult = await saveResponse.json();
                 debugLog(`✓ Saved ${saveResult.inserted} page metrics to Supabase`, 'success');
-                
-                // Calculate and save portfolio segment snapshots (Phase 3a)
-                try {
-                  await calculateAndSavePortfolioSegmentSnapshots(
-                    auditDate,
-                    window._pendingPageMetrics.propertyUrl,
-                    window._pendingPageMetrics.gscRange.startDate,
-                    window._pendingPageMetrics.gscRange.endDate,
-                    window.pageTotalsByKey || new Map()
-                  );
-                } catch (segmentError) {
-                  debugLog(`⚠ Error saving portfolio segment snapshots (non-critical): ${segmentError.message}`, 'warn');
-                }
+                pageMetricsSaved = true;
                 
                 // Clear pending metrics
                 window._pendingPageMetrics = null;
@@ -18404,9 +18414,46 @@
                 const errorText = await saveResponse.text();
                 debugLog(`⚠ Failed to save page metrics to Supabase: ${saveResponse.status} - ${errorText}`, 'warn');
               }
+            } else {
+              debugLog(`⚠ No pending page metrics to save (window._pendingPageMetrics=${!!window._pendingPageMetrics}, pages=${window._pendingPageMetrics?.pages?.length || 0})`, 'warn');
             }
           } catch (pageMetricsError) {
             debugLog(`⚠ Error saving page metrics to Supabase (non-critical): ${pageMetricsError.message}`, 'warn');
+          }
+          
+          // Calculate and save portfolio segment snapshots (Phase 3a)
+          // Run this even if page metrics save failed, as long as we have the data
+          try {
+            if (pageMetricsData || (window.pageTotalsByKey && window.pageTotalsByKey.size > 0)) {
+              const propertyUrl = pageMetricsData?.propertyUrl || localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+              const dateStart = pageMetricsData?.gscRange?.startDate || (() => {
+                const end = new Date();
+                end.setDate(end.getDate() - 1);
+                const start = new Date(end);
+                start.setDate(start.getDate() - 27);
+                return start.toISOString().split('T')[0];
+              })();
+              const dateEnd = pageMetricsData?.gscRange?.endDate || (() => {
+                const end = new Date();
+                end.setDate(end.getDate() - 1);
+                return end.toISOString().split('T')[0];
+              })();
+              
+              debugLog(`📊 Starting portfolio segment snapshot calculation (runId=${auditDate}, propertyUrl=${propertyUrl}, dateStart=${dateStart}, dateEnd=${dateEnd})...`, 'info');
+              await calculateAndSavePortfolioSegmentSnapshots(
+                auditDate,
+                propertyUrl,
+                dateStart,
+                dateEnd,
+                window.pageTotalsByKey || new Map()
+              );
+              debugLog(`✓ Portfolio segment snapshot calculation completed (runId=${auditDate})`, 'success');
+            } else {
+              debugLog(`⚠ Cannot calculate portfolio segment snapshots: no page metrics data available (pageMetricsData=${!!pageMetricsData}, pageTotalsByKey=${!!window.pageTotalsByKey && window.pageTotalsByKey.size > 0})`, 'warn');
+            }
+          } catch (segmentError) {
+            debugLog(`❌ Error saving portfolio segment snapshots (non-critical): ${segmentError.message}`, 'error');
+            debugLog(`❌ Error stack: ${segmentError.stack}`, 'error');
           }
           
           // Calculate and save portfolio snapshots (Phase 3)

@@ -111,12 +111,18 @@ export default async function handler(req, res) {
 
       // Count inserted vs updated (upsert doesn't distinguish, so we'll just count total)
       totalInserted += batch.length;
+      console.log(`[Save Portfolio Segment Metrics] Batch ${i / BATCH_SIZE + 1}: Upserted ${batch.length} rows (runId=${runId}, segments=${batch.map(r => r.segment).join(', ')})`);
     }
 
+    console.log(`[Save Portfolio Segment Metrics] Total upserted: ${totalInserted} rows for runId=${runId}, siteUrl=${siteUrl}, scope=${scope}`);
+    
     return sendJSON(res, 200, { 
       success: true,
       inserted: totalInserted,
-      message: `Upserted ${totalInserted} portfolio segment metrics`
+      message: `Upserted ${totalInserted} portfolio segment metrics`,
+      runId: runId,
+      siteUrl: siteUrl,
+      scope: scope
     });
 
   } catch (err) {
