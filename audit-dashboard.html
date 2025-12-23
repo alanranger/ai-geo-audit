@@ -5449,9 +5449,126 @@
     
     // Phase 4: Define renderMoneyPagesSuggestedTop10 function IMMEDIATELY at script start
     // This ensures it's available before any code tries to call it
-    // Stub function that will be replaced with full implementation later
+    // Will be replaced with full implementation when helper functions are available
     window.renderMoneyPagesSuggestedTop10 = function(moneyPagesRows) {
-      console.warn('[Money Pages] renderMoneyPagesSuggestedTop10 called before full implementation loaded');
+      // Check if helper functions are available (they're defined later in the script)
+      if (typeof computeImpactScores === 'function' && 
+          typeof computeDifficultyScore === 'function' && 
+          typeof computePriority === 'function' && 
+          typeof getRecommendedAction === 'function') {
+        // Helper functions are available, use full implementation
+        console.log('[Money Pages Suggested Top 10] Full implementation executing');
+        try {
+          const container = document.getElementById('money-pages-suggested-top10-content');
+          if (!container) {
+            console.warn('[Money Pages Suggested Top 10] Container not found');
+            return;
+          }
+          
+          if (!moneyPagesRows || moneyPagesRows.length === 0) {
+            container.innerHTML = '<div style="padding: 2rem; text-align: center; color: #64748b; font-size: 0.9rem;">No money pages data available.</div>';
+            return;
+          }
+          
+          // Create a copy of rows to avoid mutating original
+          const pages = moneyPagesRows.map(row => ({
+            url: row.url || row.page_url || '',
+            title: row.title || row.page_title || row.url || '',
+            clicks: row.clicks || row.clicks_28d || 0,
+            impressions: row.impressions || row.impressions_28d || 0,
+            ctr: row.ctr || row.ctr_28d || 0,
+            avgPosition: row.avgPosition || row.position || row.position_28d || null,
+            subSegment: row.subSegment || row.segmentType || 'Landing'
+          }));
+          
+          // Compute Phase 4 scores
+          computeImpactScores(pages, 0.025);
+          for (const page of pages) {
+            page.difficulty = computeDifficultyScore(page);
+            page.priority = computePriority(page.impact_score || 0, page.difficulty);
+            const { action, taskType } = getRecommendedAction(page);
+            page.recommended_action = action;
+            page.recommended_task_type = taskType;
+          }
+          
+          // Sort by priority (HIGH > MED > LOW) then by upside_clicks desc
+          const priorityOrder = { HIGH: 0, MED: 1, LOW: 2 };
+          pages.sort((a, b) => {
+            const priorityDiff = (priorityOrder[a.priority] ?? 99) - (priorityOrder[b.priority] ?? 99);
+            if (priorityDiff !== 0) return priorityDiff;
+            return (b.upside_clicks || 0) - (a.upside_clicks || 0);
+          });
+          
+          // Take top 10
+          const top10 = pages.slice(0, 10);
+          
+          if (top10.length === 0) {
+            container.innerHTML = '<div style="padding: 2rem; text-align: center; color: #64748b; font-size: 0.9rem;">No pages meet the criteria for suggested optimization.</div>';
+            return;
+          }
+          
+          // Render as a grid of cards
+          const html = `
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem;">
+              ${top10.map((page, idx) => {
+                const priority = page.priority || 'LOW';
+                const priorityColor = priority === 'HIGH' ? '#10b981' : priority === 'MED' ? '#f59e0b' : '#64748b';
+                const priorityBg = priority === 'HIGH' ? '#dcfce7' : priority === 'MED' ? '#fef3c7' : '#f1f5f9';
+                const difficulty = page.difficulty || 'MED';
+                const difficultyColor = difficulty === 'LOW' ? '#10b981' : difficulty === 'MED' ? '#f59e0b' : '#ef4444';
+                const ctrPct = ((page.ctr || 0) * 100).toFixed(1);
+                
+                return `
+                  <div style="padding: 1rem; background: white; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                    <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.75rem;">
+                      <div style="flex: 1; min-width: 0;">
+                        <div style="font-weight: 600; color: #1e293b; margin-bottom: 0.25rem; font-size: 0.9rem; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;" title="${page.title}">${page.title}</div>
+                        <div style="font-size: 0.75rem; color: #64748b; margin-bottom: 0.25rem;">${page.subSegment}</div>
+                      </div>
+                      <span style="display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600; background: ${priorityBg}; color: ${priorityColor}; border: 1px solid ${priorityColor}40; white-space: nowrap; margin-left: 0.5rem;">${priority}</span>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5rem; margin-bottom: 0.75rem; font-size: 0.8rem;">
+                      <div><span style="color: #64748b;">Pos:</span> <strong>${page.avgPosition ? page.avgPosition.toFixed(1) : '—'}</strong></div>
+                      <div><span style="color: #64748b;">CTR:</span> <strong>${ctrPct}%</strong></div>
+                      <div><span style="color: #64748b;">Impr:</span> <strong>${(page.impressions || 0).toLocaleString()}</strong></div>
+                      <div><span style="color: #64748b;">Upside:</span> <strong>${(page.upside_clicks || 0).toFixed(0)}</strong></div>
+                      <div><span style="color: #64748b;">Impact:</span> <strong>${page.impact_score != null ? page.impact_score : '—'}</strong></div>
+                      <div><span style="color: #64748b;">Difficulty:</span> <strong style="color: ${difficultyColor};">${difficulty}</strong></div>
+                    </div>
+                    <div style="font-size: 0.75rem; color: #475569; margin-bottom: 0.75rem; line-height: 1.4; min-height: 2.5rem;">${page.recommended_action || 'Review page manually'}</div>
+                    <button onclick="window.createMoneyPageTask && window.createMoneyPageTask('${page.url.replace(/'/g, "\\'")}', '${(page.recommended_task_type || 'on_page').replace(/'/g, "\\'")}', ${JSON.stringify({
+                      clicks: page.clicks || 0,
+                      impressions: page.impressions || 0,
+                      ctr: page.ctr || 0,
+                      position: page.avgPosition || null
+                    }).replace(/'/g, "\\'")})" style="width: 100%; padding: 0.6rem; background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; transition: background 0.2s;" onmouseover="this.style.background='#1d4ed8';" onmouseout="this.style.background='#2563eb';" title="Create optimisation task for this page">Create Task</button>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          `;
+          
+          container.innerHTML = html;
+          console.log(`[Money Pages Suggested Top 10] ✓ Rendered ${top10.length} pages`);
+          if (typeof debugLog === 'function') {
+            debugLog(`✓ Suggested Top 10 rendered with ${top10.length} pages`, 'success');
+          }
+        } catch (error) {
+          console.error('[Money Pages Suggested Top 10] Error rendering:', error);
+          const container = document.getElementById('money-pages-suggested-top10-content');
+          if (container) {
+            container.innerHTML = `<div style="padding: 2rem; text-align: center; color: #ef4444; font-size: 0.9rem;">Error rendering suggested pages: ${error.message}</div>`;
+          }
+        }
+      } else {
+        // Helper functions not yet available, wait a bit and retry
+        console.warn('[Money Pages] Helper functions not yet available, retrying in 100ms...');
+        setTimeout(() => {
+          if (typeof window.renderMoneyPagesSuggestedTop10 === 'function') {
+            window.renderMoneyPagesSuggestedTop10(moneyPagesRows);
+          }
+        }, 100);
+      }
     };
     
     // Helper function to safely save to localStorage (handles quota errors gracefully)
