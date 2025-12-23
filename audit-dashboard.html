@@ -5613,7 +5613,7 @@
             return;
           }
           
-          // Check optimization status for each page
+          // Check optimization status for each page - try multiple task types to catch all optimizations
           top10.forEach(page => {
             if (typeof window.getOptimisationStatus === 'function') {
               const statusRow = {
@@ -5622,7 +5622,25 @@
                 targetUrl: page.url,
                 ranking_url: page.url
               };
-              const status = window.getOptimisationStatus(statusRow, page.recommended_task_type || 'on_page');
+              // Try recommended task type first, then try 'on_page' as fallback
+              let status = window.getOptimisationStatus(statusRow, page.recommended_task_type || 'on_page');
+              if (!status || status.status !== 'monitoring') {
+                // Try 'on_page' if recommended type didn't find anything
+                if (page.recommended_task_type && page.recommended_task_type !== 'on_page') {
+                  status = window.getOptimisationStatus(statusRow, 'on_page');
+                }
+              }
+              // Also try other common task types
+              if (!status || status.status !== 'monitoring') {
+                const taskTypes = ['content', 'internal_links', 'technical'];
+                for (const taskType of taskTypes) {
+                  const testStatus = window.getOptimisationStatus(statusRow, taskType);
+                  if (testStatus && testStatus.status === 'monitoring') {
+                    status = testStatus;
+                    break;
+                  }
+                }
+              }
               page.optimisationStatus = status;
               page.isTracked = status && status.status === 'monitoring';
               page.taskId = status?.id || null;
@@ -5668,7 +5686,7 @@
                     <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.75rem;">
                       <div style="flex: 1; min-width: 0;">
                         <div style="font-weight: 600; color: #1e293b; margin-bottom: 0.25rem; font-size: 0.9rem; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;" title="${page.title}">${page.title}</div>
-                        <div style="font-size: 0.7rem; color: #64748b; margin-bottom: 0.4rem; word-break: break-all;" title="${page.url}">${page.url}</div>
+                        <a href="${page.url}" target="_blank" rel="noopener noreferrer" style="font-size: 0.7rem; color: #2563eb; margin-bottom: 0.4rem; word-break: break-all; text-decoration: underline; display: block;" title="${page.url}">${page.url}</a>
                         <div style="${pageTypeStyle}">${page.subSegment || 'Landing'}</div>
                       </div>
                       <span style="display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600; background: ${priorityBg}; color: ${priorityColor}; border: 1px solid ${priorityColor}40; white-space: nowrap; margin-left: 0.5rem;">${priority}</span>
@@ -5680,17 +5698,13 @@
                       <div><span style="color: #64748b;">Upside:</span> <strong>${(page.upside_clicks || 0).toFixed(0)}</strong></div>
                       <div><span style="color: #64748b;">Impact:</span> <strong>${page.impact_score != null ? page.impact_score : '—'}</strong></div>
                       <div><span style="color: #64748b;">Difficulty:</span> <strong style="color: ${difficultyColor};">${difficulty}</strong></div>
+                      <div style="grid-column: 1 / -1; padding-top: 0.25rem; border-top: 1px solid #e2e8f0;"><span style="color: #64748b;">Potential impact clicks 28d:</span> <strong style="color: #10b981; font-size: 0.9rem;">${(page.upside_clicks || 0).toFixed(0)}</strong></div>
                     </div>
                     <div style="font-size: 0.75rem; color: #475569; margin-bottom: 0.75rem; line-height: 1.4; min-height: 2.5rem;">${page.recommended_action || 'Review page manually'}</div>
                     ${isTracked && taskId ? `
-                      <button onclick="if (typeof window.openOptimisationDrawer === 'function') { window.openOptimisationDrawer('${taskId}'); }" style="width: 100%; padding: 0.6rem; background: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; transition: background 0.2s;" onmouseover="this.style.background='#059669';" onmouseout="this.style.background='#10b981';" title="Manage existing optimisation task">Manage Task</button>
+                      <button onclick="if (typeof window.openOptimisationTaskDrawer === 'function') { window.openOptimisationTaskDrawer('${String(taskId).replace(/'/g, "\\'").replace(/"/g, '&quot;')}'); }" style="width: 100%; padding: 0.6rem; background: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; transition: background 0.2s;" onmouseover="this.style.background='#059669';" onmouseout="this.style.background='#10b981';" title="Manage existing optimisation task">Manage Task</button>
                     ` : `
-                      <button onclick="window.createMoneyPageTask && window.createMoneyPageTask('${page.url.replace(/'/g, "\\'")}', '${(page.recommended_task_type || 'on_page').replace(/'/g, "\\'")}', ${JSON.stringify({
-                        clicks: page.clicks || 0,
-                        impressions: page.impressions || 0,
-                        ctr: page.ctr || 0,
-                        position: page.avgPosition || null
-                      }).replace(/'/g, "\\'")})" style="width: 100%; padding: 0.6rem; background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; transition: background 0.2s;" onmouseover="this.style.background='#1d4ed8';" onmouseout="this.style.background='#2563eb';" title="Create optimisation task for this page">Create Task</button>
+                      <button onclick="if (typeof window.trackMoneyPage === 'function') { window.trackMoneyPage('${page.url.replace(/'/g, "\\'")}', '${(page.title || page.url || 'Untitled').replace(/'/g, "\\'")}'); }" style="width: 100%; padding: 0.6rem; background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; transition: background 0.2s;" onmouseover="this.style.background='#1d4ed8';" onmouseout="this.style.background='#2563eb';" title="Create optimisation task for this page (CTR ≥ 2.5%)">Create Task</button>
                     `}
                   </div>
                 `;
