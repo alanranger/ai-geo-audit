@@ -3490,11 +3490,8 @@
                   <label for="portfolio-time-grain" style="display: block; margin-bottom: 0.25rem; font-weight: 600;" title="Time aggregation: How to group data points on the chart">Time Grain:</label>
                   <select id="portfolio-time-grain" style="padding: 0.5rem; min-width: 120px;">
                     <option value="weekly" title="Group data by week: Shows the last snapshot from each week">Weekly</option>
-                    <option value="monthly" selected title="Group data by month: Shows the last snapshot from each month">Monthly</option>
+                    <option value="monthly" title="Group data by month: Shows the last snapshot from each month">Monthly</option>
                   </select>
-                </div>
-                <div style="margin-top: 1.5rem;">
-                  <button id="portfolio-diagnose-btn" onclick="diagnosePortfolioData()" style="padding: 0.5rem 1rem; background: #6366f1; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.875rem;" title="Check database for portfolio segment metrics and position data">🔍 Diagnose Data</button>
                 </div>
               </div>
               
@@ -5427,7 +5424,6 @@
         <div class="debug-actions">
           <button class="btn btn-small" onclick="event.stopPropagation(); clearDebugLog();" title="Clear all debug log entries. Useful for starting fresh during troubleshooting.">Clear</button>
           <button class="btn btn-small" onclick="event.stopPropagation(); copyDebugLog();" title="Copy the entire debug log to your clipboard. Useful for sharing logs or troubleshooting issues.">Copy Log</button>
-          <button class="btn btn-small" onclick="event.stopPropagation(); loadDebugLogFromSupabase();" title="Load the latest debug log from Supabase (saved after audit completion)">Load from Supabase</button>
           <button class="btn btn-small" id="debugFilterBtn" onclick="event.stopPropagation(); toggleDebugLogFilter();" title="Filter to show only warnings and errors">Filter: All</button>
           <span id="debugToggleIcon" style="color: #fff; font-size: 1.2rem;">▼</span>
         </div>
@@ -5446,299 +5442,6 @@
     console.log('%cDebug panel should be visible at bottom with orange border', 'color: #E57200; font-size: 14px;');
     console.log('Current time:', new Date().toISOString());
     console.log('Page URL:', window.location.href);
-    
-    // Phase 4: Define helper functions IMMEDIATELY at script start
-    // These are needed by renderMoneyPagesSuggestedTop10
-    
-    // Compute impact scores (0-100) based on CTR gap and click upside
-    function computeImpactScores(pages, targetCtr = 0.025) {
-      if (!pages || pages.length === 0) return;
-      
-      // Step 1: Compute upside_clicks for each page
-      const upsideData = [];
-      for (const p of pages) {
-        const impressions = p.impressions || 0;
-        const ctr = p.ctr || 0;
-        
-        // Edge case: impressions < 10 => impact = 0
-        if (impressions < 10) {
-          p.upside_clicks = 0;
-          p.impact_score = 0;
-          upsideData.push({ upside_clicks: 0 });
-          continue;
-        }
-        
-        // Calculate click upside: max(0, impressions * (target_ctr - ctr))
-        const upside_clicks = Math.max(0, impressions * (targetCtr - ctr));
-        p.upside_clicks = upside_clicks;
-        upsideData.push({ upside_clicks });
-      }
-      
-      // Step 2: Find max upside in the set
-      const maxUpside = Math.max(...upsideData.map(d => d.upside_clicks), 0);
-      
-      // Step 3: Normalize to 0-100
-      if (maxUpside <= 0) {
-        // All pages flat → impact = 0 for all
-        for (const p of pages) {
-          p.impact_score = 0;
-        }
-        return;
-      }
-      
-      // Normalize: impact = round(100 * upside_clicks / max_upside_clicks_in_set)
-      for (let i = 0; i < pages.length; i++) {
-        pages[i].impact_score = Math.round(100 * upsideData[i].upside_clicks / maxUpside);
-      }
-    }
-    
-    // Compute difficulty score (LOW/MED/HIGH) based on position
-    function computeDifficultyScore(page) {
-      const pos = page.avgPosition || page.position || 99;
-      if (pos <= 3) return 'LOW';
-      if (pos <= 10) return 'MED';
-      return 'HIGH';
-    }
-    
-    // Compute priority (LOW/MED/HIGH) combining impact and difficulty
-    function computePriority(impactScore, difficulty) {
-      let impactBucket;
-      if (impactScore >= 70) impactBucket = 'HIGH';
-      else if (impactScore >= 30) impactBucket = 'MED';
-      else impactBucket = 'LOW';
-      
-      if (impactBucket === 'HIGH' && (difficulty === 'LOW' || difficulty === 'MED')) {
-        return 'HIGH';
-      }
-      if (impactBucket === 'HIGH' && difficulty === 'HIGH') {
-        return 'MED';
-      }
-      if (impactBucket === 'MED' && difficulty === 'LOW') {
-        return 'MED';
-      }
-      return 'LOW';
-    }
-    
-    // Get recommended action and task type based on page metrics
-    function getRecommendedAction(page) {
-      const ctr = (page.ctr || 0) * 100; // Convert to percentage
-      const pos = page.avgPosition || page.position || 99;
-      const impressions = page.impressions || 0;
-      const clicks = page.clicks || 0;
-      const targetCtr = 2.5;
-      
-      if (ctr < targetCtr && pos <= 10) {
-        return {
-          action: 'Improve CTR (title/meta/snippet) + strengthen content',
-          taskType: 'on_page'
-        };
-      }
-      if (ctr < targetCtr && pos > 10) {
-        return {
-          action: 'Improve relevance + internal links to lift rank',
-          taskType: 'internal_links'
-        };
-      }
-      if (impressions > 100 && clicks < 5 && ctr < 0.5) {
-        return {
-          action: 'Rewrite snippet + add intent-matching sections',
-          taskType: 'content'
-        };
-      }
-      return {
-        action: 'Review page manually',
-        taskType: 'on_page'
-      };
-    }
-    
-    // Phase 4: Define renderMoneyPagesSuggestedTop10 function IMMEDIATELY at script start
-    // This ensures it's available before any code tries to call it
-    window.renderMoneyPagesSuggestedTop10 = function(moneyPagesRows) {
-      // Helper functions are now defined above, so we can use them directly
-      try {
-        // Helper functions are available, use full implementation
-        console.log('[Money Pages Suggested Top 10] Full implementation executing');
-        try {
-          const container = document.getElementById('money-pages-suggested-top10-content');
-          if (!container) {
-            console.warn('[Money Pages Suggested Top 10] Container not found, retrying in 500ms...');
-            // Retry after a delay in case DOM isn't ready yet
-            setTimeout(() => {
-              if (typeof window.renderMoneyPagesSuggestedTop10 === 'function') {
-                window.renderMoneyPagesSuggestedTop10(moneyPagesRows);
-              }
-            }, 500);
-            return;
-          }
-          
-          if (!moneyPagesRows || moneyPagesRows.length === 0) {
-            container.innerHTML = '<div style="padding: 2rem; text-align: center; color: #64748b; font-size: 0.9rem;">No money pages data available.</div>';
-            return;
-          }
-          
-          // Create a copy of rows to avoid mutating original
-          const pages = moneyPagesRows.map(row => ({
-            url: row.url || row.page_url || '',
-            title: row.title || row.page_title || row.url || '',
-            clicks: row.clicks || row.clicks_28d || 0,
-            impressions: row.impressions || row.impressions_28d || 0,
-            ctr: row.ctr || row.ctr_28d || 0,
-            avgPosition: row.avgPosition || row.position || row.position_28d || null,
-            subSegment: row.subSegment || row.segmentType || 'Landing'
-          }));
-          
-          // Compute Phase 4 scores
-          computeImpactScores(pages, 0.025);
-          for (const page of pages) {
-            page.difficulty = computeDifficultyScore(page);
-            page.priority = computePriority(page.impact_score || 0, page.difficulty);
-            const { action, taskType } = getRecommendedAction(page);
-            page.recommended_action = action;
-            page.recommended_task_type = taskType;
-          }
-          
-          // Sort by priority (HIGH > MED > LOW) then by upside_clicks desc
-          const priorityOrder = { HIGH: 0, MED: 1, LOW: 2 };
-          pages.sort((a, b) => {
-            const priorityDiff = (priorityOrder[a.priority] ?? 99) - (priorityOrder[b.priority] ?? 99);
-            if (priorityDiff !== 0) return priorityDiff;
-            return (b.upside_clicks || 0) - (a.upside_clicks || 0);
-          });
-          
-          // Take top 10
-          const top10 = pages.slice(0, 10);
-          
-          if (top10.length === 0) {
-            container.innerHTML = '<div style="padding: 2rem; text-align: center; color: #64748b; font-size: 0.9rem;">No pages meet the criteria for suggested optimization.</div>';
-            return;
-          }
-          
-          // Check optimization status for each page - try multiple task types to catch all optimizations
-          top10.forEach(page => {
-            if (typeof window.getOptimisationStatus === 'function') {
-              const statusRow = {
-                keyword: '',
-                best_url: page.url,
-                targetUrl: page.url,
-                ranking_url: page.url
-              };
-              // Try recommended task type first, then try 'on_page' as fallback
-              let status = window.getOptimisationStatus(statusRow, page.recommended_task_type || 'on_page');
-              // Consider task tracked if it exists and is not 'done' or 'cancelled'
-              const activeStatuses = ['planned', 'in_progress', 'monitoring'];
-              const isActiveStatus = (s) => s && s.status && activeStatuses.includes(s.status);
-              
-              if (!status || !isActiveStatus(status)) {
-                // Try 'on_page' if recommended type didn't find anything
-                if (page.recommended_task_type && page.recommended_task_type !== 'on_page') {
-                  status = window.getOptimisationStatus(statusRow, 'on_page');
-                }
-              }
-              // Also try other common task types
-              if (!status || !isActiveStatus(status)) {
-                const taskTypes = ['content', 'internal_links', 'technical'];
-                for (const taskType of taskTypes) {
-                  const testStatus = window.getOptimisationStatus(statusRow, taskType);
-                  if (isActiveStatus(testStatus)) {
-                    status = testStatus;
-                    break;
-                  }
-                }
-              }
-              page.optimisationStatus = status;
-              // Consider task tracked if it exists and is not 'done' or 'cancelled'
-              // This matches the Priority & Actions table logic which shows "Track" for done/cancelled, "Manage" for others
-              // Reuse activeStatuses declared above
-              page.isTracked = status && status.status && activeStatuses.includes(status.status);
-              page.taskId = status?.id || null;
-            } else {
-              page.optimisationStatus = null;
-              page.isTracked = false;
-              page.taskId = null;
-            }
-          });
-          
-          // Color coding for page types
-          const getPageTypeStyle = (subSegment) => {
-            const type = (subSegment || 'Landing').toUpperCase();
-            if (type === 'LANDING') {
-              return 'font-weight: 700; color: #2563eb; background: #dbeafe; padding: 0.2rem 0.5rem; border-radius: 4px; display: inline-block;';
-            } else if (type === 'EVENT') {
-              return 'font-weight: 700; color: #dc2626; background: #fee2e2; padding: 0.2rem 0.5rem; border-radius: 4px; display: inline-block;';
-            } else if (type === 'PRODUCT') {
-              return 'font-weight: 700; color: #059669; background: #d1fae5; padding: 0.2rem 0.5rem; border-radius: 4px; display: inline-block;';
-            } else {
-              return 'font-weight: 700; color: #64748b; background: #f1f5f9; padding: 0.2rem 0.5rem; border-radius: 4px; display: inline-block;';
-            }
-          };
-          
-          // Render as a grid of cards
-          const html = `
-            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem;">
-              ${top10.map((page, idx) => {
-                const priority = page.priority || 'LOW';
-                const priorityColor = priority === 'HIGH' ? '#10b981' : priority === 'MED' ? '#f59e0b' : '#64748b';
-                const priorityBg = priority === 'HIGH' ? '#dcfce7' : priority === 'MED' ? '#fef3c7' : '#f1f5f9';
-                const difficulty = page.difficulty || 'MED';
-                const difficultyColor = difficulty === 'LOW' ? '#10b981' : difficulty === 'MED' ? '#f59e0b' : '#ef4444';
-                const ctrPct = ((page.ctr || 0) * 100).toFixed(1);
-                const isTracked = page.isTracked || false;
-                const taskId = page.taskId || null;
-                const pageTypeStyle = getPageTypeStyle(page.subSegment);
-                const shortUrl = page.url.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0] + (page.url.split('/').length > 3 ? '...' : '');
-                
-                return `
-                  <div style="padding: 1rem; background: white; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); ${isTracked ? 'border-left: 4px solid #10b981;' : ''}">
-                    ${isTracked ? `<div style="margin-bottom: 0.5rem; padding: 0.4rem 0.6rem; background: #dcfce7; border-radius: 4px; font-size: 0.75rem; color: #059669; font-weight: 600;">✓ Being Optimised</div>` : ''}
-                    <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.75rem;">
-                      <div style="flex: 1; min-width: 0;">
-                        <div style="font-weight: 600; color: #1e293b; margin-bottom: 0.25rem; font-size: 0.9rem; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;" title="${page.title}">${page.title}</div>
-                        <a href="${page.url}" target="_blank" rel="noopener noreferrer" style="font-size: 0.7rem; color: #2563eb; margin-bottom: 0.4rem; word-break: break-all; text-decoration: underline; display: block;" title="${page.url}">${page.url}</a>
-                        <div style="${pageTypeStyle}">${page.subSegment || 'Landing'}</div>
-                      </div>
-                      <span style="display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600; background: ${priorityBg}; color: ${priorityColor}; border: 1px solid ${priorityColor}40; white-space: nowrap; margin-left: 0.5rem;">${priority}</span>
-                    </div>
-                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5rem; margin-bottom: 0.75rem; font-size: 0.8rem;">
-                      <div><span style="color: #64748b;">Pos:</span> <strong>${page.avgPosition ? page.avgPosition.toFixed(1) : '—'}</strong></div>
-                      <div><span style="color: #64748b;">CTR:</span> <strong>${ctrPct}%</strong></div>
-                      <div><span style="color: #64748b;">Impr:</span> <strong>${(page.impressions || 0).toLocaleString()}</strong></div>
-                      <div><span style="color: #64748b;">Upside:</span> <strong>${(page.upside_clicks || 0).toFixed(0)}</strong></div>
-                      <div><span style="color: #64748b;">Impact:</span> <strong>${page.impact_score != null ? page.impact_score : '—'}</strong></div>
-                      <div><span style="color: #64748b;">Difficulty:</span> <strong style="color: ${difficultyColor};">${difficulty}</strong></div>
-                      <div style="grid-column: 1 / -1; padding-top: 0.25rem; border-top: 1px solid #e2e8f0;"><span style="color: #64748b;">Potential impact clicks 28d:</span> <strong style="color: #10b981; font-size: 0.9rem;">${(page.upside_clicks || 0).toFixed(0)}</strong></div>
-                    </div>
-                    <div style="font-size: 0.75rem; color: #475569; margin-bottom: 0.75rem; line-height: 1.4; min-height: 2.5rem;">${page.recommended_action || 'Review page manually'}</div>
-                    ${isTracked && taskId ? `
-                      <button onclick="if (typeof window.openOptimisationTaskDrawer === 'function') { window.openOptimisationTaskDrawer('${String(taskId).replace(/'/g, "\\'").replace(/"/g, '&quot;')}'); }" style="width: 100%; padding: 0.6rem; background: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; transition: background 0.2s;" onmouseover="this.style.background='#059669';" onmouseout="this.style.background='#10b981';" title="Manage existing optimisation task">Manage Task</button>
-                    ` : `
-                      <button onclick="if (typeof window.trackMoneyPage === 'function') { window.trackMoneyPage('${page.url.replace(/'/g, "\\'")}', '${(page.title || page.url || 'Untitled').replace(/'/g, "\\'")}'); }" style="width: 100%; padding: 0.6rem; background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; transition: background 0.2s;" onmouseover="this.style.background='#1d4ed8';" onmouseout="this.style.background='#2563eb';" title="Create optimisation task for this page (CTR ≥ 2.5%)">Create Task</button>
-                    `}
-                  </div>
-                `;
-              }).join('')}
-            </div>
-          `;
-          
-          container.innerHTML = html;
-          console.log(`[Money Pages Suggested Top 10] ✓ Rendered ${top10.length} pages`);
-          if (typeof debugLog === 'function') {
-            debugLog(`✓ Suggested Top 10 rendered with ${top10.length} pages`, 'success');
-          }
-        } catch (error) {
-          console.error('[Money Pages Suggested Top 10] Error rendering:', error);
-          const container = document.getElementById('money-pages-suggested-top10-content');
-          if (container) {
-            container.innerHTML = `<div style="padding: 2rem; text-align: center; color: #ef4444; font-size: 0.9rem;">Error rendering suggested pages: ${error.message}</div>`;
-          }
-        }
-      } catch (error) {
-        console.error('[Money Pages Suggested Top 10] Error rendering:', error);
-        const container = document.getElementById('money-pages-suggested-top10-content');
-        if (container) {
-          container.innerHTML = `<div style="padding: 2rem; text-align: center; color: #ef4444; font-size: 0.9rem;">Error rendering suggested pages: ${error.message}</div>`;
-        }
-      }
-    };
     
     // Helper function to safely save to localStorage (handles quota errors gracefully)
     // Define apiUrl helper IMMEDIATELY at the top level so it's available to all functions
@@ -6664,34 +6367,6 @@
                 console.error('[Money Pages] Error re-rendering Priority table:', err);
               }
             }
-          }
-          
-          // CRITICAL: Re-render Suggested Top 10 cards to show updated optimization status
-          // Use the same data source as Priority table (moneyPagePriorityData)
-          const suggestedTop10DataSource = window.moneyPagePriorityData && window.moneyPagePriorityData.length > 0 
-            ? window.moneyPagePriorityData 
-            : (window.moneyPagesMetrics && window.moneyPagesMetrics.rows ? window.moneyPagesMetrics.rows : []);
-          
-          if (suggestedTop10DataSource.length > 0 && typeof window.renderMoneyPagesSuggestedTop10 === 'function') {
-            console.log('[Money Pages] Re-rendering Suggested Top 10 cards after task creation...', {
-              dataSourceCount: suggestedTop10DataSource.length,
-              cacheSize: window.optimisationStatusCache?.size || 0,
-              createdTaskUrl: createdTaskUrl
-            });
-            try {
-              // Small delay to ensure cache is fully updated
-              await new Promise(resolve => setTimeout(resolve, 200));
-              window.renderMoneyPagesSuggestedTop10(suggestedTop10DataSource);
-              console.log('[Money Pages] ✓ Suggested Top 10 cards re-rendered successfully');
-            } catch (err) {
-              console.error('[Money Pages] Error re-rendering Suggested Top 10 cards:', err);
-            }
-          } else {
-            console.warn('[Money Pages] Cannot re-render Suggested Top 10 cards:', {
-              hasDataSource: suggestedTop10DataSource.length > 0,
-              hasFunction: typeof window.renderMoneyPagesSuggestedTop10 === 'function',
-              dataSourceCount: suggestedTop10DataSource.length
-            });
           }
           
           // Show success message
@@ -15017,85 +14692,6 @@
       });
     }
 
-    async function loadDebugLogFromSupabase() {
-      try {
-        const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
-        if (!propertyUrl) {
-          debugLog('⚠ Cannot load debug log: Property URL not set', 'warn');
-          showStatus('Property URL not set', 'error');
-          return;
-        }
-
-        debugLog('📊 Loading debug log from Supabase...', 'info');
-        showStatus('Loading debug log from Supabase...', 'info');
-
-        const response = await fetch(apiUrl(`/api/supabase/get-debug-log?propertyUrl=${encodeURIComponent(propertyUrl)}`));
-        
-        if (!response.ok) {
-          const errorText = await response.text();
-          debugLog(`❌ Failed to load debug log: ${response.status} - ${errorText}`, 'error');
-          showStatus(`Failed to load debug log: ${response.status}`, 'error');
-          return;
-        }
-
-        const data = await response.json();
-        
-        if (data.error || !data.logText) {
-          debugLog(`⚠ ${data.message || 'No debug log found in Supabase'}`, 'warn');
-          showStatus(data.message || 'No debug log found', 'warn');
-          return;
-        }
-
-        // Clear existing log entries
-        debugLogEntries.length = 0;
-        const logElement = document.getElementById('debugLog');
-        if (logElement) {
-          logElement.innerHTML = '';
-        }
-
-        // Parse log text and populate debugLogEntries
-        const lines = data.logText.split('\n');
-        let entryCount = 0;
-        
-        lines.forEach(line => {
-          // Match log format: [timestamp] [TYPE] message
-          const match = line.match(/^\[([^\]]+)\]\s+\[([^\]]+)\]\s+(.+)$/);
-          if (match) {
-            const [, timestamp, type, message] = match;
-            const normalizedType = type.toLowerCase();
-            debugLogEntries.push({
-              timestamp,
-              message,
-              type: normalizedType === 'warn' ? 'warn' : normalizedType === 'error' ? 'error' : normalizedType === 'success' ? 'success' : 'info'
-            });
-            entryCount++;
-          }
-        });
-
-        // Re-render with current filter
-        if (logElement) {
-          logElement.innerHTML = '';
-          debugLogEntries.forEach(entry => {
-            const shouldShow = debugLogFilter === 'all' || (debugLogFilter === 'warnings-errors' && (entry.type === 'warn' || entry.type === 'error'));
-            if (shouldShow) {
-              const entryDiv = document.createElement('div');
-              entryDiv.className = `debug-log-entry ${entry.type}`;
-              entryDiv.innerHTML = `<span class="debug-timestamp">[${new Date(entry.timestamp).toLocaleTimeString()}]</span>${entry.message}`;
-              logElement.appendChild(entryDiv);
-            }
-          });
-          logElement.scrollTop = logElement.scrollHeight;
-        }
-
-        debugLog(`✓ Loaded ${entryCount} debug log entries from Supabase (audit: ${data.auditDate})`, 'success');
-        showStatus(`Loaded ${entryCount} entries from Supabase`, 'success');
-
-      } catch (err) {
-        debugLog(`❌ Error loading debug log: ${err.message}`, 'error');
-        showStatus(`Error: ${err.message}`, 'error');
-      }
-    }
-
     function toggleDebugPanel() {
       const panel = document.getElementById('debugPanel');
       const icon = document.getElementById('debugToggleIcon');
@@ -15602,14 +15198,14 @@
           datasets: [{
             label: 'Delta',
             data: [],
-            borderColor: '#E57200',
-            backgroundColor: 'rgba(229, 114, 0, 0.15)',
+            borderColor: 'var(--dark-brand)',
+            backgroundColor: 'rgba(245, 158, 11, 0.15)',
             borderWidth: 2,
             tension: 0.4,
             fill: true,
             pointRadius: 4,
             pointHoverRadius: 6,
-            pointBackgroundColor: '#E57200',
+            pointBackgroundColor: 'var(--dark-brand)',
             pointBorderColor: '#ffffff',
             pointBorderWidth: 2
           }]
@@ -15622,7 +15218,7 @@
               display: true,
               position: 'top',
               labels: {
-                color: '#ffffff',
+                color: 'var(--dark-text)',
                 font: { size: 12, weight: '600' },
                 padding: 15
               }
@@ -15708,7 +15304,7 @@
       const kpiSelect = document.getElementById('portfolio-kpi-select')?.value || 'ctr_28d';
       const segment = document.getElementById('portfolio-segment-select')?.value || 'all_tracked';
       const scope = document.getElementById('portfolio-scope-toggle')?.value || 'active_only';
-      const timeGrain = document.getElementById('portfolio-time-grain')?.value || 'monthly';
+      const timeGrain = document.getElementById('portfolio-time-grain')?.value || 'weekly';
 
       // Map UI KPI to portfolio_segment_metrics_28d field
       const kpiFieldMap = {
@@ -15766,6 +15362,50 @@
         const metrics = data.metrics || [];
         
         debugLog(`📊 Portfolio data loaded: ${metrics.length} metrics for segment=${segment}, scope=${mappedScope}, kpi=${kpiSelect}`, 'info');
+        debugLog(`📊 API params: siteUrl=${propertyUrl}, segment=${segment}, scope=${mappedScope}, from=${fromDate.toISOString()}, to=${toDate.toISOString()}`, 'info');
+        
+        // Debug: Log sample metrics to see what data we have
+        if (metrics.length > 0) {
+          const sampleMetric = metrics[0];
+          debugLog(`📊 Sample metric: run_id=${sampleMetric.run_id}, created_at=${sampleMetric.created_at}, date_end=${sampleMetric.date_end}, position_28d=${sampleMetric.position_28d}, ctr_28d=${sampleMetric.ctr_28d}`, 'info');
+          
+          // Check for position data
+          const metricsWithPosition = metrics.filter(m => m.position_28d !== null && m.position_28d !== undefined && !isNaN(parseFloat(m.position_28d)));
+          debugLog(`📊 Metrics with position data: ${metricsWithPosition.length} out of ${metrics.length}`, metricsWithPosition.length > 0 ? 'success' : 'warn');
+          
+          // Log position values for debugging
+          if (metricsWithPosition.length > 0) {
+            const positionValues = metricsWithPosition.slice(0, 5).map(m => m.position_28d).join(', ');
+            debugLog(`📊 Sample position values: ${positionValues}`, 'info');
+          } else {
+            debugLog(`⚠ No valid position data found. Checking raw values...`, 'warn');
+            const rawPositions = metrics.slice(0, 5).map(m => `run_id=${m.run_id}, position_28d=${m.position_28d} (type=${typeof m.position_28d})`).join('; ');
+            debugLog(`📊 Raw position samples: ${rawPositions}`, 'info');
+          }
+        }
+        
+        if (metrics.length === 0) {
+          debugLog(`⚠ No metrics found. Checking if data exists in database...`, 'warn');
+          // Try querying without scope filter to see if data exists
+          const testParams = new URLSearchParams({ 
+            siteUrl: propertyUrl,
+            segment,
+            from: fromDate.toISOString(),
+            to: toDate.toISOString(),
+            order: 'asc'
+          });
+          const testResponse = await fetch(apiUrl(`/api/supabase/get-portfolio-segment-metrics?${testParams}`));
+          if (testResponse.ok) {
+            const testData = await testResponse.json();
+            const testMetrics = testData.metrics || [];
+            if (testMetrics.length > 0) {
+              debugLog(`⚠ Found ${testMetrics.length} metrics WITHOUT scope filter. Scope filter '${mappedScope}' may be excluding all data.`, 'warn');
+              debugLog(`⚠ Available scopes in data: ${[...new Set(testMetrics.map(m => m.scope))].join(', ')}`, 'warn');
+            } else {
+              debugLog(`⚠ No metrics found even without scope filter. Check if portfolio_segment_metrics_28d table has data for this site.`, 'warn');
+            }
+          }
+        }
         
         if (metrics.length === 0) {
           debugLog('⚠ No portfolio metrics found - check segment and scope filters', 'warn');
@@ -15785,33 +15425,24 @@
         
         metrics.forEach(m => {
           // Determine the date to use for bucketing:
-          // Priority order:
           // 1. If run_id is in YYYY-MM format, use that for monthly bucketing (historical backfill)
-          // 2. If run_id is in YYYY-MM-DD format, use that (most reliable for distinguishing different audit runs)
-          // 3. Otherwise, use created_at (when the record was inserted)
-          // 4. Fallback to date_end if nothing else is available
+          // 2. Otherwise, use created_at (when the audit was run) - this ensures different audit runs get different buckets
+          // 3. Fallback to date_end if created_at is not available
           let dateForBucket = null;
           let bucketKey = null;
           
-          if (timeGrain === 'monthly' && m.run_id) {
-            if (m.run_id.match(/^\d{4}-\d{2}$/)) {
-              // Monthly: use run_id directly if it's in YYYY-MM format (for historical backfill)
-              bucketKey = m.run_id;
-              dateForBucket = new Date(m.run_id + '-01');
-            } else if (m.run_id.match(/^\d{4}-\d{2}-\d{2}$/)) {
-              // If run_id is in YYYY-MM-DD format, extract YYYY-MM for monthly bucketing
-              dateForBucket = new Date(m.run_id);
-              // For monthly bucketing, use the month from the date-based run_id
-              bucketKey = `${dateForBucket.getFullYear()}-${String(dateForBucket.getMonth() + 1).padStart(2, '0')}`;
-            }
-          } else if (m.run_id && m.run_id.match(/^\d{4}-\d{2}-\d{2}$/)) {
-            // If run_id is in YYYY-MM-DD format, use that (most reliable - represents when audit was actually run)
-            dateForBucket = new Date(m.run_id);
+          if (timeGrain === 'monthly' && m.run_id && m.run_id.match(/^\d{4}-\d{2}$/)) {
+            // Monthly: use run_id directly if it's in YYYY-MM format (for historical backfill)
+            bucketKey = m.run_id;
+            dateForBucket = new Date(m.run_id + '-01');
           } else if (m.created_at) {
-            // Use created_at (when the record was inserted) - less ideal since multiple records might share same created_at
+            // Use created_at (when the audit was run) - this is the most reliable for distinguishing different audit runs
             dateForBucket = new Date(m.created_at);
+          } else if (m.run_id && m.run_id.match(/^\d{4}-\d{2}-\d{2}$/)) {
+            // If run_id is in YYYY-MM-DD format, use that
+            dateForBucket = new Date(m.run_id);
           } else if (m.date_end) {
-            // Fallback to date_end (least ideal since all audits may share the same date_end)
+            // Fallback to date_end (less ideal since all audits may share the same date_end)
             dateForBucket = new Date(m.date_end);
           } else {
             debugLog(`⚠ No valid date found for metric: run_id=${m.run_id}, date_end=${m.date_end}, created_at=${m.created_at}`, 'warn');
@@ -15852,88 +15483,76 @@
           }
         });
         
-        debugLog(`📊 Bucketed into ${buckets.size} time buckets (${timeGrain}) from ${metrics.length} metrics`, 'info');
+        debugLog(`📊 Bucketed into ${buckets.size} time buckets (${timeGrain})`, 'info');
         
-        // Sort buckets by date
-        let sortedBuckets = Array.from(buckets.entries())
-          .sort((a, b) => a[1].date - b[1].date);
-        
-        // If we only have 1 bucket, try daily bucketing instead (if weekly was selected)
-        if (sortedBuckets.length < 2 && timeGrain === 'weekly' && metrics.length >= 2) {
-          debugLog(`⚠ Only 1 weekly bucket from ${metrics.length} metrics - falling back to daily bucketing`, 'warn');
-          
-          // Re-bucket by day instead
-          const dailyBuckets = new Map();
-          metrics.forEach(m => {
-            let dateForBucket = null;
-            if (m.run_id && m.run_id.match(/^\d{4}-\d{2}-\d{2}$/)) {
-              dateForBucket = new Date(m.run_id);
-            } else if (m.created_at) {
-              dateForBucket = new Date(m.created_at);
-            } else if (m.date_end) {
-              dateForBucket = new Date(m.date_end);
-            }
-            
-            if (dateForBucket && !isNaN(dateForBucket.getTime())) {
-              const dayKey = dateForBucket.toISOString().split('T')[0]; // YYYY-MM-DD
-              const comparisonDate = m.created_at ? new Date(m.created_at) : (m.date_end ? new Date(m.date_end) : dateForBucket);
-              
-              if (!dailyBuckets.has(dayKey) || comparisonDate > dailyBuckets.get(dayKey).date) {
-                const value = kpiField === 'ctr_28d' ? parseFloat(m.ctr_28d || 0) :
-                              kpiField === 'clicks_28d' ? parseFloat(m.clicks_28d || 0) :
-                              kpiField === 'impressions_28d' ? parseFloat(m.impressions_28d || 0) :
-                              kpiField === 'position_28d' ? (m.position_28d !== null && m.position_28d !== undefined && !isNaN(parseFloat(m.position_28d)) ? parseFloat(m.position_28d) : null) :
-                              kpiField === 'ai_citations_28d' ? (m.ai_citations_28d ? parseInt(m.ai_citations_28d) : 0) :
-                              kpiField === 'ai_overview_present_count' ? (m.ai_overview_present_count ? parseInt(m.ai_overview_present_count) : 0) : null;
-                
-                dailyBuckets.set(dayKey, { value, date: comparisonDate });
-              }
-            }
+        // Debug: Log bucket details and date sources
+        if (buckets.size > 0) {
+          const bucketEntries = Array.from(buckets.entries());
+          bucketEntries.forEach(([key, bucket]) => {
+            const valueStr = bucket.value !== null 
+              ? (kpiSelect === 'ctr_28d' ? (bucket.value * 100).toFixed(2) + '%' : 
+                 kpiSelect === 'avg_position' ? bucket.value.toFixed(1) : 
+                 bucket.value.toFixed(2))
+              : 'null';
+            debugLog(`📊 Bucket ${key}: value=${valueStr}, date=${bucket.date.toISOString()}`, 'info');
           });
           
-          const sortedDailyBuckets = Array.from(dailyBuckets.entries())
-            .sort((a, b) => a[1].date - b[1].date);
-          
-          if (sortedDailyBuckets.length >= 2) {
-            debugLog(`✓ Daily bucketing: ${sortedDailyBuckets.length} buckets from ${metrics.length} metrics`, 'success');
-            // Use daily buckets instead
-            sortedBuckets = sortedDailyBuckets;
-            timeGrain = 'daily'; // Update for label formatting
+          // Log date source info for first few metrics
+          if (metrics.length > 0) {
+            const dateSources = metrics.slice(0, 5).map(m => {
+              const source = (timeGrain === 'monthly' && m.run_id && m.run_id.match(/^\d{4}-\d{2}$/)) ? 'run_id (YYYY-MM)' :
+                            m.created_at ? 'created_at' :
+                            m.run_id && m.run_id.match(/^\d{4}-\d{2}-\d{2}$/) ? 'run_id (YYYY-MM-DD)' :
+                            m.date_end ? 'date_end' :
+                            'none';
+              const dateUsed = (timeGrain === 'monthly' && m.run_id && m.run_id.match(/^\d{4}-\d{2}$/)) ? m.run_id :
+                              m.created_at || m.date_end || 'N/A';
+              return `run_id=${m.run_id}, source=${source}, date=${dateUsed}`;
+            }).join('; ');
+            debugLog(`📊 Date sources for bucketing (first 5): ${dateSources}`, 'info');
           }
         }
         
-        // If we still only have 1 bucket, we can't show deltas
-        if (sortedBuckets.length < 2) {
+        // Sort buckets by date (oldest first)
+        const sortedBuckets = Array.from(buckets.entries())
+          .sort((a, b) => a[1].date - b[1].date);
+        
+        // Filter to only last 12 months for monthly grain (rolling 12 months)
+        let filteredBuckets = sortedBuckets;
+        if (timeGrain === 'monthly') {
+          const now = new Date();
+          const twelveMonthsAgo = new Date(now);
+          twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
+          
+          filteredBuckets = sortedBuckets.filter(([bucketKey, bucket]) => {
+            // Parse bucket key (YYYY-MM format)
+            const bucketDate = new Date(bucketKey + '-01');
+            return bucketDate >= twelveMonthsAgo;
+          });
+          
+          debugLog(`📊 Filtered to last 12 months: ${filteredBuckets.length} buckets (from ${sortedBuckets.length} total)`, 'info');
+        }
+        
+        // If we only have 1 bucket, we can't show deltas
+        if (filteredBuckets.length < 2) {
+          debugLog(`⚠ Only ${filteredBuckets.length} bucket(s) - need at least 2 different ${timeGrain} periods to show deltas`, 'warn');
+          debugLog(`⚠ This usually means: (1) Only one audit has been run, or (2) Multiple audits are in the same ${timeGrain} period`, 'warn');
           if (portfolioDeltaChart) {
             portfolioDeltaChart.data.labels = [];
             portfolioDeltaChart.data.datasets[0].data = [];
             portfolioDeltaChart.update();
           }
           
-          // Show empty state message with clear explanation
+          // Show empty state message
           const canvas = document.getElementById('portfolio-delta-chart');
           if (canvas) {
             const ctx = canvas.getContext('2d');
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.fillStyle = 'var(--dark-text)';
+            ctx.fillStyle = '#ffffff';
             ctx.font = '14px Arial';
             ctx.textAlign = 'center';
-            
-            let message = '';
-            if (timeGrain === 'weekly') {
-              message = 'Weekly deltas require audits from different weeks.\nRun audits on different weeks to see weekly trends.';
-            } else if (timeGrain === 'monthly') {
-              message = 'Monthly deltas require audits from different months.\nRun audits across multiple months to see monthly trends.';
-            } else {
-              message = 'Need at least 2 different time periods to show deltas.\nRun another audit to see changes over time.';
-            }
-            
-            const lines = message.split('\n');
-            const lineHeight = 20;
-            const startY = canvas.height / 2 - (lines.length - 1) * lineHeight / 2;
-            lines.forEach((line, i) => {
-              ctx.fillText(line, canvas.width / 2, startY + i * lineHeight);
-            });
+            ctx.fillText(`Need at least 2 different ${timeGrain} periods to show deltas.`, 
+              canvas.width / 2, canvas.height / 2);
           }
           return;
         }
@@ -15942,16 +15561,13 @@
         const labels = [];
         const deltas = [];
         
-        sortedBuckets.forEach(([bucketKey, bucket], index) => {
+        filteredBuckets.forEach(([bucketKey, bucket], index) => {
           let label;
-          if (timeGrain === 'daily') {
-            // Daily: show date as "DD MMM"
-            label = new Date(bucketKey).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
-          } else if (timeGrain === 'weekly') {
+          if (timeGrain === 'weekly') {
             // Weekly: show Monday date as "DD MMM"
             label = new Date(bucketKey).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
           } else {
-            // Monthly: show as "MMM-YY" (e.g., "Jan 25")
+            // Monthly: show as "MMM YY" (e.g., "Jan 25", "Dec 25")
             const monthDate = new Date(bucketKey + '-01');
             const monthName = monthDate.toLocaleDateString('en-GB', { month: 'short' });
             const yearShort = bucketKey.split('-')[0].slice(2);
@@ -15963,7 +15579,7 @@
             labels.push(label);
             deltas.push(null); // No previous value to compare
           } else {
-            const prevBucket = sortedBuckets[index - 1][1];
+            const prevBucket = filteredBuckets[index - 1][1];
             const delta = bucket.value !== null && prevBucket.value !== null 
               ? bucket.value - prevBucket.value 
               : null;
@@ -15973,9 +15589,7 @@
           }
         });
         
-        // Reverse arrays so latest is on the right
-        labels.reverse();
-        deltas.reverse();
+        debugLog(`📊 Computed ${deltas.filter(d => d !== null).length} deltas from ${sortedBuckets.length} buckets`, 'info');
 
         if (portfolioDeltaChart) {
           // Format deltas for display
@@ -15989,16 +15603,15 @@
             return d;
           });
           
+          debugLog(`📊 Chart data: ${labels.length} labels, ${formattedDeltas.filter(d => d !== null).length} non-null deltas`, 'info');
+          
           portfolioDeltaChart.data.labels = labels;
           portfolioDeltaChart.data.datasets[0].data = formattedDeltas;
           portfolioDeltaChart.data.datasets[0].label = `Delta (${kpiSelect})`;
-          // Use brand orange (#E57200) for line and points - use hex directly, not CSS variable
-          portfolioDeltaChart.data.datasets[0].borderColor = '#E57200';
-          portfolioDeltaChart.data.datasets[0].pointBackgroundColor = '#E57200';
-          portfolioDeltaChart.data.datasets[0].pointBorderColor = '#ffffff';
-          portfolioDeltaChart.data.datasets[0].pointBorderWidth = 2;
-          // Simple brand orange fill (no gradient function - Chart.js can have issues with functions)
-          portfolioDeltaChart.data.datasets[0].backgroundColor = 'rgba(229, 114, 0, 0.15)';
+          // Update colors to match dark theme
+          portfolioDeltaChart.data.datasets[0].borderColor = 'var(--dark-brand)';
+          portfolioDeltaChart.data.datasets[0].backgroundColor = 'rgba(245, 158, 11, 0.15)';
+          portfolioDeltaChart.data.datasets[0].pointBackgroundColor = 'var(--dark-brand)';
           
           // Update Y-axis label
           if (kpiSelect === 'ctr_28d') {
@@ -16079,38 +15692,13 @@
           }
         }
 
-        // Generate last 12 months (always shows all 12 months, even if no data exists)
-        // This ensures consistent table structure regardless of data availability
+        // Generate last 12 months
         const months = [];
         const today = new Date();
-        const currentYear = today.getFullYear();
-        const currentMonth = today.getMonth(); // 0-indexed (0=Jan, 11=Dec)
-        
-        // Generate 12 months going backwards from current month
-        // Calculate explicitly to avoid Date arithmetic issues
         for (let i = 11; i >= 0; i--) {
-          let targetMonth = currentMonth - i;
-          let targetYear = currentYear;
-          
-          // Handle negative months (roll back to previous year)
-          if (targetMonth < 0) {
-            targetMonth += 12;
-            targetYear -= 1;
-          }
-          
-          // Format as YYYY-MM
-          const monthStr = `${targetYear}-${String(targetMonth + 1).padStart(2, '0')}`;
-          months.push(monthStr);
+          const date = new Date(today.getFullYear(), today.getMonth() - i, 1);
+          months.push(date.toISOString().substring(0, 7)); // YYYY-MM format
         }
-        
-        // Ensure we have exactly 12 unique months (no duplicates)
-        const uniqueMonths = [...new Set(months)];
-        if (uniqueMonths.length !== 12) {
-          debugLog(`⚠ Expected 12 unique months but got ${uniqueMonths.length}: ${months.join(', ')}`, 'warn');
-        }
-        // Use unique months to avoid duplicates, maintain original order
-        months.length = 0;
-        months.push(...uniqueMonths);
 
         // Build table
         const table = document.getElementById('portfolio-monthly-table');
@@ -16132,10 +15720,7 @@
           const th = document.createElement('th');
           th.style.cssText = 'text-align: center; padding: 0.75rem; border-bottom: 2px solid var(--dark-border); font-weight: 600; background: rgba(55, 65, 81, 0.5); color: var(--dark-text);';
           const monthDate = new Date(month + '-01');
-          // Format as "MMM-YY" (e.g., "Jan 25")
-          const monthName = monthDate.toLocaleDateString('en-GB', { month: 'short' });
-          const yearShort = month.split('-')[0].slice(2);
-          th.textContent = `${monthName} ${yearShort}`;
+          th.textContent = monthDate.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
           th.title = `Value for ${monthDate.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}: Last snapshot from this month (rolling 28-day window)`;
           thead.appendChild(th);
         });
@@ -16194,18 +15779,9 @@
             // Find the LAST snapshot in this month (bucket by date_end month or run_id)
             // run_id format can be YYYY-MM (month-based) or YYYY-MM-DD (date-based)
             const monthSnapshots = allData[segment]?.filter(s => {
-              // Try to match by run_id first
-              if (s.run_id) {
-                // If run_id is in YYYY-MM format, match directly
-                if (s.run_id.match(/^\d{4}-\d{2}$/)) {
-                  return s.run_id === month;
-                }
-                // If run_id is in YYYY-MM-DD format, extract YYYY-MM and match
-                if (s.run_id.match(/^\d{4}-\d{2}-\d{2}$/)) {
-                  const runDate = new Date(s.run_id);
-                  const runMonth = `${runDate.getFullYear()}-${String(runDate.getMonth() + 1).padStart(2, '0')}`;
-                  return runMonth === month;
-                }
+              // Try to match by run_id first (if it's in YYYY-MM format)
+              if (s.run_id && s.run_id.match(/^\d{4}-\d{2}$/)) {
+                return s.run_id === month;
               }
               // Otherwise match by date_end month (the actual date range the data represents)
               if (s.date_end) {
@@ -16234,13 +15810,11 @@
               } else if (kpiField === 'impressions_28d') {
                 value = parseFloat(snapshot.impressions_28d || 0);
               } else if (kpiField === 'position_28d') {
-                // Handle position: can be string or number from database
-                const posValue = snapshot.position_28d;
-                if (posValue != null && posValue !== '' && posValue !== 0) {
-                  const parsed = typeof posValue === 'string' ? parseFloat(posValue) : Number(posValue);
-                  if (!isNaN(parsed) && isFinite(parsed) && parsed > 0) {
-                    value = parsed;
-                  }
+                // Handle position: check if it's null, undefined, or NaN
+                if (snapshot.position_28d !== null && snapshot.position_28d !== undefined && !isNaN(parseFloat(snapshot.position_28d))) {
+                  value = parseFloat(snapshot.position_28d);
+                } else {
+                  value = null;
                 }
               } else if (kpiField === 'ai_citations_28d') {
                 value = snapshot.ai_citations_28d ? parseInt(snapshot.ai_citations_28d) : 0;
@@ -16284,27 +15858,12 @@
                   : null;
                 
                 if (prevSnapshot) {
-                  let prevValue = null;
-                  if (kpiField === 'ctr_28d') {
-                    prevValue = parseFloat(prevSnapshot.ctr_28d || 0);
-                  } else if (kpiField === 'clicks_28d') {
-                    prevValue = parseFloat(prevSnapshot.clicks_28d || 0);
-                  } else if (kpiField === 'impressions_28d') {
-                    prevValue = parseFloat(prevSnapshot.impressions_28d || 0);
-                  } else if (kpiField === 'position_28d') {
-                    // Handle position: can be string or number from database
-                    const posValue = prevSnapshot.position_28d;
-                    if (posValue != null && posValue !== '' && posValue !== 0) {
-                      const parsed = typeof posValue === 'string' ? parseFloat(posValue) : Number(posValue);
-                      if (!isNaN(parsed) && isFinite(parsed) && parsed > 0) {
-                        prevValue = parsed;
-                      }
-                    }
-                  } else if (kpiField === 'ai_citations_28d') {
-                    prevValue = prevSnapshot.ai_citations_28d ? parseInt(prevSnapshot.ai_citations_28d) : 0;
-                  } else if (kpiField === 'ai_overview_present_count') {
-                    prevValue = prevSnapshot.ai_overview_present_count ? parseInt(prevSnapshot.ai_overview_present_count) : 0;
-                  }
+                  const prevValue = kpiField === 'ctr_28d' ? parseFloat(prevSnapshot.ctr_28d || 0) :
+                                  kpiField === 'clicks_28d' ? parseFloat(prevSnapshot.clicks_28d || 0) :
+                                  kpiField === 'impressions_28d' ? parseFloat(prevSnapshot.impressions_28d || 0) :
+                                  kpiField === 'position_28d' ? (prevSnapshot.position_28d ? parseFloat(prevSnapshot.position_28d) : null) :
+                                  kpiField === 'ai_citations_28d' ? (prevSnapshot.ai_citations_28d ? parseInt(prevSnapshot.ai_citations_28d) : 0) :
+                                  kpiField === 'ai_overview_present_count' ? (prevSnapshot.ai_overview_present_count ? parseInt(prevSnapshot.ai_overview_present_count) : 0) : null;
                   
                   if (prevValue !== null && prevValue !== undefined) {
                     const delta = value - prevValue;
@@ -16316,15 +15875,9 @@
                     let deltaFormatted;
                     if (kpi === 'ctr_28d') {
                       deltaFormatted = (delta * 100).toFixed(1) + 'pp'; // Convert ratio delta to percentage points
-                      cell.innerHTML = `${formatted} <span style="color: ${color};">${indicator} ${deltaFormatted}</span>`;
-                      tooltipText += ` | Change from previous month: ${indicator} ${deltaFormatted}`;
                     } else if (kpi === 'avg_position') {
                       deltaFormatted = Math.abs(delta).toFixed(1);
-                      // For position, lower is better, so flip the indicator (negative delta = improvement)
-                      const posIndicator = delta < 0 ? '▼' : '▲';
-                      const posColor = delta < 0 ? '#10b981' : '#ef4444';
-                      cell.innerHTML = `${formatted} <span style="color: ${posColor};">${posIndicator} ${deltaFormatted}</span>`;
-                      tooltipText += ` | Change from previous month: ${posIndicator} ${deltaFormatted} (${delta < 0 ? 'improved' : 'worsened'})`;
+                      // For position, lower is better, so flip the indicator
                     } else if (kpi === 'ai_citations' || kpi === 'ai_overview') {
                       // AI metrics are integers, show absolute change
                       deltaFormatted = Math.abs(delta).toString();
@@ -16336,6 +15889,13 @@
                       deltaFormatted = Math.abs(delta).toLocaleString();
                       cell.innerHTML = `${formatted} <span style="color: ${color};">${indicator} ${deltaFormatted}</span>`;
                       tooltipText += ` | Change from previous month: ${indicator} ${deltaFormatted}`;
+                    }
+                    
+                    if (kpi !== 'avg_position') {
+                      cell.innerHTML = `${formatted} <span style="color: ${color};">${indicator} ${deltaFormatted}</span>`;
+                      if (kpi !== 'ai_citations' && kpi !== 'ai_overview') {
+                        tooltipText += ` | Change from previous month: ${indicator} ${deltaFormatted}`;
+                      }
                     }
                   } else {
                     cell.textContent = formatted;
@@ -16420,128 +15980,6 @@
       }
     }
 
-    // Diagnose portfolio data in database
-    async function diagnosePortfolioData() {
-      try {
-        const siteUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || 'https://www.alanranger.com';
-        debugLog('🔍 Querying Supabase for portfolio segment records...', 'info');
-        
-        // Query Supabase directly using the existing get-portfolio-segment-metrics endpoint
-        const params = new URLSearchParams({
-          siteUrl: siteUrl,
-          from: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString(), // Last year
-          to: new Date().toISOString(),
-          order: 'desc'
-        });
-        
-        const response = await fetch(apiUrl(`/api/supabase/get-portfolio-segment-metrics?${params}`));
-        
-        if (!response.ok) {
-          const errorText = await response.text();
-          debugLog(`❌ Query failed: ${response.status} - ${errorText}`, 'error');
-          alert(`Query failed: ${response.status}\n${errorText}`);
-          return;
-        }
-        
-        const data = await response.json();
-        const metrics = data.metrics || [];
-        
-        // Analyze the records
-        const bySegment = {};
-        const byRunId = {};
-        
-        metrics.forEach(m => {
-          // Group by segment
-          if (!bySegment[m.segment]) {
-            bySegment[m.segment] = [];
-          }
-          bySegment[m.segment].push(m);
-          
-          // Group by run_id
-          if (!byRunId[m.run_id]) {
-            byRunId[m.run_id] = [];
-          }
-          byRunId[m.run_id].push(m);
-        });
-        
-        // Log summary
-        debugLog(`📊 Portfolio Records from Supabase:`, 'info');
-        debugLog(`  Total records: ${metrics.length}`, 'info');
-        debugLog(`  Unique run_ids: ${Object.keys(byRunId).length}`, 'info');
-        debugLog(`  Unique segments: ${Object.keys(bySegment).length} (${Object.keys(bySegment).join(', ')})`, 'info');
-        
-        // Position analysis by segment
-        debugLog(`  Position analysis by segment:`, 'info');
-        Object.keys(bySegment).forEach(seg => {
-          const segRecords = bySegment[seg];
-          const withPosition = segRecords.filter(r => {
-            const pos = r.position_28d;
-            if (pos === null || pos === undefined) return false;
-            const parsed = parseFloat(pos);
-            return !isNaN(parsed) && isFinite(parsed) && parsed > 0;
-          });
-          const withNull = segRecords.filter(r => r.position_28d === null || r.position_28d === undefined);
-          
-          debugLog(`    ${seg}: ${withPosition.length} with position, ${withNull.length} null (out of ${segRecords.length} total)`, 'info');
-          
-          if (withPosition.length > 0) {
-            const samplePositions = withPosition.slice(0, 3).map(r => 
-              `pos=${parseFloat(r.position_28d).toFixed(1)} (run=${r.run_id}, imps=${r.impressions_28d})`
-            ).join('; ');
-            debugLog(`      Sample positions: ${samplePositions}`, 'info');
-          }
-          
-          if (withNull.length > 0) {
-            const sampleNulls = withNull.slice(0, 3).map(r => 
-              `run=${r.run_id}, imps=${r.impressions_28d}, pos=${r.position_28d}`
-            ).join('; ');
-            debugLog(`      Sample null records: ${sampleNulls}`, 'warn');
-          }
-        });
-        
-        // Show run_id breakdown
-        debugLog(`  Run IDs (latest 10):`, 'info');
-        Object.keys(byRunId).slice(0, 10).forEach(runId => {
-          const records = byRunId[runId];
-          const firstRecord = records[0];
-          debugLog(`    ${runId}: ${records.length} records, created ${firstRecord.created_at}, date range ${firstRecord.date_start} to ${firstRecord.date_end}`, 'info');
-        });
-        
-        // Show sample records
-        if (metrics.length > 0) {
-          debugLog(`  Sample records (latest 5):`, 'info');
-          metrics.slice(0, 5).forEach((rec, idx) => {
-            debugLog(`    [${idx + 1}] ${rec.segment}/${rec.scope}: clicks=${rec.clicks_28d}, impr=${rec.impressions_28d}, ctr=${(rec.ctr_28d * 100).toFixed(2)}%, pos=${rec.position_28d !== null ? parseFloat(rec.position_28d).toFixed(2) : 'null'}, pages=${rec.pages_count}`, 'info');
-          });
-        }
-        
-        // Alert summary
-        const positionSummary = Object.keys(bySegment).map(seg => {
-          const segRecords = bySegment[seg];
-          const withPosition = segRecords.filter(r => {
-            const pos = r.position_28d;
-            if (pos === null || pos === undefined) return false;
-            const parsed = parseFloat(pos);
-            return !isNaN(parsed) && isFinite(parsed) && parsed > 0;
-          });
-          return `${seg}: ${withPosition.length}/${segRecords.length} with position`;
-        }).join(', ');
-        
-        const summary = `Portfolio Records from Supabase:
-Total: ${metrics.length} records
-Run IDs: ${Object.keys(byRunId).length}
-Position data: ${positionSummary || 'N/A'}
-Check debug panel for details.
-Also check "Load from Supabase" for audit debug logs.`;
-        
-        alert(summary);
-        
-      } catch (err) {
-        debugLog(`❌ Diagnostic error: ${err.message}`, 'error');
-        alert(`Diagnostic error: ${err.message}`);
-      }
-    }
-
     // Calculate and save portfolio segment snapshots (Phase 3a - Using gsc_page_metrics_28d)
     async function calculateAndSavePortfolioSegmentSnapshots(runId, siteUrl, dateStart, dateEnd, pageTotalsByKey) {
       try {
@@ -16560,11 +15998,11 @@ Also check "Load from Supabase" for audit debug logs.`;
                 let positionSum = 0;
                 data.pages.forEach(page => {
                   const key = normalizeGscPageKey(page.page_url);
-                  // Handle position: check if it's null, undefined, NaN, or 0 (positions start at 1)
+                  // Handle position: check if it's null, undefined, or NaN (but allow 0 as valid)
                   let position = null;
                   if (page.position_28d !== null && page.position_28d !== undefined) {
                     const parsed = parseFloat(page.position_28d);
-                    if (!isNaN(parsed) && isFinite(parsed) && parsed > 0) {
+                    if (!isNaN(parsed) && isFinite(parsed)) {
                       position = parsed;
                     }
                   }
@@ -16608,13 +16046,6 @@ Also check "Load from Supabase" for audit debug logs.`;
                   trackedTaskUrls.add(normalizedUrl);
                 }
               });
-              debugLog(`📊 all_tracked: Found ${trackedTaskUrls.size} tracked task URLs (from ${tasks.length} tasks)`, 'info');
-              if (trackedTaskUrls.size > 0) {
-                const sampleUrls = Array.from(trackedTaskUrls).slice(0, 3);
-                debugLog(`📊 all_tracked: Sample tracked URLs: ${sampleUrls.join(', ')}`, 'info');
-              }
-            } else {
-              debugLog(`📊 all_tracked: No tasks found`, 'warn');
             }
           }
         } catch (taskError) {
@@ -16679,36 +16110,6 @@ Also check "Load from Supabase" for audit debug logs.`;
             segmentPages.all_tracked.push(metrics);
           }
         });
-        
-        // Debug logging for all_tracked segment
-        debugLog(`📊 all_tracked: Found ${segmentPages.all_tracked.length} pages matching tracked task URLs (out of ${pageMetrics.size} total pages)`, 'info');
-        if (segmentPages.all_tracked.length > 0) {
-          const totalImpressions = segmentPages.all_tracked.reduce((sum, p) => sum + (parseFloat(p.impressions) || 0), 0);
-          const totalClicks = segmentPages.all_tracked.reduce((sum, p) => sum + (parseFloat(p.clicks) || 0), 0);
-          const pagesWithPosition = segmentPages.all_tracked.filter(p => {
-            const pos = p.position !== null && p.position !== undefined ? parseFloat(p.position) : 
-                        (p.position_28d !== null && p.position_28d !== undefined ? parseFloat(p.position_28d) : 
-                         (p.avgPosition !== null && p.avgPosition !== undefined ? parseFloat(p.avgPosition) : null));
-            return pos !== null && !isNaN(pos) && pos > 0;
-          }).length;
-          debugLog(`📊 all_tracked: Total impressions=${totalImpressions}, clicks=${totalClicks}, pages with position=${pagesWithPosition}`, 'info');
-          if (totalImpressions === 0) {
-            const samplePages = segmentPages.all_tracked.slice(0, 3).map(p => {
-              const url = p.url || 'unknown';
-              const imps = parseFloat(p.impressions) || 0;
-              const pos = p.position !== null && p.position !== undefined ? parseFloat(p.position) : 
-                          (p.position_28d !== null && p.position_28d !== undefined ? parseFloat(p.position_28d) : 
-                           (p.avgPosition !== null && p.avgPosition !== undefined ? parseFloat(p.avgPosition) : null));
-              return `${url.substring(0, 50)}: imps=${imps}, pos=${pos !== null ? pos.toFixed(1) : 'null'}`;
-            }).join('; ');
-            debugLog(`📊 all_tracked: Sample pages (why imps=0?): ${samplePages}`, 'warn');
-          }
-        } else if (trackedTaskUrls.size > 0) {
-          // No pages matched, but we have tracked URLs - this is a mismatch issue
-          const samplePageKeys = Array.from(pageMetrics.keys()).slice(0, 3);
-          const sampleTrackedUrls = Array.from(trackedTaskUrls).slice(0, 3);
-          debugLog(`📊 all_tracked: WARNING - No pages matched tracked URLs. Sample page keys: ${samplePageKeys.join(', ')}, Sample tracked URLs: ${sampleTrackedUrls.join(', ')}`, 'warn');
-        }
         
         // Fetch AI citations and AI overview data from keyword_rankings for this audit date
         let aiMetricsBySegment = {
@@ -16796,8 +16197,6 @@ Also check "Load from Supabase" for audit debug logs.`;
           let totalPositionWeight = 0;
           let totalPositionImpressions = 0;
           let positionCount = 0;
-          let nullPositionCount = 0;
-          let zeroPositionCount = 0;
           pages.forEach(p => {
             const impressions = parseFloat(p.impressions) || 0;
             // Try multiple position field names (position, position_28d, avgPosition)
@@ -16807,41 +16206,28 @@ Also check "Load from Supabase" for audit debug logs.`;
             let position = null;
             if (p.position !== null && p.position !== undefined) {
               const parsed = parseFloat(p.position);
-              if (!isNaN(parsed) && isFinite(parsed) && parsed > 0) {
+              if (!isNaN(parsed) && isFinite(parsed)) {
                 position = parsed;
-              } else {
-                nullPositionCount++;
               }
             } else if (p.position_28d !== null && p.position_28d !== undefined) {
               const parsed = parseFloat(p.position_28d);
-              if (!isNaN(parsed) && isFinite(parsed) && parsed > 0) {
+              if (!isNaN(parsed) && isFinite(parsed)) {
                 position = parsed;
-              } else {
-                nullPositionCount++;
               }
             } else if (p.avgPosition !== null && p.avgPosition !== undefined) {
               const parsed = parseFloat(p.avgPosition);
-              if (!isNaN(parsed) && isFinite(parsed) && parsed > 0) {
+              if (!isNaN(parsed) && isFinite(parsed)) {
                 position = parsed;
-              } else {
-                nullPositionCount++;
               }
-            } else {
-              nullPositionCount++;
             }
             
-            if (position !== null && position > 0 && impressions > 0) {
+            if (position !== null && impressions > 0) {
               totalPositionWeight += position * impressions;
               totalPositionImpressions += impressions;
               positionCount++;
-            } else if (impressions > 0) {
-              zeroPositionCount++;
             }
           });
           const avgPosition = totalPositionImpressions > 0 ? totalPositionWeight / totalPositionImpressions : null;
-          
-          // Enhanced debug logging for position calculation
-          debugLog(`📊 Position calc for ${segment}: ${positionCount} pages with valid position (out of ${pages.length} total), ${nullPositionCount} with null/invalid position, ${zeroPositionCount} with zero impressions, total impressions=${totalPositionImpressions}, avgPosition=${avgPosition !== null ? avgPosition.toFixed(2) : 'N/A'}`, 'info');
           
           // Debug logging for position calculation
           debugLog(`📊 Position calc for ${segment}: ${positionCount} pages with position (out of ${pages.length} total), total impressions=${totalPositionImpressions}, avgPosition=${avgPosition !== null ? avgPosition.toFixed(2) : 'N/A'}`, 'info');
@@ -16883,9 +16269,6 @@ Also check "Load from Supabase" for audit debug logs.`;
         
         // Save to Supabase
         debugLog(`📊 Saving ${segmentRows.length} segment snapshots to Supabase...`, 'info');
-        debugLog(`📊 Save params: runId=${runId}, siteUrl=${siteUrl}, dateStart=${dateStart}, dateEnd=${dateEnd}, scope=${scope}`, 'info');
-        debugLog(`📊 Segment rows to save: ${JSON.stringify(segmentRows.map(r => ({ segment: r.segment, pages: r.pages_count, clicks: r.clicks_28d, impressions: r.impressions_28d, ctr: r.ctr_28d, position: r.position_28d })))}`, 'info');
-        
         const saveResponse = await fetch(apiUrl('/api/supabase/save-portfolio-segment-metrics'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -16901,15 +16284,11 @@ Also check "Load from Supabase" for audit debug logs.`;
         
         if (!saveResponse.ok) {
           const errorText = await saveResponse.text();
-          debugLog(`❌ Failed to save segment snapshots: ${saveResponse.status} - ${errorText}`, 'error');
           throw new Error(`Failed to save segment snapshots: ${saveResponse.status} - ${errorText}`);
         }
         
         const saveResult = await saveResponse.json();
-        debugLog(`✓ Saved ${saveResult.inserted} portfolio segment snapshots to Supabase (runId=${runId})`, 'success');
-        if (saveResult.warning) {
-          debugLog(`⚠ Warning from save: ${saveResult.message}`, 'warn');
-        }
+        debugLog(`✓ Saved ${saveResult.inserted} portfolio segment snapshots to Supabase`, 'success');
         
       } catch (err) {
         debugLog(`Error calculating portfolio segment snapshots: ${err.message}`, 'error');
@@ -19010,11 +18389,8 @@ Also check "Load from Supabase" for audit debug logs.`;
           }
           
           // Save GSC page-level 28d metrics to Supabase
-          let pageMetricsSaved = false;
-          let pageMetricsData = null;
           try {
             if (window._pendingPageMetrics && window._pendingPageMetrics.pages && window._pendingPageMetrics.pages.length > 0) {
-              pageMetricsData = window._pendingPageMetrics;
               debugLog(`📊 Saving ${window._pendingPageMetrics.pages.length} page metrics to Supabase (run_id: ${auditDate})...`, 'info');
               
               const saveResponse = await fetch(apiUrl('/api/supabase/save-gsc-page-metrics'), {
@@ -19032,7 +18408,19 @@ Also check "Load from Supabase" for audit debug logs.`;
               if (saveResponse.ok) {
                 const saveResult = await saveResponse.json();
                 debugLog(`✓ Saved ${saveResult.inserted} page metrics to Supabase`, 'success');
-                pageMetricsSaved = true;
+                
+                // Calculate and save portfolio segment snapshots (Phase 3a)
+                try {
+                  await calculateAndSavePortfolioSegmentSnapshots(
+                    auditDate,
+                    window._pendingPageMetrics.propertyUrl,
+                    window._pendingPageMetrics.gscRange.startDate,
+                    window._pendingPageMetrics.gscRange.endDate,
+                    window.pageTotalsByKey || new Map()
+                  );
+                } catch (segmentError) {
+                  debugLog(`⚠ Error saving portfolio segment snapshots (non-critical): ${segmentError.message}`, 'warn');
+                }
                 
                 // Clear pending metrics
                 window._pendingPageMetrics = null;
@@ -19040,46 +18428,9 @@ Also check "Load from Supabase" for audit debug logs.`;
                 const errorText = await saveResponse.text();
                 debugLog(`⚠ Failed to save page metrics to Supabase: ${saveResponse.status} - ${errorText}`, 'warn');
               }
-            } else {
-              debugLog(`⚠ No pending page metrics to save (window._pendingPageMetrics=${!!window._pendingPageMetrics}, pages=${window._pendingPageMetrics?.pages?.length || 0})`, 'warn');
             }
           } catch (pageMetricsError) {
             debugLog(`⚠ Error saving page metrics to Supabase (non-critical): ${pageMetricsError.message}`, 'warn');
-          }
-          
-          // Calculate and save portfolio segment snapshots (Phase 3a)
-          // Run this even if page metrics save failed, as long as we have the data
-          try {
-            if (pageMetricsData || (window.pageTotalsByKey && window.pageTotalsByKey.size > 0)) {
-              const propertyUrl = pageMetricsData?.propertyUrl || localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
-              const dateStart = pageMetricsData?.gscRange?.startDate || (() => {
-                const end = new Date();
-                end.setDate(end.getDate() - 1);
-                const start = new Date(end);
-                start.setDate(start.getDate() - 27);
-                return start.toISOString().split('T')[0];
-              })();
-              const dateEnd = pageMetricsData?.gscRange?.endDate || (() => {
-                const end = new Date();
-                end.setDate(end.getDate() - 1);
-                return end.toISOString().split('T')[0];
-              })();
-              
-              debugLog(`📊 Starting portfolio segment snapshot calculation (runId=${auditDate}, propertyUrl=${propertyUrl}, dateStart=${dateStart}, dateEnd=${dateEnd})...`, 'info');
-              await calculateAndSavePortfolioSegmentSnapshots(
-                auditDate,
-                propertyUrl,
-                dateStart,
-                dateEnd,
-                window.pageTotalsByKey || new Map()
-              );
-              debugLog(`✓ Portfolio segment snapshot calculation completed (runId=${auditDate})`, 'success');
-            } else {
-              debugLog(`⚠ Cannot calculate portfolio segment snapshots: no page metrics data available (pageMetricsData=${!!pageMetricsData}, pageTotalsByKey=${!!window.pageTotalsByKey && window.pageTotalsByKey.size > 0})`, 'warn');
-            }
-          } catch (segmentError) {
-            debugLog(`❌ Error saving portfolio segment snapshots (non-critical): ${segmentError.message}`, 'error');
-            debugLog(`❌ Error stack: ${segmentError.stack}`, 'error');
           }
           
           // Calculate and save portfolio snapshots (Phase 3)
@@ -21349,314 +20700,6 @@ Also check "Load from Supabase" for audit debug logs.`;
         
         return { overview, rows: moneyRows, summaryByCategory, summaryBySubSegment };
       }
-      
-      /**
-       * Phase 4: Scoring functions for priority matrix
-       * These functions compute impact, difficulty, priority, and recommended actions
-       * based on page-level metrics from gsc_page_metrics_28d (28d rolling window)
-       */
-      
-      /**
-       * Compute impact scores (0-100) based on CTR gap and click upside
-       * @param {Array} pages - Array of page objects with clicks, impressions, ctr, position
-       * @param {number} targetCtr - Target CTR (default 0.025 = 2.5%)
-       */
-      function computeImpactScores(pages, targetCtr = 0.025) {
-        if (!pages || pages.length === 0) return;
-        
-        // Step 1: Compute upside_clicks for each page
-        const upsideData = [];
-        for (const p of pages) {
-          const impressions = p.impressions || 0;
-          const ctr = p.ctr || 0;
-          
-          // Edge case: impressions < 10 => impact = 0
-          if (impressions < 10) {
-            p.upside_clicks = 0;
-            p.impact_score = 0;
-            upsideData.push({ upside_clicks: 0 });
-            continue;
-          }
-          
-          // Calculate click upside: max(0, impressions * (target_ctr - ctr))
-          const upside_clicks = Math.max(0, impressions * (targetCtr - ctr));
-          p.upside_clicks = upside_clicks;
-          upsideData.push({ upside_clicks });
-        }
-        
-        // Step 2: Find max upside in the set
-        const maxUpside = Math.max(...upsideData.map(d => d.upside_clicks), 0);
-        
-        // Step 3: Normalize to 0-100
-        if (maxUpside <= 0) {
-          // All pages flat → impact = 0 for all
-          for (const p of pages) {
-            p.impact_score = 0;
-          }
-          return;
-        }
-        
-        // Normalize: impact = round(100 * upside_clicks / max_upside_clicks_in_set)
-        for (let i = 0; i < pages.length; i++) {
-          pages[i].impact_score = Math.round(100 * upsideData[i].upside_clicks / maxUpside);
-        }
-      }
-      
-      /**
-       * Compute difficulty score (LOW/MED/HIGH) based on position
-       * @param {Object} page - Page object with avgPosition
-       * @returns {string} 'LOW', 'MED', or 'HIGH'
-       */
-      function computeDifficultyScore(page) {
-        const pos = page.avgPosition || page.position || 99;
-        
-        // Based primarily on position:
-        // pos <= 3      => LOW
-        // 3 < pos <=10  => MED
-        // pos > 10      => HIGH
-        if (pos <= 3) return 'LOW';
-        if (pos <= 10) return 'MED';
-        return 'HIGH';
-      }
-      
-      /**
-       * Compute priority (LOW/MED/HIGH) combining impact and difficulty
-       * @param {number} impactScore - Impact score (0-100)
-       * @param {string} difficulty - Difficulty level ('LOW', 'MED', 'HIGH')
-       * @returns {string} 'LOW', 'MED', or 'HIGH'
-       */
-      function computePriority(impactScore, difficulty) {
-        // Convert impact (0-100) to buckets
-        let impactBucket;
-        if (impactScore >= 70) impactBucket = 'HIGH';
-        else if (impactScore >= 30) impactBucket = 'MED';
-        else impactBucket = 'LOW';
-        
-        // Priority rules:
-        // HIGH priority if impactBucket=HIGH and difficulty in {LOW,MED}
-        // MED priority if impactBucket=HIGH and difficulty=HIGH
-        // MED priority if impactBucket=MED and difficulty=LOW
-        // LOW otherwise
-        if (impactBucket === 'HIGH' && (difficulty === 'LOW' || difficulty === 'MED')) {
-          return 'HIGH';
-        }
-        if (impactBucket === 'HIGH' && difficulty === 'HIGH') {
-          return 'MED';
-        }
-        if (impactBucket === 'MED' && difficulty === 'LOW') {
-          return 'MED';
-        }
-        return 'LOW';
-      }
-      
-      /**
-       * Get recommended action and task type based on page metrics
-       * @param {Object} page - Page object with ctr, avgPosition, impressions, clicks
-       * @returns {Object} { action: string, taskType: string }
-       */
-      function getRecommendedAction(page) {
-        const ctr = (page.ctr || 0) * 100; // Convert to percentage
-        const pos = page.avgPosition || page.position || 99;
-        const impressions = page.impressions || 0;
-        const clicks = page.clicks || 0;
-        const targetCtr = 2.5;
-        
-        // If ctr < 2.5% and pos <= 10:
-        if (ctr < targetCtr && pos <= 10) {
-          return {
-            action: 'Improve CTR (title/meta/snippet) + strengthen content',
-            taskType: 'on_page'
-          };
-        }
-        
-        // If ctr < 2.5% and pos > 10:
-        if (ctr < targetCtr && pos > 10) {
-          return {
-            action: 'Improve relevance + internal links to lift rank',
-            taskType: 'internal_links'
-          };
-        }
-        
-        // If impressions are high but clicks are low AND ctr is near 0:
-        if (impressions > 100 && clicks < 5 && ctr < 0.5) {
-          return {
-            action: 'Rewrite snippet + add intent-matching sections',
-            taskType: 'content'
-          };
-        }
-        
-        // Default: on_page optimization
-        return {
-          action: 'Review page manually',
-          taskType: 'on_page'
-        };
-      }
-      
-      /**
-       * Phase 4: Render Suggested (Top 10) priority pages table
-       * @param {Array} moneyPagesRows - Array of money page row objects
-       */
-      // Phase 4: Define function (already initialized at script start, now assign implementation)
-      if (!window.renderMoneyPagesSuggestedTop10) {
-        console.log('[Money Pages Phase 4] Defining renderMoneyPagesSuggestedTop10 function...');
-      }
-      window.renderMoneyPagesSuggestedTop10 = function renderMoneyPagesSuggestedTop10(moneyPagesRows) {
-        console.log('[Money Pages Suggested Top 10] Function called with', moneyPagesRows?.length || 0, 'rows');
-        try {
-          const container = document.getElementById('money-pages-suggested-top10-content');
-          if (!container) {
-            console.warn('[Money Pages Suggested Top 10] Container not found, will retry...');
-            // Retry after a short delay in case DOM isn't ready
-            setTimeout(() => {
-              if (typeof window.renderMoneyPagesSuggestedTop10 === 'function') {
-                window.renderMoneyPagesSuggestedTop10(moneyPagesRows);
-              }
-            }, 500);
-            return;
-          }
-          
-          if (!moneyPagesRows || moneyPagesRows.length === 0) {
-            container.innerHTML = '<div style="padding: 2rem; text-align: center; color: #64748b; font-size: 0.9rem;">No money pages data available.</div>';
-            console.log('[Money Pages Suggested Top 10] No rows provided');
-            return;
-          }
-          
-          console.log('[Money Pages Suggested Top 10] Rendering with', moneyPagesRows.length, 'rows');
-        
-        // Create a copy of rows to avoid mutating original
-        // Handle both moneyPagesMetrics.rows format and moneyPagePriorityData format
-        const pages = moneyPagesRows.map(row => ({
-          url: row.url || row.page_url || '',
-          title: row.title || row.page_title || row.url || '',
-          clicks: row.clicks || row.clicks_28d || 0,
-          impressions: row.impressions || row.impressions_28d || 0,
-          ctr: row.ctr || row.ctr_28d || 0,
-          avgPosition: row.avgPosition || row.position || row.position_28d || null,
-          subSegment: row.subSegment || row.segmentType || 'Landing'
-        }));
-        
-        // Compute Phase 4 scores
-        computeImpactScores(pages, 0.025);
-        for (const page of pages) {
-          page.difficulty = computeDifficultyScore(page);
-          page.priority = computePriority(page.impact_score || 0, page.difficulty);
-          const { action, taskType } = getRecommendedAction(page);
-          page.recommended_action = action;
-          page.recommended_task_type = taskType;
-        }
-        
-        // Sort by priority (HIGH > MED > LOW) then by upside_clicks desc
-        const priorityOrder = { HIGH: 0, MED: 1, LOW: 2 };
-        pages.sort((a, b) => {
-          const priorityDiff = (priorityOrder[a.priority] ?? 99) - (priorityOrder[b.priority] ?? 99);
-          if (priorityDiff !== 0) return priorityDiff;
-          return (b.upside_clicks || 0) - (a.upside_clicks || 0);
-        });
-        
-        // Take top 10
-        const top10 = pages.slice(0, 10);
-        
-        if (top10.length === 0) {
-          container.innerHTML = '<div style="padding: 2rem; text-align: center; color: #64748b; font-size: 0.9rem;">No pages meet the criteria for suggested optimization.</div>';
-          return;
-        }
-        
-        // Render as a grid of cards
-        const html = `
-          <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem;">
-            ${top10.map((page, idx) => {
-              const priority = page.priority || 'LOW';
-              const priorityColor = priority === 'HIGH' ? '#10b981' : priority === 'MED' ? '#f59e0b' : '#64748b';
-              const priorityBg = priority === 'HIGH' ? '#dcfce7' : priority === 'MED' ? '#fef3c7' : '#f1f5f9';
-              const difficulty = page.difficulty || 'MED';
-              const difficultyColor = difficulty === 'LOW' ? '#10b981' : difficulty === 'MED' ? '#f59e0b' : '#ef4444';
-              const ctrPct = ((page.ctr || 0) * 100).toFixed(1);
-              
-              return `
-                <div style="padding: 1rem; background: white; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                  <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.75rem;">
-                    <div style="flex: 1; min-width: 0;">
-                      <div style="font-weight: 600; color: #1e293b; margin-bottom: 0.25rem; font-size: 0.9rem; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;" title="${page.title}">${page.title}</div>
-                      <div style="font-size: 0.75rem; color: #64748b; margin-bottom: 0.25rem;">${page.subSegment}</div>
-                    </div>
-                    <span style="display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600; background: ${priorityBg}; color: ${priorityColor}; border: 1px solid ${priorityColor}40; white-space: nowrap; margin-left: 0.5rem;">${priority}</span>
-                  </div>
-                  <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5rem; margin-bottom: 0.75rem; font-size: 0.8rem;">
-                    <div><span style="color: #64748b;">Pos:</span> <strong>${page.avgPosition ? page.avgPosition.toFixed(1) : '—'}</strong></div>
-                    <div><span style="color: #64748b;">CTR:</span> <strong>${ctrPct}%</strong></div>
-                    <div><span style="color: #64748b;">Impr:</span> <strong>${(page.impressions || 0).toLocaleString()}</strong></div>
-                    <div><span style="color: #64748b;">Upside:</span> <strong>${(page.upside_clicks || 0).toFixed(0)}</strong></div>
-                    <div><span style="color: #64748b;">Impact:</span> <strong>${page.impact_score != null ? page.impact_score : '—'}</strong></div>
-                    <div><span style="color: #64748b;">Difficulty:</span> <strong style="color: ${difficultyColor};">${difficulty}</strong></div>
-                  </div>
-                  <div style="font-size: 0.75rem; color: #475569; margin-bottom: 0.75rem; line-height: 1.4; min-height: 2.5rem;">${page.recommended_action || 'Review page manually'}</div>
-                  <button onclick="window.createMoneyPageTask && window.createMoneyPageTask('${page.url.replace(/'/g, "\\'")}', '${(page.recommended_task_type || 'on_page').replace(/'/g, "\\'")}', ${JSON.stringify({
-                    clicks: page.clicks || 0,
-                    impressions: page.impressions || 0,
-                    ctr: page.ctr || 0,
-                    position: page.avgPosition || null
-                  }).replace(/'/g, "\\'")})" style="width: 100%; padding: 0.6rem; background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; transition: background 0.2s;" onmouseover="this.style.background='#1d4ed8';" onmouseout="this.style.background='#2563eb';" title="Create optimisation task for this page">Create Task</button>
-                </div>
-              `;
-            }).join('')}
-          </div>
-        `;
-        
-        container.innerHTML = html;
-        console.log(`[Money Pages Suggested Top 10] ✓ Rendered ${top10.length} pages`);
-        debugLog(`✓ Suggested Top 10 rendered with ${top10.length} pages`, 'success');
-        } catch (error) {
-          console.error('[Money Pages Suggested Top 10] Error rendering:', error);
-          const container = document.getElementById('money-pages-suggested-top10-content');
-          if (container) {
-            container.innerHTML = `<div style="padding: 2rem; text-align: center; color: #ef4444; font-size: 0.9rem;">Error rendering suggested pages: ${error.message}</div>`;
-          }
-        }
-      };
-      
-      // Verify function is defined - this should execute immediately when script loads
-      console.log('[Money Pages Phase 4] renderMoneyPagesSuggestedTop10 defined:', typeof window.renderMoneyPagesSuggestedTop10);
-      if (typeof window.renderMoneyPagesSuggestedTop10 !== 'function') {
-        console.error('[Money Pages Phase 4] ERROR: Function was not assigned to window!');
-      }
-      
-      /**
-       * Phase 4: Create optimisation task for Money Page from Suggested panel
-       * @param {string} pageUrl - The page URL
-       * @param {string} taskType - Recommended task type (on_page, internal_links, content, technical)
-       * @param {Object} baselineMetrics - Baseline metrics { clicks, impressions, ctr, position }
-       */
-      window.createMoneyPageTask = async function createMoneyPageTask(pageUrl, taskType = 'on_page', baselineMetrics = {}) {
-        try {
-          // Use existing trackMoneyPage function if available
-          if (window.trackMoneyPage) {
-            const pageTitle = baselineMetrics.title || pageUrl;
-            await window.trackMoneyPage(pageUrl, pageTitle);
-            return;
-          }
-          
-          // Fallback: open track keyword modal
-          if (window.openTrackKeywordModal) {
-            const row = {
-              keyword: '',
-              best_url: pageUrl,
-              targetUrl: pageUrl,
-              ranking_url: pageUrl,
-              title: baselineMetrics.title || pageUrl,
-              clicks: baselineMetrics.clicks || 0,
-              impressions: baselineMetrics.impressions || 0,
-              ctr: baselineMetrics.ctr || 0,
-              avgPosition: baselineMetrics.position || baselineMetrics.avgPosition || null
-            };
-            window.openTrackKeywordModal(row);
-            return;
-          }
-          
-          console.error('[Money Pages] No task creation function available');
-        } catch (error) {
-          console.error('[Money Pages] Error creating task:', error);
-        }
-      };
       
       // Build compact Money Pages summary for trend tracking (Phase 3)
       // Make buildMoneyPagesSummary globally accessible
@@ -27571,38 +26614,10 @@ Final Score: ${score}/100`;
         
         // Check if full structure already exists (created by displayDashboard)
         const existingHeader = section.querySelector('h3[style*="color: var(--brand-dark)"]');
-        const existingSuggestedSection = document.getElementById('money-pages-suggested-top10');
         if (existingHeader && existingHeader.textContent.includes('Money Pages Performance & Actions')) {
-          debugLog('✓ Money Pages full structure already exists, ensuring Suggested Top 10 section exists', 'info');
+          debugLog('✓ Money Pages full structure already exists, skipping HTML recreation', 'info');
           // Don't overwrite - just ensure section is visible
           section.style.display = 'block';
-          
-          // Ensure the Suggested (Top 10) section exists - add it if missing
-          if (!existingSuggestedSection) {
-            debugLog('⚠ Suggested Top 10 section missing, adding it now', 'warn');
-            const prioritySection = document.getElementById('money-pages-priority-card');
-            if (prioritySection && prioritySection.parentNode) {
-              const suggestedSection = document.createElement('section');
-              suggestedSection.id = 'money-pages-suggested-top10';
-              suggestedSection.className = 'card card--full';
-              suggestedSection.style.cssText = 'margin-top: 2rem; background: #f0f9ff; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); border: 1px solid #0ea5e9;';
-              suggestedSection.innerHTML = `
-                <div class="card-header" style="margin-bottom: 1rem;">
-                  <h3 style="margin: 0 0 0.5rem 0; font-size: 1.1rem; font-weight: 700; color: #0c4a6e;">Suggested (Top 10)</h3>
-                  <p class="card-subtitle" style="margin: 0; font-size: 0.85rem; color: #64748b; line-height: 1.6;">
-                    Top priority pages ranked by impact and difficulty. Click "Create Task" to start optimization tracking.
-                  </p>
-                </div>
-                <div id="money-pages-suggested-top10-content" style="min-height: 200px;">
-                  <div style="padding: 2rem; text-align: center; color: #64748b; font-size: 0.9rem;">
-                    Loading suggested pages...
-                  </div>
-                </div>
-              `;
-              prioritySection.parentNode.insertBefore(suggestedSection, prioritySection.nextSibling);
-              debugLog('✓ Suggested Top 10 section added to DOM', 'success');
-            }
-          }
         } else {
           // Always update the HTML structure to ensure it has the latest canvas IDs
           // Create the full Money Pages HTML structure with all sections
@@ -27853,23 +26868,6 @@ Final Score: ${score}/100`;
               </div>
             </section>
             
-            <!-- Phase 4: Suggested (Top 10) Priority Pages -->
-            <section id="money-pages-suggested-top10" class="card card--full" style="margin-top: 2rem; background: #f0f9ff; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); border: 1px solid #0ea5e9;">
-              <div class="card-header" style="margin-bottom: 1rem;">
-                <h3 style="margin: 0 0 0.5rem 0; font-size: 1.1rem; font-weight: 700; color: #0c4a6e;">Suggested (Top 10)</h3>
-                <p class="card-subtitle" style="margin: 0; font-size: 0.85rem; color: #64748b; line-height: 1.6;">
-                  Top priority pages ranked by impact and difficulty. Click "Create Task" to start optimization tracking.
-                </p>
-              </div>
-              
-              <div id="money-pages-suggested-top10-content" style="min-height: 200px;">
-                <!-- Filled by JavaScript -->
-                <div style="padding: 2rem; text-align: center; color: #64748b; font-size: 0.9rem;">
-                  Loading suggested pages...
-                </div>
-              </div>
-            </section>
-            
             <p class="card-footnote" style="margin-top: 1rem; font-size: 0.85rem; color: #666;">
               Based on the current audit date range and money-page segment only.
               Categories and actions are data-driven and will update each time you run a new audit.
@@ -27982,57 +26980,6 @@ Final Score: ${score}/100`;
         
         // Update sub-segment dropdown counts
         updateMoneyPagesSubSegmentCounts(moneyPagesMetrics);
-        
-        // Phase 4: Render Suggested (Top 10) table
-        // Use moneyPagePriorityData if available (same data as Priority & Actions table), otherwise use rows
-        // Use requestAnimationFrame to ensure DOM is updated after innerHTML is set
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            // Double RAF ensures DOM is fully updated
-            let retryCount = 0;
-            const maxRetries = 15;
-            const renderSuggestedTop10 = () => {
-              const container = document.getElementById('money-pages-suggested-top10-content');
-              if (!container) {
-                retryCount++;
-                if (retryCount < maxRetries) {
-                  console.warn(`[Money Pages] Container not found yet, retrying (${retryCount}/${maxRetries})...`);
-                  setTimeout(renderSuggestedTop10, 200);
-                  return;
-                } else {
-                  console.error('[Money Pages] Container not found after max retries. Checking if section exists...');
-                  const section = document.getElementById('money-pages-suggested-top10');
-                  console.error('[Money Pages] Section exists:', !!section, 'Section HTML:', section ? section.outerHTML.substring(0, 200) : 'N/A');
-                  return;
-                }
-              }
-              
-              const dataSource = window.moneyPagePriorityData && window.moneyPagePriorityData.length > 0 
-                ? window.moneyPagePriorityData 
-                : rows;
-              console.log('[Money Pages] Rendering Suggested Top 10 with data source:', {
-                hasPriorityData: !!window.moneyPagePriorityData,
-                priorityDataCount: window.moneyPagePriorityData?.length || 0,
-                rowsCount: rows?.length || 0,
-                usingDataSource: dataSource === window.moneyPagePriorityData ? 'moneyPagePriorityData' : 'rows',
-                hasFunction: typeof window.renderMoneyPagesSuggestedTop10 === 'function',
-                functionType: typeof window.renderMoneyPagesSuggestedTop10,
-                containerFound: !!container
-              });
-              if (typeof window.renderMoneyPagesSuggestedTop10 === 'function') {
-                window.renderMoneyPagesSuggestedTop10(dataSource);
-              } else {
-                console.error('[Money Pages] renderMoneyPagesSuggestedTop10 function not found. Available on window:', {
-                  hasFunction: typeof window.renderMoneyPagesSuggestedTop10,
-                  windowKeys: Object.keys(window).filter(k => k.includes('Money') || k.includes('render'))
-                });
-              }
-            };
-            
-            // Start checking immediately (DOM should be ready after double RAF)
-            renderSuggestedTop10();
-          });
-        });
         
         // Function to apply filters and re-render ALL sections (table, chart, KPIs, summaries)
         const applyFiltersAndRender = async () => {
