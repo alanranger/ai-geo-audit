@@ -75,6 +75,35 @@ async function fetchGscPageData(siteUrl, startDate, endDate) {
   return data.rows || [];
 }
 
+// Fetch GSC overview totals (no dimensions) for the same date range
+async function fetchGscOverview(siteUrl, startDate, endDate) {
+  const accessToken = await getGSCAccessToken();
+  const searchConsoleUrl = `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`;
+
+  const response = await fetch(searchConsoleUrl, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ startDate, endDate }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(`GSC overview API error: ${errorData.error?.message || response.statusText || 'Unknown error'}`);
+  }
+
+  const data = await response.json();
+  const row = (data.rows && data.rows.length > 0) ? data.rows[0] : null;
+  return {
+    clicks: row?.clicks || 0,
+    impressions: row?.impressions || 0,
+    ctr: row?.ctr || 0,
+    position: row?.position || 0
+  };
+}
+
 // Classify page segment from URL (matches frontend logic)
 function classifyPageSegment(pageUrl) {
   if (!pageUrl || typeof pageUrl !== 'string') return 'landing';
@@ -98,7 +127,7 @@ function classifyPageSegment(pageUrl) {
 }
 
 // Calculate and save segment metrics for a run
-async function calculateAndSaveSegmentMetrics(supabase, runId, siteUrl, dateStart, dateEnd, pages) {
+async function calculateAndSaveSegmentMetrics(supabase, runId, siteUrl, dateStart, dateEnd, pages, scale = { clicks: 1, impressions: 1 }) {
   // Get active optimisation tasks for all_tracked segment
   const { data: tasks } = await supabase
     .from('optimisation_tasks')
@@ -201,7 +230,11 @@ async function calculateAndSaveSegmentMetrics(supabase, runId, siteUrl, dateStar
     
     const totalClicks = segmentPageList.reduce((sum, p) => sum + (p.clicks || 0), 0);
     const totalImpressions = segmentPageList.reduce((sum, p) => sum + (p.impressions || 0), 0);
-    const ctr = totalImpressions > 0 ? totalClicks / totalImpressions : 0;
+    // Calibrate to GSC overview totals (no dimensions) so month snapshots match GSC UI totals.
+    // Apply independent scaling for clicks and impressions so the aggregate matches both.
+    const scaledClicks = totalClicks * (scale.clicks || 1);
+    const scaledImpressions = totalImpressions * (scale.impressions || 1);
+    const ctr = scaledImpressions > 0 ? scaledClicks / scaledImpressions : 0;
     
     let totalPositionWeight = 0;
     let totalPositionImpressions = 0;
@@ -223,8 +256,8 @@ async function calculateAndSaveSegmentMetrics(supabase, runId, siteUrl, dateStar
       date_start: dateStart,
       date_end: dateEnd,
       pages_count: segmentPageList.length,
-      clicks_28d: totalClicks,
-      impressions_28d: totalImpressions,
+      clicks_28d: scaledClicks,
+      impressions_28d: scaledImpressions,
       ctr_28d: ctr,
       position_28d: avgPosition
     });
@@ -258,7 +291,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { propertyUrl, months = 12, startFromMonth } = req.body;
+    const { propertyUrl, months = 12, startFromMonth, force = false } = req.body;
     
     if (!propertyUrl) {
       return sendJSON(res, 400, { error: 'Missing required parameter: propertyUrl' });
@@ -324,19 +357,37 @@ export default async function handler(req, res) {
         .eq('site_url', siteUrl)
         .limit(1);
       
-      if (existing && existing.length > 0) {
-        console.log(`[Backfill GSC] Run ${runId} already exists, skipping...`);
-        results.push({
-          runId,
-          status: 'skipped',
-          reason: 'Already exists'
-        });
+      const runExists = !!(existing && existing.length > 0);
+      if (runExists && !force) {
+        console.log(`[Backfill GSC] Run ${runId} already exists, skipping... (force=false)`);
+        results.push({ runId, status: 'skipped', reason: 'Already exists (force=false)' });
         continue;
       }
       
       try {
-        // Fetch GSC data
-        const gscRows = await fetchGscPageData(siteUrl, startDate, endDate);
+        // Fetch GSC overview totals for calibration
+        const overview = await fetchGscOverview(siteUrl, startDate, endDate);
+
+        let gscRows = [];
+        if (runExists && force) {
+          // Recompute from stored page metrics to avoid refetching big page list
+          const { data: storedPages, error: storedErr } = await supabase
+            .from('gsc_page_metrics_28d')
+            .select('page_url,clicks_28d,impressions_28d,ctr_28d,position_28d')
+            .eq('run_id', runId)
+            .eq('site_url', siteUrl);
+          if (storedErr) throw new Error(`Failed to load stored page metrics for ${runId}: ${storedErr.message}`);
+          gscRows = (storedPages || []).map(p => ({
+            keys: [p.page_url],
+            clicks: parseFloat(p.clicks_28d) || 0,
+            impressions: parseFloat(p.impressions_28d) || 0,
+            ctr: parseFloat(p.ctr_28d) || 0,
+            position: p.position_28d != null ? parseFloat(p.position_28d) : null
+          }));
+        } else {
+          // Fetch GSC page-level data for this month window
+          gscRows = await fetchGscPageData(siteUrl, startDate, endDate);
+        }
         
         if (gscRows.length === 0) {
           console.log(`[Backfill GSC] No data for ${runId}, skipping...`);
@@ -347,37 +398,51 @@ export default async function handler(req, res) {
           });
           continue;
         }
+
+        // Compute scaling factors: align page-dimension totals to overview totals
+        const rawClicks = gscRows.reduce((sum, r) => sum + (r.clicks || 0), 0);
+        const rawImpressions = gscRows.reduce((sum, r) => sum + (r.impressions || 0), 0);
+        const scale = {
+          clicks: rawClicks > 0 ? (overview.clicks / rawClicks) : 1,
+          impressions: rawImpressions > 0 ? (overview.impressions / rawImpressions) : 1
+        };
+        console.log(`[Backfill GSC] ${runId} calibration: rawImpr=${rawImpressions}, overviewImpr=${overview.impressions}, scaleImpr=${scale.impressions.toFixed(4)}; rawClicks=${rawClicks}, overviewClicks=${overview.clicks}, scaleClicks=${scale.clicks.toFixed(4)}`);
         
-        // Prepare pages for insertion
-        const pagesToInsert = gscRows.map(row => ({
-          run_id: runId,
-          site_url: siteUrl,
-          page_url: row.keys[0], // First dimension is page URL
-          date_start: startDate,
-          date_end: endDate,
-          clicks_28d: row.clicks || 0,
-          impressions_28d: row.impressions || 0,
-          ctr_28d: row.ctr || 0,
-          position_28d: row.position || null
-        }));
-        
-        // Insert page metrics in batches
-        const batchSize = 500;
-        for (let i = 0; i < pagesToInsert.length; i += batchSize) {
-          const batch = pagesToInsert.slice(i, i + batchSize);
-          const { error: insertError } = await supabase
-            .from('gsc_page_metrics_28d')
-            .upsert(batch, {
-              onConflict: 'run_id,page_url',
-              ignoreDuplicates: false
-            });
-          
-          if (insertError) {
-            throw new Error(`Failed to insert page metrics batch: ${insertError.message}`);
-          }
+        // Only insert page metrics when the run doesn't exist yet.
+        // For force recompute, we re-use stored page metrics and only update segment metrics.
+        let pagesToInsert = [];
+        if (!runExists) {
+          pagesToInsert = gscRows.map(row => ({
+            run_id: runId,
+            site_url: siteUrl,
+            page_url: row.keys[0], // First dimension is page URL
+            date_start: startDate,
+            date_end: endDate,
+            clicks_28d: row.clicks || 0,
+            impressions_28d: row.impressions || 0,
+            ctr_28d: row.ctr || 0,
+            position_28d: row.position || null
+          }));
         }
         
-        totalPagesSaved += pagesToInsert.length;
+        if (pagesToInsert.length > 0) {
+          // Insert page metrics in batches
+          const batchSize = 500;
+          for (let i = 0; i < pagesToInsert.length; i += batchSize) {
+            const batch = pagesToInsert.slice(i, i + batchSize);
+            const { error: insertError } = await supabase
+              .from('gsc_page_metrics_28d')
+              .upsert(batch, {
+                onConflict: 'run_id,page_url',
+                ignoreDuplicates: false
+              });
+            
+            if (insertError) {
+              throw new Error(`Failed to insert page metrics batch: ${insertError.message}`);
+            }
+          }
+          totalPagesSaved += pagesToInsert.length;
+        }
         
         // Calculate and save segment metrics
         const segmentsSaved = await calculateAndSaveSegmentMetrics(
@@ -386,7 +451,8 @@ export default async function handler(req, res) {
           siteUrl,
           startDate,
           endDate,
-          gscRows
+          gscRows,
+          scale
         );
         
         totalRunsProcessed++;
