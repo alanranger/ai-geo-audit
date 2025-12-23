@@ -15989,6 +15989,14 @@
 
     // Load and render Money Pages KPI Tracker (last 28 days)
     window.loadAuditHistoryAndRenderKpis = async function(propertyUrl) {
+      // Prevent multiple simultaneous calls
+      if (window._loadingMoneyKpiTracker) {
+        debugLog('⚠ Money Pages KPI Tracker already loading, skipping duplicate call', 'warn');
+        return;
+      }
+      
+      window._loadingMoneyKpiTracker = true;
+      
       try {
         debugLog('📊 Loading Money Pages KPI Tracker data...', 'info');
         
@@ -16125,12 +16133,30 @@
         // Render chart
         const canvas = document.getElementById('money-kpi-sparkline');
         if (canvas) {
-          const ctx = canvas.getContext('2d');
-          
-          // Destroy existing chart if it exists
+          // Destroy existing chart if it exists (check both window variable and Chart.js registry)
           if (window.moneyKpiChart) {
-            window.moneyKpiChart.destroy();
+            try {
+              window.moneyKpiChart.destroy();
+            } catch (e) {
+              debugLog(`Error destroying window.moneyKpiChart: ${e.message}`, 'warn');
+            }
+            window.moneyKpiChart = null;
           }
+          
+          // Also check Chart.js registry for any chart on this canvas
+          if (typeof Chart !== 'undefined' && Chart.getChart) {
+            const existingChart = Chart.getChart(canvas);
+            if (existingChart) {
+              try {
+                existingChart.destroy();
+                debugLog('Destroyed existing Chart.js instance from registry for money-kpi-sparkline', 'info');
+              } catch (e) {
+                debugLog(`Error destroying chart from registry: ${e.message}`, 'warn');
+              }
+            }
+          }
+          
+          const ctx = canvas.getContext('2d');
           
           window.moneyKpiChart = new Chart(ctx, {
             type: 'line',
@@ -16271,6 +16297,8 @@
       } catch (err) {
         debugLog(`Error loading Money Pages KPI Tracker: ${err.message}`, 'error');
         console.error(err);
+      } finally {
+        window._loadingMoneyKpiTracker = false;
       }
     };
 
