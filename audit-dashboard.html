@@ -15987,6 +15987,285 @@
       }
     }
 
+    // Load and render Money Pages KPI Tracker (last 28 days)
+    window.loadAuditHistoryAndRenderKpis = async function(propertyUrl) {
+      try {
+        debugLog('📊 Loading Money Pages KPI Tracker data...', 'info');
+        
+        if (!propertyUrl) {
+          propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+          if (!propertyUrl) {
+            debugLog('⚠ No property URL found for Money Pages KPI Tracker', 'warn');
+            return;
+          }
+        }
+        
+        // Get selected metric
+        const metricSelect = document.getElementById('money-kpi-metric-select');
+        const selectedMetric = metricSelect?.value || 'avgPosition';
+        
+        // Map UI metric to database field
+        const metricFieldMap = {
+          'ctr': 'ctr_28d',
+          'impressions': 'impressions_28d',
+          'clicks': 'clicks_28d',
+          'avgPosition': 'position_28d'
+        };
+        const dbField = metricFieldMap[selectedMetric] || 'position_28d';
+        
+        // Calculate date range (last 28 days)
+        const toDate = new Date();
+        const fromDate = new Date();
+        fromDate.setDate(fromDate.getDate() - 28);
+        
+        // Fetch data for all money page segments
+        const segments = ['money', 'landing', 'event', 'product'];
+        const segmentData = {};
+        
+        for (const segment of segments) {
+          const params = new URLSearchParams({
+            siteUrl: propertyUrl,
+            segment,
+            scope: 'active_cycles_only',
+            from: fromDate.toISOString(),
+            to: toDate.toISOString(),
+            order: 'asc'
+          });
+          
+          const response = await fetch(apiUrl(`/api/supabase/get-portfolio-segment-metrics?${params}`));
+          if (response.ok) {
+            const data = await response.json();
+            segmentData[segment] = (data.metrics || []).map(m => ({
+              date: m.date_end ? new Date(m.date_end) : new Date(m.created_at),
+              value: dbField === 'ctr_28d' ? parseFloat(m.ctr_28d || 0) :
+                     dbField === 'position_28d' ? (m.position_28d !== null && m.position_28d !== undefined && !isNaN(parseFloat(m.position_28d)) ? parseFloat(m.position_28d) : null) :
+                     dbField === 'clicks_28d' ? parseFloat(m.clicks_28d || 0) :
+                     dbField === 'impressions_28d' ? parseFloat(m.impressions_28d || 0) : null,
+              run_id: m.run_id
+            })).filter(d => d.value !== null && !isNaN(d.value));
+          } else {
+            segmentData[segment] = [];
+          }
+        }
+        
+        // Get all unique dates and sort them
+        const allDates = new Set();
+        Object.values(segmentData).forEach(data => {
+          data.forEach(d => allDates.add(d.date.toISOString().split('T')[0]));
+        });
+        const sortedDates = Array.from(allDates).sort();
+        
+        if (sortedDates.length === 0) {
+          debugLog('⚠ No data found for Money Pages KPI Tracker', 'warn');
+          return;
+        }
+        
+        // Build chart data
+        const segmentLabels = {
+          'money': 'All',
+          'landing': 'Landing',
+          'event': 'Event',
+          'product': 'Product'
+        };
+        
+        const segmentColors = {
+          'money': '#3b82f6',    // Blue
+          'landing': '#10b981',  // Green
+          'event': '#f59e0b',   // Orange/Yellow
+          'product': '#ef4444'   // Red
+        };
+        
+        const chartData = {
+          labels: sortedDates.map(d => {
+            const date = new Date(d);
+            return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+          }),
+          datasets: segments.map(segment => {
+            const data = sortedDates.map(dateStr => {
+              const segmentPoint = segmentData[segment].find(d => 
+                d.date.toISOString().split('T')[0] === dateStr
+              );
+              return segmentPoint ? segmentPoint.value : null;
+            });
+            
+            return {
+              label: segmentLabels[segment],
+              data: data,
+              borderColor: segmentColors[segment],
+              backgroundColor: segmentColors[segment] + '20',
+              borderWidth: 2,
+              fill: false,
+              tension: 0.4,
+              pointRadius: 4,
+              pointHoverRadius: 6
+            };
+          })
+        };
+        
+        // Render chart
+        const canvas = document.getElementById('money-kpi-sparkline');
+        if (canvas) {
+          const ctx = canvas.getContext('2d');
+          
+          // Destroy existing chart if it exists
+          if (window.moneyKpiChart) {
+            window.moneyKpiChart.destroy();
+          }
+          
+          window.moneyKpiChart = new Chart(ctx, {
+            type: 'line',
+            data: chartData,
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: {
+                  display: true,
+                  position: 'top'
+                },
+                tooltip: {
+                  mode: 'index',
+                  intersect: false
+                }
+              },
+              scales: {
+                x: {
+                  display: true,
+                  title: {
+                    display: true,
+                    text: 'Month'
+                  }
+                },
+                y: {
+                  display: true,
+                  title: {
+                    display: true,
+                    text: selectedMetric === 'avgPosition' ? 'Avg Position' :
+                          selectedMetric === 'ctr' ? 'CTR' :
+                          selectedMetric === 'impressions' ? 'Impressions' :
+                          'Clicks'
+                  }
+                }
+              }
+            }
+          });
+        }
+        
+        // Render table
+        const table = document.getElementById('money-kpi-table');
+        if (table) {
+          const thead = table.querySelector('thead tr');
+          const tbody = table.querySelector('tbody');
+          
+          // Clear existing content
+          thead.innerHTML = '';
+          tbody.innerHTML = '';
+          
+          // Add header row
+          const segmentHeader = document.createElement('th');
+          segmentHeader.textContent = 'Segment ↑';
+          segmentHeader.style.cssText = 'padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0; background: #f1f5f9; font-weight: 600;';
+          thead.appendChild(segmentHeader);
+          
+          sortedDates.forEach(dateStr => {
+            const th = document.createElement('th');
+            const date = new Date(dateStr);
+            th.textContent = date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+            th.style.cssText = 'padding: 0.75rem; text-align: center; border-bottom: 2px solid #e2e8f0; background: #f1f5f9; font-weight: 600;';
+            thead.appendChild(th);
+          });
+          
+          const trendHeader = document.createElement('th');
+          trendHeader.textContent = 'Trend';
+          trendHeader.style.cssText = 'padding: 0.75rem; text-align: center; border-bottom: 2px solid #e2e8f0; background: #f1f5f9; font-weight: 600;';
+          thead.appendChild(trendHeader);
+          
+          // Add data rows
+          segments.forEach(segment => {
+            const row = document.createElement('tr');
+            
+            // Segment name
+            const segmentCell = document.createElement('td');
+            segmentCell.textContent = segmentLabels[segment];
+            segmentCell.style.cssText = 'padding: 0.75rem; border-bottom: 1px solid #e2e8f0; font-weight: 600;';
+            row.appendChild(segmentCell);
+            
+            // Data cells
+            const values = sortedDates.map(dateStr => {
+              const segmentPoint = segmentData[segment].find(d => 
+                d.date.toISOString().split('T')[0] === dateStr
+              );
+              return segmentPoint ? segmentPoint.value : null;
+            });
+            
+            values.forEach((value, idx) => {
+              const cell = document.createElement('td');
+              if (value !== null) {
+                if (selectedMetric === 'avgPosition') {
+                  cell.textContent = value.toFixed(1) + '-';
+                } else if (selectedMetric === 'ctr') {
+                  cell.textContent = (value * 100).toFixed(2) + '%';
+                } else {
+                  cell.textContent = Math.round(value).toLocaleString();
+                }
+              }
+              cell.style.cssText = 'padding: 0.75rem; text-align: center; border-bottom: 1px solid #e2e8f0;';
+              row.appendChild(cell);
+            });
+            
+            // Trend cell
+            const trendCell = document.createElement('td');
+            const validValues = values.filter(v => v !== null);
+            if (validValues.length >= 2) {
+              const first = validValues[0];
+              const last = validValues[validValues.length - 1];
+              const change = last - first;
+              const changePercent = first !== 0 ? ((change / first) * 100) : 0;
+              
+              let trendText = '→ 0.0';
+              let trendClass = 'kpi-trend-flat';
+              
+              if (Math.abs(change) > 0.01) {
+                if (selectedMetric === 'avgPosition') {
+                  // For position, lower is better, so negative change is good
+                  trendText = change < 0 ? `↓ ${Math.abs(change).toFixed(1)}` : `↑ ${change.toFixed(1)}`;
+                  trendClass = change < 0 ? 'kpi-trend-up' : 'kpi-trend-down';
+                } else {
+                  trendText = change > 0 ? `↑ ${changePercent.toFixed(1)}%` : `↓ ${Math.abs(changePercent).toFixed(1)}%`;
+                  trendClass = change > 0 ? 'kpi-trend-up' : 'kpi-trend-down';
+                }
+              }
+              
+              trendCell.innerHTML = `<span class="${trendClass}">${trendText}</span>`;
+            } else {
+              trendCell.textContent = '—';
+            }
+            trendCell.style.cssText = 'padding: 0.75rem; text-align: center; border-bottom: 1px solid #e2e8f0;';
+            row.appendChild(trendCell);
+            
+            tbody.appendChild(row);
+          });
+        }
+        
+        debugLog('✓ Money Pages KPI Tracker rendered', 'success');
+      } catch (err) {
+        debugLog(`Error loading Money Pages KPI Tracker: ${err.message}`, 'error');
+        console.error(err);
+      }
+    };
+
+    // Wire up Money KPI metric selector
+    window.wireMoneyKpiMetricSelector = function() {
+      const metricSelect = document.getElementById('money-kpi-metric-select');
+      if (metricSelect) {
+        metricSelect.addEventListener('change', () => {
+          const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+          if (propertyUrl && typeof window.loadAuditHistoryAndRenderKpis === 'function') {
+            window.loadAuditHistoryAndRenderKpis(propertyUrl);
+          }
+        });
+      }
+    };
 
     // Wire up Portfolio controls
     function wirePortfolioControls() {
