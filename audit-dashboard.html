@@ -14984,15 +14984,20 @@
           
           // Define renderMoneyPagesSuggestedTop10 at global scope early
           if (!window.renderMoneyPagesSuggestedTop10) {
-            window.renderMoneyPagesSuggestedTop10 = function() {
+            window.renderMoneyPagesSuggestedTop10 = function(retryCount = 0) {
+              const MAX_RETRIES = 10; // Stop after 10 retries (5 seconds)
               const container = document.getElementById('money-pages-suggested-top10-container');
               if (!container) {
-                debugLog('⚠ money-pages-suggested-top10-container not found - section may not be rendered yet', 'warn');
-                setTimeout(() => {
-                  if (typeof window.renderMoneyPagesSuggestedTop10 === 'function') {
-                    window.renderMoneyPagesSuggestedTop10();
-                  }
-                }, 500);
+                if (retryCount < MAX_RETRIES) {
+                  debugLog(`⚠ money-pages-suggested-top10-container not found (retry ${retryCount + 1}/${MAX_RETRIES}) - section may not be rendered yet`, 'warn');
+                  setTimeout(() => {
+                    if (typeof window.renderMoneyPagesSuggestedTop10 === 'function') {
+                      window.renderMoneyPagesSuggestedTop10(retryCount + 1);
+                    }
+                  }, 500);
+                } else {
+                  debugLog(`⚠ money-pages-suggested-top10-container not found after ${MAX_RETRIES} retries - giving up. The HTML section may not be included in renderMoneyPagesSection.`, 'error');
+                }
                 return;
               }
               
@@ -15246,10 +15251,21 @@
             window.wirePriorityActionsFilters();
           }
           
+<<<<<<< ours
           // Render Suggested (Top 10) cards
           if (typeof window.renderMoneyPagesSuggestedTop10 === 'function') {
             window.renderMoneyPagesSuggestedTop10();
           }
+=======
+          // Render Suggested (Top 10) cards - wait a bit longer to ensure HTML structure exists
+          setTimeout(() => {
+            if (typeof window.renderMoneyPagesSuggestedTop10 === 'function') {
+              window.renderMoneyPagesSuggestedTop10(0); // Start with retry count 0
+            } else {
+              debugLog('⚠ renderMoneyPagesSuggestedTop10 function not found', 'warn');
+            }
+          }, 300);
+>>>>>>> theirs
         }, 100);
       }
 
@@ -16218,7 +16234,21 @@
         
         // If we still don't have a valid date, or if the date is Dec 22 but top charts show Dec 21,
         // explicitly cap to Dec 21 to match top charts behavior
+<<<<<<< ours
         if (!lastValidGscDate || (lastValidGscDate.toISOString && lastValidGscDate.toISOString().split('T')[0] > '2025-12-21')) {
+=======
+        if (!lastValidGscDate) {
+          // If we still don't have a valid date, try to use window.lastGscTimeseriesDate as fallback
+          if (window.lastGscTimeseriesDate) {
+            lastValidGscDate = new Date(window.lastGscTimeseriesDate);
+            if (lastValidGscDate && lastValidGscDate.toISOString) {
+              debugLog(`📅 Using window.lastGscTimeseriesDate as fallback: ${lastValidGscDate.toISOString().split('T')[0]}`, 'info');
+            }
+          }
+        }
+        
+        if (lastValidGscDate && lastValidGscDate.toISOString && lastValidGscDate.toISOString().split('T')[0] > '2025-12-21') {
+>>>>>>> theirs
           // Check if Dec 21 data exists in any segment
           const hasDec21Data = segments.some(segment => 
             segmentData[segment].some(({ metric: m }) => {
