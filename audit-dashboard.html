@@ -11715,6 +11715,15 @@
       // Helper to format delta with color (handles rank where lower is better)
       const formatDelta = (delta, metricKey) => {
         if (delta == null) return { text: '—', color: '#666' };
+        // For CTR, delta is in ratio format (0-1), convert to percentage points
+        if (metricKey === 'gsc_ctr_28d' || metricKey === 'ctr_28d') {
+          const deltaPp = delta * 100; // Convert ratio delta to percentage points
+          const sign = deltaPp >= 0 ? '+' : '';
+          const formatted = `${sign}${deltaPp.toFixed(2)}pp`;
+          if (deltaPp > 0) return { text: formatted, color: '#10b981' }; // Up - green
+          if (deltaPp < 0) return { text: formatted, color: '#ef4444' }; // Down - red
+          return { text: '0.00pp', color: '#f59e0b' }; // No change - amber
+        }
         // For rank, lower is better (negative delta means improved rank = good)
         if (metricKey === 'current_rank') {
           const absDelta = Math.abs(delta);
