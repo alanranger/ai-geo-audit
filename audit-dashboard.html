@@ -15431,18 +15431,37 @@
           let dateForBucket = null;
           let bucketKey = null;
           
+          // Determine date for bucketing based on time grain
           if (timeGrain === 'monthly' && m.run_id && m.run_id.match(/^\d{4}-\d{2}$/)) {
             // Monthly: use run_id directly if it's in YYYY-MM format (for historical backfill)
             bucketKey = m.run_id;
             dateForBucket = new Date(m.run_id + '-01');
+          } else if (timeGrain === 'weekly') {
+            // For weekly: prefer date_end (when data represents) over created_at (when audit was run)
+            // This ensures backfilled monthly data gets distributed across correct weeks
+            if (m.date_end) {
+              dateForBucket = new Date(m.date_end);
+            } else if (m.run_id && m.run_id.match(/^\d{4}-\d{2}-\d{2}$/)) {
+              dateForBucket = new Date(m.run_id);
+            } else if (m.run_id && m.run_id.match(/^\d{4}-\d{2}$/)) {
+              // For monthly run_id, use the last day of that month
+              dateForBucket = new Date(m.run_id + '-01');
+              dateForBucket.setMonth(dateForBucket.getMonth() + 1);
+              dateForBucket.setDate(0); // Last day of the month
+            } else if (m.created_at) {
+              dateForBucket = new Date(m.created_at);
+            } else {
+              debugLog(`⚠ No valid date found for weekly metric: run_id=${m.run_id}, date_end=${m.date_end}, created_at=${m.created_at}`, 'warn');
+              return; // Skip this metric
+            }
           } else if (m.created_at) {
-            // Use created_at (when the audit was run) - this is the most reliable for distinguishing different audit runs
+            // For monthly (non-backfill): use created_at (when the audit was run)
             dateForBucket = new Date(m.created_at);
           } else if (m.run_id && m.run_id.match(/^\d{4}-\d{2}-\d{2}$/)) {
             // If run_id is in YYYY-MM-DD format, use that
             dateForBucket = new Date(m.run_id);
           } else if (m.date_end) {
-            // Fallback to date_end (less ideal since all audits may share the same date_end)
+            // Fallback to date_end
             dateForBucket = new Date(m.date_end);
           } else {
             debugLog(`⚠ No valid date found for metric: run_id=${m.run_id}, date_end=${m.date_end}, created_at=${m.created_at}`, 'warn');
@@ -15583,17 +15602,19 @@
             label = `${monthName} ${yearShort}`;
           }
           
+          // Always add the label
+          labels.push(label);
+          
           if (index === 0) {
-            // First bucket: no delta
-            labels.push(label);
-            deltas.push(null); // No previous value to compare
+            // First bucket: set delta to 0 so the line starts from baseline
+            // This ensures the first month is visible on the chart
+            deltas.push(0);
           } else {
             const prevBucket = filteredBuckets[index - 1][1];
             const delta = bucket.value !== null && prevBucket.value !== null 
               ? bucket.value - prevBucket.value 
               : null;
             
-            labels.push(label);
             deltas.push(delta);
           }
         });
