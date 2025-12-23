@@ -16020,22 +16020,24 @@
             const cell = document.createElement('td');
             cell.style.cssText = 'text-align: center; padding: 0.75rem; border-bottom: 1px solid var(--dark-border); color: var(--dark-text);';
             
-            // Monthly KPI Tracker should represent CLOSED months.
-            // We only accept:
-            // - Backfilled month snapshots: run_id = YYYY-MM
-            // - Month-end daily snapshots: date_end = last day of the month
+            // Monthly KPI Tracker:
+            // - For CLOSED months: we only accept month-end snapshots (run_id=YYYY-MM, or date_end=last day of month)
+            // - For CURRENT month: show the latest available snapshot in the month, but mark it as partial (*)
             const monthEnd = monthEndDateFromKey(month);
             const monthEndStr = toDateOnlyStr(monthEnd); // YYYY-MM-DD (local)
+            const isCurrentMonth = month === monthKeyFromDate(today);
             const monthSnapshots = allData[segment]?.filter(s => {
               // Preferred: explicit month backfill snapshot
               if (s.run_id && s.run_id.match(/^\d{4}-\d{2}$/)) {
                 return s.run_id === month;
               }
-              // Otherwise: only accept if date_end is the last day of the month (month closed)
+              // Otherwise: use date_end
               if (s.date_end) {
-                const d = new Date(s.date_end);
-                if (isNaN(d.getTime())) return false;
-                const dStr = toDateOnlyStr(d);
+                const dStr = String(s.date_end).slice(0, 10); // YYYY-MM-DD
+                const mStr = String(s.date_end).slice(0, 7);  // YYYY-MM
+                // Current month: allow any snapshot within the month (we'll mark as partial later)
+                if (isCurrentMonth) return mStr === month;
+                // Closed months: only accept if date_end is the last day of the month
                 return dStr === monthEndStr;
               }
               return false;
