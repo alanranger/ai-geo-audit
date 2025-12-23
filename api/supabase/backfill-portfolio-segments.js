@@ -123,8 +123,17 @@ export default async function handler(req, res) {
         console.warn(`[Backfill] Calibration error for ${currentRunId} (skipping):`, calErr.message);
       }
 
-      // Group pages by segment
-      const segmentPages = {
+      // Group pages by segment for two scopes:
+      // - all_pages: all pages in the segment (calibrated to gsc_timeseries totals)
+      // - active_cycles_only: only pages currently tracked by active optimisation tasks (NOT calibrated)
+      const segmentPagesAll = {
+        money: [],
+        landing: [],
+        event: [],
+        product: [],
+        all_tracked: []
+      };
+      const segmentPagesActive = {
         money: [],
         landing: [],
         event: [],
@@ -178,13 +187,11 @@ export default async function handler(req, res) {
         const segment = classifyPageSegment(page.page_url);
         
         // Add to specific segment (event, product, or landing)
-        if (segmentPages[segment]) {
-          segmentPages[segment].push(page);
-        }
+        if (segmentPagesAll[segment]) segmentPagesAll[segment].push(page);
         
         // ALSO add to 'money' segment (aggregate of all money pages: event + product + landing)
         if (segment === 'event' || segment === 'product' || segment === 'landing') {
-          segmentPages.money.push(page);
+          segmentPagesAll.money.push(page);
         }
         
         // Add to all_tracked if this page URL is tracked by an active optimization task
@@ -206,65 +213,78 @@ export default async function handler(req, res) {
         });
         
         if (isTracked) {
-          segmentPages.all_tracked.push(page);
+          segmentPagesAll.all_tracked.push(page);
+
+          // active_cycles_only scope is the tracked subset
+          if (segmentPagesActive[segment]) segmentPagesActive[segment].push(page);
+          if (segment === 'event' || segment === 'product' || segment === 'landing') {
+            segmentPagesActive.money.push(page);
+          }
+          segmentPagesActive.all_tracked.push(page);
         }
       });
 
-      // Aggregate per segment
-      const segmentRows = [];
-      const scope = 'active_cycles_only';
+      const buildRowsForScope = (segmentPages, scopeName, applyCalibration) => {
+        const segmentRows = [];
+        ['money', 'landing', 'event', 'product', 'all_tracked'].forEach(segment => {
+          const segmentPageList = segmentPages[segment];
+          if (segmentPageList.length === 0) {
+            segmentRows.push({
+              run_id: currentRunId,
+              site_url: siteUrl,
+              segment,
+              scope: scopeName,
+              date_start: dateStart,
+              date_end: dateEnd,
+              pages_count: 0,
+              clicks_28d: 0,
+              impressions_28d: 0,
+              ctr_28d: 0,
+              position_28d: null
+            });
+            return;
+          }
 
-      ['money', 'landing', 'event', 'product', 'all_tracked'].forEach(segment => {
-        const segmentPageList = segmentPages[segment];
-        if (segmentPageList.length === 0) {
+          const totalClicks = segmentPageList.reduce((sum, p) => sum + (parseFloat(p.clicks_28d) || 0), 0);
+          const totalImpressions = segmentPageList.reduce((sum, p) => sum + (parseFloat(p.impressions_28d) || 0), 0);
+          const scaledClicks = applyCalibration ? (totalClicks * scaleClicks) : totalClicks;
+          const scaledImpressions = applyCalibration ? (totalImpressions * scaleImpressions) : totalImpressions;
+          const ctr = scaledImpressions > 0 ? scaledClicks / scaledImpressions : 0;
+
+          let totalPositionWeight = 0;
+          let totalPositionImpressions = 0;
+          segmentPageList.forEach(p => {
+            const impressions = parseFloat(p.impressions_28d) || 0;
+            const position = parseFloat(p.position_28d);
+            if (position && impressions > 0) {
+              totalPositionWeight += position * impressions;
+              totalPositionImpressions += impressions;
+            }
+          });
+          const avgPosition = totalPositionImpressions > 0 ? totalPositionWeight / totalPositionImpressions : null;
+
           segmentRows.push({
             run_id: currentRunId,
             site_url: siteUrl,
             segment,
-            scope,
+            scope: scopeName,
             date_start: dateStart,
             date_end: dateEnd,
-            pages_count: 0,
-            clicks_28d: 0,
-            impressions_28d: 0,
-            ctr_28d: 0,
-            position_28d: null
+            pages_count: segmentPageList.length,
+            clicks_28d: scaledClicks,
+            impressions_28d: scaledImpressions,
+            ctr_28d: ctr,
+            position_28d: avgPosition
           });
-          return;
-        }
-
-        const totalClicks = segmentPageList.reduce((sum, p) => sum + (parseFloat(p.clicks_28d) || 0), 0);
-        const totalImpressions = segmentPageList.reduce((sum, p) => sum + (parseFloat(p.impressions_28d) || 0), 0);
-        const scaledClicks = totalClicks * scaleClicks;
-        const scaledImpressions = totalImpressions * scaleImpressions;
-        const ctr = scaledImpressions > 0 ? scaledClicks / scaledImpressions : 0;
-
-        let totalPositionWeight = 0;
-        let totalPositionImpressions = 0;
-        segmentPageList.forEach(p => {
-          const impressions = parseFloat(p.impressions_28d) || 0;
-          const position = parseFloat(p.position_28d);
-          if (position && impressions > 0) {
-            totalPositionWeight += position * impressions;
-            totalPositionImpressions += impressions;
-          }
         });
-        const avgPosition = totalPositionImpressions > 0 ? totalPositionWeight / totalPositionImpressions : null;
+        return segmentRows;
+      };
 
-        segmentRows.push({
-          run_id: currentRunId,
-          site_url: siteUrl,
-          segment,
-          scope,
-          date_start: dateStart,
-          date_end: dateEnd,
-          pages_count: segmentPageList.length,
-          clicks_28d: scaledClicks,
-          impressions_28d: scaledImpressions,
-          ctr_28d: ctr,
-          position_28d: avgPosition
-        });
-      });
+      // Aggregate per scope
+      const segmentRows = [
+        ...buildRowsForScope(segmentPagesAll, 'all_pages', true),
+        ...buildRowsForScope(segmentPagesActive, 'active_cycles_only', false)
+      ];
 
       // Upsert segment rows
       const { error: upsertError } = await supabase

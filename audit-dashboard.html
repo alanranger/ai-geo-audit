@@ -15477,8 +15477,8 @@
       }
       
       // Map scope dropdown values to DB scope values.
-      // IMPORTANT: "All" means "no scope filter" (return whatever scopes exist).
-      const mappedScope = scope === 'active_only' ? 'active_cycles_only' : null;
+      // IMPORTANT: "All" = all pages (unfiltered), stored as scope=all_pages.
+      const mappedScope = scope === 'active_only' ? 'active_cycles_only' : 'all_pages';
 
       try {
         const propertyUrl = (window.getPropertyUrl ? window.getPropertyUrl() : '') || localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
@@ -15512,8 +15512,8 @@
         const data = await response.json();
         const metrics = data.metrics || [];
         
-        debugLog(`📊 Portfolio data loaded: ${metrics.length} metrics for segment=${segment}, scope=${mappedScope || '(all)'}, kpi=${kpiSelect}`, 'info');
-        debugLog(`📊 API params: siteUrl=${propertyUrl}, segment=${segment}, scope=${mappedScope || '(all)'}, from=${fromDate.toISOString()}, to=${toDate.toISOString()}`, 'info');
+        debugLog(`📊 Portfolio data loaded: ${metrics.length} metrics for segment=${segment}, scope=${mappedScope}, kpi=${kpiSelect}`, 'info');
+        debugLog(`📊 API params: siteUrl=${propertyUrl}, segment=${segment}, scope=${mappedScope}, from=${fromDate.toISOString()}, to=${toDate.toISOString()}`, 'info');
         
         // Debug: Log sample metrics to see what data we have
         if (metrics.length > 0) {
@@ -15867,9 +15867,10 @@
           return;
         }
 
-        // Use the same scope selector as the chart. "All" means no scope filter.
+        // Use the same scope selector as the chart.
+        // Active = pages currently being optimised; All = full unfiltered page set.
         const scopeUi = document.getElementById('portfolio-scope-toggle')?.value || 'active_only';
-        const mappedScope = scopeUi === 'active_only' ? 'active_cycles_only' : null;
+        const mappedScope = scopeUi === 'active_only' ? 'active_cycles_only' : 'all_pages';
         
         // Calculate date range (last 13 months to get previous month for trend)
         const toDate = new Date();
@@ -16787,27 +16788,38 @@
           return;
         }
         
-        // Get tracked tasks for all_tracked segment
+        // Get tracked tasks (active cycles) for all_tracked and active_cycles_only scope.
         const trackedTaskUrls = new Set();
         try {
           const tasksResponse = await fetch(apiUrl('/api/optimisation/status?includeDeleted=false'));
           if (tasksResponse.ok) {
             const { tasks } = await tasksResponse.json();
             if (tasks && tasks.length > 0) {
-              tasks.forEach(task => {
-                if (task.target_url) {
-                  const normalizedUrl = normalizeGscPageKey(task.target_url);
-                  trackedTaskUrls.add(normalizedUrl);
-                }
-              });
+              tasks
+                .filter(t => t.status && !['done', 'cancelled', 'deleted'].includes(t.status))
+                .forEach(task => {
+                  if (task.target_url) {
+                    const normalizedUrl = normalizeGscPageKey(task.target_url);
+                    trackedTaskUrls.add(normalizedUrl);
+                  }
+                });
             }
           }
         } catch (taskError) {
           debugLog(`⚠ Error fetching tasks for all_tracked segment: ${taskError.message}`, 'warn');
         }
         
-        // Classify pages by segment
-        const segmentPages = {
+        // Classify pages by segment for BOTH scopes:
+        // - all_pages: all pages in the segment
+        // - active_cycles_only: only pages currently being tracked by active optimisation tasks
+        const segmentPagesAll = {
+          money: [],
+          landing: [],
+          event: [],
+          product: [],
+          all_tracked: []
+        };
+        const segmentPagesActive = {
           money: [],
           landing: [],
           event: [],
@@ -16849,19 +16861,16 @@
             specificSegment = 'landing';
           }
           
-          // Add to specific segment (event, product, or landing)
-          if (segmentPages[specificSegment]) {
-            segmentPages[specificSegment].push(metrics);
-          }
-          
-          // ALSO add to 'money' segment (aggregate of all money pages)
-          if (segmentPages.money) {
-            segmentPages.money.push(metrics);
-          }
-          
-          // Add to all_tracked if it's a tracked task URL
+          // All pages scope
+          if (segmentPagesAll[specificSegment]) segmentPagesAll[specificSegment].push(metrics);
+          if (segmentPagesAll.money) segmentPagesAll.money.push(metrics); // money = aggregate of landing+event+product
+          if (trackedTaskUrls.has(normalizedKey)) segmentPagesAll.all_tracked.push(metrics);
+
+          // Active cycles only scope (only pages that are tracked)
           if (trackedTaskUrls.has(normalizedKey)) {
-            segmentPages.all_tracked.push(metrics);
+            if (segmentPagesActive[specificSegment]) segmentPagesActive[specificSegment].push(metrics);
+            if (segmentPagesActive.money) segmentPagesActive.money.push(metrics);
+            segmentPagesActive.all_tracked.push(metrics);
           }
         });
         
@@ -16917,12 +16926,10 @@
           debugLog(`⚠ Error fetching AI metrics from keyword_rankings: ${aiError.message}`, 'warn');
         }
         
-        // Aggregate metrics per segment
-        const segmentRows = [];
-        const scope = 'active_cycles_only'; // Match UI default
-        
-        ['money', 'landing', 'event', 'product', 'all_tracked'].forEach(segment => {
-          const pages = segmentPages[segment];
+        const buildSegmentRows = (segmentPages, scopeName) => {
+          const segmentRows = [];
+          ['money', 'landing', 'event', 'product', 'all_tracked'].forEach(segment => {
+            const pages = segmentPages[segment];
           const aiMetrics = aiMetricsBySegment[segment] || { citations: 0, overviewCount: 0 };
           
           if (pages.length === 0) {
@@ -17019,30 +17026,38 @@
             ai_citations_28d: aiMetrics.citations,
             ai_overview_present_count: aiMetrics.overviewCount
           });
-        });
-        
-        // Save to Supabase
-        debugLog(`📊 Saving ${segmentRows.length} segment snapshots to Supabase...`, 'info');
-        const saveResponse = await fetch(apiUrl('/api/supabase/save-portfolio-segment-metrics'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            siteUrl,
-            runId,
-            dateStart,
-            dateEnd,
-            scope,
-            rows: segmentRows
-          })
-        });
-        
-        if (!saveResponse.ok) {
-          const errorText = await saveResponse.text();
-          throw new Error(`Failed to save segment snapshots: ${saveResponse.status} - ${errorText}`);
+          });
+          return { scopeName, segmentRows };
+        };
+
+        const scopesToSave = [
+          buildSegmentRows(segmentPagesAll, 'all_pages'),
+          buildSegmentRows(segmentPagesActive, 'active_cycles_only')
+        ];
+
+        for (const s of scopesToSave) {
+          debugLog(`📊 Saving ${s.segmentRows.length} segment snapshots to Supabase (scope=${s.scopeName})...`, 'info');
+          const saveResponse = await fetch(apiUrl('/api/supabase/save-portfolio-segment-metrics'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              siteUrl,
+              runId,
+              dateStart,
+              dateEnd,
+              scope: s.scopeName,
+              rows: s.segmentRows
+            })
+          });
+
+          if (!saveResponse.ok) {
+            const errorText = await saveResponse.text();
+            throw new Error(`Failed to save segment snapshots (scope=${s.scopeName}): ${saveResponse.status} - ${errorText}`);
+          }
+
+          const saveResult = await saveResponse.json();
+          debugLog(`✓ Saved ${saveResult.inserted} portfolio segment snapshots to Supabase (scope=${s.scopeName})`, 'success');
         }
-        
-        const saveResult = await saveResponse.json();
-        debugLog(`✓ Saved ${saveResult.inserted} portfolio segment snapshots to Supabase`, 'success');
         
       } catch (err) {
         debugLog(`Error calculating portfolio segment snapshots: ${err.message}`, 'error');

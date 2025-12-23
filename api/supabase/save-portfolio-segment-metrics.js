@@ -59,11 +59,15 @@ export default async function handler(req, res) {
       need('SUPABASE_SERVICE_ROLE_KEY')
     );
 
-    // Calibrate segment totals to GSC overview/date totals (via cached gsc_timeseries).
-    // This keeps month backfills (which are calibrated) and daily runs consistent.
+    // Calibrate segment totals to GSC overview/date totals (via cached gsc_timeseries) ONLY for all_pages scope.
+    // For active_cycles_only (tracked subset), we do NOT calibrate (it is intentionally a subset of the whole site).
     let scaleClicks = 1;
     let scaleImpressions = 1;
     try {
+      if (scope !== 'all_pages') {
+        // No calibration for subset scopes.
+        throw new Error('skip_calibration_non_all_pages');
+      }
       const { data: tsRows, error: tsErr } = await supabase
         .from('gsc_timeseries')
         .select('clicks, impressions')
@@ -84,7 +88,9 @@ export default async function handler(req, res) {
         console.log(`[Save Portfolio Segment Metrics] Calibration scales: clicks=${scaleClicks.toFixed(4)}, impressions=${scaleImpressions.toFixed(4)} (overviewImpr=${overviewImpr}, rawImpr=${rawImpr})`);
       }
     } catch (calErr) {
-      console.warn('[Save Portfolio Segment Metrics] Calibration error (skipping):', calErr.message);
+      if (calErr?.message !== 'skip_calibration_non_all_pages') {
+        console.warn('[Save Portfolio Segment Metrics] Calibration error (skipping):', calErr.message);
+      }
     }
 
     // Prepare rows for upsert (apply calibration)
