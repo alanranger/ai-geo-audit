@@ -117,6 +117,7 @@ Vercel will automatically rebuild and deploy (usually takes 1-2 minutes).
 - ✅ **Domain Strength Tracking**: Domain rank snapshots with competitor flags and domain type classification
 - ✅ **Keyword Management**: Edit Keywords modal for managing keyword list with data loss warnings
 - ✅ **Money Pages Performance Tracking**: Split trend charts, KPI tracker (last 28 days with 8 weekly data points), and priority actions with accurate CTR plotting. Uses actual GSC timeseries data calculated from `gsc_timeseries` table.
+- ✅ **Money Pages Suggested Top 10**: Card-based panel showing top priority pages for optimization with impact/difficulty scoring, optimization status tracking, and direct task creation.
 - ✅ **GAIO Branding**: Updated throughout UI from "AIO" to "GAIO (Generative AI Optimization)"
 
 ## API Endpoints
@@ -149,9 +150,10 @@ The following serverless functions are available:
 A dedicated section tracking money pages performance vs the rest of the site, with URL-level opportunity identification and actionable recommendations. See `MONEY_PAGES_PERFORMANCE.md` for full specification.
 
 **Implementation Phases:**
-- Phase 1: Data model + calculations (money-segment aggregates, opportunity flags)
-- Phase 2: UI block (summary strip, charts, KPIs, opportunity table)
-- Phase 3: Recommendation text engine (dynamic action suggestions)
+- Phase 1: Data model + calculations (money-segment aggregates, opportunity flags) ✅
+- Phase 2: UI block (summary strip, charts, KPIs, opportunity table) ✅
+- Phase 3: Recommendation text engine (dynamic action suggestions) ✅
+- Phase 4: Priority Matrix & Actions integration (impact/difficulty scoring, Suggested Top 10 panel) ✅
 
 ### Other Planned Enhancements
 - [ ] Real-time SERP feature monitoring and alerts

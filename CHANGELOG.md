@@ -2,6 +2,44 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2025-12-22] - v1.7.2 - Money Pages Phase 4: Suggested Top 10 Priority Pages
+
+### Added
+- **Suggested (Top 10) Priority Pages Panel**: New card-based panel showing top priority pages for optimization
+  - Displays top 10 pages ranked by impact and difficulty scores
+  - Shows optimization status (✓ Being Optimised badge for tracked pages)
+  - Clickable URLs that open in new browser window
+  - Color-coded page type labels (Landing, Event, Product) with bold styling
+  - Potential impact clicks 28d metric displayed prominently
+  - "Create Task" / "Manage Task" buttons matching Priority & Actions table behavior
+  - Uses same button handlers as Priority & Actions table (`trackMoneyPage`, `openOptimisationTaskDrawer`)
+
+### Changed
+- **Optimization Status Detection**: Enhanced to check multiple task types
+  - Checks recommended task type first, then falls back to 'on_page'
+  - Also checks 'content', 'internal_links', 'technical' task types
+  - Ensures all tracked pages are correctly identified across different task types
+- **URL Display**: URLs in Suggested Top 10 cards are now clickable hyperlinks
+  - Opens in new browser window with `target="_blank"`
+  - Styled as blue underlined links for better UX
+
+### Fixed
+- **Optimization Status Missing**: Fixed pages not showing as "Being Optimised" when tracked
+  - Enhanced status lookup to try multiple task types
+  - Fixed URL normalization and matching logic
+  - Now correctly identifies tracked pages regardless of task type
+
+### Technical Details
+- **Phase 4 Scoring Functions**: Impact, difficulty, and priority calculation
+  - Impact score (0-100): Based on CTR gap and click upside potential
+  - Difficulty score (LOW/MED/HIGH): Based on position and page type
+  - Priority (LOW/MED/HIGH): Combined impact and difficulty buckets
+  - Recommended action: Dynamic suggestions based on CTR, position, impressions
+- **Button Integration**: Uses same handlers as Priority & Actions table
+  - "Create Task" uses `window.trackMoneyPage(url, title)`
+  - "Manage Task" uses `window.openOptimisationTaskDrawer(taskId)`
+- **Data Source**: Uses `window.moneyPagePriorityData` (same as Priority & Actions table)
+
 ## [2025-12-21] - v1.7.1 - Traffic Lights & Ranking & AI Task Creation Fixes
 
 ### Fixed
