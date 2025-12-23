@@ -16019,23 +16019,25 @@
             const cell = document.createElement('td');
             cell.style.cssText = 'text-align: center; padding: 0.75rem; border-bottom: 1px solid var(--dark-border); color: var(--dark-text);';
             
-            // Find the LAST snapshot in this month (bucket by date_end month or run_id)
-            // run_id format can be YYYY-MM (month-based) or YYYY-MM-DD (date-based)
+            // Monthly KPI Tracker should represent CLOSED months.
+            // We only accept:
+            // - Backfilled month snapshots: run_id = YYYY-MM
+            // - Month-end daily snapshots: date_end = last day of the month
+            const monthEnd = monthEndDateFromKey(month);
+            const monthEndStr = toDateOnlyStr(monthEnd); // YYYY-MM-DD (local)
             const monthSnapshots = allData[segment]?.filter(s => {
-              // Try to match by run_id first (if it's in YYYY-MM format)
+              // Preferred: explicit month backfill snapshot
               if (s.run_id && s.run_id.match(/^\d{4}-\d{2}$/)) {
                 return s.run_id === month;
               }
-              // Otherwise match by date_end month (the actual date range the data represents)
+              // Otherwise: only accept if date_end is the last day of the month (month closed)
               if (s.date_end) {
-                const dateEnd = new Date(s.date_end);
-                const dateEndMonth = `${dateEnd.getFullYear()}-${String(dateEnd.getMonth() + 1).padStart(2, '0')}`;
-                return dateEndMonth === month;
+                const d = new Date(s.date_end);
+                if (isNaN(d.getTime())) return false;
+                const dStr = toDateOnlyStr(d);
+                return dStr === monthEndStr;
               }
-              // Fallback to created_at month (for backwards compatibility)
-              const snapshotDate = new Date(s.created_at);
-              const snapshotMonth = `${snapshotDate.getFullYear()}-${String(snapshotDate.getMonth() + 1).padStart(2, '0')}`;
-              return snapshotMonth === month;
+              return false;
             });
             
             // Get the latest snapshot in this month (prefer max date_end, not max created_at)
