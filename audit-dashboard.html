@@ -16021,14 +16021,12 @@
         };
         const dbField = metricFieldMap[selectedMetric] || 'position_28d';
         
-        // Calculate date range (last 28 days for date_end filtering)
+        // Use the same date range logic as loadPortfolioData (last 365 days to ensure enough data for weekly bucketing)
         const toDate = new Date();
         const fromDate = new Date();
-        fromDate.setDate(fromDate.getDate() - 28);
+        fromDate.setDate(fromDate.getDate() - 365);
         
-        // Fetch a wider range (60 days) to ensure we get all records, then filter by date_end
-        const fetchFromDate = new Date();
-        fetchFromDate.setDate(fetchFromDate.getDate() - 60);
+        debugLog(`📅 Money Pages KPI Tracker: Fetching data from ${fromDate.toISOString().split('T')[0]} to ${toDate.toISOString().split('T')[0]} (same as top charts)`, 'info');
         
         // Fetch data for all money page segments
         const segments = ['money', 'landing', 'event', 'product'];
@@ -16039,7 +16037,7 @@
             siteUrl: propertyUrl,
             segment,
             scope: 'active_cycles_only',
-            from: fetchFromDate.toISOString(),
+            from: fromDate.toISOString(),
             to: toDate.toISOString(),
             order: 'asc'
           });
@@ -16047,27 +16045,14 @@
           const response = await fetch(apiUrl(`/api/supabase/get-portfolio-segment-metrics?${params}`));
           if (response.ok) {
             const data = await response.json();
-            segmentData[segment] = (data.metrics || []).map(m => {
-              // Use date_end for the date, fallback to created_at
-              const recordDate = m.date_end ? new Date(m.date_end) : new Date(m.created_at);
-              
-              // Filter by date_end: only include records where date_end is within the last 28 days
-              if (m.date_end) {
-                const dateEnd = new Date(m.date_end);
-                if (dateEnd < fromDate || dateEnd > toDate) {
-                  return null; // Exclude this record
-                }
-              }
-              
-              return {
-                date: recordDate,
-                value: dbField === 'ctr_28d' ? parseFloat(m.ctr_28d || 0) :
-                       dbField === 'position_28d' ? (m.position_28d !== null && m.position_28d !== undefined && !isNaN(parseFloat(m.position_28d)) ? parseFloat(m.position_28d) : null) :
-                       dbField === 'clicks_28d' ? parseFloat(m.clicks_28d || 0) :
-                       dbField === 'impressions_28d' ? parseFloat(m.impressions_28d || 0) : null,
-                run_id: m.run_id
-              };
-            }).filter(d => d !== null && d.value !== null && !isNaN(d.value));
+            // Store raw metrics for bucketing (same approach as loadPortfolioData)
+            segmentData[segment] = (data.metrics || []).map(m => ({
+              metric: m,
+              value: dbField === 'ctr_28d' ? parseFloat(m.ctr_28d || 0) :
+                     dbField === 'position_28d' ? (m.position_28d !== null && m.position_28d !== undefined && !isNaN(parseFloat(m.position_28d)) ? parseFloat(m.position_28d) : null) :
+                     dbField === 'clicks_28d' ? parseFloat(m.clicks_28d || 0) :
+                     dbField === 'impressions_28d' ? parseFloat(m.impressions_28d || 0) : null
+            })).filter(d => d.value !== null && !isNaN(d.value));
             
             debugLog(`✓ Fetched ${segmentData[segment].length} records for segment '${segment}' (filtered by date_end in last 28 days)`, 'info');
           } else {
@@ -16133,7 +16118,10 @@
         if (!lastValidGscDate || lastValidGscDate.toISOString().split('T')[0] > '2025-12-21') {
           // Check if Dec 21 data exists in any segment
           const hasDec21Data = segments.some(segment => 
-            segmentData[segment].some(d => d.date.toISOString().split('T')[0] === '2025-12-21')
+            segmentData[segment].some(({ metric: m }) => {
+              const dateEnd = m.date_end ? new Date(m.date_end).toISOString().split('T')[0] : null;
+              return dateEnd === '2025-12-21';
+            })
           );
           if (hasDec21Data) {
             lastValidGscDate = new Date('2025-12-21');
@@ -16147,22 +16135,41 @@
         const weeklyBuckets = new Map(); // key: Monday date (YYYY-MM-DD), value: Map<segment, {value, date_end}>
         
         segments.forEach(segment => {
-          segmentData[segment].forEach(d => {
-            // Filter out data beyond the last valid GSC date
-            // Compare dates as strings (YYYY-MM-DD) to avoid timezone issues
-            const dateStr = d.date.toISOString().split('T')[0];
-            const lastValidDateStr = lastValidGscDate ? lastValidGscDate.toISOString().split('T')[0] : null;
+          segmentData[segment].forEach(({ metric: m, value }) => {
+            // Use the same date logic as loadPortfolioData for weekly bucketing
+            // For weekly: only use actual weekly snapshots (run_id in YYYY-MM-DD format)
+            if (m.run_id && m.run_id.match(/^\d{4}-\d{2}$/)) {
+              // Skip monthly backfilled data in weekly view (same as loadPortfolioData)
+              return;
+            }
             
+            // Determine date for bucketing (same logic as loadPortfolioData)
+            let dateForBucket = null;
+            if (m.run_id && m.run_id.match(/^\d{4}-\d{2}-\d{2}$/)) {
+              dateForBucket = new Date(m.run_id);
+            } else if (m.created_at) {
+              dateForBucket = new Date(m.created_at);
+            } else if (m.date_end) {
+              dateForBucket = new Date(m.date_end);
+            } else {
+              return; // Skip if no valid date
+            }
+            
+            if (!dateForBucket || isNaN(dateForBucket.getTime())) {
+              return; // Skip invalid dates
+            }
+            
+            // Filter out data beyond the last valid GSC date
+            const dateStr = dateForBucket.toISOString().split('T')[0];
+            const lastValidDateStr = lastValidGscDate ? lastValidGscDate.toISOString().split('T')[0] : null;
             if (lastValidDateStr && dateStr > lastValidDateStr) {
-              debugLog(`📅 Filtering out ${dateStr} for segment ${segment} (beyond lastValidGscDate: ${lastValidDateStr})`, 'info');
               return; // Skip this record
             }
             
-            // Calculate Monday of the week for this date_end
-            const dateEnd = new Date(d.date);
-            const dayOfWeek = dateEnd.getDay();
-            const diff = dateEnd.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
-            const monday = new Date(dateEnd);
+            // Calculate Monday of the week (same as loadPortfolioData)
+            const dayOfWeek = dateForBucket.getDay();
+            const diff = dateForBucket.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+            const monday = new Date(dateForBucket);
             monday.setDate(diff);
             const mondayKey = monday.toISOString().split('T')[0];
             
@@ -16171,11 +16178,12 @@
             }
             
             const bucket = weeklyBuckets.get(mondayKey);
-            // Keep the LAST snapshot in each week (by date_end)
-            if (!bucket.has(segment) || d.date > bucket.get(segment).date_end) {
+            // Keep the LAST snapshot in each week (by created_at, same as loadPortfolioData)
+            const comparisonDate = m.created_at ? new Date(m.created_at) : (m.date_end ? new Date(m.date_end) : dateForBucket);
+            if (!bucket.has(segment) || comparisonDate > bucket.get(segment).date) {
               bucket.set(segment, {
-                value: d.value,
-                date_end: d.date
+                value: value,
+                date: comparisonDate
               });
             }
           });
