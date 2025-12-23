@@ -59,7 +59,35 @@ export default async function handler(req, res) {
       need('SUPABASE_SERVICE_ROLE_KEY')
     );
 
-    // Prepare rows for upsert
+    // Calibrate segment totals to GSC overview/date totals (via cached gsc_timeseries).
+    // This keeps month backfills (which are calibrated) and daily runs consistent.
+    let scaleClicks = 1;
+    let scaleImpressions = 1;
+    try {
+      const { data: tsRows, error: tsErr } = await supabase
+        .from('gsc_timeseries')
+        .select('clicks, impressions')
+        .eq('property_url', siteUrl)
+        .gte('date', String(dateStart).slice(0, 10))
+        .lte('date', String(dateEnd).slice(0, 10));
+
+      if (tsErr) {
+        console.warn('[Save Portfolio Segment Metrics] gsc_timeseries query error (skipping calibration):', tsErr.message);
+      } else if (tsRows && tsRows.length > 0) {
+        const overviewClicks = tsRows.reduce((s, r) => s + (parseFloat(r.clicks) || 0), 0);
+        const overviewImpr = tsRows.reduce((s, r) => s + (parseFloat(r.impressions) || 0), 0);
+        const moneyRow = rows.find(r => r.segment === 'money');
+        const rawClicks = moneyRow ? (parseFloat(moneyRow.clicks_28d) || 0) : 0;
+        const rawImpr = moneyRow ? (parseFloat(moneyRow.impressions_28d) || 0) : 0;
+        if (overviewClicks > 0 && rawClicks > 0) scaleClicks = overviewClicks / rawClicks;
+        if (overviewImpr > 0 && rawImpr > 0) scaleImpressions = overviewImpr / rawImpr;
+        console.log(`[Save Portfolio Segment Metrics] Calibration scales: clicks=${scaleClicks.toFixed(4)}, impressions=${scaleImpressions.toFixed(4)} (overviewImpr=${overviewImpr}, rawImpr=${rawImpr})`);
+      }
+    } catch (calErr) {
+      console.warn('[Save Portfolio Segment Metrics] Calibration error (skipping):', calErr.message);
+    }
+
+    // Prepare rows for upsert (apply calibration)
     const insertRows = rows.map(row => {
       const positionValue = row.position_28d !== null && row.position_28d !== undefined 
         ? parseFloat(row.position_28d) 
@@ -70,6 +98,12 @@ export default async function handler(req, res) {
         console.log(`[Save Portfolio Segment Metrics] ${row.segment}: position_28d=${row.position_28d} (raw), parsed=${positionValue}, pages=${row.pages_count}, impressions=${row.impressions_28d}`);
       }
       
+      const rawClicks = parseFloat(row.clicks_28d || 0);
+      const rawImpressions = parseFloat(row.impressions_28d || 0);
+      const scaledClicks = rawClicks * scaleClicks;
+      const scaledImpressions = rawImpressions * scaleImpressions;
+      const scaledCtr = scaledImpressions > 0 ? (scaledClicks / scaledImpressions) : 0;
+
       return {
         run_id: runId,
         site_url: siteUrl,
@@ -78,9 +112,9 @@ export default async function handler(req, res) {
         date_start: dateStart,
         date_end: dateEnd,
         pages_count: parseInt(row.pages_count || 0, 10),
-        clicks_28d: parseFloat(row.clicks_28d || 0),
-        impressions_28d: parseFloat(row.impressions_28d || 0),
-        ctr_28d: parseFloat(row.ctr_28d || 0), // Already a ratio (0-1)
+        clicks_28d: scaledClicks,
+        impressions_28d: scaledImpressions,
+        ctr_28d: scaledCtr, // ratio (0-1)
         position_28d: positionValue,
         ai_citations_28d: parseInt(row.ai_citations_28d || 0, 10),
         ai_overview_present_count: parseInt(row.ai_overview_present_count || 0, 10)

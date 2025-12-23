@@ -22110,6 +22110,8 @@
             if (pageLevelData.status === 'ok' && pageLevelData.data && Array.isArray(pageLevelData.data.rows)) {
               // Build pageTotalsByKey map from page-level data using normalized page key
               let landscapePageFound = false;
+              // IMPORTANT: GSC "page" dimension can include URL variants (e.g. query params like ?srsltid=...).
+              // We normalize to a canonical key, but we MUST aggregate (sum) metrics across variants rather than overwriting.
               for (const row of (pageLevelData.data.rows || [])) {
                 const rawPageUrl = row.keys?.[0];
                 if (!rawPageUrl) continue;
@@ -22129,12 +22131,27 @@
                   landscapePageFound = true;
                 }
 
+                const existing = pageTotalsByKey.get(key);
+                const nextClicks = (existing?.clicks || 0) + clicks;
+                const nextImpressions = (existing?.impressions || 0) + impressions;
+
+                let posWeight = existing?._posWeight || 0;
+                let posImpr = existing?._posImpr || 0;
+                if (position !== null && impressions > 0) {
+                  posWeight += position * impressions;
+                  posImpr += impressions;
+                }
+                const nextPosition = posImpr > 0 ? (posWeight / posImpr) : null;
+                const nextCtr = nextImpressions > 0 ? (nextClicks / nextImpressions) : 0;
+
                 pageTotalsByKey.set(key, {
-                  url: rawPageUrl,
-                  clicks: clicks,
-                  impressions: impressions,
-                  ctr: ctr, // Store as ratio (0-1)
-                  position: position
+                  url: existing?.url || rawPageUrl,
+                  clicks: nextClicks,
+                  impressions: nextImpressions,
+                  ctr: nextCtr, // Store as ratio (0-1)
+                  position: nextPosition,
+                  _posWeight: posWeight,
+                  _posImpr: posImpr
                 });
               }
               

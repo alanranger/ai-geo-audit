@@ -79,23 +79,48 @@ export default async function handler(req, res) {
       }
     };
     
-    // Prepare rows for bulk insert
-    const rows = pages.map(page => {
+    // IMPORTANT:
+    // GSC page dimension can contain URL variants (query params, trailing slashes, etc).
+    // We normalize to a canonical URL, but we MUST aggregate metrics across variants rather than overwriting.
+    const agg = new Map(); // normalizedUrl -> { url, clicks, impressions, posWeight, posImpr }
+
+    for (const page of pages) {
       const rawUrl = page.page_url || page.url || '';
       const normalizedUrl = normalizeUrl(rawUrl);
-      
+      if (!normalizedUrl) continue;
+
+      const clicks = parseFloat(page.clicks || 0) || 0;
+      const impressions = parseFloat(page.impressions || 0) || 0;
+      const pos = (page.position !== null && page.position !== undefined && !isNaN(parseFloat(page.position)) && parseFloat(page.position) > 0)
+        ? parseFloat(page.position)
+        : null;
+
+      const existing = agg.get(normalizedUrl) || { url: rawUrl, clicks: 0, impressions: 0, posWeight: 0, posImpr: 0 };
+      existing.clicks += clicks;
+      existing.impressions += impressions;
+      if (pos !== null && impressions > 0) {
+        existing.posWeight += pos * impressions;
+        existing.posImpr += impressions;
+      }
+      // Prefer first-seen raw URL for reference
+      if (!existing.url) existing.url = rawUrl;
+      agg.set(normalizedUrl, existing);
+    }
+
+    // Prepare rows for bulk upsert
+    const rows = Array.from(agg.entries()).map(([normalizedUrl, a]) => {
+      const ctr = a.impressions > 0 ? (a.clicks / a.impressions) : 0;
+      const position = a.posImpr > 0 ? (a.posWeight / a.posImpr) : null;
       return {
         run_id: runId,
         site_url: siteUrl,
         page_url: normalizedUrl,
         date_start: dateStart,
         date_end: dateEnd,
-        clicks_28d: page.clicks || 0,
-        impressions_28d: page.impressions || 0,
-        ctr_28d: page.ctr || 0, // Already a ratio (0-1)
-        position_28d: (page.position !== null && page.position !== undefined && !isNaN(parseFloat(page.position)) && parseFloat(page.position) > 0) 
-          ? parseFloat(page.position) 
-          : null
+        clicks_28d: a.clicks,
+        impressions_28d: a.impressions,
+        ctr_28d: ctr, // ratio (0-1)
+        position_28d: position
       };
     });
 

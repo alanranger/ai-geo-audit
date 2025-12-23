@@ -97,6 +97,32 @@ export default async function handler(req, res) {
       const dateStart = firstPage.date_start;
       const dateEnd = firstPage.date_end;
 
+      // Calibrate to GSC overview/date totals using cached gsc_timeseries (matches GSC headline totals).
+      let scaleClicks = 1;
+      let scaleImpressions = 1;
+      try {
+        const { data: tsRows, error: tsErr } = await supabase
+          .from('gsc_timeseries')
+          .select('clicks, impressions')
+          .eq('property_url', siteUrl)
+          .gte('date', String(dateStart).slice(0, 10))
+          .lte('date', String(dateEnd).slice(0, 10));
+
+        if (tsErr) {
+          console.warn(`[Backfill] gsc_timeseries query error for ${currentRunId} (skipping calibration):`, tsErr.message);
+        } else if (tsRows && tsRows.length > 0) {
+          const overviewClicks = tsRows.reduce((s, r) => s + (parseFloat(r.clicks) || 0), 0);
+          const overviewImpr = tsRows.reduce((s, r) => s + (parseFloat(r.impressions) || 0), 0);
+          const rawClicksAll = pages.reduce((s, p) => s + (parseFloat(p.clicks_28d) || 0), 0);
+          const rawImprAll = pages.reduce((s, p) => s + (parseFloat(p.impressions_28d) || 0), 0);
+          if (overviewClicks > 0 && rawClicksAll > 0) scaleClicks = overviewClicks / rawClicksAll;
+          if (overviewImpr > 0 && rawImprAll > 0) scaleImpressions = overviewImpr / rawImprAll;
+          console.log(`[Backfill] ${currentRunId} calibration: scaleClicks=${scaleClicks.toFixed(4)}, scaleImpr=${scaleImpressions.toFixed(4)} (overviewImpr=${overviewImpr}, rawImpr=${rawImprAll})`);
+        }
+      } catch (calErr) {
+        console.warn(`[Backfill] Calibration error for ${currentRunId} (skipping):`, calErr.message);
+      }
+
       // Group pages by segment
       const segmentPages = {
         money: [],
@@ -209,7 +235,9 @@ export default async function handler(req, res) {
 
         const totalClicks = segmentPageList.reduce((sum, p) => sum + (parseFloat(p.clicks_28d) || 0), 0);
         const totalImpressions = segmentPageList.reduce((sum, p) => sum + (parseFloat(p.impressions_28d) || 0), 0);
-        const ctr = totalImpressions > 0 ? totalClicks / totalImpressions : 0;
+        const scaledClicks = totalClicks * scaleClicks;
+        const scaledImpressions = totalImpressions * scaleImpressions;
+        const ctr = scaledImpressions > 0 ? scaledClicks / scaledImpressions : 0;
 
         let totalPositionWeight = 0;
         let totalPositionImpressions = 0;
@@ -231,8 +259,8 @@ export default async function handler(req, res) {
           date_start: dateStart,
           date_end: dateEnd,
           pages_count: segmentPageList.length,
-          clicks_28d: totalClicks,
-          impressions_28d: totalImpressions,
+          clicks_28d: scaledClicks,
+          impressions_28d: scaledImpressions,
           ctr_28d: ctr,
           position_28d: avgPosition
         });
