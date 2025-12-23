@@ -5462,6 +5462,19 @@
         return `${API_BASE_URL}${cleanPath}`;
       };
     })();
+
+    // Global helpers to read config from either UI inputs or localStorage.
+    // Preview/prod domains have different localStorage, so the UI input should be a first-class fallback.
+    window.getPropertyUrl = function getPropertyUrl() {
+      const domVal = (document.getElementById('propertyUrl')?.value || '').trim();
+      const stored = (localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '').trim();
+      const val = domVal || stored;
+      // Keep localStorage in sync (so other modules that read localStorage work).
+      if (val && val !== stored) {
+        try { localStorage.setItem('gsc_property_url', val); } catch (e) { /* ignore */ }
+      }
+      return val;
+    };
     
     // ======================
     // Optimisation Tracking Utilities (Phase 2)
@@ -6354,14 +6367,14 @@
           // ALSO: Re-render Priority table if it exists
           if (window.moneyPagePriorityData && window.moneyPagePriorityData.length > 0) {
             console.log('[Money Pages] Re-rendering Priority table after task creation...');
-            if (typeof renderMoneyPagesTable === 'function') {
+            if (typeof window.renderMoneyPagesPriorityTable === 'function') {
               const filters = {
                 typeFilter: window.moneyPagesTypeFilter || 'all',
                 minImpr: window.moneyPagesMinImpr || 0,
                 matrixFilter: window.moneyPagesMatrixFilter || null
               };
               try {
-                await renderMoneyPagesTable(null, filters);
+                await window.renderMoneyPagesPriorityTable(null, filters);
                 console.log('[Money Pages] ✓ Priority table re-rendered successfully');
               } catch (err) {
                 console.error('[Money Pages] Error re-rendering Priority table:', err);
@@ -11715,6 +11728,15 @@
       // Helper to format delta with color (handles rank where lower is better)
       const formatDelta = (delta, metricKey) => {
         if (delta == null) return { text: '—', color: '#666' };
+        // For CTR, delta is in ratio format (0-1), convert to percentage points
+        if (metricKey === 'gsc_ctr_28d' || metricKey === 'ctr_28d') {
+          const deltaPp = delta * 100; // Convert ratio delta to percentage points
+          const sign = deltaPp >= 0 ? '+' : '';
+          const formatted = `${sign}${deltaPp.toFixed(2)}pp`;
+          if (deltaPp > 0) return { text: formatted, color: '#10b981' }; // Up - green
+          if (deltaPp < 0) return { text: formatted, color: '#ef4444' }; // Down - red
+          return { text: '0.00pp', color: '#f59e0b' }; // No change - amber
+        }
         // For rank, lower is better (negative delta means improved rank = good)
         if (metricKey === 'current_rank') {
           const absDelta = Math.abs(delta);
@@ -14827,13 +14849,13 @@
             
             // Re-render Priority table
             if (window.moneyPagePriorityData && window.moneyPagePriorityData.length > 0) {
-              if (typeof renderMoneyPagesTable === 'function') {
+              if (typeof window.renderMoneyPagesPriorityTable === 'function') {
                 const filters = {
                   typeFilter: window.moneyPagesTypeFilter || 'all',
                   minImpr: window.moneyPagesMinImpr || 0,
                   matrixFilter: window.moneyPagesMatrixFilter || null
                 };
-                await renderMoneyPagesTable(null, filters);
+                await window.renderMoneyPagesPriorityTable(null, filters);
                 console.log('[Money Pages] ✓ Priority table re-rendered after tab switch');
               }
             }
@@ -14973,6 +14995,129 @@
         setTimeout(async () => {
           const saved = loadAuditResultsSync();
           
+          // Define renderMoneyPagesSuggestedTop10 at global scope early
+          if (!window.renderMoneyPagesSuggestedTop10) {
+            window.renderMoneyPagesSuggestedTop10 = function(retryCount = 0) {
+              const MAX_RETRIES = 10; // Stop after 10 retries (5 seconds)
+              const container = document.getElementById('money-pages-suggested-top10-container');
+              if (!container) {
+                if (retryCount < MAX_RETRIES) {
+                  debugLog(`⚠ money-pages-suggested-top10-container not found (retry ${retryCount + 1}/${MAX_RETRIES}) - section may not be rendered yet`, 'warn');
+                  setTimeout(() => {
+                    if (typeof window.renderMoneyPagesSuggestedTop10 === 'function') {
+                      window.renderMoneyPagesSuggestedTop10(retryCount + 1);
+                    }
+                  }, 500);
+                } else {
+                  debugLog(`⚠ money-pages-suggested-top10-container not found after ${MAX_RETRIES} retries - giving up. The HTML section may not be included in renderMoneyPagesSection.`, 'error');
+                }
+                return;
+              }
+              
+              const priorityData = window.moneyPagePriorityData || [];
+              debugLog(`📊 Rendering Suggested Top 10: ${priorityData.length} priority items available`, 'info');
+              
+              if (!priorityData || priorityData.length === 0) {
+                container.innerHTML = '<p style="padding: 2rem; text-align: center; color: #64748b;">No priority data available. Run an audit to generate suggestions.</p>';
+                debugLog('⚠ No priority data available for Suggested Top 10', 'warn');
+                return;
+              }
+              
+              const expectedCtrForPositionSafe = (pos) => {
+                // Mirror expectedCtrForPosition() if it exists; otherwise keep a simple fallback curve
+                if (typeof expectedCtrForPosition === 'function') return expectedCtrForPosition(pos);
+                if (!isFinite(pos) || pos <= 0) return 0.10;
+                if (pos <= 3) return 0.10;
+                if (pos <= 6) return 0.07;
+                if (pos <= 10) return 0.05;
+                if (pos <= 20) return 0.03;
+                return 0.02;
+              };
+              const lostClicksForRow = (p) => {
+                if (typeof p?._lostClicks === 'number' && isFinite(p._lostClicks)) return p._lostClicks;
+                const expectedCtr = expectedCtrForPositionSafe(p?.avgPosition || 0);
+                const actualCtr = p?.ctr || 0;
+                const gap = Math.max(0, expectedCtr - actualCtr);
+                return (p?.impressions || 0) * gap;
+              };
+              const maxLost = Math.max(1, ...priorityData.map(p => lostClicksForRow(p) || 0));
+              const impactScoreForRow = (p) => Math.max(0, Math.min(100, (lostClicksForRow(p) / maxLost) * 100));
+
+              const diffOrder = { LOW: 0, MEDIUM: 1, HIGH: 2 };
+              const top10 = [...priorityData]
+                .sort((a, b) => {
+                  const la = lostClicksForRow(a) || 0;
+                  const lb = lostClicksForRow(b) || 0;
+                  if (lb !== la) return lb - la;
+                  return (diffOrder[a.difficultyLevel] ?? 2) - (diffOrder[b.difficultyLevel] ?? 2);
+                })
+                .slice(0, 10);
+              
+              if (top10.length === 0) {
+                container.innerHTML = '<p style="padding: 2rem; text-align: center; color: #64748b;">No suggestions available.</p>';
+                return;
+              }
+              
+              container.innerHTML = top10.map((page) => {
+                const taskType = 'on_page';
+                const optimisationStatus = window.getOptimisationStatus
+                  ? window.getOptimisationStatus({ targetUrl: page.url, keyword: '' }, taskType)
+                  : null;
+                const statusText = optimisationStatus?.status || null;
+                const hasTask = !!statusText && statusText !== 'deleted' && statusText !== 'done' && statusText !== 'cancelled';
+                const taskId = hasTask ? (optimisationStatus.id || optimisationStatus.task_id || null) : null;
+                const isOptimized = hasTask && !!taskId;
+                const difficultyColors = { LOW: '#10b981', MEDIUM: '#f59e0b', HIGH: '#ef4444' };
+                const difficultyColor = difficultyColors[page.difficultyLevel] || '#64748b';
+                const impactScore = impactScoreForRow(page);
+                const potentialClicks28d = Math.round(lostClicksForRow(page) || 0);
+                const statusLabelMap = {
+                  planned: 'Planned',
+                  in_progress: 'In progress',
+                  monitoring: 'Monitoring',
+                  done: 'Done',
+                  cancelled: 'Cancelled'
+                };
+                const statusLabel = statusText ? (statusLabelMap[statusText] || statusText) : null;
+                
+                return `
+                  <div class="suggested-card" style="background: white; border: 2px solid #e2e8f0; border-radius: 8px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem;">
+                      <div style="flex: 1;">
+                        <h4 style="margin: 0 0 0.5rem 0; font-size: 1rem; font-weight: 700; color: #1e293b; line-height: 1.4;">${page.title || page.url || 'Untitled Page'}</h4>
+                        <a href="${page.url}" target="_blank" style="font-size: 0.85rem; color: #2563eb; text-decoration: none; word-break: break-all;">${page.url}</a>
+                      </div>
+                      ${isOptimized ? `<span style="padding: 0.25rem 0.75rem; background: #10b981; color: white; border-radius: 4px; font-size: 0.75rem; font-weight: 600; white-space: nowrap;">✓ ${statusLabel || 'Tracked'}</span>` : ''}
+                    </div>
+                    <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
+                      <span style="padding: 0.25rem 0.5rem; background: #f1f5f9; border-radius: 4px; font-size: 0.75rem; color: #64748b; text-transform: uppercase;">${page.segmentType || 'landing'}</span>
+                      <span style="padding: 0.25rem 0.5rem; background: ${difficultyColor}20; color: ${difficultyColor}; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">${page.difficultyLevel || 'MED'}</span>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; margin-bottom: 1rem; font-size: 0.85rem;">
+                      <div><div style="color: #64748b; margin-bottom: 0.25rem;">Pos:</div><div style="font-weight: 700; color: #1e293b;">${(page.avgPosition || 0).toFixed(1)}</div></div>
+                      <div><div style="color: #64748b; margin-bottom: 0.25rem;">CTR:</div><div style="font-weight: 700; color: #1e293b;">${((page.ctr || 0) * 100).toFixed(1)}%</div></div>
+                      <div><div style="color: #64748b; margin-bottom: 0.25rem;">Impr:</div><div style="font-weight: 700; color: #1e293b;">${(page.impressions || 0).toLocaleString()}</div></div>
+                      <div><div style="color: #64748b; margin-bottom: 0.25rem;">Upside:</div><div style="font-weight: 700; color: #1e293b;">${potentialClicks28d.toLocaleString()}</div></div>
+                      <div><div style="color: #64748b; margin-bottom: 0.25rem;">Impact:</div><div style="font-weight: 700; color: #1e293b;">${Math.round(impactScore)}</div></div>
+                      <div><div style="color: #64748b; margin-bottom: 0.25rem;">Difficulty:</div><div style="font-weight: 700; color: ${difficultyColor};">${page.difficultyLevel || 'MED'}</div></div>
+                    </div>
+                    <div style="margin-bottom: 1rem; padding: 0.75rem; background: #f8fafc; border-radius: 4px; font-size: 0.85rem; color: #475569;">
+                      <strong>Potential impact clicks 28d:</strong> ${potentialClicks28d.toLocaleString()}
+                    </div>
+                    <div style="margin-bottom: 1rem; font-size: 0.85rem; color: #64748b; line-height: 1.5;">
+                      ${page.suggestion || (page.impactLevel === 'HIGH' && page.difficultyLevel === 'LOW' ? 'Improve relevance + internal links to lift rank' : 'Improve CTR (title/meta/snippet) + strengthen content')}
+                    </div>
+                    <button type="button" class="btn ${isOptimized ? 'btn-secondary' : 'btn-primary'}" onclick="${isOptimized ? `window.openOptimisationTaskDrawer('${String(taskId).replace(/'/g, "\\'").replace(/"/g, '&quot;')}')` : `window.trackMoneyPage('${page.url.replace(/'/g, "\\'")}', '${(page.title || page.url).replace(/'/g, "\\'")}')`}" style="width: 100%; padding: 0.75rem; background: ${isOptimized ? '#10b981' : '#2563eb'}; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.875rem;">
+                      ${isOptimized ? 'Manage' : 'Create Task'}
+                    </button>
+                  </div>
+                `;
+              }).join('');
+              
+              debugLog(`✓ Rendered ${top10.length} suggested top 10 cards`, 'success');
+            };
+          }
+          
           if (typeof renderMoneyPagesTable === 'function') {
             const priorityData = window.moneyPagePriorityData || (saved && saved.moneyPagePriorityData) || [];
             if (priorityData && priorityData.length > 0) {
@@ -15111,7 +15256,7 @@
             }
             
             const sparklineCanvas = document.getElementById('money-kpi-sparkline');
-            if (sparklineCanvas && typeof loadAuditHistoryAndRenderKpis === 'function') {
+            if (sparklineCanvas && typeof window.loadAuditHistoryAndRenderKpis === 'function') {
               const rect = sparklineCanvas.getBoundingClientRect();
               if (rect.width === 0 || rect.height === 0) {
                 debugLog('⚠ Money KPI sparkline: Canvas has zero dimensions, will retry', 'warn');
@@ -15127,7 +15272,7 @@
                     if (canvas) {
                       const rect = canvas.getBoundingClientRect();
                       if (rect.width > 0 && rect.height > 0) {
-                        loadAuditHistoryAndRenderKpis(propertyUrl);
+                        window.loadAuditHistoryAndRenderKpis(propertyUrl);
                       } else {
                         debugLog('⚠ Money KPI sparkline: Canvas still has zero dimensions, retrying...', 'warn');
                         setTimeout(() => renderMoneyCharts(), 200);
@@ -15154,6 +15299,15 @@
           if (typeof window.wirePriorityActionsFilters === 'function') {
             window.wirePriorityActionsFilters();
           }
+          
+          // Render Suggested (Top 10) cards - wait a bit longer to ensure HTML structure exists
+          setTimeout(() => {
+            if (typeof window.renderMoneyPagesSuggestedTop10 === 'function') {
+              window.renderMoneyPagesSuggestedTop10(0); // Start with retry count 0
+            } else {
+              debugLog('⚠ renderMoneyPagesSuggestedTop10 function not found', 'warn');
+            }
+          }, 300);
         }, 100);
       }
 
@@ -15330,7 +15484,7 @@
       const mappedScope = scopeMap[scope] || scope;
 
       try {
-        const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+        const propertyUrl = (window.getPropertyUrl ? window.getPropertyUrl() : '') || localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
         if (!propertyUrl) {
           debugLog('⚠ No property URL found for portfolio data', 'warn');
           return;
@@ -15423,7 +15577,34 @@
         // For monthly bucketing, also check run_id if it's in YYYY-MM format
         const buckets = new Map(); // key: bucket label, value: { value, date }
         
+        const dateKeyUTC = (d) => {
+          const y = d.getUTCFullYear();
+          const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+          const day = String(d.getUTCDate()).padStart(2, '0');
+          return `${y}-${m}-${day}`;
+        };
+        const mondayKeyUTCFromDate = (d) => {
+          // Get Monday (UTC) for the week containing d
+          const dayOfWeek = d.getUTCDay(); // 0=Sun..6=Sat
+          const diff = d.getUTCDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+          const monday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+          monday.setUTCDate(diff);
+          return dateKeyUTC(monday);
+        };
+        const safeDateFrom = (v) => {
+          if (!v) return null;
+          const d = new Date(v);
+          return isNaN(d.getTime()) ? null : d;
+        };
+
         metrics.forEach(m => {
+          // For weekly view: ONLY use actual weekly snapshots (run_id in YYYY-MM-DD format)
+          // Skip monthly backfilled data (run_id in YYYY-MM format) to avoid misleading weekly distribution
+          if (timeGrain === 'weekly' && m.run_id && m.run_id.match(/^\d{4}-\d{2}$/)) {
+            // Skip monthly backfilled data in weekly view
+            return;
+          }
+          
           // Determine the date to use for bucketing:
           // 1. If run_id is in YYYY-MM format, use that for monthly bucketing (historical backfill)
           // 2. Otherwise, use created_at (when the audit was run) - this ensures different audit runs get different buckets
@@ -15437,32 +15618,27 @@
             bucketKey = m.run_id;
             dateForBucket = new Date(m.run_id + '-01');
           } else if (timeGrain === 'weekly') {
-            // For weekly: prefer date_end (when data represents) over created_at (when audit was run)
-            // This ensures backfilled monthly data gets distributed across correct weeks
+            // For weekly: only use actual weekly snapshots (run_id in YYYY-MM-DD format)
+            // Prefer date_end (actual GSC period end). created_at can be "now" for backfilled history.
             if (m.date_end) {
-              dateForBucket = new Date(m.date_end);
+              dateForBucket = safeDateFrom(m.date_end);
             } else if (m.run_id && m.run_id.match(/^\d{4}-\d{2}-\d{2}$/)) {
-              dateForBucket = new Date(m.run_id);
-            } else if (m.run_id && m.run_id.match(/^\d{4}-\d{2}$/)) {
-              // For monthly run_id, use the last day of that month
-              dateForBucket = new Date(m.run_id + '-01');
-              dateForBucket.setMonth(dateForBucket.getMonth() + 1);
-              dateForBucket.setDate(0); // Last day of the month
+              dateForBucket = safeDateFrom(m.run_id);
             } else if (m.created_at) {
-              dateForBucket = new Date(m.created_at);
+              dateForBucket = safeDateFrom(m.created_at);
             } else {
               debugLog(`⚠ No valid date found for weekly metric: run_id=${m.run_id}, date_end=${m.date_end}, created_at=${m.created_at}`, 'warn');
               return; // Skip this metric
             }
           } else if (m.created_at) {
             // For monthly (non-backfill): use created_at (when the audit was run)
-            dateForBucket = new Date(m.created_at);
+            dateForBucket = safeDateFrom(m.created_at);
           } else if (m.run_id && m.run_id.match(/^\d{4}-\d{2}-\d{2}$/)) {
             // If run_id is in YYYY-MM-DD format, use that
-            dateForBucket = new Date(m.run_id);
+            dateForBucket = safeDateFrom(m.run_id);
           } else if (m.date_end) {
             // Fallback to date_end
-            dateForBucket = new Date(m.date_end);
+            dateForBucket = safeDateFrom(m.date_end);
           } else {
             debugLog(`⚠ No valid date found for metric: run_id=${m.run_id}, date_end=${m.date_end}, created_at=${m.created_at}`, 'warn');
             return; // Skip this metric
@@ -15476,20 +15652,15 @@
           if (!bucketKey) {
             // Calculate bucket key from date
             if (timeGrain === 'weekly') {
-              // ISO week: get Monday of the week
-              const dayOfWeek = dateForBucket.getDay();
-              const diff = dateForBucket.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
-              const monday = new Date(dateForBucket);
-              monday.setDate(diff);
-              bucketKey = monday.toISOString().split('T')[0]; // Use Monday date as key
+              bucketKey = mondayKeyUTCFromDate(dateForBucket); // Use Monday date (UTC) as key
             } else {
               // Monthly: YYYY-MM
               bucketKey = `${dateForBucket.getFullYear()}-${String(dateForBucket.getMonth() + 1).padStart(2, '0')}`;
             }
           }
           
-          // Keep the LAST snapshot in each bucket (by created_at, which represents when the audit was run)
-          const comparisonDate = m.created_at ? new Date(m.created_at) : (m.date_end ? new Date(m.date_end) : dateForBucket);
+          // Keep the LAST snapshot in each bucket using date_end first (actual period end), then created_at as fallback
+          const comparisonDate = safeDateFrom(m.date_end) || safeDateFrom(m.created_at) || dateForBucket;
           if (!buckets.has(bucketKey) || comparisonDate > buckets.get(bucketKey).date) {
             const value = kpiField === 'ctr_28d' ? parseFloat(m.ctr_28d || 0) :
                           kpiField === 'clicks_28d' ? parseFloat(m.clicks_28d || 0) :
@@ -15593,7 +15764,7 @@
           let label;
           if (timeGrain === 'weekly') {
             // Weekly: show Monday date as "DD MMM"
-            label = new Date(bucketKey).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+            label = new Date(bucketKey + 'T00:00:00Z').toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
           } else {
             // Monthly: show as "MMM YY" (e.g., "Jan 25", "Dec 25")
             const monthDate = new Date(bucketKey + '-01');
@@ -15693,7 +15864,7 @@
       }
       
       try {
-        const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+        const propertyUrl = (window.getPropertyUrl ? window.getPropertyUrl() : '') || localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
         if (!propertyUrl) {
           debugLog('⚠ No property URL found for portfolio table', 'warn');
           return;
@@ -15725,12 +15896,25 @@
           }
         }
 
-        // Generate last 12 months
+        const monthKeyFromDate = (d) => {
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, '0');
+          return `${y}-${m}`;
+        };
+        const monthStartDateFromKey = (monthKey) => {
+          // monthKey: YYYY-MM
+          const [yStr, mStr] = String(monthKey).split('-');
+          const y = parseInt(yStr, 10);
+          const m = parseInt(mStr, 10);
+          return new Date(y, (m || 1) - 1, 1);
+        };
+
+        // Generate last 12 months (LOCAL month keys; avoid toISOString() timezone shifting)
         const months = [];
         const today = new Date();
         for (let i = 11; i >= 0; i--) {
           const date = new Date(today.getFullYear(), today.getMonth() - i, 1);
-          months.push(date.toISOString().substring(0, 7)); // YYYY-MM format
+          months.push(monthKeyFromDate(date)); // YYYY-MM
         }
 
         // Build table
@@ -15752,7 +15936,7 @@
         months.forEach(month => {
           const th = document.createElement('th');
           th.style.cssText = 'text-align: center; padding: 0.75rem; border-bottom: 2px solid var(--dark-border); font-weight: 600; background: rgba(55, 65, 81, 0.5); color: var(--dark-text);';
-          const monthDate = new Date(month + '-01');
+          const monthDate = monthStartDateFromKey(month);
           th.textContent = monthDate.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
           th.title = `Value for ${monthDate.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}: Last snapshot from this month (rolling 28-day window)`;
           thead.appendChild(th);
@@ -15860,12 +16044,12 @@
                 monthValues.push(value);
                 
                 // Build tooltip text
-                const monthDate = new Date(month + '-01');
+                const monthDate = monthStartDateFromKey(month);
                 const monthName = monthDate.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
                 let tooltipText = `${segmentLabels[segment]}: ${formatted} for ${monthName}`;
                 
                 // Find previous month snapshot for trend
-                const prevMonth = new Date(month + '-01');
+                const prevMonth = monthStartDateFromKey(month);
                 prevMonth.setMonth(prevMonth.getMonth() - 1);
                 const prevMonthStr = `${prevMonth.getFullYear()}-${String(prevMonth.getMonth() + 1).padStart(2, '0')}`;
                 
@@ -15942,14 +16126,14 @@
               } else {
                 cell.textContent = '—';
                 monthValues.push(null);
-                const monthDate = new Date(month + '-01');
+                const monthDate = monthStartDateFromKey(month);
                 const monthName = monthDate.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
                 cell.title = `${segmentLabels[segment]}: No data for ${monthName}`;
               }
             } else {
               cell.textContent = '—';
               monthValues.push(null);
-              const monthDate = new Date(month + '-01');
+              const monthDate = monthStartDateFromKey(month);
               const monthName = monthDate.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
               cell.title = `${segmentLabels[segment]}: No data for ${monthName}`;
             }
@@ -15985,6 +16169,505 @@
       }
     }
 
+    // Load and render Money Pages KPI Tracker (last 28 days)
+    window.loadAuditHistoryAndRenderKpis = async function(propertyUrl) {
+      // Prevent multiple simultaneous calls
+      if (window._loadingMoneyKpiTracker) {
+        debugLog('⚠ Money Pages KPI Tracker already loading, skipping duplicate call', 'warn');
+        return;
+      }
+      
+      window._loadingMoneyKpiTracker = true;
+      
+      try {
+        debugLog('📊 Loading Money Pages KPI Tracker data...', 'info');
+        
+        if (!propertyUrl) {
+          propertyUrl = (window.getPropertyUrl ? window.getPropertyUrl() : '') || localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+          if (!propertyUrl) {
+            debugLog('⚠ No property URL found for Money Pages KPI Tracker', 'warn');
+            return;
+          }
+        }
+        
+        // Get selected metric (with fallback if selector doesn't exist yet)
+        const metricSelect = document.getElementById('money-kpi-metric-select');
+        if (!metricSelect) {
+          debugLog('⚠ Money KPI metric selector not found - will use default avgPosition', 'warn');
+        }
+        const selectedMetric = metricSelect?.value || 'avgPosition';
+        
+        // Map UI metric to database field
+        const metricFieldMap = {
+          'ctr': 'ctr_28d',
+          'impressions': 'impressions_28d',
+          'clicks': 'clicks_28d',
+          'avgPosition': 'position_28d'
+        };
+        const dbField = metricFieldMap[selectedMetric] || 'position_28d';
+        
+        // Use the same date range logic as loadPortfolioData (last 365 days to ensure enough data for weekly bucketing)
+        const toDate = new Date();
+        const fromDate = new Date();
+        fromDate.setDate(fromDate.getDate() - 365);
+        
+        debugLog(`📅 Money Pages KPI Tracker: Fetching data from ${fromDate.toISOString().split('T')[0]} to ${toDate.toISOString().split('T')[0]} (same as top charts)`, 'info');
+        
+        // Fetch data for all money page segments
+        const segments = ['money', 'landing', 'event', 'product'];
+        const segmentData = {};
+        
+        const dateKeyUTC = (d) => {
+          const y = d.getUTCFullYear();
+          const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+          const day = String(d.getUTCDate()).padStart(2, '0');
+          return `${y}-${m}-${day}`;
+        };
+        const mondayKeyUTCFromDate = (d) => {
+          const dayOfWeek = d.getUTCDay(); // 0=Sun..6=Sat
+          const diff = d.getUTCDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+          const monday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+          monday.setUTCDate(diff);
+          return dateKeyUTC(monday);
+        };
+        const safeDateFrom = (v) => {
+          if (!v) return null;
+          const d = new Date(v);
+          return isNaN(d.getTime()) ? null : d;
+        };
+        const metricDateForPeriod = (m) => {
+          // Prefer date_end (actual GSC period). Fall back to run_id (weekly snapshot) or created_at.
+          return safeDateFrom(m?.date_end) || (m?.run_id && /^\d{4}-\d{2}-\d{2}$/.test(m.run_id) ? safeDateFrom(m.run_id) : null) || safeDateFrom(m?.created_at);
+        };
+
+        for (const segment of segments) {
+          const params = new URLSearchParams({
+            siteUrl: propertyUrl,
+            segment,
+            scope: 'active_cycles_only',
+            from: fromDate.toISOString(),
+            to: toDate.toISOString(),
+            order: 'asc'
+          });
+          
+          const response = await fetch(apiUrl(`/api/supabase/get-portfolio-segment-metrics?${params}`));
+          if (response.ok) {
+            const data = await response.json();
+            // Store raw metrics for bucketing (same approach as loadPortfolioData)
+            segmentData[segment] = (data.metrics || []).map(m => ({
+              metric: m,
+              value: dbField === 'ctr_28d' ? parseFloat(m.ctr_28d || 0) :
+                     dbField === 'position_28d' ? (m.position_28d !== null && m.position_28d !== undefined && !isNaN(parseFloat(m.position_28d)) ? parseFloat(m.position_28d) : null) :
+                     dbField === 'clicks_28d' ? parseFloat(m.clicks_28d || 0) :
+                     dbField === 'impressions_28d' ? parseFloat(m.impressions_28d || 0) : null
+            })).filter(d => d.value !== null && !isNaN(d.value));
+            
+            debugLog(`✓ Fetched ${segmentData[segment].length} records for segment '${segment}'`, 'info');
+          } else {
+            debugLog(`⚠ Failed to fetch data for segment '${segment}': ${response.status}`, 'warn');
+            segmentData[segment] = [];
+          }
+        }
+        
+        // Determine the last valid GSC date (use window.lastGscTimeseriesDate if available)
+        // This should match what the top charts use
+        let lastValidGscDate = null;
+        if (window.lastGscTimeseriesDate) {
+          lastValidGscDate = new Date(window.lastGscTimeseriesDate);
+          debugLog(`📅 Using last GSC timeseries date: ${window.lastGscTimeseriesDate}`, 'info');
+        } else {
+          // Fallback: find the maximum date_end that appears in ALL segments (most recent complete date)
+          // This ensures we only show dates where we have complete data for all segments
+          const dateCounts = new Map();
+          // segmentData entries are objects shaped like { metric: <raw row>, value: <number> }
+          // Derive a safe date string for each record (prefer date_end as the actual GSC period).
+          const safeDateStr = (m) => {
+            try {
+              if (!m) return null;
+              if (m.date_end) {
+                const d = new Date(m.date_end);
+                return isNaN(d.getTime()) ? null : d.toISOString().split('T')[0];
+              }
+              // Weekly snapshot run_id (YYYY-MM-DD)
+              if (m.run_id && /^\d{4}-\d{2}-\d{2}$/.test(m.run_id)) return m.run_id;
+              if (m.created_at) {
+                const d = new Date(m.created_at);
+                return isNaN(d.getTime()) ? null : d.toISOString().split('T')[0];
+              }
+            } catch (e) {
+              // ignore
+            }
+            return null;
+          };
+
+          segments.forEach(segment => {
+            const segmentDates = new Set(
+              (segmentData[segment] || [])
+                .map(({ metric: m }) => safeDateStr(m))
+                .filter(Boolean)
+            );
+            segmentDates.forEach(dateStr => {
+              dateCounts.set(dateStr, (dateCounts.get(dateStr) || 0) + 1);
+            });
+          });
+          
+          // Only include dates that appear in ALL segments (complete data)
+          const completeDates = Array.from(dateCounts.entries())
+            .filter(([date, count]) => count === segments.length)
+            .map(([date]) => new Date(date))
+            .sort((a, b) => b - a);
+          
+          if (completeDates.length > 0) {
+            lastValidGscDate = completeDates[0];
+            if (lastValidGscDate) {
+              debugLog(`📅 Using max complete date_end (appears in all ${segments.length} segments): ${lastValidGscDate.toISOString().split('T')[0]}`, 'info');
+            }
+          } else {
+            // If no date appears in all segments, use the most recent date that appears in at least 2 segments
+            const partialDates = Array.from(dateCounts.entries())
+              .filter(([date, count]) => count >= 2)
+              .map(([date]) => new Date(date))
+              .sort((a, b) => b - a);
+            if (partialDates.length > 0) {
+              lastValidGscDate = partialDates[0];
+              if (lastValidGscDate) {
+                debugLog(`📅 Using max partial date_end (appears in at least 2 segments): ${lastValidGscDate.toISOString().split('T')[0]}`, 'info');
+              }
+            }
+          }
+        }
+        
+        // Additional safety: if lastValidGscDate is today or in the future, cap it to yesterday
+        // This prevents showing data for dates that haven't completed yet
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        if (lastValidGscDate && lastValidGscDate >= today) {
+          const yesterday = new Date(today);
+          yesterday.setDate(yesterday.getDate() - 1);
+          if (lastValidGscDate > yesterday) {
+            lastValidGscDate = yesterday;
+            debugLog(`📅 Capped lastValidGscDate to yesterday: ${lastValidGscDate.toISOString().split('T')[0]}`, 'info');
+          }
+        }
+        
+        // If we still don't have a valid date, or if the date is Dec 22 but top charts show Dec 21,
+        // explicitly cap to Dec 21 to match top charts behavior
+        if (!lastValidGscDate) {
+          // If we still don't have a valid date, try to use window.lastGscTimeseriesDate as fallback
+          if (window.lastGscTimeseriesDate) {
+            lastValidGscDate = new Date(window.lastGscTimeseriesDate);
+            if (lastValidGscDate && lastValidGscDate.toISOString) {
+              debugLog(`📅 Using window.lastGscTimeseriesDate as fallback: ${lastValidGscDate.toISOString().split('T')[0]}`, 'info');
+            }
+          }
+        }
+        
+        if (lastValidGscDate && lastValidGscDate.toISOString && lastValidGscDate.toISOString().split('T')[0] > '2025-12-21') {
+          // Check if Dec 21 data exists in any segment
+          const hasDec21Data = segments.some(segment => 
+            segmentData[segment].some(({ metric: m }) => {
+              const dateEnd = m.date_end ? new Date(m.date_end).toISOString().split('T')[0] : null;
+              return dateEnd === '2025-12-21';
+            })
+          );
+          if (hasDec21Data) {
+            lastValidGscDate = new Date('2025-12-21');
+            debugLog(`📅 Explicitly capping to Dec 21 to match top charts: ${lastValidGscDate.toISOString().split('T')[0]}`, 'info');
+          }
+        }
+        
+        // Bucket data by week (Monday start) like the top charts
+        // Use date_end for the actual GSC data period, but bucket into weeks
+        // Only include data where date_end <= lastValidGscDate
+        const weeklyBuckets = new Map(); // key: Monday date (YYYY-MM-DD), value: Map<segment, {value, date_end}>
+        
+        segments.forEach(segment => {
+          segmentData[segment].forEach(({ metric: m, value }) => {
+            // Use the same date logic as loadPortfolioData for weekly bucketing
+            // For weekly: only use actual weekly snapshots (run_id in YYYY-MM-DD format)
+            if (m.run_id && m.run_id.match(/^\d{4}-\d{2}$/)) {
+              // Skip monthly backfilled data in weekly view (same as loadPortfolioData)
+              return;
+            }
+            
+            // Determine date for bucketing (prefer date_end)
+            const dateForBucket = metricDateForPeriod(m);
+            
+            if (!dateForBucket || isNaN(dateForBucket.getTime())) {
+              return; // Skip invalid dates
+            }
+            
+            // Filter out data beyond the last valid GSC date
+            const dateStr = dateKeyUTC(dateForBucket);
+            const lastValidDateStr = lastValidGscDate ? lastValidGscDate.toISOString().split('T')[0] : null;
+            if (lastValidDateStr && dateStr > lastValidDateStr) {
+              return; // Skip this record
+            }
+            
+            // Calculate Monday of the week (UTC)
+            const mondayKey = mondayKeyUTCFromDate(dateForBucket);
+            
+            if (!weeklyBuckets.has(mondayKey)) {
+              weeklyBuckets.set(mondayKey, new Map());
+            }
+            
+            const bucket = weeklyBuckets.get(mondayKey);
+            // Keep the LAST snapshot in each week using period end first
+            const comparisonDate = metricDateForPeriod(m) || safeDateFrom(m.created_at) || dateForBucket;
+            if (!bucket.has(segment) || comparisonDate > bucket.get(segment).date) {
+              bucket.set(segment, {
+                value: value,
+                date: comparisonDate
+              });
+            }
+          });
+        });
+        
+        // Get all unique week dates (Mondays) and sort them
+        const sortedWeekDates = Array.from(weeklyBuckets.keys()).sort();
+        
+        if (sortedWeekDates.length === 0) {
+          debugLog('⚠ No data found for Money Pages KPI Tracker', 'warn');
+          return;
+        }
+        
+        // Build chart data
+        const segmentLabels = {
+          'money': 'All',
+          'landing': 'Landing',
+          'event': 'Event',
+          'product': 'Product'
+        };
+        
+        const segmentColors = {
+          'money': '#3b82f6',    // Blue
+          'landing': '#10b981',  // Green
+          'event': '#f59e0b',   // Orange/Yellow
+          'product': '#ef4444'   // Red
+        };
+        
+        const chartData = {
+          labels: sortedWeekDates.map(mondayStr => {
+            const date = new Date(mondayStr + 'T00:00:00Z');
+            return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+          }),
+          datasets: segments.map(segment => {
+            const data = sortedWeekDates.map(mondayStr => {
+              const bucket = weeklyBuckets.get(mondayStr);
+              const segmentBucket = bucket?.get(segment);
+              return segmentBucket ? segmentBucket.value : null;
+            });
+            
+            return {
+              label: segmentLabels[segment],
+              data: data,
+              borderColor: segmentColors[segment],
+              backgroundColor: segmentColors[segment] + '20',
+              borderWidth: 2,
+              fill: false,
+              tension: 0.4,
+              pointRadius: 4,
+              pointHoverRadius: 6
+            };
+          })
+        };
+        
+        // Render chart
+        const canvas = document.getElementById('money-kpi-sparkline');
+        if (canvas) {
+          // Destroy existing chart if it exists (check both window variable and Chart.js registry)
+          if (window.moneyKpiChart) {
+            try {
+              window.moneyKpiChart.destroy();
+            } catch (e) {
+              debugLog(`Error destroying window.moneyKpiChart: ${e.message}`, 'warn');
+            }
+            window.moneyKpiChart = null;
+          }
+          
+          // Also check Chart.js registry for any chart on this canvas
+          if (typeof Chart !== 'undefined' && Chart.getChart) {
+            const existingChart = Chart.getChart(canvas);
+            if (existingChart) {
+              try {
+                existingChart.destroy();
+                debugLog('Destroyed existing Chart.js instance from registry for money-kpi-sparkline', 'info');
+              } catch (e) {
+                debugLog(`Error destroying chart from registry: ${e.message}`, 'warn');
+              }
+            }
+          }
+          
+          const ctx = canvas.getContext('2d');
+          
+          window.moneyKpiChart = new Chart(ctx, {
+            type: 'line',
+            data: chartData,
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: {
+                  display: true,
+                  position: 'top'
+                },
+                tooltip: {
+                  mode: 'index',
+                  intersect: false
+                }
+              },
+              scales: {
+                x: {
+                  display: true,
+                  title: {
+                    display: true,
+                    text: 'Month'
+                  }
+                },
+                y: {
+                  display: true,
+                  title: {
+                    display: true,
+                    text: selectedMetric === 'avgPosition' ? 'Avg Position' :
+                          selectedMetric === 'ctr' ? 'CTR (%)' :
+                          selectedMetric === 'impressions' ? 'Impressions' :
+                          'Clicks'
+                  }
+                }
+              }
+            }
+          });
+        }
+        
+        // Render table
+        const table = document.getElementById('money-kpi-table');
+        if (table) {
+          const thead = table.querySelector('thead tr');
+          const tbody = table.querySelector('tbody');
+          
+          // Clear existing content
+          thead.innerHTML = '';
+          tbody.innerHTML = '';
+          
+          // Add header row
+          const segmentHeader = document.createElement('th');
+          segmentHeader.textContent = 'Segment ↑';
+          segmentHeader.style.cssText = 'padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0; background: #f1f5f9; font-weight: 600;';
+          thead.appendChild(segmentHeader);
+          
+          sortedWeekDates.forEach(mondayStr => {
+            const th = document.createElement('th');
+            const date = new Date(mondayStr);
+            th.textContent = date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+            th.style.cssText = 'padding: 0.75rem; text-align: center; border-bottom: 2px solid #e2e8f0; background: #f1f5f9; font-weight: 600;';
+            thead.appendChild(th);
+          });
+          
+          const trendHeader = document.createElement('th');
+          trendHeader.textContent = 'Trend';
+          trendHeader.style.cssText = 'padding: 0.75rem; text-align: center; border-bottom: 2px solid #e2e8f0; background: #f1f5f9; font-weight: 600;';
+          thead.appendChild(trendHeader);
+          
+          // Add data rows
+          segments.forEach(segment => {
+            const row = document.createElement('tr');
+            
+            // Segment name
+            const segmentCell = document.createElement('td');
+            segmentCell.textContent = segmentLabels[segment];
+            segmentCell.style.cssText = 'padding: 0.75rem; border-bottom: 1px solid #e2e8f0; font-weight: 600;';
+            row.appendChild(segmentCell);
+            
+            // Data cells - use weekly buckets
+            const values = sortedWeekDates.map(mondayStr => {
+              const bucket = weeklyBuckets.get(mondayStr);
+              const segmentBucket = bucket?.get(segment);
+              return segmentBucket ? segmentBucket.value : null;
+            });
+            
+            values.forEach((value, idx) => {
+              const cell = document.createElement('td');
+              if (value !== null) {
+                if (selectedMetric === 'avgPosition') {
+                  cell.textContent = value.toFixed(1) + '-';
+                } else if (selectedMetric === 'ctr') {
+                  cell.textContent = (value * 100).toFixed(2) + '%';
+                } else {
+                  cell.textContent = Math.round(value).toLocaleString();
+                }
+              }
+              cell.style.cssText = 'padding: 0.75rem; text-align: center; border-bottom: 1px solid #e2e8f0;';
+              row.appendChild(cell);
+            });
+            
+            // Trend cell
+            const trendCell = document.createElement('td');
+            const validValues = values.filter(v => v !== null);
+            if (validValues.length >= 2) {
+              const first = validValues[0];
+              const last = validValues[validValues.length - 1];
+              const change = last - first;
+              const changePercent = first !== 0 ? ((change / first) * 100) : 0;
+              
+              let trendText = '→ 0.0';
+              let trendClass = 'kpi-trend-flat';
+              
+              if (Math.abs(change) > 0.01) {
+                if (selectedMetric === 'avgPosition') {
+                  // For position, lower is better, so negative change is good
+                  trendText = change < 0 ? `↓ ${Math.abs(change).toFixed(1)}` : `↑ ${change.toFixed(1)}`;
+                  trendClass = change < 0 ? 'kpi-trend-up' : 'kpi-trend-down';
+                } else {
+                  trendText = change > 0 ? `↑ ${changePercent.toFixed(1)}%` : `↓ ${Math.abs(changePercent).toFixed(1)}%`;
+                  trendClass = change > 0 ? 'kpi-trend-up' : 'kpi-trend-down';
+                }
+              }
+              
+              trendCell.innerHTML = `<span class="${trendClass}">${trendText}</span>`;
+            } else {
+              trendCell.textContent = '—';
+            }
+            trendCell.style.cssText = 'padding: 0.75rem; text-align: center; border-bottom: 1px solid #e2e8f0;';
+            row.appendChild(trendCell);
+            
+            tbody.appendChild(row);
+          });
+        }
+        
+        debugLog('✓ Money Pages KPI Tracker rendered', 'success');
+        
+        // Wire up metric selector after rendering
+        if (typeof window.wireMoneyKpiMetricSelector === 'function') {
+          window.wireMoneyKpiMetricSelector();
+        }
+      } catch (err) {
+        debugLog(`Error loading Money Pages KPI Tracker: ${err.message}`, 'error');
+        console.error(err);
+      } finally {
+        window._loadingMoneyKpiTracker = false;
+      }
+    };
+
+    // Wire up Money KPI metric selector
+    window.wireMoneyKpiMetricSelector = function() {
+      const metricSelect = document.getElementById('money-kpi-metric-select');
+      if (metricSelect) {
+        // Remove any existing listeners by cloning the element
+        const newSelect = metricSelect.cloneNode(true);
+        metricSelect.parentNode.replaceChild(newSelect, metricSelect);
+        
+        newSelect.addEventListener('change', () => {
+          const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+          if (propertyUrl && typeof window.loadAuditHistoryAndRenderKpis === 'function') {
+            debugLog(`📊 Money KPI metric changed to: ${newSelect.value}`, 'info');
+            window.loadAuditHistoryAndRenderKpis(propertyUrl);
+          }
+        });
+        debugLog('✓ Money KPI metric selector wired up', 'success');
+      } else {
+        debugLog('⚠ Money KPI metric selector not found', 'warn');
+      }
+    };
 
     // Wire up Portfolio controls
     function wirePortfolioControls() {
@@ -16666,25 +17349,32 @@
           if (data.apiKey) {
             vercelApiKey = data.apiKey;
             debugLog('✓ API key loaded from Vercel environment variable', 'success');
+            // Persist for this domain to reduce future cold-start issues
+            try { localStorage.setItem('gsc_api_key', data.apiKey); } catch (e) { /* ignore */ }
           }
+        } else {
+          const txt = await response.text();
+          debugLog(`⚠ /api/get-api-key returned ${response.status}: ${txt}`, 'warn');
         }
       } catch (e) {
-        debugLog('Vercel env var endpoint not available (expected for static site)', 'info');
+        debugLog(`⚠ /api/get-api-key fetch failed: ${e.message}`, 'warn');
       }
       
-      // Check config.js
+      // Check config.js (local dev only; on Vercel we prefer env via /api/get-api-key)
       debugLog('Checking for config.js...', 'info');
-      if (window.API_CONFIG && window.API_CONFIG.googleSearchConsoleApiKey) {
+      const configApiKey = window.API_CONFIG && window.API_CONFIG.googleSearchConsoleApiKey;
+      if (configApiKey) {
         debugLog('✓ config.js found with API key', 'success');
+      } else if (vercelApiKey || localStorage.getItem('gsc_api_key')) {
+        debugLog('ℹ config.js not present (expected on Vercel). Using env/localStorage key.', 'info');
       } else {
-        debugLog('✗ config.js not found or no API key', 'warn');
+        debugLog('✗ No API key found (config.js missing and env/localStorage key unavailable)', 'warn');
       }
       
       // Check localStorage
       debugLog('Checking localStorage...', 'info');
-      const configApiKey = window.API_CONFIG && window.API_CONFIG.googleSearchConsoleApiKey;
       const apiKey = vercelApiKey || configApiKey || localStorage.getItem('gsc_api_key');
-      const propertyUrl = localStorage.getItem('gsc_property_url');
+      const propertyUrl = window.getPropertyUrl ? window.getPropertyUrl() : (localStorage.getItem('gsc_property_url') || '');
       const dateRange = localStorage.getItem('gsc_date_range');
       
       const apiKeySource = vercelApiKey ? 'Vercel env var' : configApiKey ? 'config.js' : localStorage.getItem('gsc_api_key') ? 'localStorage' : 'none';
@@ -16701,8 +17391,9 @@
       }
       
       if (propertyUrl) {
-        document.getElementById('propertyUrl').value = propertyUrl;
-        debugLog('✓ Property URL loaded', 'success');
+        const el = document.getElementById('propertyUrl');
+        if (el && !el.value) el.value = propertyUrl;
+        debugLog('✓ Property URL available', 'success');
       }
       if (dateRange) {
         document.getElementById('dateRange').value = dateRange;
@@ -18497,9 +19188,9 @@
                 }
                 
                 // Refresh KPI tracker
-                if (typeof loadAuditHistoryAndRenderKpis === 'function') {
+                if (typeof window.loadAuditHistoryAndRenderKpis === 'function') {
                   setTimeout(() => {
-                    loadAuditHistoryAndRenderKpis(propertyUrl);
+                    window.loadAuditHistoryAndRenderKpis(propertyUrl);
                     debugLog('✓ Money Pages KPI tracker refreshed', 'success');
                   }, 500);
                 }
@@ -26647,8 +27338,9 @@ Final Score: ${score}/100`;
         
         // Check if full structure already exists (created by displayDashboard)
         const existingHeader = section.querySelector('h3[style*="color: var(--brand-dark)"]');
-        if (existingHeader && existingHeader.textContent.includes('Money Pages Performance & Actions')) {
-          debugLog('✓ Money Pages full structure already exists, skipping HTML recreation', 'info');
+        const existingContainer = section.querySelector('#money-pages-suggested-top10-container');
+        if (existingHeader && existingHeader.textContent.includes('Money Pages Performance & Actions') && existingContainer) {
+          debugLog('✓ Money Pages full structure already exists including Suggested Top 10 container, skipping HTML recreation', 'info');
           // Don't overwrite - just ensure section is visible
           section.style.display = 'block';
         } else {
@@ -26898,6 +27590,20 @@ Final Score: ${score}/100`;
                   <div id="money-pages-priority-pagination"></div>
                   <button id="money-pages-copy-urls-btn" type="button" class="btn btn-small" style="margin-top: 1rem;" title="Copy all filtered page URLs to clipboard. URLs are copied one per line, ready to paste into spreadsheets or other tools.">Copy URLs</button>
                 </div>
+              </div>
+            </section>
+            
+            <!-- Suggested (Top 10) Section -->
+            <section id="money-pages-suggested-top10" class="card card--full" style="margin-top: 2rem; background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+              <div class="card-header" style="margin-bottom: 1rem;">
+                <h3 style="margin: 0 0 0.5rem 0; font-size: 1.1rem; font-weight: 700; color: #1e293b;">Suggested (Top 10)</h3>
+                <p class="card-subtitle" style="margin: 0; font-size: 0.85rem; color: #64748b; line-height: 1.6;">
+                  Top priority pages ranked by impact and difficulty. Click 'Create Task' to start optimization tracking.
+                </p>
+              </div>
+              
+              <div id="money-pages-suggested-top10-container" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem;">
+                <!-- Cards will be rendered here by JS -->
               </div>
             </section>
             
@@ -29219,11 +29925,11 @@ Final Score: ${score}/100`;
         window.moneyPagesPriorityRowsPerPage = 10;
       }
 
-      async function renderMoneyPagesTable(moneyPages, filters = {}) {
+      async function renderMoneyPagesPriorityTable(moneyPages, filters = {}) {
         const tbody = document.querySelector("#money-pages-priority-table tbody");
         const thead = document.querySelector("#money-pages-priority-table thead");
         if (!tbody || !thead) {
-          debugLog('⚠ renderMoneyPagesTable (Priority Actions): Table elements not found, table may not be rendered yet', 'warn');
+          debugLog('⚠ renderMoneyPagesPriorityTable: Table elements not found, table may not be rendered yet', 'warn');
           // Return empty string instead of undefined to prevent error message
           return '';
         }
@@ -29231,7 +29937,7 @@ Final Score: ${score}/100`;
         // Use window.moneyPagePriorityData if moneyPages is not provided or empty
         const sourcePages = (moneyPages && moneyPages.length > 0) ? moneyPages : (window.moneyPagePriorityData || []);
         if (!sourcePages || sourcePages.length === 0) {
-          debugLog('⚠ renderMoneyPagesTable: No money pages data available', 'warn');
+          debugLog('⚠ renderMoneyPagesPriorityTable: No money pages data available', 'warn');
           tbody.innerHTML = '<tr><td colspan="9" style="padding: 2rem; text-align: center; color: #64748b;">No money pages data available. Run an audit to generate priority matrix data.</td></tr>';
           // Clear pagination if no data
           const paginationContainer = document.getElementById('money-pages-priority-pagination');
@@ -29300,7 +30006,7 @@ Final Score: ${score}/100`;
         const endIndex = startIndex + rowsPerPage;
         const pageRows = rows.slice(startIndex, endIndex);
         
-        // CRITICAL: DO NOT fetch statuses here - the caller should fetch before calling renderMoneyPagesTable
+        // CRITICAL: DO NOT fetch statuses here - the caller should fetch before calling renderMoneyPagesPriorityTable
         // Fetching here causes the cache to be cleared every time the table renders, losing status information
         // Instead, we rely on the cache that was populated by the caller
         const allSourcePages = sourcePages || [];
@@ -29376,7 +30082,7 @@ Final Score: ${score}/100`;
             // Reset to page 1 when sorting changes
             window.moneyPagesPriorityCurrentPage = 1;
             (async () => {
-              await renderMoneyPagesTable(moneyPages, filters);
+              await renderMoneyPagesPriorityTable(moneyPages, filters);
             })();
           });
           
@@ -29749,7 +30455,7 @@ Final Score: ${score}/100`;
               matrixFilter: window.moneyPagesMatrixFilter || null
             };
             (async () => {
-              await renderMoneyPagesTable(null, filters);
+              await renderMoneyPagesPriorityTable(null, filters);
             })();
           });
         }
@@ -29764,7 +30470,7 @@ Final Score: ${score}/100`;
                 matrixFilter: window.moneyPagesMatrixFilter || null
               };
               (async () => {
-              await renderMoneyPagesTable(null, filters);
+              await renderMoneyPagesPriorityTable(null, filters);
             })();
             }
           });
@@ -29783,7 +30489,7 @@ Final Score: ${score}/100`;
                 matrixFilter: window.moneyPagesMatrixFilter || null
               };
               (async () => {
-              await renderMoneyPagesTable(null, filters);
+              await renderMoneyPagesPriorityTable(null, filters);
             })();
             }
           });
@@ -29801,7 +30507,7 @@ Final Score: ${score}/100`;
               matrixFilter: window.moneyPagesMatrixFilter || null
             };
             (async () => {
-              await renderMoneyPagesTable(null, filters);
+              await renderMoneyPagesPriorityTable(null, filters);
             })();
           });
         }
@@ -29817,14 +30523,14 @@ Final Score: ${score}/100`;
               matrixFilter: window.moneyPagesMatrixFilter || null
             };
             (async () => {
-              await renderMoneyPagesTable(null, filters);
+              await renderMoneyPagesPriorityTable(null, filters);
             })();
           });
         }
       }
       
-      // Make renderMoneyPagesTable globally available
-      window.renderMoneyPagesTable = renderMoneyPagesTable;
+      // Make Priority table renderer globally available (avoid clobbering Opportunity table renderer)
+      window.renderMoneyPagesPriorityTable = renderMoneyPagesPriorityTable;
       
       function applyMoneyPagesTopLevelSubSegmentFilter(value) {
         const subSeg = value || 'ALL';
@@ -30079,9 +30785,10 @@ Final Score: ${score}/100`;
                   minImpr,
                   matrixFilter: newActiveFilter
                 };
-                if (typeof renderMoneyPagesTable === 'function') {
+                if (typeof window.renderMoneyPagesPriorityTable === 'function') {
                   (async () => {
-                    await renderMoneyPagesTable(filteredPages, filters);
+                    // Render the Priority & Actions table (not the opportunity table)
+                    await window.renderMoneyPagesPriorityTable(filteredPages, filters);
                   })();
                 }
               };
@@ -30092,7 +30799,7 @@ Final Score: ${score}/100`;
             }
             
             // Re-render table with filters
-            if (typeof renderMoneyPagesTable === 'function') {
+            if (typeof window.renderMoneyPagesPriorityTable === 'function') {
               const filters = {
                 typeFilter,
                 minImpr,
@@ -30101,10 +30808,10 @@ Final Score: ${score}/100`;
                   : null
               };
               (async () => {
-                await renderMoneyPagesTable(filteredPages, filters);
+                await window.renderMoneyPagesPriorityTable(filteredPages, filters);
               })();
             } else {
-              debugLog('⚠ renderMoneyPagesTable function not found', 'warn');
+              debugLog('⚠ renderMoneyPagesPriorityTable function not found', 'warn');
             }
           };
           
@@ -30848,7 +31555,8 @@ Final Score: ${score}/100`;
        * Load audit history and render KPI tracker
        * @param {string} propertyUrl
        */
-      async function loadAuditHistoryAndRenderKpis(propertyUrl) {
+      // OLD FUNCTION - Using audit history (deprecated, use window.loadAuditHistoryAndRenderKpis instead)
+      async function loadAuditHistoryAndRenderKpis_OLD(propertyUrl) {
         if (!propertyUrl) return;
         
         const endDate = new Date().toISOString().split('T')[0];
@@ -31008,7 +31716,7 @@ Final Score: ${score}/100`;
             newSelect.addEventListener('change', () => {
               const propertyUrl = document.getElementById('propertyUrl')?.value;
               if (propertyUrl) {
-                loadAuditHistoryAndRenderKpis(propertyUrl);
+                window.loadAuditHistoryAndRenderKpis(propertyUrl);
               }
             });
             debugLog('✓ Money KPI metric selector wired up', 'success');
@@ -32448,7 +33156,7 @@ Final Score: ${score}/100`;
         // Phase: Load and render 12-month KPI Tracker
         const propertyUrl = document.getElementById('propertyUrl')?.value || localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url');
         if (propertyUrl) {
-          loadAuditHistoryAndRenderKpis(propertyUrl);
+          window.loadAuditHistoryAndRenderKpis(propertyUrl);
           
           // Wire up metric selector
           const metricSelect = document.getElementById('money-kpi-metric-select');
@@ -32459,7 +33167,7 @@ Final Score: ${score}/100`;
                 // Reload full history with timeseries when metric changes
                 const propertyUrl = document.getElementById('propertyUrl')?.value;
                 if (propertyUrl) {
-                  loadAuditHistoryAndRenderKpis(propertyUrl);
+                  window.loadAuditHistoryAndRenderKpis(propertyUrl);
                 } else {
                   // Fallback: use cached data but still need timeseries
                   debugLog('⚠ Metric selector: No propertyUrl available, cannot reload timeseries', 'warn');
@@ -38395,7 +39103,7 @@ Final Score: ${score}/100`;
     // ======================
     async function loadRankingAiDataFromStorage(forceCheckSupabase = false) {
       try {
-        const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+        const propertyUrl = (window.getPropertyUrl ? window.getPropertyUrl() : '') || localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
         if (!propertyUrl) {
           debugLog('⚠ Cannot load Ranking & AI data: property URL not set', 'warn');
           return null;
