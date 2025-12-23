@@ -6354,14 +6354,14 @@
           // ALSO: Re-render Priority table if it exists
           if (window.moneyPagePriorityData && window.moneyPagePriorityData.length > 0) {
             console.log('[Money Pages] Re-rendering Priority table after task creation...');
-            if (typeof renderMoneyPagesTable === 'function') {
+            if (typeof window.renderMoneyPagesPriorityTable === 'function') {
               const filters = {
                 typeFilter: window.moneyPagesTypeFilter || 'all',
                 minImpr: window.moneyPagesMinImpr || 0,
                 matrixFilter: window.moneyPagesMatrixFilter || null
               };
               try {
-                await renderMoneyPagesTable(null, filters);
+                await window.renderMoneyPagesPriorityTable(null, filters);
                 console.log('[Money Pages] ✓ Priority table re-rendered successfully');
               } catch (err) {
                 console.error('[Money Pages] Error re-rendering Priority table:', err);
@@ -14836,13 +14836,13 @@
             
             // Re-render Priority table
             if (window.moneyPagePriorityData && window.moneyPagePriorityData.length > 0) {
-              if (typeof renderMoneyPagesTable === 'function') {
+              if (typeof window.renderMoneyPagesPriorityTable === 'function') {
                 const filters = {
                   typeFilter: window.moneyPagesTypeFilter || 'all',
                   minImpr: window.moneyPagesMinImpr || 0,
                   matrixFilter: window.moneyPagesMatrixFilter || null
                 };
-                await renderMoneyPagesTable(null, filters);
+                await window.renderMoneyPagesPriorityTable(null, filters);
                 console.log('[Money Pages] ✓ Priority table re-rendered after tab switch');
               }
             }
@@ -16179,8 +16179,33 @@
           // Fallback: find the maximum date_end that appears in ALL segments (most recent complete date)
           // This ensures we only show dates where we have complete data for all segments
           const dateCounts = new Map();
+          // segmentData entries are objects shaped like { metric: <raw row>, value: <number> }
+          // Derive a safe date string for each record (prefer date_end as the actual GSC period).
+          const safeDateStr = (m) => {
+            try {
+              if (!m) return null;
+              if (m.date_end) {
+                const d = new Date(m.date_end);
+                return isNaN(d.getTime()) ? null : d.toISOString().split('T')[0];
+              }
+              // Weekly snapshot run_id (YYYY-MM-DD)
+              if (m.run_id && /^\d{4}-\d{2}-\d{2}$/.test(m.run_id)) return m.run_id;
+              if (m.created_at) {
+                const d = new Date(m.created_at);
+                return isNaN(d.getTime()) ? null : d.toISOString().split('T')[0];
+              }
+            } catch (e) {
+              // ignore
+            }
+            return null;
+          };
+
           segments.forEach(segment => {
-            const segmentDates = new Set(segmentData[segment].map(d => d.date.toISOString().split('T')[0]));
+            const segmentDates = new Set(
+              (segmentData[segment] || [])
+                .map(({ metric: m }) => safeDateStr(m))
+                .filter(Boolean)
+            );
             segmentDates.forEach(dateStr => {
               dateCounts.set(dateStr, (dateCounts.get(dateStr) || 0) + 1);
             });
@@ -29805,11 +29830,11 @@ Final Score: ${score}/100`;
         window.moneyPagesPriorityRowsPerPage = 10;
       }
 
-      async function renderMoneyPagesTable(moneyPages, filters = {}) {
+      async function renderMoneyPagesPriorityTable(moneyPages, filters = {}) {
         const tbody = document.querySelector("#money-pages-priority-table tbody");
         const thead = document.querySelector("#money-pages-priority-table thead");
         if (!tbody || !thead) {
-          debugLog('⚠ renderMoneyPagesTable (Priority Actions): Table elements not found, table may not be rendered yet', 'warn');
+          debugLog('⚠ renderMoneyPagesPriorityTable: Table elements not found, table may not be rendered yet', 'warn');
           // Return empty string instead of undefined to prevent error message
           return '';
         }
@@ -29817,7 +29842,7 @@ Final Score: ${score}/100`;
         // Use window.moneyPagePriorityData if moneyPages is not provided or empty
         const sourcePages = (moneyPages && moneyPages.length > 0) ? moneyPages : (window.moneyPagePriorityData || []);
         if (!sourcePages || sourcePages.length === 0) {
-          debugLog('⚠ renderMoneyPagesTable: No money pages data available', 'warn');
+          debugLog('⚠ renderMoneyPagesPriorityTable: No money pages data available', 'warn');
           tbody.innerHTML = '<tr><td colspan="9" style="padding: 2rem; text-align: center; color: #64748b;">No money pages data available. Run an audit to generate priority matrix data.</td></tr>';
           // Clear pagination if no data
           const paginationContainer = document.getElementById('money-pages-priority-pagination');
@@ -29886,7 +29911,7 @@ Final Score: ${score}/100`;
         const endIndex = startIndex + rowsPerPage;
         const pageRows = rows.slice(startIndex, endIndex);
         
-        // CRITICAL: DO NOT fetch statuses here - the caller should fetch before calling renderMoneyPagesTable
+        // CRITICAL: DO NOT fetch statuses here - the caller should fetch before calling renderMoneyPagesPriorityTable
         // Fetching here causes the cache to be cleared every time the table renders, losing status information
         // Instead, we rely on the cache that was populated by the caller
         const allSourcePages = sourcePages || [];
@@ -29962,7 +29987,7 @@ Final Score: ${score}/100`;
             // Reset to page 1 when sorting changes
             window.moneyPagesPriorityCurrentPage = 1;
             (async () => {
-              await renderMoneyPagesTable(moneyPages, filters);
+              await renderMoneyPagesPriorityTable(moneyPages, filters);
             })();
           });
           
@@ -30335,7 +30360,7 @@ Final Score: ${score}/100`;
               matrixFilter: window.moneyPagesMatrixFilter || null
             };
             (async () => {
-              await renderMoneyPagesTable(null, filters);
+              await renderMoneyPagesPriorityTable(null, filters);
             })();
           });
         }
@@ -30350,7 +30375,7 @@ Final Score: ${score}/100`;
                 matrixFilter: window.moneyPagesMatrixFilter || null
               };
               (async () => {
-              await renderMoneyPagesTable(null, filters);
+              await renderMoneyPagesPriorityTable(null, filters);
             })();
             }
           });
@@ -30369,7 +30394,7 @@ Final Score: ${score}/100`;
                 matrixFilter: window.moneyPagesMatrixFilter || null
               };
               (async () => {
-              await renderMoneyPagesTable(null, filters);
+              await renderMoneyPagesPriorityTable(null, filters);
             })();
             }
           });
@@ -30387,7 +30412,7 @@ Final Score: ${score}/100`;
               matrixFilter: window.moneyPagesMatrixFilter || null
             };
             (async () => {
-              await renderMoneyPagesTable(null, filters);
+              await renderMoneyPagesPriorityTable(null, filters);
             })();
           });
         }
@@ -30403,14 +30428,14 @@ Final Score: ${score}/100`;
               matrixFilter: window.moneyPagesMatrixFilter || null
             };
             (async () => {
-              await renderMoneyPagesTable(null, filters);
+              await renderMoneyPagesPriorityTable(null, filters);
             })();
           });
         }
       }
       
-      // Make renderMoneyPagesTable globally available
-      window.renderMoneyPagesTable = renderMoneyPagesTable;
+      // Make Priority table renderer globally available (avoid clobbering Opportunity table renderer)
+      window.renderMoneyPagesPriorityTable = renderMoneyPagesPriorityTable;
       
       function applyMoneyPagesTopLevelSubSegmentFilter(value) {
         const subSeg = value || 'ALL';
