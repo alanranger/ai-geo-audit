@@ -27862,49 +27862,56 @@ Final Score: ${score}/100`;
         // Update sub-segment dropdown counts
         updateMoneyPagesSubSegmentCounts(moneyPagesMetrics);
         
-        // Phase 4: Render Suggested (Top 10) table (delay to ensure DOM is ready)
+        // Phase 4: Render Suggested (Top 10) table
         // Use moneyPagePriorityData if available (same data as Priority & Actions table), otherwise use rows
-        // Wait for the section to be fully rendered before calling the function
-        let retryCount = 0;
-        const maxRetries = 10;
-        const renderSuggestedTop10 = () => {
-          const container = document.getElementById('money-pages-suggested-top10-content');
-          if (!container) {
-            retryCount++;
-            if (retryCount < maxRetries) {
-              console.warn(`[Money Pages] Container not found yet, retrying (${retryCount}/${maxRetries})...`);
-              setTimeout(renderSuggestedTop10, 300);
-              return;
-            } else {
-              console.error('[Money Pages] Container not found after max retries. Section may not be rendered.');
-              return;
-            }
-          }
-          
-          const dataSource = window.moneyPagePriorityData && window.moneyPagePriorityData.length > 0 
-            ? window.moneyPagePriorityData 
-            : rows;
-          console.log('[Money Pages] Rendering Suggested Top 10 with data source:', {
-            hasPriorityData: !!window.moneyPagePriorityData,
-            priorityDataCount: window.moneyPagePriorityData?.length || 0,
-            rowsCount: rows?.length || 0,
-            usingDataSource: dataSource === window.moneyPagePriorityData ? 'moneyPagePriorityData' : 'rows',
-            hasFunction: typeof window.renderMoneyPagesSuggestedTop10 === 'function',
-            functionType: typeof window.renderMoneyPagesSuggestedTop10,
-            containerFound: !!container
+        // Use requestAnimationFrame to ensure DOM is updated after innerHTML is set
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            // Double RAF ensures DOM is fully updated
+            let retryCount = 0;
+            const maxRetries = 15;
+            const renderSuggestedTop10 = () => {
+              const container = document.getElementById('money-pages-suggested-top10-content');
+              if (!container) {
+                retryCount++;
+                if (retryCount < maxRetries) {
+                  console.warn(`[Money Pages] Container not found yet, retrying (${retryCount}/${maxRetries})...`);
+                  setTimeout(renderSuggestedTop10, 200);
+                  return;
+                } else {
+                  console.error('[Money Pages] Container not found after max retries. Checking if section exists...');
+                  const section = document.getElementById('money-pages-suggested-top10');
+                  console.error('[Money Pages] Section exists:', !!section, 'Section HTML:', section ? section.outerHTML.substring(0, 200) : 'N/A');
+                  return;
+                }
+              }
+              
+              const dataSource = window.moneyPagePriorityData && window.moneyPagePriorityData.length > 0 
+                ? window.moneyPagePriorityData 
+                : rows;
+              console.log('[Money Pages] Rendering Suggested Top 10 with data source:', {
+                hasPriorityData: !!window.moneyPagePriorityData,
+                priorityDataCount: window.moneyPagePriorityData?.length || 0,
+                rowsCount: rows?.length || 0,
+                usingDataSource: dataSource === window.moneyPagePriorityData ? 'moneyPagePriorityData' : 'rows',
+                hasFunction: typeof window.renderMoneyPagesSuggestedTop10 === 'function',
+                functionType: typeof window.renderMoneyPagesSuggestedTop10,
+                containerFound: !!container
+              });
+              if (typeof window.renderMoneyPagesSuggestedTop10 === 'function') {
+                window.renderMoneyPagesSuggestedTop10(dataSource);
+              } else {
+                console.error('[Money Pages] renderMoneyPagesSuggestedTop10 function not found. Available on window:', {
+                  hasFunction: typeof window.renderMoneyPagesSuggestedTop10,
+                  windowKeys: Object.keys(window).filter(k => k.includes('Money') || k.includes('render'))
+                });
+              }
+            };
+            
+            // Start checking immediately (DOM should be ready after double RAF)
+            renderSuggestedTop10();
           });
-          if (typeof window.renderMoneyPagesSuggestedTop10 === 'function') {
-            window.renderMoneyPagesSuggestedTop10(dataSource);
-          } else {
-            console.error('[Money Pages] renderMoneyPagesSuggestedTop10 function not found. Available on window:', {
-              hasFunction: typeof window.renderMoneyPagesSuggestedTop10,
-              windowKeys: Object.keys(window).filter(k => k.includes('Money') || k.includes('render'))
-            });
-          }
-        };
-        
-        // Start checking after a delay to ensure section is rendered
-        setTimeout(renderSuggestedTop10, 1000);
+        });
         
         // Function to apply filters and re-render ALL sections (table, chart, KPIs, summaries)
         const applyFiltersAndRender = async () => {
