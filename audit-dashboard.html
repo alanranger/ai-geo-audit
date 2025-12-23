@@ -16013,10 +16013,14 @@
         };
         const dbField = metricFieldMap[selectedMetric] || 'position_28d';
         
-        // Calculate date range (last 28 days)
+        // Calculate date range (last 28 days for date_end filtering)
         const toDate = new Date();
         const fromDate = new Date();
         fromDate.setDate(fromDate.getDate() - 28);
+        
+        // Fetch a wider range (60 days) to ensure we get all records, then filter by date_end
+        const fetchFromDate = new Date();
+        fetchFromDate.setDate(fetchFromDate.getDate() - 60);
         
         // Fetch data for all money page segments
         const segments = ['money', 'landing', 'event', 'product'];
@@ -16027,7 +16031,7 @@
             siteUrl: propertyUrl,
             segment,
             scope: 'active_cycles_only',
-            from: fromDate.toISOString(),
+            from: fetchFromDate.toISOString(),
             to: toDate.toISOString(),
             order: 'asc'
           });
@@ -16035,15 +16039,31 @@
           const response = await fetch(apiUrl(`/api/supabase/get-portfolio-segment-metrics?${params}`));
           if (response.ok) {
             const data = await response.json();
-            segmentData[segment] = (data.metrics || []).map(m => ({
-              date: m.date_end ? new Date(m.date_end) : new Date(m.created_at),
-              value: dbField === 'ctr_28d' ? parseFloat(m.ctr_28d || 0) :
-                     dbField === 'position_28d' ? (m.position_28d !== null && m.position_28d !== undefined && !isNaN(parseFloat(m.position_28d)) ? parseFloat(m.position_28d) : null) :
-                     dbField === 'clicks_28d' ? parseFloat(m.clicks_28d || 0) :
-                     dbField === 'impressions_28d' ? parseFloat(m.impressions_28d || 0) : null,
-              run_id: m.run_id
-            })).filter(d => d.value !== null && !isNaN(d.value));
+            segmentData[segment] = (data.metrics || []).map(m => {
+              // Use date_end for the date, fallback to created_at
+              const recordDate = m.date_end ? new Date(m.date_end) : new Date(m.created_at);
+              
+              // Filter by date_end: only include records where date_end is within the last 28 days
+              if (m.date_end) {
+                const dateEnd = new Date(m.date_end);
+                if (dateEnd < fromDate || dateEnd > toDate) {
+                  return null; // Exclude this record
+                }
+              }
+              
+              return {
+                date: recordDate,
+                value: dbField === 'ctr_28d' ? parseFloat(m.ctr_28d || 0) :
+                       dbField === 'position_28d' ? (m.position_28d !== null && m.position_28d !== undefined && !isNaN(parseFloat(m.position_28d)) ? parseFloat(m.position_28d) : null) :
+                       dbField === 'clicks_28d' ? parseFloat(m.clicks_28d || 0) :
+                       dbField === 'impressions_28d' ? parseFloat(m.impressions_28d || 0) : null,
+                run_id: m.run_id
+              };
+            }).filter(d => d !== null && d.value !== null && !isNaN(d.value));
+            
+            debugLog(`✓ Fetched ${segmentData[segment].length} records for segment '${segment}' (filtered by date_end in last 28 days)`, 'info');
           } else {
+            debugLog(`⚠ Failed to fetch data for segment '${segment}': ${response.status}`, 'warn');
             segmentData[segment] = [];
           }
         }
