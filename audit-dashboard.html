@@ -5462,6 +5462,19 @@
         return `${API_BASE_URL}${cleanPath}`;
       };
     })();
+
+    // Global helpers to read config from either UI inputs or localStorage.
+    // Preview/prod domains have different localStorage, so the UI input should be a first-class fallback.
+    window.getPropertyUrl = function getPropertyUrl() {
+      const domVal = (document.getElementById('propertyUrl')?.value || '').trim();
+      const stored = (localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '').trim();
+      const val = domVal || stored;
+      // Keep localStorage in sync (so other modules that read localStorage work).
+      if (val && val !== stored) {
+        try { localStorage.setItem('gsc_property_url', val); } catch (e) { /* ignore */ }
+      }
+      return val;
+    };
     
     // ======================
     // Optimisation Tracking Utilities (Phase 2)
@@ -15435,7 +15448,7 @@
       const mappedScope = scopeMap[scope] || scope;
 
       try {
-        const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+        const propertyUrl = (window.getPropertyUrl ? window.getPropertyUrl() : '') || localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
         if (!propertyUrl) {
           debugLog('⚠ No property URL found for portfolio data', 'warn');
           return;
@@ -15800,7 +15813,7 @@
       }
       
       try {
-        const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+        const propertyUrl = (window.getPropertyUrl ? window.getPropertyUrl() : '') || localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
         if (!propertyUrl) {
           debugLog('⚠ No property URL found for portfolio table', 'warn');
           return;
@@ -16106,7 +16119,7 @@
         debugLog('📊 Loading Money Pages KPI Tracker data...', 'info');
         
         if (!propertyUrl) {
-          propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+          propertyUrl = (window.getPropertyUrl ? window.getPropertyUrl() : '') || localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
           if (!propertyUrl) {
             debugLog('⚠ No property URL found for Money Pages KPI Tracker', 'warn');
             return;
@@ -17262,25 +17275,32 @@
           if (data.apiKey) {
             vercelApiKey = data.apiKey;
             debugLog('✓ API key loaded from Vercel environment variable', 'success');
+            // Persist for this domain to reduce future cold-start issues
+            try { localStorage.setItem('gsc_api_key', data.apiKey); } catch (e) { /* ignore */ }
           }
+        } else {
+          const txt = await response.text();
+          debugLog(`⚠ /api/get-api-key returned ${response.status}: ${txt}`, 'warn');
         }
       } catch (e) {
-        debugLog('Vercel env var endpoint not available (expected for static site)', 'info');
+        debugLog(`⚠ /api/get-api-key fetch failed: ${e.message}`, 'warn');
       }
       
-      // Check config.js
+      // Check config.js (local dev only; on Vercel we prefer env via /api/get-api-key)
       debugLog('Checking for config.js...', 'info');
-      if (window.API_CONFIG && window.API_CONFIG.googleSearchConsoleApiKey) {
+      const configApiKey = window.API_CONFIG && window.API_CONFIG.googleSearchConsoleApiKey;
+      if (configApiKey) {
         debugLog('✓ config.js found with API key', 'success');
+      } else if (vercelApiKey || localStorage.getItem('gsc_api_key')) {
+        debugLog('ℹ config.js not present (expected on Vercel). Using env/localStorage key.', 'info');
       } else {
-        debugLog('✗ config.js not found or no API key', 'warn');
+        debugLog('✗ No API key found (config.js missing and env/localStorage key unavailable)', 'warn');
       }
       
       // Check localStorage
       debugLog('Checking localStorage...', 'info');
-      const configApiKey = window.API_CONFIG && window.API_CONFIG.googleSearchConsoleApiKey;
       const apiKey = vercelApiKey || configApiKey || localStorage.getItem('gsc_api_key');
-      const propertyUrl = localStorage.getItem('gsc_property_url');
+      const propertyUrl = window.getPropertyUrl ? window.getPropertyUrl() : (localStorage.getItem('gsc_property_url') || '');
       const dateRange = localStorage.getItem('gsc_date_range');
       
       const apiKeySource = vercelApiKey ? 'Vercel env var' : configApiKey ? 'config.js' : localStorage.getItem('gsc_api_key') ? 'localStorage' : 'none';
@@ -17297,8 +17317,9 @@
       }
       
       if (propertyUrl) {
-        document.getElementById('propertyUrl').value = propertyUrl;
-        debugLog('✓ Property URL loaded', 'success');
+        const el = document.getElementById('propertyUrl');
+        if (el && !el.value) el.value = propertyUrl;
+        debugLog('✓ Property URL available', 'success');
       }
       if (dateRange) {
         document.getElementById('dateRange').value = dateRange;
@@ -39007,7 +39028,7 @@ Final Score: ${score}/100`;
     // ======================
     async function loadRankingAiDataFromStorage(forceCheckSupabase = false) {
       try {
-        const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+        const propertyUrl = (window.getPropertyUrl ? window.getPropertyUrl() : '') || localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
         if (!propertyUrl) {
           debugLog('⚠ Cannot load Ranking & AI data: property URL not set', 'warn');
           return null;
