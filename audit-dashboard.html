@@ -27478,10 +27478,38 @@ Final Score: ${score}/100`;
         
         // Check if full structure already exists (created by displayDashboard)
         const existingHeader = section.querySelector('h3[style*="color: var(--brand-dark)"]');
+        const existingSuggestedSection = document.getElementById('money-pages-suggested-top10');
         if (existingHeader && existingHeader.textContent.includes('Money Pages Performance & Actions')) {
-          debugLog('✓ Money Pages full structure already exists, skipping HTML recreation', 'info');
+          debugLog('✓ Money Pages full structure already exists, ensuring Suggested Top 10 section exists', 'info');
           // Don't overwrite - just ensure section is visible
           section.style.display = 'block';
+          
+          // Ensure the Suggested (Top 10) section exists - add it if missing
+          if (!existingSuggestedSection) {
+            debugLog('⚠ Suggested Top 10 section missing, adding it now', 'warn');
+            const prioritySection = document.getElementById('money-pages-priority-card');
+            if (prioritySection && prioritySection.parentNode) {
+              const suggestedSection = document.createElement('section');
+              suggestedSection.id = 'money-pages-suggested-top10';
+              suggestedSection.className = 'card card--full';
+              suggestedSection.style.cssText = 'margin-top: 2rem; background: #f0f9ff; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); border: 1px solid #0ea5e9;';
+              suggestedSection.innerHTML = `
+                <div class="card-header" style="margin-bottom: 1rem;">
+                  <h3 style="margin: 0 0 0.5rem 0; font-size: 1.1rem; font-weight: 700; color: #0c4a6e;">Suggested (Top 10)</h3>
+                  <p class="card-subtitle" style="margin: 0; font-size: 0.85rem; color: #64748b; line-height: 1.6;">
+                    Top priority pages ranked by impact and difficulty. Click "Create Task" to start optimization tracking.
+                  </p>
+                </div>
+                <div id="money-pages-suggested-top10-content" style="min-height: 200px;">
+                  <div style="padding: 2rem; text-align: center; color: #64748b; font-size: 0.9rem;">
+                    Loading suggested pages...
+                  </div>
+                </div>
+              `;
+              prioritySection.parentNode.insertBefore(suggestedSection, prioritySection.nextSibling);
+              debugLog('✓ Suggested Top 10 section added to DOM', 'success');
+            }
+          }
         } else {
           // Always update the HTML structure to ensure it has the latest canvas IDs
           // Create the full Money Pages HTML structure with all sections
