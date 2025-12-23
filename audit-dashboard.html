@@ -3490,7 +3490,7 @@
                   <label for="portfolio-time-grain" style="display: block; margin-bottom: 0.25rem; font-weight: 600;" title="Time aggregation: How to group data points on the chart">Time Grain:</label>
                   <select id="portfolio-time-grain" style="padding: 0.5rem; min-width: 120px;">
                     <option value="weekly" title="Group data by week: Shows the last snapshot from each week">Weekly</option>
-                    <option value="monthly" title="Group data by month: Shows the last snapshot from each month">Monthly</option>
+                    <option value="monthly" selected title="Group data by month: Shows the last snapshot from each month">Monthly</option>
                   </select>
                 </div>
               </div>
@@ -15513,9 +15513,16 @@
           }
         }
         
-        // Sort buckets by date (oldest first)
+        // Sort buckets by bucket key (chronological order - oldest first)
+        // For monthly: sort by YYYY-MM string (lexicographic sort works for dates)
+        // For weekly: sort by date string (YYYY-MM-DD)
         const sortedBuckets = Array.from(buckets.entries())
-          .sort((a, b) => a[1].date - b[1].date);
+          .sort((a, b) => {
+            const keyA = a[0];
+            const keyB = b[0];
+            // Lexicographic sort works for YYYY-MM and YYYY-MM-DD formats
+            return keyA.localeCompare(keyB);
+          });
         
         // Filter to only last 12 months for monthly grain (rolling 12 months)
         let filteredBuckets = sortedBuckets;
@@ -15608,10 +15615,13 @@
           portfolioDeltaChart.data.labels = labels;
           portfolioDeltaChart.data.datasets[0].data = formattedDeltas;
           portfolioDeltaChart.data.datasets[0].label = `Delta (${kpiSelect})`;
-          // Update colors to match dark theme
-          portfolioDeltaChart.data.datasets[0].borderColor = 'var(--dark-brand)';
-          portfolioDeltaChart.data.datasets[0].backgroundColor = 'rgba(245, 158, 11, 0.15)';
-          portfolioDeltaChart.data.datasets[0].pointBackgroundColor = 'var(--dark-brand)';
+          // Use brand orange (#E57200) for line and points
+          portfolioDeltaChart.data.datasets[0].borderColor = '#E57200';
+          portfolioDeltaChart.data.datasets[0].pointBackgroundColor = '#E57200';
+          portfolioDeltaChart.data.datasets[0].pointBorderColor = '#ffffff';
+          portfolioDeltaChart.data.datasets[0].pointBorderWidth = 2;
+          // Simple brand orange fill
+          portfolioDeltaChart.data.datasets[0].backgroundColor = 'rgba(229, 114, 0, 0.15)';
           
           // Update Y-axis label
           if (kpiSelect === 'ctr_28d') {
