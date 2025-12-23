@@ -15336,10 +15336,10 @@
           return;
         }
         
-        // Calculate date range (last ~180 days for chart)
+        // Calculate date range (last 365 days to ensure enough data for weekly and monthly views)
         const toDate = new Date();
         const fromDate = new Date();
-        fromDate.setDate(fromDate.getDate() - 180);
+        fromDate.setDate(fromDate.getDate() - 365);
         
         const params = new URLSearchParams({ 
           siteUrl: propertyUrl,
@@ -15525,19 +15525,21 @@
           });
         
         // Filter to only last 12 months for monthly grain (rolling 12 months)
+        // Match the table logic: show last 12 months including current month
         let filteredBuckets = sortedBuckets;
         if (timeGrain === 'monthly') {
-          const now = new Date();
-          const twelveMonthsAgo = new Date(now);
-          twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
+          const today = new Date();
+          // Get the first day of the month 12 months ago (to include that month)
+          // e.g., if today is Dec 23, 2025, we want to include from Jan 1, 2025
+          const firstMonthToInclude = new Date(today.getFullYear(), today.getMonth() - 11, 1);
+          const firstMonthKey = `${firstMonthToInclude.getFullYear()}-${String(firstMonthToInclude.getMonth() + 1).padStart(2, '0')}`;
           
           filteredBuckets = sortedBuckets.filter(([bucketKey, bucket]) => {
-            // Parse bucket key (YYYY-MM format)
-            const bucketDate = new Date(bucketKey + '-01');
-            return bucketDate >= twelveMonthsAgo;
+            // Compare bucket keys directly (YYYY-MM format)
+            return bucketKey >= firstMonthKey;
           });
           
-          debugLog(`📊 Filtered to last 12 months: ${filteredBuckets.length} buckets (from ${sortedBuckets.length} total)`, 'info');
+          debugLog(`📊 Filtered to last 12 months (from ${firstMonthKey}): ${filteredBuckets.length} buckets (from ${sortedBuckets.length} total)`, 'info');
         }
         
         // If we only have 1 bucket, we can't show deltas
