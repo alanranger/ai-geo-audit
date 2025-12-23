@@ -16076,14 +16076,39 @@
           }
         }
         
-        // Get all unique dates and sort them
-        const allDates = new Set();
-        Object.values(segmentData).forEach(data => {
-          data.forEach(d => allDates.add(d.date.toISOString().split('T')[0]));
-        });
-        const sortedDates = Array.from(allDates).sort();
+        // Bucket data by week (Monday start) like the top charts
+        // Use date_end for the actual GSC data period, but bucket into weeks
+        const weeklyBuckets = new Map(); // key: Monday date (YYYY-MM-DD), value: Map<segment, {value, date_end}>
         
-        if (sortedDates.length === 0) {
+        segments.forEach(segment => {
+          segmentData[segment].forEach(d => {
+            // Calculate Monday of the week for this date_end
+            const dateEnd = new Date(d.date);
+            const dayOfWeek = dateEnd.getDay();
+            const diff = dateEnd.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+            const monday = new Date(dateEnd);
+            monday.setDate(diff);
+            const mondayKey = monday.toISOString().split('T')[0];
+            
+            if (!weeklyBuckets.has(mondayKey)) {
+              weeklyBuckets.set(mondayKey, new Map());
+            }
+            
+            const bucket = weeklyBuckets.get(mondayKey);
+            // Keep the LAST snapshot in each week (by date_end)
+            if (!bucket.has(segment) || d.date > bucket.get(segment).date_end) {
+              bucket.set(segment, {
+                value: d.value,
+                date_end: d.date
+              });
+            }
+          });
+        });
+        
+        // Get all unique week dates (Mondays) and sort them
+        const sortedWeekDates = Array.from(weeklyBuckets.keys()).sort();
+        
+        if (sortedWeekDates.length === 0) {
           debugLog('⚠ No data found for Money Pages KPI Tracker', 'warn');
           return;
         }
@@ -16104,16 +16129,15 @@
         };
         
         const chartData = {
-          labels: sortedDates.map(d => {
-            const date = new Date(d);
+          labels: sortedWeekDates.map(mondayStr => {
+            const date = new Date(mondayStr);
             return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
           }),
           datasets: segments.map(segment => {
-            const data = sortedDates.map(dateStr => {
-              const segmentPoint = segmentData[segment].find(d => 
-                d.date.toISOString().split('T')[0] === dateStr
-              );
-              return segmentPoint ? segmentPoint.value : null;
+            const data = sortedWeekDates.map(mondayStr => {
+              const bucket = weeklyBuckets.get(mondayStr);
+              const segmentBucket = bucket?.get(segment);
+              return segmentBucket ? segmentBucket.value : null;
             });
             
             return {
@@ -16187,7 +16211,7 @@
                   title: {
                     display: true,
                     text: selectedMetric === 'avgPosition' ? 'Avg Position' :
-                          selectedMetric === 'ctr' ? 'CTR' :
+                          selectedMetric === 'ctr' ? 'CTR (%)' :
                           selectedMetric === 'impressions' ? 'Impressions' :
                           'Clicks'
                   }
@@ -16213,9 +16237,9 @@
           segmentHeader.style.cssText = 'padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0; background: #f1f5f9; font-weight: 600;';
           thead.appendChild(segmentHeader);
           
-          sortedDates.forEach(dateStr => {
+          sortedWeekDates.forEach(mondayStr => {
             const th = document.createElement('th');
-            const date = new Date(dateStr);
+            const date = new Date(mondayStr);
             th.textContent = date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
             th.style.cssText = 'padding: 0.75rem; text-align: center; border-bottom: 2px solid #e2e8f0; background: #f1f5f9; font-weight: 600;';
             thead.appendChild(th);
@@ -16236,12 +16260,11 @@
             segmentCell.style.cssText = 'padding: 0.75rem; border-bottom: 1px solid #e2e8f0; font-weight: 600;';
             row.appendChild(segmentCell);
             
-            // Data cells
-            const values = sortedDates.map(dateStr => {
-              const segmentPoint = segmentData[segment].find(d => 
-                d.date.toISOString().split('T')[0] === dateStr
-              );
-              return segmentPoint ? segmentPoint.value : null;
+            // Data cells - use weekly buckets
+            const values = sortedWeekDates.map(mondayStr => {
+              const bucket = weeklyBuckets.get(mondayStr);
+              const segmentBucket = bucket?.get(segment);
+              return segmentBucket ? segmentBucket.value : null;
             });
             
             values.forEach((value, idx) => {
@@ -16294,6 +16317,11 @@
         }
         
         debugLog('✓ Money Pages KPI Tracker rendered', 'success');
+        
+        // Wire up metric selector after rendering
+        if (typeof window.wireMoneyKpiMetricSelector === 'function') {
+          window.wireMoneyKpiMetricSelector();
+        }
       } catch (err) {
         debugLog(`Error loading Money Pages KPI Tracker: ${err.message}`, 'error');
         console.error(err);
@@ -16306,12 +16334,20 @@
     window.wireMoneyKpiMetricSelector = function() {
       const metricSelect = document.getElementById('money-kpi-metric-select');
       if (metricSelect) {
-        metricSelect.addEventListener('change', () => {
+        // Remove any existing listeners by cloning the element
+        const newSelect = metricSelect.cloneNode(true);
+        metricSelect.parentNode.replaceChild(newSelect, metricSelect);
+        
+        newSelect.addEventListener('change', () => {
           const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
           if (propertyUrl && typeof window.loadAuditHistoryAndRenderKpis === 'function') {
+            debugLog(`📊 Money KPI metric changed to: ${newSelect.value}`, 'info');
             window.loadAuditHistoryAndRenderKpis(propertyUrl);
           }
         });
+        debugLog('✓ Money KPI metric selector wired up', 'success');
+      } else {
+        debugLog('⚠ Money KPI metric selector not found', 'warn');
       }
     };
 
