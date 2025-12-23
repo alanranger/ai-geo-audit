@@ -6659,6 +6659,34 @@
             }
           }
           
+          // CRITICAL: Re-render Suggested Top 10 cards to show updated optimization status
+          // Use the same data source as Priority table (moneyPagePriorityData)
+          const suggestedTop10DataSource = window.moneyPagePriorityData && window.moneyPagePriorityData.length > 0 
+            ? window.moneyPagePriorityData 
+            : (window.moneyPagesMetrics && window.moneyPagesMetrics.rows ? window.moneyPagesMetrics.rows : []);
+          
+          if (suggestedTop10DataSource.length > 0 && typeof window.renderMoneyPagesSuggestedTop10 === 'function') {
+            console.log('[Money Pages] Re-rendering Suggested Top 10 cards after task creation...', {
+              dataSourceCount: suggestedTop10DataSource.length,
+              cacheSize: window.optimisationStatusCache?.size || 0,
+              createdTaskUrl: createdTaskUrl
+            });
+            try {
+              // Small delay to ensure cache is fully updated
+              await new Promise(resolve => setTimeout(resolve, 200));
+              window.renderMoneyPagesSuggestedTop10(suggestedTop10DataSource);
+              console.log('[Money Pages] ✓ Suggested Top 10 cards re-rendered successfully');
+            } catch (err) {
+              console.error('[Money Pages] Error re-rendering Suggested Top 10 cards:', err);
+            }
+          } else {
+            console.warn('[Money Pages] Cannot re-render Suggested Top 10 cards:', {
+              hasDataSource: suggestedTop10DataSource.length > 0,
+              hasFunction: typeof window.renderMoneyPagesSuggestedTop10 === 'function',
+              dataSourceCount: suggestedTop10DataSource.length
+            });
+          }
+          
           // Show success message
           const pageTitle = title ? title.replace(/^MP: /, '') : targetUrl;
           showStatus(`✓ Created optimisation task for ${pageTitle} with baseline snapshot`, 'success');
