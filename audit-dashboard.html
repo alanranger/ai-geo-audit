@@ -5624,25 +5624,32 @@
               };
               // Try recommended task type first, then try 'on_page' as fallback
               let status = window.getOptimisationStatus(statusRow, page.recommended_task_type || 'on_page');
-              if (!status || status.status !== 'monitoring') {
+              // Consider task tracked if it exists and is not 'done' or 'cancelled'
+              const activeStatuses = ['planned', 'in_progress', 'monitoring'];
+              const isActiveStatus = (s) => s && s.status && activeStatuses.includes(s.status);
+              
+              if (!status || !isActiveStatus(status)) {
                 // Try 'on_page' if recommended type didn't find anything
                 if (page.recommended_task_type && page.recommended_task_type !== 'on_page') {
                   status = window.getOptimisationStatus(statusRow, 'on_page');
                 }
               }
               // Also try other common task types
-              if (!status || status.status !== 'monitoring') {
+              if (!status || !isActiveStatus(status)) {
                 const taskTypes = ['content', 'internal_links', 'technical'];
                 for (const taskType of taskTypes) {
                   const testStatus = window.getOptimisationStatus(statusRow, taskType);
-                  if (testStatus && testStatus.status === 'monitoring') {
+                  if (isActiveStatus(testStatus)) {
                     status = testStatus;
                     break;
                   }
                 }
               }
               page.optimisationStatus = status;
-              page.isTracked = status && status.status === 'monitoring';
+              // Consider task tracked if it exists and is not 'done' or 'cancelled'
+              // This matches the Priority & Actions table logic which shows "Track" for done/cancelled, "Manage" for others
+              const activeStatuses = ['planned', 'in_progress', 'monitoring'];
+              page.isTracked = status && status.status && activeStatuses.includes(status.status);
               page.taskId = status?.id || null;
             } else {
               page.optimisationStatus = null;
