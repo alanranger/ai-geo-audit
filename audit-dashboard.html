@@ -15023,13 +15023,33 @@
                 return;
               }
               
+              const expectedCtrForPositionSafe = (pos) => {
+                // Mirror expectedCtrForPosition() if it exists; otherwise keep a simple fallback curve
+                if (typeof expectedCtrForPosition === 'function') return expectedCtrForPosition(pos);
+                if (!isFinite(pos) || pos <= 0) return 0.10;
+                if (pos <= 3) return 0.10;
+                if (pos <= 6) return 0.07;
+                if (pos <= 10) return 0.05;
+                if (pos <= 20) return 0.03;
+                return 0.02;
+              };
+              const lostClicksForRow = (p) => {
+                if (typeof p?._lostClicks === 'number' && isFinite(p._lostClicks)) return p._lostClicks;
+                const expectedCtr = expectedCtrForPositionSafe(p?.avgPosition || 0);
+                const actualCtr = p?.ctr || 0;
+                const gap = Math.max(0, expectedCtr - actualCtr);
+                return (p?.impressions || 0) * gap;
+              };
+              const maxLost = Math.max(1, ...priorityData.map(p => lostClicksForRow(p) || 0));
+              const impactScoreForRow = (p) => Math.max(0, Math.min(100, (lostClicksForRow(p) / maxLost) * 100));
+
+              const diffOrder = { LOW: 0, MEDIUM: 1, HIGH: 2 };
               const top10 = [...priorityData]
                 .sort((a, b) => {
-                  const impactA = a.impactScore || 0;
-                  const impactB = b.impactScore || 0;
-                  if (impactB !== impactA) return impactB - impactA;
-                  const diffOrder = { LOW: 0, MEDIUM: 1, HIGH: 2 };
-                  return (diffOrder[a.difficultyLevel] || 2) - (diffOrder[b.difficultyLevel] || 2);
+                  const la = lostClicksForRow(a) || 0;
+                  const lb = lostClicksForRow(b) || 0;
+                  if (lb !== la) return lb - la;
+                  return (diffOrder[a.difficultyLevel] ?? 2) - (diffOrder[b.difficultyLevel] ?? 2);
                 })
                 .slice(0, 10);
               
@@ -15039,10 +15059,26 @@
               }
               
               container.innerHTML = top10.map((page) => {
-                const isOptimized = page.optimisationStatus === 'on_page' || page.optimisationStatus === 'tracking';
+                const taskType = 'on_page';
+                const optimisationStatus = window.getOptimisationStatus
+                  ? window.getOptimisationStatus({ targetUrl: page.url, keyword: '' }, taskType)
+                  : null;
+                const statusText = optimisationStatus?.status || null;
+                const hasTask = !!statusText && statusText !== 'deleted' && statusText !== 'done' && statusText !== 'cancelled';
+                const taskId = hasTask ? (optimisationStatus.id || optimisationStatus.task_id || null) : null;
+                const isOptimized = hasTask && !!taskId;
                 const difficultyColors = { LOW: '#10b981', MEDIUM: '#f59e0b', HIGH: '#ef4444' };
                 const difficultyColor = difficultyColors[page.difficultyLevel] || '#64748b';
-                const impactScore = page.impactScore || 0;
+                const impactScore = impactScoreForRow(page);
+                const potentialClicks28d = Math.round(lostClicksForRow(page) || 0);
+                const statusLabelMap = {
+                  planned: 'Planned',
+                  in_progress: 'In progress',
+                  monitoring: 'Monitoring',
+                  done: 'Done',
+                  cancelled: 'Cancelled'
+                };
+                const statusLabel = statusText ? (statusLabelMap[statusText] || statusText) : null;
                 
                 return `
                   <div class="suggested-card" style="background: white; border: 2px solid #e2e8f0; border-radius: 8px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
@@ -15051,7 +15087,7 @@
                         <h4 style="margin: 0 0 0.5rem 0; font-size: 1rem; font-weight: 700; color: #1e293b; line-height: 1.4;">${page.title || page.url || 'Untitled Page'}</h4>
                         <a href="${page.url}" target="_blank" style="font-size: 0.85rem; color: #2563eb; text-decoration: none; word-break: break-all;">${page.url}</a>
                       </div>
-                      ${isOptimized ? '<span style="padding: 0.25rem 0.75rem; background: #10b981; color: white; border-radius: 4px; font-size: 0.75rem; font-weight: 600; white-space: nowrap;">✓ Being Optimised</span>' : ''}
+                      ${isOptimized ? `<span style="padding: 0.25rem 0.75rem; background: #10b981; color: white; border-radius: 4px; font-size: 0.75rem; font-weight: 600; white-space: nowrap;">✓ ${statusLabel || 'Tracked'}</span>` : ''}
                     </div>
                     <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
                       <span style="padding: 0.25rem 0.5rem; background: #f1f5f9; border-radius: 4px; font-size: 0.75rem; color: #64748b; text-transform: uppercase;">${page.segmentType || 'landing'}</span>
@@ -15061,18 +15097,18 @@
                       <div><div style="color: #64748b; margin-bottom: 0.25rem;">Pos:</div><div style="font-weight: 700; color: #1e293b;">${(page.avgPosition || 0).toFixed(1)}</div></div>
                       <div><div style="color: #64748b; margin-bottom: 0.25rem;">CTR:</div><div style="font-weight: 700; color: #1e293b;">${((page.ctr || 0) * 100).toFixed(1)}%</div></div>
                       <div><div style="color: #64748b; margin-bottom: 0.25rem;">Impr:</div><div style="font-weight: 700; color: #1e293b;">${(page.impressions || 0).toLocaleString()}</div></div>
-                      <div><div style="color: #64748b; margin-bottom: 0.25rem;">Upside:</div><div style="font-weight: 700; color: #1e293b;">${page.potentialClicks28d || 0}</div></div>
+                      <div><div style="color: #64748b; margin-bottom: 0.25rem;">Upside:</div><div style="font-weight: 700; color: #1e293b;">${potentialClicks28d.toLocaleString()}</div></div>
                       <div><div style="color: #64748b; margin-bottom: 0.25rem;">Impact:</div><div style="font-weight: 700; color: #1e293b;">${Math.round(impactScore)}</div></div>
                       <div><div style="color: #64748b; margin-bottom: 0.25rem;">Difficulty:</div><div style="font-weight: 700; color: ${difficultyColor};">${page.difficultyLevel || 'MED'}</div></div>
                     </div>
                     <div style="margin-bottom: 1rem; padding: 0.75rem; background: #f8fafc; border-radius: 4px; font-size: 0.85rem; color: #475569;">
-                      <strong>Potential impact clicks 28d:</strong> ${page.potentialClicks28d || 0}
+                      <strong>Potential impact clicks 28d:</strong> ${potentialClicks28d.toLocaleString()}
                     </div>
                     <div style="margin-bottom: 1rem; font-size: 0.85rem; color: #64748b; line-height: 1.5;">
                       ${page.suggestion || (page.impactLevel === 'HIGH' && page.difficultyLevel === 'LOW' ? 'Improve relevance + internal links to lift rank' : 'Improve CTR (title/meta/snippet) + strengthen content')}
                     </div>
-                    <button type="button" class="btn ${isOptimized ? 'btn-secondary' : 'btn-primary'}" onclick="${isOptimized ? `window.location.href='#optimisation'` : `window.createOptimisationTask('${page.url}', '', '${page.url}')`}" style="width: 100%; padding: 0.75rem; background: ${isOptimized ? '#64748b' : '#2563eb'}; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.875rem;">
-                      ${isOptimized ? 'Manage Task' : 'Create Task'}
+                    <button type="button" class="btn ${isOptimized ? 'btn-secondary' : 'btn-primary'}" onclick="${isOptimized ? `window.openOptimisationTaskDrawer('${String(taskId).replace(/'/g, "\\'").replace(/"/g, '&quot;')}')` : `window.trackMoneyPage('${page.url.replace(/'/g, "\\'")}', '${(page.title || page.url).replace(/'/g, "\\'")}')`}" style="width: 100%; padding: 0.75rem; background: ${isOptimized ? '#10b981' : '#2563eb'}; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.875rem;">
+                      ${isOptimized ? 'Manage' : 'Create Task'}
                     </button>
                   </div>
                 `;
@@ -15541,6 +15577,26 @@
         // For monthly bucketing, also check run_id if it's in YYYY-MM format
         const buckets = new Map(); // key: bucket label, value: { value, date }
         
+        const dateKeyUTC = (d) => {
+          const y = d.getUTCFullYear();
+          const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+          const day = String(d.getUTCDate()).padStart(2, '0');
+          return `${y}-${m}-${day}`;
+        };
+        const mondayKeyUTCFromDate = (d) => {
+          // Get Monday (UTC) for the week containing d
+          const dayOfWeek = d.getUTCDay(); // 0=Sun..6=Sat
+          const diff = d.getUTCDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+          const monday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+          monday.setUTCDate(diff);
+          return dateKeyUTC(monday);
+        };
+        const safeDateFrom = (v) => {
+          if (!v) return null;
+          const d = new Date(v);
+          return isNaN(d.getTime()) ? null : d;
+        };
+
         metrics.forEach(m => {
           // For weekly view: ONLY use actual weekly snapshots (run_id in YYYY-MM-DD format)
           // Skip monthly backfilled data (run_id in YYYY-MM format) to avoid misleading weekly distribution
@@ -15563,26 +15619,26 @@
             dateForBucket = new Date(m.run_id + '-01');
           } else if (timeGrain === 'weekly') {
             // For weekly: only use actual weekly snapshots (run_id in YYYY-MM-DD format)
-            // Use run_id if it's a weekly snapshot, otherwise use created_at
-            if (m.run_id && m.run_id.match(/^\d{4}-\d{2}-\d{2}$/)) {
-              dateForBucket = new Date(m.run_id);
+            // Prefer date_end (actual GSC period end). created_at can be "now" for backfilled history.
+            if (m.date_end) {
+              dateForBucket = safeDateFrom(m.date_end);
+            } else if (m.run_id && m.run_id.match(/^\d{4}-\d{2}-\d{2}$/)) {
+              dateForBucket = safeDateFrom(m.run_id);
             } else if (m.created_at) {
-              dateForBucket = new Date(m.created_at);
-            } else if (m.date_end) {
-              dateForBucket = new Date(m.date_end);
+              dateForBucket = safeDateFrom(m.created_at);
             } else {
               debugLog(`⚠ No valid date found for weekly metric: run_id=${m.run_id}, date_end=${m.date_end}, created_at=${m.created_at}`, 'warn');
               return; // Skip this metric
             }
           } else if (m.created_at) {
             // For monthly (non-backfill): use created_at (when the audit was run)
-            dateForBucket = new Date(m.created_at);
+            dateForBucket = safeDateFrom(m.created_at);
           } else if (m.run_id && m.run_id.match(/^\d{4}-\d{2}-\d{2}$/)) {
             // If run_id is in YYYY-MM-DD format, use that
-            dateForBucket = new Date(m.run_id);
+            dateForBucket = safeDateFrom(m.run_id);
           } else if (m.date_end) {
             // Fallback to date_end
-            dateForBucket = new Date(m.date_end);
+            dateForBucket = safeDateFrom(m.date_end);
           } else {
             debugLog(`⚠ No valid date found for metric: run_id=${m.run_id}, date_end=${m.date_end}, created_at=${m.created_at}`, 'warn');
             return; // Skip this metric
@@ -15596,20 +15652,15 @@
           if (!bucketKey) {
             // Calculate bucket key from date
             if (timeGrain === 'weekly') {
-              // ISO week: get Monday of the week
-              const dayOfWeek = dateForBucket.getDay();
-              const diff = dateForBucket.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
-              const monday = new Date(dateForBucket);
-              monday.setDate(diff);
-              bucketKey = monday.toISOString().split('T')[0]; // Use Monday date as key
+              bucketKey = mondayKeyUTCFromDate(dateForBucket); // Use Monday date (UTC) as key
             } else {
               // Monthly: YYYY-MM
               bucketKey = `${dateForBucket.getFullYear()}-${String(dateForBucket.getMonth() + 1).padStart(2, '0')}`;
             }
           }
           
-          // Keep the LAST snapshot in each bucket (by created_at, which represents when the audit was run)
-          const comparisonDate = m.created_at ? new Date(m.created_at) : (m.date_end ? new Date(m.date_end) : dateForBucket);
+          // Keep the LAST snapshot in each bucket using date_end first (actual period end), then created_at as fallback
+          const comparisonDate = safeDateFrom(m.date_end) || safeDateFrom(m.created_at) || dateForBucket;
           if (!buckets.has(bucketKey) || comparisonDate > buckets.get(bucketKey).date) {
             const value = kpiField === 'ctr_28d' ? parseFloat(m.ctr_28d || 0) :
                           kpiField === 'clicks_28d' ? parseFloat(m.clicks_28d || 0) :
@@ -15713,7 +15764,7 @@
           let label;
           if (timeGrain === 'weekly') {
             // Weekly: show Monday date as "DD MMM"
-            label = new Date(bucketKey).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+            label = new Date(bucketKey + 'T00:00:00Z').toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
           } else {
             // Monthly: show as "MMM YY" (e.g., "Jan 25", "Dec 25")
             const monthDate = new Date(bucketKey + '-01');
@@ -15845,12 +15896,25 @@
           }
         }
 
-        // Generate last 12 months
+        const monthKeyFromDate = (d) => {
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, '0');
+          return `${y}-${m}`;
+        };
+        const monthStartDateFromKey = (monthKey) => {
+          // monthKey: YYYY-MM
+          const [yStr, mStr] = String(monthKey).split('-');
+          const y = parseInt(yStr, 10);
+          const m = parseInt(mStr, 10);
+          return new Date(y, (m || 1) - 1, 1);
+        };
+
+        // Generate last 12 months (LOCAL month keys; avoid toISOString() timezone shifting)
         const months = [];
         const today = new Date();
         for (let i = 11; i >= 0; i--) {
           const date = new Date(today.getFullYear(), today.getMonth() - i, 1);
-          months.push(date.toISOString().substring(0, 7)); // YYYY-MM format
+          months.push(monthKeyFromDate(date)); // YYYY-MM
         }
 
         // Build table
@@ -15872,7 +15936,7 @@
         months.forEach(month => {
           const th = document.createElement('th');
           th.style.cssText = 'text-align: center; padding: 0.75rem; border-bottom: 2px solid var(--dark-border); font-weight: 600; background: rgba(55, 65, 81, 0.5); color: var(--dark-text);';
-          const monthDate = new Date(month + '-01');
+          const monthDate = monthStartDateFromKey(month);
           th.textContent = monthDate.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
           th.title = `Value for ${monthDate.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}: Last snapshot from this month (rolling 28-day window)`;
           thead.appendChild(th);
@@ -15980,12 +16044,12 @@
                 monthValues.push(value);
                 
                 // Build tooltip text
-                const monthDate = new Date(month + '-01');
+                const monthDate = monthStartDateFromKey(month);
                 const monthName = monthDate.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
                 let tooltipText = `${segmentLabels[segment]}: ${formatted} for ${monthName}`;
                 
                 // Find previous month snapshot for trend
-                const prevMonth = new Date(month + '-01');
+                const prevMonth = monthStartDateFromKey(month);
                 prevMonth.setMonth(prevMonth.getMonth() - 1);
                 const prevMonthStr = `${prevMonth.getFullYear()}-${String(prevMonth.getMonth() + 1).padStart(2, '0')}`;
                 
@@ -16062,14 +16126,14 @@
               } else {
                 cell.textContent = '—';
                 monthValues.push(null);
-                const monthDate = new Date(month + '-01');
+                const monthDate = monthStartDateFromKey(month);
                 const monthName = monthDate.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
                 cell.title = `${segmentLabels[segment]}: No data for ${monthName}`;
               }
             } else {
               cell.textContent = '—';
               monthValues.push(null);
-              const monthDate = new Date(month + '-01');
+              const monthDate = monthStartDateFromKey(month);
               const monthName = monthDate.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
               cell.title = `${segmentLabels[segment]}: No data for ${monthName}`;
             }
@@ -16153,6 +16217,29 @@
         const segments = ['money', 'landing', 'event', 'product'];
         const segmentData = {};
         
+        const dateKeyUTC = (d) => {
+          const y = d.getUTCFullYear();
+          const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+          const day = String(d.getUTCDate()).padStart(2, '0');
+          return `${y}-${m}-${day}`;
+        };
+        const mondayKeyUTCFromDate = (d) => {
+          const dayOfWeek = d.getUTCDay(); // 0=Sun..6=Sat
+          const diff = d.getUTCDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+          const monday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+          monday.setUTCDate(diff);
+          return dateKeyUTC(monday);
+        };
+        const safeDateFrom = (v) => {
+          if (!v) return null;
+          const d = new Date(v);
+          return isNaN(d.getTime()) ? null : d;
+        };
+        const metricDateForPeriod = (m) => {
+          // Prefer date_end (actual GSC period). Fall back to run_id (weekly snapshot) or created_at.
+          return safeDateFrom(m?.date_end) || (m?.run_id && /^\d{4}-\d{2}-\d{2}$/.test(m.run_id) ? safeDateFrom(m.run_id) : null) || safeDateFrom(m?.created_at);
+        };
+
         for (const segment of segments) {
           const params = new URLSearchParams({
             siteUrl: propertyUrl,
@@ -16175,7 +16262,7 @@
                      dbField === 'impressions_28d' ? parseFloat(m.impressions_28d || 0) : null
             })).filter(d => d.value !== null && !isNaN(d.value));
             
-            debugLog(`✓ Fetched ${segmentData[segment].length} records for segment '${segment}' (filtered by date_end in last 28 days)`, 'info');
+            debugLog(`✓ Fetched ${segmentData[segment].length} records for segment '${segment}'`, 'info');
           } else {
             debugLog(`⚠ Failed to fetch data for segment '${segment}': ${response.status}`, 'warn');
             segmentData[segment] = [];
@@ -16303,43 +16390,30 @@
               return;
             }
             
-            // Determine date for bucketing (same logic as loadPortfolioData)
-            let dateForBucket = null;
-            if (m.run_id && m.run_id.match(/^\d{4}-\d{2}-\d{2}$/)) {
-              dateForBucket = new Date(m.run_id);
-            } else if (m.created_at) {
-              dateForBucket = new Date(m.created_at);
-            } else if (m.date_end) {
-              dateForBucket = new Date(m.date_end);
-            } else {
-              return; // Skip if no valid date
-            }
+            // Determine date for bucketing (prefer date_end)
+            const dateForBucket = metricDateForPeriod(m);
             
             if (!dateForBucket || isNaN(dateForBucket.getTime())) {
               return; // Skip invalid dates
             }
             
             // Filter out data beyond the last valid GSC date
-            const dateStr = dateForBucket.toISOString().split('T')[0];
+            const dateStr = dateKeyUTC(dateForBucket);
             const lastValidDateStr = lastValidGscDate ? lastValidGscDate.toISOString().split('T')[0] : null;
             if (lastValidDateStr && dateStr > lastValidDateStr) {
               return; // Skip this record
             }
             
-            // Calculate Monday of the week (same as loadPortfolioData)
-            const dayOfWeek = dateForBucket.getDay();
-            const diff = dateForBucket.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
-            const monday = new Date(dateForBucket);
-            monday.setDate(diff);
-            const mondayKey = monday.toISOString().split('T')[0];
+            // Calculate Monday of the week (UTC)
+            const mondayKey = mondayKeyUTCFromDate(dateForBucket);
             
             if (!weeklyBuckets.has(mondayKey)) {
               weeklyBuckets.set(mondayKey, new Map());
             }
             
             const bucket = weeklyBuckets.get(mondayKey);
-            // Keep the LAST snapshot in each week (by created_at, same as loadPortfolioData)
-            const comparisonDate = m.created_at ? new Date(m.created_at) : (m.date_end ? new Date(m.date_end) : dateForBucket);
+            // Keep the LAST snapshot in each week using period end first
+            const comparisonDate = metricDateForPeriod(m) || safeDateFrom(m.created_at) || dateForBucket;
             if (!bucket.has(segment) || comparisonDate > bucket.get(segment).date) {
               bucket.set(segment, {
                 value: value,
@@ -16374,7 +16448,7 @@
         
         const chartData = {
           labels: sortedWeekDates.map(mondayStr => {
-            const date = new Date(mondayStr);
+            const date = new Date(mondayStr + 'T00:00:00Z');
             return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
           }),
           datasets: segments.map(segment => {
@@ -30711,9 +30785,10 @@ Final Score: ${score}/100`;
                   minImpr,
                   matrixFilter: newActiveFilter
                 };
-                if (typeof renderMoneyPagesTable === 'function') {
+                if (typeof window.renderMoneyPagesPriorityTable === 'function') {
                   (async () => {
-                    await renderMoneyPagesTable(filteredPages, filters);
+                    // Render the Priority & Actions table (not the opportunity table)
+                    await window.renderMoneyPagesPriorityTable(filteredPages, filters);
                   })();
                 }
               };
@@ -30724,7 +30799,7 @@ Final Score: ${score}/100`;
             }
             
             // Re-render table with filters
-            if (typeof renderMoneyPagesTable === 'function') {
+            if (typeof window.renderMoneyPagesPriorityTable === 'function') {
               const filters = {
                 typeFilter,
                 minImpr,
@@ -30733,10 +30808,10 @@ Final Score: ${score}/100`;
                   : null
               };
               (async () => {
-                await renderMoneyPagesTable(filteredPages, filters);
+                await window.renderMoneyPagesPriorityTable(filteredPages, filters);
               })();
             } else {
-              debugLog('⚠ renderMoneyPagesTable function not found', 'warn');
+              debugLog('⚠ renderMoneyPagesPriorityTable function not found', 'warn');
             }
           };
           

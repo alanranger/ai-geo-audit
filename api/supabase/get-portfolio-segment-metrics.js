@@ -54,6 +54,14 @@ export default async function handler(req, res) {
       need('SUPABASE_SERVICE_ROLE_KEY')
     );
 
+    const toDateOnly = (v) => {
+      if (!v) return null;
+      const s = String(v);
+      // Accept ISO strings and YYYY-MM-DD; normalize to YYYY-MM-DD when possible
+      if (s.length >= 10) return s.slice(0, 10);
+      return s;
+    };
+
     // Build query
     let query = supabase
       .from('portfolio_segment_metrics_28d')
@@ -67,15 +75,18 @@ export default async function handler(req, res) {
     if (segment) {
       query = query.eq('segment', segment);
     }
-    if (from) {
-      query = query.gte('created_at', from);
-    }
-    if (to) {
-      query = query.lte('created_at', to);
-    }
+    // IMPORTANT:
+    // - Use date_end for filtering and ordering so time-series charts/table align to the actual GSC period.
+    // - created_at can be "now" for backfilled history, which collapses weekly bucketing into a single week.
+    const fromDate = toDateOnly(from);
+    const toDate = toDateOnly(to);
+    if (fromDate) query = query.gte('date_end', fromDate);
+    if (toDate) query = query.lte('date_end', toDate);
 
-    // Order by created_at
-    query = query.order('created_at', { ascending: order === 'asc' });
+    // Order by date_end first (actual period), then created_at (tie-break)
+    query = query
+      .order('date_end', { ascending: order === 'asc' })
+      .order('created_at', { ascending: order === 'asc' });
 
     // Limit results
     if (limit) {
