@@ -15476,12 +15476,9 @@
         return;
       }
       
-      // Map scope
-      const scopeMap = {
-        'active_only': 'active_cycles_only',
-        'all': 'all_tracked'
-      };
-      const mappedScope = scopeMap[scope] || scope;
+      // Map scope dropdown values to DB scope values.
+      // IMPORTANT: "All" means "no scope filter" (return whatever scopes exist).
+      const mappedScope = scope === 'active_only' ? 'active_cycles_only' : null;
 
       try {
         const propertyUrl = (window.getPropertyUrl ? window.getPropertyUrl() : '') || localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
@@ -15498,11 +15495,11 @@
         const params = new URLSearchParams({ 
           siteUrl: propertyUrl,
           segment,
-          scope: mappedScope,
           from: fromDate.toISOString(),
           to: toDate.toISOString(),
           order: 'asc' // Chronological for chart
         });
+        if (mappedScope) params.set('scope', mappedScope);
         
         const response = await fetch(apiUrl(`/api/supabase/get-portfolio-segment-metrics?${params}`));
         
@@ -15515,8 +15512,8 @@
         const data = await response.json();
         const metrics = data.metrics || [];
         
-        debugLog(`📊 Portfolio data loaded: ${metrics.length} metrics for segment=${segment}, scope=${mappedScope}, kpi=${kpiSelect}`, 'info');
-        debugLog(`📊 API params: siteUrl=${propertyUrl}, segment=${segment}, scope=${mappedScope}, from=${fromDate.toISOString()}, to=${toDate.toISOString()}`, 'info');
+        debugLog(`📊 Portfolio data loaded: ${metrics.length} metrics for segment=${segment}, scope=${mappedScope || '(all)'}, kpi=${kpiSelect}`, 'info');
+        debugLog(`📊 API params: siteUrl=${propertyUrl}, segment=${segment}, scope=${mappedScope || '(all)'}, from=${fromDate.toISOString()}, to=${toDate.toISOString()}`, 'info');
         
         // Debug: Log sample metrics to see what data we have
         if (metrics.length > 0) {
@@ -15869,6 +15866,10 @@
           debugLog('⚠ No property URL found for portfolio table', 'warn');
           return;
         }
+
+        // Use the same scope selector as the chart. "All" means no scope filter.
+        const scopeUi = document.getElementById('portfolio-scope-toggle')?.value || 'active_only';
+        const mappedScope = scopeUi === 'active_only' ? 'active_cycles_only' : null;
         
         // Calculate date range (last 13 months to get previous month for trend)
         const toDate = new Date();
@@ -15881,11 +15882,11 @@
           const params = new URLSearchParams({ 
             siteUrl: propertyUrl,
             segment,
-            scope: 'active_cycles_only',
             from: fromDate.toISOString(),
             to: toDate.toISOString(),
             order: 'desc' // Latest first
           });
+          if (mappedScope) params.set('scope', mappedScope);
           const response = await fetch(apiUrl(`/api/supabase/get-portfolio-segment-metrics?${params}`));
           
           if (response.ok) {
@@ -16113,7 +16114,7 @@
                   const prevValue = kpiField === 'ctr_28d' ? parseFloat(prevSnapshot.ctr_28d || 0) :
                                   kpiField === 'clicks_28d' ? parseFloat(prevSnapshot.clicks_28d || 0) :
                                   kpiField === 'impressions_28d' ? parseFloat(prevSnapshot.impressions_28d || 0) :
-                                  kpiField === 'position_28d' ? (prevSnapshot.position_28d ? parseFloat(prevSnapshot.position_28d) : null) :
+                                  kpiField === 'position_28d' ? (prevSnapshot.position_28d !== null && prevSnapshot.position_28d !== undefined && !isNaN(parseFloat(prevSnapshot.position_28d)) ? parseFloat(prevSnapshot.position_28d) : null) :
                                   kpiField === 'ai_citations_28d' ? (prevSnapshot.ai_citations_28d ? parseInt(prevSnapshot.ai_citations_28d) : 0) :
                                   kpiField === 'ai_overview_present_count' ? (prevSnapshot.ai_overview_present_count ? parseInt(prevSnapshot.ai_overview_present_count) : 0) : null;
                   
@@ -16128,8 +16129,12 @@
                     if (kpi === 'ctr_28d') {
                       deltaFormatted = (delta * 100).toFixed(1) + 'pp'; // Convert ratio delta to percentage points
                     } else if (kpi === 'avg_position') {
+                      // For position: LOWER is better. So delta<0 => improvement (green ▲), delta>0 => worse (red ▼).
                       deltaFormatted = Math.abs(delta).toFixed(1);
-                      // For position, lower is better, so flip the indicator
+                      const posIndicator = delta < 0 ? '▲' : (delta > 0 ? '▼' : '→');
+                      const posColor = delta < 0 ? '#10b981' : (delta > 0 ? '#ef4444' : '#94a3b8');
+                      cell.innerHTML = `${formatted} <span style="color: ${posColor};">${posIndicator} ${deltaFormatted}</span>`;
+                      tooltipText += ` | Change from previous month: ${posIndicator} ${deltaFormatted}`;
                     } else if (kpi === 'ai_citations' || kpi === 'ai_overview') {
                       // AI metrics are integers, show absolute change
                       deltaFormatted = Math.abs(delta).toString();
@@ -16143,12 +16148,7 @@
                       tooltipText += ` | Change from previous month: ${indicator} ${deltaFormatted}`;
                     }
                     
-                    if (kpi !== 'avg_position') {
-                      cell.innerHTML = `${formatted} <span style="color: ${color};">${indicator} ${deltaFormatted}</span>`;
-                      if (kpi !== 'ai_citations' && kpi !== 'ai_overview') {
-                        tooltipText += ` | Change from previous month: ${indicator} ${deltaFormatted}`;
-                      }
-                    }
+                    // Note: avg_position and AI metrics are already rendered above. All other KPIs use the default branch.
                   } else {
                     cell.textContent = formatted;
                   }
