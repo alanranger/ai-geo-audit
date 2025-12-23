@@ -15908,6 +15908,31 @@
           const m = parseInt(mStr, 10);
           return new Date(y, (m || 1) - 1, 1);
         };
+        const monthEndDateFromKey = (monthKey) => {
+          const start = monthStartDateFromKey(monthKey);
+          return new Date(start.getFullYear(), start.getMonth() + 1, 0);
+        };
+        const toDateOnlyStr = (d) => {
+          // yyyy-mm-dd in local timezone
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, '0');
+          const day = String(d.getDate()).padStart(2, '0');
+          return `${y}-${m}-${day}`;
+        };
+        const pickLatestSnapshotInMonth = (snapshots) => {
+          if (!snapshots || snapshots.length === 0) return null;
+          // Prefer latest date_end, tie-break by created_at (handles backfills where created_at is "now")
+          return snapshots
+            .slice()
+            .sort((a, b) => {
+              const aDateEnd = a?.date_end ? new Date(a.date_end) : null;
+              const bDateEnd = b?.date_end ? new Date(b.date_end) : null;
+              const aKey = aDateEnd && !isNaN(aDateEnd.getTime()) ? aDateEnd.getTime() : -Infinity;
+              const bKey = bDateEnd && !isNaN(bDateEnd.getTime()) ? bDateEnd.getTime() : -Infinity;
+              if (bKey !== aKey) return bKey - aKey;
+              return new Date(b.created_at) - new Date(a.created_at);
+            })[0];
+        };
 
         // Generate last 12 months (LOCAL month keys; avoid toISOString() timezone shifting)
         const months = [];
@@ -15937,7 +15962,8 @@
           const th = document.createElement('th');
           th.style.cssText = 'text-align: center; padding: 0.75rem; border-bottom: 2px solid var(--dark-border); font-weight: 600; background: rgba(55, 65, 81, 0.5); color: var(--dark-text);';
           const monthDate = monthStartDateFromKey(month);
-          th.textContent = monthDate.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+          const isCurrentMonth = month === monthKeyFromDate(today);
+          th.textContent = monthDate.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) + (isCurrentMonth ? '*' : '');
           th.title = `Value for ${monthDate.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}: Last snapshot from this month (rolling 28-day window)`;
           thead.appendChild(th);
         });
@@ -16012,10 +16038,8 @@
               return snapshotMonth === month;
             });
             
-            // Get the latest snapshot in this month
-            const snapshot = monthSnapshots?.length > 0 
-              ? monthSnapshots.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0]
-              : null;
+            // Get the latest snapshot in this month (prefer max date_end, not max created_at)
+            const snapshot = pickLatestSnapshotInMonth(monthSnapshots);
             
             if (snapshot) {
               // Extract value based on KPI field
@@ -16043,10 +16067,18 @@
                 const formatted = formatValue(value, kpi);
                 monthValues.push(value);
                 
+                const isCurrentMonth = month === monthKeyFromDate(today);
+                const monthEnd = monthEndDateFromKey(month);
+                const snapshotEnd = snapshot.date_end ? new Date(snapshot.date_end) : null;
+                const isPartialMonth = isCurrentMonth && snapshotEnd && !isNaN(snapshotEnd.getTime()) && snapshotEnd < monthEnd;
+
                 // Build tooltip text
                 const monthDate = monthStartDateFromKey(month);
                 const monthName = monthDate.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
                 let tooltipText = `${segmentLabels[segment]}: ${formatted} for ${monthName}`;
+                if (isPartialMonth) {
+                  tooltipText += ` (partial month: latest snapshot ends ${toDateOnlyStr(snapshotEnd)})`;
+                }
                 
                 // Find previous month snapshot for trend
                 const prevMonth = monthStartDateFromKey(month);
@@ -16074,7 +16106,8 @@
                   ? prevMonthSnapshots.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0]
                   : null;
                 
-                if (prevSnapshot) {
+                // For current partial month, suppress month-over-month delta (comparison is misleading until month-end snapshot exists)
+                if (prevSnapshot && !isPartialMonth) {
                   const prevValue = kpiField === 'ctr_28d' ? parseFloat(prevSnapshot.ctr_28d || 0) :
                                   kpiField === 'clicks_28d' ? parseFloat(prevSnapshot.clicks_28d || 0) :
                                   kpiField === 'impressions_28d' ? parseFloat(prevSnapshot.impressions_28d || 0) :
@@ -16118,7 +16151,8 @@
                     cell.textContent = formatted;
                   }
                 } else {
-                  cell.textContent = formatted;
+                  // If partial month, show a subtle marker so big apparent drops don't look like a full-month collapse
+                  cell.textContent = isPartialMonth ? `${formatted} *` : formatted;
                 }
                 
                 // Add tooltip to cell
