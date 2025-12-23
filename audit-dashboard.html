@@ -16076,12 +16076,52 @@
           }
         }
         
+        // Determine the last valid GSC date (use window.lastGscTimeseriesDate if available, otherwise use max date_end from data)
+        let lastValidGscDate = null;
+        if (window.lastGscTimeseriesDate) {
+          lastValidGscDate = new Date(window.lastGscTimeseriesDate);
+          debugLog(`📅 Using last GSC timeseries date: ${window.lastGscTimeseriesDate}`, 'info');
+        } else {
+          // Fallback: find the maximum date_end that appears in all segments (most recent common date)
+          const allDateEnds = [];
+          segments.forEach(segment => {
+            segmentData[segment].forEach(d => {
+              allDateEnds.push(d.date);
+            });
+          });
+          if (allDateEnds.length > 0) {
+            // Find the maximum date that appears in at least 2 segments (to avoid showing partial data)
+            const dateCounts = new Map();
+            segments.forEach(segment => {
+              const segmentDates = new Set(segmentData[segment].map(d => d.date.toISOString().split('T')[0]));
+              segmentDates.forEach(dateStr => {
+                dateCounts.set(dateStr, (dateCounts.get(dateStr) || 0) + 1);
+              });
+            });
+            // Get dates that appear in at least 2 segments, then take the max
+            const commonDates = Array.from(dateCounts.entries())
+              .filter(([date, count]) => count >= 2)
+              .map(([date]) => new Date(date))
+              .sort((a, b) => b - a);
+            if (commonDates.length > 0) {
+              lastValidGscDate = commonDates[0];
+              debugLog(`📅 Using max common date_end from data: ${lastValidGscDate.toISOString().split('T')[0]}`, 'info');
+            }
+          }
+        }
+        
         // Bucket data by week (Monday start) like the top charts
         // Use date_end for the actual GSC data period, but bucket into weeks
+        // Only include data where date_end <= lastValidGscDate
         const weeklyBuckets = new Map(); // key: Monday date (YYYY-MM-DD), value: Map<segment, {value, date_end}>
         
         segments.forEach(segment => {
           segmentData[segment].forEach(d => {
+            // Filter out data beyond the last valid GSC date
+            if (lastValidGscDate && d.date > lastValidGscDate) {
+              return; // Skip this record
+            }
+            
             // Calculate Monday of the week for this date_end
             const dateEnd = new Date(d.date);
             const dayOfWeek = dateEnd.getDay();
