@@ -3454,8 +3454,8 @@
           <div class="portfolio-chart-section" style="margin-bottom: 3rem;">
             <div class="card" style="padding: 1.5rem;">
               <h2 style="margin-top: 0; margin-bottom: 1rem;" title="Median Delta Over Time: Shows the change (delta) in selected KPI between consecutive time periods. Each point shows how much the metric changed compared to the previous period.">Median Delta Over Time</h2>
-              <p style="color: #666; margin-bottom: 1.5rem;" title="Shows the change (delta) in selected KPI over time using rolling 28d snapshots. Segment meanings: Entire site = all pages on the property (unfiltered). Money Pages = Landing + Event + Product combined. All tracked = only URLs that currently have an active optimisation task (planned/in_progress/monitoring). Scope meanings: All = all pages in the selected segment. Active cycles only = only URLs currently being optimised (active tasks).">
-                Portfolio movement over time using rolling 28d snapshots. <strong>Tip:</strong> “All tracked” = only actively tracked URLs, not the whole site.
+              <p style="color: #666; margin-bottom: 1.5rem;" title="Shows the change (delta) in selected KPI over time using rolling 28d snapshots. Segment meanings: Entire site = all pages on the property (unfiltered). Money Pages = Landing + Event + Product combined. Money Pages (tracked) = only money pages that currently have an active optimisation task (planned/in_progress/monitoring). All tracked = all pages (any type) that currently have an active optimisation task.">
+                Portfolio movement over time using rolling 28d snapshots. <strong>Tip:</strong> “Tracked” segments only include URLs with active optimisation tasks.
               </p>
               
               <!-- Controls -->
@@ -3477,16 +3477,10 @@
                     <option value="site" title="Entire site: all pages on the property (unfiltered)">Entire site</option>
                     <option value="all_tracked" title="All pages that have active optimisation tasks tracking them">All tracked</option>
                     <option value="money" title="All commercial pages: landing pages, event pages, and product pages combined">Money Pages</option>
+                    <option value="money_tracked" title="Only money pages (landing/event/product) that currently have active optimisation tasks">Money Pages (tracked)</option>
                     <option value="landing" title="Landing pages: general commercial landing pages (not events or products)">Landing</option>
                     <option value="event" title="Event pages: photography workshop and course event pages">Event</option>
                     <option value="product" title="Product pages: photography service and product pages">Product</option>
-                  </select>
-                </div>
-                <div>
-                  <label for="portfolio-scope-toggle" style="display: block; margin-bottom: 0.25rem; font-weight: 600;" title="Scope: All = all pages in the selected segment. Active cycles only = only URLs with active optimisation tasks (planned/in_progress/monitoring).">Scope:</label>
-                  <select id="portfolio-scope-toggle" style="padding: 0.5rem; min-width: 150px;">
-                    <option value="active_only" title="Only include pages with active optimisation task cycles (excludes completed, cancelled, or deleted tasks)">Active cycles only</option>
-                    <option value="all" title="Include all pages in the segment, regardless of optimisation task status">All</option>
                   </select>
                 </div>
                 <div>
@@ -15459,8 +15453,7 @@
 
     async function loadPortfolioData() {
       const kpiSelect = document.getElementById('portfolio-kpi-select')?.value || 'ctr_28d';
-      const segment = document.getElementById('portfolio-segment-select')?.value || 'all_tracked';
-      const scope = document.getElementById('portfolio-scope-toggle')?.value || 'active_only';
+      const segmentUi = document.getElementById('portfolio-segment-select')?.value || 'all_tracked';
       const timeGrain = document.getElementById('portfolio-time-grain')?.value || 'weekly';
 
       // Map UI KPI to portfolio_segment_metrics_28d field
@@ -15479,16 +15472,17 @@
         return;
       }
       
-      // Map scope dropdown values to DB scope values.
-      // IMPORTANT: "All" = all pages (unfiltered), stored as scope=all_pages.
-      // Scope mapping:
-      // - Entire site always uses full unfiltered dataset
-      // - All tracked always uses the tracked subset dataset (scope selector is irrelevant/confusing for this segment)
-      // - Other segments can toggle between all_pages and active_cycles_only
-      const mappedScope =
-        segment === 'site' ? 'all_pages'
-        : segment === 'all_tracked' ? 'active_cycles_only'
-        : (scope === 'active_only' ? 'active_cycles_only' : 'all_pages');
+      // Portfolio no longer uses a separate "Scope" control (too nuanced).
+      // Instead we expose explicit tracked segments. Map UI segment -> (db segment, db scope).
+      const segmentMap = (() => {
+        if (segmentUi === 'money_tracked') return { segment: 'money', scope: 'active_cycles_only' };
+        if (segmentUi === 'all_tracked') return { segment: 'all_tracked', scope: 'active_cycles_only' };
+        if (segmentUi === 'site') return { segment: 'site', scope: 'all_pages' };
+        // Default: untracked / full segment
+        return { segment: segmentUi, scope: 'all_pages' };
+      })();
+      const segment = segmentMap.segment;
+      const mappedScope = segmentMap.scope;
 
       try {
         const propertyUrl = (window.getPropertyUrl ? window.getPropertyUrl() : '') || localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
@@ -15522,7 +15516,7 @@
         const data = await response.json();
         const metrics = data.metrics || [];
         
-        debugLog(`📊 Portfolio data loaded: ${metrics.length} metrics for segment=${segment}, scope=${mappedScope}, kpi=${kpiSelect}`, 'info');
+        debugLog(`📊 Portfolio data loaded: ${metrics.length} metrics for segment=${segmentUi} (db: segment=${segment}, scope=${mappedScope}), kpi=${kpiSelect}`, 'info');
         debugLog(`📊 API params: siteUrl=${propertyUrl}, segment=${segment}, scope=${mappedScope}, from=${fromDate.toISOString()}, to=${toDate.toISOString()}`, 'info');
         
         // Debug: Log sample metrics to see what data we have
@@ -15845,10 +15839,11 @@
 
     async function renderPortfolioTable() {
       const kpi = document.getElementById('portfolio-table-kpi-select')?.value || 'ctr_28d';
-        const segments = ['site', 'money', 'landing', 'event', 'product', 'all_tracked'];
+      const segments = ['site', 'money', 'money_tracked', 'landing', 'event', 'product', 'all_tracked'];
       const segmentLabels = {
         'site': 'Entire site',
         'money': 'Money Pages',
+        'money_tracked': 'Money Pages (tracked)',
         'landing': 'Landing',
         'event': 'Event',
         'product': 'Product',
@@ -15878,10 +15873,14 @@
           return;
         }
 
-        // Use the same scope selector as the chart.
-        // Active = pages currently being optimised; All = full unfiltered page set.
-        const scopeUi = document.getElementById('portfolio-scope-toggle')?.value || 'active_only';
-        const mappedScope = scopeUi === 'active_only' ? 'active_cycles_only' : 'all_pages';
+        // Portfolio no longer uses a separate "Scope" control (too nuanced).
+        // Instead we expose explicit tracked segments. Map UI segment -> (db segment, db scope).
+        const mapSegmentToDb = (segUi) => {
+          if (segUi === 'money_tracked') return { segment: 'money', scope: 'active_cycles_only' };
+          if (segUi === 'all_tracked') return { segment: 'all_tracked', scope: 'active_cycles_only' };
+          if (segUi === 'site') return { segment: 'site', scope: 'all_pages' };
+          return { segment: segUi, scope: 'all_pages' };
+        };
         
         // Calculate date range (last 13 months to get previous month for trend)
         const toDate = new Date();
@@ -15891,20 +15890,15 @@
         // Fetch data for all segments
         const allData = {};
         for (const segment of segments) {
+          const dbMap = mapSegmentToDb(segment);
           const params = new URLSearchParams({ 
             siteUrl: propertyUrl,
-            segment,
+            segment: dbMap.segment,
             from: fromDate.toISOString(),
             to: toDate.toISOString(),
             order: 'desc' // Latest first
           });
-          // Entire site is always unfiltered (all_pages)
-          // Entire site is always unfiltered (all_pages). All tracked is always the tracked subset.
-          params.set('scope',
-            segment === 'site' ? 'all_pages'
-            : segment === 'all_tracked' ? 'active_cycles_only'
-            : mappedScope
-          );
+          params.set('scope', dbMap.scope);
           const response = await fetch(apiUrl(`/api/supabase/get-portfolio-segment-metrics?${params}`));
           
           if (response.ok) {
@@ -16023,7 +16017,9 @@
           segmentCell.textContent = segmentLabels[segment] || segment;
           // Add tooltip based on segment
           const segmentTooltips = {
+            'site': 'Entire site: all pages on the property (unfiltered)',
             'money': 'All commercial pages: landing pages, event pages, and product pages combined',
+            'money_tracked': 'Only money pages (landing/event/product) that currently have an active optimisation task (planned/in_progress/monitoring)',
             'landing': 'Landing pages: general commercial landing pages (not events or products)',
             'event': 'Event pages: photography workshop and course event pages',
             'product': 'Product pages: photography service and product pages',
@@ -16147,7 +16143,10 @@
                     // Format delta based on KPI
                     let deltaFormatted;
                     if (kpi === 'ctr_28d') {
-                      deltaFormatted = (delta * 100).toFixed(1) + 'pp'; // Convert ratio delta to percentage points
+                      // CTR stored as ratio (0-1). Render as percentage points delta.
+                      deltaFormatted = Math.abs(delta * 100).toFixed(1) + 'pp';
+                      cell.innerHTML = `${formatted} <span style="color: ${color};">${indicator} ${deltaFormatted}</span>`;
+                      tooltipText += ` | Change from previous month: ${indicator} ${deltaFormatted}`;
                     } else if (kpi === 'avg_position') {
                       // For position: LOWER is better. So delta<0 => improvement (green ▲), delta>0 => worse (red ▼).
                       deltaFormatted = Math.abs(delta).toFixed(1);
@@ -16729,7 +16728,6 @@
     function wirePortfolioControls() {
       const kpiSelect = document.getElementById('portfolio-kpi-select');
       const segmentSelect = document.getElementById('portfolio-segment-select');
-      const scopeToggle = document.getElementById('portfolio-scope-toggle');
       const timeGrain = document.getElementById('portfolio-time-grain');
       const tableKpiSelect = document.getElementById('portfolio-table-kpi-select');
 
@@ -16742,22 +16740,9 @@
       if (kpiSelect) kpiSelect.addEventListener('change', updateChart);
       if (segmentSelect) {
         segmentSelect.addEventListener('change', () => {
-          // Entire site always uses the full unfiltered dataset, so scope is not applicable.
-          // All tracked is already a subset (tracked URLs), so scope is also not applicable.
-          if (scopeToggle) {
-            const isSite = segmentSelect.value === 'site';
-            const isAllTracked = segmentSelect.value === 'all_tracked';
-            scopeToggle.disabled = isSite || isAllTracked;
-            if (isSite) {
-              scopeToggle.value = 'all';
-            } else if (isAllTracked) {
-              scopeToggle.value = 'active_only';
-            }
-          }
           updateChart();
         });
       }
-      if (scopeToggle) scopeToggle.addEventListener('change', updateChart);
       if (timeGrain) timeGrain.addEventListener('change', updateChart);
       if (tableKpiSelect) {
         tableKpiSelect.addEventListener('change', () => {

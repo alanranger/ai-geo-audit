@@ -107,7 +107,7 @@ export default async function handler(req, res) {
       try {
         const { data: tsRows, error: tsErr } = await supabase
           .from('gsc_timeseries')
-          .select('clicks, impressions')
+          .select('clicks, impressions, position')
           .eq('property_url', siteUrl)
           .gte('date', String(dateStart).slice(0, 10))
           .lte('date', String(dateEnd).slice(0, 10));
