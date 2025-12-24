@@ -15997,8 +15997,11 @@
           const abs = Math.abs(v);
           // 0–999 -> show full integer
           if (abs < 1000) return Math.round(v).toString();
-          // Use compact for thousands+ (K/M/B). Keep it readable: 1 decimal for <10K, otherwise 0 decimals.
-          const maxFractionDigits = abs < 10000 ? 1 : 0;
+          // Use compact for thousands+ (K/M/B). Keep it readable:
+          // - 1 decimal for 1K–9.9K
+          // - 0 decimals for 10K–999K
+          // - 1 decimal for 1M+ so you can see 1.1M vs 1.4M
+          const maxFractionDigits = abs >= 1_000_000 ? 1 : (abs < 10_000 ? 1 : 0);
           try {
             return new Intl.NumberFormat('en-GB', {
               notation: 'compact',
