@@ -15219,7 +15219,7 @@
                             debugLog(`Money Pages Trend: Canvas dimensions - Volume: ${volumeRect.width}x${volumeRect.height}, Rate: ${rateRect.width}x${rateRect.height}`, 'info');
                             if (volumeRect.width > 0 && volumeRect.height > 0 && rateRect.width > 0 && rateRect.height > 0) {
                               debugLog(`Money Pages Trend: Calling renderMoneyPagesTrendChart with ${json.data.length} records`, 'info');
-                              renderMoneyPagesTrendChart(json.data);
+                              renderMoneyPagesTrendChart(json.data, json.timeseries);
                             } else {
                               debugLog('⚠ Money Pages trend charts: Canvases still have zero dimensions, retrying...', 'warn');
                               // Set explicit dimensions and retry
@@ -15231,7 +15231,7 @@
                                 const volumeRect2 = volumeCanvas.getBoundingClientRect();
                                 const rateRect2 = rateCanvas.getBoundingClientRect();
                                 if (volumeRect2.width > 0 && volumeRect2.height > 0 && rateRect2.width > 0 && rateRect2.height > 0) {
-                                  renderMoneyPagesTrendChart(json.data);
+                                  renderMoneyPagesTrendChart(json.data, json.timeseries);
                                 } else {
                                   setTimeout(() => renderMoneyCharts(), 200);
                                 }
@@ -31881,7 +31881,7 @@ Final Score: ${score}/100`;
       }
       
       // Render Money Pages Performance Trends charts (split into Volume and Rate charts)
-      function renderMoneyPagesTrendChart(history) {
+      function renderMoneyPagesTrendChart(history, timeseries = null) {
         const volumeCanvas = document.getElementById('moneyPagesVolumeChart');
         const rateCanvas = document.getElementById('moneyPagesRateChart');
         
@@ -31948,6 +31948,60 @@ Final Score: ${score}/100`;
             }
           });
           return;
+        }
+
+        // IMPORTANT: Align Performance Trends with KPI Tracker by deriving money-page clicks/impressions from
+        // actual GSC timeseries + the latest money-page proportion. Historical `moneySegmentMetrics` can be
+        // inconsistent (e.g. definition changes), causing artificial spikes.
+        if (Array.isArray(timeseries) && timeseries.length > 0) {
+          try {
+            const latestMoney =
+              window.moneySegmentMetrics?.allMoney ||
+              // fallback: use latest audit record that has moneySegmentMetrics
+              (history.slice().reverse().find(r => r && r.moneySegmentMetrics && r.moneySegmentMetrics.allMoney)?.moneySegmentMetrics?.allMoney) ||
+              null;
+
+            const refTs = timeseries.slice().reverse().find(ts => ts && ts.date && ts.clicks > 0 && ts.impressions > 0) || null;
+            const clicksProp = latestMoney && refTs ? (Number(latestMoney.clicks || 0) / Number(refTs.clicks || 1)) : 0;
+            const imprProp = latestMoney && refTs ? (Number(latestMoney.impressions || 0) / Number(refTs.impressions || 1)) : 0;
+
+            if (refTs && (clicksProp > 0 || imprProp > 0)) {
+              const behaviourScore =
+                (typeof latestMoney?.behaviourScore === 'number' ? latestMoney.behaviourScore : null) ??
+                (typeof window.moneyPagesMetrics?.behaviour?.score === 'number' ? window.moneyPagesMetrics.behaviour.score : null);
+
+              const derivedHistory = timeseries
+                .filter(ts => ts && ts.date)
+                .map(ts => {
+                  const siteClicks = Number(ts.clicks || 0);
+                  const siteImpr = Number(ts.impressions || 0);
+                  const moneyClicks = Math.round(siteClicks * clicksProp);
+                  const moneyImpr = Math.round(siteImpr * imprProp);
+                  const ctr = moneyImpr > 0 ? (moneyClicks / moneyImpr) : 0;
+                  return {
+                    date: ts.date,
+                    isPartial: false,
+                    moneyPagesBehaviourScore: behaviourScore,
+                    moneySegmentMetrics: {
+                      allMoney: {
+                        clicks: moneyClicks,
+                        impressions: moneyImpr,
+                        ctr,
+                        avgPosition: (typeof latestMoney?.avgPosition === 'number' ? latestMoney.avgPosition : null),
+                        behaviourScore
+                      }
+                    }
+                  };
+                });
+
+              history = derivedHistory;
+              debugLog(`✓ Money Pages trend chart: using derived history from GSC timeseries (${derivedHistory.length} pts, ref=${refTs.date}, clicksProp=${(clicksProp * 100).toFixed(1)}%, imprProp=${(imprProp * 100).toFixed(1)}%)`, 'success');
+            } else {
+              debugLog('⚠ Money Pages trend chart: could not derive proportions from timeseries; falling back to historical moneySegmentMetrics', 'warn');
+            }
+          } catch (e) {
+            debugLog(`⚠ Money Pages trend chart: timeseries derivation failed (${e.message}), falling back to historical history`, 'warn');
+          }
         }
         
         // Get the last GSC timeseries date (Money Pages metrics are GSC-derived)
