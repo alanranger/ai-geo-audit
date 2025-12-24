@@ -27415,8 +27415,14 @@ Final Score: ${score}/100`;
       
       // Function to render Money Pages Performance section
       async function renderMoneyPagesSection(moneyPagesMetrics) {
-        // CRITICAL: Fetch optimisation statuses BEFORE rendering tables to ensure cache is populated
-        if (typeof window.fetchOptimisationStatuses === 'function') {
+        // CRITICAL: Fetch optimisation statuses BEFORE rendering tables to ensure cache is populated.
+        // Only do this when an admin key is present; otherwise the endpoint returns 401 and clears cache.
+        const canFetchOptimisationStatuses =
+          typeof window.fetchOptimisationStatuses === 'function' &&
+          typeof window.hasAdminKey === 'function' &&
+          window.hasAdminKey();
+
+        if (canFetchOptimisationStatuses) {
           const allStatusRows = [];
           
           // Add Opportunity table rows
@@ -27451,6 +27457,10 @@ Final Score: ${score}/100`;
             } catch (err) {
               debugLog(`[Money Pages] Error fetching statuses before render: ${err.message}`, 'error');
             }
+          }
+        } else {
+          if (moneyPagesMetrics?.rows?.length) {
+            debugLog('[Money Pages] Skipping optimisation status fetch (admin key not set)', 'info');
           }
         }
         
@@ -27918,8 +27928,8 @@ Final Score: ${score}/100`;
         };
         
         // CRITICAL: Fetch optimisation statuses for ALL rows before initial render
-        // This ensures the cache is populated on page load/refresh
-        if (typeof window.fetchOptimisationStatuses === 'function' && rows.length > 0) {
+        // (only if admin key set; otherwise will 401 and clear cache)
+        if (canFetchOptimisationStatuses && rows.length > 0) {
           console.log('[Money Pages] Fetching optimisation statuses for all rows on page load...', rows.length);
           const allStatusRows = rows.map(row => ({
             keyword: '', // Empty for page-level tasks
@@ -30816,6 +30826,12 @@ Final Score: ${score}/100`;
           // When top-level filter changes, update all sections
           newFilter.addEventListener('change', () => applyMoneyPagesTopLevelSubSegmentFilter(newFilter.value));
           
+          // CRITICAL: Apply the current filter once on initial wire-up so Behaviour KPIs / summary
+          // don't stay as placeholder "—" until the user changes the dropdown.
+          if (typeof applyMoneyPagesTopLevelSubSegmentFilter === 'function') {
+            applyMoneyPagesTopLevelSubSegmentFilter(currentSubSeg);
+          }
+
           debugLog('✓ Top-level filter wired up successfully', 'success');
         }, 200);
       }
