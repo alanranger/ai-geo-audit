@@ -65,16 +65,46 @@ export default async function handler(req, res) {
       queryUrl += `&audit_date=lte.${endDate}`;
     }
     
-    // CRITICAL: Also fetch timeseries data from gsc_timeseries table for Score Trends chart
-    // Always fetch last 28 days of timeseries data (matching Money Pages date range)
+    // CRITICAL: Also fetch timeseries data from gsc_timeseries table.
+    // NOTE: Money Pages charts compute rolling-28d values at multiple points across the last 28 days,
+    // which requires MORE than 28 days of raw daily data (otherwise early points will never have a full
+    // 28-day window and will show as "—"). Fetch ~56 days to support this.
     let timeseries = [];
     try {
-      // Calculate 28-day range ending today (GSC data is always 1-2 days behind)
-      const today = new Date();
-      const endDateForTimeseries = new Date(today);
-      endDateForTimeseries.setDate(endDateForTimeseries.getDate() - 1); // Yesterday (GSC is 1 day behind)
+      const LOOKBACK_DAYS = 56; // enough to compute rolling-28 across multiple points in a 28d view
+
+      // Prefer using the latest available GSC timeseries date from the database.
+      // GSC is often 1–2 days behind, so "yesterday" is not always correct.
+      let endDateForTimeseries = null;
+      try {
+        const latestDateQuery = `${supabaseUrl}/rest/v1/gsc_timeseries?property_url=eq.${encodeURIComponent(propertyUrl)}&select=date&order=date.desc&limit=1`;
+        const latestResp = await fetch(latestDateQuery, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': supabaseKey,
+            'Authorization': `Bearer ${supabaseKey}`
+          }
+        });
+        if (latestResp.ok) {
+          const latestRows = await latestResp.json();
+          const latestDateStr = latestRows && latestRows[0] && latestRows[0].date ? String(latestRows[0].date) : null;
+          if (latestDateStr) {
+            endDateForTimeseries = new Date(latestDateStr + 'T00:00:00');
+          }
+        }
+      } catch (e) {
+        // Ignore and fall back.
+      }
+
+      if (!endDateForTimeseries || Number.isNaN(endDateForTimeseries.getTime())) {
+        const today = new Date();
+        endDateForTimeseries = new Date(today);
+        endDateForTimeseries.setDate(endDateForTimeseries.getDate() - 1); // fallback: yesterday
+      }
+
       const startDateForTimeseries = new Date(endDateForTimeseries);
-      startDateForTimeseries.setDate(startDateForTimeseries.getDate() - 27); // 27 days back + end date = 28 days total
+      startDateForTimeseries.setDate(startDateForTimeseries.getDate() - (LOOKBACK_DAYS - 1));
       
       const formatDate = (date) => {
         const year = date.getFullYear();
