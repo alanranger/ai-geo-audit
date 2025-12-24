@@ -26573,6 +26573,9 @@ Final Score: ${score}/100`;
           const matchZero = includeZero || (row.impressions || 0) > 0; // Include zero impressions if checkbox is checked
           return matchCat && matchSubSeg && matchImp && matchZero;
         });
+
+        // Expose current filtered Opportunity rows so Suggested Top 10 can align with the table.
+        window.moneyPagesOpportunityFilteredRows = filteredRows;
         
         // Update pagination based on filtered rows
         const filteredTotalPages = Math.ceil(filteredRows.length / rowsPerPage);
@@ -27483,11 +27486,6 @@ Final Score: ${score}/100`;
               </div>
             </div>
             
-            <!-- Table container (will be populated by renderMoneyPagesTable) -->
-            <div id="money-pages-table-container">
-              <!-- Table will be rendered here -->
-            </div>
-            
             <!-- Phase 3: Money Pages Trend Chart -->
             <section id="money-pages-trend" class="card card--full" style="margin-top: 2rem; background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
               <div class="card-header" style="margin-bottom: 1rem;">
@@ -27619,6 +27617,11 @@ Final Score: ${score}/100`;
                 </div>
               </div>
             </section>
+
+            <!-- Money Pages Opportunity Table (moved to sit directly above Suggested Top 10) -->
+            <div id="money-pages-table-container" style="margin-top: 2rem;">
+              <!-- Table will be rendered here -->
+            </div>
             
             <!-- Suggested (Top 10) Section -->
             <section id="money-pages-suggested-top10" class="card card--full" style="margin-top: 2rem; background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
@@ -27806,6 +27809,11 @@ Final Score: ${score}/100`;
           // Update dropdown counts after filtering (both table and top-level)
           updateMoneyPagesSubSegmentCounts(moneyPagesMetrics);
           }, 100);
+
+          // Keep Suggested Top 10 aligned with Opportunity table filters
+          if (typeof window.renderMoneyPagesSuggestedTop10 === 'function') {
+            window.renderMoneyPagesSuggestedTop10();
+          }
         };
         
         // CRITICAL: Fetch optimisation statuses for ALL rows before initial render
@@ -28001,158 +28009,97 @@ Final Score: ${score}/100`;
       
       // Attach filter handlers for Money Pages table (Phase 2)
       function attachMoneyPagesFilterHandlers(allRows, onFilterChange) {
-        setTimeout(() => {
-          const categoryFilterEl = document.getElementById('money-pages-filter-category');
-          const subSegmentFilterEl = document.getElementById('money-pages-filter-subsegment');
-          const minImpressionsEl = document.getElementById('money-pages-min-impressions');
-          const copyBtn = document.getElementById('money-pages-copy-urls');
-          const tableContainer = document.getElementById('money-pages-table-container');
-          
-          if (!categoryFilterEl || !subSegmentFilterEl || !minImpressionsEl || !tableContainer) return;
-          
-          // Get zero impressions checkbox
-          const includeZeroEl = document.getElementById('money-pages-include-zero');
-          
-          // Function to apply filters and re-render
-          const applyFilters = async () => {
-            // Re-read checkbox state from DOM (it might have changed)
-            const currentIncludeZeroEl = document.getElementById('money-pages-include-zero');
-            const filterCat = categoryFilterEl.value || 'ALL';
-            const filterSubSeg = subSegmentFilterEl.value || 'ALL';
-            const minImp = parseInt(minImpressionsEl.value, 10) || 0;
-            const includeZero = currentIncludeZeroEl ? currentIncludeZeroEl.checked : (includeZeroEl ? includeZeroEl.checked : true);
-            
-            debugLog(`🔄 applyFilters: includeZero=${includeZero}, filterCat=${filterCat}, filterSubSeg=${filterSubSeg}, minImp=${minImp}`, 'info');
-            
-            // Store filter state globally
+        // Keep latest dataset + callback; use delegation so filters survive table re-renders.
+        window.__moneyPagesOpportunityAllRows = allRows || window.__moneyPagesOpportunityAllRows || [];
+        window.__moneyPagesOpportunityOnFilterChange = onFilterChange || window.__moneyPagesOpportunityOnFilterChange || null;
+
+        if (!window.__moneyPagesOpportunityFiltersDelegationAttached) {
+          window.__moneyPagesOpportunityFiltersDelegationAttached = true;
+
+          document.addEventListener('change', async (e) => {
+            const t = e && e.target ? e.target : null;
+            if (!t || !t.id) return;
+
+            const isFilter =
+              t.id === 'money-pages-filter-category' ||
+              t.id === 'money-pages-filter-subsegment' ||
+              t.id === 'money-pages-min-impressions' ||
+              t.id === 'money-pages-include-zero';
+            if (!isFilter) return;
+
+            const categoryEl = document.getElementById('money-pages-filter-category');
+            const subSegEl = document.getElementById('money-pages-filter-subsegment');
+            const minImpEl = document.getElementById('money-pages-min-impressions');
+            const includeZeroEl = document.getElementById('money-pages-include-zero');
+            if (!categoryEl || !subSegEl || !minImpEl) return;
+
+            const filterCat = categoryEl.value || 'ALL';
+            const filterSubSeg = subSegEl.value || 'ALL';
+            const minImp = parseInt(minImpEl.value, 10) || 0;
+            const includeZero = includeZeroEl ? !!includeZeroEl.checked : true;
+
             window.moneyPagesCategoryFilter = filterCat;
             window.moneyPagesSubSegmentFilter = filterSubSeg;
             window.moneyPagesMinImpressions = minImp;
             window.moneyPagesIncludeZero = includeZero;
-            
-            // Reset to page 1 when filters change
             window.moneyPagesCurrentPage = 1;
-            
-            // Re-render everything with filters (table, chart, KPIs, summary)
-            if (onFilterChange) {
-              await onFilterChange();
-            } else {
-              // Fallback: re-render directly with filtered data
-              const moneyPagesMetrics = window.currentMoneyPagesMetrics;
-              const queryPages = window.currentQueryPages || null;
-              
-              if (!moneyPagesMetrics) return;
-              
-              // Get filtered metrics FIRST
-              const filteredMetrics = getFilteredMoneyPagesMetrics(moneyPagesMetrics);
-              if (!filteredMetrics) return;
-              
-              const filteredRows = filteredMetrics.rows || [];
-              
-              // Update table with FILTERED rows
-              const currentPage = 1;
-              const rowsPerPage = window.moneyPagesRowsPerPage || 10;
-              tableContainer.innerHTML = await renderMoneyPagesTable(filteredRows, currentPage, rowsPerPage);
-              attachMoneyPagesSortHandlers();
-              attachMoneyPagesPaginationHandlers(filteredRows);
-              attachMoneyPagesCopyHandler(filteredRows);
-              // Use original allRows for filter handlers (they need full dataset to filter from)
-              // Get original rows from moneyPagesMetrics
-              const originalRows = moneyPagesMetrics?.rows || allRows;
-              attachMoneyPagesFilterHandlers(originalRows, onFilterChange);
-              
-              // Re-render chart and KPIs with filters
-              setTimeout(() => {
-                // Get queryPages from global storage
-                const queryPages = window.currentQueryPages || null;
-                
-                debugLog(`🔄 Fallback filter change: Recalculating behaviour for ${filteredRows.length} filtered rows`, 'info');
-                debugLog(`🔄 Fallback filter change: queryPages available: ${!!queryPages}, length: ${queryPages?.length || 0}`, 'info');
-                
-                // Update doughnut chart with filtered data
-                renderMoneyPagesCategoryChart(moneyPagesMetrics, 0);
-                
-                // Recalculate behaviour for filtered pages (use all positions for filtered calculations)
-                const filteredBehaviour = window.computeMoneyPagesBehaviour ? 
-                  window.computeMoneyPagesBehaviour(queryPages, filteredRows, true) : null;
-                
-                debugLog(`🔄 Fallback filter change: filteredBehaviour calculated: ${!!filteredBehaviour}, impressions: ${filteredBehaviour?.impressions || 0}`, 'info');
-                
-                // Update all sections
-                renderMoneyPagesBehaviourKpis(filteredBehaviour, filteredMetrics, queryPages);
-                updateMoneyPagesSummaryMetrics(moneyPagesMetrics); // Pass original metrics so function can apply filters internally
-                updateMoneyPagesChartSummary(filteredMetrics);
-                
-                // Update dropdown counts after filtering
-                updateMoneyPagesSubSegmentCounts(moneyPagesMetrics);
-              }, 100);
+
+            // Sync top-level filter when table filter changes.
+            if (t.id === 'money-pages-filter-subsegment') {
+              const topLevelFilterEl = document.getElementById('money-top-level-filter-subsegment');
+              if (topLevelFilterEl && topLevelFilterEl.value !== filterSubSeg) {
+                topLevelFilterEl.value = filterSubSeg;
+              }
             }
-          };
-          
-          // Attach filter change handlers
-          categoryFilterEl.addEventListener('change', applyFilters);
-          subSegmentFilterEl.addEventListener('change', applyFilters);
-          minImpressionsEl.addEventListener('change', applyFilters);
-          if (includeZeroEl) {
-            includeZeroEl.addEventListener('change', applyFilters);
-          }
-          
-          // When table filter changes, update top-level filter (if user changes table filter directly)
-          subSegmentFilterEl.addEventListener('change', () => {
-            const value = subSegmentFilterEl.value;
-            const topLevelFilterEl = document.getElementById('money-top-level-filter-subsegment');
-            if (topLevelFilterEl && topLevelFilterEl.value !== value) {
-              topLevelFilterEl.value = value;
-              window.moneyPagesSubSegmentFilter = value;
+
+            if (typeof window.__moneyPagesOpportunityOnFilterChange === 'function') {
+              await window.__moneyPagesOpportunityOnFilterChange();
             }
-            // Update summary metrics when filter changes
-            const moneyPagesMetrics = window.currentMoneyPagesMetrics || window.moneyPagesMetrics;
-            if (moneyPagesMetrics && typeof updateMoneyPagesSummaryMetrics === 'function') {
-              updateMoneyPagesSummaryMetrics(moneyPagesMetrics);
+
+            if (typeof window.renderMoneyPagesSuggestedTop10 === 'function') {
+              window.renderMoneyPagesSuggestedTop10();
             }
           });
-          
-          // Update copy button to use filtered data
-          if (copyBtn) {
-            const newCopyBtn = copyBtn.cloneNode(true);
-            copyBtn.parentNode.replaceChild(newCopyBtn, copyBtn);
-            newCopyBtn.addEventListener('click', async () => {
-              const filterCat = categoryFilterEl.value || 'ALL';
-              const filterSubSeg = subSegmentFilterEl.value || 'ALL';
-              const minImp = parseInt(minImpressionsEl.value, 10) || 0;
-              const includeZero = includeZeroEl ? includeZeroEl.checked : true;
-              
-              const filtered = (allRows || []).filter(row => {
-                const matchCat = filterCat === 'ALL' || row.category === filterCat;
-                const matchSubSeg = filterSubSeg === 'ALL' || row.subSegment === filterSubSeg;
-                const matchImp = (row.impressions || 0) >= minImp;
-                const matchZero = includeZero || (row.impressions || 0) > 0;
-                return matchCat && matchSubSeg && matchImp && matchZero;
-              });
-              
-              const urls = filtered.map(r => r.url).join('\n');
-              if (urls) {
-                try {
-                  await navigator.clipboard.writeText(urls);
-                  newCopyBtn.textContent = 'Copied!';
-                  newCopyBtn.style.color = '#10b981';
-                  setTimeout(() => {
-                    newCopyBtn.textContent = 'Copy current URLs';
-                    newCopyBtn.style.color = 'white';
-                  }, 2000);
-                } catch (err) {
-                  newCopyBtn.textContent = 'Copy failed';
-                  newCopyBtn.style.color = '#ef4444';
-                  setTimeout(() => {
-                    newCopyBtn.textContent = 'Copy current URLs';
-                    newCopyBtn.style.color = 'white';
-                  }, 2000);
-                }
-              }
+
+          document.addEventListener('click', async (e) => {
+            const t = e && e.target ? e.target : null;
+            if (!t || t.id !== 'money-pages-copy-urls') return;
+
+            const categoryEl = document.getElementById('money-pages-filter-category');
+            const subSegEl = document.getElementById('money-pages-filter-subsegment');
+            const minImpEl = document.getElementById('money-pages-min-impressions');
+            const includeZeroEl = document.getElementById('money-pages-include-zero');
+
+            const filterCat = categoryEl ? (categoryEl.value || 'ALL') : (window.moneyPagesCategoryFilter || 'ALL');
+            const filterSubSeg = subSegEl ? (subSegEl.value || 'ALL') : (window.moneyPagesSubSegmentFilter || 'ALL');
+            const minImp = minImpEl ? (parseInt(minImpEl.value, 10) || 0) : (window.moneyPagesMinImpressions || 0);
+            const includeZero = includeZeroEl ? !!includeZeroEl.checked : (window.moneyPagesIncludeZero !== false);
+
+            const all = Array.isArray(window.__moneyPagesOpportunityAllRows) ? window.__moneyPagesOpportunityAllRows : [];
+            const filtered = all.filter(row => {
+              const matchCat = filterCat === 'ALL' || row.category === filterCat;
+              const matchSubSeg = filterSubSeg === 'ALL' || row.subSegment === filterSubSeg;
+              const matchImp = (row.impressions || 0) >= minImp;
+              const matchZero = includeZero || (row.impressions || 0) > 0;
+              return matchCat && matchSubSeg && matchImp && matchZero;
             });
-          }
-        }, 50);
-        
+
+            const urls = filtered.map(r => r.url).join('\n');
+            if (!urls) return;
+
+            const btn = t;
+            const prevText = btn.textContent;
+            try {
+              await navigator.clipboard.writeText(urls);
+              btn.textContent = 'Copied!';
+              setTimeout(() => { btn.textContent = prevText; }, 1500);
+            } catch (err) {
+              btn.textContent = 'Copy failed';
+              setTimeout(() => { btn.textContent = prevText; }, 1500);
+            }
+          });
+        }
+
         // Wire up Create Tasks button after rendering completes
         setTimeout(() => {
           if (typeof wireMoneyPagesCreateTasksButton === 'function') {
@@ -30755,13 +30702,56 @@ Final Score: ${score}/100`;
         const container = document.getElementById('money-pages-suggested-top10-container');
         if (!container) return;
 
-        const all = Array.isArray(window.moneyPagePriorityData) ? window.moneyPagePriorityData : [];
-        const subSeg = String(window.moneyPagesSubSegmentFilter || 'ALL').toUpperCase();
-        const wantedType = subSeg === 'ALL' ? null : subSeg.toLowerCase();
+        // Source of truth for Suggested: align to Opportunity table's CURRENT filtered rows.
+        const tableRows = Array.isArray(window.moneyPagesOpportunityFilteredRows) ? window.moneyPagesOpportunityFilteredRows : [];
+        const priorityRows = Array.isArray(window.moneyPagePriorityData) ? window.moneyPagePriorityData : [];
 
-        const candidates = all
-          .filter(p => p && p.url && p.segmentType !== 'authority')
-          .filter(p => !wantedType || String(p.segmentType || '').toLowerCase() === wantedType);
+        const norm = (u) => normalizeUrlForDedupe
+          ? normalizeUrlForDedupe(u)
+          : String(u || '').toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+
+        const priorityByUrl = new Map(priorityRows.filter(p => p && p.url).map(p => [norm(p.url), p]));
+
+        const candidates = (tableRows && tableRows.length > 0)
+          ? tableRows
+              .filter(r => r && r.url)
+              .map(r => {
+                const p = priorityByUrl.get(norm(r.url)) || null;
+                const segmentType = (p?.segmentType || r.subSegment || r.segmentType || 'landing');
+
+                // If priority data exists, use it. Otherwise derive basic levels.
+                const derivedDifficulty = (() => {
+                  const pos = Number(r.avgPosition || 0);
+                  if (pos <= 6) return 'LOW';
+                  if (pos <= 12) return 'MEDIUM';
+                  return 'HIGH';
+                })();
+
+                const derivedPriority = (() => {
+                  // Use category from Opportunity table if available.
+                  const cat = String(r.category || '').toUpperCase();
+                  if (cat === 'HIGH_OPPORTUNITY') return 'HIGH';
+                  if (cat === 'VISIBILITY_FIX') return 'MEDIUM';
+                  return 'LOW';
+                })();
+
+                return {
+                  url: r.url,
+                  title: r.title || p?.title || r.url,
+                  segmentType: String(segmentType).toLowerCase(),
+                  impressions: Number(r.impressions || 0),
+                  clicks: Number(r.clicks || 0),
+                  ctr: r.ctr != null ? Number(r.ctr) : null,
+                  avgPosition: r.avgPosition != null ? Number(r.avgPosition) : null,
+                  // Levels used by the card renderer
+                  difficultyLevel: (p?.difficultyLevel || derivedDifficulty),
+                  priorityLevel: (p?.priorityLevel || derivedPriority),
+                  impactLevel: (p?.impactLevel || 'MEDIUM'),
+                  suggestion: (p?.suggestion || r.recommendedAction || r.opportunityText || null)
+                };
+              })
+          : priorityRows
+              .filter(p => p && p.url && p.segmentType !== 'authority');
 
         if (candidates.length === 0) {
           container.innerHTML = '<p style="padding: 1.5rem; text-align: center; color: #64748b;">No suggested pages for this filter.</p>';
@@ -30773,22 +30763,28 @@ Final Score: ${score}/100`;
         const impactRank = { HIGH: 0, MEDIUM: 1, LOW: 2 };
         const diffRank = { LOW: 0, MEDIUM: 1, HIGH: 2 };
 
+        // Rank Suggested primarily by impressions (matches Opportunity table expectation),
+        // with secondary tie-breaks for priority/impact/difficulty when available.
         const top10 = candidates
           .slice()
           .sort((a, b) => {
+            const ia = Number(a.impressions || 0);
+            const ib = Number(b.impressions || 0);
+            if (ib !== ia) return ib - ia;
+
             const pa = rank(a.priorityLevel, priorityRank);
             const pb = rank(b.priorityLevel, priorityRank);
             if (pa !== pb) return pa - pb;
 
-            const ia = rank(a.impactLevel, impactRank);
-            const ib = rank(b.impactLevel, impactRank);
-            if (ia !== ib) return ia - ib;
+            const impa = rank(a.impactLevel, impactRank);
+            const impb = rank(b.impactLevel, impactRank);
+            if (impa !== impb) return impa - impb;
 
             const da = rank(a.difficultyLevel, diffRank);
             const db = rank(b.difficultyLevel, diffRank);
             if (da !== db) return da - db;
 
-            return Number(b.impressions || 0) - Number(a.impressions || 0);
+            return Number(b.clicks || 0) - Number(a.clicks || 0);
           })
           .slice(0, 10);
 
