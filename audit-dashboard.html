@@ -11810,6 +11810,60 @@
         return { text: '0', color: '#f59e0b' }; // No change - amber
       };
 
+      // AI metrics for URL-only tasks (derived from Ranking & AI cited-URL lists).
+      // This answers: "Is THIS page URL cited in AI Overviews, and how many citation items point to it?"
+      // NOTE: AI data is keyword-driven, but citations can be attributed to pages by scanning cited URLs.
+      window.getRankingAiCombinedRows = window.getRankingAiCombinedRows || function getRankingAiCombinedRows() {
+        try {
+          if (typeof RankingAiModule !== 'undefined' && RankingAiModule.state) {
+            const s = RankingAiModule.state();
+            if (s && Array.isArray(s.combinedRows) && s.combinedRows.length > 0) return s.combinedRows;
+          }
+        } catch {
+          // ignore
+        }
+        if (Array.isArray(window.rankingAiData) && window.rankingAiData.length > 0) return window.rankingAiData;
+        try {
+          const local = localStorage.getItem('rankingAiData');
+          if (local) {
+            const parsed = JSON.parse(local);
+            if (parsed && Array.isArray(parsed.combinedRows)) return parsed.combinedRows;
+          }
+        } catch {
+          // ignore
+        }
+        return [];
+      };
+
+      window.computeAiMetricsForPageUrl = window.computeAiMetricsForPageUrl || function computeAiMetricsForPageUrl(pageUrl, combinedRows) {
+        const rows = Array.isArray(combinedRows) ? combinedRows : [];
+        const canonTarget = (typeof normalizeGscPageKey === 'function')
+          ? normalizeGscPageKey(pageUrl || '')
+          : String(pageUrl || '').split('?')[0].split('#')[0].replace(/\/$/, '');
+        if (!canonTarget || rows.length === 0) return { ai_overview: false, ai_citations: null };
+
+        let citations = 0;
+        let overviewOn = false;
+        rows.forEach(r => {
+          const cited = r.ai_alan_citations || r.aiAlanCitations || [];
+          if (!Array.isArray(cited) || cited.length === 0) return;
+          const rowHasOverview = r.has_ai_overview === true || r.ai_overview_present_any === true;
+          cited.forEach(v => {
+            const u = typeof v === 'string' ? v : (v && typeof v === 'object' ? v.url : null);
+            if (!u) return;
+            const canon = (typeof normalizeGscPageKey === 'function')
+              ? normalizeGscPageKey(String(u))
+              : String(u).split('?')[0].split('#')[0].replace(/\/$/, '');
+            if (canon && canon === canonTarget) {
+              citations += 1;
+              if (rowHasOverview) overviewOn = true;
+            }
+          });
+        });
+
+        return { ai_overview: overviewOn, ai_citations: citations };
+      };
+
       // Build metrics table
       const metrics = [
         { label: 'Clicks (28d)', baselineKey: 'gsc_clicks_28d', latestKey: 'gsc_clicks_28d', higherIsBetter: true },
@@ -12928,15 +12982,20 @@
                 const totalsJson = await totalsRes.json().catch(() => null);
                 const totals = totalsRes.ok && totalsJson && totalsJson.status === 'ok' ? totalsJson.data : null;
                 if (totals) {
+                  const aiRows = (typeof window.getRankingAiCombinedRows === 'function') ? window.getRankingAiCombinedRows() : [];
+                  const aiForUrl = (typeof window.computeAiMetricsForPageUrl === 'function')
+                    ? window.computeAiMetricsForPageUrl(pageUrlForGsc, aiRows)
+                    : { ai_overview: false, ai_citations: null };
                   currentMetrics = {
                     gsc_clicks_28d: Number(totals.clicks || 0),
                     gsc_impressions_28d: Number(totals.impressions || 0),
                     gsc_ctr_28d: Number(totals.ctr || 0) / 100,
                     current_rank: totals.position != null ? Number(totals.position) : null,
                     opportunity_score: null,
-                    ai_overview: false,
-                    ai_citations: 0,
-                    ai_citations_total: 0,
+                    ai_overview: !!aiForUrl.ai_overview,
+                    // If ranking data isn't available, keep as null so UI shows "—" (unknown) rather than 0 (false negative).
+                    ai_citations: aiForUrl.ai_citations != null ? Number(aiForUrl.ai_citations) : null,
+                    ai_citations_total: null,
                     classic_ranking_url: pageUrlForGsc,
                     page_type: task.page_type || null,
                     segment: task.segment || 'money_pages',
@@ -13108,9 +13167,14 @@
                   gsc_ctr_28d: ctrValue, // Normalized to ratio (0-1)
                   current_rank: moneyPageRow.avg_position || moneyPageRow.position || null,
                   opportunity_score: null,
-                  ai_overview: false,
-                  ai_citations: 0,
-                  ai_citations_total: 0,
+                  // Derive AI metrics from cited URLs if ranking data is available
+                  ai_overview: (typeof window.computeAiMetricsForPageUrl === 'function')
+                    ? !!window.computeAiMetricsForPageUrl(moneyPageRow.url || moneyPageRow.page_url || taskUrl, (typeof window.getRankingAiCombinedRows === 'function') ? window.getRankingAiCombinedRows() : []).ai_overview
+                    : false,
+                  ai_citations: (typeof window.computeAiMetricsForPageUrl === 'function')
+                    ? (window.computeAiMetricsForPageUrl(moneyPageRow.url || moneyPageRow.page_url || taskUrl, (typeof window.getRankingAiCombinedRows === 'function') ? window.getRankingAiCombinedRows() : []).ai_citations ?? null)
+                    : null,
+                  ai_citations_total: null,
                   classic_ranking_url: moneyPageRow.url || moneyPageRow.page_url || taskUrl,
                   page_type: moneyPageRow.page_type || moneyPageRow.type || null,
                   segment: 'money_pages',
@@ -13157,9 +13221,13 @@
                         gsc_ctr_28d: ctrValue, // Normalized to ratio (0-1)
                         current_rank: moneyPageRow.avg_position || moneyPageRow.position || null,
                         opportunity_score: null,
-                        ai_overview: false,
-                        ai_citations: 0,
-                        ai_citations_total: 0,
+                        ai_overview: (typeof window.computeAiMetricsForPageUrl === 'function')
+                          ? !!window.computeAiMetricsForPageUrl(moneyPageRow.url || moneyPageRow.page_url || taskUrl, (typeof window.getRankingAiCombinedRows === 'function') ? window.getRankingAiCombinedRows() : []).ai_overview
+                          : false,
+                        ai_citations: (typeof window.computeAiMetricsForPageUrl === 'function')
+                          ? (window.computeAiMetricsForPageUrl(moneyPageRow.url || moneyPageRow.page_url || taskUrl, (typeof window.getRankingAiCombinedRows === 'function') ? window.getRankingAiCombinedRows() : []).ai_citations ?? null)
+                          : null,
+                        ai_citations_total: null,
                         classic_ranking_url: moneyPageRow.url || moneyPageRow.page_url || taskUrl,
                         page_type: moneyPageRow.page_type || moneyPageRow.type || null,
                         segment: 'money_pages',
@@ -13544,12 +13612,19 @@
                 const totalsJson = await totalsRes.json().catch(() => null);
                 const totals = totalsRes.ok && totalsJson && totalsJson.status === 'ok' ? totalsJson.data : null;
                 if (totals) {
+                  const aiRows = (typeof window.getRankingAiCombinedRows === 'function') ? window.getRankingAiCombinedRows() : [];
+                  const aiForUrl = (typeof window.computeAiMetricsForPageUrl === 'function')
+                    ? window.computeAiMetricsForPageUrl(pageUrlForGsc, aiRows)
+                    : { ai_overview: false, ai_citations: null };
                   currentMetrics = {
                     gsc_clicks_28d: Number(totals.clicks || 0),
                     gsc_impressions_28d: Number(totals.impressions || 0),
                     gsc_ctr_28d: Number(totals.ctr || 0) / 100,
                     current_rank: totals.position != null ? Number(totals.position) : null,
                     classic_ranking_url: pageUrlForGsc,
+                    ai_overview: !!aiForUrl.ai_overview,
+                    ai_citations: aiForUrl.ai_citations != null ? Number(aiForUrl.ai_citations) : null,
+                    ai_citations_total: null,
                     segment: task.segment || 'money_pages',
                     captured_at: new Date().toISOString()
                   };
@@ -13780,15 +13855,18 @@
                   }
                   // If CTR is <= 1, assume it's already a ratio (0-1)
                 }
+                const aiForUrl = (typeof window.computeAiMetricsForPageUrl === 'function')
+                  ? window.computeAiMetricsForPageUrl(moneyPageRow.url || moneyPageRow.page_url || taskUrl, combinedRows)
+                  : { ai_overview: false, ai_citations: null };
                 currentMetrics = {
                   gsc_clicks_28d: moneyPageRow.clicks || moneyPageRow.clicks_28d || null,
                   gsc_impressions_28d: moneyPageRow.impressions || moneyPageRow.impressions_28d || null,
                   gsc_ctr_28d: ctrValue, // Normalized to ratio (0-1)
                   current_rank: moneyPageRow.avg_position || moneyPageRow.position || null,
                   opportunity_score: null,
-                  ai_overview: false,
-                  ai_citations: 0,
-                  ai_citations_total: 0,
+                  ai_overview: !!aiForUrl.ai_overview,
+                  ai_citations: aiForUrl.ai_citations != null ? Number(aiForUrl.ai_citations) : null,
+                  ai_citations_total: null,
                   classic_ranking_url: moneyPageRow.url || moneyPageRow.page_url || taskUrl,
                   page_type: moneyPageRow.page_type || moneyPageRow.type || null,
                   segment: 'money_pages',
@@ -13826,15 +13904,18 @@
                         }
                         // If CTR is <= 1, assume it's already a ratio (0-1)
                       }
+                      const aiForUrl = (typeof window.computeAiMetricsForPageUrl === 'function')
+                        ? window.computeAiMetricsForPageUrl(moneyPageRow.url || moneyPageRow.page_url || taskUrl, combinedRows)
+                        : { ai_overview: false, ai_citations: null };
                       currentMetrics = {
                         gsc_clicks_28d: moneyPageRow.clicks || moneyPageRow.clicks_28d || null,
                         gsc_impressions_28d: moneyPageRow.impressions || moneyPageRow.impressions_28d || null,
                         gsc_ctr_28d: ctrValue, // Normalized to ratio (0-1)
                         current_rank: moneyPageRow.avg_position || moneyPageRow.position || null,
                         opportunity_score: null,
-                        ai_overview: false,
-                        ai_citations: 0,
-                        ai_citations_total: 0,
+                        ai_overview: !!aiForUrl.ai_overview,
+                        ai_citations: aiForUrl.ai_citations != null ? Number(aiForUrl.ai_citations) : null,
+                        ai_citations_total: null,
                         classic_ranking_url: moneyPageRow.url || moneyPageRow.page_url || taskUrl,
                         page_type: moneyPageRow.page_type || moneyPageRow.type || null,
                         segment: 'money_pages',
