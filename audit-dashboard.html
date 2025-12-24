@@ -31834,9 +31834,9 @@ Final Score: ${score}/100`;
           window.moneyPagesRateChart = null;
         }
         
-        // Prevent re-rendering if charts are already being created
+        // Prevent re-rendering loops: if a render is in progress, queue the latest request and run it after.
         if (window.moneyPagesChartsRendering) {
-          debugLog('⚠ Money Pages charts already rendering, skipping...', 'warn');
+          window.moneyPagesChartsPending = { history, timeseries };
           return;
         }
         window.moneyPagesChartsRendering = true;
@@ -32275,11 +32275,7 @@ Final Score: ${score}/100`;
               if (derived != null) behaviourScore = derived;
             }
             
-            // Debug logging for Dec 14 specifically
-            if (dateStr === '2025-12-14') {
-              debugLog(`Money Pages Trend: Dec 14 extraction - record found: ${!!record}, segmentMetrics: ${!!segmentMetrics}, allMoney: ${!!allMoney}, clicks: ${clicks}, impressions: ${impressions}`, 'info');
-              debugLog(`Money Pages Trend: Dec 14 raw data - segmentMetrics: ${JSON.stringify(segmentMetrics)}, allMoney: ${JSON.stringify(allMoney)}`, 'info');
-            }
+            // (Removed noisy Dec 14 debug logging that referenced undefined locals and could crash rendering)
             
             // Track first available values (for backward-filling)
             if (firstClicks == null && clicks != null) firstClicks = clicks;
@@ -32647,6 +32643,18 @@ Final Score: ${score}/100`;
           
           debugLog('✓ Money Pages trend charts rendered successfully', 'success');
           window.moneyPagesChartsRendering = false;
+
+          if (window.moneyPagesChartsPending) {
+            const pending = window.moneyPagesChartsPending;
+            window.moneyPagesChartsPending = null;
+            setTimeout(() => {
+              try {
+                renderMoneyPagesTrendChart(pending.history, pending.timeseries);
+              } catch (e) {
+                // ignore
+              }
+            }, 0);
+          }
         } catch (error) {
           window.moneyPagesChartsRendering = false;
           debugLog(`✗ Error creating Money Pages trend charts: ${error.message}`, 'error');
@@ -35697,7 +35705,13 @@ Final Score: ${score}/100`;
                     const isSuspicious = pageCount > 0 && pageCount < minAcceptablePages;
                     
                     if (isSuspicious) {
-                      debugLog(`[Audit Validation] ⚠️ Marking audit ${record.date} as suspicious: ${pageCount} pages (expected ~${medianPageCount})`, 'warn');
+                      // De-noise: only log each suspicious date once per page load.
+                      window.__auditValidationWarnedDates = window.__auditValidationWarnedDates || new Set();
+                      const k = String(record.date || '').split('T')[0];
+                      if (!window.__auditValidationWarnedDates.has(k)) {
+                        window.__auditValidationWarnedDates.add(k);
+                        debugLog(`[Audit Validation] ⚠️ Marking audit ${record.date} as suspicious: ${pageCount} pages (expected ~${medianPageCount})`, 'warn');
+                      }
                       record._isPartialAudit = true;
                       record._partialReason = `Low page count: ${pageCount} pages (expected ~${medianPageCount})`;
                     }
