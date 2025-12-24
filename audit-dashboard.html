@@ -7544,12 +7544,36 @@
 
       // CTR (28d) - stored as ratio (0-1), compare as percentage points
       if (metricKey === 'ctr_28d') {
-        // Normalize: some legacy rows store CTR as percent (0-100) or 1.0 meaning "1%".
-        // Our canonical internal format is ratio (0-1). Keep classifier consistent with table formatting.
-        let baselineRatio = Number(baselineValue);
-        let latestRatio = Number(latestValue);
-        if (isFinite(baselineRatio) && Math.abs(baselineRatio) > 1) baselineRatio = baselineRatio / 100;
-        if (isFinite(latestRatio) && Math.abs(latestRatio) > 1) latestRatio = latestRatio / 100;
+        // Normalize CTR to a ratio (0-1).
+        // Legacy data sometimes stores CTR as a percent in the 1..100 range (including 1.00 meaning 1%).
+        const normalizeCtrRatio = (raw, measurement) => {
+          const v = Number(raw);
+          if (!isFinite(v)) return null;
+
+          // Canonical ratio
+          if (v >= 0 && v < 1) return v;
+
+          // Likely percent
+          if (v >= 1 && v <= 100) {
+            // Edge case: some legitimate CTR ratios could be exactly 1.0 (100%) for tiny impression counts.
+            // If clicks==impressions and impressions are very small, treat 1.0 as ratio; otherwise treat as 1%.
+            if (v === 1) {
+              const impr = getMetricValue(measurement, 'impressions_28d');
+              const clicks = getMetricValue(measurement, 'clicks_28d');
+              if (impr != null && clicks != null && Number(impr) > 0 && Number(impr) <= 10 && Number(clicks) === Number(impr)) {
+                return 1;
+              }
+            }
+            return v / 100;
+          }
+
+          // Fallback
+          return v;
+        };
+
+        const baselineRatio = normalizeCtrRatio(baselineValue, baseline);
+        const latestRatio = normalizeCtrRatio(latestValue, latest);
+        if (baselineRatio == null || latestRatio == null) return null;
 
         // Match what the UI shows: baseline/latest are displayed to 2dp (%) in the task table/drawer.
         // If they render equal, classify as 'same' (avoid confusing "Better" due to tiny precision noise).
@@ -7822,6 +7846,21 @@
             // DEBUG: Log classification for all tasks with objectives
             if (typeof debugLog === 'function' && task.objectiveKpiKey) {
               debugLog(`[Traffic Lights] ${metricKey}: baselineValue=${baselineValue}, latestValue=${latestValue}, classification=${classification || 'null'}, taskObjectiveMetricKey=${taskObjectiveMetricKey}`, 'info');
+            }
+
+            // Extra precision debug for the Coventry task (helps confirm whether "4.7k" hides a real delta)
+            if (typeof debugLog === 'function' && metricKey === 'ctr_28d') {
+              const tu = String(task.target_url || '');
+              if (tu.includes('photography-courses-coventry')) {
+                const bImpr = getMetricValue(baselineLatest.baseline, 'impressions_28d');
+                const lImpr = getMetricValue(baselineLatest.latest, 'impressions_28d');
+                const bClk = getMetricValue(baselineLatest.baseline, 'clicks_28d');
+                const lClk = getMetricValue(baselineLatest.latest, 'clicks_28d');
+                debugLog(
+                  `[Traffic Lights][Coventry] raw ctr baseline=${baselineValue} latest=${latestValue} | impr baseline=${bImpr} latest=${lImpr} | clicks baseline=${bClk} latest=${lClk} | classification=${classification}`,
+                  'info'
+                );
+              }
             }
 
             if (classification) {
