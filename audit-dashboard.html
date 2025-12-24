@@ -5943,6 +5943,12 @@
       // Get cleaned URL from dataset (already cleaned when modal opened)
       let targetUrl = modal.dataset.rowUrl || '';
       // Double-check it's cleaned (in case it was modified elsewhere)
+      // NOTE: Don't rely on scheme-less display URLs for GSC fetches.
+      // GSC "page" filters expect full absolute URLs (https://...). We'll compute that once here.
+      const propertyForAbs = document.getElementById('propertyUrl')?.value ||
+        localStorage.getItem('gsc_property_url') ||
+        localStorage.getItem('last_property_url') || '';
+      const targetUrlAbs = toAbsoluteUrlForGsc(targetUrl, propertyForAbs);
       targetUrl = window.cleanUrlForDisplay(targetUrl);
       const taskType = modal.dataset.taskType || document.getElementById('track-task-type').value;
       const status = document.getElementById('track-status').value;
@@ -5998,6 +6004,7 @@
             // Measurements pull from `window.moneyPagesMetrics.rows` (latest audit), so prefer that over
             // any stale rowData captured when the modal was opened.
             const taskUrl = rowData.url || rowData.targetUrl || targetUrl || '';
+            const taskUrlAbs = toAbsoluteUrlForGsc(taskUrl, propertyForAbs);
             const norm = (u) => normalizeUrlForDedupe
               ? normalizeUrlForDedupe(u)
               : String(u || '').toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
@@ -6017,7 +6024,8 @@
                   localStorage.getItem('gsc_property_url') ||
                   localStorage.getItem('last_property_url') || '';
                 if (property) {
-                  const totalsRes = await fetch(apiUrl(`/api/aigeo/gsc-page-totals?property=${encodeURIComponent(property)}&pageUrl=${encodeURIComponent(taskUrl)}`));
+                  const pageUrlForGsc = toAbsoluteUrlForGsc(taskUrl, property);
+                  const totalsRes = await fetch(apiUrl(`/api/aigeo/gsc-page-totals?property=${encodeURIComponent(property)}&pageUrl=${encodeURIComponent(pageUrlForGsc)}`));
                   const totalsJson = await totalsRes.json().catch(() => null);
                   const totals = totalsRes.ok && totalsJson && totalsJson.status === 'ok' ? totalsJson.data : null;
                   if (totals) {
@@ -6027,7 +6035,7 @@
                       // gsc-page-totals returns CTR as percentage (0-100) — convert to ratio for storage
                       gsc_ctr_28d: Number(totals.ctr || 0) / 100,
                       gsc_position_28d: totals.position != null ? Number(totals.position) : null,
-                      classic_ranking_url: taskUrl,
+                      classic_ranking_url: pageUrlForGsc,
                       segment: 'money_pages',
                       captured_at: new Date().toISOString()
                     };
@@ -6052,7 +6060,7 @@
                   return n;
                 })(),
                 gsc_position_28d: src.avgPosition != null ? src.avgPosition : (src.position != null ? src.position : (src.position_28d || null)),
-                classic_ranking_url: taskUrl || null,
+                classic_ranking_url: taskUrlAbs || taskUrl || null,
                 segment: src.segment || 'money_pages',
                 captured_at: new Date().toISOString()
               };
@@ -6101,7 +6109,8 @@
         // Debug: Log what we're sending
         const requestBody = {
           keyword_text: keyword || '', // Empty for page-level tasks
-            target_url: targetUrl,
+            // Store full URL for Money Pages (page-level) tasks so measurements/baselines match GSC exactly.
+            target_url: source === 'money_pages' ? (targetUrlAbs || targetUrl) : targetUrl,
             task_type: taskType,
             status: status,
             title: title || null,
@@ -12896,7 +12905,8 @@
                 const range = (typeof getGscDateRange === 'function') ? getGscDateRange(28, 2) : null;
                 const startDate = range?.startDate ? `&startDate=${encodeURIComponent(range.startDate)}` : '';
                 const endDate = range?.endDate ? `&endDate=${encodeURIComponent(range.endDate)}` : '';
-                const totalsUrl = apiUrl(`/api/aigeo/gsc-page-totals?property=${encodeURIComponent(property)}&pageUrl=${encodeURIComponent(taskUrlForPage)}${startDate}${endDate}`);
+                const pageUrlForGsc = toAbsoluteUrlForGsc(taskUrlForPage, property);
+                const totalsUrl = apiUrl(`/api/aigeo/gsc-page-totals?property=${encodeURIComponent(property)}&pageUrl=${encodeURIComponent(pageUrlForGsc)}${startDate}${endDate}`);
                 const totalsRes = await fetch(totalsUrl);
                 const totalsJson = await totalsRes.json().catch(() => null);
                 const totals = totalsRes.ok && totalsJson && totalsJson.status === 'ok' ? totalsJson.data : null;
@@ -12910,7 +12920,7 @@
                     ai_overview: false,
                     ai_citations: 0,
                     ai_citations_total: 0,
-                    classic_ranking_url: taskUrlForPage,
+                    classic_ranking_url: pageUrlForGsc,
                     page_type: task.page_type || null,
                     segment: task.segment || 'money_pages',
                     captured_at: new Date().toISOString()
@@ -13511,7 +13521,8 @@
                 const range = (typeof getGscDateRange === 'function') ? getGscDateRange(28, 2) : null;
                 const startDate = range?.startDate ? `&startDate=${encodeURIComponent(range.startDate)}` : '';
                 const endDate = range?.endDate ? `&endDate=${encodeURIComponent(range.endDate)}` : '';
-                const totalsUrl = apiUrl(`/api/aigeo/gsc-page-totals?property=${encodeURIComponent(property)}&pageUrl=${encodeURIComponent(taskUrlForPage)}${startDate}${endDate}`);
+                const pageUrlForGsc = toAbsoluteUrlForGsc(taskUrlForPage, property);
+                const totalsUrl = apiUrl(`/api/aigeo/gsc-page-totals?property=${encodeURIComponent(property)}&pageUrl=${encodeURIComponent(pageUrlForGsc)}${startDate}${endDate}`);
                 const totalsRes = await fetch(totalsUrl);
                 const totalsJson = await totalsRes.json().catch(() => null);
                 const totals = totalsRes.ok && totalsJson && totalsJson.status === 'ok' ? totalsJson.data : null;
@@ -13521,7 +13532,7 @@
                     gsc_impressions_28d: Number(totals.impressions || 0),
                     gsc_ctr_28d: Number(totals.ctr || 0) / 100,
                     current_rank: totals.position != null ? Number(totals.position) : null,
-                    classic_ranking_url: taskUrlForPage,
+                    classic_ranking_url: pageUrlForGsc,
                     segment: task.segment || 'money_pages',
                     captured_at: new Date().toISOString()
                   };
@@ -14213,6 +14224,33 @@
         startDate: formatDate(start),
         endDate: formatDate(end)
       };
+    }
+
+    /**
+     * GSC "page" dimension expects a FULL absolute URL (including https://).
+     * Our UI often stores/displays URLs without a scheme (e.g. "www.example.com/path"),
+     * so normalize before calling any GSC-backed endpoints.
+     */
+    function toAbsoluteUrlForGsc(inputUrl, propertyUrl = '') {
+      const raw = String(inputUrl || '').trim();
+      if (!raw) return '';
+      if (/^https?:\/\//i.test(raw)) return raw;
+      if (/^\/\//.test(raw)) return `https:${raw}`;
+
+      // If it's a path, join to property origin.
+      if (raw.startsWith('/')) {
+        try {
+          const base = String(propertyUrl || '').trim();
+          const baseAbs = /^https?:\/\//i.test(base) ? base : (base ? `https://${base}` : 'https://www.alanranger.com');
+          const u = new URL(baseAbs);
+          return `${u.origin}${raw}`;
+        } catch (e) {
+          return `https://www.alanranger.com${raw}`;
+        }
+      }
+
+      // Otherwise assume it's host[/path] and prepend https://
+      return `https://${raw}`;
     }
     
     function safeSetLocalStorage(key, value) {
@@ -15248,37 +15286,54 @@
                 const imps = Number(page.impressions || 0);
                 const ctrPct = imps > 0 ? ((clicks / imps) * 100) : ((actualCtrForRow(page) || 0) * 100);
                 
+                const impactLevel = (page.impactLevel || (impactScore >= 66 ? 'HIGH' : impactScore >= 33 ? 'MEDIUM' : 'LOW')).toUpperCase();
+                const impactColors = { LOW: '#10b981', MEDIUM: '#f59e0b', HIGH: '#ef4444' };
+                const impactColor = impactColors[impactLevel] || '#64748b';
+                const typeLabel = (page.segmentType || 'landing').toLowerCase();
+
                 return `
-                  <div class="suggested-card" style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 1rem; box-shadow: 0 1px 2px rgba(0,0,0,0.06); ${isOptimized ? 'border-left: 4px solid #10b981;' : ''}">
-                    ${isOptimized ? `<div style="background: #dcfce7; color: #166534; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 700; margin-bottom: 0.75rem;">✓ Being Optimised</div>` : ''}
-                    <div style="margin-bottom: 0.5rem;">
-                      <div style="font-size: 0.95rem; font-weight: 800; color: #0f172a; line-height: 1.25; margin-bottom: 0.25rem;">
-                        ${escapeHtml(page.title || page.url || 'Untitled Page')}
+                  <div class="suggested-card" style="background: white; border: 2px solid #e2e8f0; border-radius: 8px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem;">
+                      <div style="flex: 1; min-width: 0;">
+                        <h4 style="margin: 0 0 0.5rem 0; font-size: 1rem; font-weight: 700; color: #1e293b; line-height: 1.4;">
+                          ${escapeHtml(page.title || page.url || 'Untitled Page')}
+                        </h4>
+                        <a href="${page.url}" target="_blank" style="font-size: 0.85rem; color: #2563eb; text-decoration: none; word-break: break-all;">${page.url}</a>
                       </div>
-                      <a href="${page.url}" target="_blank" style="font-size: 0.75rem; color: #2563eb; text-decoration: none; word-break: break-all;">${page.url}</a>
-                    </div>
-                    <div style="display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
-                      <span style="padding: 0.2rem 0.45rem; background: #e2e8f0; border-radius: 4px; font-size: 0.7rem; color: #334155; font-weight: 700;">${(page.segmentType || 'landing').toLowerCase()}</span>
-                      <span style="padding: 0.2rem 0.45rem; background: ${difficultyColor}20; color: ${difficultyColor}; border-radius: 4px; font-size: 0.7rem; font-weight: 800;">${page.difficultyLevel || 'MED'}</span>
-                    </div>
-
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.35rem 0.75rem; font-size: 0.75rem; color: #334155; margin-bottom: 0.75rem;">
-                      <div><span style="color:#64748b;">Pos:</span> <span style="font-weight: 800; color:#0f172a;">${(page.avgPosition || 0).toFixed(1)}</span></div>
-                      <div><span style="color:#64748b;">CTR:</span> <span style="font-weight: 800; color:#0f172a;">${(ctrPct || 0).toFixed(1)}%</span></div>
-                      <div><span style="color:#64748b;">Impr:</span> <span style="font-weight: 800; color:#0f172a;">${(page.impressions || 0).toLocaleString()}</span></div>
-                      <div><span style="color:#64748b;">Upside:</span> <span style="font-weight: 800; color:#0f172a;">${potentialClicks28d.toLocaleString()}</span></div>
-                      <div><span style="color:#64748b;">Impact:</span> <span style="font-weight: 800; color:#0f172a;">${Math.round(impactScore)}</span></div>
-                      <div><span style="color:#64748b;">Difficulty:</span> <span style="font-weight: 800; color:${difficultyColor};">${page.difficultyLevel || 'MED'}</span></div>
+                      <div style="display: flex; flex-direction: column; gap: 0.35rem; align-items: flex-end; margin-left: 0.75rem;">
+                        <span style="padding: 0.25rem 0.75rem; background: rgba(100, 116, 139, 0.12); color: #0f172a; border-radius: 999px; font-size: 0.75rem; font-weight: 800;">
+                          ${(page.difficultyLevel || 'MEDIUM').toUpperCase()}
+                        </span>
+                        <span style="padding: 0.25rem 0.75rem; background: ${impactColor}20; color: ${impactColor}; border-radius: 999px; font-size: 0.75rem; font-weight: 900;">
+                          ${impactLevel}
+                        </span>
+                      </div>
                     </div>
 
-                    <div style="font-size: 0.75rem; color: #475569; margin-bottom: 0.6rem;">
-                      Potential impact clicks 28d: <strong>${potentialClicks28d.toLocaleString()}</strong>
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; margin-bottom: 0.75rem; font-size: 0.85rem;">
+                      <div><div style="color: #64748b; margin-bottom: 0.25rem;">CTR</div><div style="font-weight: 800; color: #1e293b;">${(ctrPct || 0).toFixed(1)}%</div></div>
+                      <div><div style="color: #64748b; margin-bottom: 0.25rem;">Impr</div><div style="font-weight: 800; color: #1e293b;">${(page.impressions || 0).toLocaleString()}</div></div>
+                      <div><div style="color: #64748b; margin-bottom: 0.25rem;">Pos</div><div style="font-weight: 800; color: #1e293b;">${(page.avgPosition || 0).toFixed(1)}</div></div>
                     </div>
-                    <div style="font-size: 0.72rem; color: #64748b; line-height: 1.35; margin-bottom: 0.75rem;">
-                      ${escapeHtml(page.suggestion || (page.impactLevel === 'HIGH' && page.difficultyLevel === 'LOW' ? 'Improve relevance + internal links to lift rank' : 'Improve CTR (title/meta/snippet) + strengthen content'))}
+
+                    <div style="display: flex; gap: 0.5rem; align-items: baseline; flex-wrap: wrap; margin-bottom: 0.75rem; font-size: 0.9rem;">
+                      <div><strong style="color:#334155;">Impact:</strong> <span style="font-weight: 800; color: ${impactColor};">${impactLevel}</span></div>
+                      <div style="color:#94a3b8;">•</div>
+                      <div><strong style="color:#334155;">Type:</strong> <span style="color:#475569;">${typeLabel}</span></div>
                     </div>
-                    <button type="button" class="btn ${isOptimized ? 'btn-secondary' : 'btn-primary'}" onclick="${isOptimized ? `window.openOptimisationTaskDrawer('${String(taskId).replace(/'/g, "\\'").replace(/"/g, '&quot;')}')` : `window.trackMoneyPage('${page.url.replace(/'/g, "\\'")}', '${(page.title || page.url).replace(/'/g, "\\'")}')`}" style="width: 100%; padding: 0.65rem 0.75rem; background: ${isOptimized ? '#10b981' : '#2563eb'}; color: #ffffff; border: none; border-radius: 6px; font-weight: 800; cursor: pointer; font-size: 0.8rem;">
-                      ${isOptimized ? 'Manage Task' : 'Create Task'}
+
+                    <div style="margin-bottom: 1rem; color: #64748b; font-size: 0.85rem; line-height: 1.5;">
+                      ${escapeHtml(page.suggestion || 'Improve CTR (title/meta/snippet) and strengthen content relevance.')}
+                    </div>
+
+                    <div style="margin-bottom: 1rem; padding: 0.75rem; background: #f8fafc; border-radius: 6px; font-size: 0.85rem; color: #475569;">
+                      <strong>Expected increase in clicks (28d) to hit 2.5% CTR:</strong> +${potentialClicks28d.toLocaleString()}
+                    </div>
+
+                    <button type="button" class="btn ${isOptimized ? 'btn-secondary' : 'btn-primary'}"
+                      onclick="${isOptimized ? `window.openOptimisationTaskDrawer('${String(taskId).replace(/'/g, "\\'").replace(/"/g, '&quot;')}')` : `window.trackMoneyPage('${page.url.replace(/'/g, "\\'")}', '${(page.title || page.url).replace(/'/g, "\\'")}')`}"
+                      style="width: 100%; padding: 0.85rem; background: ${isOptimized ? '#10b981' : '#2563eb'}; color: white; border: none; border-radius: 6px; font-weight: 700; cursor: pointer; font-size: 0.875rem;">
+                      ${isOptimized ? 'Manage' : 'Create Task'}
                     </button>
                   </div>
                 `;
