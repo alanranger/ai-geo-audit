@@ -146,6 +146,7 @@ export default async function handler(req, res) {
       const segmentPagesAll = {
         site: [],
         money: [],
+        academy: [],
         landing: [],
         event: [],
         product: [],
@@ -155,6 +156,7 @@ export default async function handler(req, res) {
       const segmentPagesActive = {
         site: [],
         money: [],
+        academy: [],
         landing: [],
         event: [],
         product: [],
@@ -214,6 +216,12 @@ export default async function handler(req, res) {
         if (isBlog) {
           segmentPagesAll.blog.push(page);
         }
+        
+        // Academy segment: single signup page only
+        const isAcademy = urlLower.includes('/free-online-photography-course');
+        if (isAcademy) {
+          segmentPagesAll.academy.push(page);
+        }
 
         // Money Pages segments (exclude blogs/support/system)
         const subSegment = classifyMoneySubSegment(page.page_url);
@@ -245,6 +253,7 @@ export default async function handler(req, res) {
           // active_cycles_only scope is the tracked subset
           segmentPagesActive.site.push(page);
           if (isBlog) segmentPagesActive.blog.push(page);
+          if (isAcademy) segmentPagesActive.academy.push(page);
           if (subSegment && segmentPagesActive[subSegment]) segmentPagesActive[subSegment].push(page);
           if (subSegment) segmentPagesActive.money.push(page);
           segmentPagesActive.all_tracked.push(page);
@@ -256,6 +265,7 @@ export default async function handler(req, res) {
       const initAi = () => ({
         site: { citations: 0, overviewCount: 0 },
         money: { citations: 0, overviewCount: 0 },
+        academy: { citations: 0, overviewCount: 0 },
         landing: { citations: 0, overviewCount: 0 },
         event: { citations: 0, overviewCount: 0 },
         product: { citations: 0, overviewCount: 0 },
@@ -285,6 +295,7 @@ export default async function handler(req, res) {
         if (!bestUrl) return null;
         const lower = String(bestUrl).toLowerCase();
         if (lower.includes('/blog-on-photography/')) return 'blog';
+        if (lower.includes('/free-online-photography-course')) return 'academy';
         const sub = classifyMoneySubSegment(bestUrl); // landing|event|product for money pages only
         if (sub === 'landing' || sub === 'event' || sub === 'product') return sub;
         return null;
@@ -356,7 +367,7 @@ export default async function handler(req, res) {
       const buildRowsForScope = (segmentPages, scopeName, applyCalibration) => {
         const segmentRows = [];
         const aiMap = aiForScope(scopeName);
-        ['site', 'money', 'landing', 'event', 'product', 'blog', 'all_tracked'].forEach(segment => {
+        ['site', 'money', 'academy', 'landing', 'event', 'product', 'blog', 'all_tracked'].forEach(segment => {
           const segmentPageList = segmentPages[segment];
           if (segmentPageList.length === 0) {
             const ai = aiMap[segment] || { citations: 0, overviewCount: 0 };

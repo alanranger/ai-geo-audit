@@ -3478,6 +3478,7 @@
                     <option value="all_tracked" title="All pages that have active optimisation tasks tracking them">All tracked</option>
                     <option value="money" title="All commercial pages: landing pages, event pages, and product pages combined">Money Pages</option>
                     <option value="money_tracked" title="Only money pages (landing/event/product) that currently have active optimisation tasks">Money Pages (tracked)</option>
+                    <option value="academy" title="Academy: single signup page only (/free-online-photography-course)">Academy</option>
                     <option value="blog" title="Blog pages: URLs containing /blog-on-photography/">Blog Pages</option>
                     <option value="landing" title="Landing pages: general commercial landing pages (not events or products)">Landing</option>
                     <option value="event" title="Event pages: photography workshop and course event pages">Event</option>
@@ -15722,11 +15723,12 @@
 
     async function renderPortfolioTable() {
       const kpi = document.getElementById('portfolio-table-kpi-select')?.value || 'ctr_28d';
-      const segments = ['site', 'money', 'money_tracked', 'landing', 'event', 'product', 'blog', 'all_tracked'];
+      const segments = ['site', 'money', 'money_tracked', 'academy', 'landing', 'event', 'product', 'blog', 'all_tracked'];
       const segmentLabels = {
         'site': 'Entire site',
         'money': 'Money Pages',
         'money_tracked': 'Money Pages (tracked)',
+        'academy': 'Academy',
         'landing': 'Landing',
         'event': 'Event',
         'product': 'Product',
@@ -15934,6 +15936,7 @@
             'site': 'Entire site: all pages on the property (unfiltered)',
             'money': 'All commercial pages: landing pages, event pages, and product pages combined',
             'money_tracked': 'Only money pages (landing/event/product) that currently have an active optimisation task (planned/in_progress/monitoring)',
+            'academy': 'Academy: single signup page only (/free-online-photography-course)',
             'landing': 'Landing pages: general commercial landing pages (not events or products)',
             'event': 'Event pages: photography workshop and course event pages',
             'product': 'Product pages: photography service and product pages',
@@ -16762,6 +16765,7 @@
         const segmentPagesAll = {
           site: [],
           money: [],
+          academy: [],
           landing: [],
           event: [],
           product: [],
@@ -16771,12 +16775,15 @@
         const segmentPagesActive = {
           site: [],
           money: [],
+          academy: [],
           landing: [],
           event: [],
           product: [],
           blog: [],
           all_tracked: []
         };
+        
+        const academyKey = normalizeGscPageKey('https://www.alanranger.com/free-online-photography-course');
         
         pageMetrics.forEach((metrics, normalizedKey) => {
           const pageUrl = metrics.url;
@@ -16790,6 +16797,11 @@
           const isBlog = pageUrlLower.includes('/blog-on-photography/');
           if (isBlog) {
             segmentPagesAll.blog.push(metrics);
+          }
+          
+          // Academy segment: single signup page only
+          if (normalizedKey === academyKey) {
+            segmentPagesAll.academy.push(metrics);
           }
 
           // Money Pages segments should match Money Pages classifier (exclude blogs/support/system).
@@ -16808,6 +16820,7 @@
           if (trackedTaskUrls.has(normalizedKey)) {
             segmentPagesActive.site.push(metrics); // tracked subset across the whole site
             if (isBlog) segmentPagesActive.blog.push(metrics);
+            if (normalizedKey === academyKey) segmentPagesActive.academy.push(metrics);
             if (specificSegment && segmentPagesActive[specificSegment]) segmentPagesActive[specificSegment].push(metrics);
             if (specificSegment && segmentPagesActive.money) segmentPagesActive.money.push(metrics);
             segmentPagesActive.all_tracked.push(metrics);
@@ -16818,6 +16831,7 @@
         let aiMetricsBySegment = {
           site: { citations: 0, overviewCount: 0 },
           money: { citations: 0, overviewCount: 0 },
+          academy: { citations: 0, overviewCount: 0 },
           landing: { citations: 0, overviewCount: 0 },
           event: { citations: 0, overviewCount: 0 },
           product: { citations: 0, overviewCount: 0 },
@@ -16837,6 +16851,7 @@
                 if (!bestUrl) return null;
                 const urlLower = String(bestUrl).toLowerCase();
                 if (urlLower.includes('/blog-on-photography/')) return 'blog';
+                if (urlLower.includes('/free-online-photography-course')) return 'academy';
                 if (typeof classifyMoneyPage === 'function') {
                   const mc = classifyMoneyPage(bestUrl);
                   if (mc && mc.isMoney && mc.segmentType) return mc.segmentType; // landing|event|product
@@ -16884,7 +16899,7 @@
         
         const buildSegmentRows = (segmentPages, scopeName) => {
         const segmentRows = [];
-          ['site', 'money', 'landing', 'event', 'product', 'blog', 'all_tracked'].forEach(segment => {
+          ['site', 'money', 'academy', 'landing', 'event', 'product', 'blog', 'all_tracked'].forEach(segment => {
           const pages = segmentPages[segment];
           const aiMetrics = aiMetricsBySegment[segment] || { citations: 0, overviewCount: 0 };
           
