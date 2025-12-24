@@ -30622,6 +30622,11 @@ Final Score: ${score}/100`;
             window.renderMoneyPagesTrendChart([], ts);
           }
         }
+
+        // Re-render Suggested Top 10 to reflect the selected sub-segment.
+        if (typeof window.renderMoneyPagesSuggestedTop10 === 'function') {
+          window.renderMoneyPagesSuggestedTop10();
+        }
       }
 
       // Wire up top-level filter (independent of table section)
@@ -30700,6 +30705,115 @@ Final Score: ${score}/100`;
       
       // Make function globally available
       window.wireTopLevelFilter = wireTopLevelFilter;
+
+      // Suggested (Top 10) cards renderer
+      // Renders from `window.moneyPagePriorityData` (built during score calculation / loaded from Supabase).
+      window.renderMoneyPagesSuggestedTop10 = function renderMoneyPagesSuggestedTop10() {
+        const container = document.getElementById('money-pages-suggested-top10-container');
+        if (!container) return;
+
+        const all = Array.isArray(window.moneyPagePriorityData) ? window.moneyPagePriorityData : [];
+        const subSeg = String(window.moneyPagesSubSegmentFilter || 'ALL').toUpperCase();
+        const wantedType = subSeg === 'ALL' ? null : subSeg.toLowerCase();
+
+        const candidates = all
+          .filter(p => p && p.url && p.segmentType !== 'authority')
+          .filter(p => !wantedType || String(p.segmentType || '').toLowerCase() === wantedType);
+
+        if (candidates.length === 0) {
+          container.innerHTML = '<p style="padding: 1.5rem; text-align: center; color: #64748b;">No suggested pages for this filter.</p>';
+          return;
+        }
+
+        const rank = (v, map) => map[String(v || '').toUpperCase()] ?? 99;
+        const priorityRank = { HIGH: 0, MEDIUM: 1, LOW: 2 };
+        const impactRank = { HIGH: 0, MEDIUM: 1, LOW: 2 };
+        const diffRank = { LOW: 0, MEDIUM: 1, HIGH: 2 };
+
+        const top10 = candidates
+          .slice()
+          .sort((a, b) => {
+            const pa = rank(a.priorityLevel, priorityRank);
+            const pb = rank(b.priorityLevel, priorityRank);
+            if (pa !== pb) return pa - pb;
+
+            const ia = rank(a.impactLevel, impactRank);
+            const ib = rank(b.impactLevel, impactRank);
+            if (ia !== ib) return ia - ib;
+
+            const da = rank(a.difficultyLevel, diffRank);
+            const db = rank(b.difficultyLevel, diffRank);
+            if (da !== db) return da - db;
+
+            return Number(b.impressions || 0) - Number(a.impressions || 0);
+          })
+          .slice(0, 10);
+
+        const ctrPct = (p) => {
+          const clicks = Number(p.clicks || 0);
+          const imps = Number(p.impressions || 0);
+          if (imps > 0) return (clicks / imps) * 100;
+          const raw = Number(p.ctr || 0);
+          const ratio = raw > 1 ? raw / 100 : raw;
+          return (ratio || 0) * 100;
+        };
+
+        container.innerHTML = top10.map((p) => {
+          const status = window.getOptimisationStatus
+            ? window.getOptimisationStatus({ targetUrl: p.url, keyword: '' }, 'on_page')
+            : null;
+          const statusText = status?.status || null;
+          const hasTask = !!statusText && statusText !== 'deleted' && statusText !== 'done' && statusText !== 'cancelled';
+          const taskId = hasTask ? (status.id || status.task_id || null) : null;
+
+          const pri = String(p.priorityLevel || '').toUpperCase() || 'MEDIUM';
+          const diff = String(p.difficultyLevel || '').toUpperCase() || 'MEDIUM';
+          const imp = String(p.impactLevel || '').toUpperCase() || 'MEDIUM';
+
+          const diffColors = { LOW: '#10b981', MEDIUM: '#f59e0b', HIGH: '#ef4444' };
+          const diffColor = diffColors[diff] || '#64748b';
+
+          const title = p.title || p.url;
+          const safeUrl = String(p.url).replace(/'/g, "\\'");
+          const safeTitle = String(title).replace(/'/g, "\\'");
+
+          return `
+            <div class="suggested-card" style="background: white; border: 2px solid #e2e8f0; border-radius: 8px; padding: 1.25rem; box-shadow: 0 2px 4px rgba(0,0,0,0.06);">
+              <div style="display:flex; justify-content: space-between; gap: 0.75rem; align-items: flex-start; margin-bottom: 0.75rem;">
+                <div style="flex:1;">
+                  <div style="font-weight:700; color:#1e293b; line-height:1.35; margin-bottom:0.25rem;">${title}</div>
+                  <a href="${p.url}" target="_blank" style="font-size:0.85rem; color:#2563eb; text-decoration:none; word-break:break-all;">${p.url}</a>
+                </div>
+                <div style="display:flex; flex-direction:column; align-items:flex-end; gap:0.35rem; min-width:92px;">
+                  <span style="padding: 0.2rem 0.5rem; border-radius: 999px; background:#f1f5f9; color:#0f172a; font-size:0.75rem; font-weight:700;">${pri}</span>
+                  <span style="padding: 0.2rem 0.5rem; border-radius: 999px; background:${diffColor}20; color:${diffColor}; font-size:0.75rem; font-weight:700;">${diff}</span>
+                </div>
+              </div>
+
+              <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:0.75rem; font-size:0.85rem; margin-bottom:0.75rem;">
+                <div><div style="color:#64748b;">CTR</div><div style="font-weight:700;">${ctrPct(p).toFixed(1)}%</div></div>
+                <div><div style="color:#64748b;">Impr</div><div style="font-weight:700;">${Number(p.impressions || 0).toLocaleString()}</div></div>
+                <div><div style="color:#64748b;">Pos</div><div style="font-weight:700;">${Number(p.avgPosition || 0).toFixed(1)}</div></div>
+              </div>
+
+              <div style="font-size:0.85rem; color:#475569; margin-bottom:0.75rem;">
+                <strong>Impact:</strong> ${imp}
+                <span style="margin:0 0.5rem; color:#cbd5e1;">•</span>
+                <strong>Type:</strong> ${String(p.segmentType || 'landing')}
+              </div>
+
+              <div style="font-size:0.85rem; color:#64748b; line-height:1.5; margin-bottom:0.75rem;">
+                ${p.suggestion || 'Improve CTR (title/meta/snippet) and strengthen content relevance.'}
+              </div>
+
+              <button type="button" style="width:100%; padding:0.65rem; border:none; border-radius:6px; font-weight:700; cursor:pointer; background:${hasTask ? '#10b981' : '#2563eb'}; color:white;"
+                onclick="${hasTask && taskId ? `window.openOptimisationTaskDrawer('${String(taskId).replace(/'/g, "\\'").replace(/\"/g, '&quot;')}')` : `window.trackMoneyPage('${safeUrl}', '${safeTitle}')`}">
+                ${hasTask ? 'Manage' : 'Create Task'}
+              </button>
+            </div>
+          `;
+        }).join('');
+      };
       
       // Wire up Priority & Actions filters
       function wirePriorityActionsFilters() {
@@ -33046,6 +33160,11 @@ Final Score: ${score}/100`;
                 });
                 console.log('[Money Pages Priority] ✓ Initial Priority & Actions table rendered');
               })();
+            }
+
+            // Render Suggested (Top 10) cards once Money Pages DOM exists.
+            if (typeof window.renderMoneyPagesSuggestedTop10 === 'function') {
+              window.renderMoneyPagesSuggestedTop10();
             }
 
             // Load authority actions async and refresh table (non-blocking).
