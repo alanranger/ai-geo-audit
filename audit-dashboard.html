@@ -11840,7 +11840,8 @@
         const canonTarget = (typeof normalizeGscPageKey === 'function')
           ? normalizeGscPageKey(pageUrl || '')
           : String(pageUrl || '').split('?')[0].split('#')[0].replace(/\/$/, '');
-        if (!canonTarget || rows.length === 0) return { ai_overview: false, ai_citations: null };
+        // If we don't have ranking rows loaded, we don't know (avoid false negatives).
+        if (!canonTarget || rows.length === 0) return { ai_overview: null, ai_citations: null };
 
         let citations = 0;
         let overviewOn = false;
@@ -11870,7 +11871,7 @@
         { label: 'Impressions (28d)', baselineKey: 'gsc_impressions_28d', latestKey: 'gsc_impressions_28d', higherIsBetter: true },
         { label: 'CTR (28d)', baselineKey: 'gsc_ctr_28d', latestKey: 'gsc_ctr_28d', higherIsBetter: true, format: (v) => v != null ? (v * 100).toFixed(2) + '%' : '—' },
         { label: 'Current Rank', baselineKey: 'current_rank', latestKey: 'current_rank', higherIsBetter: false },
-        { label: 'AI Overview', baselineKey: 'ai_overview', latestKey: 'ai_overview', format: (v) => v ? 'On' : 'Off' },
+        { label: 'AI Overview', baselineKey: 'ai_overview', latestKey: 'ai_overview', format: (v) => v === true ? 'Present' : (v === false ? 'Not present' : '—') },
         { label: 'AI Citations', baselineKey: 'ai_citations', latestKey: 'ai_citations', higherIsBetter: true }
       ];
 
@@ -12992,7 +12993,7 @@
                     gsc_ctr_28d: Number(totals.ctr || 0) / 100,
                     current_rank: totals.position != null ? Number(totals.position) : null,
                     opportunity_score: null,
-                    ai_overview: !!aiForUrl.ai_overview,
+                    ai_overview: aiForUrl.ai_overview === true ? true : (aiForUrl.ai_overview === false ? false : null),
                     // If ranking data isn't available, keep as null so UI shows "—" (unknown) rather than 0 (false negative).
                     ai_citations: aiForUrl.ai_citations != null ? Number(aiForUrl.ai_citations) : null,
                     ai_citations_total: null,
@@ -13622,7 +13623,7 @@
                     gsc_ctr_28d: Number(totals.ctr || 0) / 100,
                     current_rank: totals.position != null ? Number(totals.position) : null,
                     classic_ranking_url: pageUrlForGsc,
-                    ai_overview: !!aiForUrl.ai_overview,
+                    ai_overview: aiForUrl.ai_overview === true ? true : (aiForUrl.ai_overview === false ? false : null),
                     ai_citations: aiForUrl.ai_citations != null ? Number(aiForUrl.ai_citations) : null,
                     ai_citations_total: null,
                     segment: task.segment || 'money_pages',
@@ -13864,7 +13865,7 @@
                   gsc_ctr_28d: ctrValue, // Normalized to ratio (0-1)
                   current_rank: moneyPageRow.avg_position || moneyPageRow.position || null,
                   opportunity_score: null,
-                  ai_overview: !!aiForUrl.ai_overview,
+                  ai_overview: aiForUrl.ai_overview === true ? true : (aiForUrl.ai_overview === false ? false : null),
                   ai_citations: aiForUrl.ai_citations != null ? Number(aiForUrl.ai_citations) : null,
                   ai_citations_total: null,
                   classic_ranking_url: moneyPageRow.url || moneyPageRow.page_url || taskUrl,
@@ -13913,7 +13914,7 @@
                         gsc_ctr_28d: ctrValue, // Normalized to ratio (0-1)
                         current_rank: moneyPageRow.avg_position || moneyPageRow.position || null,
                         opportunity_score: null,
-                        ai_overview: !!aiForUrl.ai_overview,
+                        ai_overview: aiForUrl.ai_overview === true ? true : (aiForUrl.ai_overview === false ? false : null),
                         ai_citations: aiForUrl.ai_citations != null ? Number(aiForUrl.ai_citations) : null,
                         ai_citations_total: null,
                         classic_ranking_url: moneyPageRow.url || moneyPageRow.page_url || taskUrl,
