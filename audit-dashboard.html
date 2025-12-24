@@ -3480,6 +3480,7 @@
                     <option value="money_tracked" title="Only money pages (landing/event/product) that currently have active optimisation tasks">Money Pages (tracked)</option>
                     <option value="academy" title="Academy: single signup page only (/free-online-photography-course)">Academy</option>
                     <option value="blog" title="Blog pages: URLs containing /blog-on-photography/">Blog Pages</option>
+                    <option value="other" title="Other (non-money): all pages that are not money pages, not blog posts, and not the Academy signup page">Other (non-money)</option>
                     <option value="landing" title="Landing pages: general commercial landing pages (not events or products)">Landing</option>
                     <option value="event" title="Event pages: photography workshop and course event pages">Event</option>
                     <option value="product" title="Product pages: photography service and product pages">Product</option>
@@ -4001,6 +4002,15 @@
             <div class="metric-pill-footer">Pillars: Authority (Reviews), Content/Schema</div>
             <div class="metric-pill-toggle" onclick="toggleMetricPillDetails('ranking-card-ai-citations')">Show details</div>
             <div class="metric-pill-details" id="ranking-card-ai-citations-details"></div>
+          </div>
+
+          <div class="metric-pill metric-pill--red" id="ranking-card-ai-citations-money">
+            <div class="metric-pill-value" data-field="value">–</div>
+            <div class="metric-pill-label">AI citations (Money pages)</div>
+            <div class="metric-pill-status" data-field="status">–</div>
+            <div class="metric-pill-footer">Counts citations to Landing/Event/Product pages (cited URLs)</div>
+            <div class="metric-pill-toggle" onclick="toggleMetricPillDetails('ranking-card-ai-citations-money')">Show details</div>
+            <div class="metric-pill-details" id="ranking-card-ai-citations-money-details"></div>
           </div>
 
           <div class="metric-pill metric-pill--red" id="ranking-card-top10">
@@ -15723,17 +15733,30 @@
 
     async function renderPortfolioTable() {
       const kpi = document.getElementById('portfolio-table-kpi-select')?.value || 'ctr_28d';
-      const segments = ['site', 'money', 'money_tracked', 'academy', 'landing', 'event', 'product', 'blog', 'all_tracked'];
+      const segments = ['site', 'money', 'money_tracked', 'landing', 'event', 'product', 'academy', 'blog', 'other', 'all_tracked'];
       const segmentLabels = {
         'site': 'Entire site',
         'money': 'Money Pages',
         'money_tracked': 'Money Pages (tracked)',
-        'academy': 'Academy',
         'landing': 'Landing',
         'event': 'Event',
         'product': 'Product',
         'blog': 'Blog Pages',
+        'academy': 'Academy',
+        'other': 'Other (non-money)',
         'all_tracked': 'All tracked'
+      };
+      const segmentIndentPx = {
+        // children of Money Pages
+        'money_tracked': 18,
+        'landing': 18,
+        'event': 18,
+        'product': 18,
+        // children of Entire site
+        'academy': 18,
+        'blog': 18,
+        'other': 18,
+        'all_tracked': 18
       };
       
       // Map UI KPI to portfolio_segment_metrics_28d field
@@ -15931,12 +15954,17 @@
           const segmentCell = document.createElement('td');
           segmentCell.style.cssText = 'padding: 0.75rem; border-bottom: 1px solid var(--dark-border); font-weight: 600; color: var(--dark-text);';
           segmentCell.textContent = segmentLabels[segment] || segment;
+          if (segmentIndentPx[segment]) {
+            segmentCell.style.paddingLeft = `${0.75 * 16 + segmentIndentPx[segment]}px`; // base 0.75rem + indent
+            segmentCell.style.fontWeight = '500';
+          }
           // Add tooltip based on segment
           const segmentTooltips = {
             'site': 'Entire site: all pages on the property (unfiltered)',
             'money': 'All commercial pages: landing pages, event pages, and product pages combined',
             'money_tracked': 'Only money pages (landing/event/product) that currently have an active optimisation task (planned/in_progress/monitoring)',
             'academy': 'Academy: single signup page only (/free-online-photography-course)',
+            'other': 'Other (non-money): all pages that are not money pages, not blog posts, and not the Academy signup page',
             'landing': 'Landing pages: general commercial landing pages (not events or products)',
             'event': 'Event pages: photography workshop and course event pages',
             'product': 'Product pages: photography service and product pages',
@@ -16770,6 +16798,7 @@
           event: [],
           product: [],
           blog: [],
+          other: [],
           all_tracked: []
         };
         const segmentPagesActive = {
@@ -16780,6 +16809,7 @@
           event: [],
           product: [],
           blog: [],
+          other: [],
           all_tracked: []
         };
         
@@ -16810,10 +16840,12 @@
             : { isMoney: false, segmentType: null };
           const isMoney = !!moneyClass.isMoney;
           const specificSegment = isMoney ? moneyClass.segmentType : null;
+          const isOther = !isMoney && !isBlog && normalizedKey !== academyKey;
 
           // All pages scope
           if (specificSegment && segmentPagesAll[specificSegment]) segmentPagesAll[specificSegment].push(metrics);
           if (specificSegment && segmentPagesAll.money) segmentPagesAll.money.push(metrics); // money = aggregate of landing+event+product
+          if (isOther) segmentPagesAll.other.push(metrics);
           if (trackedTaskUrls.has(normalizedKey)) segmentPagesAll.all_tracked.push(metrics); // tracked subset across the whole site
 
           // Active cycles only scope (only pages that are tracked)
@@ -16823,6 +16855,7 @@
             if (normalizedKey === academyKey) segmentPagesActive.academy.push(metrics);
             if (specificSegment && segmentPagesActive[specificSegment]) segmentPagesActive[specificSegment].push(metrics);
             if (specificSegment && segmentPagesActive.money) segmentPagesActive.money.push(metrics);
+            if (isOther) segmentPagesActive.other.push(metrics);
             segmentPagesActive.all_tracked.push(metrics);
           }
         });
@@ -16836,6 +16869,7 @@
           event: { citations: 0, overviewCount: 0 },
           product: { citations: 0, overviewCount: 0 },
           blog: { citations: 0, overviewCount: 0 },
+          other: { citations: 0, overviewCount: 0 },
           all_tracked: { citations: 0, overviewCount: 0 }
         };
         
@@ -16882,7 +16916,7 @@
                     return [mc.segmentType, 'money']; // include money rollup
                   }
                 }
-                return [];
+                return ['other'];
               };
 
               keywordsData.keywords.forEach(keyword => {
@@ -16934,7 +16968,7 @@
         
         const buildSegmentRows = (segmentPages, scopeName) => {
         const segmentRows = [];
-          ['site', 'money', 'academy', 'landing', 'event', 'product', 'blog', 'all_tracked'].forEach(segment => {
+          ['site', 'money', 'academy', 'landing', 'event', 'product', 'blog', 'other', 'all_tracked'].forEach(segment => {
           const pages = segmentPages[segment];
           const aiMetrics = aiMetricsBySegment[segment] || { citations: 0, overviewCount: 0 };
           
@@ -39250,6 +39284,114 @@ Final Score: ${score}/100`;
       }
     }
 
+    function computeAiCitationsByCitedUrlSegment(rows) {
+      const normalize = (u) => {
+        if (!u) return '';
+        let s = String(u);
+        s = s.split('?')[0];
+        s = s.split('#')[0];
+        s = s.replace(/\/$/, '');
+        return s.toLowerCase();
+      };
+
+      const segCounts = {
+        landing: 0,
+        event: 0,
+        product: 0,
+        academy: 0,
+        blog: 0,
+        other: 0,
+        money: 0,
+        site: 0
+      };
+
+      const inferSegs = (url) => {
+        const u = normalize(url);
+        if (!u || !u.includes('alanranger.com')) return [];
+        if (u.includes('/free-online-photography-course')) return ['academy'];
+        if (u.includes('/blog-on-photography/')) return ['blog'];
+        if (typeof window.classifyMoneyPage === 'function') {
+          const mc = window.classifyMoneyPage(url);
+          if (mc && mc.isMoney && mc.segmentType) return [mc.segmentType, 'money'];
+        }
+        return ['other'];
+      };
+
+      const extractCitedUrls = (row) => {
+        const raw = row?.ai_alan_citations || row?.aiAlanCitations || [];
+        if (!raw || !Array.isArray(raw)) return [];
+        return raw
+          .map(v => {
+            if (!v) return null;
+            if (typeof v === 'string') return v;
+            if (typeof v === 'object' && v.url) return v.url;
+            return null;
+          })
+          .filter(Boolean);
+      };
+
+      const safeRows = Array.isArray(rows) ? rows : [];
+      safeRows.forEach(r => {
+        const cCount = parseInt(r.ai_alan_citations_count ?? r.aiAlanCitationsCount ?? 0, 10) || 0;
+        segCounts.site += cCount;
+        const citedUrls = extractCitedUrls(r);
+        citedUrls.forEach(u => {
+          inferSegs(u).forEach(seg => {
+            if (segCounts[seg] === undefined) return;
+            segCounts[seg] += 1;
+          });
+        });
+      });
+
+      return segCounts;
+    }
+
+    function renderRankingAiMoneyCitationsTile(rankingAiData) {
+      const pill = document.getElementById('ranking-card-ai-citations-money');
+      if (!pill) return;
+      const valueEl = pill.querySelector('[data-field="value"]');
+      const statusEl = pill.querySelector('[data-field="status"]');
+      const detailsEl = document.getElementById('ranking-card-ai-citations-money-details');
+
+      const rows = rankingAiData?.combinedRows || [];
+      const counts = computeAiCitationsByCitedUrlSegment(rows);
+
+      const moneyCitations = counts.money || 0;
+      const totalCitations = counts.site || 0;
+      const share = totalCitations > 0 ? (moneyCitations / totalCitations) : 0;
+
+      if (valueEl) valueEl.textContent = `${moneyCitations}/${totalCitations} (${Math.round(share * 100)}%)`;
+      if (statusEl) statusEl.textContent = moneyCitations > 0 ? 'Some' : 'None';
+
+      if (detailsEl) {
+        detailsEl.innerHTML = `
+          <div style="margin-top: 0.75rem;">
+            <div style="margin-bottom: 0.5rem;">How many citations point to <strong>money pages</strong> (Landing/Event/Product), based on the <strong>cited URLs</strong>.</div>
+            <div style="font-size: 0.9rem; line-height: 1.6;">
+              <div><strong>Money citations:</strong> ${moneyCitations} (${Math.round(share * 100)}%)</div>
+              <div><strong>Total citations:</strong> ${totalCitations}</div>
+            </div>
+            <div style="margin-top: 0.75rem; border-top: 1px solid #e2e8f0; padding-top: 0.75rem;">
+              <div style="font-weight: 600; margin-bottom: 0.5rem;">Breakdown (cited URLs)</div>
+              <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+                <tbody>
+                  <tr><td style="padding: 0.25rem 0;">Landing</td><td style="padding: 0.25rem 0; text-align: right;">${counts.landing || 0}</td></tr>
+                  <tr><td style="padding: 0.25rem 0;">Event</td><td style="padding: 0.25rem 0; text-align: right;">${counts.event || 0}</td></tr>
+                  <tr><td style="padding: 0.25rem 0;">Product</td><td style="padding: 0.25rem 0; text-align: right;">${counts.product || 0}</td></tr>
+                  <tr><td style="padding: 0.25rem 0; border-top: 1px solid #e2e8f0;">Academy</td><td style="padding: 0.25rem 0; border-top: 1px solid #e2e8f0; text-align: right;">${counts.academy || 0}</td></tr>
+                  <tr><td style="padding: 0.25rem 0;">Blog</td><td style="padding: 0.25rem 0; text-align: right;">${counts.blog || 0}</td></tr>
+                  <tr><td style="padding: 0.25rem 0;">Other (non-money)</td><td style="padding: 0.25rem 0; text-align: right;">${counts.other || 0}</td></tr>
+                </tbody>
+              </table>
+              <div style="margin-top: 0.5rem; color: #64748b; font-size: 0.8rem;">
+                Note: totals may not sum perfectly if a keyword reports more citations than the stored citation URL list.
+              </div>
+            </div>
+          </div>
+        `;
+      }
+    }
+
     // ======================
     // Ranking & AI: Normalize summary field names (snake_case to camelCase)
     // ======================
@@ -41881,6 +42023,15 @@ Final Score: ${score}/100`;
             </p>
           `;
         }
+      }
+      
+      // AI Citations (Money pages)
+      try {
+        const rankingAiDataRaw = localStorage.getItem('rankingAiData');
+        const parsed = rankingAiDataRaw ? JSON.parse(rankingAiDataRaw) : null;
+        renderRankingAiMoneyCitationsTile(parsed);
+      } catch (e) {
+        // Ignore if localStorage missing/corrupt
       }
 
       // Top-10 coverage
