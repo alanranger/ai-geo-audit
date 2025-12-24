@@ -158,6 +158,17 @@ Return merged data to Client
 - No fallback to audit records - uses actual GSC data or shows null
 - Metrics calculated per date: clicks, impressions, CTR from GSC timeseries × money page proportions
 
+### Portfolio AI Metrics (AI Citations / AI Overview)
+**Storage:**
+- `keyword_rankings` stores keyword-level AI data:
+  - `ai_alan_citations_count` (total citations to our domain for the keyword)
+  - `ai_alan_citations` (captured cited URL items; may be shorter than the count)
+- `portfolio_segment_metrics_28d` stores segment-level rollups:
+  - `ai_citations_28d` and `ai_overview_present_count`
+
+**Attribution model:**
+- Segment attribution is based on **cited URLs** (not `best_url`), with any “unattributed delta” rolled into **Other (non‑money)** so segment totals reconcile to site totals.
+
 **Example:**
 - User requests 180 days of data
 - Supabase has last 150 days stored

@@ -65,14 +65,14 @@
 ### 8. **Data Display (Scorecard - Page-Only)** ✅
 - [x] Scorecard fetches page totals on-demand via `/api/aigeo/gsc-page-totals`
 - [x] Displays "Target page totals" tile with page-only metrics
-- [x] Shows Clicks, Impressions, CTR, Avg Position for best_url
+- [x] Shows Clicks, Impressions, CTR, Avg Position for the classic ranking URL (`best_url`)
 
 **File:** `audit-dashboard.html` lines 27137-27190
 
 ### 9. **Data Display (Scorecard - Query→Pages Breakdown)** ✅
 - [x] Scorecard fetches query→pages breakdown on-demand via `/api/aigeo/gsc-query-pages`
 - [x] Displays "Advanced" section with pages table
-- [x] Highlights DataForSEO `best_url` row
+- [x] Highlights DataForSEO `best_url` row (the best-ranking URL for the keyword)
 - [x] Shows Page URL, Clicks, Impressions, CTR, Position for each page
 
 **File:** `audit-dashboard.html` lines 27192-27250

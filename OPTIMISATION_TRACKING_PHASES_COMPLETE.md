@@ -147,7 +147,7 @@
   - CTR: Deltas shown as percentage points (pp), e.g., "+0.20pp"
   - Rank: Lower is better (delta = baseline - latest)
   - AI Citations: Integer formatting
-  - Impressions: Abbreviated as "k" when >= 1000
+  - Impressions: Always show exact values with thousands separators (no "k" abbreviation)
 - ✅ Shared progress calculation helper (`computeGoalProgress()`)
 - ✅ Progress display shows "Remaining: +X" instead of confusing double delta lines
 - ✅ Consistent formatting across modal and table
@@ -364,4 +364,13 @@
 - **Issue**: Bulk update was including test tasks even when checkbox was unchecked
 - **Fix**: Added check to filter out test tasks if "Include Test Tasks" checkbox is unchecked
 - **Result**: Bulk update respects the test tasks filter
+
+### Bulk Update Safety & Freshness (2025-12-24)
+- **Change**: Bulk update no longer hard-blocks on Ranking & AI data for URL-only tasks.
+- **Change**: Added a staleness nudge when Ranking & AI snapshot is missing/stale (for keyword-based tasks).
+- **Change**: Added fallback to `localStorage.rankingAiData` when Ranking & AI rows are not in memory.
+
+### URL-only Tasks: AI Overview/Citations (2025-12-24)
+- **Fix**: URL-only (`on_page`) tasks now populate **AI Overview** and **AI Citations** by scanning Ranking & AI cited URLs (`ai_alan_citations`) for the task’s page URL.
+- **UX**: “AI Overview” shows **Present / Not present / —** (unknown) to avoid false negatives when ranking data isn’t available.
 

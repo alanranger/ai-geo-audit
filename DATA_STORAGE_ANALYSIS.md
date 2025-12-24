@@ -342,3 +342,19 @@ To verify Money Pages metrics match GSC:
 - ✅ Better accuracy for optimization task creation
 - ✅ Improved data integrity for trend tracking
 
+---
+
+## Portfolio AI Citations: Source of Truth & Reconciliation (Latest Update)
+
+### Source tables
+- **`keyword_rankings`**:
+  - `ai_alan_citations_count`: keyword-level total citations to our domain
+  - `ai_alan_citations`: captured cited URL items (may be shorter than the count)
+- **`portfolio_segment_metrics_28d`**:
+  - `ai_citations_28d`: segment-level citation items (with reconciliation)
+  - `ai_overview_present_count`: segment-level count of keywords with AI Overview present
+
+### Attribution model
+- Segment attribution uses **cited URLs** (not `best_url`) so we can answer “which pages/segments are actually cited”.
+- Any “unattributed delta” (where `ai_alan_citations_count` > captured cited URL items) is rolled into **Other (non‑money)** so the sum of segments reconciles to the site total.
+

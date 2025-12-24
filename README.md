@@ -114,10 +114,19 @@ Vercel will automatically rebuild and deploy (usually takes 1-2 minutes).
 - ✅ **Intent-Based Keyword Segmentation**: Keyword classification based on search intent (Brand → Money → Education → Other)
 - ✅ **Data-Driven Presets**: Refactored preset system with hard reset and single source of truth
 - ✅ **Ranking & AI Visibility**: Keyword rankings with AI Overview citations, competitor analysis, and domain strength integration
+- ✅ **AI citations attribution by cited URLs**:
+  - Portfolio monthly KPIs and the Ranking & AI “Money citations” tile attribute AI citations to segments using the **cited URL list** (`ai_alan_citations`) rather than `best_url`
+  - Any “unattributed delta” (when `ai_alan_citations_count` exceeds captured URL items) is rolled into **Other (non‑money)** so segment totals reconcile to site totals
+- ✅ **Portfolio segmentation**:
+  - Segments include **Academy** (single URL `/free-online-photography-course`) and **Other (non‑money)** so segment totals reconcile to Entire site
+  - Segment label modal supports Segment pages + AI‑cited pages with copy list
 - ✅ **Domain Strength Tracking**: Domain rank snapshots with competitor flags and domain type classification
 - ✅ **Keyword Management**: Edit Keywords modal for managing keyword list with data loss warnings
 - ✅ **Money Pages Performance Tracking**: Split trend charts, KPI tracker (last 28 days with 8 weekly data points), and priority actions with accurate CTR plotting. Uses actual GSC timeseries data calculated from `gsc_timeseries` table.
 - ✅ **Money Pages Suggested Top 10**: Card-based panel showing top priority pages for optimization with impact/difficulty scoring, optimization status tracking, and direct task creation.
+- ✅ **Audit guardrails**:
+  - “Run Audit Scan” will not overwrite Portfolio AI fields with zeros if no Ranking & AI data exists for the date (common with GSC lag)
+  - Bulk “Update All Tasks with Latest Data” warns if Ranking & AI snapshot is missing/stale, and does not require Ranking & AI for URL‑only tasks
 - ✅ **GAIO Branding**: Updated throughout UI from "AIO" to "GAIO (Generative AI Optimization)"
 
 ## API Endpoints

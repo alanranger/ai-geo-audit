@@ -2,6 +2,29 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2025-12-24] - v1.7.3 - Data Integrity + AI Citation Consistency (Portfolio + Tasks)
+
+### Added
+- **AI citations (Money pages) RAG**: The Ranking & AI tile now uses thresholds based on money-share: Green ≥ 70%, Amber 50–69%, Red < 50%.
+- **Audit safety guardrails**:
+  - “Run Audit Scan” no longer overwrites Portfolio AI fields with zeros when keyword_rankings for the relevant date aren’t available (common with GSC lag).
+  - Bulk “Update All Tasks” warns when Ranking & AI snapshot is missing/stale (for keyword-based tasks).
+
+### Changed
+- **Portfolio AI attribution model**: Portfolio AI citations/overview are attributed by **cited URLs** (`ai_alan_citations`) rather than `best_url`, with any “unattributed delta” rolled into **Other (non‑money)** so totals reconcile to site totals.
+- **Bulk update behavior**:
+  - Ranking & AI data is only required for **keyword-based** tasks.
+  - URL-only tasks can bulk-update without a Ranking & AI run.
+  - Added fallback to `localStorage.rankingAiData` for bulk updates.
+- **Task drawer clarity**: “AI Overview” label now displays **Present / Not present / —** (unknown) rather than “On/Off”.
+
+### Fixed
+- **Portfolio table vs modal vs tile mismatches**: counts now reconcile consistently by distinguishing:
+  - “unique AI‑cited URLs” (deduped list)
+  - “citation items” (total cited URL occurrences)
+  - “unattributed citations” (counted in totals, but no URL captured)
+- **URL-only task AI metrics**: Task measurements for URL-only tasks now populate AI Overview/Citations by scanning Ranking & AI cited URLs (when available), avoiding false negatives.
+
 ## [2025-12-22] - v1.7.2 - Money Pages Phase 4: Suggested Top 10 Priority Pages
 
 ### Added
