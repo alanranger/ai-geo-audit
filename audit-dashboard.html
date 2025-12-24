@@ -32743,30 +32743,37 @@ Final Score: ${score}/100`;
           debugLog(`Money Pages: scores.moneyPagesMetrics=${!!scores.moneyPagesMetrics}, saved.scores.moneyPagesMetrics=${!!(saved && saved.scores && saved.scores.moneyPagesMetrics)}, saved.moneyPagesMetrics=${!!(saved && saved.moneyPagesMetrics)}`, 'warn');
         }
         
-        // Ensure section exists before rendering (retry if needed)
-        let sectionExists = document.getElementById('money-pages-section');
-        if (!sectionExists) {
-          debugLog('⚠ Money Pages section not found, waiting 50ms and retrying...', 'warn');
-          setTimeout(async () => {
-            sectionExists = document.getElementById('money-pages-section');
-            if (sectionExists) {
-              debugLog('✓ Money Pages section found on retry, rendering...', 'success');
-              await renderMoneyPagesSection(moneyPagesMetricsToRender || null);
+        // Ensure the Money Pages panel exists, then render the section.
+        // IMPORTANT: `renderMoneyPagesSection()` is responsible for creating `#money-pages-section`
+        // and the container IDs (top-level filter, charts, suggested top10, KPI selector).
+        const ensureMoneyPagesRendered = (attempt = 0) => {
+          const moneyPanel = document.querySelector('.aigeo-panel[data-panel="money"]');
+          if (!moneyPanel) {
+            if (attempt < 20) {
+              debugLog(`⚠ Money Pages panel not ready yet (attempt ${attempt + 1})`, 'warn');
+              setTimeout(() => ensureMoneyPagesRendered(attempt + 1), 100);
             } else {
-              debugLog('✗ Money Pages section still not found after retry', 'error');
+              debugLog('✗ Money Pages panel not found after retries - cannot render Money Pages section', 'error');
             }
-          }, 50);
-        } else {
-          // Render Money Pages section (async call)
+            return;
+          }
+
           (async () => {
             await renderMoneyPagesSection(moneyPagesMetricsToRender || null);
-          })();
-        }
 
-        // Ensure top-level filter is wired after any re-render of this section
-        if (typeof window.wireTopLevelFilter === 'function') {
-          setTimeout(() => window.wireTopLevelFilter(), 0);
-        }
+            // Wire the top-level filter AFTER the section HTML exists.
+            if (typeof window.wireTopLevelFilter === 'function') {
+              window.wireTopLevelFilter();
+            }
+
+            // Wire KPI metric selector AFTER the section HTML exists.
+            if (typeof window.wireMoneyKpiMetricSelector === 'function') {
+              window.wireMoneyKpiMetricSelector();
+            }
+          })();
+        };
+
+        ensureMoneyPagesRendered(0);
         
         // Phase: Render Money Pages Priority Matrix & Action List
         const priorityCard = document.getElementById('money-pages-priority-card');
