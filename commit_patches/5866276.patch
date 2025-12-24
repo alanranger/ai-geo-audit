@@ -1,0 +1,54 @@
+From 5866276196910faf918e26375a25e801885bc70c Mon Sep 17 00:00:00 2001
+From: alanranger <info@alanranger.com>
+Date: Tue, 23 Dec 2025 14:35:47 +0000
+Subject: [PATCH] Fix weekly view: Only use actual weekly snapshots (YYYY-MM-DD
+ run_id), exclude monthly backfilled data to prevent misleading weekly
+ distribution
+
+---
+ audit-dashboard.html | 22 ++++++++++++----------
+ 1 file changed, 12 insertions(+), 10 deletions(-)
+
+diff --git a/audit-dashboard.html b/audit-dashboard.html
+index 2b2f75b..af2b6d8 100644
+--- a/audit-dashboard.html
++++ b/audit-dashboard.html
+@@ -15424,6 +15424,13 @@ <h3>🔍 Debug Log</h3>
+         const buckets = new Map(); // key: bucket label, value: { value, date }
+         
+         metrics.forEach(m => {
++          // For weekly view: ONLY use actual weekly snapshots (run_id in YYYY-MM-DD format)
++          // Skip monthly backfilled data (run_id in YYYY-MM format) to avoid misleading weekly distribution
++          if (timeGrain === 'weekly' && m.run_id && m.run_id.match(/^\d{4}-\d{2}$/)) {
++            // Skip monthly backfilled data in weekly view
++            return;
++          }
++          
+           // Determine the date to use for bucketing:
+           // 1. If run_id is in YYYY-MM format, use that for monthly bucketing (historical backfill)
+           // 2. Otherwise, use created_at (when the audit was run) - this ensures different audit runs get different buckets
+@@ -15437,19 +15444,14 @@ <h3>🔍 Debug Log</h3>
+             bucketKey = m.run_id;
+             dateForBucket = new Date(m.run_id + '-01');
+           } else if (timeGrain === 'weekly') {
+-            // For weekly: prefer date_end (when data represents) over created_at (when audit was run)
+-            // This ensures backfilled monthly data gets distributed across correct weeks
+-            if (m.date_end) {
+-              dateForBucket = new Date(m.date_end);
+-            } else if (m.run_id && m.run_id.match(/^\d{4}-\d{2}-\d{2}$/)) {
++            // For weekly: only use actual weekly snapshots (run_id in YYYY-MM-DD format)
++            // Use run_id if it's a weekly snapshot, otherwise use created_at
++            if (m.run_id && m.run_id.match(/^\d{4}-\d{2}-\d{2}$/)) {
+               dateForBucket = new Date(m.run_id);
+-            } else if (m.run_id && m.run_id.match(/^\d{4}-\d{2}$/)) {
+-              // For monthly run_id, use the last day of that month
+-              dateForBucket = new Date(m.run_id + '-01');
+-              dateForBucket.setMonth(dateForBucket.getMonth() + 1);
+-              dateForBucket.setDate(0); // Last day of the month
+             } else if (m.created_at) {
+               dateForBucket = new Date(m.created_at);
++            } else if (m.date_end) {
++              dateForBucket = new Date(m.date_end);
+             } else {
+               debugLog(`⚠ No valid date found for weekly metric: run_id=${m.run_id}, date_end=${m.date_end}, created_at=${m.created_at}`, 'warn');
+               return; // Skip this metric

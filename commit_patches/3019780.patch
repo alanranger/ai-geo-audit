@@ -1,0 +1,70 @@
+From 30197801fb0167974899bf61ac01e929c3219b1e Mon Sep 17 00:00:00 2001
+From: alanranger <info@alanranger.com>
+Date: Tue, 23 Dec 2025 15:03:50 +0000
+Subject: [PATCH] Add debug logging to Money Pages KPI Tracker to diagnose data
+ fetching and chart rendering issues
+
+---
+ audit-dashboard.html | 21 ++++++++++++++++++++-
+ 1 file changed, 20 insertions(+), 1 deletion(-)
+
+diff --git a/audit-dashboard.html b/audit-dashboard.html
+index fb48fe3..b064d8c 100644
+--- a/audit-dashboard.html
++++ b/audit-dashboard.html
+@@ -16035,6 +16035,8 @@ <h3>🔍 Debug Log</h3>
+         const fromDate = new Date();
+         fromDate.setDate(fromDate.getDate() - 28);
+         
++        debugLog(`📅 Money Pages KPI Tracker: Filtering by date_end between ${fromDate.toISOString().split('T')[0]} and ${toDate.toISOString().split('T')[0]}`, 'info');
++        
+         // Fetch a wider range (60 days) to ensure we get all records, then filter by date_end
+         const fetchFromDate = new Date();
+         fetchFromDate.setDate(fetchFromDate.getDate() - 60);
+@@ -16097,6 +16099,9 @@ <h3>🔍 Debug Log</h3>
+           return;
+         }
+         
++        debugLog(`📊 Money Pages KPI Tracker: Found ${sortedDates.length} unique dates: ${sortedDates.join(', ')}`, 'info');
++        debugLog(`📊 Money Pages KPI Tracker: Segment data counts - money: ${segmentData.money?.length || 0}, landing: ${segmentData.landing?.length || 0}, event: ${segmentData.event?.length || 0}, product: ${segmentData.product?.length || 0}`, 'info');
++        
+         // Build chart data
+         const segmentLabels = {
+           'money': 'All',
+@@ -16122,7 +16127,11 @@ <h3>🔍 Debug Log</h3>
+               const segmentPoint = segmentData[segment].find(d => 
+                 d.date.toISOString().split('T')[0] === dateStr
+               );
+-              return segmentPoint ? segmentPoint.value : null;
++              const value = segmentPoint ? segmentPoint.value : null;
++              if (segmentPoint) {
++                debugLog(`📊 ${segmentLabels[segment]} (${segment}): ${dateStr} = ${value}`, 'info');
++              }
++              return value;
+             });
+             
+             return {
+@@ -16143,6 +16152,7 @@ <h3>🔍 Debug Log</h3>
+         const canvas = document.getElementById('money-kpi-sparkline');
+         if (canvas) {
+           // Destroy existing chart if it exists (check both window variable and Chart.js registry)
++          // Also destroy the old moneyKpiChart variable used by renderMoneyKpiSparkline
+           if (window.moneyKpiChart) {
+             try {
+               window.moneyKpiChart.destroy();
+@@ -16165,6 +16175,15 @@ <h3>🔍 Debug Log</h3>
+             }
+           }
+           
++          // Clear the old moneyKpiChart variable to prevent conflicts
++          if (typeof moneyKpiChart !== 'undefined') {
++            try {
++              if (moneyKpiChart) moneyKpiChart.destroy();
++            } catch (e) {
++              // Ignore errors
++            }
++          }
++          
+           const ctx = canvas.getContext('2d');
+           
+           window.moneyKpiChart = new Chart(ctx, {

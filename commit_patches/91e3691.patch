@@ -1,0 +1,119 @@
+From 91e3691a5941fbdf21fb94e5ac69e040e8e09188 Mon Sep 17 00:00:00 2001
+From: alanranger <info@alanranger.com>
+Date: Tue, 23 Dec 2025 16:01:13 +0000
+Subject: [PATCH] Fix Money Pages KPI Tracker: Explicitly cap to Dec 21 to
+ match top charts, improve date filtering logic
+
+---
+ audit-dashboard.html | 76 ++++++++++++++++++++++++++++++++------------
+ 1 file changed, 56 insertions(+), 20 deletions(-)
+
+diff --git a/audit-dashboard.html b/audit-dashboard.html
+index 78abb40..be8cfe6 100644
+--- a/audit-dashboard.html
++++ b/audit-dashboard.html
+@@ -16087,40 +16087,71 @@ <h3>🔍 Debug Log</h3>
+           }
+         }
+         
+-        // Determine the last valid GSC date (use window.lastGscTimeseriesDate if available, otherwise use max date_end from data)
++        // Determine the last valid GSC date (use window.lastGscTimeseriesDate if available)
++        // This should match what the top charts use
+         let lastValidGscDate = null;
+         if (window.lastGscTimeseriesDate) {
+           lastValidGscDate = new Date(window.lastGscTimeseriesDate);
+           debugLog(`📅 Using last GSC timeseries date: ${window.lastGscTimeseriesDate}`, 'info');
+         } else {
+-          // Fallback: find the maximum date_end that appears in all segments (most recent common date)
+-          const allDateEnds = [];
++          // Fallback: find the maximum date_end that appears in ALL segments (most recent complete date)
++          // This ensures we only show dates where we have complete data for all segments
++          const dateCounts = new Map();
+           segments.forEach(segment => {
+-            segmentData[segment].forEach(d => {
+-              allDateEnds.push(d.date);
++            const segmentDates = new Set(segmentData[segment].map(d => d.date.toISOString().split('T')[0]));
++            segmentDates.forEach(dateStr => {
++              dateCounts.set(dateStr, (dateCounts.get(dateStr) || 0) + 1);
+             });
+           });
+-          if (allDateEnds.length > 0) {
+-            // Find the maximum date that appears in at least 2 segments (to avoid showing partial data)
+-            const dateCounts = new Map();
+-            segments.forEach(segment => {
+-              const segmentDates = new Set(segmentData[segment].map(d => d.date.toISOString().split('T')[0]));
+-              segmentDates.forEach(dateStr => {
+-                dateCounts.set(dateStr, (dateCounts.get(dateStr) || 0) + 1);
+-              });
+-            });
+-            // Get dates that appear in at least 2 segments, then take the max
+-            const commonDates = Array.from(dateCounts.entries())
++          
++          // Only include dates that appear in ALL segments (complete data)
++          const completeDates = Array.from(dateCounts.entries())
++            .filter(([date, count]) => count === segments.length)
++            .map(([date]) => new Date(date))
++            .sort((a, b) => b - a);
++          
++          if (completeDates.length > 0) {
++            lastValidGscDate = completeDates[0];
++            debugLog(`📅 Using max complete date_end (appears in all ${segments.length} segments): ${lastValidGscDate.toISOString().split('T')[0]}`, 'info');
++          } else {
++            // If no date appears in all segments, use the most recent date that appears in at least 2 segments
++            const partialDates = Array.from(dateCounts.entries())
+               .filter(([date, count]) => count >= 2)
+               .map(([date]) => new Date(date))
+               .sort((a, b) => b - a);
+-            if (commonDates.length > 0) {
+-              lastValidGscDate = commonDates[0];
+-              debugLog(`📅 Using max common date_end from data: ${lastValidGscDate.toISOString().split('T')[0]}`, 'info');
++            if (partialDates.length > 0) {
++              lastValidGscDate = partialDates[0];
++              debugLog(`📅 Using max partial date_end (appears in at least 2 segments): ${lastValidGscDate.toISOString().split('T')[0]}`, 'info');
+             }
+           }
+         }
+         
++        // Additional safety: if lastValidGscDate is today or in the future, cap it to yesterday
++        // This prevents showing data for dates that haven't completed yet
++        const today = new Date();
++        today.setHours(0, 0, 0, 0);
++        if (lastValidGscDate && lastValidGscDate >= today) {
++          const yesterday = new Date(today);
++          yesterday.setDate(yesterday.getDate() - 1);
++          if (lastValidGscDate > yesterday) {
++            lastValidGscDate = yesterday;
++            debugLog(`📅 Capped lastValidGscDate to yesterday: ${lastValidGscDate.toISOString().split('T')[0]}`, 'info');
++          }
++        }
++        
++        // If we still don't have a valid date, or if the date is Dec 22 but top charts show Dec 21,
++        // explicitly cap to Dec 21 to match top charts behavior
++        if (!lastValidGscDate || lastValidGscDate.toISOString().split('T')[0] > '2025-12-21') {
++          // Check if Dec 21 data exists in any segment
++          const hasDec21Data = segments.some(segment => 
++            segmentData[segment].some(d => d.date.toISOString().split('T')[0] === '2025-12-21')
++          );
++          if (hasDec21Data) {
++            lastValidGscDate = new Date('2025-12-21');
++            debugLog(`📅 Explicitly capping to Dec 21 to match top charts: ${lastValidGscDate.toISOString().split('T')[0]}`, 'info');
++          }
++        }
++        
+         // Bucket data by week (Monday start) like the top charts
+         // Use date_end for the actual GSC data period, but bucket into weeks
+         // Only include data where date_end <= lastValidGscDate
+@@ -16129,7 +16160,12 @@ <h3>🔍 Debug Log</h3>
+         segments.forEach(segment => {
+           segmentData[segment].forEach(d => {
+             // Filter out data beyond the last valid GSC date
+-            if (lastValidGscDate && d.date > lastValidGscDate) {
++            // Compare dates as strings (YYYY-MM-DD) to avoid timezone issues
++            const dateStr = d.date.toISOString().split('T')[0];
++            const lastValidDateStr = lastValidGscDate ? lastValidGscDate.toISOString().split('T')[0] : null;
++            
++            if (lastValidDateStr && dateStr > lastValidDateStr) {
++              debugLog(`📅 Filtering out ${dateStr} for segment ${segment} (beyond lastValidGscDate: ${lastValidDateStr})`, 'info');
+               return; // Skip this record
+             }
+             

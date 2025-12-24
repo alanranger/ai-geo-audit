@@ -1,0 +1,67 @@
+From cacff277f9898fc8ccce767042caabae6aaa418e Mon Sep 17 00:00:00 2001
+From: alanranger <info@alanranger.com>
+Date: Tue, 23 Dec 2025 16:44:04 +0000
+Subject: [PATCH] Fix infinite retry loop: Add retry limit (10 max) to
+ renderMoneyPagesSuggestedTop10, fix toISOString null checks
+
+---
+ audit-dashboard.html | 27 +++++++++++++++++----------
+ 1 file changed, 17 insertions(+), 10 deletions(-)
+
+diff --git a/audit-dashboard.html b/audit-dashboard.html
+index beb760a..b4b5281 100644
+--- a/audit-dashboard.html
++++ b/audit-dashboard.html
+@@ -14984,15 +14984,20 @@ <h3>🔍 Debug Log</h3>
+           
+           // Define renderMoneyPagesSuggestedTop10 at global scope early
+           if (!window.renderMoneyPagesSuggestedTop10) {
+-            window.renderMoneyPagesSuggestedTop10 = function() {
++            window.renderMoneyPagesSuggestedTop10 = function(retryCount = 0) {
++              const MAX_RETRIES = 10; // Stop after 10 retries (5 seconds)
+               const container = document.getElementById('money-pages-suggested-top10-container');
+               if (!container) {
+-                debugLog('⚠ money-pages-suggested-top10-container not found - section may not be rendered yet', 'warn');
+-                setTimeout(() => {
+-                  if (typeof window.renderMoneyPagesSuggestedTop10 === 'function') {
+-                    window.renderMoneyPagesSuggestedTop10();
+-                  }
+-                }, 500);
++                if (retryCount < MAX_RETRIES) {
++                  debugLog(`⚠ money-pages-suggested-top10-container not found (retry ${retryCount + 1}/${MAX_RETRIES}) - section may not be rendered yet`, 'warn');
++                  setTimeout(() => {
++                    if (typeof window.renderMoneyPagesSuggestedTop10 === 'function') {
++                      window.renderMoneyPagesSuggestedTop10(retryCount + 1);
++                    }
++                  }, 500);
++                } else {
++                  debugLog(`⚠ money-pages-suggested-top10-container not found after ${MAX_RETRIES} retries - giving up. The HTML section may not be included in renderMoneyPagesSection.`, 'error');
++                }
+                 return;
+               }
+               
+@@ -15249,7 +15254,7 @@ <h4 style="margin: 0 0 0.5rem 0; font-size: 1rem; font-weight: 700; color: #1e29
+           // Render Suggested (Top 10) cards - wait a bit longer to ensure HTML structure exists
+           setTimeout(() => {
+             if (typeof window.renderMoneyPagesSuggestedTop10 === 'function') {
+-              window.renderMoneyPagesSuggestedTop10();
++              window.renderMoneyPagesSuggestedTop10(0); // Start with retry count 0
+             } else {
+               debugLog('⚠ renderMoneyPagesSuggestedTop10 function not found', 'warn');
+             }
+@@ -16226,11 +16231,13 @@ <h4 style="margin: 0 0 0.5rem 0; font-size: 1rem; font-weight: 700; color: #1e29
+           // If we still don't have a valid date, try to use window.lastGscTimeseriesDate as fallback
+           if (window.lastGscTimeseriesDate) {
+             lastValidGscDate = new Date(window.lastGscTimeseriesDate);
+-            debugLog(`📅 Using window.lastGscTimeseriesDate as fallback: ${lastValidGscDate.toISOString().split('T')[0]}`, 'info');
++            if (lastValidGscDate && lastValidGscDate.toISOString) {
++              debugLog(`📅 Using window.lastGscTimeseriesDate as fallback: ${lastValidGscDate.toISOString().split('T')[0]}`, 'info');
++            }
+           }
+         }
+         
+-        if (lastValidGscDate && lastValidGscDate.toISOString().split('T')[0] > '2025-12-21') {
++        if (lastValidGscDate && lastValidGscDate.toISOString && lastValidGscDate.toISOString().split('T')[0] > '2025-12-21') {
+           // Check if Dec 21 data exists in any segment
+           const hasDec21Data = segments.some(segment => 
+             segmentData[segment].some(({ metric: m }) => {

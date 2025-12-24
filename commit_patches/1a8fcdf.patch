@@ -1,0 +1,74 @@
+From 1a8fcdfa09330892e82e2e9b67918b40d755784e Mon Sep 17 00:00:00 2001
+From: alanranger <info@alanranger.com>
+Date: Tue, 23 Dec 2025 14:58:36 +0000
+Subject: [PATCH] Fix Chart.js canvas reuse error: Properly destroy existing
+ chart instances before creating new ones
+
+---
+ audit-dashboard.html | 36 ++++++++++++++++++++++++++++++++----
+ 1 file changed, 32 insertions(+), 4 deletions(-)
+
+diff --git a/audit-dashboard.html b/audit-dashboard.html
+index 86610d7..fb48fe3 100644
+--- a/audit-dashboard.html
++++ b/audit-dashboard.html
+@@ -15998,6 +15998,14 @@ <h3>🔍 Debug Log</h3>
+ 
+     // Load and render Money Pages KPI Tracker (last 28 days)
+     window.loadAuditHistoryAndRenderKpis = async function(propertyUrl) {
++      // Prevent multiple simultaneous calls
++      if (window._loadingMoneyKpiTracker) {
++        debugLog('⚠ Money Pages KPI Tracker already loading, skipping duplicate call', 'warn');
++        return;
++      }
++      
++      window._loadingMoneyKpiTracker = true;
++      
+       try {
+         debugLog('📊 Loading Money Pages KPI Tracker data...', 'info');
+         
+@@ -16134,13 +16142,31 @@ <h3>🔍 Debug Log</h3>
+         // Render chart
+         const canvas = document.getElementById('money-kpi-sparkline');
+         if (canvas) {
+-          const ctx = canvas.getContext('2d');
+-          
+-          // Destroy existing chart if it exists
++          // Destroy existing chart if it exists (check both window variable and Chart.js registry)
+           if (window.moneyKpiChart) {
+-            window.moneyKpiChart.destroy();
++            try {
++              window.moneyKpiChart.destroy();
++            } catch (e) {
++              debugLog(`Error destroying window.moneyKpiChart: ${e.message}`, 'warn');
++            }
++            window.moneyKpiChart = null;
+           }
+           
++          // Also check Chart.js registry for any chart on this canvas
++          if (typeof Chart !== 'undefined' && Chart.getChart) {
++            const existingChart = Chart.getChart(canvas);
++            if (existingChart) {
++              try {
++                existingChart.destroy();
++                debugLog('Destroyed existing Chart.js instance from registry for money-kpi-sparkline', 'info');
++              } catch (e) {
++                debugLog(`Error destroying chart from registry: ${e.message}`, 'warn');
++              }
++            }
++          }
++          
++          const ctx = canvas.getContext('2d');
++          
+           window.moneyKpiChart = new Chart(ctx, {
+             type: 'line',
+             data: chartData,
+@@ -16280,6 +16306,8 @@ <h3>🔍 Debug Log</h3>
+       } catch (err) {
+         debugLog(`Error loading Money Pages KPI Tracker: ${err.message}`, 'error');
+         console.error(err);
++      } finally {
++        window._loadingMoneyKpiTracker = false;
+       }
+     };
+ 
