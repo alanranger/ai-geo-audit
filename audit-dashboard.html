@@ -30808,6 +30808,12 @@ Final Score: ${score}/100`;
           return Math.round(imps * gap);
         };
 
+        const maxExpectedUp = Math.max(1, ...top10.map(p => expectedIncreaseClicks28dToTargetCtr(p) || 0));
+        const impactScore100 = (p) => {
+          const up = expectedIncreaseClicks28dToTargetCtr(p) || 0;
+          return Math.max(0, Math.min(100, Math.round((up / maxExpectedUp) * 100)));
+        };
+
         container.innerHTML = top10.map((p) => {
           const status = window.getOptimisationStatus
             ? window.getOptimisationStatus({ targetUrl: p.url, keyword: '' }, 'on_page')
@@ -30816,6 +30822,7 @@ Final Score: ${score}/100`;
           const hasTask = !!statusText && statusText !== 'deleted' && statusText !== 'done' && statusText !== 'cancelled';
           const taskId = hasTask ? (status.id || status.task_id || null) : null;
 
+          const pri = String(p.priorityLevel || '').toUpperCase() || 'MED';
           const diff = String(p.difficultyLevel || '').toUpperCase() || 'MEDIUM';
           const imp = String(p.impactLevel || '').toUpperCase() || 'MEDIUM';
 
@@ -30826,43 +30833,45 @@ Final Score: ${score}/100`;
           const safeUrl = String(p.url).replace(/'/g, "\\'");
           const safeTitle = String(title).replace(/'/g, "\\'");
           const expectedUp = expectedIncreaseClicks28dToTargetCtr(p);
+          const impact100 = impactScore100(p);
+          const typeTag = String(p.segmentType || 'landing').toLowerCase();
 
           return `
-            <div class="suggested-card" style="background: white; border: 2px solid #e2e8f0; border-radius: 8px; padding: 1.25rem; box-shadow: 0 2px 4px rgba(0,0,0,0.06);">
-              <div style="display:flex; justify-content: space-between; gap: 0.75rem; align-items: flex-start; margin-bottom: 0.75rem;">
+            <div class="suggested-card" style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 1.25rem; box-shadow: 0 2px 4px rgba(0,0,0,0.06); ${hasTask ? 'border-left: 4px solid #10b981;' : ''}">
+              ${hasTask ? `<div style="background: #dcfce7; color: #166534; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 700; margin-bottom: 0.75rem;">✓ Being Optimised</div>` : ''}
+              <div style="display:flex; justify-content: space-between; gap: 0.75rem; align-items: flex-start; margin-bottom: 0.5rem;">
                 <div style="flex:1;">
-                  <div style="font-weight:700; color:#1e293b; line-height:1.35; margin-bottom:0.25rem;">${title}</div>
+                  <div style="font-weight:700; color:#1e293b; line-height:1.35; margin-bottom:0.35rem;">${escapeHtml(title)}</div>
                   <a href="${p.url}" target="_blank" style="font-size:0.85rem; color:#2563eb; text-decoration:none; word-break:break-all;">${p.url}</a>
+                  <div style="margin-top: 0.5rem;">
+                    <span style="display:inline-block; padding: 0.15rem 0.5rem; background:#dbeafe; color:#1d4ed8; border-radius: 6px; font-size: 0.75rem; font-weight: 700;">${escapeHtml(typeTag)}</span>
+                  </div>
                 </div>
-                <div style="display:flex; flex-direction:column; align-items:flex-end; gap:0.35rem; min-width:92px;">
-                  <span style="padding: 0.2rem 0.5rem; border-radius: 999px; background:#f1f5f9; color:#0f172a; font-size:0.75rem; font-weight:700;">${diff}</span>
-                  <span style="padding: 0.2rem 0.5rem; border-radius: 999px; background:${diffColor}20; color:${diffColor}; font-size:0.75rem; font-weight:700;">${imp}</span>
+                <div style="display:flex; flex-direction:column; align-items:flex-end; gap:0.35rem; min-width:72px;">
+                  <span style="padding: 0.2rem 0.5rem; border-radius: 999px; background:#f1f5f9; color:#0f172a; font-size:0.75rem; font-weight:700;">${pri}</span>
                 </div>
               </div>
 
-              <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:0.75rem; font-size:0.85rem; margin-bottom:0.75rem;">
-                <div><div style="color:#64748b;">CTR</div><div style="font-weight:700;">${ctrPct(p).toFixed(1)}%</div></div>
-                <div><div style="color:#64748b;">Impr</div><div style="font-weight:700;">${Number(p.impressions || 0).toLocaleString()}</div></div>
-                <div><div style="color:#64748b;">Pos</div><div style="font-weight:700;">${Number(p.avgPosition || 0).toFixed(1)}</div></div>
+              <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 0.35rem 1rem; font-size:0.85rem; color:#475569; margin: 0.75rem 0 0.75rem;">
+                <div><span style="color:#64748b;">Pos:</span> <span style="font-weight:700; color:#1e293b;">${Number(p.avgPosition || 0).toFixed(1)}</span></div>
+                <div><span style="color:#64748b;">CTR:</span> <span style="font-weight:700; color:#1e293b;">${ctrPct(p).toFixed(1)}%</span></div>
+                <div><span style="color:#64748b;">Impr:</span> <span style="font-weight:700; color:#1e293b;">${Number(p.impressions || 0).toLocaleString()}</span></div>
+                <div><span style="color:#64748b;">Upside:</span> <span style="font-weight:700; color:#1e293b;">${Number(expectedUp || 0).toLocaleString()}</span></div>
+                <div><span style="color:#64748b;">Impact:</span> <span style="font-weight:700; color:#1e293b;">${impact100}</span></div>
+                <div><span style="color:#64748b;">Difficulty:</span> <span style="font-weight:700; color:${diffColor};">${diff}</span></div>
               </div>
 
-              <div style="font-size:0.85rem; color:#475569; margin-bottom:0.75rem;">
-                <strong>Impact:</strong> ${imp}
-                <span style="margin:0 0.5rem; color:#cbd5e1;">•</span>
-                <strong>Type:</strong> ${String(p.segmentType || 'landing')}
+              <div style="margin-bottom: 0.5rem; font-size:0.85rem; color:#64748b;">
+                Potential impact clicks 28d: <strong style="color:#1e293b;">${Number(expectedUp || 0).toLocaleString()}</strong>
               </div>
 
               <div style="font-size:0.85rem; color:#64748b; line-height:1.5; margin-bottom:0.75rem;">
-                ${p.suggestion || 'Improve CTR (title/meta/snippet) and strengthen content relevance.'}
-              </div>
-
-              <div style="margin-bottom: 0.75rem; padding: 0.6rem 0.75rem; background: #f8fafc; border-radius: 6px; font-size: 0.85rem; color: #475569;">
-                <strong>Expected increase in clicks (28d) to hit 2.5% CTR:</strong> +${Number(expectedUp || 0).toLocaleString()}
+                ${escapeHtml(p.suggestion || 'Improve relevance + internal links to lift rank')}
               </div>
 
               <button type="button" style="width:100%; padding:0.65rem; border:none; border-radius:6px; font-weight:700; cursor:pointer; background:${hasTask ? '#10b981' : '#2563eb'}; color:white;"
                 onclick="${hasTask && taskId ? `window.openOptimisationTaskDrawer('${String(taskId).replace(/'/g, "\\'").replace(/\"/g, '&quot;')}')` : `window.trackMoneyPage('${safeUrl}', '${safeTitle}')`}">
-                ${hasTask ? 'Manage' : 'Create Task'}
+                ${hasTask ? 'Manage Task' : 'Create Task'}
               </button>
             </div>
           `;
