@@ -16845,47 +16845,82 @@
           if (keywordsResponse.ok) {
             const keywordsData = await keywordsResponse.json();
             if (keywordsData.keywords && keywordsData.keywords.length > 0) {
-              // Group keywords by inferred page segment and aggregate AI metrics.
-              // IMPORTANT: AI metrics are keyword-driven; segment is inferred from each keyword's best_url.
-              const inferSegmentFromBestUrl = (bestUrl) => {
-                if (!bestUrl) return null;
-                const urlLower = String(bestUrl).toLowerCase();
-                if (urlLower.includes('/blog-on-photography/')) return 'blog';
-                if (urlLower.includes('/free-online-photography-course')) return 'academy';
+              // AI metrics are keyword-driven, but we attribute citations by the ACTUAL cited URLs (not best_url).
+              // This gives a true picture of which page segments are being cited in AI Overviews.
+              const normalizeUrlForMatch = (url) => {
+                if (!url) return '';
+                let u = String(url);
+                u = u.split('?')[0];
+                u = u.split('#')[0];
+                u = u.replace(/\/$/, '');
+                return u.toLowerCase();
+              };
+
+              const extractAlanCitedUrls = (keyword) => {
+                const raw = keyword?.ai_alan_citations;
+                if (!raw || !Array.isArray(raw)) return [];
+                return raw
+                  .map(v => {
+                    if (!v) return null;
+                    if (typeof v === 'string') return v;
+                    if (typeof v === 'object' && v.url) return v.url;
+                    return null;
+                  })
+                  .filter(Boolean);
+              };
+
+              const inferSegmentsFromCitedUrl = (citedUrl) => {
+                const u = normalizeUrlForMatch(citedUrl);
+                if (!u || !u.includes('alanranger.com')) return [];
+                if (u.includes('/free-online-photography-course')) return ['academy'];
+                if (u.includes('/blog-on-photography/')) return ['blog'];
+
+                // Money pages only (landing/event/product)
                 if (typeof classifyMoneyPage === 'function') {
-                  const mc = classifyMoneyPage(bestUrl);
-                  if (mc && mc.isMoney && mc.segmentType) return mc.segmentType; // landing|event|product
+                  const mc = classifyMoneyPage(citedUrl);
+                  if (mc && mc.isMoney && mc.segmentType) {
+                    return [mc.segmentType, 'money']; // include money rollup
+                  }
                 }
-                return null;
+                return [];
               };
 
               keywordsData.keywords.forEach(keyword => {
                 const citations = parseInt(keyword.ai_alan_citations_count) || 0;
                 const hasOverview = keyword.has_ai_overview === true || keyword.ai_overview_present_any === true;
                 
-                // Entire site = all keywords
+                // Entire site = keyword-level totals (what the Ranking & AI summary shows)
                 aiMetricsBySegment.site.citations += citations;
                 if (hasOverview) aiMetricsBySegment.site.overviewCount += 1;
-                
-                // Infer segment from best_url so we can split Money into landing/event/product (and blog).
-                const inferred = inferSegmentFromBestUrl(keyword.best_url);
-                if (inferred && aiMetricsBySegment[inferred]) {
-                  aiMetricsBySegment[inferred].citations += citations;
-                  if (hasOverview) aiMetricsBySegment[inferred].overviewCount += 1;
-                }
-                
-                // Money rollup = landing + event + product inferred from URL.
-                if (inferred === 'event' || inferred === 'product' || inferred === 'landing') {
-                  aiMetricsBySegment.money.citations += citations;
-                  if (hasOverview) {
-                    aiMetricsBySegment.money.overviewCount += 1;
+
+                // Attribute citations by cited URLs (can span multiple segments per keyword)
+                const citedUrls = extractAlanCitedUrls(keyword);
+                const segsForKeyword = new Set();
+                const segsTrackedForKeyword = new Set();
+
+                citedUrls.forEach(citedUrl => {
+                  const segs = inferSegmentsFromCitedUrl(citedUrl); // may include 'money' rollup
+                  segs.forEach(seg => {
+                    if (aiMetricsBySegment[seg]) {
+                      aiMetricsBySegment[seg].citations += 1; // 1 per cited URL
+                      segsForKeyword.add(seg);
+                    }
+                  });
+
+                  // all_tracked: only if the cited URL is an actively tracked task URL
+                  const normKey = normalizeGscPageKey(citedUrl);
+                  if (trackedTaskUrls.has(normKey)) {
+                    aiMetricsBySegment.all_tracked.citations += 1;
+                    segsTrackedForKeyword.add('all_tracked');
                   }
-                }
-                
-                // Add to all_tracked if URL matches a tracked task
-                if (keyword.best_url && trackedTaskUrls.has(normalizeGscPageKey(keyword.best_url))) {
-                  aiMetricsBySegment.all_tracked.citations += citations;
-                  if (hasOverview) {
+                });
+
+                // Overview keyword counts: count keyword once per segment it appears in
+                if (hasOverview) {
+                  segsForKeyword.forEach(seg => {
+                    if (aiMetricsBySegment[seg]) aiMetricsBySegment[seg].overviewCount += 1;
+                  });
+                  if (segsTrackedForKeyword.size > 0) {
                     aiMetricsBySegment.all_tracked.overviewCount += 1;
                   }
                 }

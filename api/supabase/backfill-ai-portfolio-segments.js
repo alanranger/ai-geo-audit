@@ -4,6 +4,7 @@
 export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
+import { classifyPageSegment as classifySitePageSegment, PageSegment } from '../aigeo/pageSegment.js';
 
 const need = (k) => {
   const v = process.env[k];
@@ -19,45 +20,38 @@ const sendJSON = (res, status, obj) => {
   res.status(status).send(JSON.stringify(obj));
 };
 
-// Map audit_date to run_id format
-// Try to match existing run_ids in portfolio_segment_metrics_28d
-// First try YYYY-MM format, then try YYYY-MM-DD format
-async function findMatchingRunId(supabase, auditDate, siteUrl) {
-  if (!auditDate) return null;
-  
+// Map audit_date to run_id format(s).
+// We can have BOTH:
+// - daily snapshots: run_id=YYYY-MM-DD (normal audits)
+// - monthly snapshots: run_id=YYYY-MM (historical backfills)
+// Return all run_ids that exist for this site so we update whichever rows the UI will pick.
+async function findMatchingRunIds(supabase, auditDate, siteUrl) {
+  if (!auditDate) return [];
   const date = new Date(auditDate);
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
-  
-  // Try YYYY-MM format first (for monthly backfills)
   const monthlyRunId = `${year}-${month}`;
-  const { data: monthlyMatch } = await supabase
-    .from('portfolio_segment_metrics_28d')
-    .select('run_id')
-    .eq('run_id', monthlyRunId)
-    .eq('site_url', siteUrl)
-    .limit(1);
-  
-  if (monthlyMatch && monthlyMatch.length > 0) {
-    return monthlyRunId;
-  }
-  
-  // Try YYYY-MM-DD format (for daily audits)
   const dailyRunId = `${year}-${month}-${day}`;
-  const { data: dailyMatch } = await supabase
-    .from('portfolio_segment_metrics_28d')
-    .select('run_id')
-    .eq('run_id', dailyRunId)
-    .eq('site_url', siteUrl)
-    .limit(1);
-  
-  if (dailyMatch && dailyMatch.length > 0) {
-    return dailyRunId;
-  }
-  
-  // If no match found, default to monthly format
-  return monthlyRunId;
+
+  const out = [];
+  const checkExists = async (runId) => {
+    const { data } = await supabase
+      .from('portfolio_segment_metrics_28d')
+      .select('run_id')
+      .eq('run_id', runId)
+      .eq('site_url', siteUrl)
+      .limit(1);
+    return !!(data && data.length > 0);
+  };
+
+  // Prefer daily first (most current), but include monthly if it exists too.
+  if (await checkExists(dailyRunId)) out.push(dailyRunId);
+  if (await checkExists(monthlyRunId)) out.push(monthlyRunId);
+
+  // If nothing exists, still return the daily run_id as a sensible default for logging
+  if (out.length === 0) out.push(dailyRunId);
+  return out;
 }
 
 export default async function handler(req, res) {
@@ -100,12 +94,7 @@ export default async function handler(req, res) {
     const results = [];
 
     for (const currentAuditDate of auditDates) {
-      const runId = await findMatchingRunId(supabase, currentAuditDate, targetSiteUrl);
-      
-      if (!runId) {
-        console.warn(`[Backfill AI] Skipping invalid audit_date: ${currentAuditDate}`);
-        continue;
-      }
+      const runIds = await findMatchingRunIds(supabase, currentAuditDate, targetSiteUrl);
 
       // Get keyword rankings for this audit date
       const { data: keywords, error: keywordsError } = await supabase
@@ -126,64 +115,24 @@ export default async function handler(req, res) {
         continue;
       }
 
-      // Group keywords by inferred segment (keyword_rankings is keyword-driven; we infer segment from best_url).
-      // This matches the frontend Portfolio logic (and allows single-URL segments like "academy").
-      const segmentKeywords = {
-        site: [],
-        money: [],
-        academy: [],
-        landing: [],
-        event: [],
-        product: [],
-        blog: [],
-        all_tracked: []
-      };
-
       const normalizeUrl = (u) => {
         if (!u) return '';
         let s = String(u).trim().toLowerCase();
         // Strip query params
         s = s.split('?')[0];
+        // Strip hash
+        s = s.split('#')[0];
         // Remove trailing slash
         s = s.replace(/\/$/, '');
         return s;
       };
 
-      const inferSegmentFromBestUrl = (bestUrl, row) => {
-        const u = normalizeUrl(bestUrl);
-        if (!u) return null;
-        if (u.includes('/free-online-photography-course')) return 'academy';
-        if (u.includes('/blog-on-photography/')) return 'blog';
-        const pageType = (row?.page_type || '').toLowerCase();
-        if (pageType === 'event' || pageType === 'product' || pageType === 'landing') return pageType;
-        // Fallback: if it's a money keyword but page type is "other", treat as landing for rollups
-        const keywordSegment = (row?.segment || '').toLowerCase();
-        if (keywordSegment === 'money') return 'landing';
-        return null;
-      };
-
-      // Entire site: all keywords (AI metrics are keyword-driven)
-      keywords.forEach(k => segmentKeywords.site.push(k));
-
-      // Money rollup: any keyword whose declared segment is "money"
-      keywords.forEach(k => {
-        const keywordSegment = (k.segment || '').toLowerCase();
-        if (keywordSegment === 'money') segmentKeywords.money.push(k);
-      });
-
-      // Segment by best_url for page-level groupings (academy/blog/landing/event/product)
-      keywords.forEach(k => {
-        const inferred = inferSegmentFromBestUrl(k.best_url, k);
-        if (inferred && segmentKeywords[inferred]) {
-          segmentKeywords[inferred].push(k);
-        }
-      });
-
       // Get tracked URLs for all_tracked segment
       const { data: tasks } = await supabase
         .from('optimisation_tasks')
-        .select('target_url')
-        .not('status', 'in', '(done,cancelled,deleted)')
+        .select('target_url, status, cycle_active')
+        .in('status', ['in_progress', 'monitoring', 'planned'])
+        .gt('cycle_active', 0)
         .not('target_url', 'is', null);
       
       const trackedUrls = new Set();
@@ -197,69 +146,180 @@ export default async function handler(req, res) {
         });
       }
 
-      // Add keywords to all_tracked if their best_url matches a tracked task
-      keywords.forEach(keyword => {
-        if (keyword.best_url) {
-          const url = normalizeUrl(keyword.best_url);
-          if (trackedUrls.has(url)) {
-            segmentKeywords.all_tracked.push(keyword);
+      const getCitedUrls = (row) => {
+        const raw = row?.ai_alan_citations;
+        if (!raw) return [];
+        if (!Array.isArray(raw)) return [];
+        return raw
+          .map(v => {
+            if (!v) return null;
+            if (typeof v === 'string') return v;
+            if (typeof v === 'object' && v.url) return v.url;
+            return null;
+          })
+          .filter(Boolean);
+      };
+
+      // Classify citations by cited URL (not by best_url).
+      // This matches the user intent: see which page segments are truly being cited.
+      const classifyCitedUrlToSegments = (url) => {
+        if (!url) return [];
+        const u = normalizeUrl(url);
+        // Only count citations to our domain
+        if (!u.includes('alanranger.com')) return [];
+
+        // Academy override (single URL)
+        if (u.includes('/free-online-photography-course')) {
+          return ['academy'];
+        }
+
+        // Blog
+        if (u.includes('/blog-on-photography/')) {
+          return ['blog'];
+        }
+
+        // Money pages (landing/event/product)
+        try {
+          const main = classifySitePageSegment(url);
+          if (main !== PageSegment.MONEY) return [];
+        } catch {
+          // If classifier fails, be conservative and do not count it as money.
+          return [];
+        }
+
+        // Use the same heuristics as the money pages segmenter
+        const lower = u;
+        if (lower.includes('/beginners-photography-lessons') || lower.includes('/photographic-workshops-near-me')) {
+          return ['event', 'money'];
+        }
+        if (lower.includes('/photo-workshops-uk') || lower.includes('/photography-services-near-me')) {
+          return ['product', 'money'];
+        }
+        return ['landing', 'money'];
+      };
+
+      // Aggregate AI metrics per segment
+      const segments = ['site', 'money', 'academy', 'landing', 'event', 'product', 'blog', 'all_tracked'];
+      const scopes = ['all_pages', 'active_cycles_only'];
+
+      const initCounts = () => ({
+        citations: Object.fromEntries(segments.map(s => [s, 0])),
+        overviewKeywords: Object.fromEntries(segments.map(s => [s, 0]))
+      });
+
+      const countsAll = initCounts();
+      const countsTracked = initCounts();
+
+      // For each keyword, distribute citations to segments based on cited URLs.
+      keywords.forEach(k => {
+        const hasOverview = k.has_ai_overview === true || k.ai_overview_present_any === true;
+        const citedUrls = getCitedUrls(k);
+
+        // Site overview count = keywords with overview present (regardless of citations)
+        if (hasOverview) {
+          countsAll.overviewKeywords.site += 1;
+          countsTracked.overviewKeywords.site += 1;
+        }
+
+        // Track which segments were cited for this keyword (for overview keyword counts)
+        const citedSegsAll = new Set();
+        const citedSegsTracked = new Set();
+
+        citedUrls.forEach(citedUrl => {
+          const segs = classifyCitedUrlToSegments(citedUrl); // may include money rollup
+          if (!segs || segs.length === 0) return;
+
+          // Count as a citation for each inferred segment
+          segs.forEach(seg => {
+            if (!countsAll.citations[seg] && countsAll.citations[seg] !== 0) return;
+            countsAll.citations[seg] += 1;
+            citedSegsAll.add(seg);
+          });
+
+          // Site total citations (one per cited URL)
+          countsAll.citations.site += 1;
+
+          // Tracked subset: only count citations where the cited URL is a tracked task URL
+          const citedNorm = normalizeUrl(citedUrl);
+          const isTrackedUrl = trackedUrls.has(citedNorm);
+          if (isTrackedUrl) {
+            segs.forEach(seg => {
+              if (!countsTracked.citations[seg] && countsTracked.citations[seg] !== 0) return;
+              countsTracked.citations[seg] += 1;
+              citedSegsTracked.add(seg);
+            });
+            countsTracked.citations.site += 1;
+            countsTracked.citations.all_tracked += 1;
           }
+        });
+
+        // all_tracked keyword count: if any cited URL is tracked
+        if (hasOverview && citedSegsTracked.size > 0) {
+          countsTracked.overviewKeywords.all_tracked += 1;
+        }
+
+        // For overview keyword counts per segment: count keyword once per segment that appears in its citations
+        if (hasOverview) {
+          citedSegsAll.forEach(seg => {
+            if (!countsAll.overviewKeywords[seg] && countsAll.overviewKeywords[seg] !== 0) return;
+            countsAll.overviewKeywords[seg] += 1;
+          });
+          citedSegsTracked.forEach(seg => {
+            if (!countsTracked.overviewKeywords[seg] && countsTracked.overviewKeywords[seg] !== 0) return;
+            countsTracked.overviewKeywords[seg] += 1;
+          });
         }
       });
 
-      // Aggregate AI metrics per segment
       const updates = [];
-      const scopes = ['all_pages', 'active_cycles_only'];
+      for (const runId of runIds) {
+        const { data: existingRows, error: existingErr } = await supabase
+          .from('portfolio_segment_metrics_28d')
+          .select('segment, scope')
+          .eq('run_id', runId)
+          .eq('site_url', targetSiteUrl)
+          .in('segment', segments)
+          .in('scope', scopes);
 
-      for (const [segment, segmentKeywordList] of Object.entries(segmentKeywords)) {
-        if (segmentKeywordList.length === 0) continue;
+        if (existingErr) {
+          console.error(`[Backfill AI] Error loading portfolio rows for ${runId}:`, existingErr);
+          updates.push({ runId, success: false, error: existingErr.message });
+          continue;
+        }
 
-        // Calculate AI citations (sum of ai_alan_citations_count)
-        const totalCitations = segmentKeywordList.reduce((sum, k) => {
-          return sum + (parseInt(k.ai_alan_citations_count) || 0);
-        }, 0);
+        const existingSet = new Set((existingRows || []).map(r => `${r.segment}::${r.scope}`));
+        for (const seg of segments) {
+          for (const scope of scopes) {
+            if (!existingSet.has(`${seg}::${scope}`)) continue;
+            const source = scope === 'active_cycles_only' ? countsTracked : countsAll;
+            const totalCitations = source.citations[seg] || 0;
+            const overviewCount = source.overviewKeywords[seg] || 0;
 
-        // Count keywords with AI overview present
-        const overviewCount = segmentKeywordList.filter(k => 
-          k.has_ai_overview === true || k.ai_overview_present_any === true
-        ).length;
+            const { error: updateError } = await supabase
+              .from('portfolio_segment_metrics_28d')
+              .update({
+                ai_citations_28d: totalCitations,
+                ai_overview_present_count: overviewCount
+              })
+              .eq('run_id', runId)
+              .eq('site_url', targetSiteUrl)
+              .eq('segment', seg)
+              .eq('scope', scope);
 
-        for (const scope of scopes) {
-          const { data: existing } = await supabase
-            .from('portfolio_segment_metrics_28d')
-            .select('id')
-            .eq('run_id', runId)
-            .eq('site_url', targetSiteUrl)
-            .eq('segment', segment)
-            .eq('scope', scope)
-            .limit(1);
-
-          if (!existing || existing.length === 0) continue;
-
-          const { error: updateError } = await supabase
-            .from('portfolio_segment_metrics_28d')
-            .update({
-              ai_citations_28d: totalCitations,
-              ai_overview_present_count: overviewCount
-            })
-            .eq('run_id', runId)
-            .eq('site_url', targetSiteUrl)
-            .eq('segment', segment)
-            .eq('scope', scope);
-
-          if (updateError) {
-            console.error(`[Backfill AI] Error updating ${segment} (${scope}) for ${runId}:`, updateError);
-            updates.push({ segment, scope, success: false, error: updateError.message });
-          } else {
-            updates.push({ segment, scope, success: true, citations: totalCitations, overviewCount });
-            totalUpdated++;
+            if (updateError) {
+              console.error(`[Backfill AI] Error updating ${seg} (${scope}) for ${runId}:`, updateError);
+              updates.push({ runId, segment: seg, scope, success: false, error: updateError.message });
+            } else {
+              updates.push({ runId, segment: seg, scope, success: true, citations: totalCitations, overviewCount });
+              totalUpdated++;
+            }
           }
         }
       }
 
       results.push({
         auditDate: currentAuditDate,
-        runId,
+        runIds,
         success: true,
         keywordsProcessed: keywords.length,
         updates
