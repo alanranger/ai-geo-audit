@@ -30965,19 +30965,37 @@ Final Score: ${score}/100`;
 
         const clamp01 = (x) => Math.max(0, Math.min(1, x));
 
-        // Use latest money segment metrics as the source of money-page totals (28d window).
-        const refMoneyMetrics =
-          latestMoneySegmentMetrics ||
-          (history.slice().reverse().find(r => r && r.moneySegmentMetrics)?.moneySegmentMetrics) ||
-          null;
+        // Prefer moneySegmentMetrics if present; otherwise fall back to the latest Money Pages overview.
+        // (Some audits may not have `moneySegmentMetrics` persisted, but we still have moneyClicks/impressions.)
+        const overview = window.moneyPagesMetrics?.overview || null;
 
-        const refAllMoney = refMoneyMetrics?.allMoney || null;
+        const refAllMoney =
+          latestMoneySegmentMetrics?.allMoney ||
+          (history.slice().reverse().find(r => r && r.moneySegmentMetrics)?.moneySegmentMetrics?.allMoney) ||
+          window.moneySegmentMetrics?.allMoney ||
+          (overview ? {
+            clicks: Number(overview.moneyClicks || 0),
+            impressions: Number(overview.moneyImpressions || 0),
+            avgPosition: (typeof overview.moneyAvgPosition === 'number' ? overview.moneyAvgPosition : null),
+            behaviourScore: (typeof window.moneyPagesMetrics?.behaviour?.score === 'number' ? window.moneyPagesMetrics.behaviour.score : null)
+          } : null);
+
         const siteRollAtEnd = rolling28d(endDate.toISOString().split('T')[0]);
 
+        const moneyClicks28d = Number(refAllMoney?.clicks || overview?.moneyClicks || 0);
+        const moneyImpressions28d = Number(refAllMoney?.impressions || overview?.moneyImpressions || 0);
+
         const moneyClicksShare =
-          refAllMoney && siteRollAtEnd.clicks > 0 ? clamp01(Number(refAllMoney.clicks || 0) / siteRollAtEnd.clicks) : 0;
+          siteRollAtEnd.clicks > 0 && moneyClicks28d > 0 ? clamp01(moneyClicks28d / siteRollAtEnd.clicks) : 0;
         const moneyImpressionsShare =
-          refAllMoney && siteRollAtEnd.impressions > 0 ? clamp01(Number(refAllMoney.impressions || 0) / siteRollAtEnd.impressions) : 0;
+          siteRollAtEnd.impressions > 0 && moneyImpressions28d > 0 ? clamp01(moneyImpressions28d / siteRollAtEnd.impressions) : 0;
+
+        // Segment split within money pages (Landing/Event/Product) – use any available segment metrics.
+        const segSource =
+          latestMoneySegmentMetrics ||
+          (history.slice().reverse().find(r => r && r.moneySegmentMetrics)?.moneySegmentMetrics) ||
+          window.moneySegmentMetrics ||
+          null;
 
         const segmentProportions = {
           landingPages: { clicks: 0, impressions: 0 },
@@ -30985,18 +31003,18 @@ Final Score: ${score}/100`;
           productPages: { clicks: 0, impressions: 0 }
         };
 
-        if (refMoneyMetrics && refAllMoney) {
-          const allClicks = Number(refAllMoney.clicks || 0);
-          const allImps = Number(refAllMoney.impressions || 0);
+        if (segSource && segSource.allMoney) {
+          const allClicks = Number(segSource.allMoney.clicks || moneyClicks28d || 0);
+          const allImps = Number(segSource.allMoney.impressions || moneyImpressions28d || 0);
           if (allClicks > 0) {
-            segmentProportions.landingPages.clicks = Number(refMoneyMetrics.landingPages?.clicks || 0) / allClicks;
-            segmentProportions.eventPages.clicks = Number(refMoneyMetrics.eventPages?.clicks || 0) / allClicks;
-            segmentProportions.productPages.clicks = Number(refMoneyMetrics.productPages?.clicks || 0) / allClicks;
+            segmentProportions.landingPages.clicks = Number(segSource.landingPages?.clicks || 0) / allClicks;
+            segmentProportions.eventPages.clicks = Number(segSource.eventPages?.clicks || 0) / allClicks;
+            segmentProportions.productPages.clicks = Number(segSource.productPages?.clicks || 0) / allClicks;
           }
           if (allImps > 0) {
-            segmentProportions.landingPages.impressions = Number(refMoneyMetrics.landingPages?.impressions || 0) / allImps;
-            segmentProportions.eventPages.impressions = Number(refMoneyMetrics.eventPages?.impressions || 0) / allImps;
-            segmentProportions.productPages.impressions = Number(refMoneyMetrics.productPages?.impressions || 0) / allImps;
+            segmentProportions.landingPages.impressions = Number(segSource.landingPages?.impressions || 0) / allImps;
+            segmentProportions.eventPages.impressions = Number(segSource.eventPages?.impressions || 0) / allImps;
+            segmentProportions.productPages.impressions = Number(segSource.productPages?.impressions || 0) / allImps;
           }
         }
 
@@ -31018,7 +31036,9 @@ Final Score: ${score}/100`;
           productPages: []
         };
         
-        const refAvgPos = typeof refAllMoney?.avgPosition === 'number' ? refAllMoney.avgPosition : null;
+        const refAvgPos =
+          (typeof refAllMoney?.avgPosition === 'number' ? refAllMoney.avgPosition : null) ??
+          (typeof overview?.moneyAvgPosition === 'number' ? overview.moneyAvgPosition : null);
         const refBehaviour = typeof refAllMoney?.behaviourScore === 'number'
           ? refAllMoney.behaviourScore
           : (typeof window.moneyPagesMetrics?.behaviour?.score === 'number' ? window.moneyPagesMetrics.behaviour.score : null);
@@ -31780,7 +31800,8 @@ Final Score: ${score}/100`;
         }
         window.moneyPagesChartsRendering = true;
         
-        if (!history || !Array.isArray(history) || history.length === 0) {
+        const hasTimeseries = Array.isArray(timeseries) && timeseries.length > 0;
+        if ((!history || !Array.isArray(history) || history.length === 0) && !hasTimeseries) {
           debugLog('⚠ Money Pages trend chart: No history data available', 'warn');
           // Set canvas dimensions before drawing text
           [volumeCanvas, rateCanvas].forEach(canvas => {
