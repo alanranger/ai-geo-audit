@@ -7544,7 +7544,14 @@
 
       // CTR (28d) - stored as ratio (0-1), compare as percentage points
       if (metricKey === 'ctr_28d') {
-        const deltaPp = (latestValue - baselineValue) * 100;
+        // Normalize: some legacy rows store CTR as percent (0-100) or 1.0 meaning "1%".
+        // Our canonical internal format is ratio (0-1). Keep classifier consistent with table formatting.
+        let baselineRatio = Number(baselineValue);
+        let latestRatio = Number(latestValue);
+        if (isFinite(baselineRatio) && Math.abs(baselineRatio) > 1) baselineRatio = baselineRatio / 100;
+        if (isFinite(latestRatio) && Math.abs(latestRatio) > 1) latestRatio = latestRatio / 100;
+
+        const deltaPp = (latestRatio - baselineRatio) * 100;
         if (Math.abs(deltaPp) < 0.10) {
           return 'same';
         }
