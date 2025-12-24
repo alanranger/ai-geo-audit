@@ -39278,15 +39278,79 @@ Final Score: ${score}/100`;
     }
 
     function computeAiCitationsByCitedUrlSegment(rows) {
-      const normalize = (u) => {
+      const canonicalUrl = (u) => {
         if (!u) return '';
-        // Canonicalize to origin+path (strip query/hash/trailing slash) so text fragments and tracking params don't break classification.
-        if (typeof normalizeGscPageKey === 'function') return normalizeGscPageKey(u).toLowerCase();
+        if (typeof normalizeGscPageKey === 'function') return normalizeGscPageKey(u);
         let s = String(u);
         s = s.split('?')[0];
         s = s.split('#')[0];
         s = s.replace(/\/$/, '');
-        return s.toLowerCase();
+        return s;
+      };
+      const canonicalLower = (u) => String(canonicalUrl(u) || '').toLowerCase();
+
+      const pathFromCanonical = (uLower) => {
+        try {
+          const urlObj = new URL(uLower);
+          let p = (urlObj.pathname || '/').toLowerCase();
+          if (p.length > 1) p = p.replace(/\/+$/, '');
+          return p;
+        } catch {
+          const m = String(uLower).toLowerCase().match(/https?:\/\/[^/]+(\/.*)$/);
+          return m ? m[1].split('?')[0].split('#')[0] : '/';
+        }
+      };
+
+      const isMoneyPath = (path) => {
+        // Mirror api/aigeo/pageSegment.js money intent, but keep it lightweight.
+        // Treat explicit support/system pages as non-money.
+        const SUPPORT_EXACT = new Set([
+          '/', '/about-alan-ranger', '/testimonials-customer-reviews', '/awards-and-qualifications',
+          '/gallery-image-portfolios', '/help-site-map', '/contact-us'
+        ]);
+        if (SUPPORT_EXACT.has(path)) return false;
+
+        const MONEY_EXACT = new Set([
+          '/photography-workshops',
+          '/photography-workshops-near-me',
+          '/photography-workshops-uk',
+          '/landscape-photography-workshops',
+          '/outdoor-photography-workshops',
+          '/photographic-workshops-near-me',
+          '/photographic-workshops-uk',
+          '/photography-courses-coventry',
+          '/course-finder-photography-classes-near-me',
+          '/photography-tuition-services',
+          '/photography-services-near-me',
+          '/photography-shop-services',
+          '/rps-courses-mentoring-distinctions',
+          '/professional-photographer-near-me',
+          '/coventry-photographer',
+          '/photographer-in-coventry',
+          '/batsford-arboretum-photography'
+        ]);
+        if (MONEY_EXACT.has(path)) return true;
+
+        const MONEY_KEYWORDS = [
+          'workshop', 'workshops', 'lesson', 'lessons', 'course', 'courses', 'class', 'classes',
+          'training', 'tuition', 'mentoring', 'academy', 'gift-voucher', 'gift-vouchers',
+          'photography-services-near-me', 'photography-services', 'photography-shop', 'hire-a-professional-photographer'
+        ];
+        return MONEY_KEYWORDS.some(k => path.includes(k));
+      };
+
+      const classifyCitedUrlSegment = (url) => {
+        const uLower = canonicalLower(url);
+        if (!uLower || !uLower.includes('alanranger.com')) return null;
+        const path = pathFromCanonical(uLower);
+        if (path === '/free-online-photography-course') return 'academy';
+        if (path.startsWith('/blog-on-photography/')) return 'blog';
+        if (!isMoneyPath(path)) return 'other';
+
+        // Subsegment heuristics (matches server backfill-portfolio-segments + earlier money logic)
+        if (path.includes('/beginners-photography-lessons') || path.includes('/photographic-workshops-near-me')) return 'event';
+        if (path.includes('/photo-workshops-uk') || path.includes('/photography-services-near-me')) return 'product';
+        return 'landing';
       };
 
       const segCounts = {
@@ -39301,15 +39365,10 @@ Final Score: ${score}/100`;
       };
 
       const inferSegs = (url) => {
-        const u = normalize(url);
-        if (!u || !u.includes('alanranger.com')) return [];
-        if (u.includes('/free-online-photography-course')) return ['academy'];
-        if (u.includes('/blog-on-photography/')) return ['blog'];
-        if (typeof window.classifyMoneyPage === 'function') {
-          const mc = window.classifyMoneyPage(u);
-          if (mc && mc.isMoney && mc.segmentType) return [mc.segmentType, 'money'];
-        }
-        return ['other'];
+        const seg = classifyCitedUrlSegment(url);
+        if (!seg) return [];
+        if (seg === 'landing' || seg === 'event' || seg === 'product') return [seg, 'money'];
+        return [seg];
       };
 
       const extractCitedUrls = (row) => {
@@ -39478,15 +39537,32 @@ Final Score: ${score}/100`;
 
     function inferPortfolioSegmentForPageUrl(pageUrl) {
       if (!pageUrl) return null;
-      const canonical = (typeof normalizeGscPageKey === 'function') ? normalizeGscPageKey(pageUrl) : String(pageUrl);
-      const u = String(canonical).toLowerCase();
-      if (u.includes('/free-online-photography-course')) return 'academy';
-      if (u.includes('/blog-on-photography/')) return 'blog';
-      if (typeof window.classifyMoneyPage === 'function') {
-        const mc = window.classifyMoneyPage(canonical);
-        if (mc && mc.isMoney && mc.segmentType) return mc.segmentType; // landing|event|product
-      }
-      return 'other';
+      // Use same cited-url classifier for consistency across tiles + modal + portfolio rollups.
+      const seg = (() => {
+        const uLower = (typeof normalizeGscPageKey === 'function') ? normalizeGscPageKey(pageUrl).toLowerCase() : String(pageUrl).toLowerCase();
+        const path = (() => {
+          try {
+            const urlObj = new URL(uLower);
+            let p = (urlObj.pathname || '/').toLowerCase();
+            if (p.length > 1) p = p.replace(/\/+$/, '');
+            return p;
+          } catch {
+            return '/';
+          }
+        })();
+        if (path === '/free-online-photography-course') return 'academy';
+        if (path.startsWith('/blog-on-photography/')) return 'blog';
+        // Reuse money intent heuristic defined in computeAiCitationsByCitedUrlSegment via a minimal inline check.
+        const moneyHint = ['workshop','workshops','lesson','lessons','course','courses','class','classes','training','tuition','mentoring','academy','photography-services-near-me','photography-workshops','photographic-workshops','rps-courses-mentoring-distinctions'];
+        const supportExact = new Set(['/','/about-alan-ranger','/awards-and-qualifications','/gallery-image-portfolios','/contact-us']);
+        if (supportExact.has(path)) return 'other';
+        const isMoney = moneyHint.some(k => path.includes(k)) || path === '/landscape-photography-workshops' || path === '/photography-courses-coventry' || path === '/photography-workshops';
+        if (!isMoney) return 'other';
+        if (path.includes('/beginners-photography-lessons') || path.includes('/photographic-workshops-near-me')) return 'event';
+        if (path.includes('/photo-workshops-uk') || path.includes('/photography-services-near-me')) return 'product';
+        return 'landing';
+      })();
+      return seg;
     }
 
     async function openPortfolioSegmentUrlsModal(segmentKey) {
