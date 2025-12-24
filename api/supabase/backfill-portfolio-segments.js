@@ -4,6 +4,7 @@
 export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
+import { classifyPageSegment as classifySitePageSegment, PageSegment } from '../aigeo/pageSegment.js';
 
 const need = (k) => {
   const v = process.env[k];
@@ -19,25 +20,25 @@ const sendJSON = (res, status, obj) => {
   res.status(status).send(JSON.stringify(obj));
 };
 
-// Classify page segment from URL (matches frontend classifyMoneyPageSubSegment logic)
-function classifyPageSegment(pageUrl) {
-  if (!pageUrl || typeof pageUrl !== 'string') return 'landing';
-  
+// Classify Money Pages sub-segment (event/product/landing) but ONLY for true money pages.
+// This matches the intent of the Money Pages module: exclude blogs/support/system pages.
+function classifyMoneySubSegment(pageUrl) {
+  if (!pageUrl || typeof pageUrl !== 'string') return null;
+  const main = classifySitePageSegment(pageUrl);
+  if (main !== PageSegment.MONEY) return null;
+
   const urlLower = pageUrl.toLowerCase();
-  
-  // Event Pages: Use same pattern as frontend (substring match for consistency)
+  // Event pages (substring match for consistency with frontend)
   if (urlLower.includes('/beginners-photography-lessons') ||
       urlLower.includes('/photographic-workshops-near-me')) {
     return 'event';
   }
-  
-  // Product Pages: Use same pattern as frontend (substring match for consistency)
+  // Product pages
   if (urlLower.includes('/photo-workshops-uk') ||
       urlLower.includes('/photography-services-near-me')) {
     return 'product';
   }
-  
-  // Landing Pages (default - anything not matching above)
+  // Default money page bucket
   return 'landing';
 }
 
@@ -143,6 +144,7 @@ export default async function handler(req, res) {
       // - all_pages: all pages in the segment (calibrated to gsc_timeseries totals)
       // - active_cycles_only: only pages currently tracked by active optimisation tasks (NOT calibrated)
       const segmentPagesAll = {
+        site: [],
         money: [],
         landing: [],
         event: [],
@@ -150,6 +152,7 @@ export default async function handler(req, res) {
         all_tracked: []
       };
       const segmentPagesActive = {
+        site: [],
         money: [],
         landing: [],
         event: [],
@@ -200,15 +203,14 @@ export default async function handler(req, res) {
       }
 
       pages.forEach(page => {
-        const segment = classifyPageSegment(page.page_url);
+        // Entire site segment: always include every page row
+        segmentPagesAll.site.push(page);
+
+        // Money Pages segments (exclude blogs/support/system)
+        const subSegment = classifyMoneySubSegment(page.page_url);
         
-        // Add to specific segment (event, product, or landing)
-        if (segmentPagesAll[segment]) segmentPagesAll[segment].push(page);
-        
-        // ALSO add to 'money' segment (aggregate of all money pages: event + product + landing)
-        if (segment === 'event' || segment === 'product' || segment === 'landing') {
-          segmentPagesAll.money.push(page);
-        }
+        if (subSegment && segmentPagesAll[subSegment]) segmentPagesAll[subSegment].push(page);
+        if (subSegment) segmentPagesAll.money.push(page); // money = aggregate of landing+event+product (money pages only)
         
         // Add to all_tracked if this page URL is tracked by an active optimization task
         // Normalize page URL: remove protocol, www, trailing slash, extract path
@@ -232,10 +234,9 @@ export default async function handler(req, res) {
           segmentPagesAll.all_tracked.push(page);
 
           // active_cycles_only scope is the tracked subset
-          if (segmentPagesActive[segment]) segmentPagesActive[segment].push(page);
-          if (segment === 'event' || segment === 'product' || segment === 'landing') {
-            segmentPagesActive.money.push(page);
-          }
+          segmentPagesActive.site.push(page);
+          if (subSegment && segmentPagesActive[subSegment]) segmentPagesActive[subSegment].push(page);
+          if (subSegment) segmentPagesActive.money.push(page);
           segmentPagesActive.all_tracked.push(page);
         }
       });
@@ -315,6 +316,9 @@ export default async function handler(req, res) {
       };
 
       // Ensure we have a "site" segment:
+      // - all_pages.site represents the whole property (overview totals)
+      // - active_cycles_only.site is equivalent to active_cycles_only.all_tracked (tracked subset)
+      // Ensure "site" and "active site" consistency:
       // - all_pages.site represents the whole property (overview totals)
       // - active_cycles_only.site is equivalent to active_cycles_only.all_tracked (tracked subset)
       segmentPagesAll.site = pages;

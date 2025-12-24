@@ -15481,8 +15481,14 @@
       
       // Map scope dropdown values to DB scope values.
       // IMPORTANT: "All" = all pages (unfiltered), stored as scope=all_pages.
-      // Entire site should always represent the full unfiltered dataset.
-      const mappedScope = segment === 'site' ? 'all_pages' : (scope === 'active_only' ? 'active_cycles_only' : 'all_pages');
+      // Scope mapping:
+      // - Entire site always uses full unfiltered dataset
+      // - All tracked always uses the tracked subset dataset (scope selector is irrelevant/confusing for this segment)
+      // - Other segments can toggle between all_pages and active_cycles_only
+      const mappedScope =
+        segment === 'site' ? 'all_pages'
+        : segment === 'all_tracked' ? 'active_cycles_only'
+        : (scope === 'active_only' ? 'active_cycles_only' : 'all_pages');
 
       try {
         const propertyUrl = (window.getPropertyUrl ? window.getPropertyUrl() : '') || localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
@@ -15839,7 +15845,7 @@
 
     async function renderPortfolioTable() {
       const kpi = document.getElementById('portfolio-table-kpi-select')?.value || 'ctr_28d';
-      const segments = ['site', 'money', 'landing', 'event', 'product', 'all_tracked'];
+        const segments = ['site', 'money', 'landing', 'event', 'product', 'all_tracked'];
       const segmentLabels = {
         'site': 'Entire site',
         'money': 'Money Pages',
@@ -15893,7 +15899,12 @@
             order: 'desc' // Latest first
           });
           // Entire site is always unfiltered (all_pages)
-          params.set('scope', segment === 'site' ? 'all_pages' : mappedScope);
+          // Entire site is always unfiltered (all_pages). All tracked is always the tracked subset.
+          params.set('scope',
+            segment === 'site' ? 'all_pages'
+            : segment === 'all_tracked' ? 'active_cycles_only'
+            : mappedScope
+          );
           const response = await fetch(apiUrl(`/api/supabase/get-portfolio-segment-metrics?${params}`));
           
           if (response.ok) {
@@ -16732,11 +16743,15 @@
       if (segmentSelect) {
         segmentSelect.addEventListener('change', () => {
           // Entire site always uses the full unfiltered dataset, so scope is not applicable.
+          // All tracked is already a subset (tracked URLs), so scope is also not applicable.
           if (scopeToggle) {
             const isSite = segmentSelect.value === 'site';
-            scopeToggle.disabled = isSite;
+            const isAllTracked = segmentSelect.value === 'all_tracked';
+            scopeToggle.disabled = isSite || isAllTracked;
             if (isSite) {
               scopeToggle.value = 'all';
+            } else if (isAllTracked) {
+              scopeToggle.value = 'active_only';
             }
           }
           updateChart();
@@ -16831,6 +16846,7 @@
         // - all_pages: all pages in the segment
         // - active_cycles_only: only pages currently being tracked by active optimisation tasks
         const segmentPagesAll = {
+          site: [],
           money: [],
           landing: [],
           event: [],
@@ -16838,6 +16854,7 @@
           all_tracked: []
         };
         const segmentPagesActive = {
+          site: [],
           money: [],
           landing: [],
           event: [],
@@ -16848,52 +16865,34 @@
         pageMetrics.forEach((metrics, normalizedKey) => {
           const pageUrl = metrics.url;
           if (!pageUrl) return;
-          
-          // Classify segment using Money Pages logic
-          // Use direct classification to avoid dependency on window.classifyUrlForRankingAi
-          let subSegment = 'LANDING'; // Default
-          const urlLower = (pageUrl || '').toLowerCase();
-          
-          // Event Pages: Use same pattern as Ranking & AI (substring match for consistency)
-          if (urlLower.includes('/beginners-photography-lessons') ||
-              urlLower.includes('/photographic-workshops-near-me')) {
-            subSegment = 'EVENT';
-          }
-          // Product Pages: Use same pattern as Ranking & AI (substring match for consistency)
-          else if (urlLower.includes('/photo-workshops-uk') ||
-                   urlLower.includes('/photography-services-near-me')) {
-            subSegment = 'PRODUCT';
-          }
-          // Landing Pages (default - anything not matching above)
-          else {
-            subSegment = 'LANDING';
-          }
-          
-          // Map subSegment to specific segment
-          let specificSegment = 'landing'; // Default
-          if (subSegment === 'EVENT') {
-            specificSegment = 'event';
-          } else if (subSegment === 'PRODUCT') {
-            specificSegment = 'product';
-          } else if (subSegment === 'LANDING') {
-            specificSegment = 'landing';
-          }
-          
+
+          // Whole-site segment always includes everything.
+          segmentPagesAll.site.push(metrics);
+
+          // Money Pages segments should match Money Pages classifier (exclude blogs/support/system).
+          const moneyClass = (typeof classifyMoneyPage === 'function')
+            ? classifyMoneyPage(pageUrl)
+            : { isMoney: false, segmentType: null };
+          const isMoney = !!moneyClass.isMoney;
+          const specificSegment = isMoney ? moneyClass.segmentType : null;
+
           // All pages scope
-          if (segmentPagesAll[specificSegment]) segmentPagesAll[specificSegment].push(metrics);
-          if (segmentPagesAll.money) segmentPagesAll.money.push(metrics); // money = aggregate of landing+event+product
-          if (trackedTaskUrls.has(normalizedKey)) segmentPagesAll.all_tracked.push(metrics);
+          if (specificSegment && segmentPagesAll[specificSegment]) segmentPagesAll[specificSegment].push(metrics);
+          if (specificSegment && segmentPagesAll.money) segmentPagesAll.money.push(metrics); // money = aggregate of landing+event+product
+          if (trackedTaskUrls.has(normalizedKey)) segmentPagesAll.all_tracked.push(metrics); // tracked subset across the whole site
 
           // Active cycles only scope (only pages that are tracked)
           if (trackedTaskUrls.has(normalizedKey)) {
-            if (segmentPagesActive[specificSegment]) segmentPagesActive[specificSegment].push(metrics);
-            if (segmentPagesActive.money) segmentPagesActive.money.push(metrics);
+            segmentPagesActive.site.push(metrics); // tracked subset across the whole site
+            if (specificSegment && segmentPagesActive[specificSegment]) segmentPagesActive[specificSegment].push(metrics);
+            if (specificSegment && segmentPagesActive.money) segmentPagesActive.money.push(metrics);
             segmentPagesActive.all_tracked.push(metrics);
           }
         });
         
         // Fetch AI citations and AI overview data from keyword_rankings for this audit date
         let aiMetricsBySegment = {
+          site: { citations: 0, overviewCount: 0 },
           money: { citations: 0, overviewCount: 0 },
           landing: { citations: 0, overviewCount: 0 },
           event: { citations: 0, overviewCount: 0 },
@@ -16912,6 +16911,10 @@
                 const segment = (keyword.segment || '').toLowerCase();
                 const citations = parseInt(keyword.ai_alan_citations_count) || 0;
                 const hasOverview = keyword.has_ai_overview === true || keyword.ai_overview_present_any === true;
+
+                // Entire site = all keywords
+                aiMetricsBySegment.site.citations += citations;
+                if (hasOverview) aiMetricsBySegment.site.overviewCount += 1;
                 
                 // Add to specific segment
                 if (aiMetricsBySegment[segment]) {
@@ -16946,7 +16949,7 @@
         
         const buildSegmentRows = (segmentPages, scopeName) => {
           const segmentRows = [];
-          ['money', 'landing', 'event', 'product', 'all_tracked'].forEach(segment => {
+          ['site', 'money', 'landing', 'event', 'product', 'all_tracked'].forEach(segment => {
             const pages = segmentPages[segment];
           const aiMetrics = aiMetricsBySegment[segment] || { citations: 0, overviewCount: 0 };
           

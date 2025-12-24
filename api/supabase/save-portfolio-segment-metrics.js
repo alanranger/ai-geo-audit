@@ -63,6 +63,9 @@ export default async function handler(req, res) {
     // For active_cycles_only (tracked subset), we do NOT calibrate (it is intentionally a subset of the whole site).
     let scaleClicks = 1;
     let scaleImpressions = 1;
+    let overviewClicks = null;
+    let overviewImpr = null;
+    let overviewPos = null;
     try {
       if (scope !== 'all_pages') {
         // No calibration for subset scopes.
@@ -70,7 +73,7 @@ export default async function handler(req, res) {
       }
       const { data: tsRows, error: tsErr } = await supabase
         .from('gsc_timeseries')
-        .select('clicks, impressions')
+        .select('clicks, impressions, position')
         .eq('property_url', siteUrl)
         .gte('date', String(dateStart).slice(0, 10))
         .lte('date', String(dateEnd).slice(0, 10));
@@ -78,11 +81,26 @@ export default async function handler(req, res) {
       if (tsErr) {
         console.warn('[Save Portfolio Segment Metrics] gsc_timeseries query error (skipping calibration):', tsErr.message);
       } else if (tsRows && tsRows.length > 0) {
-        const overviewClicks = tsRows.reduce((s, r) => s + (parseFloat(r.clicks) || 0), 0);
-        const overviewImpr = tsRows.reduce((s, r) => s + (parseFloat(r.impressions) || 0), 0);
-        const moneyRow = rows.find(r => r.segment === 'money');
-        const rawClicks = moneyRow ? (parseFloat(moneyRow.clicks_28d) || 0) : 0;
-        const rawImpr = moneyRow ? (parseFloat(moneyRow.impressions_28d) || 0) : 0;
+        overviewClicks = tsRows.reduce((s, r) => s + (parseFloat(r.clicks) || 0), 0);
+        overviewImpr = tsRows.reduce((s, r) => s + (parseFloat(r.impressions) || 0), 0);
+
+        // Approximate period-average position: weight daily position by daily impressions.
+        let posWeight = 0;
+        let posImpr = 0;
+        tsRows.forEach(r => {
+          const impr = parseFloat(r.impressions) || 0;
+          const pos = parseFloat(r.position);
+          if (impr > 0 && !isNaN(pos) && isFinite(pos) && pos > 0) {
+            posWeight += pos * impr;
+            posImpr += impr;
+          }
+        });
+        overviewPos = posImpr > 0 ? (posWeight / posImpr) : null;
+
+        // Scale against the raw SITE row (not money) so Money Pages can be a subset.
+        const siteRow = rows.find(r => r.segment === 'site');
+        const rawClicks = siteRow ? (parseFloat(siteRow.clicks_28d) || 0) : 0;
+        const rawImpr = siteRow ? (parseFloat(siteRow.impressions_28d) || 0) : 0;
         if (overviewClicks > 0 && rawClicks > 0) scaleClicks = overviewClicks / rawClicks;
         if (overviewImpr > 0 && rawImpr > 0) scaleImpressions = overviewImpr / rawImpr;
         console.log(`[Save Portfolio Segment Metrics] Calibration scales: clicks=${scaleClicks.toFixed(4)}, impressions=${scaleImpressions.toFixed(4)} (overviewImpr=${overviewImpr}, rawImpr=${rawImpr})`);
@@ -106,7 +124,27 @@ export default async function handler(req, res) {
       
       const rawClicks = parseFloat(row.clicks_28d || 0);
       const rawImpressions = parseFloat(row.impressions_28d || 0);
-      const shouldScale = scope === 'all_pages' && row.segment !== 'site';
+
+      // Entire site (all_pages) should reflect the overview totals from gsc_timeseries.
+      if (scope === 'all_pages' && row.segment === 'site' && overviewClicks !== null && overviewImpr !== null) {
+        return {
+          run_id: runId,
+          site_url: siteUrl,
+          segment: row.segment,
+          scope: scope,
+          date_start: dateStart,
+          date_end: dateEnd,
+          pages_count: parseInt(row.pages_count || 0, 10),
+          clicks_28d: overviewClicks,
+          impressions_28d: overviewImpr,
+          ctr_28d: overviewImpr > 0 ? (overviewClicks / overviewImpr) : 0,
+          position_28d: overviewPos !== null ? overviewPos : positionValue,
+          ai_citations_28d: parseInt(row.ai_citations_28d || 0, 10),
+          ai_overview_present_count: parseInt(row.ai_overview_present_count || 0, 10)
+        };
+      }
+
+      const shouldScale = scope === 'all_pages';
       const scaledClicks = shouldScale ? (rawClicks * scaleClicks) : rawClicks;
       const scaledImpressions = shouldScale ? (rawImpressions * scaleImpressions) : rawImpressions;
       const scaledCtr = scaledImpressions > 0 ? (scaledClicks / scaledImpressions) : 0;
