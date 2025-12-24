@@ -7471,8 +7471,19 @@
         return dateA - dateB;
       });
 
-      const baseline = eligibleMeasurements[0];
-      // If only 1 measurement, use it as both baseline and latest
+      // Baseline selection must respect rebaselining:
+      // If there are measurements explicitly marked as baseline, use the *most recent* baseline marker.
+      // Otherwise fallback to the first (oldest) measurement.
+      const baselineIdx = (() => {
+        for (let i = eligibleMeasurements.length - 1; i >= 0; i--) {
+          const m = eligibleMeasurements[i];
+          if (m && (m.is_baseline === true || m.isBaseline === true)) return i;
+        }
+        return 0;
+      })();
+
+      const baseline = eligibleMeasurements[baselineIdx];
+      // Latest = most recent measurement after baseline (or baseline itself if it's the newest)
       const latest = eligibleMeasurements.length > 1 ? eligibleMeasurements[eligibleMeasurements.length - 1] : baseline;
 
       return { baseline, latest };
