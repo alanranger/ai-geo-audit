@@ -266,7 +266,9 @@ export default async function handler(req, res) {
       });
 
       // --- AI metrics (keyword-driven) ---
-      // AI Citations / AI Overview are stored per keyword. We infer segment from each keyword's best_url.
+      // AI Citations / AI Overview are stored per keyword.
+      // IMPORTANT: We attribute AI citations by the *cited URLs* (ai_alan_citations), not best_url,
+      // so that segment breakdown matches the UI + backfill-ai-portfolio-segments.js.
       const initAi = () => ({
         site: { citations: 0, overviewCount: 0 },
         money: { citations: 0, overviewCount: 0 },
@@ -282,36 +284,61 @@ export default async function handler(req, res) {
       const aiAll = initAi();
       const aiActive = initAi(); // tracked subset only
 
-      const normalizeUrlForPathMatch = (url) => {
-        if (!url) return { path: '' };
-        let u = String(url);
-        // Strip query params (GSC + SERP tooling often adds tracking params)
-        u = u.split('?')[0];
-        // Remove protocol and www
-        u = u.replace(/^https?:\/\//i, '');
-        u = u.replace(/^www\./i, '');
-        // Remove trailing slash
-        u = u.replace(/\/$/, '');
-        u = u.toLowerCase();
-        const m = u.match(/\/(.+)$/);
-        return { path: m ? m[1] : '' };
+      const normalizeAiUrl = (u) => {
+        if (!u) return '';
+        let s = String(u).trim().toLowerCase();
+        s = s.split('?')[0];
+        s = s.split('#')[0];
+        s = s.replace(/\/$/, '');
+        return s;
       };
 
-      const inferSegmentFromBestUrl = (bestUrl) => {
-        if (!bestUrl) return null;
-        const lower = String(bestUrl).toLowerCase();
-        if (lower.includes('/blog-on-photography/')) return 'blog';
-        if (lower.includes('/free-online-photography-course')) return 'academy';
-        const sub = classifyMoneySubSegment(bestUrl); // landing|event|product for money pages only
-        if (sub === 'landing' || sub === 'event' || sub === 'product') return sub;
-        return 'other';
+      const getCitedUrls = (row) => {
+        const raw = row?.ai_alan_citations;
+        if (!raw || !Array.isArray(raw)) return [];
+        return raw
+          .map(v => {
+            if (!v) return null;
+            if (typeof v === 'string') return v;
+            if (typeof v === 'object' && v.url) return v.url;
+            return null;
+          })
+          .filter(Boolean);
+      };
+
+      // Classify citations by cited URL (not by best_url).
+      // - Only count citations to our domain
+      // - Segment rules align with api/aigeo/pageSegment.js for "money vs support/system"
+      const classifyCitedUrlToSegments = (url) => {
+        if (!url) return [];
+        const u = normalizeAiUrl(url);
+        if (!u.includes('alanranger.com')) return [];
+
+        // Blog
+        if (u.includes('/blog-on-photography/')) return ['blog'];
+        // Academy (single tracked page)
+        if (u.includes('/free-online-photography-course')) return ['academy'];
+
+        // Money vs everything else (Other)
+        try {
+          const main = classifySitePageSegment(url);
+          if (main !== PageSegment.MONEY) return ['other'];
+        } catch {
+          return ['other'];
+        }
+
+        // Money sub-segment (event/product/landing) using consistent URL patterns
+        const sub = classifyMoneySubSegment(url); // landing|event|product (money pages only)
+        if (sub === 'event') return ['event', 'money'];
+        if (sub === 'product') return ['product', 'money'];
+        return ['landing', 'money'];
       };
 
       try {
         const auditDate = String(dateEnd).slice(0, 10);
         const { data: keywords, error: kwErr } = await supabase
           .from('keyword_rankings')
-          .select('best_url, ai_alan_citations_count, has_ai_overview, ai_overview_present_any')
+          .select('ai_alan_citations, ai_alan_citations_count, has_ai_overview, ai_overview_present_any')
           .eq('property_url', siteUrl)
           .eq('audit_date', auditDate);
 
@@ -319,54 +346,73 @@ export default async function handler(req, res) {
           console.warn(`[Backfill] keyword_rankings query error for ${currentRunId} (${auditDate}):`, kwErr.message);
         } else if (keywords && keywords.length > 0) {
           keywords.forEach(k => {
-            const citations = parseInt(k.ai_alan_citations_count, 10) || 0;
             const hasOverview = k.has_ai_overview === true || k.ai_overview_present_any === true;
+            const citationCount = parseInt(k.ai_alan_citations_count, 10) || 0;
+            const citedUrls = getCitedUrls(k);
 
             // Total (site) = all keywords
-            aiAll.site.citations += citations;
+            aiAll.site.citations += citationCount;
             if (hasOverview) aiAll.site.overviewCount += 1;
 
-            const inferred = inferSegmentFromBestUrl(k.best_url);
-            if (inferred && aiAll[inferred]) {
-              aiAll[inferred].citations += citations;
-              if (hasOverview) aiAll[inferred].overviewCount += 1;
-            }
-            if (inferred === 'landing' || inferred === 'event' || inferred === 'product') {
-              aiAll.money.citations += citations;
-              if (hasOverview) aiAll.money.overviewCount += 1;
-            }
+            // Attribute citations by cited URLs (each cited URL item contributes +1 to its segment bucket).
+            const segsAll = new Set();
+            const segsTracked = new Set();
 
-            // Tracked subset (active cycles only) = keywords whose best_url matches a tracked URL pattern.
-            const { path } = normalizeUrlForPathMatch(k.best_url);
-            const isTrackedKeyword = trackedUrlPatterns.some(pattern => {
-              if (!pattern) return true;
-              return path.includes(pattern) || path.startsWith(pattern + '/');
+            citedUrls.forEach(citedUrl => {
+              const segs = classifyCitedUrlToSegments(citedUrl);
+              if (!segs || segs.length === 0) return;
+
+              segs.forEach(seg => {
+                if (!aiAll[seg]) return;
+                aiAll[seg].citations += 1;
+                segsAll.add(seg);
+              });
+
+              // active_cycles_only: only count citations whose cited URL is currently tracked
+              const citedNorm = normalizeAiUrl(citedUrl);
+              const isTrackedUrl = trackedUrlPatterns.some(pattern => {
+                if (!pattern) return true;
+                return citedNorm.includes(`/${pattern}`) || citedNorm.endsWith(`/${pattern}`);
+              });
+              if (isTrackedUrl) {
+                segs.forEach(seg => {
+                  if (!aiActive[seg]) return;
+                  aiActive[seg].citations += 1;
+                  segsTracked.add(seg);
+                });
+                aiActive.all_tracked.citations += 1;
+                aiActive.site.citations += 1; // tracked subset: only URL-attributed items available
+              }
             });
 
-            if (isTrackedKeyword) {
-              aiActive.site.citations += citations;
-              if (hasOverview) aiActive.site.overviewCount += 1;
-
-              aiAll.all_tracked.citations += citations;
-              if (hasOverview) aiAll.all_tracked.overviewCount += 1;
-
-              aiActive.all_tracked.citations += citations;
-              if (hasOverview) aiActive.all_tracked.overviewCount += 1;
-
-              if (inferred && aiActive[inferred]) {
-                aiActive[inferred].citations += citations;
-                if (hasOverview) aiActive[inferred].overviewCount += 1;
-              }
-              if (inferred === 'landing' || inferred === 'event' || inferred === 'product') {
-                aiActive.money.citations += citations;
-                if (hasOverview) aiActive.money.overviewCount += 1;
-              }
+            // Overview keyword counts: count keyword once per segment that appears in its citations
+            if (hasOverview) {
+              segsAll.forEach(seg => {
+                if (!aiAll[seg]) return;
+                aiAll[seg].overviewCount += 1;
+              });
+              segsTracked.forEach(seg => {
+                if (!aiActive[seg]) return;
+                aiActive[seg].overviewCount += 1;
+              });
+              if (segsTracked.size > 0) aiActive.all_tracked.overviewCount += 1;
             }
           });
         }
       } catch (aiErr) {
         console.warn(`[Backfill] AI metrics aggregation error for ${currentRunId}:`, aiErr.message);
       }
+
+      // Reconcile: cited URL arrays can be shorter than ai_alan_citations_count totals (dedup/truncation).
+      // Put any remainder into Other so segment totals reconcile with site total.
+      const sumAiAllBase = (aiAll.landing?.citations || 0)
+        + (aiAll.event?.citations || 0)
+        + (aiAll.product?.citations || 0)
+        + (aiAll.academy?.citations || 0)
+        + (aiAll.blog?.citations || 0)
+        + (aiAll.other?.citations || 0);
+      const deltaAiAll = (aiAll.site?.citations || 0) - sumAiAllBase;
+      if (deltaAiAll > 0) aiAll.other.citations += deltaAiAll;
 
       const aiForScope = (scopeName) => (scopeName === 'active_cycles_only' ? aiActive : aiAll);
 

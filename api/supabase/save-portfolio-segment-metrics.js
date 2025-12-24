@@ -124,6 +124,13 @@ export default async function handler(req, res) {
       
       const rawClicks = parseFloat(row.clicks_28d || 0);
       const rawImpressions = parseFloat(row.impressions_28d || 0);
+      // Preserve AI fields if they are omitted from the payload (avoid overwriting existing DB values with 0).
+      const aiCitationsVal = (row.ai_citations_28d === null || row.ai_citations_28d === undefined)
+        ? null
+        : (parseInt(row.ai_citations_28d || 0, 10) || 0);
+      const aiOverviewVal = (row.ai_overview_present_count === null || row.ai_overview_present_count === undefined)
+        ? null
+        : (parseInt(row.ai_overview_present_count || 0, 10) || 0);
 
       // Entire site (all_pages) should reflect the overview totals from gsc_timeseries.
       if (scope === 'all_pages' && row.segment === 'site' && overviewClicks !== null && overviewImpr !== null) {
@@ -139,8 +146,8 @@ export default async function handler(req, res) {
           impressions_28d: overviewImpr,
           ctr_28d: overviewImpr > 0 ? (overviewClicks / overviewImpr) : 0,
           position_28d: overviewPos !== null ? overviewPos : positionValue,
-          ai_citations_28d: parseInt(row.ai_citations_28d || 0, 10),
-          ai_overview_present_count: parseInt(row.ai_overview_present_count || 0, 10)
+          ai_citations_28d: aiCitationsVal,
+          ai_overview_present_count: aiOverviewVal
         };
       }
 
@@ -161,10 +168,29 @@ export default async function handler(req, res) {
         impressions_28d: scaledImpressions,
         ctr_28d: scaledCtr, // ratio (0-1)
         position_28d: positionValue,
-        ai_citations_28d: parseInt(row.ai_citations_28d || 0, 10),
-        ai_overview_present_count: parseInt(row.ai_overview_present_count || 0, 10)
+        ai_citations_28d: aiCitationsVal,
+        ai_overview_present_count: aiOverviewVal
       };
     });
+
+    // Fill omitted AI fields from existing DB rows (so partial callers can't clobber AI data).
+    const missingAi = insertRows.some(r => r.ai_citations_28d === null || r.ai_overview_present_count === null);
+    if (missingAi) {
+      const segs = Array.from(new Set(insertRows.map(r => r.segment))).filter(Boolean);
+      const { data: existing } = await supabase
+        .from('portfolio_segment_metrics_28d')
+        .select('segment, ai_citations_28d, ai_overview_present_count')
+        .eq('run_id', runId)
+        .eq('site_url', siteUrl)
+        .eq('scope', scope)
+        .in('segment', segs);
+      const bySeg = new Map((existing || []).map(r => [r.segment, r]));
+      insertRows.forEach(r => {
+        const ex = bySeg.get(r.segment);
+        if (r.ai_citations_28d === null) r.ai_citations_28d = ex ? (parseInt(ex.ai_citations_28d || 0, 10) || 0) : 0;
+        if (r.ai_overview_present_count === null) r.ai_overview_present_count = ex ? (parseInt(ex.ai_overview_present_count || 0, 10) || 0) : 0;
+      });
+    }
 
     // Batch upsert in chunks of 500
     const BATCH_SIZE = 500;
