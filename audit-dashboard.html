@@ -16585,54 +16585,10 @@
           });
         }
 
-        // Refresh Money Pages Performance Trends from the SAME portfolio metrics (money segment).
-        // This prevents spikes caused by mixing audit-history moneySegmentMetrics with portfolio metrics.
-        try {
-          const volumeCanvas = document.getElementById('moneyPagesVolumeChart');
-          const rateCanvas = document.getElementById('moneyPagesRateChart');
-          if (volumeCanvas && rateCanvas && typeof window.renderMoneyPagesTrendChart === 'function') {
-            const moneyMetrics = rawMetricsBySegment.money || [];
-            const behaviourScore =
-              typeof window.moneyPagesMetrics?.behaviour?.score === 'number' ? window.moneyPagesMetrics.behaviour.score : null;
-
-            const trendHistory = moneyMetrics
-              .map(m => {
-                const d = metricDateForPeriod(m);
-                const dateStr = d ? dateKeyUTC(d) : null;
-                if (!dateStr) return null;
-                const clicks = Number(m.clicks_28d || 0);
-                const impressions = Number(m.impressions_28d || 0);
-                const ctr = (m.ctr_28d != null && !isNaN(parseFloat(m.ctr_28d)))
-                  ? parseFloat(m.ctr_28d)
-                  : (impressions > 0 ? (clicks / impressions) : 0);
-
-                return {
-                  date: dateStr,
-                  isPartial: false,
-                  moneyPagesBehaviourScore: behaviourScore,
-                  moneySegmentMetrics: {
-                    allMoney: {
-                      clicks,
-                      impressions,
-                      ctr,
-                      avgPosition: (m.position_28d != null && !isNaN(parseFloat(m.position_28d))) ? parseFloat(m.position_28d) : null,
-                      behaviourScore
-                    }
-                  }
-                };
-              })
-              .filter(Boolean);
-
-            if (trendHistory.length > 0) {
-              window.renderMoneyPagesTrendChart(trendHistory, null);
-              debugLog(`✓ Money Pages Performance Trends refreshed from portfolio metrics (${trendHistory.length} pts)`, 'success');
-            } else {
-              debugLog('⚠ Money Pages Performance Trends: no portfolio metrics available to render', 'warn');
-            }
-          }
-        } catch (e) {
-          debugLog(`⚠ Money Pages Performance Trends refresh failed: ${e.message}`, 'warn');
-        }
+        // NOTE: Do NOT render Money Pages Performance Trends from portfolio segment snapshots here.
+        // It causes a “stale render then flip” on page load because the KPI loader later re-renders
+        // the charts from GSC timeseries (our canonical source). Trends are now rendered only from
+        // `loadAuditHistoryAndRenderKpis()` using `gsc_timeseries`.
         
         debugLog('✓ Money Pages KPI Tracker rendered', 'success');
         
