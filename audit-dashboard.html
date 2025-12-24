@@ -14990,6 +14990,11 @@
           }
         }, 200);
       } else if (panelId === 'money') {
+        // Money Pages is rendered by `ensureMoneyPagesRendered()` during `displayDashboard()`.
+        // Avoid rebuilding/wiring Money Pages from the generic panel initializer (it causes races where
+        // selectors/containers don't exist yet, spamming warnings and leaving KPIs blank).
+        panelInitDone.add(panelId);
+        return;
         setTimeout(async () => {
           // Always use async load to avoid stale/partial sync results.
           const saved = await loadAuditResults();
@@ -31684,10 +31689,21 @@ Final Score: ${score}/100`;
           
           renderMoneyKpiTable(historyData, metricKey);
           renderMoneyKpiSparkline(historyData, metricKey);
+
+          // Keep the Money Pages Performance Trends in sync with the KPI tracker.
+          // We pass `timeseries` so the trend charts can use rolling-28d derivation (avoids spikes and
+          // avoids relying on sparse portfolio snapshot rows).
+          if (typeof renderMoneyPagesTrendChart === 'function') {
+            renderMoneyPagesTrendChart([], timeseries);
+          }
         } catch (error) {
           debugLog(`⚠ Error loading KPI history: ${error.message}`, 'warn');
         }
       }
+
+      // Use the timeseries-based KPI loader as the canonical Money Pages KPI implementation.
+      // (Portfolio snapshot rows can be sparse/irregular, which collapses the KPI table to a single week.)
+      window.loadAuditHistoryAndRenderKpis = loadAuditHistoryAndRenderKpis_OLD;
 
       // Canonical implementation: KPI Tracker should be based on GSC timeseries + audit-derived proportions,
       // not portfolio segment snapshot rows (which may only exist for a single audit date).
