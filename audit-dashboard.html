@@ -39300,14 +39300,16 @@ Final Score: ${score}/100`;
         return 'other';
       }
 
-      // Money → use the unified money page classifier for landing/event/product
-      if (typeof classifyMoneyPage === 'function') {
-        const mc = classifyMoneyPage(canonical);
-        if (mc && mc.isMoney && mc.segmentType) {
-          if (mc.segmentType === 'event' || mc.segmentType === 'product' || mc.segmentType === 'landing') return mc.segmentType;
-          return 'landing';
-        }
+      // Money → use the same sub-segment heuristics as backend (stable and not dependent on Ranking&AI pageType)
+      // Event pages
+      if (lower.includes('/beginners-photography-lessons') || lower.includes('/photographic-workshops-near-me')) {
+        return 'event';
       }
+      // Product pages
+      if (lower.includes('/photo-workshops-uk') || lower.includes('/photography-services-near-me')) {
+        return 'product';
+      }
+      // Default money bucket
       return 'landing';
     }
 
@@ -39505,7 +39507,11 @@ Final Score: ${score}/100`;
       const modal = document.getElementById('portfolio-segment-urls-modal');
       if (!modal) return;
       modal.style.display = 'block';
-      if (!modal.dataset.activeTab) modal.dataset.activeTab = 'segment';
+      // Default tab based on the KPI context:
+      // - When looking at AI metrics, users typically want the AI-cited URLs first.
+      // - For traffic KPIs, segment pages are the natural default.
+      const kpi = document.getElementById('portfolio-table-kpi-select')?.value || 'ctr_28d';
+      modal.dataset.activeTab = (kpi === 'ai_citations' || kpi === 'ai_overview') ? 'cited' : 'segment';
 
       const titleEl = document.getElementById('portfolio-segment-urls-modal-title');
       const subtitleEl = document.getElementById('portfolio-segment-urls-modal-subtitle');
