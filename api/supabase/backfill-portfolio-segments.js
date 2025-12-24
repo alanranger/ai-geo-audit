@@ -149,6 +149,7 @@ export default async function handler(req, res) {
         landing: [],
         event: [],
         product: [],
+        blog: [],
         all_tracked: []
       };
       const segmentPagesActive = {
@@ -157,6 +158,7 @@ export default async function handler(req, res) {
         landing: [],
         event: [],
         product: [],
+        blog: [],
         all_tracked: []
       };
 
@@ -206,6 +208,13 @@ export default async function handler(req, res) {
         // Entire site segment: always include every page row
         segmentPagesAll.site.push(page);
 
+        // Blog segment: any URL containing /blog-on-photography/
+        const urlLower = String(page.page_url || '').toLowerCase();
+        const isBlog = urlLower.includes('/blog-on-photography/');
+        if (isBlog) {
+          segmentPagesAll.blog.push(page);
+        }
+
         // Money Pages segments (exclude blogs/support/system)
         const subSegment = classifyMoneySubSegment(page.page_url);
         
@@ -235,17 +244,122 @@ export default async function handler(req, res) {
 
           // active_cycles_only scope is the tracked subset
           segmentPagesActive.site.push(page);
+          if (isBlog) segmentPagesActive.blog.push(page);
           if (subSegment && segmentPagesActive[subSegment]) segmentPagesActive[subSegment].push(page);
           if (subSegment) segmentPagesActive.money.push(page);
           segmentPagesActive.all_tracked.push(page);
         }
       });
 
+      // --- AI metrics (keyword-driven) ---
+      // AI Citations / AI Overview are stored per keyword. We infer segment from each keyword's best_url.
+      const initAi = () => ({
+        site: { citations: 0, overviewCount: 0 },
+        money: { citations: 0, overviewCount: 0 },
+        landing: { citations: 0, overviewCount: 0 },
+        event: { citations: 0, overviewCount: 0 },
+        product: { citations: 0, overviewCount: 0 },
+        blog: { citations: 0, overviewCount: 0 },
+        all_tracked: { citations: 0, overviewCount: 0 }
+      });
+
+      const aiAll = initAi();
+      const aiActive = initAi(); // tracked subset only
+
+      const normalizeUrlForPathMatch = (url) => {
+        if (!url) return { path: '' };
+        let u = String(url);
+        // Strip query params (GSC + SERP tooling often adds tracking params)
+        u = u.split('?')[0];
+        // Remove protocol and www
+        u = u.replace(/^https?:\/\//i, '');
+        u = u.replace(/^www\./i, '');
+        // Remove trailing slash
+        u = u.replace(/\/$/, '');
+        u = u.toLowerCase();
+        const m = u.match(/\/(.+)$/);
+        return { path: m ? m[1] : '' };
+      };
+
+      const inferSegmentFromBestUrl = (bestUrl) => {
+        if (!bestUrl) return null;
+        const lower = String(bestUrl).toLowerCase();
+        if (lower.includes('/blog-on-photography/')) return 'blog';
+        const sub = classifyMoneySubSegment(bestUrl); // landing|event|product for money pages only
+        if (sub === 'landing' || sub === 'event' || sub === 'product') return sub;
+        return null;
+      };
+
+      try {
+        const auditDate = String(dateEnd).slice(0, 10);
+        const { data: keywords, error: kwErr } = await supabase
+          .from('keyword_rankings')
+          .select('best_url, ai_alan_citations_count, has_ai_overview, ai_overview_present_any')
+          .eq('property_url', siteUrl)
+          .eq('audit_date', auditDate);
+
+        if (kwErr) {
+          console.warn(`[Backfill] keyword_rankings query error for ${currentRunId} (${auditDate}):`, kwErr.message);
+        } else if (keywords && keywords.length > 0) {
+          keywords.forEach(k => {
+            const citations = parseInt(k.ai_alan_citations_count, 10) || 0;
+            const hasOverview = k.has_ai_overview === true || k.ai_overview_present_any === true;
+
+            // Total (site) = all keywords
+            aiAll.site.citations += citations;
+            if (hasOverview) aiAll.site.overviewCount += 1;
+
+            const inferred = inferSegmentFromBestUrl(k.best_url);
+            if (inferred && aiAll[inferred]) {
+              aiAll[inferred].citations += citations;
+              if (hasOverview) aiAll[inferred].overviewCount += 1;
+            }
+            if (inferred === 'landing' || inferred === 'event' || inferred === 'product') {
+              aiAll.money.citations += citations;
+              if (hasOverview) aiAll.money.overviewCount += 1;
+            }
+
+            // Tracked subset (active cycles only) = keywords whose best_url matches a tracked URL pattern.
+            const { path } = normalizeUrlForPathMatch(k.best_url);
+            const isTrackedKeyword = trackedUrlPatterns.some(pattern => {
+              if (!pattern) return true;
+              return path.includes(pattern) || path.startsWith(pattern + '/');
+            });
+
+            if (isTrackedKeyword) {
+              aiActive.site.citations += citations;
+              if (hasOverview) aiActive.site.overviewCount += 1;
+
+              aiAll.all_tracked.citations += citations;
+              if (hasOverview) aiAll.all_tracked.overviewCount += 1;
+
+              aiActive.all_tracked.citations += citations;
+              if (hasOverview) aiActive.all_tracked.overviewCount += 1;
+
+              if (inferred && aiActive[inferred]) {
+                aiActive[inferred].citations += citations;
+                if (hasOverview) aiActive[inferred].overviewCount += 1;
+              }
+              if (inferred === 'landing' || inferred === 'event' || inferred === 'product') {
+                aiActive.money.citations += citations;
+                if (hasOverview) aiActive.money.overviewCount += 1;
+              }
+            }
+          });
+        }
+      } catch (aiErr) {
+        console.warn(`[Backfill] AI metrics aggregation error for ${currentRunId}:`, aiErr.message);
+      }
+
+      const aiForScope = (scopeName) => (scopeName === 'active_cycles_only' ? aiActive : aiAll);
+
       const buildRowsForScope = (segmentPages, scopeName, applyCalibration) => {
         const segmentRows = [];
-        ['site', 'money', 'landing', 'event', 'product', 'all_tracked'].forEach(segment => {
+        const aiMap = aiForScope(scopeName);
+        ['site', 'money', 'landing', 'event', 'product', 'blog', 'all_tracked'].forEach(segment => {
           const segmentPageList = segmentPages[segment];
           if (segmentPageList.length === 0) {
+            const ai = aiMap[segment] || { citations: 0, overviewCount: 0 };
             segmentRows.push({
               run_id: currentRunId,
               site_url: siteUrl,
@@ -257,13 +371,16 @@ export default async function handler(req, res) {
               clicks_28d: 0,
               impressions_28d: 0,
               ctr_28d: 0,
-              position_28d: null
+              position_28d: null,
+              ai_citations_28d: ai.citations,
+              ai_overview_present_count: ai.overviewCount
             });
             return;
           }
 
           // Entire site (all_pages) should reflect the overview totals (gsc_timeseries).
           if (segment === 'site' && scopeName === 'all_pages' && overviewClicks !== null && overviewImpr !== null) {
+            const ai = aiMap[segment] || { citations: 0, overviewCount: 0 };
             segmentRows.push({
               run_id: currentRunId,
               site_url: siteUrl,
@@ -275,7 +392,9 @@ export default async function handler(req, res) {
               clicks_28d: overviewClicks,
               impressions_28d: overviewImpr,
               ctr_28d: overviewImpr > 0 ? (overviewClicks / overviewImpr) : 0,
-              position_28d: overviewPos
+              position_28d: overviewPos,
+              ai_citations_28d: ai.citations,
+              ai_overview_present_count: ai.overviewCount
             });
             return;
           }
@@ -297,6 +416,7 @@ export default async function handler(req, res) {
             }
           });
           const avgPosition = totalPositionImpressions > 0 ? totalPositionWeight / totalPositionImpressions : null;
+          const ai = aiMap[segment] || { citations: 0, overviewCount: 0 };
 
           segmentRows.push({
             run_id: currentRunId,
@@ -309,7 +429,9 @@ export default async function handler(req, res) {
             clicks_28d: scaledClicks,
             impressions_28d: scaledImpressions,
             ctr_28d: ctr,
-            position_28d: avgPosition
+            position_28d: avgPosition,
+            ai_citations_28d: ai.citations,
+            ai_overview_present_count: ai.overviewCount
           });
         });
         return segmentRows;
