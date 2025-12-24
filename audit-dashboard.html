@@ -30943,15 +30943,17 @@ Final Score: ${score}/100`;
           .sort((a, b) => String(a.date).localeCompare(String(b.date)));
 
         const rolling28d = (endDateStr) => {
-          if (!endDateStr || tsSorted.length === 0) return { clicks: 0, impressions: 0, days: 0 };
+          if (!endDateStr || tsSorted.length === 0) return { clicks: 0, impressions: 0, days: 0, posWeight: 0, posImpr: 0 };
           const end = new Date(endDateStr + 'T00:00:00');
-          if (Number.isNaN(end.getTime())) return { clicks: 0, impressions: 0, days: 0 };
+          if (Number.isNaN(end.getTime())) return { clicks: 0, impressions: 0, days: 0, posWeight: 0, posImpr: 0 };
           const start = new Date(end);
           start.setDate(start.getDate() - 27);
           const startStr = start.toISOString().split('T')[0];
           let clicks = 0;
           let impressions = 0;
           let days = 0;
+          let posWeight = 0;
+          let posImpr = 0;
           for (const ts of tsSorted) {
             const d = String(ts.date);
             if (d < startStr) continue;
@@ -30959,8 +30961,14 @@ Final Score: ${score}/100`;
             clicks += Number(ts.clicks || 0);
             impressions += Number(ts.impressions || 0);
             days += 1;
+            const impr = Number(ts.impressions || 0);
+            const pos = Number(ts.position);
+            if (impr > 0 && !Number.isNaN(pos) && isFinite(pos) && pos > 0) {
+              posWeight += pos * impr;
+              posImpr += impr;
+            }
           }
-          return { clicks, impressions, days };
+          return { clicks, impressions, days, posWeight, posImpr };
         };
 
         const clamp01 = (x) => Math.max(0, Math.min(1, x));
@@ -31039,6 +31047,16 @@ Final Score: ${score}/100`;
         const refAvgPos =
           (typeof refAllMoney?.avgPosition === 'number' ? refAllMoney.avgPosition : null) ??
           (typeof overview?.moneyAvgPosition === 'number' ? overview.moneyAvgPosition : null);
+
+        const siteAvgPos28d =
+          (typeof overview?.siteAvgPosition === 'number' && isFinite(overview.siteAvgPosition) && overview.siteAvgPosition > 0)
+            ? overview.siteAvgPosition
+            : null;
+        const moneyAvgPos28d =
+          (typeof overview?.moneyAvgPosition === 'number' && isFinite(overview.moneyAvgPosition) && overview.moneyAvgPosition > 0)
+            ? overview.moneyAvgPosition
+            : null;
+        const moneyPosRatio = (siteAvgPos28d && moneyAvgPos28d) ? (moneyAvgPos28d / siteAvgPos28d) : null;
         const refBehaviour = typeof refAllMoney?.behaviourScore === 'number'
           ? refAllMoney.behaviourScore
           : (typeof window.moneyPagesMetrics?.behaviour?.score === 'number' ? window.moneyPagesMetrics.behaviour.score : null);
@@ -31083,7 +31101,10 @@ Final Score: ${score}/100`;
               if (metricKey === 'clicks') v = cls;
               else if (metricKey === 'impressions') v = imps;
               else if (metricKey === 'ctr') v = imps > 0 ? (cls / imps) * 100 : 0;
-              else if (metricKey === 'avgPosition') v = refAvgPos;
+              else if (metricKey === 'avgPosition') {
+                const sitePos = (siteRoll.posImpr > 0) ? (siteRoll.posWeight / siteRoll.posImpr) : null;
+                v = (sitePos && moneyPosRatio) ? (sitePos * moneyPosRatio) : refAvgPos;
+              }
               else if (metricKey === 'behaviourScore') v = refBehaviour;
               segments[key].push(v);
             }
