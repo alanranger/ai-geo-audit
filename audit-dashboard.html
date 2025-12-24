@@ -39375,19 +39375,30 @@ Final Score: ${score}/100`;
       const moneyCitations = counts.money || 0;
       const totalCitations = counts.site || 0;
       const share = totalCitations > 0 ? (moneyCitations / totalCitations) : 0;
+      const sharePct = Math.round(share * 100);
       const sumFromUrls = (counts.landing || 0) + (counts.event || 0) + (counts.product || 0) + (counts.academy || 0) + (counts.blog || 0) + (counts.other || 0);
       const unattributed = Math.max(0, (totalCitations || 0) - sumFromUrls);
       const otherTotal = (counts.other || 0) + unattributed;
 
-      if (valueEl) valueEl.textContent = `${moneyCitations}/${totalCitations} (${Math.round(share * 100)}%)`;
-      if (statusEl) statusEl.textContent = moneyCitations > 0 ? 'Some' : 'None';
+      if (valueEl) valueEl.textContent = `${moneyCitations}/${totalCitations} (${sharePct}%)`;
+
+      // RAG thresholds (money share of citations):
+      // - Green: >= 70%
+      // - Amber: 50-69%
+      // - Red: < 50%
+      let ragClass = 'red';
+      let statusLabel = 'Low';
+      if (sharePct >= 70) { ragClass = 'green'; statusLabel = 'Strong'; }
+      else if (sharePct >= 50) { ragClass = 'amber'; statusLabel = 'Moderate'; }
+      pill.className = `metric-pill metric-pill--${ragClass}`;
+      if (statusEl) statusEl.textContent = statusLabel;
 
       if (detailsEl) {
         detailsEl.innerHTML = `
           <div style="margin-top: 0.75rem;">
             <div style="margin-bottom: 0.5rem;">How many citations point to <strong>money pages</strong> (Landing/Event/Product), based on the <strong>cited URLs</strong>.</div>
             <div style="font-size: 0.9rem; line-height: 1.6;">
-              <div><strong>Money citations:</strong> ${moneyCitations} (${Math.round(share * 100)}%)</div>
+              <div><strong>Money citations:</strong> ${moneyCitations} (${sharePct}%)</div>
               <div><strong>Total citations:</strong> ${totalCitations}</div>
             </div>
             <div style="margin-top: 0.75rem; border-top: 1px solid #e2e8f0; padding-top: 0.75rem;">
