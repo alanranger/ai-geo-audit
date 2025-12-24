@@ -275,6 +275,20 @@ export default async function handler(req, res) {
         }
       });
 
+      // Ensure the segment buckets reconcile to the site total.
+      // We keep countsAll.citations.site aligned to ai_alan_citations_count (Ranking & AI summary),
+      // but cited URL lists can be shorter (dedup/truncation). Put any unattributed remainder into "other".
+      const sumBase = (countsAll.citations.landing || 0)
+        + (countsAll.citations.event || 0)
+        + (countsAll.citations.product || 0)
+        + (countsAll.citations.academy || 0)
+        + (countsAll.citations.blog || 0)
+        + (countsAll.citations.other || 0);
+      const delta = (countsAll.citations.site || 0) - sumBase;
+      if (delta > 0) {
+        countsAll.citations.other = (countsAll.citations.other || 0) + delta;
+      }
+
       const updates = [];
       for (const runId of runIds) {
         const { data: existingRows, error: existingErr } = await supabase
