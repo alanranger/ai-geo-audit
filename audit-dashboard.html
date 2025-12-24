@@ -9559,7 +9559,6 @@
           if (baselineEvent && baselineEvent.metrics) {
             baselineMetrics = { ...baselineEvent.metrics };
             if (baselineEvent.created_at) baselineMetrics.captured_at = baselineEvent.created_at;
-            console.log('[Performance Snapshot] Using baseline measurement:', baselineEvent.is_baseline ? '(latest is_baseline=true)' : '(first measurement fallback)', baselineMetrics);
           }
           
           // Latest is always the most recent measurement
@@ -9571,12 +9570,8 @@
           }
           }
           
-          // Debug logging
-          console.log('[Performance Snapshot] Measurements found:', measurements.length);
-          console.log('[Performance Snapshot] Baseline metrics:', baselineMetrics);
-          console.log('[Performance Snapshot] Latest metrics:', latestMetrics);
         } else {
-          console.warn('[Performance Snapshot] No measurements found for cycle', cycleId || cycleNo);
+          // No measurements for this cycle
         }
       }
 
@@ -11769,23 +11764,22 @@
         return;
       }
 
-      // Helper to format numbers
+      // Helper to format numbers (always show exact values; no "k" abbreviations)
       const formatNum = (val) => {
         if (val == null) return '—';
-        if (typeof val === 'number') {
-          if (val >= 1000) return (val / 1000).toFixed(1) + 'k';
-          return val.toLocaleString();
-        }
-        return val;
+        const n = (typeof val === 'number') ? val : (val !== '' && isFinite(Number(val)) ? Number(val) : null);
+        if (n == null) return val;
+        if (Number.isInteger(n)) return n.toLocaleString('en-GB');
+        // Keep precision for ranks/positions etc
+        return n.toLocaleString('en-GB', { maximumFractionDigits: 3 });
       };
 
-      // Helper to calculate delta
+      // Helper to calculate delta (numeric-safe)
       const calcDelta = (latestVal, baselineVal) => {
-        if (latestVal == null || baselineVal == null) return null;
-        if (typeof latestVal === 'number' && typeof baselineVal === 'number') {
-          return latestVal - baselineVal;
-        }
-        return null;
+        const a = (typeof latestVal === 'number') ? latestVal : (latestVal != null && latestVal !== '' && isFinite(Number(latestVal)) ? Number(latestVal) : null);
+        const b = (typeof baselineVal === 'number') ? baselineVal : (baselineVal != null && baselineVal !== '' && isFinite(Number(baselineVal)) ? Number(baselineVal) : null);
+        if (a == null || b == null) return null;
+        return a - b;
       };
 
       // Helper to format delta with color (handles rank where lower is better)
