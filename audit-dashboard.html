@@ -31697,14 +31697,22 @@ Final Score: ${score}/100`;
             debugLog(`✓ Timeseries date range: ${timeseries[0]?.date} to ${timeseries[timeseries.length - 1]?.date}`, 'info');
           }
           
-          // Get latest audit's moneyPagePriorityData for proportions
-          const latestAudit = filteredHistory.length > 0 ? filteredHistory[filteredHistory.length - 1] : null;
-          const latestMoneyPagePriorityData = latestAudit?.moneyPagePriorityData || window.moneyPagePriorityData || [];
-          const latestMoneySegmentMetrics = latestAudit?.moneySegmentMetrics || null;
+          // IMPORTANT: Do NOT use `filteredHistory` to pick the "latest audit" for money shares.
+          // GSC data is typically 1–2 days behind, so filtering audits to <= lastGscTimeseriesDate can
+          // accidentally drop the most recent audit run (audit_date = today), which is exactly where
+          // we get the latest moneyClicks/moneyImpressions proportions from.
+          const latestAuditForShares =
+            history.slice().reverse().find(r => r && (r.moneySegmentMetrics || r.moneyPagePriorityData)) ||
+            (history.length > 0 ? history[history.length - 1] : null);
+
+          const latestMoneyPagePriorityData =
+            latestAuditForShares?.moneyPagePriorityData || window.moneyPagePriorityData || [];
+          const latestMoneySegmentMetrics =
+            latestAuditForShares?.moneySegmentMetrics || null;
           
           const metricKey = document.getElementById("money-kpi-metric-select")?.value || "ctr";
           debugLog(`✓ Money Pages KPI Tracker: Using metricKey="${metricKey}"`, 'info');
-          const historyData = buildMoneyKpiHistory(filteredHistory, metricKey, timeseries, latestMoneySegmentMetrics, latestMoneyPagePriorityData);
+          const historyData = buildMoneyKpiHistory(history, metricKey, timeseries, latestMoneySegmentMetrics, latestMoneyPagePriorityData);
           debugLog(`✓ Money Pages KPI Tracker: Built history with ${historyData.labels.length} labels`, 'info');
           
           renderMoneyKpiTable(historyData, metricKey);
