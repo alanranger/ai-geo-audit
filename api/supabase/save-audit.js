@@ -513,6 +513,81 @@ export default async function handler(req, res) {
       }
       console.log('[Supabase Save] ⚠ Partial update detected - only updating query_totals to prevent data loss');
     }
+
+    // SAFETY: Prevent partial audits from overwriting existing full audit data with nulls.
+    // This can happen if you run an audit and it is missing heavy payload fields (schema_pages_detail, gsc_timeseries, query_pages),
+    // which would otherwise PATCH those columns to null for the same (property_url, audit_date).
+    if (!isPartialUpdate && auditRecord.is_partial === true) {
+      try {
+        const selectFields = [
+          'is_partial',
+          'partial_reason',
+          // heavy payloads
+          'schema_pages_detail',
+          'gsc_timeseries',
+          'query_pages',
+          'top_queries',
+          'query_totals',
+          'query_pages',
+          // money pages
+          'money_pages_metrics',
+          'money_pages_summary',
+          'money_pages_behaviour_score',
+          'money_segment_metrics',
+          'money_page_priority_data',
+          // ranking/ai
+          'ranking_ai_data',
+          // core scores
+          'visibility_score',
+          'authority_score',
+          'local_entity_score',
+          'service_area_score',
+          'content_schema_score',
+          'brand_score',
+          'ai_summary_score',
+          'brand_overlay',
+          // schema coverage metadata
+          'schema_total_pages',
+          'schema_pages_with_schema',
+          'schema_coverage'
+        ].join(',');
+
+        const existingRes = await fetch(
+          `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${auditDate}&select=${selectFields}&limit=1`,
+          {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': supabaseKey,
+              'Authorization': `Bearer ${supabaseKey}`
+            }
+          }
+        );
+
+        if (existingRes.ok) {
+          const existingRows = await existingRes.json().catch(() => []);
+          const existing = Array.isArray(existingRows) && existingRows.length > 0 ? existingRows[0] : null;
+          if (existing) {
+            // Merge: keep existing values when incoming is null/undefined.
+            const merged = { ...auditRecord };
+            for (const [k, v] of Object.entries(existing)) {
+              if (merged[k] === null || merged[k] === undefined) merged[k] = v;
+            }
+
+            // If an existing full audit exists, keep it marked as full.
+            if (existing.is_partial === false) {
+              merged.is_partial = false;
+              merged.partial_reason = existing.partial_reason ?? null;
+            }
+
+            updatePayload = merged;
+            console.warn('[Supabase Save] ⚠ Partial audit merge: preserved existing non-null fields to prevent data loss');
+          }
+        }
+      } catch (e) {
+        console.warn('[Supabase Save] ⚠ Partial audit merge failed (continuing with original payload):', e?.message || String(e));
+      }
+    }
     
     // First, try to update existing record
     const updateResponse = await fetch(`${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${auditDate}`, {
