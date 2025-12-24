@@ -31857,6 +31857,10 @@ Final Score: ${score}/100`;
           debugLog(`⚠ Error loading KPI history: ${error.message}`, 'warn');
         }
       }
+
+      // Canonical implementation: KPI Tracker should be based on GSC timeseries + audit-derived proportions,
+      // not portfolio segment snapshot rows (which may only exist for a single audit date).
+      window.loadAuditHistoryAndRenderKpis = loadAuditHistoryAndRenderKpis_OLD;
       
       // Wire up KPI metric selector to reload on change
       function wireMoneyKpiMetricSelector() {
@@ -32770,11 +32774,20 @@ Final Score: ${score}/100`;
             if (typeof window.wireMoneyKpiMetricSelector === 'function') {
               window.wireMoneyKpiMetricSelector();
             }
+
+            // Now that the Money Pages DOM exists, initialize dependent sections (Priority table, KPI tracker, etc).
+            if (typeof window.__initMoneyPagesPanelAfterRender === 'function') {
+              window.__initMoneyPagesPanelAfterRender();
+            }
           })();
         };
 
         ensureMoneyPagesRendered(0);
         
+        // Define a post-render initializer that must only run after `renderMoneyPagesSection()`
+        // has created the Money Pages DOM (tables/canvases/selectors).
+        // It is invoked from inside `ensureMoneyPagesRendered()` after the section render completes.
+        window.__initMoneyPagesPanelAfterRender = function __initMoneyPagesPanelAfterRender() {
         // Phase: Render Money Pages Priority Matrix & Action List
         const priorityCard = document.getElementById('money-pages-priority-card');
         if (priorityCard) {
@@ -32947,7 +32960,7 @@ Final Score: ${score}/100`;
             
             // Initialize filter state
             window.moneyPagesTypeFilter = 'all';
-            window.moneyPagesMinImpr = 1000;
+            window.moneyPagesMinImpr = 0;
             window.moneyPagesMatrixFilter = null;
             
             // Render initial table (with await to ensure statuses are fetched)
@@ -32955,7 +32968,7 @@ Final Score: ${score}/100`;
               (async () => {
                 await renderMoneyPagesTable(window.moneyPagePriorityData, {
                   typeFilter: 'all',
-                  minImpr: 1000,
+                  minImpr: 0,
                   matrixFilter: null
                 });
                 console.log('[Money Pages Priority] ✓ Initial table rendered with statuses fetched');
@@ -33105,6 +33118,7 @@ Final Score: ${score}/100`;
             }
           }, 200);
         }
+        };
       }, 100);
       
       // Remove existing scorecard table if it exists
