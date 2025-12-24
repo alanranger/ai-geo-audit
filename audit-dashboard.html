@@ -30951,6 +30951,8 @@ Final Score: ${score}/100`;
           })
           .slice(0, 10);
 
+        const TARGET_CTR = 0.025; // 2.5% target used by Money Pages optimisation tasks
+
         const ctrPct = (p) => {
           const clicks = Number(p.clicks || 0);
           const imps = Number(p.impressions || 0);
@@ -30958,6 +30960,22 @@ Final Score: ${score}/100`;
           const raw = Number(p.ctr || 0);
           const ratio = raw > 1 ? raw / 100 : raw;
           return (ratio || 0) * 100;
+        };
+
+        const ctrRatio = (p) => {
+          const clicks = Number(p.clicks || 0);
+          const imps = Number(p.impressions || 0);
+          if (imps > 0) return clicks / imps;
+          const raw = Number(p.ctr || 0);
+          const ratio = raw > 1 ? raw / 100 : raw;
+          return ratio || 0;
+        };
+
+        const expectedIncreaseClicks28dToTargetCtr = (p) => {
+          const imps = Number(p.impressions || 0);
+          if (!(imps > 0)) return 0;
+          const gap = Math.max(0, TARGET_CTR - ctrRatio(p));
+          return Math.round(imps * gap);
         };
 
         container.innerHTML = top10.map((p) => {
@@ -30968,7 +30986,6 @@ Final Score: ${score}/100`;
           const hasTask = !!statusText && statusText !== 'deleted' && statusText !== 'done' && statusText !== 'cancelled';
           const taskId = hasTask ? (status.id || status.task_id || null) : null;
 
-          const pri = String(p.priorityLevel || '').toUpperCase() || 'MEDIUM';
           const diff = String(p.difficultyLevel || '').toUpperCase() || 'MEDIUM';
           const imp = String(p.impactLevel || '').toUpperCase() || 'MEDIUM';
 
@@ -30978,6 +30995,7 @@ Final Score: ${score}/100`;
           const title = p.title || p.url;
           const safeUrl = String(p.url).replace(/'/g, "\\'");
           const safeTitle = String(title).replace(/'/g, "\\'");
+          const expectedUp = expectedIncreaseClicks28dToTargetCtr(p);
 
           return `
             <div class="suggested-card" style="background: white; border: 2px solid #e2e8f0; border-radius: 8px; padding: 1.25rem; box-shadow: 0 2px 4px rgba(0,0,0,0.06);">
@@ -30987,8 +31005,8 @@ Final Score: ${score}/100`;
                   <a href="${p.url}" target="_blank" style="font-size:0.85rem; color:#2563eb; text-decoration:none; word-break:break-all;">${p.url}</a>
                 </div>
                 <div style="display:flex; flex-direction:column; align-items:flex-end; gap:0.35rem; min-width:92px;">
-                  <span style="padding: 0.2rem 0.5rem; border-radius: 999px; background:#f1f5f9; color:#0f172a; font-size:0.75rem; font-weight:700;">${pri}</span>
-                  <span style="padding: 0.2rem 0.5rem; border-radius: 999px; background:${diffColor}20; color:${diffColor}; font-size:0.75rem; font-weight:700;">${diff}</span>
+                  <span style="padding: 0.2rem 0.5rem; border-radius: 999px; background:#f1f5f9; color:#0f172a; font-size:0.75rem; font-weight:700;">${diff}</span>
+                  <span style="padding: 0.2rem 0.5rem; border-radius: 999px; background:${diffColor}20; color:${diffColor}; font-size:0.75rem; font-weight:700;">${imp}</span>
                 </div>
               </div>
 
@@ -31006,6 +31024,10 @@ Final Score: ${score}/100`;
 
               <div style="font-size:0.85rem; color:#64748b; line-height:1.5; margin-bottom:0.75rem;">
                 ${p.suggestion || 'Improve CTR (title/meta/snippet) and strengthen content relevance.'}
+              </div>
+
+              <div style="margin-bottom: 0.75rem; padding: 0.6rem 0.75rem; background: #f8fafc; border-radius: 6px; font-size: 0.85rem; color: #475569;">
+                <strong>Expected increase in clicks (28d) to hit 2.5% CTR:</strong> +${Number(expectedUp || 0).toLocaleString()}
               </div>
 
               <button type="button" style="width:100%; padding:0.65rem; border:none; border-radius:6px; font-weight:700; cursor:pointer; background:${hasTask ? '#10b981' : '#2563eb'}; color:white;"
