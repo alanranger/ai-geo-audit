@@ -50,7 +50,7 @@ export default async function handler(req, res) {
       return sendJSON(res, 400, { error: 'Task ID required' });
     }
 
-    const { metrics, note } = req.body;
+    const { metrics, note, is_baseline } = req.body;
 
     if (!metrics || typeof metrics !== 'object') {
       return sendJSON(res, 400, { error: 'metrics object required' });
@@ -108,33 +108,36 @@ export default async function handler(req, res) {
       }
     }
 
-    // Idempotency check: If a measurement was created in the last 5 minutes, return existing
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-    const { data: recentMeasurement } = await supabase
-      .from('optimisation_task_events')
-      .select('id, created_at, metrics')
-      .eq('task_id', id)
-      .eq('event_type', 'measurement')
-      .or(`cycle_id.eq.${task.active_cycle_id},cycle_number.eq.${cycleNo}`)
-      .gte('created_at', fiveMinutesAgo)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    // Idempotency check: If a measurement was created in the last 5 minutes, return existing.
+    // Exception: allow explicit baseline resets even if a measurement was just taken.
+    if (!is_baseline) {
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      const { data: recentMeasurement } = await supabase
+        .from('optimisation_task_events')
+        .select('id, created_at, metrics')
+        .eq('task_id', id)
+        .eq('event_type', 'measurement')
+        .or(`cycle_id.eq.${task.active_cycle_id},cycle_number.eq.${cycleNo}`)
+        .gte('created_at', fiveMinutesAgo)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-    if (recentMeasurement) {
-      // Return existing measurement (idempotent)
-      const { data: updatedTask } = await supabase
-        .from('vw_optimisation_task_status')
-        .select('*')
-        .eq('id', id)
-        .single();
-      
-      return sendJSON(res, 200, { 
-        event: recentMeasurement, 
-        task: updatedTask,
-        skipped: true,
-        message: 'Measurement already captured recently (within 5 minutes). Returning existing measurement.'
-      });
+      if (recentMeasurement) {
+        // Return existing measurement (idempotent)
+        const { data: updatedTask } = await supabase
+          .from('vw_optimisation_task_status')
+          .select('*')
+          .eq('id', id)
+          .single();
+        
+        return sendJSON(res, 200, { 
+          event: recentMeasurement, 
+          task: updatedTask,
+          skipped: true,
+          message: 'Measurement already captured recently (within 5 minutes). Returning existing measurement.'
+        });
+      }
     }
 
     // Insert measurement event
@@ -142,6 +145,7 @@ export default async function handler(req, res) {
       task_id: id,
       event_type: 'measurement',
       note: note || 'Latest measurement captured',
+      is_baseline: !!is_baseline,
       cycle_id: task.active_cycle_id || null,
       cycle_number: cycleNo,
       metrics: {
@@ -176,7 +180,7 @@ export default async function handler(req, res) {
         // Fetch baseline and latest measurements for this cycle
         const { data: measurements } = await supabase
           .from('optimisation_task_events')
-          .select('metrics, created_at')
+          .select('metrics, created_at, is_baseline')
           .eq('task_id', id)
           .or(`cycle_id.eq.${task.active_cycle_id},cycle_number.eq.${cycleNo}`)
           .not('metrics', 'is', null)
@@ -186,8 +190,11 @@ export default async function handler(req, res) {
         let latestMeasurement = null;
 
         if (measurements && measurements.length > 0) {
-          // Baseline = earliest measurement
-          baselineMeasurement = measurements[0].metrics;
+          // Baseline: prefer the most recent baseline marker (supports rebaselining); fallback to earliest measurement.
+          const baselineCandidates = measurements.filter(m => m && m.is_baseline === true && m.metrics);
+          baselineMeasurement = baselineCandidates.length > 0
+            ? baselineCandidates[baselineCandidates.length - 1].metrics
+            : measurements[0].metrics;
           // Latest = most recent measurement (should be the one we just created)
           latestMeasurement = measurements[measurements.length - 1].metrics;
         }

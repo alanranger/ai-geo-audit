@@ -5312,7 +5312,10 @@
                 <div style="padding: 0.75rem; background: var(--dark-panel); border-radius: 4px; border: 1px solid var(--dark-border);">
                   <h4 style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; font-size: 0.95rem; color: var(--dark-text);">
                     <span>Performance Snapshot <span title="Shows current metrics compared to baseline measurement. Baseline is captured when the cycle starts, and latest shows the most recent measurement. Use 'Add Measurement' to capture new snapshots." style="opacity: 0.6; cursor: help; font-size: 0.85rem;">ℹ</span></span>
-                    <button id="optimisation-add-measurement-btn" class="btn btn-small" style="padding: 0.25rem 0.75rem; font-size: 0.875rem; background: var(--dark-brand); color: #000000; font-weight: 700; border: 1px solid var(--dark-brand);" title="Capture the latest metrics and compare to baseline.">Add Measurement</button>
+                    <div style="display: flex; gap: 0.5rem; align-items: center;">
+                      <button id="optimisation-rebaseline-btn" class="btn btn-small" style="padding: 0.25rem 0.75rem; font-size: 0.875rem; background: rgba(156, 163, 175, 0.15); color: var(--dark-text); font-weight: 700; border: 1px solid var(--dark-border);" title="Create a new baseline measurement (keeps history).">Rebaseline</button>
+                      <button id="optimisation-add-measurement-btn" class="btn btn-small" style="padding: 0.25rem 0.75rem; font-size: 0.875rem; background: var(--dark-brand); color: #000000; font-weight: 700; border: 1px solid var(--dark-brand);" title="Capture the latest metrics and compare to baseline.">Add Measurement</button>
+                    </div>
                   </h4>
                   <div id="optimisation-metrics-snapshot" style="display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 0.75rem; font-size: 0.9rem; color: var(--dark-text);">
                     <!-- Metrics will be populated by JavaScript -->
@@ -9500,38 +9503,25 @@
         const measurements = data.events || [];
         
         if (measurements.length > 0) {
-          // First, try to find baseline measurement explicitly marked with is_baseline: true
-          const baselineEvent = measurements.find(m => m.is_baseline === true);
-          
-          if (baselineEvent && baselineEvent.metrics) {
-            baselineMetrics = { ...baselineEvent.metrics };
-            if (baselineEvent.created_at) {
-              baselineMetrics.captured_at = baselineEvent.created_at;
-            }
-            console.log('[Performance Snapshot] Found baseline measurement with is_baseline=true:', baselineMetrics);
-          } else {
-            // Fallback: Use first measurement chronologically if no explicit baseline found
           const sorted = [...measurements].sort((a, b) => {
             const dateA = new Date(a.created_at || a.event_at || 0);
             const dateB = new Date(b.created_at || b.event_at || 0);
             return dateA - dateB;
           });
-          
-            if (sorted[0] && sorted[0].metrics) {
-              baselineMetrics = { ...sorted[0].metrics };
-              if (sorted[0].created_at) {
-            baselineMetrics.captured_at = sorted[0].created_at;
-          }
-              console.log('[Performance Snapshot] Using first measurement as baseline (no is_baseline flag found):', baselineMetrics);
-            }
+
+          // Baseline: prefer the most recent baseline marker; fallback to first measurement.
+          const baselineCandidates = sorted.filter(m => m && m.is_baseline === true && m.metrics);
+          const baselineEvent = baselineCandidates.length > 0
+            ? baselineCandidates[baselineCandidates.length - 1]
+            : sorted[0];
+
+          if (baselineEvent && baselineEvent.metrics) {
+            baselineMetrics = { ...baselineEvent.metrics };
+            if (baselineEvent.created_at) baselineMetrics.captured_at = baselineEvent.created_at;
+            console.log('[Performance Snapshot] Using baseline measurement:', baselineEvent.is_baseline ? '(latest is_baseline=true)' : '(first measurement fallback)', baselineMetrics);
           }
           
           // Latest is always the most recent measurement
-          const sorted = [...measurements].sort((a, b) => {
-            const dateA = new Date(a.created_at || a.event_at || 0);
-            const dateB = new Date(b.created_at || b.event_at || 0);
-            return dateA - dateB;
-          });
           
           if (sorted[sorted.length - 1] && sorted[sorted.length - 1].metrics) {
             latestMetrics = { ...sorted[sorted.length - 1].metrics };
@@ -12890,8 +12880,51 @@
             return;
           }
 
-          // Try to ensure Ranking & AI data is loaded
-          if (typeof window.renderRankingAiTab === 'function') {
+          let currentMetrics = null;
+          let matchingRow = null;
+
+          const taskUrlForPage = task.target_url_clean || task.target_url || '';
+          const hasKeyword = !!(task.keyword_text && String(task.keyword_text).trim());
+
+          // For URL-only tasks (e.g. Money Pages), prefer an exact GSC page totals fetch.
+          if (!hasKeyword && taskUrlForPage) {
+            try {
+              const property = document.getElementById('propertyUrl')?.value ||
+                localStorage.getItem('gsc_property_url') ||
+                localStorage.getItem('last_property_url') || '';
+              if (property) {
+                const range = (typeof getGscDateRange === 'function') ? getGscDateRange(28, 2) : null;
+                const startDate = range?.startDate ? `&startDate=${encodeURIComponent(range.startDate)}` : '';
+                const endDate = range?.endDate ? `&endDate=${encodeURIComponent(range.endDate)}` : '';
+                const totalsUrl = apiUrl(`/api/aigeo/gsc-page-totals?property=${encodeURIComponent(property)}&pageUrl=${encodeURIComponent(taskUrlForPage)}${startDate}${endDate}`);
+                const totalsRes = await fetch(totalsUrl);
+                const totalsJson = await totalsRes.json().catch(() => null);
+                const totals = totalsRes.ok && totalsJson && totalsJson.status === 'ok' ? totalsJson.data : null;
+                if (totals) {
+                  currentMetrics = {
+                    gsc_clicks_28d: Number(totals.clicks || 0),
+                    gsc_impressions_28d: Number(totals.impressions || 0),
+                    gsc_ctr_28d: Number(totals.ctr || 0) / 100,
+                    current_rank: totals.position != null ? Number(totals.position) : null,
+                    opportunity_score: null,
+                    ai_overview: false,
+                    ai_citations: 0,
+                    ai_citations_total: 0,
+                    classic_ranking_url: taskUrlForPage,
+                    page_type: task.page_type || null,
+                    segment: task.segment || 'money_pages',
+                    captured_at: new Date().toISOString()
+                  };
+                  console.log('[Optimisation] Built currentMetrics from GSC page totals (URL task):', currentMetrics);
+                }
+              }
+            } catch (e) {
+              console.warn('[Optimisation] Failed to fetch GSC page totals for URL task:', e);
+            }
+          }
+
+          // Try to ensure Ranking & AI data is loaded (keyword-based tasks only)
+          if (!currentMetrics && hasKeyword && typeof window.renderRankingAiTab === 'function') {
             try {
               await window.renderRankingAiTab();
               // Small delay to let data load
@@ -12900,13 +12933,9 @@
               console.warn('[Optimisation] Could not refresh Ranking & AI data:', e);
             }
           }
-
-          // Try to find matching row in Ranking & AI data
-          let currentMetrics = null;
-          let matchingRow = null;
           
           // First try RankingAiModule state
-          if (typeof RankingAiModule !== 'undefined' && RankingAiModule.state) {
+          if (!currentMetrics && hasKeyword && typeof RankingAiModule !== 'undefined' && RankingAiModule.state) {
             const { combinedRows } = RankingAiModule.state();
             console.log('[Optimisation] Searching in combinedRows:', combinedRows?.length, 'rows');
             
@@ -13028,9 +13057,7 @@
               const moneyPageRow = window.moneyPagesMetrics.rows.find(row => {
                 const rowUrl = row.url || row.page_url || '';
                 const normalizedRowUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(rowUrl) : rowUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
-                return normalizedRowUrl === normalizedTaskUrl || 
-                       normalizedRowUrl.includes(normalizedTaskUrl) ||
-                       normalizedTaskUrl.includes(normalizedRowUrl);
+                return normalizedRowUrl === normalizedTaskUrl;
               });
               
               if (moneyPageRow) {
@@ -13079,9 +13106,7 @@
                     const moneyPageRow = moneyPagesData.rows.find(row => {
                       const rowUrl = row.url || row.page_url || '';
                       const normalizedRowUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(rowUrl) : rowUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
-                      return normalizedRowUrl === normalizedTaskUrl || 
-                             normalizedRowUrl.includes(normalizedTaskUrl) ||
-                             normalizedTaskUrl.includes(normalizedRowUrl);
+                      return normalizedRowUrl === normalizedTaskUrl;
                     });
                     
                     if (moneyPageRow) {
@@ -13125,9 +13150,7 @@
                       if (normalizedTaskUrl && normalizedTaskUrl.length > 0) {
                         const qtUrl = (qt.best_url || qt.targetUrl || '').toLowerCase();
                         const normalizedQtUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(qtUrl) : qtUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
-                        if (normalizedQtUrl === normalizedTaskUrl || 
-                            normalizedQtUrl.includes(normalizedTaskUrl) ||
-                            normalizedTaskUrl.includes(normalizedQtUrl)) {
+                          if (normalizedQtUrl === normalizedTaskUrl) {
                           return true;
                         }
                       }
@@ -13196,9 +13219,7 @@
                     const matchingQueryPage = queryPages.find(qp => {
                       const qpUrl = (qp.page || qp.url || '').toLowerCase();
                       const normalizedQpUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(qpUrl) : qpUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
-                      return normalizedQpUrl === normalizedTaskUrl || 
-                             normalizedQpUrl.includes(normalizedTaskUrl) ||
-                             normalizedTaskUrl.includes(normalizedQpUrl);
+                      return normalizedQpUrl === normalizedTaskUrl;
                     });
                     
                     if (matchingQueryPage) {
@@ -13242,9 +13263,7 @@
                       const moneyPageRow = moneyPagesData.rows.find(row => {
                         const rowUrl = row.url || row.page_url || '';
                         const normalizedRowUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(rowUrl) : rowUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
-                        return normalizedRowUrl === normalizedTaskUrl || 
-                               normalizedRowUrl.includes(normalizedTaskUrl) ||
-                               normalizedTaskUrl.includes(normalizedRowUrl);
+                        return normalizedRowUrl === normalizedTaskUrl;
                       });
                       
                       if (moneyPageRow) {
@@ -13287,9 +13306,7 @@
                         if (normalizedTaskUrl && normalizedTaskUrl.length > 0) {
                           const qtUrl = (qt.best_url || qt.targetUrl || '').toLowerCase();
                           const normalizedQtUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(qtUrl) : qtUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
-                          if (normalizedQtUrl === normalizedTaskUrl || 
-                              normalizedQtUrl.includes(normalizedTaskUrl) ||
-                              normalizedTaskUrl.includes(normalizedQtUrl)) {
+                          if (normalizedQtUrl === normalizedTaskUrl) {
                             return true;
                           }
                         }
@@ -13358,9 +13375,7 @@
                       const matchingQueryPage = queryPages.find(qp => {
                         const qpUrl = (qp.page || qp.url || '').toLowerCase();
                         const normalizedQpUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(qpUrl) : qpUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
-                        return normalizedQpUrl === normalizedTaskUrl || 
-                               normalizedQpUrl.includes(normalizedTaskUrl) ||
-                               normalizedTaskUrl.includes(normalizedQpUrl);
+                        return normalizedQpUrl === normalizedTaskUrl;
                       });
                       
                       if (matchingQueryPage) {
@@ -13465,6 +13480,95 @@
           }
         });
       }
+
+      const rebaselineBtn = document.getElementById('optimisation-rebaseline-btn');
+      if (rebaselineBtn) {
+        rebaselineBtn.addEventListener('click', async () => {
+          const taskId = window.optimisationModuleState.currentTaskId;
+          if (!taskId) return;
+
+          const task = window.optimisationModuleState.allTasks.find(t => t.id === taskId);
+          if (!task) {
+            alert('Task not found. Please refresh the page.');
+            return;
+          }
+
+          if (!confirm('Create a new baseline measurement for the current cycle? This keeps history, but baseline comparisons will use the newest baseline.')) {
+            return;
+          }
+
+          let currentMetrics = null;
+          const taskUrlForPage = task.target_url_clean || task.target_url || '';
+          const hasKeyword = !!(task.keyword_text && String(task.keyword_text).trim());
+
+          // Prefer exact GSC page totals for URL-only tasks
+          if (!hasKeyword && taskUrlForPage) {
+            try {
+              const property = document.getElementById('propertyUrl')?.value ||
+                localStorage.getItem('gsc_property_url') ||
+                localStorage.getItem('last_property_url') || '';
+              if (property) {
+                const range = (typeof getGscDateRange === 'function') ? getGscDateRange(28, 2) : null;
+                const startDate = range?.startDate ? `&startDate=${encodeURIComponent(range.startDate)}` : '';
+                const endDate = range?.endDate ? `&endDate=${encodeURIComponent(range.endDate)}` : '';
+                const totalsUrl = apiUrl(`/api/aigeo/gsc-page-totals?property=${encodeURIComponent(property)}&pageUrl=${encodeURIComponent(taskUrlForPage)}${startDate}${endDate}`);
+                const totalsRes = await fetch(totalsUrl);
+                const totalsJson = await totalsRes.json().catch(() => null);
+                const totals = totalsRes.ok && totalsJson && totalsJson.status === 'ok' ? totalsJson.data : null;
+                if (totals) {
+                  currentMetrics = {
+                    gsc_clicks_28d: Number(totals.clicks || 0),
+                    gsc_impressions_28d: Number(totals.impressions || 0),
+                    gsc_ctr_28d: Number(totals.ctr || 0) / 100,
+                    current_rank: totals.position != null ? Number(totals.position) : null,
+                    classic_ranking_url: taskUrlForPage,
+                    segment: task.segment || 'money_pages',
+                    captured_at: new Date().toISOString()
+                  };
+                }
+              }
+            } catch (e) {
+              console.warn('[Optimisation] Failed to fetch GSC page totals for rebaseline:', e);
+            }
+          }
+
+          // Fallback to existing baseline metrics (still records a new baseline marker)
+          if (!currentMetrics) {
+            const baselineMetrics = task.baseline_metrics;
+            if (baselineMetrics && typeof baselineMetrics === 'object') {
+              currentMetrics = { ...baselineMetrics, captured_at: new Date().toISOString() };
+            } else {
+              alert('Could not find metrics to rebaseline. Try again after running an audit.');
+              return;
+            }
+          }
+
+          try {
+            const headers = window.getOptimisationHeaders();
+            const response = await fetch(apiUrl(`/api/optimisation/task/${taskId}/measurement`), {
+              method: 'POST',
+              headers: headers,
+              body: JSON.stringify({
+                metrics: currentMetrics,
+                note: 'Rebaseline snapshot',
+                is_baseline: true
+              })
+            });
+
+            if (!response.ok) {
+              const errorText = await response.text();
+              throw new Error(errorText || 'Failed to rebaseline');
+            }
+
+            await window.loadAllOptimisationTasks();
+            await openOptimisationTaskDrawer(taskId);
+            alert('Baseline updated successfully!');
+          } catch (error) {
+            console.error('[Optimisation Module] Error rebaselining:', error);
+            alert('Failed to rebaseline: ' + error.message);
+          }
+        });
+      }
     }
 
     // Bulk update all tasks with latest data
@@ -13562,9 +13666,7 @@
               if (normalizedTaskUrl && normalizedTaskUrl.length > 0) {
             const rowUrl = (r.best_url || r.targetUrl || r.ranking_url || '').toLowerCase();
                 const normalizedRowUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(rowUrl) : rowUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
-                return normalizedRowUrl === normalizedTaskUrl || 
-                       normalizedRowUrl.includes(normalizedTaskUrl) ||
-                       normalizedTaskUrl.includes(normalizedRowUrl);
+                return normalizedRowUrl === normalizedTaskUrl;
               }
               return true; // Keyword match is enough if no URL
             });
@@ -13577,9 +13679,7 @@
               const moneyPageRow = window.moneyPagesMetrics.rows.find(row => {
                 const rowUrl = row.url || row.page_url || '';
                 const normalizedRowUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(rowUrl) : rowUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
-                return normalizedRowUrl === normalizedTaskUrl || 
-                       normalizedRowUrl.includes(normalizedTaskUrl) ||
-                       normalizedTaskUrl.includes(normalizedRowUrl);
+                return normalizedRowUrl === normalizedTaskUrl;
               });
               
               if (moneyPageRow) {
@@ -13625,9 +13725,7 @@
                     const moneyPageRow = moneyPagesData.rows.find(row => {
                       const rowUrl = row.url || row.page_url || '';
                       const normalizedRowUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(rowUrl) : rowUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
-                      return normalizedRowUrl === normalizedTaskUrl || 
-                             normalizedRowUrl.includes(normalizedTaskUrl) ||
-                             normalizedTaskUrl.includes(normalizedRowUrl);
+                      return normalizedRowUrl === normalizedTaskUrl;
                     });
                     
                     if (moneyPageRow) {
@@ -13666,9 +13764,7 @@
                     const matchingQueries = parsed.searchData.queryTotals.filter(qt => {
                       const qtUrl = (qt.best_url || qt.targetUrl || '').toLowerCase();
                       const normalizedQtUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(qtUrl) : qtUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
-                      return normalizedQtUrl === normalizedTaskUrl || 
-                             normalizedQtUrl.includes(normalizedTaskUrl) ||
-                             normalizedTaskUrl.includes(normalizedQtUrl);
+                      return normalizedQtUrl === normalizedTaskUrl;
                     });
                     
                     if (matchingQueries.length > 0) {
@@ -15177,8 +15273,20 @@
                       <div><div style="color: #64748b; margin-bottom: 0.25rem;">Impact:</div><div style="font-weight: 700; color: #1e293b;">${Math.round(impactScore)}</div></div>
                       <div><div style="color: #64748b; margin-bottom: 0.25rem;">Difficulty:</div><div style="font-weight: 700; color: ${difficultyColor};">${page.difficultyLevel || 'MED'}</div></div>
                     </div>
-                    <div style="margin-bottom: 1rem; padding: 0.75rem; background: #f8fafc; border-radius: 4px; font-size: 0.85rem; color: #475569;">
-                      <strong>Potential impact clicks 28d:</strong> ${potentialClicks28d.toLocaleString()}
+                    <div style="margin-bottom: 1rem; padding: 0.75rem; background: #f8fafc; border-radius: 4px; font-size: 0.85rem; color: #475569; line-height: 1.45;">
+                      <div><strong>Potential impact clicks (vs expected CTR for position):</strong> ${potentialClicks28d.toLocaleString()}</div>
+                      ${(() => {
+                        const TARGET_CTR = 0.025; // 2.5% default CTR target for Money Pages tasks
+                        const clicks = Number(page.clicks || 0);
+                        const imps = Number(page.impressions || 0);
+                        const currentCtr = imps > 0 ? (clicks / imps) : (() => {
+                          const raw = Number(page.ctr || 0);
+                          return raw > 1 ? (raw / 100) : raw;
+                        })();
+                        const delta = imps > 0 ? Math.max(0, (TARGET_CTR - (currentCtr || 0)) * imps) : 0;
+                        const expectedExtraClicks = Math.round(delta || 0);
+                        return `<div style="margin-top: 0.25rem;"><strong>Expected clicks to hit 2.5% CTR:</strong> +${expectedExtraClicks.toLocaleString()}</div>`;
+                      })()}
                     </div>
                     <div style="margin-bottom: 1rem; font-size: 0.85rem; color: #64748b; line-height: 1.5;">
                       ${page.suggestion || (page.impactLevel === 'HIGH' && page.difficultyLevel === 'LOW' ? 'Improve relevance + internal links to lift rank' : 'Improve CTR (title/meta/snippet) + strengthen content')}

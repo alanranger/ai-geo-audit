@@ -293,16 +293,15 @@ export default async function handler(req, res) {
       let latestMeasurement = null;
       let baselineEvent = null;
       if (cycleEvents.length > 0) {
-        // First, try to find baseline measurement explicitly marked with is_baseline: true
-        baselineEvent = cycleEvents.find(e => e.is_baseline === true);
+        // Baseline: prefer the most recent baseline marker (supports rebaselining); fallback to first measurement.
+        const baselineCandidates = cycleEvents.filter(e => e && e.is_baseline === true && e.metrics);
+        baselineEvent = baselineCandidates.length > 0
+          ? baselineCandidates[baselineCandidates.length - 1]
+          : cycleEvents[0];
+
         if (baselineEvent && baselineEvent.metrics) {
           baselineMeasurement = baselineEvent.metrics;
-          console.log(`[Dashboard] Found baseline measurement with is_baseline=true for task ${task.id}`);
-        } else {
-          // Fallback: Use first measurement chronologically if no explicit baseline found
-          baselineEvent = cycleEvents[0];
-          baselineMeasurement = cycleEvents[0].metrics;
-          console.log(`[Dashboard] Using first measurement as baseline (no is_baseline flag) for task ${task.id}`);
+          console.log(`[Dashboard] Using baseline for task ${task.id}:`, baselineEvent.is_baseline ? 'latest baseline marker' : 'first measurement fallback');
         }
         
         // Latest is always the most recent measurement
