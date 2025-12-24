@@ -15188,31 +15188,30 @@
                 return;
               }
               
-              const expectedCtrForPositionSafe = (pos) => {
-                // Mirror expectedCtrForPosition() if it exists; otherwise keep a simple fallback curve
-                if (typeof expectedCtrForPosition === 'function') return expectedCtrForPosition(pos);
-                if (!isFinite(pos) || pos <= 0) return 0.10;
-                if (pos <= 3) return 0.10;
-                if (pos <= 6) return 0.07;
-                if (pos <= 10) return 0.05;
-                if (pos <= 20) return 0.03;
-                return 0.02;
+              // Upside is based on reaching the Money Pages default CTR target (2.5%) – matches the historic UI.
+              const TARGET_CTR = 0.025;
+              const actualCtrForRow = (p) => {
+                const clicks = Number(p?.clicks || 0);
+                const imps = Number(p?.impressions || 0);
+                if (imps > 0) return clicks / imps;
+                const raw = Number(p?.ctr || 0);
+                const ratio = raw > 1 ? raw / 100 : raw;
+                return ratio || 0;
               };
-              const lostClicksForRow = (p) => {
-                if (typeof p?._lostClicks === 'number' && isFinite(p._lostClicks)) return p._lostClicks;
-                const expectedCtr = expectedCtrForPositionSafe(p?.avgPosition || 0);
-                const actualCtr = p?.ctr || 0;
-                const gap = Math.max(0, expectedCtr - actualCtr);
-                return (p?.impressions || 0) * gap;
+              const upsideClicksToTarget = (p) => {
+                const imps = Number(p?.impressions || 0);
+                const actualCtr = actualCtrForRow(p);
+                const gap = Math.max(0, TARGET_CTR - (actualCtr || 0));
+                return imps > 0 ? (imps * gap) : 0;
               };
-              const maxLost = Math.max(1, ...priorityData.map(p => lostClicksForRow(p) || 0));
-              const impactScoreForRow = (p) => Math.max(0, Math.min(100, (lostClicksForRow(p) / maxLost) * 100));
+              const maxUpside = Math.max(1, ...priorityData.map(p => upsideClicksToTarget(p) || 0));
+              const impactScoreForRow = (p) => Math.max(0, Math.min(100, (upsideClicksToTarget(p) / maxUpside) * 100));
 
               const diffOrder = { LOW: 0, MEDIUM: 1, HIGH: 2 };
               const top10 = [...priorityData]
                 .sort((a, b) => {
-                  const la = lostClicksForRow(a) || 0;
-                  const lb = lostClicksForRow(b) || 0;
+                  const la = upsideClicksToTarget(a) || 0;
+                  const lb = upsideClicksToTarget(b) || 0;
                   if (lb !== la) return lb - la;
                   return (diffOrder[a.difficultyLevel] ?? 2) - (diffOrder[b.difficultyLevel] ?? 2);
                 })
@@ -15235,7 +15234,7 @@
                 const difficultyColors = { LOW: '#10b981', MEDIUM: '#f59e0b', HIGH: '#ef4444' };
                 const difficultyColor = difficultyColors[page.difficultyLevel] || '#64748b';
                 const impactScore = impactScoreForRow(page);
-                const potentialClicks28d = Math.round(lostClicksForRow(page) || 0);
+                const potentialClicks28d = Math.round(upsideClicksToTarget(page) || 0);
                 const statusLabelMap = {
                   planned: 'Planned',
                   in_progress: 'In progress',
@@ -15244,55 +15243,42 @@
                   cancelled: 'Cancelled'
                 };
                 const statusLabel = statusText ? (statusLabelMap[statusText] || statusText) : null;
+
+                const clicks = Number(page.clicks || 0);
+                const imps = Number(page.impressions || 0);
+                const ctrPct = imps > 0 ? ((clicks / imps) * 100) : ((actualCtrForRow(page) || 0) * 100);
                 
                 return `
-                  <div class="suggested-card" style="background: white; border: 2px solid #e2e8f0; border-radius: 8px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem;">
-                      <div style="flex: 1;">
-                        <h4 style="margin: 0 0 0.5rem 0; font-size: 1rem; font-weight: 700; color: #1e293b; line-height: 1.4;">${page.title || page.url || 'Untitled Page'}</h4>
-                        <a href="${page.url}" target="_blank" style="font-size: 0.85rem; color: #2563eb; text-decoration: none; word-break: break-all;">${page.url}</a>
+                  <div class="suggested-card" style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 1rem; box-shadow: 0 1px 2px rgba(0,0,0,0.06); ${isOptimized ? 'border-left: 4px solid #10b981;' : ''}">
+                    ${isOptimized ? `<div style="background: #dcfce7; color: #166534; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 700; margin-bottom: 0.75rem;">✓ Being Optimised</div>` : ''}
+                    <div style="margin-bottom: 0.5rem;">
+                      <div style="font-size: 0.95rem; font-weight: 800; color: #0f172a; line-height: 1.25; margin-bottom: 0.25rem;">
+                        ${escapeHtml(page.title || page.url || 'Untitled Page')}
                       </div>
-                      ${isOptimized ? `<span style="padding: 0.25rem 0.75rem; background: #10b981; color: white; border-radius: 4px; font-size: 0.75rem; font-weight: 600; white-space: nowrap;">✓ ${statusLabel || 'Tracked'}</span>` : ''}
+                      <a href="${page.url}" target="_blank" style="font-size: 0.75rem; color: #2563eb; text-decoration: none; word-break: break-all;">${page.url}</a>
                     </div>
-                    <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
-                      <span style="padding: 0.25rem 0.5rem; background: #f1f5f9; border-radius: 4px; font-size: 0.75rem; color: #64748b; text-transform: uppercase;">${page.segmentType || 'landing'}</span>
-                      <span style="padding: 0.25rem 0.5rem; background: ${difficultyColor}20; color: ${difficultyColor}; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">${page.difficultyLevel || 'MED'}</span>
+                    <div style="display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
+                      <span style="padding: 0.2rem 0.45rem; background: #e2e8f0; border-radius: 4px; font-size: 0.7rem; color: #334155; font-weight: 700;">${(page.segmentType || 'landing').toLowerCase()}</span>
+                      <span style="padding: 0.2rem 0.45rem; background: ${difficultyColor}20; color: ${difficultyColor}; border-radius: 4px; font-size: 0.7rem; font-weight: 800;">${page.difficultyLevel || 'MED'}</span>
                     </div>
-                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; margin-bottom: 1rem; font-size: 0.85rem;">
-                      <div><div style="color: #64748b; margin-bottom: 0.25rem;">Pos:</div><div style="font-weight: 700; color: #1e293b;">${(page.avgPosition || 0).toFixed(1)}</div></div>
-                      <div><div style="color: #64748b; margin-bottom: 0.25rem;">CTR:</div><div style="font-weight: 700; color: #1e293b;">${(() => {
-                        const clicks = Number(page.clicks || 0);
-                        const imps = Number(page.impressions || 0);
-                        if (imps > 0) return ((clicks / imps) * 100).toFixed(1) + '%';
-                        const raw = Number(page.ctr || 0);
-                        const ratio = raw > 1 ? raw / 100 : raw; // handle legacy percent values
-                        return ((ratio || 0) * 100).toFixed(1) + '%';
-                      })()}</div></div>
-                      <div><div style="color: #64748b; margin-bottom: 0.25rem;">Impr:</div><div style="font-weight: 700; color: #1e293b;">${(page.impressions || 0).toLocaleString()}</div></div>
-                      <div><div style="color: #64748b; margin-bottom: 0.25rem;">Upside:</div><div style="font-weight: 700; color: #1e293b;">${potentialClicks28d.toLocaleString()}</div></div>
-                      <div><div style="color: #64748b; margin-bottom: 0.25rem;">Impact:</div><div style="font-weight: 700; color: #1e293b;">${Math.round(impactScore)}</div></div>
-                      <div><div style="color: #64748b; margin-bottom: 0.25rem;">Difficulty:</div><div style="font-weight: 700; color: ${difficultyColor};">${page.difficultyLevel || 'MED'}</div></div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.35rem 0.75rem; font-size: 0.75rem; color: #334155; margin-bottom: 0.75rem;">
+                      <div><span style="color:#64748b;">Pos:</span> <span style="font-weight: 800; color:#0f172a;">${(page.avgPosition || 0).toFixed(1)}</span></div>
+                      <div><span style="color:#64748b;">CTR:</span> <span style="font-weight: 800; color:#0f172a;">${(ctrPct || 0).toFixed(1)}%</span></div>
+                      <div><span style="color:#64748b;">Impr:</span> <span style="font-weight: 800; color:#0f172a;">${(page.impressions || 0).toLocaleString()}</span></div>
+                      <div><span style="color:#64748b;">Upside:</span> <span style="font-weight: 800; color:#0f172a;">${potentialClicks28d.toLocaleString()}</span></div>
+                      <div><span style="color:#64748b;">Impact:</span> <span style="font-weight: 800; color:#0f172a;">${Math.round(impactScore)}</span></div>
+                      <div><span style="color:#64748b;">Difficulty:</span> <span style="font-weight: 800; color:${difficultyColor};">${page.difficultyLevel || 'MED'}</span></div>
                     </div>
-                    <div style="margin-bottom: 1rem; padding: 0.75rem; background: #f8fafc; border-radius: 4px; font-size: 0.85rem; color: #475569; line-height: 1.45;">
-                      <div><strong>Potential impact clicks (vs expected CTR for position):</strong> ${potentialClicks28d.toLocaleString()}</div>
-                      ${(() => {
-                        const TARGET_CTR = 0.025; // 2.5% default CTR target for Money Pages tasks
-                        const clicks = Number(page.clicks || 0);
-                        const imps = Number(page.impressions || 0);
-                        const currentCtr = imps > 0 ? (clicks / imps) : (() => {
-                          const raw = Number(page.ctr || 0);
-                          return raw > 1 ? (raw / 100) : raw;
-                        })();
-                        const delta = imps > 0 ? Math.max(0, (TARGET_CTR - (currentCtr || 0)) * imps) : 0;
-                        const expectedExtraClicks = Math.round(delta || 0);
-                        return `<div style="margin-top: 0.25rem;"><strong>Expected clicks to hit 2.5% CTR:</strong> +${expectedExtraClicks.toLocaleString()}</div>`;
-                      })()}
+
+                    <div style="font-size: 0.75rem; color: #475569; margin-bottom: 0.6rem;">
+                      Potential impact clicks 28d: <strong>${potentialClicks28d.toLocaleString()}</strong>
                     </div>
-                    <div style="margin-bottom: 1rem; font-size: 0.85rem; color: #64748b; line-height: 1.5;">
-                      ${page.suggestion || (page.impactLevel === 'HIGH' && page.difficultyLevel === 'LOW' ? 'Improve relevance + internal links to lift rank' : 'Improve CTR (title/meta/snippet) + strengthen content')}
+                    <div style="font-size: 0.72rem; color: #64748b; line-height: 1.35; margin-bottom: 0.75rem;">
+                      ${escapeHtml(page.suggestion || (page.impactLevel === 'HIGH' && page.difficultyLevel === 'LOW' ? 'Improve relevance + internal links to lift rank' : 'Improve CTR (title/meta/snippet) + strengthen content'))}
                     </div>
-                    <button type="button" class="btn ${isOptimized ? 'btn-secondary' : 'btn-primary'}" onclick="${isOptimized ? `window.openOptimisationTaskDrawer('${String(taskId).replace(/'/g, "\\'").replace(/"/g, '&quot;')}')` : `window.trackMoneyPage('${page.url.replace(/'/g, "\\'")}', '${(page.title || page.url).replace(/'/g, "\\'")}')`}" style="width: 100%; padding: 0.75rem; background: ${isOptimized ? '#10b981' : '#2563eb'}; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.875rem;">
-                      ${isOptimized ? 'Manage' : 'Create Task'}
+                    <button type="button" class="btn ${isOptimized ? 'btn-secondary' : 'btn-primary'}" onclick="${isOptimized ? `window.openOptimisationTaskDrawer('${String(taskId).replace(/'/g, "\\'").replace(/"/g, '&quot;')}')` : `window.trackMoneyPage('${page.url.replace(/'/g, "\\'")}', '${(page.title || page.url).replace(/'/g, "\\'")}')`}" style="width: 100%; padding: 0.65rem 0.75rem; background: ${isOptimized ? '#10b981' : '#2563eb'}; color: #ffffff; border: none; border-radius: 6px; font-weight: 800; cursor: pointer; font-size: 0.8rem;">
+                      ${isOptimized ? 'Manage Task' : 'Create Task'}
                     </button>
                   </div>
                 `;
@@ -27969,18 +27955,26 @@ Final Score: ${score}/100`;
       
       // Attach sort handlers for Money Pages table
       function attachMoneyPagesSortHandlers() {
-        setTimeout(() => {
-          ['clicks', 'impressions', 'ctr', 'position', 'opportunity'].forEach(col => {
-            const th = document.getElementById(`money-sort-${col}`);
-            if (th) {
-              const newTh = th.cloneNode(true);
-              th.parentNode.replaceChild(newTh, th);
-              newTh.addEventListener('click', () => {
-                handleMoneyPagesSort(col);
-              });
-            }
-          });
-        }, 50);
+        // Use event delegation so sorting keeps working across any table re-render path.
+        ensureMoneyPagesOpportunitySortDelegation();
+      }
+
+      // One-time delegated sort handler for the Money Pages Opportunity table headers.
+      function ensureMoneyPagesOpportunitySortDelegation() {
+        if (window.__moneyPagesOpportunitySortDelegationAttached) return;
+        window.__moneyPagesOpportunitySortDelegationAttached = true;
+
+        document.addEventListener('click', (e) => {
+          const th = e?.target?.closest ? e.target.closest('th[id^="money-sort-"]') : null;
+          if (!th || !th.id) return;
+          const col = String(th.id).replace('money-sort-', '');
+          if (!['clicks', 'impressions', 'ctr', 'position', 'opportunity'].includes(col)) return;
+          try {
+            handleMoneyPagesSort(col);
+          } catch (err) {
+            console.warn('[Money Pages Opportunity] Sort handler error:', err);
+          }
+        });
       }
       
       // Handle sorting for Money Pages table
