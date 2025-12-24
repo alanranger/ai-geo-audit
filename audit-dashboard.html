@@ -15093,7 +15093,14 @@
                     </div>
                     <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; margin-bottom: 1rem; font-size: 0.85rem;">
                       <div><div style="color: #64748b; margin-bottom: 0.25rem;">Pos:</div><div style="font-weight: 700; color: #1e293b;">${(page.avgPosition || 0).toFixed(1)}</div></div>
-                      <div><div style="color: #64748b; margin-bottom: 0.25rem;">CTR:</div><div style="font-weight: 700; color: #1e293b;">${((page.ctr || 0) * 100).toFixed(1)}%</div></div>
+                      <div><div style="color: #64748b; margin-bottom: 0.25rem;">CTR:</div><div style="font-weight: 700; color: #1e293b;">${(() => {
+                        const clicks = Number(page.clicks || 0);
+                        const imps = Number(page.impressions || 0);
+                        if (imps > 0) return ((clicks / imps) * 100).toFixed(1) + '%';
+                        const raw = Number(page.ctr || 0);
+                        const ratio = raw > 1 ? raw / 100 : raw; // handle legacy percent values
+                        return ((ratio || 0) * 100).toFixed(1) + '%';
+                      })()}</div></div>
                       <div><div style="color: #64748b; margin-bottom: 0.25rem;">Impr:</div><div style="font-weight: 700; color: #1e293b;">${(page.impressions || 0).toLocaleString()}</div></div>
                       <div><div style="color: #64748b; margin-bottom: 0.25rem;">Upside:</div><div style="font-weight: 700; color: #1e293b;">${potentialClicks28d.toLocaleString()}</div></div>
                       <div><div style="color: #64748b; margin-bottom: 0.25rem;">Impact:</div><div style="font-weight: 700; color: #1e293b;">${Math.round(impactScore)}</div></div>
@@ -30405,7 +30412,14 @@ Final Score: ${score}/100`;
                 <td style="padding: 0.75rem;"><span class="badge badge-priority-${priorityLevel.toLowerCase()}" style="display: inline-block; padding: 0.35rem 0.75rem; border-radius: 6px; background: ${priorityBg}; color: ${priorityColor}; border: 1.5px solid ${priorityBorder}; font-weight: 700; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">${priorityLevel}</span></td>
                 <td style="padding: 0.75rem;">${impactLevel}</td>
                 <td style="padding: 0.75rem;">${difficultyLevel}</td>
-                <td style="padding: 0.75rem; text-align: right;">${isAuthorityAction ? '—' : `${((p.ctr || 0) * 100).toFixed(1)}%`}</td>
+                <td style="padding: 0.75rem; text-align: right;">${isAuthorityAction ? '—' : (() => {
+                  const clicks = Number(p.clicks || 0);
+                  const imps = Number(p.impressions || 0);
+                  if (imps > 0) return `${((clicks / imps) * 100).toFixed(1)}%`;
+                  const raw = Number(p.ctr || 0);
+                  const ratio = raw > 1 ? raw / 100 : raw;
+                  return `${((ratio || 0) * 100).toFixed(1)}%`;
+                })()}</td>
                 <td style="padding: 0.75rem; text-align: right;">${isAuthorityAction ? '—' : `${(p.impressions || 0).toLocaleString()}`}</td>
                 <td style="padding: 0.75rem; text-align: right;">${isAuthorityAction ? '—' : (p.avgPosition ? p.avgPosition.toFixed(1) : "—")}</td>
                 <td style="padding: 0.75rem;">${action}</td>
@@ -31042,96 +31056,75 @@ Final Score: ${score}/100`;
           datePoints[datePoints.length - 1] = endDate.toISOString().split('T')[0];
         }
         
-        // Create a map of date -> timeseries data for quick lookup
-        const timeseriesMap = new Map();
-        if (timeseries.length > 0) {
-          for (const ts of timeseries) {
-            if (ts.date) {
-              timeseriesMap.set(ts.date, ts);
-            }
+        // Build rolling 28-day site totals from daily GSC timeseries.
+        // This avoids mixing 28d metrics (moneySegmentMetrics) with 1-day metrics (gsc_timeseries).
+        const tsSorted = (Array.isArray(timeseries) ? timeseries : [])
+          .filter(ts => ts && ts.date)
+          .slice()
+          .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+
+        const rolling28d = (endDateStr) => {
+          if (!endDateStr || tsSorted.length === 0) return { clicks: 0, impressions: 0, days: 0 };
+          const end = new Date(endDateStr + 'T00:00:00');
+          if (Number.isNaN(end.getTime())) return { clicks: 0, impressions: 0, days: 0 };
+          const start = new Date(end);
+          start.setDate(start.getDate() - 27);
+          const startStr = start.toISOString().split('T')[0];
+          let clicks = 0;
+          let impressions = 0;
+          let days = 0;
+          for (const ts of tsSorted) {
+            const d = String(ts.date);
+            if (d < startStr) continue;
+            if (d > endDateStr) break;
+            clicks += Number(ts.clicks || 0);
+            impressions += Number(ts.impressions || 0);
+            days += 1;
           }
-        }
-        
-        // Calculate money page proportions from latest audit's metrics
-        // Find the latest audit that has both moneySegmentMetrics and corresponding timeseries data
-        let moneyClicksProportion = 0;
-        let moneyImpressionsProportion = 0;
-        let segmentProportions = {
+          return { clicks, impressions, days };
+        };
+
+        const clamp01 = (x) => Math.max(0, Math.min(1, x));
+
+        // Use latest money segment metrics as the source of money-page totals (28d window).
+        const refMoneyMetrics =
+          latestMoneySegmentMetrics ||
+          (history.slice().reverse().find(r => r && r.moneySegmentMetrics)?.moneySegmentMetrics) ||
+          null;
+
+        const refAllMoney = refMoneyMetrics?.allMoney || null;
+        const siteRollAtEnd = rolling28d(endDate.toISOString().split('T')[0]);
+
+        const moneyClicksShare =
+          refAllMoney && siteRollAtEnd.clicks > 0 ? clamp01(Number(refAllMoney.clicks || 0) / siteRollAtEnd.clicks) : 0;
+        const moneyImpressionsShare =
+          refAllMoney && siteRollAtEnd.impressions > 0 ? clamp01(Number(refAllMoney.impressions || 0) / siteRollAtEnd.impressions) : 0;
+
+        const segmentProportions = {
           landingPages: { clicks: 0, impressions: 0 },
           eventPages: { clicks: 0, impressions: 0 },
           productPages: { clicks: 0, impressions: 0 }
         };
-        
-        // Find latest audit with valid metrics
-        let referenceAudit = null;
-        let referenceTs = null;
-        
-        // Try to find an audit with both metrics and timeseries data
-        for (let i = history.length - 1; i >= 0; i--) {
-          const audit = history[i];
-          const auditDate = audit.date || audit.audit_date || audit.auditDate;
-          if (!auditDate) continue;
-          
-          const metrics = audit.moneySegmentMetrics;
-          if (metrics && metrics.allMoney && metrics.allMoney.clicks > 0 && metrics.allMoney.impressions > 0) {
-            // Check if we have timeseries data for this date
-            const ts = timeseriesMap.get(auditDate);
-            if (ts && ts.clicks > 0 && ts.impressions > 0) {
-              referenceAudit = audit;
-              referenceTs = ts;
-              break;
-            }
+
+        if (refMoneyMetrics && refAllMoney) {
+          const allClicks = Number(refAllMoney.clicks || 0);
+          const allImps = Number(refAllMoney.impressions || 0);
+          if (allClicks > 0) {
+            segmentProportions.landingPages.clicks = Number(refMoneyMetrics.landingPages?.clicks || 0) / allClicks;
+            segmentProportions.eventPages.clicks = Number(refMoneyMetrics.eventPages?.clicks || 0) / allClicks;
+            segmentProportions.productPages.clicks = Number(refMoneyMetrics.productPages?.clicks || 0) / allClicks;
+          }
+          if (allImps > 0) {
+            segmentProportions.landingPages.impressions = Number(refMoneyMetrics.landingPages?.impressions || 0) / allImps;
+            segmentProportions.eventPages.impressions = Number(refMoneyMetrics.eventPages?.impressions || 0) / allImps;
+            segmentProportions.productPages.impressions = Number(refMoneyMetrics.productPages?.impressions || 0) / allImps;
           }
         }
-        
-        // If no exact match, try to find closest timeseries date to latest audit
-        if (!referenceAudit && history.length > 0 && latestMoneySegmentMetrics && latestMoneySegmentMetrics.allMoney) {
-          const latestAuditDate = history[history.length - 1].date || history[history.length - 1].audit_date;
-          if (latestAuditDate) {
-            // Find closest timeseries date (before or on audit date)
-            const auditDateObj = new Date(latestAuditDate + 'T00:00:00');
-            let closestTs = null;
-            let closestDate = null;
-            
-            for (const [tsDate, tsData] of timeseriesMap.entries()) {
-              const tsDateObj = new Date(tsDate + 'T00:00:00');
-              if (tsDateObj <= auditDateObj && tsData.clicks > 0 && tsData.impressions > 0) {
-                if (!closestDate || tsDateObj > new Date(closestDate + 'T00:00:00')) {
-                  closestDate = tsDate;
-                  closestTs = tsData;
-                }
-              }
-            }
-            
-            if (closestTs && latestMoneySegmentMetrics.allMoney.clicks > 0 && latestMoneySegmentMetrics.allMoney.impressions > 0) {
-              referenceAudit = { moneySegmentMetrics: latestMoneySegmentMetrics };
-              referenceTs = closestTs;
-            }
-          }
-        }
-        
-        // Calculate proportions from reference audit
-        if (referenceAudit && referenceTs && referenceAudit.moneySegmentMetrics) {
-          const allMoney = referenceAudit.moneySegmentMetrics.allMoney;
-          if (allMoney && allMoney.clicks > 0 && allMoney.impressions > 0 && referenceTs.clicks > 0 && referenceTs.impressions > 0) {
-            moneyClicksProportion = allMoney.clicks / referenceTs.clicks;
-            moneyImpressionsProportion = allMoney.impressions / referenceTs.impressions;
-            
-            debugLog(`[KPI Tracker] Calculated proportions: clicks=${(moneyClicksProportion * 100).toFixed(1)}%, impressions=${(moneyImpressionsProportion * 100).toFixed(1)}%`, 'info');
-            
-            // Calculate segment proportions
-            if (allMoney.clicks > 0) {
-              segmentProportions.landingPages.clicks = (referenceAudit.moneySegmentMetrics.landingPages?.clicks || 0) / allMoney.clicks;
-              segmentProportions.eventPages.clicks = (referenceAudit.moneySegmentMetrics.eventPages?.clicks || 0) / allMoney.clicks;
-              segmentProportions.productPages.clicks = (referenceAudit.moneySegmentMetrics.productPages?.clicks || 0) / allMoney.clicks;
-            }
-            if (allMoney.impressions > 0) {
-              segmentProportions.landingPages.impressions = (referenceAudit.moneySegmentMetrics.landingPages?.impressions || 0) / allMoney.impressions;
-              segmentProportions.eventPages.impressions = (referenceAudit.moneySegmentMetrics.eventPages?.impressions || 0) / allMoney.impressions;
-              segmentProportions.productPages.impressions = (referenceAudit.moneySegmentMetrics.productPages?.impressions || 0) / allMoney.impressions;
-            }
-          }
-        }
+
+        debugLog(
+          `[KPI Tracker] Rolling-28d shares: clicksShare=${(moneyClicksShare * 100).toFixed(2)}%, imprShare=${(moneyImpressionsShare * 100).toFixed(2)}% (siteRollAtEnd clicks=${siteRollAtEnd.clicks}, imps=${siteRollAtEnd.impressions})`,
+          'info'
+        );
         
         // Create labels using same format as Performance Trends charts (e.g., "17 Nov", "15 Dec")
         const labels = datePoints.map(dateStr => {
@@ -31146,93 +31139,53 @@ Final Score: ${score}/100`;
           productPages: []
         };
         
-        // Debug: Log what we have
-        debugLog(`[KPI Tracker] Building history: timeseries.length=${timeseries.length}, timeseriesMap.size=${timeseriesMap.size}, moneyClicksProportion=${moneyClicksProportion}, moneyImpressionsProportion=${moneyImpressionsProportion}`, 'info');
-        
-        // Process each of the 8 weekly date points - calculate from actual GSC timeseries data
-        // Only proceed if we have valid proportions (calculated from real audit data)
-        if (timeseries.length === 0 || (moneyClicksProportion === 0 && moneyImpressionsProportion === 0)) {
-          debugLog(`[KPI Tracker] Cannot calculate: timeseries=${timeseries.length}, moneyClicksProportion=${moneyClicksProportion}, moneyImpressionsProportion=${moneyImpressionsProportion}`, 'warn');
-          debugLog(`[KPI Tracker] referenceAudit=${!!referenceAudit}, referenceTs=${!!referenceTs}, latestMoneySegmentMetrics=${!!latestMoneySegmentMetrics}`, 'warn');
-          if (referenceAudit && referenceAudit.moneySegmentMetrics) {
-            debugLog(`[KPI Tracker] referenceAudit.moneySegmentMetrics.allMoney: clicks=${referenceAudit.moneySegmentMetrics.allMoney?.clicks}, impressions=${referenceAudit.moneySegmentMetrics.allMoney?.impressions}`, 'warn');
-          }
-          if (referenceTs) {
-            debugLog(`[KPI Tracker] referenceTs: clicks=${referenceTs.clicks}, impressions=${referenceTs.impressions}`, 'warn');
-          }
-          // Return empty data structure - don't fake it
-          for (const datePoint of datePoints) {
-            for (const key of Object.keys(segments)) {
-              segments[key].push(null);
-            }
+        const refAvgPos = typeof refAllMoney?.avgPosition === 'number' ? refAllMoney.avgPosition : null;
+        const refBehaviour = typeof refAllMoney?.behaviourScore === 'number'
+          ? refAllMoney.behaviourScore
+          : (typeof window.moneyPagesMetrics?.behaviour?.score === 'number' ? window.moneyPagesMetrics.behaviour.score : null);
+
+        if (tsSorted.length === 0 || (!moneyClicksShare && !moneyImpressionsShare)) {
+          debugLog(`[KPI Tracker] Cannot calculate rolling series: tsSorted=${tsSorted.length}, clicksShare=${moneyClicksShare}, imprShare=${moneyImpressionsShare}`, 'warn');
+          for (const _ of datePoints) {
+            for (const key of Object.keys(segments)) segments[key].push(null);
           }
         } else {
-          // Process each of the 8 weekly date points - calculate from actual GSC timeseries data
           for (const datePoint of datePoints) {
-            // Find closest timeseries date (might not be exact match)
-            let ts = timeseriesMap.get(datePoint);
-            if (!ts) {
-              // Find closest timeseries date before or on this date
-              const datePointDate = new Date(datePoint + 'T00:00:00');
-              let closestTs = null;
-              let closestDate = null;
-              
-              for (const [tsDate, tsData] of timeseriesMap.entries()) {
-                const tsDateObj = new Date(tsDate + 'T00:00:00');
-                if (tsDateObj <= datePointDate && (!closestDate || tsDateObj > new Date(closestDate + 'T00:00:00'))) {
-                  closestDate = tsDate;
-                  closestTs = tsData;
-                }
-              }
-              
-              if (closestTs) {
-                ts = closestTs;
-              }
+            const siteRoll = rolling28d(datePoint);
+            // If we don't have a full 28 days ending at this date, show nulls (matches UI expectation).
+            if (siteRoll.days < 28) {
+              for (const key of Object.keys(segments)) segments[key].push(null);
+              continue;
             }
-            
-            for (const key of Object.keys(segments)) {
-              let v = null;
-              
-              if (ts && ts.clicks > 0 && ts.impressions > 0 && moneyClicksProportion > 0 && moneyImpressionsProportion > 0) {
-                // Calculate metrics from actual GSC timeseries data using proportions
-                if (key === 'allMoney') {
-                  const moneyClicks = Math.round(ts.clicks * moneyClicksProportion);
-                  const moneyImpressions = Math.round(ts.impressions * moneyImpressionsProportion);
-                  
-                  if (metricKey === 'clicks') {
-                    v = moneyClicks;
-                  } else if (metricKey === 'impressions') {
-                    v = moneyImpressions;
-                  } else if (metricKey === 'ctr') {
-                    v = moneyImpressions > 0 ? (moneyClicks / moneyImpressions) * 100 : 0;
-                  } else if (metricKey === 'avgPosition') {
-                    // Use reference audit's avgPosition (position doesn't change much day-to-day)
-                    v = referenceAudit?.moneySegmentMetrics?.allMoney?.avgPosition || null;
-                  } else if (metricKey === 'behaviourScore') {
-                    v = referenceAudit?.moneySegmentMetrics?.allMoney?.behaviourScore || null;
-                  }
-                } else {
-                  // Calculate segment metrics
-                  const segmentClicks = Math.round(ts.clicks * moneyClicksProportion * segmentProportions[key].clicks);
-                  const segmentImpressions = Math.round(ts.impressions * moneyImpressionsProportion * segmentProportions[key].impressions);
-                  
-                  if (metricKey === 'clicks') {
-                    v = segmentClicks;
-                  } else if (metricKey === 'impressions') {
-                    v = segmentImpressions;
-                  } else if (metricKey === 'ctr') {
-                    v = segmentImpressions > 0 ? (segmentClicks / segmentImpressions) * 100 : 0;
-                  } else if (metricKey === 'avgPosition') {
-                    v = referenceAudit?.moneySegmentMetrics?.[key]?.avgPosition || null;
-                  } else if (metricKey === 'behaviourScore') {
-                    v = referenceAudit?.moneySegmentMetrics?.[key]?.behaviourScore || null;
-                  }
-                }
-              } else if (ts && metricKey === 'avgPosition') {
-                // For position, use reference audit's value (position is relatively stable)
-                v = referenceAudit?.moneySegmentMetrics?.[key]?.avgPosition || null;
+
+            const moneyClicks = Math.round(siteRoll.clicks * moneyClicksShare);
+            const moneyImpressions = Math.round(siteRoll.impressions * moneyImpressionsShare);
+
+            const segmentTotals = {
+              allMoney: { clicks: moneyClicks, impressions: moneyImpressions },
+              landingPages: {
+                clicks: Math.round(moneyClicks * (segmentProportions.landingPages.clicks || 0)),
+                impressions: Math.round(moneyImpressions * (segmentProportions.landingPages.impressions || 0))
+              },
+              eventPages: {
+                clicks: Math.round(moneyClicks * (segmentProportions.eventPages.clicks || 0)),
+                impressions: Math.round(moneyImpressions * (segmentProportions.eventPages.impressions || 0))
+              },
+              productPages: {
+                clicks: Math.round(moneyClicks * (segmentProportions.productPages.clicks || 0)),
+                impressions: Math.round(moneyImpressions * (segmentProportions.productPages.impressions || 0))
               }
-              
+            };
+
+            for (const key of Object.keys(segments)) {
+              const cls = segmentTotals[key]?.clicks ?? null;
+              const imps = segmentTotals[key]?.impressions ?? null;
+              let v = null;
+              if (metricKey === 'clicks') v = cls;
+              else if (metricKey === 'impressions') v = imps;
+              else if (metricKey === 'ctr') v = imps > 0 ? (cls / imps) * 100 : 0;
+              else if (metricKey === 'avgPosition') v = refAvgPos;
+              else if (metricKey === 'behaviourScore') v = refBehaviour;
               segments[key].push(v);
             }
           }
@@ -31954,57 +31907,84 @@ Final Score: ${score}/100`;
           return;
         }
 
-        // IMPORTANT: Align Performance Trends with KPI Tracker by deriving money-page clicks/impressions from
-        // actual GSC timeseries + the latest money-page proportion. Historical `moneySegmentMetrics` can be
-        // inconsistent (e.g. definition changes), causing artificial spikes.
+        // IMPORTANT: Money Pages Trend charts are "last 28 days (rolling)" metrics.
+        // We have daily site totals in `gsc_timeseries`, so compute rolling-28d site totals and apply
+        // the current money-page share to avoid discontinuities from older audits that used different
+        // segmentation/aggregation logic.
         if (Array.isArray(timeseries) && timeseries.length > 0) {
           try {
-            const latestMoney =
-              window.moneySegmentMetrics?.allMoney ||
-              // fallback: use latest audit record that has moneySegmentMetrics
-              (history.slice().reverse().find(r => r && r.moneySegmentMetrics && r.moneySegmentMetrics.allMoney)?.moneySegmentMetrics?.allMoney) ||
-              null;
+            const tsSorted = timeseries
+              .filter(ts => ts && ts.date)
+              .slice()
+              .sort((a, b) => String(a.date).localeCompare(String(b.date)));
 
-            const refTs = timeseries.slice().reverse().find(ts => ts && ts.date && ts.clicks > 0 && ts.impressions > 0) || null;
-            const clicksProp = latestMoney && refTs ? (Number(latestMoney.clicks || 0) / Number(refTs.clicks || 1)) : 0;
-            const imprProp = latestMoney && refTs ? (Number(latestMoney.impressions || 0) / Number(refTs.impressions || 1)) : 0;
+            const clamp01 = (x) => Math.max(0, Math.min(1, x));
 
-            if (refTs && (clicksProp > 0 || imprProp > 0)) {
-              const behaviourScore =
-                (typeof latestMoney?.behaviourScore === 'number' ? latestMoney.behaviourScore : null) ??
-                (typeof window.moneyPagesMetrics?.behaviour?.score === 'number' ? window.moneyPagesMetrics.behaviour.score : null);
+            const rolling28d = (endDateStr) => {
+              const end = new Date(endDateStr + 'T00:00:00');
+              if (Number.isNaN(end.getTime())) return { clicks: 0, impressions: 0, days: 0 };
+              const start = new Date(end);
+              start.setDate(start.getDate() - 27);
+              const startStr = start.toISOString().split('T')[0];
+              let clicks = 0;
+              let impressions = 0;
+              let days = 0;
+              for (const ts of tsSorted) {
+                const d = String(ts.date);
+                if (d < startStr) continue;
+                if (d > endDateStr) break;
+                clicks += Number(ts.clicks || 0);
+                impressions += Number(ts.impressions || 0);
+                days += 1;
+              }
+              return { clicks, impressions, days };
+            };
 
-              const derivedHistory = timeseries
-                .filter(ts => ts && ts.date)
-                .map(ts => {
-                  const siteClicks = Number(ts.clicks || 0);
-                  const siteImpr = Number(ts.impressions || 0);
-                  const moneyClicks = Math.round(siteClicks * clicksProp);
-                  const moneyImpr = Math.round(siteImpr * imprProp);
-                  const ctr = moneyImpr > 0 ? (moneyClicks / moneyImpr) : 0;
-                  return {
-                    date: ts.date,
-                    isPartial: false,
-                    moneyPagesBehaviourScore: behaviourScore,
-                    moneySegmentMetrics: {
-                      allMoney: {
-                        clicks: moneyClicks,
-                        impressions: moneyImpr,
-                        ctr,
-                        avgPosition: (typeof latestMoney?.avgPosition === 'number' ? latestMoney.avgPosition : null),
-                        behaviourScore
-                      }
-                    }
-                  };
-                });
+            const endDateStr = tsSorted[tsSorted.length - 1].date;
+            const siteRollAtEnd = rolling28d(endDateStr);
 
-              history = derivedHistory;
-              debugLog(`✓ Money Pages trend chart: using derived history from GSC timeseries (${derivedHistory.length} pts, ref=${refTs.date}, clicksProp=${(clicksProp * 100).toFixed(1)}%, imprProp=${(imprProp * 100).toFixed(1)}%)`, 'success');
-            } else {
-              debugLog('⚠ Money Pages trend chart: could not derive proportions from timeseries; falling back to historical moneySegmentMetrics', 'warn');
-            }
+            const overview = window.moneyPagesMetrics?.overview || null;
+            const moneyClicks28d = Number(overview?.moneyClicks ?? 0);
+            const moneyImpressions28d = Number(overview?.moneyImpressions ?? 0);
+
+            const clicksShare = siteRollAtEnd.clicks > 0 ? clamp01(moneyClicks28d / siteRollAtEnd.clicks) : 0;
+            const imprShare = siteRollAtEnd.impressions > 0 ? clamp01(moneyImpressions28d / siteRollAtEnd.impressions) : 0;
+
+            const behaviourScore = typeof window.moneyPagesMetrics?.behaviour?.score === 'number'
+              ? window.moneyPagesMetrics.behaviour.score
+              : null;
+
+            const derivedHistory = tsSorted.map(ts => {
+              const roll = rolling28d(ts.date);
+              if (roll.days < 28) {
+                return { date: ts.date, isPartial: false, moneySegmentMetrics: { allMoney: { clicks: null, impressions: null, ctr: null, avgPosition: null, behaviourScore } } };
+              }
+              const clicks = Math.round(roll.clicks * clicksShare);
+              const imps = Math.round(roll.impressions * imprShare);
+              const ctr = imps > 0 ? (clicks / imps) : 0;
+              return {
+                date: ts.date,
+                isPartial: false,
+                moneyPagesBehaviourScore: behaviourScore,
+                moneySegmentMetrics: {
+                  allMoney: {
+                    clicks,
+                    impressions: imps,
+                    ctr,
+                    avgPosition: (typeof overview?.moneyAvgPosition === 'number' ? overview.moneyAvgPosition : null),
+                    behaviourScore
+                  }
+                }
+              };
+            });
+
+            history = derivedHistory;
+            debugLog(
+              `✓ Money Pages trend chart: using rolling-28d derived history (${derivedHistory.length} pts, clicksShare=${(clicksShare * 100).toFixed(2)}%, imprShare=${(imprShare * 100).toFixed(2)}%)`,
+              'success'
+            );
           } catch (e) {
-            debugLog(`⚠ Money Pages trend chart: timeseries derivation failed (${e.message}), falling back to historical history`, 'warn');
+            debugLog(`⚠ Money Pages trend chart: rolling derivation failed (${e.message}), falling back to historical history`, 'warn');
           }
         }
         
