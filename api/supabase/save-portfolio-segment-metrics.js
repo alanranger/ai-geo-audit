@@ -106,8 +106,9 @@ export default async function handler(req, res) {
       
       const rawClicks = parseFloat(row.clicks_28d || 0);
       const rawImpressions = parseFloat(row.impressions_28d || 0);
-      const scaledClicks = rawClicks * scaleClicks;
-      const scaledImpressions = rawImpressions * scaleImpressions;
+      const shouldScale = scope === 'all_pages' && row.segment !== 'site';
+      const scaledClicks = shouldScale ? (rawClicks * scaleClicks) : rawClicks;
+      const scaledImpressions = shouldScale ? (rawImpressions * scaleImpressions) : rawImpressions;
       const scaledCtr = scaledImpressions > 0 ? (scaledClicks / scaledImpressions) : 0;
 
       return {

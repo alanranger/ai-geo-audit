@@ -100,6 +100,9 @@ export default async function handler(req, res) {
       // Calibrate to GSC overview/date totals using cached gsc_timeseries (matches GSC headline totals).
       let scaleClicks = 1;
       let scaleImpressions = 1;
+      let overviewClicks = null;
+      let overviewImpr = null;
+      let overviewPos = null;
       try {
         const { data: tsRows, error: tsErr } = await supabase
           .from('gsc_timeseries')
@@ -111,8 +114,21 @@ export default async function handler(req, res) {
         if (tsErr) {
           console.warn(`[Backfill] gsc_timeseries query error for ${currentRunId} (skipping calibration):`, tsErr.message);
         } else if (tsRows && tsRows.length > 0) {
-          const overviewClicks = tsRows.reduce((s, r) => s + (parseFloat(r.clicks) || 0), 0);
-          const overviewImpr = tsRows.reduce((s, r) => s + (parseFloat(r.impressions) || 0), 0);
+          overviewClicks = tsRows.reduce((s, r) => s + (parseFloat(r.clicks) || 0), 0);
+          overviewImpr = tsRows.reduce((s, r) => s + (parseFloat(r.impressions) || 0), 0);
+          // Approximate period-average position: weight daily position by daily impressions (best available for overview).
+          // NOTE: gsc_timeseries stores daily position; not perfect, but consistent with the overview/time-series basis.
+          let posWeight = 0;
+          let posImpr = 0;
+          tsRows.forEach(r => {
+            const impr = parseFloat(r.impressions) || 0;
+            const pos = parseFloat(r.position);
+            if (impr > 0 && !isNaN(pos) && isFinite(pos) && pos > 0) {
+              posWeight += pos * impr;
+              posImpr += impr;
+            }
+          });
+          overviewPos = posImpr > 0 ? (posWeight / posImpr) : null;
           const rawClicksAll = pages.reduce((s, p) => s + (parseFloat(p.clicks_28d) || 0), 0);
           const rawImprAll = pages.reduce((s, p) => s + (parseFloat(p.impressions_28d) || 0), 0);
           if (overviewClicks > 0 && rawClicksAll > 0) scaleClicks = overviewClicks / rawClicksAll;
@@ -226,7 +242,7 @@ export default async function handler(req, res) {
 
       const buildRowsForScope = (segmentPages, scopeName, applyCalibration) => {
         const segmentRows = [];
-        ['money', 'landing', 'event', 'product', 'all_tracked'].forEach(segment => {
+        ['site', 'money', 'landing', 'event', 'product', 'all_tracked'].forEach(segment => {
           const segmentPageList = segmentPages[segment];
           if (segmentPageList.length === 0) {
             segmentRows.push({
@@ -241,6 +257,24 @@ export default async function handler(req, res) {
               impressions_28d: 0,
               ctr_28d: 0,
               position_28d: null
+            });
+            return;
+          }
+
+          // Entire site (all_pages) should reflect the overview totals (gsc_timeseries).
+          if (segment === 'site' && scopeName === 'all_pages' && overviewClicks !== null && overviewImpr !== null) {
+            segmentRows.push({
+              run_id: currentRunId,
+              site_url: siteUrl,
+              segment,
+              scope: scopeName,
+              date_start: dateStart,
+              date_end: dateEnd,
+              pages_count: segmentPageList.length,
+              clicks_28d: overviewClicks,
+              impressions_28d: overviewImpr,
+              ctr_28d: overviewImpr > 0 ? (overviewClicks / overviewImpr) : 0,
+              position_28d: overviewPos
             });
             return;
           }
@@ -279,6 +313,12 @@ export default async function handler(req, res) {
         });
         return segmentRows;
       };
+
+      // Ensure we have a "site" segment:
+      // - all_pages.site represents the whole property (overview totals)
+      // - active_cycles_only.site is equivalent to active_cycles_only.all_tracked (tracked subset)
+      segmentPagesAll.site = pages;
+      segmentPagesActive.site = segmentPagesActive.all_tracked;
 
       // Aggregate per scope
       const segmentRows = [

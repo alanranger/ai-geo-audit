@@ -3454,7 +3454,9 @@
           <div class="portfolio-chart-section" style="margin-bottom: 3rem;">
             <div class="card" style="padding: 1.5rem;">
               <h2 style="margin-top: 0; margin-bottom: 1rem;" title="Median Delta Over Time: Shows the change (delta) in selected KPI between consecutive time periods. Each point shows how much the metric changed compared to the previous period.">Median Delta Over Time</h2>
-              <p style="color: #666; margin-bottom: 1.5rem;" title="Shows the change (delta) in selected KPI over time. Each data point represents the difference between consecutive time periods (weekly or monthly). Positive values (above zero) indicate improvement, negative values indicate decline.">Portfolio movement over time using rolling 28d snapshots</p>
+              <p style="color: #666; margin-bottom: 1.5rem;" title="Shows the change (delta) in selected KPI over time using rolling 28d snapshots. Segment meanings: Entire site = all pages on the property (unfiltered). Money Pages = Landing + Event + Product combined. All tracked = only URLs that currently have an active optimisation task (planned/in_progress/monitoring). Scope meanings: All = all pages in the selected segment. Active cycles only = only URLs currently being optimised (active tasks).">
+                Portfolio movement over time using rolling 28d snapshots. <strong>Tip:</strong> “All tracked” = only actively tracked URLs, not the whole site.
+              </p>
               
               <!-- Controls -->
               <div class="portfolio-controls" style="display: flex; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; align-items: center;">
@@ -3470,8 +3472,9 @@
                   </select>
                 </div>
                 <div>
-                  <label for="portfolio-segment-select" style="display: block; margin-bottom: 0.25rem; font-weight: 600;" title="Page segment: Filter metrics by page type">Segment:</label>
+                  <label for="portfolio-segment-select" style="display: block; margin-bottom: 0.25rem; font-weight: 600;" title="Segment: Choose which set of pages to measure. Entire site = all pages. Money Pages = Landing+Event+Product. All tracked = only URLs with active optimisation tasks.">Segment:</label>
                   <select id="portfolio-segment-select" style="padding: 0.5rem; min-width: 150px;">
+                    <option value="site" title="Entire site: all pages on the property (unfiltered)">Entire site</option>
                     <option value="all_tracked" title="All pages that have active optimisation tasks tracking them">All tracked</option>
                     <option value="money" title="All commercial pages: landing pages, event pages, and product pages combined">Money Pages</option>
                     <option value="landing" title="Landing pages: general commercial landing pages (not events or products)">Landing</option>
@@ -3480,7 +3483,7 @@
                   </select>
                 </div>
                 <div>
-                  <label for="portfolio-scope-toggle" style="display: block; margin-bottom: 0.25rem; font-weight: 600;" title="Data scope: Filter by optimisation task status">Scope:</label>
+                  <label for="portfolio-scope-toggle" style="display: block; margin-bottom: 0.25rem; font-weight: 600;" title="Scope: All = all pages in the selected segment. Active cycles only = only URLs with active optimisation tasks (planned/in_progress/monitoring).">Scope:</label>
                   <select id="portfolio-scope-toggle" style="padding: 0.5rem; min-width: 150px;">
                     <option value="active_only" title="Only include pages with active optimisation task cycles (excludes completed, cancelled, or deleted tasks)">Active cycles only</option>
                     <option value="all" title="Include all pages in the segment, regardless of optimisation task status">All</option>
@@ -3506,7 +3509,7 @@
           <div class="portfolio-table-section">
             <div class="card" style="padding: 1.5rem;">
               <h2 style="margin-top: 0; margin-bottom: 1rem;" title="Monthly KPI Tracker: View actual metric values (not deltas) for each segment across the last 12 months">Monthly KPI Tracker</h2>
-              <p style="color: #666; margin-bottom: 1.5rem;" title="Shows the actual KPI value (not delta) for each segment across the last 12 months. Each cell shows the last snapshot from that month. The Trend column shows month-over-month change.">Executive summary by segment over time (rolling 12 months)</p>
+              <p style="color: #666; margin-bottom: 1.5rem;" title="Shows the actual KPI value (not delta) for each segment across the last 12 months. Segment meanings: Entire site = all pages (unfiltered). Money Pages = Landing + Event + Product. All tracked = only URLs with active optimisation tasks. Scope meanings: All = all pages. Active cycles only = tracked subset.">Executive summary by segment over time (rolling 12 months)</p>
               
               <!-- KPI Selector for Table -->
               <div style="margin-bottom: 1.5rem;">
@@ -15478,7 +15481,8 @@
       
       // Map scope dropdown values to DB scope values.
       // IMPORTANT: "All" = all pages (unfiltered), stored as scope=all_pages.
-      const mappedScope = scope === 'active_only' ? 'active_cycles_only' : 'all_pages';
+      // Entire site should always represent the full unfiltered dataset.
+      const mappedScope = segment === 'site' ? 'all_pages' : (scope === 'active_only' ? 'active_cycles_only' : 'all_pages');
 
       try {
         const propertyUrl = (window.getPropertyUrl ? window.getPropertyUrl() : '') || localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
@@ -15835,8 +15839,9 @@
 
     async function renderPortfolioTable() {
       const kpi = document.getElementById('portfolio-table-kpi-select')?.value || 'ctr_28d';
-      const segments = ['money', 'landing', 'event', 'product', 'all_tracked'];
+      const segments = ['site', 'money', 'landing', 'event', 'product', 'all_tracked'];
       const segmentLabels = {
+        'site': 'Entire site',
         'money': 'Money Pages',
         'landing': 'Landing',
         'event': 'Event',
@@ -15887,7 +15892,8 @@
             to: toDate.toISOString(),
             order: 'desc' // Latest first
           });
-          if (mappedScope) params.set('scope', mappedScope);
+          // Entire site is always unfiltered (all_pages)
+          params.set('scope', segment === 'site' ? 'all_pages' : mappedScope);
           const response = await fetch(apiUrl(`/api/supabase/get-portfolio-segment-metrics?${params}`));
           
           if (response.ok) {
@@ -16723,7 +16729,19 @@
       };
 
       if (kpiSelect) kpiSelect.addEventListener('change', updateChart);
-      if (segmentSelect) segmentSelect.addEventListener('change', updateChart);
+      if (segmentSelect) {
+        segmentSelect.addEventListener('change', () => {
+          // Entire site always uses the full unfiltered dataset, so scope is not applicable.
+          if (scopeToggle) {
+            const isSite = segmentSelect.value === 'site';
+            scopeToggle.disabled = isSite;
+            if (isSite) {
+              scopeToggle.value = 'all';
+            }
+          }
+          updateChart();
+        });
+      }
       if (scopeToggle) scopeToggle.addEventListener('change', updateChart);
       if (timeGrain) timeGrain.addEventListener('change', updateChart);
       if (tableKpiSelect) {
