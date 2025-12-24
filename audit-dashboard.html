@@ -15958,6 +15958,7 @@
             segmentCell.style.paddingLeft = `${0.75 * 16 + segmentIndentPx[segment]}px`; // base 0.75rem + indent
             segmentCell.style.fontWeight = '500';
           }
+          segmentCell.style.cursor = 'pointer';
           // Add tooltip based on segment
           const segmentTooltips = {
             'site': 'Entire site: all pages on the property (unfiltered)',
@@ -15972,6 +15973,13 @@
             'all_tracked': 'All pages that have active optimisation tasks tracking them'
           };
           segmentCell.title = segmentTooltips[segment] || segment;
+          segmentCell.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (typeof openPortfolioSegmentUrlsModal === 'function') {
+              openPortfolioSegmentUrlsModal(segment);
+            }
+          });
           row.appendChild(segmentCell);
 
           // Month values
@@ -39390,6 +39398,231 @@ Final Score: ${score}/100`;
           </div>
         `;
       }
+    }
+
+    // ======================
+    // Portfolio: Segment URLs modal (Segment pages + AI-cited pages)
+    // ======================
+    function ensurePortfolioSegmentUrlsModal() {
+      if (document.getElementById('portfolio-segment-urls-modal')) return;
+      const modalHtml = `
+        <div id="portfolio-segment-urls-modal" style="display:none; position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 99999;">
+          <div style="max-width: 980px; margin: 5vh auto; background: #0b1220; border: 1px solid rgba(148,163,184,0.35); border-radius: 10px; overflow: hidden;">
+            <div style="display:flex; align-items:center; justify-content:space-between; padding: 12px 14px; background: rgba(15,23,42,0.85); border-bottom: 1px solid rgba(148,163,184,0.25);">
+              <div>
+                <div id="portfolio-segment-urls-modal-title" style="font-weight: 700; color: #e2e8f0;">Segment URLs</div>
+                <div id="portfolio-segment-urls-modal-subtitle" style="font-size: 12px; color: #94a3b8; margin-top: 2px;">Latest snapshot</div>
+              </div>
+              <button id="portfolio-segment-urls-modal-close" type="button" style="background: transparent; color: #e2e8f0; border: 1px solid rgba(148,163,184,0.35); border-radius: 6px; padding: 6px 10px; cursor: pointer;">Close</button>
+            </div>
+
+            <div style="padding: 12px 14px; border-bottom: 1px solid rgba(148,163,184,0.25); display:flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+              <button type="button" class="portfolio-segment-tab-btn" data-tab="segment" style="padding: 6px 10px; border-radius: 6px; border: 1px solid rgba(148,163,184,0.35); background: #1f2a44; color: #e2e8f0; cursor: pointer;">Segment pages</button>
+              <button type="button" class="portfolio-segment-tab-btn" data-tab="cited" style="padding: 6px 10px; border-radius: 6px; border: 1px solid rgba(148,163,184,0.35); background: transparent; color: #e2e8f0; cursor: pointer;">AI-cited pages</button>
+              <div style="margin-left:auto; display:flex; gap: 8px; align-items:center;">
+                <button type="button" id="portfolio-segment-urls-copy" style="padding: 6px 10px; border-radius: 6px; border: 1px solid rgba(148,163,184,0.35); background: transparent; color: #e2e8f0; cursor: pointer;">Copy list</button>
+              </div>
+            </div>
+
+            <div id="portfolio-segment-urls-modal-body" style="padding: 12px 14px; max-height: 70vh; overflow: auto;">
+              <div id="portfolio-segment-urls-modal-status" style="color:#94a3b8; font-size: 13px;">Loading…</div>
+              <div id="portfolio-segment-urls-modal-content" style="margin-top: 10px;"></div>
+            </div>
+          </div>
+        </div>
+      `;
+      document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+      const modal = document.getElementById('portfolio-segment-urls-modal');
+      const closeBtn = document.getElementById('portfolio-segment-urls-modal-close');
+      if (closeBtn && modal) closeBtn.addEventListener('click', () => { modal.style.display = 'none'; });
+      if (modal) {
+        modal.addEventListener('click', (e) => {
+          if (e.target === modal) modal.style.display = 'none';
+        });
+      }
+
+      const tabBtns = Array.from(document.querySelectorAll('#portfolio-segment-urls-modal .portfolio-segment-tab-btn'));
+      tabBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+          tabBtns.forEach(b => {
+            const active = b === btn;
+            b.style.background = active ? '#1f2a44' : 'transparent';
+          });
+          modal.dataset.activeTab = btn.dataset.tab;
+          // Re-render from cached content
+          if (typeof window.__renderPortfolioSegmentUrlsModalFromCache === 'function') {
+            window.__renderPortfolioSegmentUrlsModalFromCache();
+          }
+        });
+      });
+
+      const copyBtn = document.getElementById('portfolio-segment-urls-copy');
+      if (copyBtn) {
+        copyBtn.addEventListener('click', async () => {
+          const txt = modal?.dataset?.copyText || '';
+          if (!txt) return;
+          try {
+            await navigator.clipboard.writeText(txt);
+            copyBtn.textContent = 'Copied';
+            setTimeout(() => { copyBtn.textContent = 'Copy list'; }, 900);
+          } catch {
+            // ignore
+          }
+        });
+      }
+    }
+
+    function getPortfolioSegmentLabel(seg) {
+      const labels = {
+        site: 'Entire site',
+        money: 'Money Pages',
+        money_tracked: 'Money Pages (tracked)',
+        landing: 'Landing',
+        event: 'Event',
+        product: 'Product',
+        academy: 'Academy',
+        blog: 'Blog Pages',
+        other: 'Other (non-money)',
+        all_tracked: 'All tracked'
+      };
+      return labels[seg] || seg;
+    }
+
+    function inferPortfolioSegmentForPageUrl(pageUrl) {
+      if (!pageUrl) return null;
+      const u = String(pageUrl).toLowerCase();
+      if (u.includes('/free-online-photography-course')) return 'academy';
+      if (u.includes('/blog-on-photography/')) return 'blog';
+      if (typeof window.classifyMoneyPage === 'function') {
+        const mc = window.classifyMoneyPage(pageUrl);
+        if (mc && mc.isMoney && mc.segmentType) return mc.segmentType; // landing|event|product
+      }
+      return 'other';
+    }
+
+    async function openPortfolioSegmentUrlsModal(segmentKey) {
+      ensurePortfolioSegmentUrlsModal();
+      const modal = document.getElementById('portfolio-segment-urls-modal');
+      if (!modal) return;
+      modal.style.display = 'block';
+      if (!modal.dataset.activeTab) modal.dataset.activeTab = 'segment';
+
+      const titleEl = document.getElementById('portfolio-segment-urls-modal-title');
+      const subtitleEl = document.getElementById('portfolio-segment-urls-modal-subtitle');
+      const statusEl = document.getElementById('portfolio-segment-urls-modal-status');
+      const contentEl = document.getElementById('portfolio-segment-urls-modal-content');
+      if (titleEl) titleEl.textContent = `${getPortfolioSegmentLabel(segmentKey)} — URLs`;
+      if (subtitleEl) subtitleEl.textContent = 'Loading latest snapshot…';
+      if (statusEl) statusEl.textContent = 'Loading…';
+      if (contentEl) contentEl.innerHTML = '';
+
+      const propertyUrl = (window.getPropertyUrl ? window.getPropertyUrl() : '') || localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+      if (!propertyUrl) {
+        if (statusEl) statusEl.textContent = 'No property URL found.';
+        return;
+      }
+
+      // Fetch latest page snapshot from Supabase (server decides latest date range).
+      const pagesResp = await fetch(apiUrl(`/api/supabase/get-gsc-page-metrics?siteUrl=${encodeURIComponent(propertyUrl)}`));
+      if (!pagesResp.ok) {
+        if (statusEl) statusEl.textContent = `Failed to load pages: ${pagesResp.status}`;
+        return;
+      }
+      const pagesJson = await pagesResp.json();
+      const pages = Array.isArray(pagesJson.pages) ? pagesJson.pages : [];
+      const snapshotStart = pages[0]?.date_start ? String(pages[0].date_start).slice(0, 10) : null;
+      const snapshotEnd = pages[0]?.date_end ? String(pages[0].date_end).slice(0, 10) : null;
+
+      // Latest AI audit date (from keyword_rankings), via portfolio AI backfill endpoint logic is heavier; do a small API-less heuristic:
+      // We rely on Ranking & AI audits being saved with auditDate=YYYY-MM-DD, and use today in UI.
+      // Fallback: use today.
+      const aiAuditDate = new Date().toISOString().slice(0, 10);
+
+      modal.__cache = {
+        segmentKey,
+        snapshotStart,
+        snapshotEnd,
+        pages,
+        aiAuditDate,
+        citedUrls: null
+      };
+
+      if (subtitleEl) {
+        subtitleEl.textContent = snapshotStart && snapshotEnd
+          ? `Latest 28d snapshot: ${snapshotStart} → ${snapshotEnd}`
+          : 'Latest 28d snapshot';
+      }
+
+      // Load cited urls lazily when needed
+      window.__renderPortfolioSegmentUrlsModalFromCache = async () => {
+        const cache = modal.__cache || {};
+        const activeTab = modal.dataset.activeTab || 'segment';
+        if (statusEl) statusEl.textContent = '';
+        if (contentEl) contentEl.innerHTML = '';
+
+        const renderList = (items, metaText) => {
+          const list = Array.isArray(items) ? items : [];
+          modal.dataset.copyText = list.join('\n');
+          const meta = `<div style="color:#94a3b8; font-size: 12px; margin-bottom: 8px;">${metaText}</div>`;
+          const rows = list.slice(0, 500).map(u => `<div style="padding: 6px 0; border-bottom: 1px solid rgba(148,163,184,0.15);"><a href="${u}" target="_blank" style="color:#93c5fd; text-decoration:none;">${u}</a></div>`).join('');
+          const more = list.length > 500 ? `<div style="color:#94a3b8; margin-top: 8px;">Showing first 500 of ${list.length}. Use “Copy list” for full.</div>` : '';
+          if (contentEl) contentEl.innerHTML = `${meta}${rows}${more}`;
+        };
+
+        if (activeTab === 'segment') {
+          const seg = cache.segmentKey;
+          const filtered = cache.pages
+            .filter(p => inferPortfolioSegmentForPageUrl(p.page_url) === seg || (seg === 'money' && ['landing','event','product'].includes(inferPortfolioSegmentForPageUrl(p.page_url))))
+            .sort((a, b) => (parseFloat(b.impressions_28d) || 0) - (parseFloat(a.impressions_28d) || 0))
+            .map(p => String(p.page_url));
+          const label = getPortfolioSegmentLabel(seg);
+          renderList(filtered, `${label}: ${filtered.length.toLocaleString()} pages in latest snapshot (sorted by impressions).`);
+          return;
+        }
+
+        // cited tab
+        if (!cache.citedUrls) {
+          if (statusEl) statusEl.textContent = 'Loading AI cited URLs…';
+          // Pull latest keyword_rankings from Supabase via existing data loader in localStorage if available
+          let rows = [];
+          try {
+            const local = localStorage.getItem('rankingAiData');
+            const parsed = local ? JSON.parse(local) : null;
+            rows = Array.isArray(parsed?.combinedRows) ? parsed.combinedRows : [];
+          } catch {}
+
+          // If no localStorage, we can’t easily query keyword_rankings without an API endpoint; show a hint.
+          if (!rows || rows.length === 0) {
+            cache.citedUrls = [];
+            if (statusEl) statusEl.textContent = 'No Ranking & AI data found in this browser. Run a Ranking & AI check, then re-open this modal.';
+          } else {
+            const urls = [];
+            rows.forEach(r => {
+              const cited = r.ai_alan_citations || r.aiAlanCitations || [];
+              if (Array.isArray(cited)) {
+                cited.forEach(v => {
+                  const u = typeof v === 'string' ? v : (v && typeof v === 'object' ? v.url : null);
+                  if (u) urls.push(String(u));
+                });
+              }
+            });
+            cache.citedUrls = urls;
+          }
+        }
+
+        const seg = cache.segmentKey;
+        const citedFiltered = (cache.citedUrls || [])
+          .filter(u => {
+            const s = inferPortfolioSegmentForPageUrl(u);
+            if (seg === 'money') return ['landing','event','product'].includes(s);
+            return s === seg;
+          });
+        const label = getPortfolioSegmentLabel(seg);
+        renderList(citedFiltered, `${label}: ${citedFiltered.length.toLocaleString()} AI-cited URL items (from latest Ranking & AI data in this browser).`);
+      };
+
+      await window.__renderPortfolioSegmentUrlsModalFromCache();
     }
 
     // ======================
