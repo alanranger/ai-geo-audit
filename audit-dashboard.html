@@ -7719,32 +7719,18 @@
 
       // CTR: return as percentage points
       if (kpi === 'ctr_28d') {
-        // TEMP: Log raw values to debug scaling issue
-        console.log("[computeDeltaForKPI] CTR baselineValue:", baselineValue, "latestValue:", latestValue);
-        
-        // Normalize: CTR should be stored as ratio (0-1), but check if it's in percentage format (0-100)
-        // If value > 1, assume it's already in percentage format and convert to ratio
+        // Normalize: CTR should be stored as ratio (0-1), but legacy values can be stored as percent (0-100).
         let baselineRatio = baselineValue;
         let latestRatio = latestValue;
         if (Math.abs(baselineValue) > 1) {
-          console.warn("[computeDeltaForKPI] CTR baselineValue appears to be in percentage format, converting:", baselineValue, "->", baselineValue / 100);
           baselineRatio = baselineValue / 100;
         }
         if (Math.abs(latestValue) > 1) {
-          console.warn("[computeDeltaForKPI] CTR latestValue appears to be in percentage format, converting:", latestValue, "->", latestValue / 100);
           latestRatio = latestValue / 100;
         }
         
-        console.log("[computeDeltaForKPI] CTR normalized ratios - baseline:", baselineRatio, "latest:", latestRatio);
         const rawDelta = latestRatio - baselineRatio;
-        console.log("[computeDeltaForKPI] CTR raw delta (ratio):", rawDelta);
         const deltaPp = rawDelta * 100; // Convert ratio delta to percentage points
-        console.log("[computeDeltaForKPI] CTR delta in pp (FINAL):", deltaPp);
-        
-        // Sanity check: CTR deltas should typically be small (a few percentage points)
-        if (Math.abs(deltaPp) > 20) {
-          console.error("[computeDeltaForKPI] CTR delta seems too large:", deltaPp, "pp. Check if values are in correct format.");
-        }
         
         return deltaPp;
       }
@@ -7846,21 +7832,6 @@
             // DEBUG: Log classification for all tasks with objectives
             if (typeof debugLog === 'function' && task.objectiveKpiKey) {
               debugLog(`[Traffic Lights] ${metricKey}: baselineValue=${baselineValue}, latestValue=${latestValue}, classification=${classification || 'null'}, taskObjectiveMetricKey=${taskObjectiveMetricKey}`, 'info');
-            }
-
-            // Extra precision debug for the Coventry task (helps confirm whether "4.7k" hides a real delta)
-            if (typeof debugLog === 'function' && metricKey === 'ctr_28d') {
-              const tu = String(task.target_url || '');
-              if (tu.includes('photography-courses-coventry')) {
-                const bImpr = getMetricValue(baselineLatest.baseline, 'impressions_28d');
-                const lImpr = getMetricValue(baselineLatest.latest, 'impressions_28d');
-                const bClk = getMetricValue(baselineLatest.baseline, 'clicks_28d');
-                const lClk = getMetricValue(baselineLatest.latest, 'clicks_28d');
-                debugLog(
-                  `[Traffic Lights][Coventry] raw ctr baseline=${baselineValue} latest=${latestValue} | impr baseline=${bImpr} latest=${lImpr} | clicks baseline=${bClk} latest=${lClk} | classification=${classification}`,
-                  'info'
-                );
-              }
             }
 
             if (classification) {
@@ -26553,6 +26524,14 @@ Final Score: ${score}/100`;
                 aVal = (a.ctr || 0) * 100;
                 bVal = (b.ctr || 0) * 100;
                 break;
+              case 'type': {
+                const order = { PRODUCT: 0, EVENT: 1, LANDING: 2 };
+                const aType = String(a.subSegment || a.segmentType || '').toUpperCase();
+                const bType = String(b.subSegment || b.segmentType || '').toUpperCase();
+                aVal = order[aType] ?? 99;
+                bVal = order[bType] ?? 99;
+                break;
+              }
               case 'impressions':
                 aVal = a.impressions || 0;
                 bVal = b.impressions || 0;
@@ -26561,6 +26540,15 @@ Final Score: ${score}/100`;
                 aVal = a.clicks || 0;
                 bVal = b.clicks || 0;
                 break;
+              case 'clickPotential': {
+                const aImpr = Number(a.impressions || 0) || 0;
+                const bImpr = Number(b.impressions || 0) || 0;
+                const aClk = Number(a.clicks || 0) || 0;
+                const bClk = Number(b.clicks || 0) || 0;
+                aVal = Math.max(0, (aImpr * 0.025) - aClk);
+                bVal = Math.max(0, (bImpr * 0.025) - bClk);
+                break;
+              }
               case 'position':
                 aVal = a.avgPosition || 99;
                 bVal = b.avgPosition || 99;
@@ -26596,18 +26584,20 @@ Final Score: ${score}/100`;
         const dateRange = parseInt(localStorage.getItem('gsc_date_range') || '30', 10);
         const dateRangeText = dateRange === 30 ? '30 days' : dateRange === 60 ? '60 days' : dateRange === 90 ? '90 days' : dateRange === 120 ? '120 days' : dateRange === 180 ? '180 days' : dateRange === 365 ? '365 days' : dateRange === 540 ? '540 days' : `${dateRange} days`;
         
-        // Get current filter values (stored globally)
-        const currentCategoryFilter = window.moneyPagesCategoryFilter || 'ALL';
-        const currentSubSegmentFilter = window.moneyPagesSubSegmentFilter || 'ALL';
-        const currentMinImpressions = window.moneyPagesMinImpressions || 0;
+        // Get current filter values (stored globally) - normalize for robustness
+        const currentCategoryFilter = String(window.moneyPagesCategoryFilter || 'ALL').toUpperCase();
+        const currentSubSegmentFilter = String(window.moneyPagesSubSegmentFilter || 'ALL').toUpperCase();
+        const currentMinImpressions = Number(window.moneyPagesMinImpressions || 0) || 0;
         
         // Get zero impressions filter (default to true - include zero impressions)
         const includeZero = window.moneyPagesIncludeZero !== false;
         
         // Apply filters before sorting/pagination
         let filteredRows = sortedRows.filter(row => {
-          const matchCat = currentCategoryFilter === 'ALL' || row.category === currentCategoryFilter;
-          const matchSubSeg = currentSubSegmentFilter === 'ALL' || row.subSegment === currentSubSegmentFilter;
+          const rowCat = String(row.category || '').toUpperCase();
+          const rowSub = String(row.subSegment || row.segmentType || '').toUpperCase();
+          const matchCat = currentCategoryFilter === 'ALL' || rowCat === currentCategoryFilter;
+          const matchSubSeg = currentSubSegmentFilter === 'ALL' || rowSub === currentSubSegmentFilter;
           const matchImp = (row.impressions || 0) >= currentMinImpressions;
           const matchZero = includeZero || (row.impressions || 0) > 0; // Include zero impressions if checkbox is checked
           return matchCat && matchSubSeg && matchImp && matchZero;
@@ -26670,7 +26660,10 @@ Final Score: ${score}/100`;
               <thead>
                 <tr style="background: linear-gradient(135deg, #f8f9fa 0%, #f1f5f9 100%); border-bottom: 2px solid #e2e8f0;">
                   <th style="text-align: left; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; width: 40px;">#</th>
-                  <th style="text-align: left; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; width: 500px; min-width: 500px;">URL / Title / Meta</th>
+                  <th style="text-align: left; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; width: 460px; min-width: 460px;">URL / Title / Meta</th>
+                  <th id="money-sort-type" style="text-align: left; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; transition: background 0.2s; white-space: nowrap; width: 110px; min-width: 110px;" onmouseover="this.style.background='#e2e8f0';" onmouseout="this.style.background='transparent';" title="Page type (money sub-segment). Click to sort.">
+                    Page type${getSortIcon('type')}
+                  </th>
                   <th id="money-sort-clicks" style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; transition: background 0.2s; white-space: nowrap;" onmouseover="this.style.background='#e2e8f0';" onmouseout="this.style.background='transparent';" title="Click to sort by Clicks">
                     Clicks${getSortIcon('clicks')}
                   </th>
@@ -26679,6 +26672,9 @@ Final Score: ${score}/100`;
                   </th>
                   <th id="money-sort-ctr" style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; transition: background 0.2s; white-space: nowrap;" onmouseover="this.style.background='#e2e8f0';" onmouseout="this.style.background='transparent';" title="Click to sort by CTR">
                     CTR${getSortIcon('ctr')}
+                  </th>
+                  <th id="money-sort-clickPotential" style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; transition: background 0.2s; white-space: nowrap;" onmouseover="this.style.background='#e2e8f0';" onmouseout="this.style.background='transparent';" title="Click potential = expected additional clicks in this period if CTR hit 2.5%: max(0, impressions × 0.025 − clicks). Click to sort.">
+                    Click potential${getSortIcon('clickPotential')}
                   </th>
                   <th id="money-sort-position" style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; transition: background 0.2s; line-height: 1.2;" onmouseover="this.style.background='#e2e8f0';" onmouseout="this.style.background='transparent';" title="Click to sort by Avg Position">
                     <div>Avg</div><div>Position</div>${getSortIcon('position')}
@@ -26763,16 +26759,33 @@ Final Score: ${score}/100`;
           tableHtml += `
             <tr style="border-bottom: 1px solid #f1f5f9; background: ${rowBg}; transition: background 0.2s;" onmouseover="this.style.background='#f8f9fa';" onmouseout="this.style.background='${rowBg}';">
               <td style="padding: 0.75rem; color: #0f172a; font-weight: 600; vertical-align: top; width: 40px;">${filteredStartIdx + idx + 1}</td>
-              <td style="padding: 0.75rem; vertical-align: top; width: 500px; min-width: 500px;">
+              <td style="padding: 0.75rem; vertical-align: top; width: 460px; min-width: 460px;">
                 <a href="${row.url}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: none; font-weight: 500; border-bottom: 1px solid transparent; transition: all 0.2s;" onmouseover="this.style.color='#1d4ed8'; this.style.borderBottomColor='#1d4ed8';" onmouseout="this.style.color='#2563eb'; this.style.borderBottomColor='transparent';" title="Open ${row.url} in new tab">
                   <div style="font-size: 0.85rem; color: #64748b; margin-bottom: 0.25rem; word-break: break-all;">${row.url}</div>
                 </a>
                 ${pageTitle ? `<div style="font-weight: 600; color: #1e293b; font-size: 0.9rem; margin-top: 0.5rem; margin-bottom: 0.25rem; white-space: nowrap;">${pageTitle}</div>` : ''}
                 ${metaDescription ? `<div style="font-size: 0.8rem; color: #64748b; line-height: 1.4; margin-top: ${pageTitle ? '0.25rem' : '0.5rem'}; word-wrap: break-word;">${metaDescription}</div>` : '<div style="font-size: 0.8rem; color: #94a3b8; font-style: italic; margin-top: 0.5rem;">No meta description available</div>'}
               </td>
+              <td style="padding: 0.75rem; vertical-align: top; white-space: nowrap;">
+                ${(() => {
+                  const sub = String(row.subSegment || row.segmentType || '').toLowerCase();
+                  const label = sub === 'product' ? 'product' : sub === 'event' ? 'event' : sub === 'landing' ? 'landing' : (sub || '—');
+                  const bg = label === 'landing' ? '#dbeafe' : label === 'event' ? '#fee2e2' : label === 'product' ? '#dcfce7' : '#e5e7eb';
+                  const color = label === 'landing' ? '#1d4ed8' : label === 'event' ? '#991b1b' : label === 'product' ? '#166534' : '#374151';
+                  return `<span style="display:inline-block; padding: 0.2rem 0.5rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; background:${bg}; color:${color}; border: 1px solid rgba(0,0,0,0.06); text-transform: lowercase;">${label}</span>`;
+                })()}
+              </td>
               <td style="padding: 0.75rem; text-align: right; color: #0f172a; font-weight: 500; vertical-align: top; white-space: nowrap;">${(row.clicks || 0).toLocaleString()}</td>
               <td style="padding: 0.75rem; text-align: right; color: #0f172a; font-weight: 500; vertical-align: top; white-space: nowrap;">${(row.impressions || 0).toLocaleString()}</td>
               <td style="padding: 0.75rem; text-align: right; color: ${ctrColor}; font-weight: 600; vertical-align: top; white-space: nowrap;">${ctrPct.toFixed(1)}%</td>
+              <td style="padding: 0.75rem; text-align: right; color: #0f172a; font-weight: 600; vertical-align: top; white-space: nowrap;" title="Click potential to hit 2.5% CTR in this period: max(0, impressions × 0.025 − clicks)">
+                ${(() => {
+                  const impr = Number(row.impressions || 0) || 0;
+                  const clk = Number(row.clicks || 0) || 0;
+                  const potential = Math.max(0, Math.round((impr * 0.025) - clk));
+                  return potential.toLocaleString('en-GB');
+                })()}
+              </td>
               <td style="padding: 0.75rem; text-align: right; color: ${posColor}; font-weight: 600; vertical-align: top; white-space: nowrap;">${row.avgPosition ? row.avgPosition.toFixed(1) : '—'}</td>
               <td style="padding: 0.75rem; text-align: center; vertical-align: top;">
                 ${(() => {
@@ -27092,81 +27105,7 @@ Final Score: ${score}/100`;
       }
       
       // Get filtered money pages metrics based on current filter state
-      function getFilteredMoneyPagesMetrics(moneyPagesMetrics) {
-        if (!moneyPagesMetrics || !moneyPagesMetrics.rows) {
-          return null;
-        }
-        
-        // Get current filter state from global variables
-        const subSegmentFilter = window.moneyPagesSubSegmentFilter || 'ALL';
-        
-        // Filter rows by sub-segment
-        let filteredRows = moneyPagesMetrics.rows || [];
-        if (subSegmentFilter !== 'ALL') {
-          // Map filter values to segment types
-          const segmentMap = {
-            'PRODUCT': 'product',
-            'EVENT': 'event',
-            'LANDING': 'landing'
-          };
-          const targetSegment = segmentMap[subSegmentFilter];
-          if (targetSegment) {
-            filteredRows = filteredRows.filter(row => {
-              // Check subSegment field first, then fallback to segmentType
-              const rowSegment = row.subSegment || row.segmentType || 'all';
-              return rowSegment.toLowerCase() === targetSegment.toLowerCase();
-            });
-          }
-        }
-        
-        // Recalculate overview from filtered rows
-        const filteredClicks = filteredRows.reduce((sum, r) => sum + (r.clicks || 0), 0);
-        const filteredImpressions = filteredRows.reduce((sum, r) => sum + (r.impressions || 0), 0);
-        const filteredCtr = filteredImpressions > 0 ? filteredClicks / filteredImpressions : 0;
-        const filteredAvgPosition = filteredRows.length > 0
-          ? filteredRows.reduce((sum, r) => sum + (r.avgPosition || 0), 0) / filteredRows.length
-          : 0;
-        
-        // Recalculate summaryByCategory from filtered rows
-        const filteredSummaryByCategory = {
-          HIGH_OPPORTUNITY: { count: 0, impressions: 0, clicks: 0 },
-          VISIBILITY_FIX: { count: 0, impressions: 0, clicks: 0 },
-          MAINTAIN: { count: 0, impressions: 0, clicks: 0 }
-        };
-        
-        filteredRows.forEach(row => {
-          const category = row.category || 'MAINTAIN';
-          if (filteredSummaryByCategory[category]) {
-            filteredSummaryByCategory[category].count++;
-            filteredSummaryByCategory[category].impressions += (row.impressions || 0);
-            filteredSummaryByCategory[category].clicks += (row.clicks || 0);
-          }
-        });
-        
-        // Build filtered overview
-        const originalOverview = moneyPagesMetrics.overview || {};
-        const filteredOverview = {
-          ...originalOverview,
-          moneyClicks: filteredClicks,
-          moneyImpressions: filteredImpressions,
-          moneyCtr: filteredCtr,
-          moneyAvgPosition: filteredAvgPosition,
-          moneyCoverageCount: filteredRows.length,
-          siteTotalClicks: originalOverview.siteTotalClicks || 0,
-          siteTotalImpressions: originalOverview.siteTotalImpressions || 0,
-          siteCtr: originalOverview.siteCtr || 0,
-          siteAvgPosition: originalOverview.siteAvgPosition || 0
-        };
-        
-        return {
-          rows: filteredRows,
-          overview: filteredOverview,
-          summaryByCategory: filteredSummaryByCategory
-        };
-      }
-      
-      // Make function globally available
-      window.getFilteredMoneyPagesMetrics = getFilteredMoneyPagesMetrics;
+      // (canonical implementation lives later in the file; this old duplicate was removed)
       
       // Update summary metrics with sub-segment filtering
       function updateMoneyPagesSummaryMetrics(moneyPagesMetrics) {
@@ -27911,7 +27850,7 @@ Final Score: ${score}/100`;
           const th = e?.target?.closest ? e.target.closest('th[id^="money-sort-"]') : null;
           if (!th || !th.id) return;
           const col = String(th.id).replace('money-sort-', '');
-          if (!['clicks', 'impressions', 'ctr', 'position', 'opportunity'].includes(col)) return;
+          if (!['type', 'clicks', 'impressions', 'ctr', 'clickPotential', 'position', 'opportunity'].includes(col)) return;
           try {
             handleMoneyPagesSort(col);
           } catch (err) {
@@ -28851,18 +28790,18 @@ Final Score: ${score}/100`;
         if (!moneyPagesMetrics || !moneyPagesMetrics.rows) {
           return null;
         }
-        
-        const currentCategoryFilter = window.moneyPagesCategoryFilter || 'ALL';
-        const currentSubSegmentFilter = window.moneyPagesSubSegmentFilter || 'ALL';
-        const currentMinImpressions = window.moneyPagesMinImpressions || 0;
+
+        const currentCategoryFilter = String(window.moneyPagesCategoryFilter || 'ALL').toUpperCase();
+        const currentSubSegmentFilter = String(window.moneyPagesSubSegmentFilter || 'ALL').toUpperCase();
+        const currentMinImpressions = Number(window.moneyPagesMinImpressions || 0) || 0;
         const includeZero = window.moneyPagesIncludeZero !== false;
-        
-        debugLog(`🔍 getFilteredMoneyPagesMetrics: includeZero=${includeZero}, category=${currentCategoryFilter}, subSegment=${currentSubSegmentFilter}, minImp=${currentMinImpressions}, totalRows=${moneyPagesMetrics.rows.length}`, 'info');
-        
+
         // Apply all filters
         const filteredRows = moneyPagesMetrics.rows.filter(row => {
-          const matchCat = currentCategoryFilter === 'ALL' || row.category === currentCategoryFilter;
-          const matchSubSeg = currentSubSegmentFilter === 'ALL' || row.subSegment === currentSubSegmentFilter;
+          const rowCat = String(row.category || '').toUpperCase();
+          const rowSub = String(row.subSegment || row.segmentType || '').toUpperCase();
+          const matchCat = currentCategoryFilter === 'ALL' || rowCat === currentCategoryFilter;
+          const matchSubSeg = currentSubSegmentFilter === 'ALL' || rowSub === currentSubSegmentFilter;
           const matchImp = (row.impressions || 0) >= currentMinImpressions;
           const matchZero = includeZero || (row.impressions || 0) > 0;
           return matchCat && matchSubSeg && matchImp && matchZero;
@@ -28893,8 +28832,6 @@ Final Score: ${score}/100`;
         
         const filteredCtr = filteredImpressions > 0 ? filteredClicks / filteredImpressions : 0;
         const filteredAvgPosition = filteredImpressions > 0 ? filteredWeightedPosSum / filteredImpressions : null;
-        
-        debugLog(`🔍 getFilteredMoneyPagesMetrics: Filtered ${filteredRows.length} rows (from ${moneyPagesMetrics.rows.length}), impressions=${filteredImpressions}, clicks=${filteredClicks}`, 'info');
         
         return {
           ...moneyPagesMetrics,
