@@ -301,7 +301,6 @@ export default async function handler(req, res) {
 
         if (baselineEvent && baselineEvent.metrics) {
           baselineMeasurement = baselineEvent.metrics;
-          console.log(`[Dashboard] Using baseline for task ${task.id}:`, baselineEvent.is_baseline ? 'latest baseline marker' : 'first measurement fallback');
         }
         
         // Latest is always the most recent measurement
@@ -436,8 +435,10 @@ export default async function handler(req, res) {
       const isTestTask = testTaskMap.get(task.id) || false;
       
       // Format measurements for client (convert events to measurement objects)
+      // IMPORTANT: include is_baseline so the frontend traffic lights can align with the drawer's baseline selection.
       const measurements = cycleEvents.map(e => ({
         captured_at: e.created_at,
+        is_baseline: e.is_baseline === true,
         ...e.metrics
       }));
 
