@@ -213,6 +213,7 @@ export default async function handler(req, res) {
       // For each keyword, distribute citations to segments based on cited URLs.
       keywords.forEach(k => {
         const hasOverview = k.has_ai_overview === true || k.ai_overview_present_any === true;
+        const citationCount = parseInt(k.ai_alan_citations_count, 10) || 0;
         const citedUrls = getCitedUrls(k);
 
         // Site overview count = keywords with overview present (regardless of citations)
@@ -220,6 +221,11 @@ export default async function handler(req, res) {
           countsAll.overviewKeywords.site += 1;
           countsTracked.overviewKeywords.site += 1;
         }
+        
+        // Site citation total should match Ranking & AI summary (uses ai_alan_citations_count).
+        // Note: ai_alan_citations array can sometimes be shorter than ai_alan_citations_count (e.g. dedup/truncation),
+        // so per-segment attribution uses the array, but site total uses the count field.
+        countsAll.citations.site += citationCount;
 
         // Track which segments were cited for this keyword (for overview keyword counts)
         const citedSegsAll = new Set();
@@ -236,9 +242,6 @@ export default async function handler(req, res) {
             citedSegsAll.add(seg);
           });
 
-          // Site total citations (one per cited URL)
-          countsAll.citations.site += 1;
-
           // Tracked subset: only count citations where the cited URL is a tracked task URL
           const citedNorm = normalizeUrl(citedUrl);
           const isTrackedUrl = trackedUrls.has(citedNorm);
@@ -248,6 +251,7 @@ export default async function handler(req, res) {
               countsTracked.citations[seg] += 1;
               citedSegsTracked.add(seg);
             });
+            // For tracked subset, we only have per-URL citation attribution available.
             countsTracked.citations.site += 1;
             countsTracked.citations.all_tracked += 1;
           }
