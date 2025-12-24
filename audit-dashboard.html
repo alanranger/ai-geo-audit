@@ -13622,6 +13622,47 @@
         return;
       }
 
+      // Nudge if Ranking & AI snapshot is stale (bulk update relies on it for keyword-based tasks)
+      const hasKeywordTasks = activeTasks.some(t => (t.keyword_text || t.keyword || '').trim().length > 0);
+      const getRankingAiSnapshotInfo = () => {
+        try {
+          const local = localStorage.getItem('rankingAiData');
+          if (!local) return { has: false, date: null, daysOld: null };
+          const parsed = JSON.parse(local);
+          const ts = parsed?.timestamp ? new Date(parsed.timestamp) : null;
+          if (!ts || isNaN(ts.getTime())) return { has: false, date: null, daysOld: null };
+          const now = new Date();
+          const daysOld = Math.floor((now.getTime() - ts.getTime()) / 86400000);
+          const date = ts.toISOString().split('T')[0];
+          return { has: true, date, daysOld };
+        } catch {
+          return { has: false, date: null, daysOld: null };
+        }
+      };
+
+      if (hasKeywordTasks) {
+        const info = getRankingAiSnapshotInfo();
+        // Thresholds: gentle warning at 3+ days; stronger warning at 7+ days.
+        const warnDays = 3;
+        const strongDays = 7;
+        if (!info.has) {
+          const ok = confirm(
+            'Ranking & AI data is missing in this browser.\n\n' +
+            'Bulk update uses Ranking & AI data for keyword-based tasks, so results may be stale or incomplete.\n\n' +
+            'Click Cancel to run "Run ranking & AI check" first, or OK to continue anyway.'
+          );
+          if (!ok) return;
+        } else if (info.daysOld != null && info.daysOld >= warnDays) {
+          const severity = info.daysOld >= strongDays ? 'WARNING' : 'Note';
+          const ok = confirm(
+            `${severity}: Ranking & AI data is ${info.daysOld} day(s) old (last: ${info.date}).\n\n` +
+            'Bulk update will use this snapshot for keyword-based tasks.\n\n' +
+            'Click Cancel to run "Run ranking & AI check" first, or OK to continue.'
+          );
+          if (!ok) return;
+        }
+      }
+
       const confirmMsg = `Update ${activeTasks.length} task(s) with latest ranking data? This will create a new measurement for each task.`;
       if (!confirm(confirmMsg)) {
         return;
