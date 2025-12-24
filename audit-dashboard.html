@@ -5991,29 +5991,74 @@
           
           // Check if this is a Money Pages task (page-level)
           if (source === 'money_pages' || !keyword) {
-            // Money Pages: use page-level metrics directly from row data
-            // Debug: Log row data to see what we're working with
-            console.log('[Money Pages] Building baseline metrics from row data:', {
-              clicks: rowData.clicks,
-              impressions: rowData.impressions,
-              ctr: rowData.ctr,
-              avgPosition: rowData.avgPosition,
-              position: rowData.position,
-              url: rowData.url
-            });
-            
-            baselineMetrics = {
-              gsc_clicks_28d: rowData.clicks != null ? rowData.clicks : (rowData.clicks_28d || 0),
-              gsc_impressions_28d: rowData.impressions != null ? rowData.impressions : (rowData.impressions_28d || 0),
-              // rowData.ctr is already a ratio (0-1) from pageTotalsByKey
-              gsc_ctr_28d: rowData.ctr != null ? rowData.ctr : (rowData.ctr_28d != null ? rowData.ctr_28d : 0),
-              gsc_position_28d: rowData.avgPosition != null ? rowData.avgPosition : (rowData.position != null ? rowData.position : (rowData.position_28d || null)),
-              classic_ranking_url: rowData.url || rowData.targetUrl || targetUrl || null,
-              segment: rowData.segment || 'money_pages',
-              captured_at: new Date().toISOString()
-            };
-            
-            console.log('[Money Pages] Built baseline metrics:', baselineMetrics);
+            // Money Pages: baseline must match the same "source of truth" used by measurements.
+            // Measurements pull from `window.moneyPagesMetrics.rows` (latest audit), so prefer that over
+            // any stale rowData captured when the modal was opened.
+            const taskUrl = rowData.url || rowData.targetUrl || targetUrl || '';
+            const norm = (u) => normalizeUrlForDedupe
+              ? normalizeUrlForDedupe(u)
+              : String(u || '').toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+            const normalizedTaskUrl = norm(taskUrl);
+
+            let row = null;
+            const rows = window.moneyPagesMetrics?.rows || [];
+            if (Array.isArray(rows) && rows.length > 0 && normalizedTaskUrl) {
+              row = rows.find(r => norm(r.url || r.page_url || '') === normalizedTaskUrl) || null;
+            }
+
+            // Fallback: if we still don't have a row, attempt a direct page totals fetch from GSC.
+            // This is slower, but avoids creating a "baseline" with missing/incorrect numbers.
+            if (!row && taskUrl) {
+              try {
+                const property = document.getElementById('propertyUrl')?.value ||
+                  localStorage.getItem('gsc_property_url') ||
+                  localStorage.getItem('last_property_url') || '';
+                if (property) {
+                  const totalsRes = await fetch(apiUrl(`/api/aigeo/gsc-page-totals?property=${encodeURIComponent(property)}&pageUrl=${encodeURIComponent(taskUrl)}`));
+                  const totalsJson = await totalsRes.json().catch(() => null);
+                  const totals = totalsRes.ok && totalsJson && totalsJson.status === 'ok' ? totalsJson.data : null;
+                  if (totals) {
+                    baselineMetrics = {
+                      gsc_clicks_28d: Number(totals.clicks || 0),
+                      gsc_impressions_28d: Number(totals.impressions || 0),
+                      // gsc-page-totals returns CTR as percentage (0-100) — convert to ratio for storage
+                      gsc_ctr_28d: Number(totals.ctr || 0) / 100,
+                      gsc_position_28d: totals.position != null ? Number(totals.position) : null,
+                      classic_ranking_url: taskUrl,
+                      segment: 'money_pages',
+                      captured_at: new Date().toISOString()
+                    };
+                  }
+                }
+              } catch (e) {
+                // ignore; will fall back to rowData below
+              }
+            }
+
+            // If we have a current moneyPagesMetrics row, use it (this matches measurement logic).
+            if (!baselineMetrics) {
+              const src = row || rowData;
+              baselineMetrics = {
+                gsc_clicks_28d: src.clicks != null ? src.clicks : (src.clicks_28d || 0),
+                gsc_impressions_28d: src.impressions != null ? src.impressions : (src.impressions_28d || 0),
+                // Money Pages CTR should be ratio (0-1); if stored as percent, normalize.
+                gsc_ctr_28d: (() => {
+                  const v = src.ctr != null ? src.ctr : (src.ctr_28d != null ? src.ctr_28d : 0);
+                  const n = Number(v || 0);
+                  if (n > 1 && n <= 100) return n / 100;
+                  return n;
+                })(),
+                gsc_position_28d: src.avgPosition != null ? src.avgPosition : (src.position != null ? src.position : (src.position_28d || null)),
+                classic_ranking_url: taskUrl || null,
+                segment: src.segment || 'money_pages',
+                captured_at: new Date().toISOString()
+              };
+            }
+
+            // If impressions are missing, don't create a baseline measurement (avoids "0/0/0%" baselines).
+            if (!baselineMetrics?.gsc_impressions_28d) {
+              baselineMetrics = null;
+            }
           } else {
             // Ranking & AI: use keyword-based metrics
           // Get queryTotal data for clicks, impressions, and CTR
