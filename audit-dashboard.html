@@ -30657,6 +30657,15 @@ Final Score: ${score}/100`;
         if (typeof renderMoneyPagesCategoryChart === 'function') {
           renderMoneyPagesCategoryChart(moneyPagesMetrics, 0);
         }
+
+        // Re-render Performance Trends to reflect the selected sub-segment (ALL/LANDING/EVENT/PRODUCT).
+        // Uses cached timeseries loaded by the KPI tracker.
+        if (typeof window.renderMoneyPagesTrendChart === 'function') {
+          const ts = window.__moneyPagesTimeseriesCache;
+          if (Array.isArray(ts) && ts.length > 0) {
+            window.renderMoneyPagesTrendChart([], ts);
+          }
+        }
       }
 
       // Wire up top-level filter (independent of table section)
@@ -31717,6 +31726,9 @@ Final Score: ${score}/100`;
           debugLog(`✓ Money Pages KPI Tracker: Using ${timeseries.length} timeseries data points from GSC`, 'info');
             debugLog(`✓ Timeseries date range: ${timeseries[0]?.date} to ${timeseries[timeseries.length - 1]?.date}`, 'info');
           }
+
+          // Cache for re-rendering charts on filter changes without re-fetching.
+          window.__moneyPagesTimeseriesCache = timeseries;
           
           // IMPORTANT: Do NOT use `filteredHistory` to pick the "latest audit" for money shares.
           // GSC data is typically 1–2 days behind, so filtering audits to <= lastGscTimeseriesDate can
@@ -31848,6 +31860,42 @@ Final Score: ${score}/100`;
           return;
         }
 
+        // Current top-level sub-segment filter (ALL/LANDING/EVENT/PRODUCT).
+        const subSegRaw =
+          (document.getElementById('money-top-level-filter-subsegment')?.value ||
+            window.moneyPagesSubSegmentFilter ||
+            'ALL');
+        const subSeg = String(subSegRaw).toUpperCase();
+        const segmentKey =
+          subSeg === 'PRODUCT' ? 'productPages' :
+          subSeg === 'EVENT' ? 'eventPages' :
+          subSeg === 'LANDING' ? 'landingPages' :
+          'allMoney';
+
+        // Behaviour score: recompute from the same derived CTR series (plus a segment-specific top10CTR anchor from page aggregates).
+        const aggFn = window.computeMoneyPagesBehaviourFromPageAggregates;
+        const rowsAll = (window.currentMoneyPagesMetrics || window.moneyPagesMetrics)?.rows || [];
+        const rowsForSubSeg = (seg) => {
+          if (!Array.isArray(rowsAll) || rowsAll.length === 0) return [];
+          if (seg === 'ALL') return rowsAll;
+          return rowsAll.filter(r => {
+            const s = (r?.subSegment || r?.segmentType || 'LANDING');
+            return String(s).toUpperCase() === seg;
+          });
+        };
+        const top10CtrByKey = {
+          allMoney: (typeof aggFn === 'function' ? aggFn(rowsForSubSeg('ALL'))?.top10Ctr : null),
+          landingPages: (typeof aggFn === 'function' ? aggFn(rowsForSubSeg('LANDING'))?.top10Ctr : null),
+          eventPages: (typeof aggFn === 'function' ? aggFn(rowsForSubSeg('EVENT'))?.top10Ctr : null),
+          productPages: (typeof aggFn === 'function' ? aggFn(rowsForSubSeg('PRODUCT'))?.top10Ctr : null)
+        };
+        const behaviourFromCtr = (ctrRatio, top10CtrRatio) => {
+          if (!ctrRatio || !top10CtrRatio) return null;
+          const scoreCtrAll = Math.min(ctrRatio / 0.05, 1) * 100;    // 0–5% => 0–100
+          const scoreCtrTop10 = Math.min(top10CtrRatio / 0.10, 1) * 100; // 0–10% => 0–100
+          return 0.5 * scoreCtrAll + 0.5 * scoreCtrTop10;
+        };
+
         // IMPORTANT: Money Pages Trend charts are "last 28 days (rolling)" metrics.
         // We have daily site totals in `gsc_timeseries`, so compute rolling-28d site totals and apply
         // the current money-page share to avoid discontinuities from older audits that used different
@@ -31895,25 +31943,83 @@ Final Score: ${score}/100`;
               ? window.moneyPagesMetrics.behaviour.score
               : null;
 
+            // Split money totals into sub-segments using latest money segment proportions if available.
+            const segSource = window.moneySegmentMetrics || null;
+            const segAll = segSource?.allMoney || null;
+            const allClicks = Number(segAll?.clicks || moneyClicks28d || 0);
+            const allImps = Number(segAll?.impressions || moneyImpressions28d || 0);
+            const segPropClicks = {
+              landingPages: allClicks > 0 ? Number(segSource?.landingPages?.clicks || 0) / allClicks : 0,
+              eventPages: allClicks > 0 ? Number(segSource?.eventPages?.clicks || 0) / allClicks : 0,
+              productPages: allClicks > 0 ? Number(segSource?.productPages?.clicks || 0) / allClicks : 0
+            };
+            const segPropImps = {
+              landingPages: allImps > 0 ? Number(segSource?.landingPages?.impressions || 0) / allImps : 0,
+              eventPages: allImps > 0 ? Number(segSource?.eventPages?.impressions || 0) / allImps : 0,
+              productPages: allImps > 0 ? Number(segSource?.productPages?.impressions || 0) / allImps : 0
+            };
+
             const derivedHistory = tsSorted.map(ts => {
               const roll = rolling28d(ts.date);
               if (roll.days < 28) {
-                return { date: ts.date, isPartial: false, moneySegmentMetrics: { allMoney: { clicks: null, impressions: null, ctr: null, avgPosition: null, behaviourScore } } };
+                return {
+                  date: ts.date,
+                  isPartial: false,
+                  moneySegmentMetrics: {
+                    allMoney: { clicks: null, impressions: null, ctr: null, avgPosition: null, behaviourScore: null },
+                    landingPages: { clicks: null, impressions: null, ctr: null, avgPosition: null, behaviourScore: null },
+                    eventPages: { clicks: null, impressions: null, ctr: null, avgPosition: null, behaviourScore: null },
+                    productPages: { clicks: null, impressions: null, ctr: null, avgPosition: null, behaviourScore: null }
+                  }
+                };
               }
               const clicks = Math.round(roll.clicks * clicksShare);
               const imps = Math.round(roll.impressions * imprShare);
               const ctr = imps > 0 ? (clicks / imps) : 0;
+
+              const landingClicks = Math.round(clicks * (segPropClicks.landingPages || 0));
+              const eventClicks = Math.round(clicks * (segPropClicks.eventPages || 0));
+              const productClicks = Math.round(clicks * (segPropClicks.productPages || 0));
+              const landingImps = Math.round(imps * (segPropImps.landingPages || 0));
+              const eventImps = Math.round(imps * (segPropImps.eventPages || 0));
+              const productImps = Math.round(imps * (segPropImps.productPages || 0));
+
+              const landingCtr = landingImps > 0 ? (landingClicks / landingImps) : 0;
+              const eventCtr = eventImps > 0 ? (eventClicks / eventImps) : 0;
+              const productCtr = productImps > 0 ? (productClicks / productImps) : 0;
+
+              const avgPos = (typeof overview?.moneyAvgPosition === 'number' ? overview.moneyAvgPosition : null);
               return {
                 date: ts.date,
                 isPartial: false,
-                moneyPagesBehaviourScore: behaviourScore,
                 moneySegmentMetrics: {
                   allMoney: {
                     clicks,
                     impressions: imps,
                     ctr,
-                    avgPosition: (typeof overview?.moneyAvgPosition === 'number' ? overview.moneyAvgPosition : null),
-                    behaviourScore
+                    avgPosition: avgPos,
+                    behaviourScore: null
+                  },
+                  landingPages: {
+                    clicks: landingClicks,
+                    impressions: landingImps,
+                    ctr: landingCtr,
+                    avgPosition: avgPos,
+                    behaviourScore: null
+                  },
+                  eventPages: {
+                    clicks: eventClicks,
+                    impressions: eventImps,
+                    ctr: eventCtr,
+                    avgPosition: avgPos,
+                    behaviourScore: null
+                  },
+                  productPages: {
+                    clicks: productClicks,
+                    impressions: productImps,
+                    ctr: productCtr,
+                    avgPosition: avgPos,
+                    behaviourScore: null
                   }
                 }
               };
@@ -32079,8 +32185,8 @@ Final Score: ${score}/100`;
         for (const [dateStr, record] of historyMap.entries()) {
           if (!record.isPartial) {
             const segmentMetrics = record.moneySegmentMetrics || {};
-            const allMoney = segmentMetrics.allMoney || {};
-            const hasZeroMetrics = (allMoney.clicks === 0 && allMoney.impressions === 0 && allMoney.ctr === 0);
+            const seg = segmentMetrics[segmentKey] || {};
+            const hasZeroMetrics = (seg.clicks === 0 && seg.impressions === 0 && (seg.ctr === 0 || seg.ctr == null));
             if (!hasZeroMetrics) {
               firstAvailableRecord = record;
               firstAvailableDateStr = dateStr;
@@ -32123,8 +32229,8 @@ Final Score: ${score}/100`;
             // Check if this is a partial audit or has invalid zero data
             const isPartial = record.isPartial === true;
             const segmentMetrics = record.moneySegmentMetrics || {};
-            const allMoney = segmentMetrics.allMoney || {};
-            const hasZeroMetrics = (allMoney.clicks === 0 && allMoney.impressions === 0 && allMoney.ctr === 0);
+            const seg = segmentMetrics[segmentKey] || {};
+            const hasZeroMetrics = (seg.clicks === 0 && seg.impressions === 0 && (seg.ctr === 0 || seg.ctr == null));
             
             // If partial audit or has all zeros, skip this record and forward-fill from last known value
             if (isPartial || hasZeroMetrics) {
@@ -32140,11 +32246,11 @@ Final Score: ${score}/100`;
             const summary = record.moneyPagesSummary || {};
             
             // Get behaviour score
-            const behaviourScore = record.moneyPagesBehaviourScore || null;
+            let behaviourScore = (typeof seg.behaviourScore === 'number' ? seg.behaviourScore : null);
             
             // For clicks and impressions, use moneySegmentMetrics if available
-            const clicks = allMoney.clicks || null;
-            const impressions = allMoney.impressions || null;
+            const clicks = (seg.clicks != null ? seg.clicks : null);
+            const impressions = (seg.impressions != null ? seg.impressions : null);
             // Calculate CTR directly from clicks/impressions for accuracy
             // If clicks and impressions are available, calculate CTR as percentage
             // Otherwise fall back to stored values (assuming they're in decimal format 0-1)
@@ -32155,10 +32261,18 @@ Final Score: ${score}/100`;
               // summary.ctr might be decimal (0.015) or percentage (1.5)
               // If > 1, assume it's already a percentage; otherwise multiply by 100
               ctr = summary.ctr > 1 ? summary.ctr : summary.ctr * 100;
-            } else if (allMoney.ctr != null) {
+            } else if ((segmentMetrics.allMoney || {}).ctr != null) {
               // allMoney.ctr might be decimal (0.015) or percentage (1.5)
               // If > 1, assume it's already a percentage; otherwise multiply by 100
-              ctr = allMoney.ctr > 1 ? allMoney.ctr : allMoney.ctr * 100;
+              const fallbackAll = segmentMetrics.allMoney || {};
+              ctr = fallbackAll.ctr > 1 ? fallbackAll.ctr : fallbackAll.ctr * 100;
+            }
+
+            if (behaviourScore == null && clicks != null && impressions != null && impressions > 0) {
+              const ctrRatio = clicks / impressions;
+              const top10Ctr = top10CtrByKey[segmentKey] ?? top10CtrByKey.allMoney;
+              const derived = behaviourFromCtr(ctrRatio, top10Ctr);
+              if (derived != null) behaviourScore = derived;
             }
             
             // Debug logging for Dec 14 specifically
