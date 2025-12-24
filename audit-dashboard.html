@@ -13668,8 +13668,8 @@
         return;
       }
 
-      // Ensure Ranking & AI data is loaded
-      if (typeof window.renderRankingAiTab === 'function') {
+      // Ensure Ranking & AI data is loaded (ONLY needed for keyword-based tasks)
+      if (hasKeywordTasks && typeof window.renderRankingAiTab === 'function') {
         try {
           await window.renderRankingAiTab();
           await new Promise(resolve => setTimeout(resolve, 1000)); // Give time for data to load
@@ -13687,8 +13687,23 @@
       if (combinedRows.length === 0 && typeof window.rankingAiData !== 'undefined' && Array.isArray(window.rankingAiData)) {
         combinedRows = window.rankingAiData;
       }
-
+      // Fallback: use localStorage snapshot if present (saved by Ranking & AI check)
       if (combinedRows.length === 0) {
+        try {
+          const local = localStorage.getItem('rankingAiData');
+          if (local) {
+            const parsed = JSON.parse(local);
+            if (parsed && Array.isArray(parsed.combinedRows)) {
+              combinedRows = parsed.combinedRows;
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      // Only block if we truly need ranking data (keyword-based tasks)
+      if (hasKeywordTasks && combinedRows.length === 0) {
         alert('No ranking data available. Please run a Ranking & AI check first.');
         return;
       }
