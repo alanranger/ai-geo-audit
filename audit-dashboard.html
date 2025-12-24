@@ -31764,6 +31764,24 @@ Final Score: ${score}/100`;
           }
           return;
         }
+
+        // IMPORTANT: Only render Money Pages Performance Trends from GSC daily timeseries.
+        // This prevents "stale then flip" on load caused by other parts of the dashboard calling
+        // `renderMoneyPagesTrendChart(history)` for unrelated charts (history-only), which would
+        // paint these canvases before the KPI loader provides the canonical timeseries.
+        if (!Array.isArray(timeseries) || timeseries.length === 0) {
+          // Clear canvases to avoid showing stale previous chart instances.
+          [volumeCanvas, rateCanvas].forEach(canvas => {
+            try {
+              const ctx = canvas.getContext('2d');
+              if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+            } catch (e) {
+              // ignore
+            }
+          });
+          window.moneyPagesChartsRendering = false;
+          return;
+        }
         
         // Destroy existing charts if they exist
         // Also check if charts are already being rendered to prevent loops
