@@ -178,13 +178,13 @@ export default async function handler(req, res) {
           return ['blog'];
         }
 
-        // Money pages (landing/event/product)
+        // Money pages (landing/event/product) vs everything else (Other)
         try {
           const main = classifySitePageSegment(url);
-          if (main !== PageSegment.MONEY) return [];
+          if (main !== PageSegment.MONEY) return ['other'];
         } catch {
-          // If classifier fails, be conservative and do not count it as money.
-          return [];
+          // If classifier fails, fall back to Other (non-money).
+          return ['other'];
         }
 
         // Use the same heuristics as the money pages segmenter
@@ -199,7 +199,7 @@ export default async function handler(req, res) {
       };
 
       // Aggregate AI metrics per segment
-      const segments = ['site', 'money', 'academy', 'landing', 'event', 'product', 'blog', 'all_tracked'];
+      const segments = ['site', 'money', 'academy', 'landing', 'event', 'product', 'blog', 'other', 'all_tracked'];
       const scopes = ['all_pages', 'active_cycles_only'];
 
       const initCounts = () => ({

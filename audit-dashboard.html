@@ -39280,6 +39280,8 @@ Final Score: ${score}/100`;
     function computeAiCitationsByCitedUrlSegment(rows) {
       const normalize = (u) => {
         if (!u) return '';
+        // Canonicalize to origin+path (strip query/hash/trailing slash) so text fragments and tracking params don't break classification.
+        if (typeof normalizeGscPageKey === 'function') return normalizeGscPageKey(u).toLowerCase();
         let s = String(u);
         s = s.split('?')[0];
         s = s.split('#')[0];
@@ -39304,7 +39306,7 @@ Final Score: ${score}/100`;
         if (u.includes('/free-online-photography-course')) return ['academy'];
         if (u.includes('/blog-on-photography/')) return ['blog'];
         if (typeof window.classifyMoneyPage === 'function') {
-          const mc = window.classifyMoneyPage(url);
+          const mc = window.classifyMoneyPage(u);
           if (mc && mc.isMoney && mc.segmentType) return [mc.segmentType, 'money'];
         }
         return ['other'];
@@ -39476,11 +39478,12 @@ Final Score: ${score}/100`;
 
     function inferPortfolioSegmentForPageUrl(pageUrl) {
       if (!pageUrl) return null;
-      const u = String(pageUrl).toLowerCase();
+      const canonical = (typeof normalizeGscPageKey === 'function') ? normalizeGscPageKey(pageUrl) : String(pageUrl);
+      const u = String(canonical).toLowerCase();
       if (u.includes('/free-online-photography-course')) return 'academy';
       if (u.includes('/blog-on-photography/')) return 'blog';
       if (typeof window.classifyMoneyPage === 'function') {
-        const mc = window.classifyMoneyPage(pageUrl);
+        const mc = window.classifyMoneyPage(canonical);
         if (mc && mc.isMoney && mc.segmentType) return mc.segmentType; // landing|event|product
       }
       return 'other';
@@ -39592,7 +39595,11 @@ Final Score: ${score}/100`;
                 });
               }
             });
-            cache.citedUrls = urls;
+            // Canonicalize + de-dupe so counts and classification are stable (strip #:~:text and tracking params).
+            const canonical = urls
+              .map(u => (typeof normalizeGscPageKey === 'function') ? normalizeGscPageKey(u) : u)
+              .filter(Boolean);
+            cache.citedUrls = Array.from(new Set(canonical));
           }
         }
 
