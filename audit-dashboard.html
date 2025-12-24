@@ -7551,11 +7551,15 @@
         if (isFinite(baselineRatio) && Math.abs(baselineRatio) > 1) baselineRatio = baselineRatio / 100;
         if (isFinite(latestRatio) && Math.abs(latestRatio) > 1) latestRatio = latestRatio / 100;
 
-        const deltaPp = (latestRatio - baselineRatio) * 100;
+        // Match what the UI shows: baseline/latest are displayed to 2dp (%) in the task table/drawer.
+        // If they render equal, classify as 'same' (avoid confusing "Better" due to tiny precision noise).
+        const baselinePct2 = Math.round((baselineRatio * 100) * 100) / 100;
+        const latestPct2 = Math.round((latestRatio * 100) * 100) / 100;
+        const deltaPp = latestPct2 - baselinePct2;
         if (Math.abs(deltaPp) < 0.10) {
           return 'same';
         }
-        return deltaPp >= 0.10 ? 'better' : 'worse';
+        return deltaPp > 0.10 ? 'better' : 'worse';
       }
 
       // Impressions (28d)
