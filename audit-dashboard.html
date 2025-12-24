@@ -14991,23 +14991,44 @@
         }, 200);
       } else if (panelId === 'money') {
         setTimeout(async () => {
-          const saved = loadAuditResultsSync();
-          
-          // Define renderMoneyPagesSuggestedTop10 at global scope early
+          // Always use async load to avoid stale/partial sync results.
+          const saved = await loadAuditResults();
+
+          // Ensure Money Pages section HTML exists BEFORE wiring KPI selector / Top10 / charts.
+          const moneyPagesMetrics =
+            window.moneyPagesMetrics ||
+            saved?.scores?.moneyPagesMetrics ||
+            saved?.moneyPagesMetrics ||
+            null;
+
+          if (typeof renderMoneyPagesSection === 'function') {
+            await renderMoneyPagesSection(moneyPagesMetrics);
+          }
+
+          // Define renderMoneyPagesSuggestedTop10 at global scope early (but make it self-heal if DOM isn't ready).
           if (!window.renderMoneyPagesSuggestedTop10) {
             window.renderMoneyPagesSuggestedTop10 = function(retryCount = 0) {
               const MAX_RETRIES = 10; // Stop after 10 retries (5 seconds)
               const container = document.getElementById('money-pages-suggested-top10-container');
               if (!container) {
+                // Attempt to create the Money Pages section, then retry.
                 if (retryCount < MAX_RETRIES) {
-                  debugLog(`⚠ money-pages-suggested-top10-container not found (retry ${retryCount + 1}/${MAX_RETRIES}) - section may not be rendered yet`, 'warn');
-                  setTimeout(() => {
+                  debugLog(`⚠ money-pages-suggested-top10-container not found (retry ${retryCount + 1}/${MAX_RETRIES}) - rendering Money Pages section then retrying`, 'warn');
+                  setTimeout(async () => {
+                    try {
+                      if (typeof renderMoneyPagesSection === 'function') {
+                        const metrics = window.moneyPagesMetrics || saved?.scores?.moneyPagesMetrics || saved?.moneyPagesMetrics || null;
+                        await renderMoneyPagesSection(metrics);
+                      }
+                    } catch (e) {
+                      // ignore; we'll retry anyway
+                    }
                     if (typeof window.renderMoneyPagesSuggestedTop10 === 'function') {
                       window.renderMoneyPagesSuggestedTop10(retryCount + 1);
                     }
-                  }, 500);
+                  }, 250);
                 } else {
-                  debugLog(`⚠ money-pages-suggested-top10-container not found after ${MAX_RETRIES} retries - giving up. The HTML section may not be included in renderMoneyPagesSection.`, 'error');
+                  debugLog(`⚠ money-pages-suggested-top10-container not found after ${MAX_RETRIES} retries - giving up.`, 'error');
                 }
                 return;
               }
@@ -15123,196 +15144,17 @@
             };
           }
           
-          if (typeof renderMoneyPagesTable === 'function') {
-            const priorityData = window.moneyPagePriorityData || (saved && saved.moneyPagePriorityData) || [];
-            if (priorityData && priorityData.length > 0) {
-              debugLog('Re-rendering Money Pages Priority Matrix table', 'info');
-              await renderMoneyPagesTable(priorityData);
-            }
+          // Run the canonical Money Pages initializer (wires KPI selector, renders KPI tracker,
+          // Priority table, Suggested Top 10, and charts) now that the DOM exists.
+          if (typeof window.__initMoneyPagesPanelAfterRender === 'function') {
+            window.__initMoneyPagesPanelAfterRender();
+          } else {
+            // Fallback: at least wire controls and render Suggested Top 10
+            if (typeof window.wireMoneyKpiMetricSelector === 'function') window.wireMoneyKpiMetricSelector();
+            if (typeof window.wireTopLevelFilter === 'function') window.wireTopLevelFilter();
+            if (typeof window.wirePriorityActionsFilters === 'function') window.wirePriorityActionsFilters();
+            if (typeof window.renderMoneyPagesSuggestedTop10 === 'function') window.renderMoneyPagesSuggestedTop10(0);
           }
-          
-          if (typeof renderMoneyPagesSection === 'function' && saved && saved.scores && saved.scores.moneyPagesMetrics) {
-            debugLog('Re-rendering Money Pages section', 'info');
-            await renderMoneyPagesSection(saved.scores.moneyPagesMetrics);
-            
-            // Wait for HTML structure to be created before rendering charts
-            setTimeout(() => {
-              // Opportunity Mix: render after layout settles (Money tab activation can report 0x0)
-              if (saved && saved.scores && saved.scores.moneyPagesMetrics && typeof renderMoneyPagesCategoryChart === 'function') {
-                requestAnimationFrame(() => {
-                  requestAnimationFrame(() => {
-                    renderMoneyPagesCategoryChart(saved.scores.moneyPagesMetrics, 0);
-                  });
-                });
-              }
-            }, 200); // Give renderMoneyPagesSection time to create HTML structure
-          } else if (saved && saved.scores && saved.scores.moneyPagesMetrics && typeof renderMoneyPagesCategoryChart === 'function') {
-            // If renderMoneyPagesSection wasn't called, still try to render charts (structure might already exist)
-            requestAnimationFrame(() => {
-              requestAnimationFrame(() => {
-                renderMoneyPagesCategoryChart(saved.scores.moneyPagesMetrics, 0);
-              });
-            });
-          }
-          
-          // Render charts only when panel is visible and canvas has dimensions
-          // Wait a bit longer to ensure HTML structure is created
-          setTimeout(() => {
-            const renderMoneyCharts = () => {
-            const moneyPanel = document.querySelector('.aigeo-panel[data-panel="money"]');
-            const isPanelVisible = moneyPanel && moneyPanel.classList.contains('is-active') && 
-                                   window.getComputedStyle(moneyPanel).display !== 'none';
-            
-            if (!isPanelVisible) {
-              debugLog('⚠ Money Pages charts: Panel not visible yet, will retry', 'warn');
-              setTimeout(renderMoneyCharts, 200);
-              return;
-            }
-            
-            const volumeCanvas = document.getElementById('moneyPagesVolumeChart');
-            const rateCanvas = document.getElementById('moneyPagesRateChart');
-            if ((volumeCanvas || rateCanvas) && typeof renderMoneyPagesTrendChart === 'function') {
-              const volumeRect = volumeCanvas ? volumeCanvas.getBoundingClientRect() : { width: 0, height: 0 };
-              const rateRect = rateCanvas ? rateCanvas.getBoundingClientRect() : { width: 0, height: 0 };
-              if ((volumeRect.width === 0 || volumeRect.height === 0) && (rateRect.width === 0 || rateRect.height === 0)) {
-                debugLog('⚠ Money Pages trend charts: Canvases have zero dimensions, will retry', 'warn');
-                setTimeout(renderMoneyCharts, 200);
-                return;
-              }
-              
-              const propertyUrl = document.getElementById('propertyUrl')?.value;
-              if (propertyUrl) {
-                const endDate = new Date();
-                const startDate = new Date();
-                startDate.setFullYear(startDate.getFullYear() - 1);
-                const startDateStr = startDate.toISOString().split('T')[0];
-                const endDateStr = endDate.toISOString().split('T')[0];
-                
-                // Use apiUrl helper so this works both on Vercel and when opened locally (file://)
-                const urlHelper = window.apiUrl || ((path) => {
-                  const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || !window.location.hostname;
-                  const baseUrl = isLocal ? 'https://ai-geo-audit.vercel.app' : '';
-                  const cleanPath = path.startsWith('/') ? path : `/${path}`;
-                  return `${baseUrl}${cleanPath}`;
-                });
-                fetch(urlHelper(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDateStr}`))
-                  .then(res => res.json())
-                  .then(json => {
-                    if (json.status === 'ok' && json.data) {
-                      // Extract last GSC timeseries date from API response if available
-                      if (json.timeseries && Array.isArray(json.timeseries) && json.timeseries.length > 0) {
-                        const timeseriesDates = json.timeseries
-                          .map(ts => ts.date)
-                          .filter(date => date)
-                          .sort()
-                          .reverse();
-                        if (timeseriesDates.length > 0) {
-                          window.lastGscTimeseriesDate = timeseriesDates[0];
-                          debugLog(`Money Pages Trend: Set last GSC timeseries date from API: ${window.lastGscTimeseriesDate}`, 'info');
-                        }
-                      } else {
-                        debugLog(`Money Pages Trend: No timeseries data in API response`, 'warn');
-                      }
-                      
-                      debugLog(`Money Pages Trend: About to render chart with ${json.data ? json.data.length : 0} history records`, 'info');
-                      
-                      requestAnimationFrame(() => {
-                        requestAnimationFrame(() => {
-                          const volumeCanvas = document.getElementById('moneyPagesVolumeChart');
-                          const rateCanvas = document.getElementById('moneyPagesRateChart');
-                          if (volumeCanvas && rateCanvas) {
-                            const volumeRect = volumeCanvas.getBoundingClientRect();
-                            const rateRect = rateCanvas.getBoundingClientRect();
-                            debugLog(`Money Pages Trend: Canvas dimensions - Volume: ${volumeRect.width}x${volumeRect.height}, Rate: ${rateRect.width}x${rateRect.height}`, 'info');
-                            if (volumeRect.width > 0 && volumeRect.height > 0 && rateRect.width > 0 && rateRect.height > 0) {
-                              debugLog(`Money Pages Trend: Calling renderMoneyPagesTrendChart with ${json.data.length} records`, 'info');
-                              renderMoneyPagesTrendChart(json.data, json.timeseries);
-                            } else {
-                              debugLog('⚠ Money Pages trend charts: Canvases still have zero dimensions, retrying...', 'warn');
-                              // Set explicit dimensions and retry
-                              [volumeCanvas, rateCanvas].forEach(canvas => {
-                                canvas.width = canvas.offsetWidth || canvas.parentElement?.clientWidth || 800;
-                                canvas.height = canvas.offsetHeight || 300;
-                              });
-                              setTimeout(() => {
-                                const volumeRect2 = volumeCanvas.getBoundingClientRect();
-                                const rateRect2 = rateCanvas.getBoundingClientRect();
-                                if (volumeRect2.width > 0 && volumeRect2.height > 0 && rateRect2.width > 0 && rateRect2.height > 0) {
-                                  renderMoneyPagesTrendChart(json.data, json.timeseries);
-                                } else {
-                                  setTimeout(() => renderMoneyCharts(), 200);
-                                }
-                              }, 100);
-                            }
-                          } else {
-                            debugLog('⚠ Money Pages trend charts: Canvas elements not found', 'warn');
-                          }
-                        });
-                      });
-                    } else {
-                      debugLog(`⚠ Money Pages trend chart: API returned error or no data. Status: ${json.status}`, 'warn');
-                    }
-                  })
-                  .catch(err => {
-                    debugLog(`✗ Error fetching history for trend chart: ${err.message}`, 'error');
-                    debugLog(`Money Pages trend chart fetch error details: ${err.stack || err.toString()}`, 'error');
-                  });
-              }
-            }
-            
-            const sparklineCanvas = document.getElementById('money-kpi-sparkline');
-            if (sparklineCanvas && typeof window.loadAuditHistoryAndRenderKpis === 'function') {
-              const rect = sparklineCanvas.getBoundingClientRect();
-              if (rect.width === 0 || rect.height === 0) {
-                debugLog('⚠ Money KPI sparkline: Canvas has zero dimensions, will retry', 'warn');
-                setTimeout(renderMoneyCharts, 200);
-                return;
-              }
-              
-              const propertyUrl = document.getElementById('propertyUrl')?.value;
-              if (propertyUrl) {
-                requestAnimationFrame(() => {
-                  requestAnimationFrame(() => {
-                    const canvas = document.getElementById('money-kpi-sparkline');
-                    if (canvas) {
-                      const rect = canvas.getBoundingClientRect();
-                      if (rect.width > 0 && rect.height > 0) {
-                        window.loadAuditHistoryAndRenderKpis(propertyUrl);
-                      } else {
-                        debugLog('⚠ Money KPI sparkline: Canvas still has zero dimensions, retrying...', 'warn');
-                        setTimeout(() => renderMoneyCharts(), 200);
-                      }
-                    }
-                  });
-                });
-              }
-            }
-            };
-            
-            // Start rendering charts with retry logic
-            renderMoneyCharts();
-          }, 300); // Wait 300ms to ensure HTML structure is created
-          
-          // Wire up KPI metric selector
-          if (typeof window.wireMoneyKpiMetricSelector === 'function') {
-            window.wireMoneyKpiMetricSelector();
-          }
-          
-          if (typeof window.wireTopLevelFilter === 'function') {
-            window.wireTopLevelFilter();
-          }
-          if (typeof window.wirePriorityActionsFilters === 'function') {
-            window.wirePriorityActionsFilters();
-          }
-          
-          // Render Suggested (Top 10) cards - wait a bit longer to ensure HTML structure exists
-          setTimeout(() => {
-            if (typeof window.renderMoneyPagesSuggestedTop10 === 'function') {
-              window.renderMoneyPagesSuggestedTop10(0); // Start with retry count 0
-            } else {
-              debugLog('⚠ renderMoneyPagesSuggestedTop10 function not found', 'warn');
-            }
-          }, 300);
         }, 100);
       }
 
@@ -16317,6 +16159,7 @@
         // Fetch data for all money page segments
         const segments = ['money', 'landing', 'event', 'product'];
         const segmentData = {};
+        const rawMetricsBySegment = {};
         
         const dateKeyUTC = (d) => {
           const y = d.getUTCFullYear();
@@ -16354,6 +16197,7 @@
           const response = await fetch(apiUrl(`/api/supabase/get-portfolio-segment-metrics?${params}`));
           if (response.ok) {
             const data = await response.json();
+            rawMetricsBySegment[segment] = Array.isArray(data.metrics) ? data.metrics : [];
             // Store raw metrics for bucketing (same approach as loadPortfolioData)
             segmentData[segment] = (data.metrics || []).map(m => ({
               metric: m,
@@ -16367,6 +16211,7 @@
           } else {
             debugLog(`⚠ Failed to fetch data for segment '${segment}': ${response.status}`, 'warn');
             segmentData[segment] = [];
+            rawMetricsBySegment[segment] = [];
           }
         }
         
@@ -16733,6 +16578,55 @@
             
             tbody.appendChild(row);
           });
+        }
+
+        // Refresh Money Pages Performance Trends from the SAME portfolio metrics (money segment).
+        // This prevents spikes caused by mixing audit-history moneySegmentMetrics with portfolio metrics.
+        try {
+          const volumeCanvas = document.getElementById('moneyPagesVolumeChart');
+          const rateCanvas = document.getElementById('moneyPagesRateChart');
+          if (volumeCanvas && rateCanvas && typeof window.renderMoneyPagesTrendChart === 'function') {
+            const moneyMetrics = rawMetricsBySegment.money || [];
+            const behaviourScore =
+              typeof window.moneyPagesMetrics?.behaviour?.score === 'number' ? window.moneyPagesMetrics.behaviour.score : null;
+
+            const trendHistory = moneyMetrics
+              .map(m => {
+                const d = metricDateForPeriod(m);
+                const dateStr = d ? dateKeyUTC(d) : null;
+                if (!dateStr) return null;
+                const clicks = Number(m.clicks_28d || 0);
+                const impressions = Number(m.impressions_28d || 0);
+                const ctr = (m.ctr_28d != null && !isNaN(parseFloat(m.ctr_28d)))
+                  ? parseFloat(m.ctr_28d)
+                  : (impressions > 0 ? (clicks / impressions) : 0);
+
+                return {
+                  date: dateStr,
+                  isPartial: false,
+                  moneyPagesBehaviourScore: behaviourScore,
+                  moneySegmentMetrics: {
+                    allMoney: {
+                      clicks,
+                      impressions,
+                      ctr,
+                      avgPosition: (m.position_28d != null && !isNaN(parseFloat(m.position_28d))) ? parseFloat(m.position_28d) : null,
+                      behaviourScore
+                    }
+                  }
+                };
+              })
+              .filter(Boolean);
+
+            if (trendHistory.length > 0) {
+              window.renderMoneyPagesTrendChart(trendHistory, null);
+              debugLog(`✓ Money Pages Performance Trends refreshed from portfolio metrics (${trendHistory.length} pts)`, 'success');
+            } else {
+              debugLog('⚠ Money Pages Performance Trends: no portfolio metrics available to render', 'warn');
+            }
+          }
+        } catch (e) {
+          debugLog(`⚠ Money Pages Performance Trends refresh failed: ${e.message}`, 'warn');
         }
         
         debugLog('✓ Money Pages KPI Tracker rendered', 'success');
@@ -19296,32 +19190,12 @@
           try {
             debugLog('Refreshing Money Pages charts with updated history...', 'info');
             
-            // Fetch updated history for Money Pages trend chart
-            const endDate = new Date().toISOString().split('T')[0];
-            const startDate = new Date();
-            startDate.setFullYear(startDate.getFullYear() - 1);
-            const startDateStr = startDate.toISOString().split('T')[0];
-            
-            const historyResponse = await fetch(apiUrl(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}&startDate=${startDateStr}&endDate=${endDate}`));
-            if (historyResponse.ok) {
-              const historyJson = await historyResponse.json();
-              if (historyJson.status === 'ok' && historyJson.data) {
-                // Render Money Pages trend chart with updated history
-                if (typeof renderMoneyPagesTrendChart === 'function') {
-                  setTimeout(() => {
-                    renderMoneyPagesTrendChart(historyJson.data);
-                    debugLog('✓ Money Pages trend chart refreshed', 'success');
-                  }, 500); // Small delay to ensure DOM is ready
-                }
-                
-                // Refresh KPI tracker
-                if (typeof window.loadAuditHistoryAndRenderKpis === 'function') {
-                  setTimeout(() => {
-                    window.loadAuditHistoryAndRenderKpis(propertyUrl);
-                    debugLog('✓ Money Pages KPI tracker refreshed', 'success');
-                  }, 500);
-                }
-              }
+            // Refresh KPI tracker (which now also refreshes Performance Trends from portfolio metrics).
+            if (typeof window.loadAuditHistoryAndRenderKpis === 'function') {
+              setTimeout(() => {
+                window.loadAuditHistoryAndRenderKpis(propertyUrl);
+                debugLog('✓ Money Pages KPI tracker + trends refreshed', 'success');
+              }, 500);
             }
           } catch (refreshError) {
             debugLog(`⚠ Error refreshing Money Pages charts: ${refreshError.message}`, 'warn');
@@ -31817,7 +31691,8 @@ Final Score: ${score}/100`;
 
       // Canonical implementation: KPI Tracker should be based on GSC timeseries + audit-derived proportions,
       // not portfolio segment snapshot rows (which may only exist for a single audit date).
-      window.loadAuditHistoryAndRenderKpis = loadAuditHistoryAndRenderKpis_OLD;
+      // NOTE: Do not override `window.loadAuditHistoryAndRenderKpis` here.
+      // The canonical implementation is defined later and uses portfolio segment metrics.
       
       // Wire up KPI metric selector to reload on change
       function wireMoneyKpiMetricSelector() {
