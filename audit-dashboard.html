@@ -16855,8 +16855,11 @@
           }
         });
         
-        // Fetch AI citations and AI overview data from keyword_rankings for this audit date
-        let aiMetricsBySegment = {
+        // Fetch AI citations and AI overview data from keyword_rankings.
+        // IMPORTANT: do NOT overwrite existing portfolio AI fields with zeros if no keyword_rankings exist
+        // for this date (common due to GSC lag vs "ranking audit" date). If no data found, we omit AI fields
+        // and the save endpoint will preserve existing DB values.
+        const aiMetricsBySegment = {
           site: { citations: 0, overviewCount: 0 },
           money: { citations: 0, overviewCount: 0 },
           academy: { citations: 0, overviewCount: 0 },
@@ -16867,13 +16870,37 @@
           other: { citations: 0, overviewCount: 0 },
           all_tracked: { citations: 0, overviewCount: 0 }
         };
+        let includeAiFields = false;
+        let aiAuditDateUsed = null;
         
         try {
-          const auditDate = dateEnd; // Use dateEnd as audit_date (most recent date in the 28d window)
-          const keywordsResponse = await fetch(apiUrl(`/api/supabase/get-keyword-rankings?auditDate=${auditDate}&propertyUrl=${encodeURIComponent(siteUrl)}`));
-          if (keywordsResponse.ok) {
+          const candidates = [];
+          const addCandidate = (d) => {
+            const s = d ? String(d).slice(0, 10) : '';
+            if (s && !candidates.includes(s)) candidates.push(s);
+          };
+          // 1) Prefer last Ranking & AI run date (localStorage rankingAiData.timestamp)
+          try {
+            const local = localStorage.getItem('rankingAiData');
+            if (local) {
+              const parsed = JSON.parse(local);
+              addCandidate(parsed?.timestamp ? String(parsed.timestamp).split('T')[0] : null);
+            }
+          } catch {
+            // ignore
+          }
+          // 2) Today's date (Ranking & AI save uses "today")
+          addCandidate(new Date().toISOString().split('T')[0]);
+          // 3) Fallback: dateEnd (GSC window end date; often ~2d behind)
+          addCandidate(dateEnd);
+
+          for (const auditDate of candidates) {
+            const keywordsResponse = await fetch(apiUrl(`/api/supabase/get-keyword-rankings?auditDate=${auditDate}&propertyUrl=${encodeURIComponent(siteUrl)}`));
+            if (!keywordsResponse.ok) continue;
             const keywordsData = await keywordsResponse.json();
             if (keywordsData.keywords && keywordsData.keywords.length > 0) {
+              includeAiFields = true;
+              aiAuditDateUsed = auditDate;
               // AI metrics are keyword-driven, but we attribute citations by the ACTUAL cited URLs (not best_url).
               // This gives a true picture of which page segments are being cited in AI Overviews.
               const normalizeUrlForMatch = (url) => {
@@ -16954,11 +16981,27 @@
                   }
                 }
               });
-              debugLog(`✓ Aggregated AI metrics from ${keywordsData.keywords.length} keywords`, 'success');
+
+              // Reconcile: ai_alan_citations_count totals can exceed captured cited URL list length.
+              // Put any remainder into Other so segment totals can still reconcile.
+              const sumBase = (aiMetricsBySegment.landing?.citations || 0)
+                + (aiMetricsBySegment.event?.citations || 0)
+                + (aiMetricsBySegment.product?.citations || 0)
+                + (aiMetricsBySegment.academy?.citations || 0)
+                + (aiMetricsBySegment.blog?.citations || 0)
+                + (aiMetricsBySegment.other?.citations || 0);
+              const delta = (aiMetricsBySegment.site?.citations || 0) - sumBase;
+              if (delta > 0) aiMetricsBySegment.other.citations += delta;
+
+              debugLog(`✓ Aggregated AI metrics from ${keywordsData.keywords.length} keywords (auditDate=${auditDate})`, 'success');
+              break; // stop after first successful match
             }
           }
         } catch (aiError) {
           debugLog(`⚠ Error fetching AI metrics from keyword_rankings: ${aiError.message}`, 'warn');
+        }
+        if (!includeAiFields) {
+          debugLog('ℹ No keyword_rankings found for candidate AI audit dates; preserving existing portfolio AI fields (skipping AI write in Audit Scan).', 'info');
         }
         
         const buildSegmentRows = (segmentPages, scopeName) => {
@@ -16976,8 +17019,8 @@
               impressions_28d: 0,
               ctr_28d: 0,
               position_28d: null,
-              ai_citations_28d: aiMetrics.citations,
-              ai_overview_present_count: aiMetrics.overviewCount
+              ai_citations_28d: includeAiFields ? aiMetrics.citations : undefined,
+              ai_overview_present_count: includeAiFields ? aiMetrics.overviewCount : undefined
             });
             return;
           }
@@ -17058,8 +17101,8 @@
             impressions_28d: totalImpressions,
             ctr_28d: ctr, // Ratio (0-1)
             position_28d: avgPosition,
-            ai_citations_28d: aiMetrics.citations,
-            ai_overview_present_count: aiMetrics.overviewCount
+            ai_citations_28d: includeAiFields ? aiMetrics.citations : undefined,
+            ai_overview_present_count: includeAiFields ? aiMetrics.overviewCount : undefined
           });
         });
           return { scopeName, segmentRows };
