@@ -30,7 +30,7 @@ function* dateRangeInclusive(startIso, endIso) {
   }
 }
 
-async function fetchGscDailyTotals({ siteUrl, date, accessToken }) {
+async function fetchGscDailyTotals({ siteUrl, startDate, endDate, accessToken }) {
   const searchConsoleUrl = `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`;
   const resp = await fetch(searchConsoleUrl, {
     method: 'POST',
@@ -38,7 +38,13 @@ async function fetchGscDailyTotals({ siteUrl, date, accessToken }) {
       'Authorization': `Bearer ${accessToken}`,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({ startDate: date, endDate: date })
+    // Fetch per-day totals for the whole range in ONE call (fast, avoids serverless timeouts).
+    body: JSON.stringify({
+      startDate,
+      endDate,
+      dimensions: ['date'],
+      rowLimit: 1000
+    })
   });
 
   if (!resp.ok) {
@@ -47,13 +53,19 @@ async function fetchGscDailyTotals({ siteUrl, date, accessToken }) {
   }
 
   const data = await resp.json().catch(() => ({}));
-  const row = (data.rows && data.rows.length > 0) ? data.rows[0] : null;
-  return {
-    clicks: row?.clicks ?? 0,
-    impressions: row?.impressions ?? 0,
-    ctr: row?.ctr ?? 0, // ratio 0-1
-    position: row?.position ?? 0
-  };
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  const byDate = new Map();
+  rows.forEach(r => {
+    const date = r?.keys?.[0];
+    if (!date) return;
+    byDate.set(String(date), {
+      clicks: r?.clicks ?? 0,
+      impressions: r?.impressions ?? 0,
+      ctr: r?.ctr ?? 0, // ratio 0-1
+      position: r?.position ?? 0
+    });
+  });
+  return byDate;
 }
 
 export default async function handler(req, res) {
@@ -76,7 +88,8 @@ export default async function handler(req, res) {
       propertyUrl = 'https://www.alanranger.com',
       days = 58,
       endOffsetDays = 2,
-      delayMs = 200
+      // no per-day delay needed now; kept for backward compat
+      delayMs = 0
     } = req.body || {};
 
     const nDays = Number(days);
@@ -96,42 +109,41 @@ export default async function handler(req, res) {
 
     const accessToken = await getGSCAccessToken();
 
-    let fetched = 0;
-    let saved = 0;
-    const errors = [];
+    const byDate = await fetchGscDailyTotals({ siteUrl, startDate, endDate, accessToken });
 
+    const rowsToUpsert = [];
     for (const date of dateRangeInclusive(startDate, endDate)) {
-      try {
-        const totals = await fetchGscDailyTotals({ siteUrl, date, accessToken });
-        fetched += 1;
+      const totals = byDate.get(date) || { clicks: 0, impressions: 0, ctr: 0, position: 0 };
+      rowsToUpsert.push({
+        property_url: siteUrl,
+        date,
+        clicks: totals.clicks || 0,
+        impressions: totals.impressions || 0,
+        ctr: totals.ctr || 0,
+        position: totals.position || 0
+      });
+    }
 
-        const row = {
-          property_url: siteUrl,
-          date,
-          clicks: totals.clicks || 0,
-          impressions: totals.impressions || 0,
-          ctr: totals.ctr || 0,
-          position: totals.position || 0
-        };
-
-        const { error } = await supabase
-          .from('gsc_timeseries')
-          .upsert(row, { onConflict: 'property_url,date' });
-        if (error) throw new Error(`supabase_upsert_error:${error.message}`);
-        saved += 1;
-
-        if (nDelay > 0) await new Promise((r) => setTimeout(r, nDelay));
-      } catch (e) {
-        errors.push({ date, error: e?.message || String(e) });
-        if (nDelay > 0) await new Promise((r) => setTimeout(r, Math.max(200, nDelay)));
+    const errors = [];
+    let saved = 0;
+    const batchSize = 200;
+    for (let i = 0; i < rowsToUpsert.length; i += batchSize) {
+      const batch = rowsToUpsert.slice(i, i + batchSize);
+      const { error } = await supabase
+        .from('gsc_timeseries')
+        .upsert(batch, { onConflict: 'property_url,date' });
+      if (error) {
+        errors.push({ batchStart: batch[0]?.date, batchEnd: batch[batch.length - 1]?.date, error: error.message });
+      } else {
+        saved += batch.length;
       }
+      if (nDelay > 0) await new Promise((r) => setTimeout(r, nDelay));
     }
 
     return sendJSON(res, 200, {
       status: 'ok',
       siteUrl,
       range: { startDate, endDate, days: nDays, endOffsetDays: nOffset },
-      fetched,
       saved,
       errorCount: errors.length,
       errors: errors.slice(0, 10), // cap payload
