@@ -39375,6 +39375,9 @@ Final Score: ${score}/100`;
       const moneyCitations = counts.money || 0;
       const totalCitations = counts.site || 0;
       const share = totalCitations > 0 ? (moneyCitations / totalCitations) : 0;
+      const sumFromUrls = (counts.landing || 0) + (counts.event || 0) + (counts.product || 0) + (counts.academy || 0) + (counts.blog || 0) + (counts.other || 0);
+      const unattributed = Math.max(0, (totalCitations || 0) - sumFromUrls);
+      const otherTotal = (counts.other || 0) + unattributed;
 
       if (valueEl) valueEl.textContent = `${moneyCitations}/${totalCitations} (${Math.round(share * 100)}%)`;
       if (statusEl) statusEl.textContent = moneyCitations > 0 ? 'Some' : 'None';
@@ -39396,11 +39399,11 @@ Final Score: ${score}/100`;
                   <tr><td style="padding: 0.25rem 0;">Product</td><td style="padding: 0.25rem 0; text-align: right;">${counts.product || 0}</td></tr>
                   <tr><td style="padding: 0.25rem 0; border-top: 1px solid #e2e8f0;">Academy</td><td style="padding: 0.25rem 0; border-top: 1px solid #e2e8f0; text-align: right;">${counts.academy || 0}</td></tr>
                   <tr><td style="padding: 0.25rem 0;">Blog</td><td style="padding: 0.25rem 0; text-align: right;">${counts.blog || 0}</td></tr>
-                  <tr><td style="padding: 0.25rem 0;">Other (non-money)</td><td style="padding: 0.25rem 0; text-align: right;">${counts.other || 0}</td></tr>
+                  <tr><td style="padding: 0.25rem 0;">Other (non-money)</td><td style="padding: 0.25rem 0; text-align: right;">${otherTotal}</td></tr>
                 </tbody>
               </table>
               <div style="margin-top: 0.5rem; color: #64748b; font-size: 0.8rem;">
-                Note: totals may not sum perfectly if a keyword reports more citations than the stored citation URL list.
+                ${unattributed > 0 ? `Includes <strong>${unattributed}</strong> unattributed citations (counted in totals, but no URL captured).` : `All citations were attributed to captured URLs.`}
               </div>
             </div>
           </div>
@@ -39618,6 +39621,14 @@ Final Score: ${score}/100`;
               .filter(Boolean);
             cache.citedUrlItems = canonicalItems; // may include duplicates (citation items)
             cache.citedUrls = Array.from(new Set(canonicalItems)); // unique URLs
+            // Unattributed citations = keyword-reported citation counts with no URL captured
+            try {
+              const totalCitations = rows.reduce((s, r) => s + (parseInt(r.ai_alan_citations_count ?? r.aiAlanCitationsCount ?? 0, 10) || 0), 0);
+              const urlItemCount = canonicalItems.length;
+              cache.unattributedCitations = Math.max(0, totalCitations - urlItemCount);
+            } catch {
+              cache.unattributedCitations = 0;
+            }
           }
         }
 
@@ -39634,7 +39645,16 @@ Final Score: ${score}/100`;
           return s === seg;
         }).length;
         const label = getPortfolioSegmentLabel(seg);
-        renderList(citedFiltered, `${label}: ${citedFiltered.length.toLocaleString()} unique AI-cited URLs (${citedItemsCount.toLocaleString()} citation items) from latest Ranking & AI data in this browser.`);
+        const extra = (seg === 'other' && (cache.unattributedCitations || 0) > 0)
+          ? ` + ${(cache.unattributedCitations || 0).toLocaleString()} unattributed (no URL captured)`
+          : '';
+        const citedItemsWithUnattributed = seg === 'other'
+          ? (citedItemsCount + (cache.unattributedCitations || 0))
+          : citedItemsCount;
+        renderList(
+          citedFiltered,
+          `${label}: ${citedFiltered.length.toLocaleString()} unique AI-cited URLs (${citedItemsWithUnattributed.toLocaleString()} citation items${extra}) from latest Ranking & AI data in this browser.`
+        );
       };
 
       await window.__renderPortfolioSegmentUrlsModalFromCache();
