@@ -126,41 +126,56 @@ export default async function handler(req, res) {
         continue;
       }
 
-      // Group keywords by segment
+      // Group keywords by inferred segment (keyword_rankings is keyword-driven; we infer segment from best_url).
+      // This matches the frontend Portfolio logic (and allows single-URL segments like "academy").
       const segmentKeywords = {
+        site: [],
         money: [],
+        academy: [],
         landing: [],
         event: [],
         product: [],
+        blog: [],
         all_tracked: []
       };
 
-      keywords.forEach(keyword => {
-        const keywordSegment = (keyword.segment || '').toLowerCase();
-        const pageType = (keyword.page_type || '').toLowerCase();
-        
-        // Map keyword segments and page types to portfolio segments
-        // Portfolio segments: money, landing, event, product, all_tracked
-        
-        // Only process "money" segment keywords (exclude "brand", "education", "other")
-        if (keywordSegment !== 'money') {
-          return; // Skip non-money keywords
-        }
-        
-        // All "money" keywords go to "money" segment
-        segmentKeywords.money.push(keyword);
-        
-        // Map page_type to specific sub-segments (landing, event, product)
-        // page_type values: "Landing", "Product", "Event", "Blog", "GBP", "Other"
-        if (pageType === 'landing') {
-          segmentKeywords.landing.push(keyword);
-        } else if (pageType === 'product') {
-          segmentKeywords.product.push(keyword);
-        } else if (pageType === 'event') {
-          segmentKeywords.event.push(keyword);
-        } else {
-          // If page_type is not landing/product/event but keyword is "money", default to "landing"
-          segmentKeywords.landing.push(keyword);
+      const normalizeUrl = (u) => {
+        if (!u) return '';
+        let s = String(u).trim().toLowerCase();
+        // Strip query params
+        s = s.split('?')[0];
+        // Remove trailing slash
+        s = s.replace(/\/$/, '');
+        return s;
+      };
+
+      const inferSegmentFromBestUrl = (bestUrl, row) => {
+        const u = normalizeUrl(bestUrl);
+        if (!u) return null;
+        if (u.includes('/free-online-photography-course')) return 'academy';
+        if (u.includes('/blog-on-photography/')) return 'blog';
+        const pageType = (row?.page_type || '').toLowerCase();
+        if (pageType === 'event' || pageType === 'product' || pageType === 'landing') return pageType;
+        // Fallback: if it's a money keyword but page type is "other", treat as landing for rollups
+        const keywordSegment = (row?.segment || '').toLowerCase();
+        if (keywordSegment === 'money') return 'landing';
+        return null;
+      };
+
+      // Entire site: all keywords (AI metrics are keyword-driven)
+      keywords.forEach(k => segmentKeywords.site.push(k));
+
+      // Money rollup: any keyword whose declared segment is "money"
+      keywords.forEach(k => {
+        const keywordSegment = (k.segment || '').toLowerCase();
+        if (keywordSegment === 'money') segmentKeywords.money.push(k);
+      });
+
+      // Segment by best_url for page-level groupings (academy/blog/landing/event/product)
+      keywords.forEach(k => {
+        const inferred = inferSegmentFromBestUrl(k.best_url, k);
+        if (inferred && segmentKeywords[inferred]) {
+          segmentKeywords[inferred].push(k);
         }
       });
 
@@ -176,7 +191,7 @@ export default async function handler(req, res) {
         tasks.forEach(t => {
           if (t.target_url) {
             // Normalize URL for matching
-            const url = String(t.target_url).toLowerCase().trim();
+            const url = normalizeUrl(t.target_url);
             trackedUrls.add(url);
           }
         });
@@ -185,7 +200,7 @@ export default async function handler(req, res) {
       // Add keywords to all_tracked if their best_url matches a tracked task
       keywords.forEach(keyword => {
         if (keyword.best_url) {
-          const url = String(keyword.best_url).toLowerCase().trim();
+          const url = normalizeUrl(keyword.best_url);
           if (trackedUrls.has(url)) {
             segmentKeywords.all_tracked.push(keyword);
           }
@@ -194,7 +209,7 @@ export default async function handler(req, res) {
 
       // Aggregate AI metrics per segment
       const updates = [];
-      const scope = 'active_cycles_only';
+      const scopes = ['all_pages', 'active_cycles_only'];
 
       for (const [segment, segmentKeywordList] of Object.entries(segmentKeywords)) {
         if (segmentKeywordList.length === 0) continue;
@@ -209,18 +224,18 @@ export default async function handler(req, res) {
           k.has_ai_overview === true || k.ai_overview_present_any === true
         ).length;
 
-        // Check if portfolio_segment_metrics_28d row exists for this run_id + segment
-        const { data: existing } = await supabase
-          .from('portfolio_segment_metrics_28d')
-          .select('id')
-          .eq('run_id', runId)
-          .eq('site_url', targetSiteUrl)
-          .eq('segment', segment)
-          .eq('scope', scope)
-          .limit(1);
+        for (const scope of scopes) {
+          const { data: existing } = await supabase
+            .from('portfolio_segment_metrics_28d')
+            .select('id')
+            .eq('run_id', runId)
+            .eq('site_url', targetSiteUrl)
+            .eq('segment', segment)
+            .eq('scope', scope)
+            .limit(1);
 
-        if (existing && existing.length > 0) {
-          // Update existing row
+          if (!existing || existing.length === 0) continue;
+
           const { error: updateError } = await supabase
             .from('portfolio_segment_metrics_28d')
             .update({
@@ -233,17 +248,12 @@ export default async function handler(req, res) {
             .eq('scope', scope);
 
           if (updateError) {
-            console.error(`[Backfill AI] Error updating ${segment} for ${runId}:`, updateError);
-            updates.push({ segment, success: false, error: updateError.message });
+            console.error(`[Backfill AI] Error updating ${segment} (${scope}) for ${runId}:`, updateError);
+            updates.push({ segment, scope, success: false, error: updateError.message });
           } else {
-            updates.push({ segment, success: true, citations: totalCitations, overviewCount });
+            updates.push({ segment, scope, success: true, citations: totalCitations, overviewCount });
             totalUpdated++;
           }
-        } else {
-          // Row doesn't exist - we can't create it without GSC page data
-          // Just log a warning
-          console.warn(`[Backfill AI] No portfolio_segment_metrics_28d row found for run_id=${runId}, segment=${segment}. Skipping (requires GSC page data first).`);
-          updates.push({ segment, success: false, reason: 'No portfolio row exists (requires GSC data first)' });
         }
       }
 

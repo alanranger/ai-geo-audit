@@ -39180,6 +39180,30 @@ Final Score: ${score}/100`;
           if (responseData.data) {
             debugLog(`✓ Supabase confirmed save: ${JSON.stringify(responseData.data).substring(0, 200)}...`, 'info');
           }
+          
+          // Keep Portfolio AI metrics in sync: update portfolio_segment_metrics_28d AI fields from keyword_rankings
+          // (important for single-URL segments like "Academy")
+          try {
+            const aiResp = await fetch(apiUrl('/api/supabase/backfill-ai-portfolio-segments'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                auditDate,
+                siteUrl: propertyUrl
+              })
+            });
+            if (aiResp.ok) {
+              debugLog('✓ Portfolio AI metrics refreshed from keyword_rankings', 'success');
+              if (typeof renderPortfolioTable === 'function') {
+                renderPortfolioTable();
+              }
+            } else {
+              const t = await aiResp.text();
+              debugLog(`⚠ Portfolio AI metrics refresh failed: ${aiResp.status} - ${t}`, 'warn');
+            }
+          } catch (aiSyncErr) {
+            debugLog(`⚠ Portfolio AI metrics refresh failed: ${aiSyncErr.message}`, 'warn');
+          }
         } else {
           const errorText = await response.text();
           debugLog(`⚠ Failed to save Ranking & AI data to Supabase: ${response.status} - ${errorText}`, 'warn');
