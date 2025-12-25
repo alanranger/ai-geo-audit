@@ -5966,12 +5966,14 @@
     // Admin key utilities (Phase A - Security)
     window.getAdminKey = function getAdminKey() {
       if (typeof window === "undefined") return "";
-      return sessionStorage.getItem("arp_admin_key") || "";
+      // Prefer sessionStorage, but also support localStorage for persistence across browser restarts.
+      return sessionStorage.getItem("arp_admin_key") || localStorage.getItem("arp_admin_key") || "";
     };
 
     window.setAdminKey = function setAdminKey(key) {
       if (typeof window === "undefined") return;
       sessionStorage.setItem("arp_admin_key", key);
+      try { localStorage.setItem("arp_admin_key", key); } catch {}
     };
 
     window.hasAdminKey = function hasAdminKey() {
@@ -5981,6 +5983,7 @@
     window.clearAdminKey = function clearAdminKey() {
       if (typeof window === "undefined") return;
       sessionStorage.removeItem("arp_admin_key");
+      try { localStorage.removeItem("arp_admin_key"); } catch {}
     };
 
     // Share mode detection
@@ -49648,10 +49651,11 @@ Final Score: ${score}/100`;
           const normalizedSelf = normalizeDomainForStrength(self);
           const normItems = items
             .map(it => ({
-              domain: normalizeDomainForStrength(it.domain || it.root_domain || ''),
-              score: toNum(it.score),
-              band: it.band || it.label || null,
-              snapshotDate: it.snapshotDate || it.snapshot_date || null
+              domain: normalizeDomainForStrength(it.domain || it.root_domain || it.rootDomain || ''),
+              // API shape: overview items expose metrics under `latest` (but support flat fields too).
+              score: toNum(it?.latest?.score ?? it.score),
+              band: (it?.latest?.band ?? it.band ?? it.label) || null,
+              snapshotDate: it?.latest?.snapshotDate || it.snapshotDate || it.snapshot_date || null
             }))
             .filter(it => it.domain);
           const selfItem = normItems.find(it => it.domain === normalizedSelf) || null;
