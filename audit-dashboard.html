@@ -49157,6 +49157,11 @@ Final Score: ${score}/100`;
 
       function getRankFromRow(row) {
         const candidates = [
+          // Ranking & AI module uses these fields
+          row?.best_rank_group,
+          row?.best_rank_absolute,
+          row?.current_rank,
+          // Common alternatives
           row?.rank,
           row?.rank_position,
           row?.rankPosition,
@@ -49679,6 +49684,24 @@ Final Score: ${score}/100`;
         // Always show LIVE latest-available metrics (from the latest independent audits).
         // Deltas are computed against the previous global run snapshot, if present.
         const liveSnapshot = computeDashboardSnapshot();
+
+        // If admin key exists, auto-load optimisation tasks so the dashboard isn't blank.
+        // Throttle to avoid hammering the API and to avoid loops (loadAllOptimisationTasks also triggers renderDashboardTab).
+        try {
+          const hasKey = (typeof window.hasAdminKey === 'function') ? window.hasAdminKey() : false;
+          const canLoad = (typeof window.loadAllOptimisationTasks === 'function');
+          const notLoadedYet = !isOptimisationDataLoadedForDashboard();
+          const lastAutoMs = window.__dashboardAutoLoadOptimisationMs || 0;
+          const allow = Date.now() - lastAutoMs > 60 * 1000; // 60s throttle
+          if (hasKey && canLoad && notLoadedYet && allow) {
+            window.__dashboardAutoLoadOptimisationMs = Date.now();
+            setTimeout(() => {
+              try { window.loadAllOptimisationTasks(); } catch {}
+            }, 0);
+          }
+        } catch {
+          // ignore
+        }
 
         const runs = getDashboardRuns();
         const lastGlobal = runs.length ? runs[runs.length - 1] : null;
