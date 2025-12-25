@@ -48982,7 +48982,16 @@ Final Score: ${score}/100`;
 
       function isOptimisationDataLoadedForDashboard() {
         const state = window.optimisationModuleState;
-        return !!state && Array.isArray(state.allTasks);
+        // optimisationModuleState exists even before tasks are actually loaded, so avoid treating
+        // an empty default state as "loaded" (otherwise dashboard shows misleading 0s / 100%).
+        const hasKey = (typeof window.hasAdminKey === 'function') ? window.hasAdminKey() : false;
+        const hasState = !!state && Array.isArray(state.allTasks);
+        const loadedViaApi = !!state && (
+          state.dashboardTiles !== null ||
+          state.dashboardImpact !== null ||
+          state.dashboardTimeseries !== null
+        );
+        return !!hasState && !!hasKey && !state.authError && loadedViaApi;
       }
 
       function getOptimisationTasksForDashboard() {
@@ -49330,6 +49339,7 @@ Final Score: ${score}/100`;
           } : null
         } : null;
 
+        const rankingSummary = rankingStore?.summary || null;
         const rankingCard = {
           timestamp: rankingStore?.timestamp || null,
           rag: rankingFresh.rag,
@@ -49340,15 +49350,29 @@ Final Score: ${score}/100`;
             onClick: "if (typeof window.dashboardRunRankingAiScan === 'function') window.dashboardRunRankingAiScan();"
           },
           summary: {
-            tracked: rankingStore?.summary?.trackedKeywords ?? rankingRows.length ?? '—',
-            withRank: rankingStore?.summary?.rankedKeywords ?? rankingStore?.summary?.withRank ?? '—',
-            aiOverviews: rankingStore?.summary?.aiOverviewPresent ?? rankingStore?.summary?.withAiOverview ?? '—',
-            citations: rankingStore?.summary?.aiCitationsTotal ?? rankingStore?.summary?.withCitations ?? '—'
+            tracked: rankingSummary?.totalKeywords ?? rankingSummary?.total_keywords ?? rankingRows.length ?? '—',
+            withRank: rankingSummary?.keywordsWithRank ?? rankingSummary?.keywords_with_rank ?? '—',
+            aiOverviews: rankingSummary?.keywordsWithAiOverview ?? rankingSummary?.keywords_with_ai_overview ?? '—',
+            citations: rankingSummary?.keywordsWithAiCitations ?? rankingSummary?.keywords_with_ai_citations ?? '—'
           }
         };
 
         const moneyShare = computeMoneyCitationsShareFromRankingRows(rankingRows);
-        const hasMoneyPages = !!(window.moneyPagesMetrics && Array.isArray(window.moneyPagesMetrics.rows) && window.moneyPagesMetrics.rows.length);
+        const moneyMetricsFromAudit = audit?.scores?.moneyPagesMetrics || audit?.moneyPagesMetrics || null;
+        const moneyPriorityFromAudit = Array.isArray(audit?.moneyPagePriorityData) ? audit.moneyPagePriorityData : null;
+        const moneyMetrics = (moneyMetricsFromAudit && Array.isArray(moneyMetricsFromAudit.rows)) ? moneyMetricsFromAudit : window.moneyPagesMetrics;
+        const moneyPriority = moneyPriorityFromAudit || (Array.isArray(window.moneyPagePriorityData) ? window.moneyPagePriorityData : null);
+
+        // Keep globals warm so Money Pages tab can use the latest cached audit without requiring Overview tab render.
+        if (moneyMetrics && !window.moneyPagesMetrics) {
+          window.moneyPagesMetrics = moneyMetrics;
+          window.currentMoneyPagesMetrics = moneyMetrics;
+        }
+        if (moneyPriority && !window.moneyPagePriorityData) {
+          window.moneyPagePriorityData = moneyPriority;
+        }
+
+        const hasMoneyPages = !!(moneyMetrics && Array.isArray(moneyMetrics.rows) && moneyMetrics.rows.length);
         const moneyPagesCard = {
           note: hasMoneyPages
             ? (audit?.timestamp ? `Last audit: ${formatUtcTimestamp(audit.timestamp)}` : 'Loaded money pages metrics in this browser')
@@ -49361,8 +49385,8 @@ Final Score: ${score}/100`;
             onClick: "if (typeof window.dashboardRunMoneyPagesScan === 'function') window.dashboardRunMoneyPagesScan();"
           },
           counts: {
-            opportunityRows: Array.isArray(window.moneyPagesMetrics?.rows) ? window.moneyPagesMetrics.rows.length : '—',
-            priorityRows: Array.isArray(window.moneyPagePriorityData) ? window.moneyPagePriorityData.length : '—',
+            opportunityRows: Array.isArray(moneyMetrics?.rows) ? moneyMetrics.rows.length : '—',
+            priorityRows: Array.isArray(moneyPriority) ? moneyPriority.length : '—',
             moneyShare: (typeof moneyShare.money === 'number' && typeof moneyShare.total === 'number')
               ? `${moneyShare.money}/${moneyShare.total} (${moneyShare.pct ?? 0}%)`
               : '—'
@@ -49377,10 +49401,10 @@ Final Score: ${score}/100`;
           rag: optLoaded ? execRag : 'neutral',
           ragLabel: optLoaded ? (typeof metrics?.execPct === 'number' ? `Updated: ${metrics.execPct}%` : 'Unknown') : 'Not loaded',
           counts: {
-            active: tasks.filter(t => activeStatuses.includes(t.status)).length,
-            monitoring: tasks.filter(t => t.status === 'monitoring').length,
-            done: tasks.filter(t => t.status === 'done').length,
-            updated30d: (typeof metrics.execUpdated30d === 'number') ? metrics.execUpdated30d : '—'
+            active: optLoaded ? tasks.filter(t => activeStatuses.includes(t.status)).length : '—',
+            monitoring: optLoaded ? tasks.filter(t => t.status === 'monitoring').length : '—',
+            done: optLoaded ? tasks.filter(t => t.status === 'done').length : '—',
+            updated30d: (optLoaded && typeof metrics.execUpdated30d === 'number') ? metrics.execUpdated30d : '—'
           }
         };
 
