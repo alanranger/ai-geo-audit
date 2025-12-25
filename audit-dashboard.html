@@ -3930,7 +3930,7 @@
           <div class="card dashboard-dial-card">
             <div class="dashboard-dial-header">
               <div class="dashboard-dial-title">EEAT</div>
-              <div class="dashboard-dial-subtitle">Coming soon</div>
+              <div class="dashboard-dial-subtitle">Score (0–100)</div>
             </div>
             <div class="dashboard-dial-ring" id="dashboard-dial-eeat" data-pct="0">
               <div class="dashboard-dial-inner">
@@ -49377,6 +49377,80 @@ Final Score: ${score}/100`;
         return { active: activeTasks.length, updated30d: updated, pct };
       }
 
+      function computeEeatConfidence({ hasBacklinks, hasDomainStrength, hasAiCitations, hasLocalSignals }) {
+        const signals = [hasBacklinks, hasDomainStrength, hasAiCitations, hasLocalSignals].filter(Boolean).length;
+        if (signals >= 3) return 'High';
+        if (signals >= 2) return 'Medium';
+        return 'Low';
+      }
+
+      function computeEeatScore({ audit, pillars, rankingKpis, domainStrength }) {
+        const ac = audit?.scores?.authorityComponents || audit?.authorityComponents || null;
+        const behaviour = toNum(ac?.behaviour);
+        const reviews = toNum(ac?.reviews);
+
+        // Backlinks: only treat as "measured" if backlinkMetrics exist (otherwise computeBacklinkScore returns 0)
+        const hasBacklinks = !!audit?.backlinkMetrics;
+        const backlinksRaw = toNum(ac?.backlinks);
+        const backlinks = hasBacklinks ? backlinksRaw : 50;
+
+        // Local signals / NAP
+        const localSignals = audit?.localSignals || audit?.localSignalsSnapshot || null;
+        const localData = localSignals
+          ? ((localSignals.status && localSignals.status === 'ok' && localSignals.data) ? localSignals.data : (localSignals.data || localSignals))
+          : null;
+        const nap = toNum(localData?.napConsistencyScore);
+        const hasLocalSignals = nap != null || localData?.knowledgePanelDetected === true || (Array.isArray(localData?.locations) && localData.locations.length > 0);
+
+        // Core pillar scores
+        const localEntity = toNum(pillars?.localEntity);
+        const contentSchema = toNum(pillars?.contentSchema);
+        const snippet = toNum((audit?.snippetReadiness && typeof audit.snippetReadiness === 'object') ? audit.snippetReadiness.overallScore : audit?.snippetReadiness);
+
+        // Domain Strength (0–100)
+        const domainScoreRaw = toNum(domainStrength?.selfScore);
+        const hasDomainStrength = typeof domainScoreRaw === 'number';
+        const domainScore = hasDomainStrength ? clampScore(domainScoreRaw) : 50;
+
+        // AI citations signal (cap 0–100)
+        const citationsTotal = toNum(rankingKpis?.citationsTotal);
+        const hasAiCitations = typeof citationsTotal === 'number';
+        const citationsSignal = hasAiCitations ? Math.max(0, Math.min(100, citationsTotal)) : 50;
+
+        // Sub-scores (EEAT v1)
+        const safe50 = (v) => (typeof v === 'number' ? v : 50);
+        const trustNap = (typeof nap === 'number') ? clampScore(nap) : safe50(localEntity);
+        const experience = clampScore(0.5 * safe50(reviews) + 0.3 * safe50(behaviour) + 0.2 * safe50(localEntity));
+        const expertise = clampScore(0.6 * safe50(contentSchema) + 0.4 * safe50(snippet));
+        const authoritativeness = clampScore(0.5 * safe50(backlinks) + 0.3 * safe50(domainScore) + 0.2 * safe50(citationsSignal));
+        const trustworthiness = clampScore(0.6 * trustNap + 0.4 * safe50(reviews));
+
+        const eeat = clampScore(
+          0.2 * experience +
+          0.25 * expertise +
+          0.3 * authoritativeness +
+          0.25 * trustworthiness
+        );
+
+        const confidence = computeEeatConfidence({
+          hasBacklinks,
+          hasDomainStrength,
+          hasAiCitations,
+          hasLocalSignals
+        });
+
+        return {
+          score: Math.round(eeat),
+          confidence,
+          subscores: {
+            experience: Math.round(experience),
+            expertise: Math.round(expertise),
+            authoritativeness: Math.round(authoritativeness),
+            trustworthiness: Math.round(trustworthiness)
+          }
+        };
+      }
+
       function computeDashboardSnapshot() {
         const audit = dashboardSafeJsonParse(localStorage.getItem('last_audit_results'), null);
         const hasAudit = audit && audit.scores;
@@ -49421,9 +49495,19 @@ Final Score: ${score}/100`;
           || dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v2'), null)
           || dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v1'), null);
 
+        const eeat = computeEeatScore({
+          audit,
+          pillars,
+          rankingKpis,
+          domainStrength: domainCache
+        });
+
         return {
           gaioScore,
           aiSummaryScore,
+          eeatScore: eeat?.score ?? null,
+          eeatConfidence: eeat?.confidence ?? null,
+          eeatSubscores: eeat?.subscores ?? null,
           pillars,
           auditKpis,
           rankingKpis,
@@ -49927,19 +50011,32 @@ Final Score: ${score}/100`;
 
         // Dial: EEAT (placeholder)
         {
+          const v = metrics?.eeatScore ?? null;
+          const p = typeof v === 'number' ? v : null;
+          const rag = scoreToRag(p, { greenAt: 70, amberAt: 50 });
           setDial(document.getElementById('dashboard-dial-eeat'), {
-            valueText: '—',
-            pct: null,
-            rag: 'neutral',
-            deltaText: '—'
+            valueText: typeof v === 'number' ? `${v}/100` : '—',
+            pct: p,
+            rag,
+            deltaText: formatDelta(metrics?.eeatScore, prevMetrics?.eeatScore)
           });
           const host = document.getElementById('dashboard-eeat-mini');
           if (host) {
+            const c = metrics?.eeatConfidence || '—';
+            const s = metrics?.eeatSubscores || {};
+            const breakdown = `EEAT v1 (proxy) breakdown:
+Experience: ${toNum(s.experience) ?? '—'}/100
+Expertise: ${toNum(s.expertise) ?? '—'}/100
+Authoritativeness: ${toNum(s.authoritativeness) ?? '—'}/100
+Trustworthiness: ${toNum(s.trustworthiness) ?? '—'}/100
+Confidence: ${c}
+
+Signals used (where available): reviews+behaviour+local signals, content/schema+snippet readiness, backlinks+domain strength+AI citations, NAP consistency.`;
             host.innerHTML = `
-              <div class="dashboard-mini-gauge" title="EEAT is coming soon (we'll define the model + scoring).">
-                <div class="fill" style="opacity: 0.25;"></div>
+              <div class="dashboard-mini-gauge" title="${breakdown.replace(/"/g, '&quot;')}">
+                <div class="fill"></div>
               </div>
-              <div class="dashboard-mini-note">Coming soon: EEAT scoring + signals breakdown.</div>
+              <div class="dashboard-mini-note">Confidence: <strong>${c}</strong> · E ${toNum(s.experience) ?? '—'} · Ex ${toNum(s.expertise) ?? '—'} · A ${toNum(s.authoritativeness) ?? '—'} · T ${toNum(s.trustworthiness) ?? '—'}</div>
             `;
           }
         }
