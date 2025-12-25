@@ -1402,6 +1402,64 @@
       color: var(--dark-text-muted);
     }
 
+    /* Dashboard: mini visuals under dials */
+    section[data-panel="dashboard"] .dashboard-mini-gauge {
+      width: 100%;
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(148, 163, 184, 0.18);
+      overflow: hidden;
+      position: relative;
+      border: 1px solid rgba(148, 163, 184, 0.16);
+    }
+    section[data-panel="dashboard"] .dashboard-mini-gauge .fill {
+      height: 100%;
+      background: linear-gradient(90deg, rgba(239, 68, 68, 0.75), rgba(245, 158, 11, 0.85), rgba(16, 185, 129, 0.85));
+      width: 100%;
+      opacity: 0.85;
+    }
+    section[data-panel="dashboard"] .dashboard-mini-gauge .marker {
+      position: absolute;
+      top: -3px;
+      width: 2px;
+      height: 16px;
+      background: rgba(226, 232, 240, 0.95);
+      box-shadow: 0 0 0 2px rgba(15, 20, 25, 0.75);
+      border-radius: 2px;
+    }
+    section[data-panel="dashboard"] .dashboard-mini-note {
+      margin-top: 0.45rem;
+      font-size: 0.78rem;
+      color: var(--dark-text-muted);
+      font-weight: 650;
+      line-height: 1.3;
+    }
+
+    /* Dashboard: traffic-light tile content (matches Optimisation module semantics) */
+    section[data-panel="dashboard"] .dashboard-traffic-row {
+      display: flex;
+      gap: 0.45rem;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-top: 0.35rem;
+    }
+    section[data-panel="dashboard"] .dashboard-traffic-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.25rem 0.5rem;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      font-weight: 900;
+      border: 1px solid rgba(148, 163, 184, 0.20);
+      background: rgba(15, 20, 25, 0.25);
+      color: rgba(226, 232, 240, 0.95);
+      white-space: nowrap;
+    }
+    section[data-panel="dashboard"] .dashboard-traffic-pill[data-bucket="worse"] { border-color: rgba(239, 68, 68, 0.45); background: rgba(239, 68, 68, 0.12); }
+    section[data-panel="dashboard"] .dashboard-traffic-pill[data-bucket="same"] { border-color: rgba(245, 158, 11, 0.55); background: rgba(245, 158, 11, 0.14); }
+    section[data-panel="dashboard"] .dashboard-traffic-pill[data-bucket="better"] { border-color: rgba(16, 185, 129, 0.45); background: rgba(16, 185, 129, 0.12); }
+
     /* Dashboard: summary cards */
     section[data-panel="dashboard"] .dashboard-summary-card {
       position: relative;
@@ -3838,6 +3896,7 @@
                 <div class="dashboard-dial-delta" data-field="delta">—</div>
               </div>
             </div>
+            <div id="dashboard-ai-summary-mini" style="margin-top: 0.75rem;"></div>
           </div>
 
           <div class="card dashboard-dial-card">
@@ -3851,6 +3910,7 @@
                 <div class="dashboard-dial-delta" data-field="delta">—</div>
               </div>
             </div>
+            <div id="dashboard-money-share-mini" style="margin-top: 0.75rem;"></div>
           </div>
 
           <div class="card dashboard-dial-card">
@@ -3864,6 +3924,7 @@
                 <div class="dashboard-dial-delta" data-field="delta">—</div>
               </div>
             </div>
+            <div id="dashboard-uplift-mini" style="margin-top: 0.75rem;"></div>
           </div>
 
           <div class="card dashboard-dial-card">
@@ -3877,6 +3938,7 @@
                 <div class="dashboard-dial-delta" data-field="delta">—</div>
               </div>
             </div>
+            <div id="dashboard-eeat-mini" style="margin-top: 0.75rem;"></div>
           </div>
         </div>
 
@@ -49354,7 +49416,8 @@ Final Score: ${score}/100`;
           optimisationPotentialClicks = Math.round(sum);
         }
 
-        const domainCache = dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v1'), null);
+        const domainCache = dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v2'), null)
+          || dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v1'), null);
 
         return {
           gaioScore,
@@ -49433,16 +49496,34 @@ Final Score: ${score}/100`;
           </span>
         `;
 
-        const tile = (label, value, deltaText, dir = 'flat') => `
-          <div class="dashboard-kpi-tile">
+        const tile = (label, value, deltaText, dir = 'flat', title = '') => `
+          <div class="dashboard-kpi-tile" title="${title || ''}">
             <div class="dashboard-kpi-label">${label}</div>
             <div class="dashboard-kpi-value">${value}</div>
             ${deltaText ? `<div class="dashboard-kpi-delta" data-dir="${dir}">${deltaText}</div>` : ''}
           </div>
         `;
 
+        const trafficTile = (label, counts, title = '') => {
+          const c = counts || {};
+          const w = (typeof c.worse === 'number') ? c.worse : '—';
+          const s = (typeof c.same === 'number') ? c.same : '—';
+          const b = (typeof c.better === 'number') ? c.better : '—';
+          return `
+            <div class="dashboard-kpi-tile" title="${title || ''}">
+              <div class="dashboard-kpi-label">${label}</div>
+              <div class="dashboard-kpi-value" style="font-size: 1rem; font-weight: 900;">W/S/B</div>
+              <div class="dashboard-traffic-row">
+                <span class="dashboard-traffic-pill" data-bucket="worse">${w} Worse</span>
+                <span class="dashboard-traffic-pill" data-bucket="same">${s} Same</span>
+                <span class="dashboard-traffic-pill" data-bucket="better">${b} Better</span>
+              </div>
+            </div>
+          `;
+        };
+
         grid.innerHTML = `
-          <div class="card dashboard-summary-card" data-rag="${audit?.rag || 'neutral'}">
+          <div class="card dashboard-summary-card" data-rag="${audit?.rag || 'neutral'}" title="Audit Scan: latest GSC clicks/impressions/avg position/CTR for the whole site. Deltas compare vs the previous global run.">
             <div class="dashboard-summary-header">
               <div>
                 <div class="dashboard-summary-title">📊 Audit Scan</div>
@@ -49454,14 +49535,14 @@ Final Score: ${score}/100`;
               </div>
             </div>
             <div class="dashboard-kpi-grid">
-              ${tile('Clicks (28d)', audit?.kpis?.clicks ?? '—', audit?.deltas?.clicks ?? '', audit?.dirs?.clicks ?? 'flat')}
-              ${tile('Impressions (28d)', audit?.kpis?.impressions ?? '—', audit?.deltas?.impressions ?? '', audit?.dirs?.impressions ?? 'flat')}
-              ${tile('Avg position', audit?.kpis?.avgPosition ?? '—', audit?.deltas?.avgPosition ?? '', audit?.dirs?.avgPosition ?? 'flat')}
-              ${tile('CTR', audit?.kpis?.ctr ?? '—', audit?.deltas?.ctr ?? '', audit?.dirs?.ctr ?? 'flat')}
+              ${tile('Clicks (28d)', audit?.kpis?.clicks ?? '—', audit?.deltas?.clicks ?? '', audit?.dirs?.clicks ?? 'flat', 'Total Google Search Console clicks over the last 28 days.')}
+              ${tile('Impressions (28d)', audit?.kpis?.impressions ?? '—', audit?.deltas?.impressions ?? '', audit?.dirs?.impressions ?? 'flat', 'Total Google Search Console impressions over the last 28 days.')}
+              ${tile('Avg position', audit?.kpis?.avgPosition ?? '—', audit?.deltas?.avgPosition ?? '', audit?.dirs?.avgPosition ?? 'flat', 'Average Search Console position (lower is better).')}
+              ${tile('CTR', audit?.kpis?.ctr ?? '—', audit?.deltas?.ctr ?? '', audit?.dirs?.ctr ?? 'flat', 'Clicks ÷ impressions (last 28 days).')}
             </div>
           </div>
 
-          <div class="card dashboard-summary-card" data-rag="${ranking?.rag || 'neutral'}">
+          <div class="card dashboard-summary-card" data-rag="${ranking?.rag || 'neutral'}" title="Ranking & AI: top-3/top-10 share plus AI citations signals from the latest keyword scan.">
             <div class="dashboard-summary-header">
               <div>
                 <div class="dashboard-summary-title">🔍 Ranking & AI</div>
@@ -49474,14 +49555,14 @@ Final Score: ${score}/100`;
               </div>
             </div>
             <div class="dashboard-kpi-grid">
-              ${tile('Top 3 share', ranking?.kpis?.top3Share ?? '—', ranking?.deltas?.top3Share ?? '', ranking?.dirs?.top3Share ?? 'flat')}
-              ${tile('Top 10 share', ranking?.kpis?.top10Share ?? '—', ranking?.deltas?.top10Share ?? '', ranking?.dirs?.top10Share ?? 'flat')}
-              ${tile('AI citations', ranking?.kpis?.citations ?? '—', ranking?.deltas?.citations ?? '', ranking?.dirs?.citations ?? 'flat')}
-              ${tile('Money share', ranking?.kpis?.moneyShare ?? '—', ranking?.deltas?.moneyShare ?? '', ranking?.dirs?.moneyShare ?? 'flat')}
+              ${tile('Top 3 share', ranking?.kpis?.top3Share ?? '—', ranking?.deltas?.top3Share ?? '', ranking?.dirs?.top3Share ?? 'flat', 'Share of ranked tracked keywords currently in positions 1–3.')}
+              ${tile('Top 10 share', ranking?.kpis?.top10Share ?? '—', ranking?.deltas?.top10Share ?? '', ranking?.dirs?.top10Share ?? 'flat', 'Share of ranked tracked keywords currently in positions 1–10.')}
+              ${tile('AI citations', ranking?.kpis?.citations ?? '—', ranking?.deltas?.citations ?? '', ranking?.dirs?.citations ?? 'flat', 'Total AI citations found across tracked keywords in the latest scan.')}
+              ${tile('Money share', ranking?.kpis?.moneyShare ?? '—', ranking?.deltas?.moneyShare ?? '', ranking?.dirs?.moneyShare ?? 'flat', 'Percent of AI citations that land on Money Pages.')}
             </div>
           </div>
 
-          <div class="card dashboard-summary-card" data-rag="${moneyPages?.rag || 'neutral'}">
+          <div class="card dashboard-summary-card" data-rag="${moneyPages?.rag || 'neutral'}" title="Money Pages: business-impact metrics for your Money Pages segment (last 28 days) and the CTR-gap uplift estimate.">
             <div class="dashboard-summary-header">
               <div>
                 <div class="dashboard-summary-title">💰 Money Pages</div>
@@ -49494,14 +49575,14 @@ Final Score: ${score}/100`;
               </div>
             </div>
             <div class="dashboard-kpi-grid">
-              ${tile('Money clicks (28d)', moneyPages?.kpis?.clicks ?? '—', moneyPages?.deltas?.clicks ?? '', moneyPages?.dirs?.clicks ?? 'flat')}
-              ${tile('Money CTR', moneyPages?.kpis?.ctr ?? '—', moneyPages?.deltas?.ctr ?? '', moneyPages?.dirs?.ctr ?? 'flat')}
-              ${tile('Money avg pos', moneyPages?.kpis?.avgPosition ?? '—', moneyPages?.deltas?.avgPosition ?? '', moneyPages?.dirs?.avgPosition ?? 'flat')}
-              ${tile('Uplift remaining', moneyPages?.kpis?.uplift ?? '—', moneyPages?.deltas?.uplift ?? '', moneyPages?.dirs?.uplift ?? 'flat')}
+              ${tile('Money clicks (28d)', moneyPages?.kpis?.clicks ?? '—', moneyPages?.deltas?.clicks ?? '', moneyPages?.dirs?.clicks ?? 'flat', 'Total clicks to Money Pages over the last 28 days.')}
+              ${tile('Money CTR', moneyPages?.kpis?.ctr ?? '—', moneyPages?.deltas?.ctr ?? '', moneyPages?.dirs?.ctr ?? 'flat', 'CTR across Money Pages (last 28 days).')}
+              ${tile('Money avg pos', moneyPages?.kpis?.avgPosition ?? '—', moneyPages?.deltas?.avgPosition ?? '', moneyPages?.dirs?.avgPosition ?? 'flat', 'Average position across Money Pages (lower is better).')}
+              ${tile('Uplift remaining', moneyPages?.kpis?.uplift ?? '—', moneyPages?.deltas?.uplift ?? '', moneyPages?.dirs?.uplift ?? 'flat', 'Estimated extra clicks available if Money Pages CTR reaches the target.')}
             </div>
           </div>
 
-          <div class="card dashboard-summary-card" data-rag="${optimisation?.rag || 'neutral'}">
+          <div class="card dashboard-summary-card" data-rag="${optimisation?.rag || 'neutral'}" title="Optimisation: live task movement using the Optimisation module traffic-light logic (worse/same/better) plus remaining uplift.">
             <div class="dashboard-summary-header">
               <div>
                 <div class="dashboard-summary-title">✅ Optimisation</div>
@@ -49513,14 +49594,14 @@ Final Score: ${score}/100`;
               </div>
             </div>
             <div class="dashboard-kpi-grid">
-              ${tile('Potential uplift (28d)', optimisation?.kpis?.potential ?? '—', optimisation?.deltas?.potential ?? '', optimisation?.dirs?.potential ?? 'flat')}
-              ${tile('Updated (30d)', optimisation?.kpis?.updated ?? '—', optimisation?.deltas?.updated ?? '', optimisation?.dirs?.updated ?? 'flat')}
-              ${tile('Status', optimisation?.kpis?.status ?? '—', '', 'flat')}
-              ${tile('Next action', optimisation?.kpis?.nextAction ?? 'Open tasks', '', 'flat')}
+              ${tile('Potential uplift (28d)', optimisation?.kpis?.potential ?? '—', optimisation?.deltas?.potential ?? '', optimisation?.dirs?.potential ?? 'flat', 'Sum of estimated extra clicks (28d) across active optimisation tasks (CTR gap logic).')}
+              ${trafficTile('Tasks (All metrics)', optimisation?.kpis?.trafficAll ?? null, 'Worse/Same/Better for active tasks (majority outcome across their objective KPI).')}
+              ${trafficTile('CTR', optimisation?.kpis?.trafficCtr ?? null, 'Worse/Same/Better for tasks whose objective KPI is CTR (28d).')}
+              ${trafficTile('AI citations', optimisation?.kpis?.trafficCitations ?? null, 'Worse/Same/Better for tasks whose objective KPI is AI citations.')}
             </div>
           </div>
 
-          <div class="card dashboard-summary-card" data-rag="${domainStrength?.rag || 'neutral'}">
+          <div class="card dashboard-summary-card" data-rag="${domainStrength?.rag || 'neutral'}" title="Domain Strength: your latest monthly score and the gap vs the strongest competitor in the snapshot set.">
             <div class="dashboard-summary-header">
               <div>
                 <div class="dashboard-summary-title">📈 Domain Strength</div>
@@ -49533,10 +49614,10 @@ Final Score: ${score}/100`;
               </div>
             </div>
             <div class="dashboard-kpi-grid">
-              ${tile('Your score', domainStrength?.kpis?.selfScore ?? '—', domainStrength?.deltas?.selfScore ?? '', domainStrength?.dirs?.selfScore ?? 'flat')}
-              ${tile('Gap to top', domainStrength?.kpis?.gapTop ?? '—', domainStrength?.deltas?.gapTop ?? '', domainStrength?.dirs?.gapTop ?? 'flat')}
-              ${tile('# stronger domains', domainStrength?.kpis?.stronger ?? '—', domainStrength?.deltas?.stronger ?? '', domainStrength?.dirs?.stronger ?? 'flat')}
-              ${tile('Snapshot date', domainStrength?.kpis?.snapshotDate ?? '—', '', 'flat')}
+              ${tile('Your score', domainStrength?.kpis?.selfScore ?? '—', domainStrength?.deltas?.selfScore ?? '', domainStrength?.dirs?.selfScore ?? 'flat', 'Your domain strength score (0–100).')}
+              ${tile('Gap to top', domainStrength?.kpis?.gapTop ?? '—', domainStrength?.deltas?.gapTop ?? '', domainStrength?.dirs?.gapTop ?? 'flat', 'Difference between the strongest competitor score and your score (lower is better).')}
+              ${tile('# stronger domains', domainStrength?.kpis?.stronger ?? '—', domainStrength?.deltas?.stronger ?? '', domainStrength?.dirs?.stronger ?? 'flat', 'How many competitors in the snapshot set have a higher score than you.')}
+              ${tile('Snapshot date', domainStrength?.kpis?.snapshotDate ?? '—', '', 'flat', 'Date of the snapshot used for this tile.')}
             </div>
           </div>
         `;
@@ -49637,9 +49718,20 @@ Final Score: ${score}/100`;
 
       async function refreshDashboardDomainStrengthCacheIfNeeded() {
         const now = Date.now();
-        const cache = dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v1'), null);
+        // v2: cache key bump to avoid "fresh-but-null" caches created by older parsers
+        const cacheV2 = dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v2'), null);
+        const cacheV1 = dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v1'), null);
+        const cache = cacheV2 || cacheV1 || null;
         const lastMs = cache?.fetchedAtMs ? Number(cache.fetchedAtMs) : 0;
-        const stale = !lastMs || (now - lastMs) > (6 * 60 * 60 * 1000); // 6 hours
+        const hasUsefulValues = (() => {
+          const selfScore = toNum(cache?.selfScore);
+          const topScore = toNum(cache?.topCompetitorScore);
+          const stronger = toNum(cache?.strongerCount);
+          const snapshotDate = cache?.snapshotDate || null;
+          // Treat null-valued caches as stale (common when older code wrote "fresh" cache with nulls).
+          return (typeof selfScore === 'number' || typeof topScore === 'number' || typeof stronger === 'number') && !!snapshotDate;
+        })();
+        const stale = !lastMs || (now - lastMs) > (6 * 60 * 60 * 1000) || !hasUsefulValues; // 6 hours
         if (!stale) return { cache, updated: false };
         if (window.__dashboardDomainStrengthRefreshing) return { cache, updated: false };
         window.__dashboardDomainStrengthRefreshing = true;
@@ -49675,7 +49767,7 @@ Final Score: ${score}/100`;
             topCompetitorScore,
             strongerCount
           };
-          localStorage.setItem('dashboard_domain_strength_cache_v1', JSON.stringify(next));
+          localStorage.setItem('dashboard_domain_strength_cache_v2', JSON.stringify(next));
           return { cache: next, updated: true };
         } catch {
           return { cache, updated: false };
@@ -49744,6 +49836,17 @@ Final Score: ${score}/100`;
             rag,
             deltaText: formatDelta(metrics?.aiSummaryScore, prevMetrics?.aiSummaryScore)
           });
+          const host = document.getElementById('dashboard-ai-summary-mini');
+          if (host) {
+            const markerLeft = (typeof p === 'number') ? Math.max(0, Math.min(100, Math.round(p))) : null;
+            host.innerHTML = `
+              <div class="dashboard-mini-gauge" title="Quick view of where the score sits on the 0–100 scale (red→amber→green).">
+                <div class="fill"></div>
+                ${markerLeft == null ? '' : `<div class="marker" style="left: calc(${markerLeft}% - 1px);"></div>`}
+              </div>
+              <div class="dashboard-mini-note">Higher = more likely AI systems summarise your brand pages confidently.</div>
+            `;
+          }
         }
 
         // Dial: Money share
@@ -49761,6 +49864,20 @@ Final Score: ${score}/100`;
             rag,
             deltaText: formatDelta(metrics?.moneySharePct, prevMetrics?.moneySharePct)
           });
+          const host = document.getElementById('dashboard-money-share-mini');
+          if (host) {
+            const m = (typeof money === 'number') ? money : null;
+            const t = (typeof total === 'number') ? total : null;
+            const share = (m != null && t != null && t > 0) ? Math.max(0, Math.min(1, m / t)) : null;
+            const leftPct = (share == null) ? null : Math.round(share * 100);
+            host.innerHTML = `
+              <div class="dashboard-mini-gauge" title="Stacked view: money-page citations share (marker shows percent).">
+                <div class="fill" style="background: linear-gradient(90deg, rgba(16,185,129,0.85), rgba(245,158,11,0.85), rgba(239,68,68,0.75));"></div>
+                ${leftPct == null ? '' : `<div class="marker" style="left: calc(${leftPct}% - 1px);"></div>`}
+              </div>
+              <div class="dashboard-mini-note">Goal: move citations toward Money Pages (commercial intent).</div>
+            `;
+          }
         }
 
         // Dial: Uplift remaining (Money Pages CTR target)
@@ -49783,6 +49900,17 @@ Final Score: ${score}/100`;
             rag,
             deltaText: (typeof extra === 'number' && typeof prevExtra === 'number') ? deltaText : '—'
           });
+          const host = document.getElementById('dashboard-uplift-mini');
+          if (host) {
+            const markerLeft = (typeof progressPct === 'number') ? Math.max(0, Math.min(100, Math.round(progressPct))) : null;
+            host.innerHTML = `
+              <div class="dashboard-mini-gauge" title="Progress toward the Money Pages CTR target. Marker = current CTR vs target.">
+                <div class="fill"></div>
+                ${markerLeft == null ? '' : `<div class="marker" style="left: calc(${markerLeft}% - 1px);"></div>`}
+              </div>
+              <div class="dashboard-mini-note">Based on CTR gap: current ${typeof currCtr === 'number' ? formatPct(currCtr, 1) : '—'} vs target ${targetCtr}%.</div>
+            `;
+          }
         }
 
         // Dial: EEAT (placeholder)
@@ -49793,6 +49921,15 @@ Final Score: ${score}/100`;
             rag: 'neutral',
             deltaText: '—'
           });
+          const host = document.getElementById('dashboard-eeat-mini');
+          if (host) {
+            host.innerHTML = `
+              <div class="dashboard-mini-gauge" title="EEAT is coming soon (we'll define the model + scoring).">
+                <div class="fill" style="opacity: 0.25;"></div>
+              </div>
+              <div class="dashboard-mini-note">Coming soon: EEAT scoring + signals breakdown.</div>
+            `;
+          }
         }
 
         // Summary cards (use latest available data from localStorage/window)
@@ -49907,15 +50044,19 @@ Final Score: ${score}/100`;
         const optLoaded = isOptimisationDataLoadedForDashboard();
         const optPotential = metrics?.optimisationPotentialClicks ?? null;
         const prevOptPotential = prevMetrics?.optimisationPotentialClicks ?? null;
+        const optScope = window.optimisationModuleState?.scope || 'active_cycle';
+        const trafficCounts = (optLoaded && typeof computeTrafficLightCounts === 'function')
+          ? computeTrafficLightCounts(getOptimisationTasksForDashboard(), optScope)
+          : null;
         const optCard = {
           note: optLoaded ? 'Uses optimisation tasks loaded in this browser session (admin key required)' : 'Not loaded (set admin key + open Optimisation tab or run global run)',
           rag: optLoaded ? scoreToRag((toNum(metrics?.execPct) ?? null), { greenAt: 70, amberAt: 50 }) : 'neutral',
           ragLabel: optLoaded ? (typeof metrics?.execPct === 'number' ? `Updated (30d): ${metrics.execPct}%` : 'Loaded') : 'Not loaded',
           kpis: {
             potential: (typeof optPotential === 'number') ? `+${formatInt(optPotential)}` : '—',
-            updated: (optLoaded && typeof metrics?.execPct === 'number') ? formatPct(metrics.execPct, 0) : '—',
-            status: optLoaded ? 'Loaded' : 'Not loaded',
-            nextAction: optLoaded ? 'Run bulk update when ready' : 'Set admin key'
+            trafficAll: trafficCounts?.all_metrics || null,
+            trafficCtr: trafficCounts?.ctr_28d || null,
+            trafficCitations: trafficCounts?.ai_citations || null
           },
           deltas: {
             potential: (typeof optPotential === 'number' && typeof prevOptPotential === 'number') ? formatDeltaNumber(optPotential, prevOptPotential, { decimals: 0, betterLower: true }) : '',
