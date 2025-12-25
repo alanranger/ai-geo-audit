@@ -1462,6 +1462,9 @@
     section[data-panel="dashboard"] .dashboard-rag-pill[data-rag="green"] { border-color: rgba(16,185,129,0.45); }
     section[data-panel="dashboard"] .dashboard-rag-pill[data-rag="amber"] { border-color: rgba(245,158,11,0.55); }
     section[data-panel="dashboard"] .dashboard-rag-pill[data-rag="red"] { border-color: rgba(239,68,68,0.55); }
+    section[data-panel="dashboard"] .dashboard-rag-pill[data-rag="green"] { background: rgba(16,185,129,0.12); }
+    section[data-panel="dashboard"] .dashboard-rag-pill[data-rag="amber"] { background: rgba(245,158,11,0.14); }
+    section[data-panel="dashboard"] .dashboard-rag-pill[data-rag="red"] { background: rgba(239,68,68,0.14); }
 
     section[data-panel="dashboard"] .dashboard-kpi-grid {
       display: grid;
@@ -1490,6 +1493,57 @@
       font-size: 1.25rem;
       font-weight: 900;
       letter-spacing: -0.02em;
+    }
+
+    section[data-panel="dashboard"] .dashboard-kpi-delta {
+      margin-top: 0.1rem;
+      font-size: 0.85rem;
+      font-weight: 900;
+      letter-spacing: -0.01em;
+    }
+    section[data-panel="dashboard"] .dashboard-kpi-delta[data-dir="up"] { color: #10b981; }
+    section[data-panel="dashboard"] .dashboard-kpi-delta[data-dir="down"] { color: #ef4444; }
+    section[data-panel="dashboard"] .dashboard-kpi-delta[data-dir="flat"] { color: rgba(148, 163, 184, 0.95); }
+
+    section[data-panel="dashboard"] .dashboard-pillar-strip {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 0.45rem;
+    }
+    section[data-panel="dashboard"] .dashboard-pillar-row {
+      display: grid;
+      grid-template-columns: 132px 1fr 44px;
+      gap: 0.6rem;
+      align-items: center;
+      font-size: 0.85rem;
+    }
+    section[data-panel="dashboard"] .dashboard-pillar-label {
+      color: rgba(226, 232, 240, 0.92);
+      font-weight: 900;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    section[data-panel="dashboard"] .dashboard-pillar-bar {
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(148, 163, 184, 0.22);
+      overflow: hidden;
+      position: relative;
+      box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.10);
+    }
+    section[data-panel="dashboard"] .dashboard-pillar-bar > span {
+      display: block;
+      height: 100%;
+      width: 0%;
+      border-radius: 999px;
+      background: rgba(148, 163, 184, 0.55);
+      transition: width 0.25s ease;
+    }
+    section[data-panel="dashboard"] .dashboard-pillar-score {
+      font-weight: 900;
+      text-align: right;
+      color: rgba(226, 232, 240, 0.95);
     }
     
     /* Optimisation module tiles - dark theme with green centered counts and orange hover animation */
@@ -3737,6 +3791,10 @@
                 <div class="dashboard-dial-delta" data-field="delta">—</div>
               </div>
             </div>
+            <div id="dashboard-gaio-pillars" style="margin-top: 0.75rem;"></div>
+            <div style="margin-top: 0.75rem;">
+              <canvas id="dashboard-gaio-radar" width="340" height="200" style="width: 100%; height: 200px;"></canvas>
+            </div>
           </div>
 
           <div class="card dashboard-dial-card">
@@ -3767,10 +3825,23 @@
 
           <div class="card dashboard-dial-card">
             <div class="dashboard-dial-header">
-              <div class="dashboard-dial-title">Execution</div>
-              <div class="dashboard-dial-subtitle">Active tasks updated (30d)</div>
+              <div class="dashboard-dial-title">Uplift Remaining</div>
+              <div class="dashboard-dial-subtitle">Estimated extra clicks (28d)</div>
             </div>
-            <div class="dashboard-dial-ring" id="dashboard-dial-execution" data-pct="0">
+            <div class="dashboard-dial-ring" id="dashboard-dial-uplift" data-pct="0">
+              <div class="dashboard-dial-inner">
+                <div class="dashboard-dial-value" data-field="value">—</div>
+                <div class="dashboard-dial-delta" data-field="delta">—</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card dashboard-dial-card">
+            <div class="dashboard-dial-header">
+              <div class="dashboard-dial-title">EEAT</div>
+              <div class="dashboard-dial-subtitle">Coming soon</div>
+            </div>
+            <div class="dashboard-dial-ring" id="dashboard-dial-eeat" data-pct="0">
               <div class="dashboard-dial-inner">
                 <div class="dashboard-dial-value" data-field="value">—</div>
                 <div class="dashboard-dial-delta" data-field="delta">—</div>
@@ -48980,6 +49051,170 @@ Final Score: ${score}/100`;
         return { money, total, pct };
       }
 
+      function toNum(v) {
+        const n = typeof v === 'number' ? v : (v == null ? NaN : Number(v));
+        return Number.isFinite(n) ? n : null;
+      }
+
+      function safeDiv(a, b) {
+        const na = toNum(a);
+        const nb = toNum(b);
+        if (na == null || nb == null || nb === 0) return null;
+        return na / nb;
+      }
+
+      function formatInt(v) {
+        const n = toNum(v);
+        if (n == null) return '—';
+        return Math.round(n).toLocaleString();
+      }
+
+      function formatFixed(v, decimals = 1) {
+        const n = toNum(v);
+        if (n == null) return '—';
+        return n.toFixed(decimals);
+      }
+
+      function formatPct(v, decimals = 1) {
+        const n = toNum(v);
+        if (n == null) return '—';
+        return `${n.toFixed(decimals)}%`;
+      }
+
+      function deltaDir(curr, prev, { betterLower = false } = {}) {
+        const c = toNum(curr);
+        const p = toNum(prev);
+        if (c == null || p == null) return 'flat';
+        if (c === p) return 'flat';
+        // If lower is better (e.g., avg position), then a decrease is "up" (good).
+        if (betterLower) return (c < p) ? 'up' : 'down';
+        return (c > p) ? 'up' : 'down';
+      }
+
+      function formatDeltaNumber(curr, prev, { decimals = 0, betterLower = false, pp = false } = {}) {
+        const c = toNum(curr);
+        const p = toNum(prev);
+        if (c == null || p == null) return '—';
+        const raw = betterLower ? (p - c) : (c - p);
+        const d = Number.isFinite(raw) ? raw : 0;
+        const sign = d > 0 ? '+' : '';
+        const base = decimals > 0 ? d.toFixed(decimals) : String(Math.round(d));
+        return pp ? `${sign}${base}pp` : `${sign}${base}`;
+      }
+
+      function computePillarScoresFromAudit(audit) {
+        const scores = audit?.scores || null;
+        if (!scores) return null;
+        return {
+          authority: toNum(scores.authority?.score ?? scores.authority) ?? null,
+          contentSchema: toNum(scores.contentSchema) ?? null,
+          visibility: toNum(scores.visibility) ?? null,
+          localEntity: toNum(scores.localEntity) ?? null,
+          serviceArea: toNum(scores.serviceArea) ?? null,
+        };
+      }
+
+      function computeAuditKpisFromAudit(audit) {
+        const sd = audit?.searchData || null;
+        if (!sd) return null;
+        return {
+          clicks: toNum(sd.totalClicks) ?? 0,
+          impressions: toNum(sd.totalImpressions) ?? 0,
+          avgPosition: toNum(sd.averagePosition),
+          ctrPct: toNum(sd.ctr),
+        };
+      }
+
+      function getRankFromRow(row) {
+        const candidates = [
+          row?.rank,
+          row?.rank_position,
+          row?.rankPosition,
+          row?.position,
+          row?.avgPosition,
+          row?.gsc_avg_position,
+        ];
+        for (const v of candidates) {
+          const n = toNum(v);
+          if (n != null && n > 0) return n;
+        }
+        return null;
+      }
+
+      function computeRankingKpisFromRows(rows) {
+        const list = Array.isArray(rows) ? rows : [];
+        let ranked = 0;
+        let top3 = 0;
+        let top10 = 0;
+        let citationsTotal = 0;
+        let aiOverviews = 0;
+        for (const r of list) {
+          const rank = getRankFromRow(r);
+          if (rank != null) {
+            ranked += 1;
+            if (rank <= 3) top3 += 1;
+            if (rank <= 10) top10 += 1;
+          }
+          const cit = toNum(r?.ai_alan_citations_count ?? r?.aiAlanCitationsCount);
+          if (cit != null) citationsTotal += cit;
+          const hasAio = (r?.ai_overview_present_any ?? r?.aiOverviewPresentAny ?? r?.has_ai_overview ?? r?.hasAiOverview);
+          if (hasAio === true) aiOverviews += 1;
+        }
+        const top3SharePct = ranked > 0 ? Math.round((top3 / ranked) * 100) : null;
+        const top10SharePct = ranked > 0 ? Math.round((top10 / ranked) * 100) : null;
+        return { ranked, top3SharePct, top10SharePct, citationsTotal, aiOverviews };
+      }
+
+      function computeMoneyPagesAggregateFromMetrics(moneyMetrics) {
+        const rows = moneyMetrics?.rows;
+        if (!Array.isArray(rows) || rows.length === 0) return null;
+        let clicks = 0;
+        let impressions = 0;
+        let weightedPosImps = 0;
+        for (const r of rows) {
+          const c = toNum(r?.clicks) ?? 0;
+          const i = toNum(r?.impressions) ?? 0;
+          const p = toNum(r?.avgPosition ?? r?.position);
+          clicks += c;
+          impressions += i;
+          if (p != null && i > 0) weightedPosImps += (p * i);
+        }
+        const ctrPct = impressions > 0 ? (clicks / impressions) * 100 : null;
+        const avgPosition = (impressions > 0 && weightedPosImps > 0) ? (weightedPosImps / impressions) : null;
+
+        // CTR targets (provide both so you can choose later)
+        const targetCtrAbsPct = 2.5; // absolute
+        const targetCtrPlusPp = (ctrPct != null) ? (ctrPct + 0.3) : null; // +0.3pp
+
+        const extraClicksAbs = (ctrPct != null && impressions > 0)
+          ? Math.max(0, Math.round((impressions * (targetCtrAbsPct / 100)) - clicks))
+          : null;
+        const extraClicksPlus = (targetCtrPlusPp != null && impressions > 0)
+          ? Math.max(0, Math.round((impressions * (targetCtrPlusPp / 100)) - clicks))
+          : null;
+
+        // Position targets (also provide two)
+        const targetPosAbs = 10;
+        const targetPosMinus2 = (avgPosition != null) ? Math.max(1, avgPosition - 2) : null;
+
+        return {
+          clicks,
+          impressions,
+          ctrPct,
+          avgPosition,
+          targets: {
+            ctrAbsPct: targetCtrAbsPct,
+            ctrPlusPp: targetCtrPlusPp,
+            posAbs: targetPosAbs,
+            posMinus2: targetPosMinus2
+          },
+          uplift: {
+            extraClicksAbs,
+            extraClicksPlus
+          }
+        };
+      }
+
       function isOptimisationDataLoadedForDashboard() {
         const state = window.optimisationModuleState;
         // optimisationModuleState exists even before tasks are actually loaded, so avoid treating
@@ -49056,19 +49291,48 @@ Final Score: ${score}/100`;
 
         const rankingRows = getRankingAiRowsFromStorage();
         const moneyShare = computeMoneyCitationsShareFromRankingRows(rankingRows);
+        const rankingKpis = computeRankingKpisFromRows(rankingRows);
+
+        const pillars = computePillarScoresFromAudit(audit);
+        const auditKpis = computeAuditKpisFromAudit(audit);
+
+        const moneyMetricsFromAudit = audit?.scores?.moneyPagesMetrics || audit?.moneyPagesMetrics || null;
+        const moneyAgg = computeMoneyPagesAggregateFromMetrics(moneyMetricsFromAudit);
 
         const tasks = getOptimisationTasksForDashboard();
         const exec = computeExecutionFromTasks(tasks, isOptimisationDataLoadedForDashboard());
 
+        const optLoaded = isOptimisationDataLoadedForDashboard();
+        const estimateFn = (typeof window.computeEstimatedExtraClicks28d === 'function') ? window.computeEstimatedExtraClicks28d : null;
+        let optimisationPotentialClicks = null;
+        if (optLoaded && estimateFn) {
+          const activeStatuses = ['planned', 'in_progress', 'monitoring'];
+          let sum = 0;
+          for (const t of tasks) {
+            if (!activeStatuses.includes(t.status)) continue;
+            const v = toNum(estimateFn(t));
+            if (v != null) sum += v;
+          }
+          optimisationPotentialClicks = Math.round(sum);
+        }
+
+        const domainCache = dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v1'), null);
+
         return {
           gaioScore,
           aiSummaryScore,
+          pillars,
+          auditKpis,
+          rankingKpis,
           moneyCitations: moneyShare.money,
           totalCitations: moneyShare.total,
           moneySharePct: moneyShare.pct,
+          moneyAgg,
           execActive: exec.active,
           execUpdated30d: exec.updated30d,
-          execPct: exec.pct
+          execPct: exec.pct,
+          optimisationPotentialClicks,
+          domainStrength: domainCache
         };
       }
 
@@ -49087,7 +49351,8 @@ Final Score: ${score}/100`;
         if (typeof curr !== 'number' || typeof prev !== 'number') return '—';
         const d = curr - prev;
         if (d === 0) return '0';
-        return `${d > 0 ? '+' : ''}${d}`;
+        const sign = d > 0 ? '+' : '';
+        return `${sign}${Math.round(d)}`;
       }
 
       function computeFreshnessBadge(timestampIso, { warnDays = 3, staleDays = 7 } = {}) {
@@ -49130,10 +49395,11 @@ Final Score: ${score}/100`;
           </span>
         `;
 
-        const tile = (label, value) => `
+        const tile = (label, value, deltaText, dir = 'flat') => `
           <div class="dashboard-kpi-tile">
             <div class="dashboard-kpi-label">${label}</div>
             <div class="dashboard-kpi-value">${value}</div>
+            ${deltaText ? `<div class="dashboard-kpi-delta" data-dir="${dir}">${deltaText}</div>` : ''}
           </div>
         `;
 
@@ -49150,10 +49416,10 @@ Final Score: ${score}/100`;
               </div>
             </div>
             <div class="dashboard-kpi-grid">
-              ${tile('Clicks (28d)', audit?.kpis?.clicks ?? '—')}
-              ${tile('Impressions (28d)', audit?.kpis?.impressions ?? '—')}
-              ${tile('Avg position', audit?.kpis?.avgPosition ?? '—')}
-              ${tile('CTR', audit?.kpis?.ctr ?? '—')}
+              ${tile('Clicks (28d)', audit?.kpis?.clicks ?? '—', audit?.deltas?.clicks ?? '', audit?.dirs?.clicks ?? 'flat')}
+              ${tile('Impressions (28d)', audit?.kpis?.impressions ?? '—', audit?.deltas?.impressions ?? '', audit?.dirs?.impressions ?? 'flat')}
+              ${tile('Avg position', audit?.kpis?.avgPosition ?? '—', audit?.deltas?.avgPosition ?? '', audit?.dirs?.avgPosition ?? 'flat')}
+              ${tile('CTR', audit?.kpis?.ctr ?? '—', audit?.deltas?.ctr ?? '', audit?.dirs?.ctr ?? 'flat')}
             </div>
           </div>
 
@@ -49170,10 +49436,10 @@ Final Score: ${score}/100`;
               </div>
             </div>
             <div class="dashboard-kpi-grid">
-              ${tile('Tracked keywords', ranking?.summary?.tracked ?? '—')}
-              ${tile('With rankings', ranking?.summary?.withRank ?? '—')}
-              ${tile('AI Overviews', ranking?.summary?.aiOverviews ?? '—')}
-              ${tile('AI citations', ranking?.summary?.citations ?? '—')}
+              ${tile('Top 3 share', ranking?.kpis?.top3Share ?? '—', ranking?.deltas?.top3Share ?? '', ranking?.dirs?.top3Share ?? 'flat')}
+              ${tile('Top 10 share', ranking?.kpis?.top10Share ?? '—', ranking?.deltas?.top10Share ?? '', ranking?.dirs?.top10Share ?? 'flat')}
+              ${tile('AI citations', ranking?.kpis?.citations ?? '—', ranking?.deltas?.citations ?? '', ranking?.dirs?.citations ?? 'flat')}
+              ${tile('Money share', ranking?.kpis?.moneyShare ?? '—', ranking?.deltas?.moneyShare ?? '', ranking?.dirs?.moneyShare ?? 'flat')}
             </div>
           </div>
 
@@ -49181,7 +49447,7 @@ Final Score: ${score}/100`;
             <div class="dashboard-summary-header">
               <div>
                 <div class="dashboard-summary-title">💰 Money Pages</div>
-                <div class="dashboard-summary-subtitle">${moneyPages?.note || 'Uses latest Money Pages + Ranking & AI data in this browser'}</div>
+                <div class="dashboard-summary-subtitle">${moneyPages?.note || 'Uses latest Money Pages metrics from the latest audit'}</div>
               </div>
               <div style="display:flex; gap:0.5rem; flex-wrap: wrap; align-items: center;">
                 ${ragPill(moneyPages?.rag || 'neutral', moneyPages?.ragLabel || 'Unknown')}
@@ -49190,10 +49456,10 @@ Final Score: ${score}/100`;
               </div>
             </div>
             <div class="dashboard-kpi-grid">
-              ${tile('Opportunity rows', moneyPages?.counts?.opportunityRows ?? '—')}
-              ${tile('Suggested Top 10', moneyPages?.counts?.priorityRows ?? '—')}
-              ${tile('Money citations', moneyPages?.counts?.moneyShare ?? '—')}
-              ${tile('Next action', moneyPages?.nextAction ?? 'Review opportunities')}
+              ${tile('Money clicks (28d)', moneyPages?.kpis?.clicks ?? '—', moneyPages?.deltas?.clicks ?? '', moneyPages?.dirs?.clicks ?? 'flat')}
+              ${tile('Money CTR', moneyPages?.kpis?.ctr ?? '—', moneyPages?.deltas?.ctr ?? '', moneyPages?.dirs?.ctr ?? 'flat')}
+              ${tile('Money avg pos', moneyPages?.kpis?.avgPosition ?? '—', moneyPages?.deltas?.avgPosition ?? '', moneyPages?.dirs?.avgPosition ?? 'flat')}
+              ${tile('Uplift remaining', moneyPages?.kpis?.uplift ?? '—', moneyPages?.deltas?.uplift ?? '', moneyPages?.dirs?.uplift ?? 'flat')}
             </div>
           </div>
 
@@ -49209,10 +49475,10 @@ Final Score: ${score}/100`;
               </div>
             </div>
             <div class="dashboard-kpi-grid">
-              ${tile('Active tasks', optimisation?.counts?.active ?? '—')}
-              ${tile('Updated (30d)', optimisation?.counts?.updated30d ?? '—')}
-              ${tile('Monitoring', optimisation?.counts?.monitoring ?? '—')}
-              ${tile('Done', optimisation?.counts?.done ?? '—')}
+              ${tile('Potential uplift (28d)', optimisation?.kpis?.potential ?? '—', optimisation?.deltas?.potential ?? '', optimisation?.dirs?.potential ?? 'flat')}
+              ${tile('Updated (30d)', optimisation?.kpis?.updated ?? '—', optimisation?.deltas?.updated ?? '', optimisation?.dirs?.updated ?? 'flat')}
+              ${tile('Status', optimisation?.kpis?.status ?? '—', '', 'flat')}
+              ${tile('Next action', optimisation?.kpis?.nextAction ?? 'Open tasks', '', 'flat')}
             </div>
           </div>
 
@@ -49220,21 +49486,163 @@ Final Score: ${score}/100`;
             <div class="dashboard-summary-header">
               <div>
                 <div class="dashboard-summary-title">📈 Domain Strength</div>
-                <div class="dashboard-summary-subtitle">${domainStrength?.note || 'See Ranking & AI for the snapshot table'}</div>
+                <div class="dashboard-summary-subtitle">${domainStrength?.note || 'Latest snapshot (this month) + competitor gap'}</div>
               </div>
               <div style="display:flex; gap:0.5rem; flex-wrap: wrap; align-items: center;">
                 ${ragPill(domainStrength?.rag || 'neutral', domainStrength?.ragLabel || 'Unknown')}
+                ${domainStrength?.run ? runBtn(domainStrength.run.label || 'Run snapshot', domainStrength.run.onClick || '', domainStrength.run.title || '') : ''}
                 ${jumpBtn('Open', 'ranking')}
               </div>
             </div>
             <div class="dashboard-kpi-grid">
-              ${tile('Status', domainStrength?.headline ?? 'Run snapshot to populate')}
-              ${tile('This month', domainStrength?.month ?? '—')}
-              ${tile('Queued', domainStrength?.queued ?? '—')}
-              ${tile('Next action', domainStrength?.nextAction ?? 'Run snapshot')}
+              ${tile('Your score', domainStrength?.kpis?.selfScore ?? '—', domainStrength?.deltas?.selfScore ?? '', domainStrength?.dirs?.selfScore ?? 'flat')}
+              ${tile('Gap to top', domainStrength?.kpis?.gapTop ?? '—', domainStrength?.deltas?.gapTop ?? '', domainStrength?.dirs?.gapTop ?? 'flat')}
+              ${tile('# stronger domains', domainStrength?.kpis?.stronger ?? '—', domainStrength?.deltas?.stronger ?? '', domainStrength?.dirs?.stronger ?? 'flat')}
+              ${tile('Snapshot date', domainStrength?.kpis?.snapshotDate ?? '—', '', 'flat')}
             </div>
           </div>
         `;
+      }
+
+      function renderDashboardGaioPillarsAndRadar(pillars, prevPillars) {
+        const host = document.getElementById('dashboard-gaio-pillars');
+        if (!host) return;
+
+        const p = pillars || {};
+        const prev = prevPillars || {};
+        const items = [
+          { key: 'authority', label: 'Authority', score: p.authority, prevScore: prev.authority },
+          { key: 'contentSchema', label: 'Content / Schema', score: p.contentSchema, prevScore: prev.contentSchema },
+          { key: 'visibility', label: 'Visibility', score: p.visibility, prevScore: prev.visibility },
+          { key: 'localEntity', label: 'Local Entity', score: p.localEntity, prevScore: prev.localEntity },
+          { key: 'serviceArea', label: 'Service Area', score: p.serviceArea, prevScore: prev.serviceArea },
+        ];
+
+        const rowsHtml = items.map(it => {
+          const s = toNum(it.score);
+          const pct = s == null ? 0 : Math.max(0, Math.min(100, s));
+          const rag = scoreToRag(s, { greenAt: 70, amberAt: 50 });
+          const delta = formatDeltaNumber(it.score, it.prevScore, { decimals: 0 });
+          const dir = deltaDir(it.score, it.prevScore, { betterLower: false });
+          return `
+            <div class="dashboard-pillar-row" data-key="${it.key}">
+              <div class="dashboard-pillar-label">${it.label}</div>
+              <div class="dashboard-pillar-bar" title="${it.label}: ${s == null ? '—' : `${Math.round(s)}/100`} (Δ ${delta})">
+                <span style="width:${pct}%; background:${ragToAccent(rag)};"></span>
+              </div>
+              <div class="dashboard-pillar-score">${s == null ? '—' : Math.round(s)}</div>
+            </div>
+          `;
+        }).join('');
+
+        host.innerHTML = `<div class="dashboard-pillar-strip">${rowsHtml}</div>`;
+
+        // Radar / web diagram
+        const canvas = document.getElementById('dashboard-gaio-radar');
+        if (!canvas || typeof Chart === 'undefined') return;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        const labels = items.map(i => i.label);
+        const values = items.map(i => (toNum(i.score) ?? 0));
+
+        try {
+          if (window.__dashboardGaioRadarChart) {
+            window.__dashboardGaioRadarChart.destroy();
+            window.__dashboardGaioRadarChart = null;
+          }
+        } catch {
+          // ignore
+        }
+
+        try {
+          window.__dashboardGaioRadarChart = new Chart(ctx, {
+            type: 'radar',
+            data: {
+              labels,
+              datasets: [{
+                label: 'Pillars',
+                data: values,
+                borderColor: 'rgba(59, 130, 246, 0.85)',
+                backgroundColor: 'rgba(59, 130, 246, 0.18)',
+                borderWidth: 2,
+                pointBackgroundColor: '#ffffff',
+                pointBorderColor: 'rgba(59, 130, 246, 0.85)',
+                pointRadius: 3
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { display: false }
+              },
+              scales: {
+                r: {
+                  min: 0,
+                  max: 100,
+                  ticks: { display: false },
+                  grid: { color: 'rgba(148, 163, 184, 0.20)' },
+                  angleLines: { color: 'rgba(148, 163, 184, 0.20)' },
+                  pointLabels: {
+                    color: 'rgba(226, 232, 240, 0.92)',
+                    font: { size: 11, weight: '700' }
+                  }
+                }
+              }
+            }
+          });
+        } catch {
+          // ignore
+        }
+      }
+
+      async function refreshDashboardDomainStrengthCacheIfNeeded() {
+        const now = Date.now();
+        const cache = dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v1'), null);
+        const lastMs = cache?.fetchedAtMs ? Number(cache.fetchedAtMs) : 0;
+        const stale = !lastMs || (now - lastMs) > (6 * 60 * 60 * 1000); // 6 hours
+        if (!stale) return { cache, updated: false };
+        if (window.__dashboardDomainStrengthRefreshing) return { cache, updated: false };
+        window.__dashboardDomainStrengthRefreshing = true;
+        try {
+          if (typeof fetchDomainStrengthOverview !== 'function') return { cache, updated: false };
+          const items = await fetchDomainStrengthOverview();
+          if (!Array.isArray(items) || items.length === 0) return { cache, updated: false };
+          const self = (typeof getSelfDomainForDomainStrength === 'function') ? getSelfDomainForDomainStrength() : 'alanranger.com';
+          const normalizedSelf = normalizeDomainForStrength(self);
+          const normItems = items
+            .map(it => ({
+              domain: normalizeDomainForStrength(it.domain || it.root_domain || ''),
+              score: toNum(it.score),
+              band: it.band || it.label || null,
+              snapshotDate: it.snapshotDate || it.snapshot_date || null
+            }))
+            .filter(it => it.domain);
+          const selfItem = normItems.find(it => it.domain === normalizedSelf) || null;
+          const competitors = normItems.filter(it => it.domain !== normalizedSelf && typeof it.score === 'number');
+          const selfScore = selfItem?.score ?? null;
+          const topCompetitor = competitors.slice().sort((a, b) => (b.score ?? -1) - (a.score ?? -1))[0] || null;
+          const topCompetitorScore = topCompetitor?.score ?? null;
+          const strongerCount = (typeof selfScore === 'number')
+            ? competitors.filter(it => typeof it.score === 'number' && it.score > selfScore).length
+            : null;
+
+          const next = {
+            fetchedAtMs: now,
+            snapshotDate: selfItem?.snapshotDate || topCompetitor?.snapshotDate || null,
+            selfDomain: normalizedSelf,
+            selfScore,
+            topCompetitorScore,
+            strongerCount
+          };
+          localStorage.setItem('dashboard_domain_strength_cache_v1', JSON.stringify(next));
+          return { cache: next, updated: true };
+        } catch {
+          return { cache, updated: false };
+        } finally {
+          window.__dashboardDomainStrengthRefreshing = false;
+        }
       }
 
       window.renderDashboardTab = function renderDashboardTab() {
@@ -49265,6 +49673,7 @@ Final Score: ${score}/100`;
             rag,
             deltaText: formatDelta(metrics?.gaioScore, prevMetrics?.gaioScore)
           });
+          renderDashboardGaioPillarsAndRadar(metrics?.pillars || null, prevMetrics?.pillars || null);
         }
 
         // Dial: AI Summary
@@ -49297,20 +49706,35 @@ Final Score: ${score}/100`;
           });
         }
 
-        // Dial: Execution
+        // Dial: Uplift remaining (Money Pages CTR target)
         {
-          const pct = metrics?.execPct ?? null;
-          const active = metrics?.execActive ?? null;
-          const updated = metrics?.execUpdated30d ?? null;
-          const rag = scoreToRag(typeof pct === 'number' ? pct : null, { greenAt: 70, amberAt: 40 });
-          const text = (typeof active === 'number' && typeof updated === 'number' && typeof pct === 'number')
-            ? `${updated}/${active} (${pct}%)`
-            : (active === 0 ? '0 active' : '—');
-          setDial(document.getElementById('dashboard-dial-execution'), {
-            valueText: text,
-            pct: typeof pct === 'number' ? pct : null,
+          const extra = metrics?.moneyAgg?.uplift?.extraClicksAbs ?? null;
+          const prevExtra = prevMetrics?.moneyAgg?.uplift?.extraClicksAbs ?? null;
+          const currCtr = metrics?.moneyAgg?.ctrPct ?? null;
+          const targetCtr = metrics?.moneyAgg?.targets?.ctrAbsPct ?? 2.5;
+          const progressPct = (typeof currCtr === 'number' && typeof targetCtr === 'number' && targetCtr > 0)
+            ? Math.max(0, Math.min(100, Math.round((currCtr / targetCtr) * 100)))
+            : null;
+          const rag = scoreToRag(typeof progressPct === 'number' ? progressPct : null, { greenAt: 70, amberAt: 50 });
+          const valueText = (typeof extra === 'number')
+            ? `+${formatInt(extra)}`
+            : '—';
+          const deltaText = formatDeltaNumber(extra, prevExtra, { decimals: 0, betterLower: true });
+          setDial(document.getElementById('dashboard-dial-uplift'), {
+            valueText,
+            pct: typeof progressPct === 'number' ? progressPct : null,
             rag,
-            deltaText: formatDelta(metrics?.execPct, prevMetrics?.execPct)
+            deltaText: (typeof extra === 'number' && typeof prevExtra === 'number') ? deltaText : '—'
+          });
+        }
+
+        // Dial: EEAT (placeholder)
+        {
+          setDial(document.getElementById('dashboard-dial-eeat'), {
+            valueText: '—',
+            pct: null,
+            rag: 'neutral',
+            deltaText: '—'
           });
         }
 
@@ -49323,88 +49747,160 @@ Final Score: ${score}/100`;
         const moneyFresh = computeFreshnessBadge(audit?.timestamp || null, { warnDays: 3, staleDays: 7 });
 
         const gaioRag = scoreToRag(metrics?.gaioScore ?? null, { greenAt: 70, amberAt: 50 });
-        const aiSummaryRag = scoreToRag(metrics?.aiSummaryScore ?? null, { greenAt: 70, amberAt: 50 });
         const moneyShareRag = scoreToRag(metrics?.moneySharePct ?? null, { greenAt: 70, amberAt: 50 });
-        const execRag = scoreToRag(metrics?.execPct ?? null, { greenAt: 70, amberAt: 40 });
 
         const auditCard = audit ? {
           timestamp: audit.timestamp || null,
           rag: gaioRag,
           ragLabel: (typeof metrics?.gaioScore === 'number') ? `${gaioRag.toUpperCase()} (${metrics.gaioScore}/100)` : 'Unknown',
           kpis: audit.searchData ? {
-            clicks: `${(audit.searchData.totalClicks || 0).toLocaleString()}`,
-            impressions: `${(audit.searchData.totalImpressions || 0).toLocaleString()}`,
-            avgPosition: `${(audit.searchData.averagePosition || 0).toFixed ? (audit.searchData.averagePosition || 0).toFixed(1) : (audit.searchData.averagePosition || 0)}`,
-            ctr: `${(audit.searchData.ctr || 0).toFixed ? (audit.searchData.ctr || 0).toFixed(1) : (audit.searchData.ctr || 0)}%`
+            clicks: formatInt(metrics?.auditKpis?.clicks),
+            impressions: formatInt(metrics?.auditKpis?.impressions),
+            avgPosition: (typeof metrics?.auditKpis?.avgPosition === 'number') ? formatFixed(metrics.auditKpis.avgPosition, 1) : '—',
+            ctr: (typeof metrics?.auditKpis?.ctrPct === 'number') ? formatPct(metrics.auditKpis.ctrPct, 1) : '—'
           } : null
+          ,
+          deltas: {
+            clicks: (prevMetrics?.auditKpis ? formatDeltaNumber(metrics?.auditKpis?.clicks, prevMetrics.auditKpis.clicks, { decimals: 0 }) : ''),
+            impressions: (prevMetrics?.auditKpis ? formatDeltaNumber(metrics?.auditKpis?.impressions, prevMetrics.auditKpis.impressions, { decimals: 0 }) : ''),
+            avgPosition: (prevMetrics?.auditKpis ? formatDeltaNumber(metrics?.auditKpis?.avgPosition, prevMetrics.auditKpis.avgPosition, { decimals: 1, betterLower: true }) : ''),
+            ctr: (prevMetrics?.auditKpis ? formatDeltaNumber(metrics?.auditKpis?.ctrPct, prevMetrics.auditKpis.ctrPct, { decimals: 1, pp: true }) : '')
+          },
+          dirs: {
+            clicks: deltaDir(metrics?.auditKpis?.clicks, prevMetrics?.auditKpis?.clicks, { betterLower: false }),
+            impressions: deltaDir(metrics?.auditKpis?.impressions, prevMetrics?.auditKpis?.impressions, { betterLower: false }),
+            avgPosition: deltaDir(metrics?.auditKpis?.avgPosition, prevMetrics?.auditKpis?.avgPosition, { betterLower: true }),
+            ctr: deltaDir(metrics?.auditKpis?.ctrPct, prevMetrics?.auditKpis?.ctrPct, { betterLower: false })
+          }
         } : null;
 
-        const rankingSummary = rankingStore?.summary || null;
+        const rankingK = metrics?.rankingKpis || null;
+        const prevRankingK = prevMetrics?.rankingKpis || null;
+        const hasRanking = !!(rankingStore && rankingStore.timestamp);
+        const rankingRag = hasRanking ? scoreToRag(rankingK?.top3SharePct ?? null, { greenAt: 70, amberAt: 50 }) : 'neutral';
         const rankingCard = {
           timestamp: rankingStore?.timestamp || null,
-          rag: rankingFresh.rag,
-          ragLabel: rankingFresh.label,
+          rag: rankingRag,
+          ragLabel: hasRanking
+            ? (rankingK?.top3SharePct != null ? `Top 3 share: ${rankingK.top3SharePct}%` : 'Rankings loaded')
+            : rankingFresh.label,
           run: {
             label: 'Run scan',
             title: 'Runs the Ranking & AI check now (uses existing keywords list).',
             onClick: "if (typeof window.dashboardRunRankingAiScan === 'function') window.dashboardRunRankingAiScan();"
           },
-          summary: {
-            tracked: rankingSummary?.totalKeywords ?? rankingSummary?.total_keywords ?? rankingRows.length ?? '—',
-            withRank: rankingSummary?.keywordsWithRank ?? rankingSummary?.keywords_with_rank ?? '—',
-            aiOverviews: rankingSummary?.keywordsWithAiOverview ?? rankingSummary?.keywords_with_ai_overview ?? '—',
-            citations: rankingSummary?.keywordsWithAiCitations ?? rankingSummary?.keywords_with_ai_citations ?? '—'
+          kpis: {
+            top3Share: (rankingK?.top3SharePct != null) ? formatPct(rankingK.top3SharePct, 0) : '—',
+            top10Share: (rankingK?.top10SharePct != null) ? formatPct(rankingK.top10SharePct, 0) : '—',
+            citations: formatInt(rankingK?.citationsTotal),
+            moneyShare: (typeof metrics?.moneySharePct === 'number') ? formatPct(metrics.moneySharePct, 0) : '—'
+          },
+          deltas: {
+            top3Share: (prevRankingK ? formatDeltaNumber(rankingK?.top3SharePct, prevRankingK.top3SharePct, { decimals: 0, pp: true }) : ''),
+            top10Share: (prevRankingK ? formatDeltaNumber(rankingK?.top10SharePct, prevRankingK.top10SharePct, { decimals: 0, pp: true }) : ''),
+            citations: (prevRankingK ? formatDeltaNumber(rankingK?.citationsTotal, prevRankingK.citationsTotal, { decimals: 0 }) : ''),
+            moneyShare: (typeof prevMetrics?.moneySharePct === 'number' ? formatDeltaNumber(metrics?.moneySharePct, prevMetrics.moneySharePct, { decimals: 0, pp: true }) : '')
+          },
+          dirs: {
+            top3Share: deltaDir(rankingK?.top3SharePct, prevRankingK?.top3SharePct, { betterLower: false }),
+            top10Share: deltaDir(rankingK?.top10SharePct, prevRankingK?.top10SharePct, { betterLower: false }),
+            citations: deltaDir(rankingK?.citationsTotal, prevRankingK?.citationsTotal, { betterLower: false }),
+            moneyShare: deltaDir(metrics?.moneySharePct, prevMetrics?.moneySharePct, { betterLower: false })
           }
         };
 
-        const moneyShare = computeMoneyCitationsShareFromRankingRows(rankingRows);
         const moneyMetricsFromAudit = audit?.scores?.moneyPagesMetrics || audit?.moneyPagesMetrics || null;
-        const moneyPriorityFromAudit = Array.isArray(audit?.moneyPagePriorityData) ? audit.moneyPagePriorityData : null;
-        const moneyMetrics = (moneyMetricsFromAudit && Array.isArray(moneyMetricsFromAudit.rows)) ? moneyMetricsFromAudit : window.moneyPagesMetrics;
-        const moneyPriority = moneyPriorityFromAudit || (Array.isArray(window.moneyPagePriorityData) ? window.moneyPagePriorityData : null);
-
-        // Keep globals warm so Money Pages tab can use the latest cached audit without requiring Overview tab render.
-        if (moneyMetrics && !window.moneyPagesMetrics) {
-          window.moneyPagesMetrics = moneyMetrics;
-          window.currentMoneyPagesMetrics = moneyMetrics;
-        }
-        if (moneyPriority && !window.moneyPagePriorityData) {
-          window.moneyPagePriorityData = moneyPriority;
-        }
-
-        const hasMoneyPages = !!(moneyMetrics && Array.isArray(moneyMetrics.rows) && moneyMetrics.rows.length);
+        const moneyAgg = metrics?.moneyAgg || null;
+        const prevMoneyAgg = prevMetrics?.moneyAgg || null;
+        const hasMoneyPages = !!moneyAgg;
+        const moneyCtrTarget = moneyAgg?.targets?.ctrAbsPct ?? 2.5;
+        const moneyCtrProgressPct = (moneyAgg?.ctrPct != null && moneyCtrTarget > 0) ? Math.round((moneyAgg.ctrPct / moneyCtrTarget) * 100) : null;
+        const moneyRag = scoreToRag((typeof moneyCtrProgressPct === 'number') ? Math.min(100, moneyCtrProgressPct) : null, { greenAt: 70, amberAt: 50 });
         const moneyPagesCard = {
-          note: hasMoneyPages
-            ? (audit?.timestamp ? `Last audit: ${formatUtcTimestamp(audit.timestamp)}` : 'Loaded money pages metrics in this browser')
-            : (audit?.timestamp ? `No money pages metrics loaded in this browser (last audit: ${formatUtcTimestamp(audit.timestamp)})` : 'No money pages metrics loaded in this browser'),
-          rag: hasMoneyPages ? moneyFresh.rag : 'neutral',
-          ragLabel: hasMoneyPages ? moneyFresh.label : 'Not run',
+          note: hasMoneyPages && audit?.timestamp
+            ? `Last audit: ${formatUtcTimestamp(audit.timestamp)} · CTR target: ≥ ${moneyCtrTarget}% (alt: +0.3pp) · Position targets: ≤10 (alt: -2)`
+            : (audit?.timestamp ? `No Money Pages metrics in latest audit (last: ${formatUtcTimestamp(audit.timestamp)})` : 'No Money Pages metrics yet'),
+          rag: hasMoneyPages ? moneyRag : 'neutral',
+          ragLabel: hasMoneyPages ? `CTR: ${formatPct(moneyAgg?.ctrPct, 1)} (target ${moneyCtrTarget}%)` : 'Not run',
           run: {
             label: 'Run scan',
             title: 'Refreshes Money Pages using the latest audit in Supabase (does not run a new audit).',
             onClick: "if (typeof window.dashboardRunMoneyPagesScan === 'function') window.dashboardRunMoneyPagesScan();"
           },
-          counts: {
-            opportunityRows: Array.isArray(moneyMetrics?.rows) ? moneyMetrics.rows.length : '—',
-            priorityRows: Array.isArray(moneyPriority) ? moneyPriority.length : '—',
-            moneyShare: (typeof moneyShare.money === 'number' && typeof moneyShare.total === 'number')
-              ? `${moneyShare.money}/${moneyShare.total} (${moneyShare.pct ?? 0}%)`
-              : '—'
+          kpis: {
+            clicks: formatInt(moneyAgg?.clicks),
+            ctr: (typeof moneyAgg?.ctrPct === 'number') ? formatPct(moneyAgg.ctrPct, 1) : '—',
+            avgPosition: (typeof moneyAgg?.avgPosition === 'number') ? formatFixed(moneyAgg.avgPosition, 1) : '—',
+            uplift: (typeof moneyAgg?.uplift?.extraClicksAbs === 'number') ? `+${formatInt(moneyAgg.uplift.extraClicksAbs)}` : '—'
+          },
+          deltas: {
+            clicks: (prevMoneyAgg ? formatDeltaNumber(moneyAgg?.clicks, prevMoneyAgg.clicks, { decimals: 0 }) : ''),
+            ctr: (prevMoneyAgg ? formatDeltaNumber(moneyAgg?.ctrPct, prevMoneyAgg.ctrPct, { decimals: 1, pp: true }) : ''),
+            avgPosition: (prevMoneyAgg ? formatDeltaNumber(moneyAgg?.avgPosition, prevMoneyAgg.avgPosition, { decimals: 1, betterLower: true }) : ''),
+            uplift: (prevMoneyAgg ? formatDeltaNumber(moneyAgg?.uplift?.extraClicksAbs, prevMoneyAgg.uplift?.extraClicksAbs, { decimals: 0, betterLower: true }) : '')
+          },
+          dirs: {
+            clicks: deltaDir(moneyAgg?.clicks, prevMoneyAgg?.clicks, { betterLower: false }),
+            ctr: deltaDir(moneyAgg?.ctrPct, prevMoneyAgg?.ctrPct, { betterLower: false }),
+            avgPosition: deltaDir(moneyAgg?.avgPosition, prevMoneyAgg?.avgPosition, { betterLower: true }),
+            uplift: deltaDir(moneyAgg?.uplift?.extraClicksAbs, prevMoneyAgg?.uplift?.extraClicksAbs, { betterLower: true })
           }
         };
 
-        const tasks = getOptimisationTasksForDashboard();
-        const activeStatuses = ['planned', 'in_progress', 'monitoring'];
         const optLoaded = isOptimisationDataLoadedForDashboard();
+        const optPotential = metrics?.optimisationPotentialClicks ?? null;
+        const prevOptPotential = prevMetrics?.optimisationPotentialClicks ?? null;
         const optCard = {
-          note: optLoaded ? 'Uses tasks loaded in this browser session' : 'Admin key not set / tasks not loaded in this browser',
-          rag: optLoaded ? execRag : 'neutral',
-          ragLabel: optLoaded ? (typeof metrics?.execPct === 'number' ? `Updated: ${metrics.execPct}%` : 'Unknown') : 'Not loaded',
-          counts: {
-            active: optLoaded ? tasks.filter(t => activeStatuses.includes(t.status)).length : '—',
-            monitoring: optLoaded ? tasks.filter(t => t.status === 'monitoring').length : '—',
-            done: optLoaded ? tasks.filter(t => t.status === 'done').length : '—',
-            updated30d: (optLoaded && typeof metrics.execUpdated30d === 'number') ? metrics.execUpdated30d : '—'
+          note: optLoaded ? 'Uses optimisation tasks loaded in this browser session (admin key required)' : 'Not loaded (set admin key + open Optimisation tab or run global run)',
+          rag: optLoaded ? scoreToRag((toNum(metrics?.execPct) ?? null), { greenAt: 70, amberAt: 50 }) : 'neutral',
+          ragLabel: optLoaded ? (typeof metrics?.execPct === 'number' ? `Updated (30d): ${metrics.execPct}%` : 'Loaded') : 'Not loaded',
+          kpis: {
+            potential: (typeof optPotential === 'number') ? `+${formatInt(optPotential)}` : '—',
+            updated: (optLoaded && typeof metrics?.execPct === 'number') ? formatPct(metrics.execPct, 0) : '—',
+            status: optLoaded ? 'Loaded' : 'Not loaded',
+            nextAction: optLoaded ? 'Run bulk update when ready' : 'Set admin key'
+          },
+          deltas: {
+            potential: (typeof optPotential === 'number' && typeof prevOptPotential === 'number') ? formatDeltaNumber(optPotential, prevOptPotential, { decimals: 0, betterLower: true }) : '',
+            updated: (typeof metrics?.execPct === 'number' && typeof prevMetrics?.execPct === 'number') ? formatDeltaNumber(metrics.execPct, prevMetrics.execPct, { decimals: 0, pp: true }) : ''
+          },
+          dirs: {
+            potential: deltaDir(optPotential, prevOptPotential, { betterLower: true }),
+            updated: deltaDir(metrics?.execPct, prevMetrics?.execPct, { betterLower: false })
+          }
+        };
+
+        const ds = metrics?.domainStrength || null;
+        const prevDs = prevMetrics?.domainStrength || null;
+        const selfScore = toNum(ds?.selfScore);
+        const topScore = toNum(ds?.topCompetitorScore);
+        const gapTop = (selfScore != null && topScore != null) ? (topScore - selfScore) : null;
+        const strongerCount = toNum(ds?.strongerCount);
+        const domainRag = scoreToRag(selfScore, { greenAt: 70, amberAt: 50 });
+        const domainCard = {
+          note: ds?.snapshotDate ? `Snapshot date: ${ds.snapshotDate}` : 'Run snapshot to populate (Ranking & AI tab)',
+          rag: (typeof selfScore === 'number') ? domainRag : 'neutral',
+          ragLabel: (typeof selfScore === 'number') ? `Score: ${formatFixed(selfScore, 1)}` : 'Not run',
+          run: {
+            label: 'Run snapshot',
+            title: 'Runs a Domain Strength snapshot now.',
+            onClick: "if (typeof window.runDomainStrengthSnapshot === 'function') window.runDomainStrengthSnapshot();"
+          },
+          kpis: {
+            selfScore: (typeof selfScore === 'number') ? formatFixed(selfScore, 1) : '—',
+            gapTop: (typeof gapTop === 'number') ? `+${formatFixed(Math.max(0, gapTop), 1)}` : '—',
+            stronger: (typeof strongerCount === 'number') ? formatInt(strongerCount) : '—',
+            snapshotDate: ds?.snapshotDate || '—'
+          },
+          deltas: {
+            selfScore: (prevDs ? formatDeltaNumber(selfScore, prevDs.selfScore, { decimals: 1 }) : ''),
+            gapTop: (prevDs ? formatDeltaNumber(gapTop, (toNum(prevDs?.topCompetitorScore) != null && toNum(prevDs?.selfScore) != null) ? (toNum(prevDs.topCompetitorScore) - toNum(prevDs.selfScore)) : null, { decimals: 1, betterLower: true }) : ''),
+            stronger: (prevDs ? formatDeltaNumber(strongerCount, prevDs.strongerCount, { decimals: 0, betterLower: true }) : '')
+          },
+          dirs: {
+            selfScore: deltaDir(selfScore, prevDs?.selfScore, { betterLower: false }),
+            gapTop: deltaDir(gapTop, (toNum(prevDs?.topCompetitorScore) != null && toNum(prevDs?.selfScore) != null) ? (toNum(prevDs.topCompetitorScore) - toNum(prevDs.selfScore)) : null, { betterLower: true }),
+            stronger: deltaDir(strongerCount, prevDs?.strongerCount, { betterLower: true })
           }
         };
 
@@ -49413,8 +49909,21 @@ Final Score: ${score}/100`;
           ranking: rankingCard,
           moneyPages: moneyPagesCard,
           optimisation: optCard,
-          domainStrength: { note: 'See Ranking & AI tab for latest Domain Strength snapshot table', rag: 'neutral', ragLabel: 'Snapshot table' }
+          domainStrength: domainCard
         });
+
+        // Async: refresh Domain Strength cache occasionally so the tile isn't stale.
+        // Keep it non-blocking and avoid loops.
+        setTimeout(() => {
+          refreshDashboardDomainStrengthCacheIfNeeded().then((res) => {
+            if (!res || res.updated !== true) return;
+            // Only re-render if we're still on the dashboard tab.
+            const active = document.querySelector('.aigeo-panel.is-active');
+            if (active && active.dataset && active.dataset.panel === 'dashboard') {
+              try { window.renderDashboardTab(); } catch {}
+            }
+          });
+        }, 0);
       };
 
       function dashboardRunModalSetProgress(pct) {
@@ -49503,7 +50012,16 @@ Final Score: ${score}/100`;
           { key: 'audit_scan', label: 'Run Audit Scan', runner: async () => { if (typeof window.runAudit === 'function') await window.runAudit(); } },
           { key: 'ranking_ai', label: 'Run Ranking & AI Scan', runner: async () => { if (typeof window.loadRankingAiData === 'function') await window.loadRankingAiData(true); } },
           { key: 'domain_strength', label: 'Run Domain Strength Snapshot', runner: async () => { if (typeof window.runDomainStrengthSnapshot === 'function') await window.runDomainStrengthSnapshot(); } },
-          { key: 'update_tasks', label: 'Update All Tasks with Latest Data', runner: async () => { if (typeof window.bulkUpdateAllTasks === 'function') await window.bulkUpdateAllTasks(); } }
+          { key: 'update_tasks', label: 'Update All Tasks with Latest Data', runner: async () => {
+            // Ensure tasks are actually loaded before/after bulk update so the dashboard reflects real outcomes.
+            if (typeof window.loadAllOptimisationTasks === 'function') {
+              try { await window.loadAllOptimisationTasks(); } catch {}
+            }
+            if (typeof window.bulkUpdateAllTasks === 'function') await window.bulkUpdateAllTasks();
+            if (typeof window.loadAllOptimisationTasks === 'function') {
+              try { await window.loadAllOptimisationTasks(); } catch {}
+            }
+          } }
         ];
 
         const steps = stepDefs.map(s => ({ key: s.key, label: s.label, status: 'Pending' }));
