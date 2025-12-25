@@ -1334,7 +1334,7 @@
 
     section[data-panel="dashboard"] .dashboard-summary-grid {
       display: grid;
-      grid-template-columns: 1fr;
+      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
       gap: 1rem;
       margin-top: 1rem;
     }
@@ -1400,6 +1400,96 @@
       font-size: 0.85rem;
       font-weight: 700;
       color: var(--dark-text-muted);
+    }
+
+    /* Dashboard: summary cards */
+    section[data-panel="dashboard"] .dashboard-summary-card {
+      position: relative;
+      overflow: hidden;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    section[data-panel="dashboard"] .dashboard-summary-card:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 10px 24px rgba(0,0,0,0.25);
+    }
+    section[data-panel="dashboard"] .dashboard-summary-card::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 5px;
+      background: rgba(148, 163, 184, 0.5);
+    }
+    section[data-panel="dashboard"] .dashboard-summary-card[data-rag="green"]::before { background: #10b981; }
+    section[data-panel="dashboard"] .dashboard-summary-card[data-rag="amber"]::before { background: #f59e0b; }
+    section[data-panel="dashboard"] .dashboard-summary-card[data-rag="red"]::before { background: #ef4444; }
+
+    section[data-panel="dashboard"] .dashboard-summary-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      margin-bottom: 0.75rem;
+      padding-left: 0.25rem;
+    }
+    section[data-panel="dashboard"] .dashboard-summary-title {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-weight: 900;
+      letter-spacing: -0.01em;
+    }
+    section[data-panel="dashboard"] .dashboard-summary-subtitle {
+      margin-top: 0.15rem;
+      font-size: 0.85rem;
+      color: var(--dark-text-muted);
+    }
+    section[data-panel="dashboard"] .dashboard-rag-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.25rem 0.6rem;
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      font-weight: 800;
+      font-size: 0.8rem;
+      color: var(--dark-text);
+      background: rgba(15, 20, 25, 0.35);
+      white-space: nowrap;
+    }
+    section[data-panel="dashboard"] .dashboard-rag-pill[data-rag="green"] { border-color: rgba(16,185,129,0.45); }
+    section[data-panel="dashboard"] .dashboard-rag-pill[data-rag="amber"] { border-color: rgba(245,158,11,0.55); }
+    section[data-panel="dashboard"] .dashboard-rag-pill[data-rag="red"] { border-color: rgba(239,68,68,0.55); }
+
+    section[data-panel="dashboard"] .dashboard-kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.75rem;
+      margin-top: 0.75rem;
+      padding-left: 0.25rem;
+    }
+    section[data-panel="dashboard"] .dashboard-kpi-tile {
+      background: rgba(15, 20, 25, 0.35);
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      border-radius: 10px;
+      padding: 0.8rem 0.9rem;
+      min-height: 72px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 0.25rem;
+    }
+    section[data-panel="dashboard"] .dashboard-kpi-label {
+      font-size: 0.8rem;
+      color: var(--dark-text-muted);
+      font-weight: 700;
+    }
+    section[data-panel="dashboard"] .dashboard-kpi-value {
+      font-size: 1.25rem;
+      font-weight: 900;
+      letter-spacing: -0.02em;
     }
     
     /* Optimisation module tiles - dark theme with green centered counts and orange hover animation */
@@ -48882,6 +48972,11 @@ Final Score: ${score}/100`;
         return { money, total, pct };
       }
 
+      function isOptimisationDataLoadedForDashboard() {
+        const state = window.optimisationModuleState;
+        return !!state && Array.isArray(state.allTasks);
+      }
+
       function getOptimisationTasksForDashboard() {
         const state = window.optimisationModuleState;
         if (!state || !Array.isArray(state.allTasks)) return [];
@@ -48894,7 +48989,10 @@ Final Score: ${score}/100`;
         return tasks;
       }
 
-      function computeExecutionFromTasks(tasks) {
+      function computeExecutionFromTasks(tasks, isLoaded) {
+        if (!isLoaded) {
+          return { active: null, updated30d: null, pct: null };
+        }
         const activeStatuses = ['planned', 'in_progress', 'monitoring'];
         const activeTasks = (tasks || []).filter(t => activeStatuses.includes(t.status));
 
@@ -48918,7 +49016,12 @@ Final Score: ${score}/100`;
           if (!Number.isNaN(d.getTime()) && d >= thirtyDaysAgo) updated += 1;
         }
 
-        const pct = activeTasks.length > 0 ? Math.round((updated / activeTasks.length) * 100) : 100;
+        // If there are no active tasks, don't pretend it's "100% updated" — show neutral.
+        if (activeTasks.length === 0) {
+          return { active: 0, updated30d: 0, pct: null };
+        }
+
+        const pct = Math.round((updated / activeTasks.length) * 100);
         return { active: activeTasks.length, updated30d: updated, pct };
       }
 
@@ -48938,7 +49041,7 @@ Final Score: ${score}/100`;
         const moneyShare = computeMoneyCitationsShareFromRankingRows(rankingRows);
 
         const tasks = getOptimisationTasksForDashboard();
-        const exec = computeExecutionFromTasks(tasks);
+        const exec = computeExecutionFromTasks(tasks, isOptimisationDataLoadedForDashboard());
 
         return {
           gaioScore,
@@ -48974,106 +49077,120 @@ Final Score: ${score}/100`;
         const grid = document.getElementById('dashboard-summary-grid');
         if (!grid) return;
 
-        const linkBtn = (label, panelId) => `
-          <button type="button" class="btn" style="padding: 0.5rem 0.9rem; font-size: 0.9rem;"
+        const jumpBtn = (label, panelId) => `
+          <button type="button" class="btn" style="padding: 0.45rem 0.85rem; font-size: 0.9rem;"
             onclick="if (typeof setActivePanel === 'function') setActivePanel('${panelId}')">
             ${label}
           </button>
         `;
 
-        const small = (v) => `<div style="color: var(--dark-text-muted); font-size: 0.9rem;">${v}</div>`;
-        const big = (v) => `<div style="font-weight: 900; font-size: 1.35rem; margin-top: 0.25rem;">${v}</div>`;
-        const row = (label, value) => `
-          <div style="display:flex; justify-content: space-between; gap: 1rem; border-top: 1px solid rgba(148,163,184,0.18); padding-top: 0.5rem; margin-top: 0.5rem;">
-            <div style="color: var(--dark-text-muted);">${label}</div>
-            <div style="font-weight: 800;">${value}</div>
+        const ragPill = (rag, label) => `
+          <span class="dashboard-rag-pill" data-rag="${rag}">
+            ${label}
+          </span>
+        `;
+
+        const tile = (label, value) => `
+          <div class="dashboard-kpi-tile">
+            <div class="dashboard-kpi-label">${label}</div>
+            <div class="dashboard-kpi-value">${value}</div>
           </div>
         `;
 
         grid.innerHTML = `
-          <div class="card">
-            <div style="display:flex; justify-content: space-between; gap: 1rem; align-items: flex-start; flex-wrap: wrap;">
+          <div class="card dashboard-summary-card" data-rag="${audit?.rag || 'neutral'}">
+            <div class="dashboard-summary-header">
               <div>
-                <div style="font-weight: 900;">Audit Scan</div>
-                ${small(audit?.timestamp ? `Last audit: ${formatUtcTimestamp(audit.timestamp)}` : 'No audit data yet')}
+                <div class="dashboard-summary-title">📊 Audit Scan</div>
+                <div class="dashboard-summary-subtitle">${audit?.timestamp ? `Last audit: ${formatUtcTimestamp(audit.timestamp)}` : 'No audit data yet'}</div>
               </div>
-              <div style="display:flex; gap:0.5rem; flex-wrap: wrap;">
-                ${linkBtn('Open AI Health Scorecard', 'overview')}
-                ${linkBtn('Open Configuration', 'config')}
+              <div style="display:flex; gap:0.5rem; flex-wrap: wrap; align-items: center;">
+                ${ragPill(audit?.rag || 'neutral', audit?.ragLabel || 'Unknown')}
+                ${jumpBtn('Open', 'overview')}
               </div>
             </div>
-            ${audit?.kpis ? `
-              ${row('Clicks (GSC)', audit.kpis.clicks)}
-              ${row('Impressions (GSC)', audit.kpis.impressions)}
-              ${row('Avg position', audit.kpis.avgPosition)}
-              ${row('CTR', audit.kpis.ctr)}
-            ` : small('—')}
+            <div class="dashboard-kpi-grid">
+              ${tile('Clicks (28d)', audit?.kpis?.clicks ?? '—')}
+              ${tile('Impressions (28d)', audit?.kpis?.impressions ?? '—')}
+              ${tile('Avg position', audit?.kpis?.avgPosition ?? '—')}
+              ${tile('CTR', audit?.kpis?.ctr ?? '—')}
+            </div>
           </div>
 
-          <div class="card">
-            <div style="display:flex; justify-content: space-between; gap: 1rem; align-items: flex-start; flex-wrap: wrap;">
+          <div class="card dashboard-summary-card" data-rag="${ranking?.rag || 'neutral'}">
+            <div class="dashboard-summary-header">
               <div>
-                <div style="font-weight: 900;">Ranking & AI</div>
-                ${small(ranking?.timestamp ? `Last scan: ${formatUtcTimestamp(ranking.timestamp)}` : 'No Ranking & AI data yet')}
+                <div class="dashboard-summary-title">🔍 Ranking & AI</div>
+                <div class="dashboard-summary-subtitle">${ranking?.timestamp ? `Last scan: ${formatUtcTimestamp(ranking.timestamp)}` : 'No Ranking & AI data yet'}</div>
               </div>
-              <div style="display:flex; gap:0.5rem; flex-wrap: wrap;">
-                ${linkBtn('Open Ranking & AI', 'ranking')}
+              <div style="display:flex; gap:0.5rem; flex-wrap: wrap; align-items: center;">
+                ${ragPill(ranking?.rag || 'neutral', ranking?.ragLabel || 'Unknown')}
+                ${jumpBtn('Open', 'ranking')}
               </div>
             </div>
-            ${ranking?.summary ? `
-              ${row('Tracked keywords', ranking.summary.tracked)}
-              ${row('With rankings', ranking.summary.withRank)}
-              ${row('AI Overviews present', ranking.summary.aiOverviews)}
-              ${row('Total citations', ranking.summary.citations)}
-            ` : small('—')}
+            <div class="dashboard-kpi-grid">
+              ${tile('Tracked keywords', ranking?.summary?.tracked ?? '—')}
+              ${tile('With rankings', ranking?.summary?.withRank ?? '—')}
+              ${tile('AI Overviews', ranking?.summary?.aiOverviews ?? '—')}
+              ${tile('AI citations', ranking?.summary?.citations ?? '—')}
+            </div>
           </div>
 
-          <div class="card">
-            <div style="display:flex; justify-content: space-between; gap: 1rem; align-items: flex-start; flex-wrap: wrap;">
+          <div class="card dashboard-summary-card" data-rag="${moneyPages?.rag || 'neutral'}">
+            <div class="dashboard-summary-header">
               <div>
-                <div style="font-weight: 900;">Money Pages</div>
-                ${small(moneyPages?.note || 'Snapshot from latest loaded data')}
+                <div class="dashboard-summary-title">💰 Money Pages</div>
+                <div class="dashboard-summary-subtitle">${moneyPages?.note || 'Uses latest Money Pages + Ranking & AI data in this browser'}</div>
               </div>
-              <div style="display:flex; gap:0.5rem; flex-wrap: wrap;">
-                ${linkBtn('Open Money Pages', 'money')}
+              <div style="display:flex; gap:0.5rem; flex-wrap: wrap; align-items: center;">
+                ${ragPill(moneyPages?.rag || 'neutral', moneyPages?.ragLabel || 'Unknown')}
+                ${jumpBtn('Open', 'money')}
               </div>
             </div>
-            ${moneyPages?.counts ? `
-              ${row('Opportunity rows', moneyPages.counts.opportunityRows)}
-              ${row('Suggested Top 10 rows', moneyPages.counts.priorityRows)}
-              ${row('AI citations (Money share)', moneyPages.counts.moneyShare)}
-            ` : small('—')}
+            <div class="dashboard-kpi-grid">
+              ${tile('Opportunity rows', moneyPages?.counts?.opportunityRows ?? '—')}
+              ${tile('Suggested Top 10', moneyPages?.counts?.priorityRows ?? '—')}
+              ${tile('Money citations', moneyPages?.counts?.moneyShare ?? '—')}
+              ${tile('Next action', moneyPages?.nextAction ?? 'Review opportunities')}
+            </div>
           </div>
 
-          <div class="card">
-            <div style="display:flex; justify-content: space-between; gap: 1rem; align-items: flex-start; flex-wrap: wrap;">
+          <div class="card dashboard-summary-card" data-rag="${optimisation?.rag || 'neutral'}">
+            <div class="dashboard-summary-header">
               <div>
-                <div style="font-weight: 900;">Optimisation Tracking</div>
-                ${small(optimisation?.note || 'Loads from tasks currently in this browser')}
+                <div class="dashboard-summary-title">✅ Optimisation</div>
+                <div class="dashboard-summary-subtitle">${optimisation?.note || 'Uses tasks loaded in this browser session'}</div>
               </div>
-              <div style="display:flex; gap:0.5rem; flex-wrap: wrap;">
-                ${linkBtn('Open Optimisation Tracking', 'optimisation')}
+              <div style="display:flex; gap:0.5rem; flex-wrap: wrap; align-items: center;">
+                ${ragPill(optimisation?.rag || 'neutral', optimisation?.ragLabel || 'Unknown')}
+                ${jumpBtn('Open', 'optimisation')}
               </div>
             </div>
-            ${optimisation?.counts ? `
-              ${row('Active tasks', optimisation.counts.active)}
-              ${row('Monitoring', optimisation.counts.monitoring)}
-              ${row('Done', optimisation.counts.done)}
-              ${row('Updated (30d)', optimisation.counts.updated30d)}
-            ` : small('—')}
+            <div class="dashboard-kpi-grid">
+              ${tile('Active tasks', optimisation?.counts?.active ?? '—')}
+              ${tile('Updated (30d)', optimisation?.counts?.updated30d ?? '—')}
+              ${tile('Monitoring', optimisation?.counts?.monitoring ?? '—')}
+              ${tile('Done', optimisation?.counts?.done ?? '—')}
+            </div>
           </div>
 
-          <div class="card">
-            <div style="display:flex; justify-content: space-between; gap: 1rem; align-items: flex-start; flex-wrap: wrap;">
+          <div class="card dashboard-summary-card" data-rag="${domainStrength?.rag || 'neutral'}">
+            <div class="dashboard-summary-header">
               <div>
-                <div style="font-weight: 900;">Domain Strength</div>
-                ${small(domainStrength?.note || 'Latest snapshot is stored server-side')}
+                <div class="dashboard-summary-title">📈 Domain Strength</div>
+                <div class="dashboard-summary-subtitle">${domainStrength?.note || 'See Ranking & AI for the snapshot table'}</div>
               </div>
-              <div style="display:flex; gap:0.5rem; flex-wrap: wrap;">
-                ${linkBtn('Open Ranking & AI', 'ranking')}
+              <div style="display:flex; gap:0.5rem; flex-wrap: wrap; align-items: center;">
+                ${ragPill(domainStrength?.rag || 'neutral', domainStrength?.ragLabel || 'Unknown')}
+                ${jumpBtn('Open', 'ranking')}
               </div>
             </div>
-            ${domainStrength?.headline ? big(domainStrength.headline) : small('Run a snapshot to populate this card.')}
+            <div class="dashboard-kpi-grid">
+              ${tile('Status', domainStrength?.headline ?? 'Run snapshot to populate')}
+              ${tile('This month', domainStrength?.month ?? '—')}
+              ${tile('Queued', domainStrength?.queued ?? '—')}
+              ${tile('Next action', domainStrength?.nextAction ?? 'Run snapshot')}
+            </div>
           </div>
         `;
       }
@@ -49146,7 +49263,7 @@ Final Score: ${score}/100`;
           const rag = scoreToRag(typeof pct === 'number' ? pct : null, { greenAt: 70, amberAt: 40 });
           const text = (typeof active === 'number' && typeof updated === 'number' && typeof pct === 'number')
             ? `${updated}/${active} (${pct}%)`
-            : '—';
+            : (active === 0 ? '0 active' : '—');
           setDial(document.getElementById('dashboard-dial-execution'), {
             valueText: text,
             pct: typeof pct === 'number' ? pct : null,
@@ -49160,8 +49277,15 @@ Final Score: ${score}/100`;
         const rankingStore = dashboardSafeJsonParse(localStorage.getItem('rankingAiData'), null);
         const rankingRows = (rankingStore && Array.isArray(rankingStore.combinedRows)) ? rankingStore.combinedRows : [];
 
+        const gaioRag = scoreToRag(metrics?.gaioScore ?? null, { greenAt: 70, amberAt: 50 });
+        const aiSummaryRag = scoreToRag(metrics?.aiSummaryScore ?? null, { greenAt: 70, amberAt: 50 });
+        const moneyShareRag = scoreToRag(metrics?.moneySharePct ?? null, { greenAt: 70, amberAt: 50 });
+        const execRag = scoreToRag(metrics?.execPct ?? null, { greenAt: 70, amberAt: 40 });
+
         const auditCard = audit ? {
           timestamp: audit.timestamp || null,
+          rag: gaioRag,
+          ragLabel: (typeof metrics?.gaioScore === 'number') ? `${gaioRag.toUpperCase()} (${metrics.gaioScore}/100)` : 'Unknown',
           kpis: audit.searchData ? {
             clicks: `${(audit.searchData.totalClicks || 0).toLocaleString()}`,
             impressions: `${(audit.searchData.totalImpressions || 0).toLocaleString()}`,
@@ -49172,6 +49296,8 @@ Final Score: ${score}/100`;
 
         const rankingCard = rankingStore ? {
           timestamp: rankingStore.timestamp || null,
+          rag: moneyShareRag,
+          ragLabel: (typeof metrics?.moneySharePct === 'number') ? `Money share: ${metrics.moneySharePct}%` : 'Unknown',
           summary: {
             tracked: rankingStore.summary?.trackedKeywords ?? rankingRows.length ?? 0,
             withRank: rankingStore.summary?.rankedKeywords ?? rankingStore.summary?.withRank ?? '—',
@@ -49183,6 +49309,10 @@ Final Score: ${score}/100`;
         const moneyShare = computeMoneyCitationsShareFromRankingRows(rankingRows);
         const moneyPagesCard = {
           note: 'Uses latest available Money Pages + Ranking & AI data in this browser',
+          rag: moneyShareRag,
+          ragLabel: (typeof metrics?.moneySharePct === 'number')
+            ? `Money share: ${metrics.moneySharePct}%`
+            : 'Unknown',
           counts: {
             opportunityRows: Array.isArray(window.moneyPagesMetrics?.rows) ? window.moneyPagesMetrics.rows.length : '—',
             priorityRows: Array.isArray(window.moneyPagePriorityData) ? window.moneyPagePriorityData.length : '—',
@@ -49194,8 +49324,11 @@ Final Score: ${score}/100`;
 
         const tasks = getOptimisationTasksForDashboard();
         const activeStatuses = ['planned', 'in_progress', 'monitoring'];
+        const optLoaded = isOptimisationDataLoadedForDashboard();
         const optCard = {
-          note: 'Uses tasks loaded in this browser session',
+          note: optLoaded ? 'Uses tasks loaded in this browser session' : 'Admin key not set / tasks not loaded in this browser',
+          rag: optLoaded ? execRag : 'neutral',
+          ragLabel: optLoaded ? (typeof metrics?.execPct === 'number' ? `Updated: ${metrics.execPct}%` : 'Unknown') : 'Not loaded',
           counts: {
             active: tasks.filter(t => activeStatuses.includes(t.status)).length,
             monitoring: tasks.filter(t => t.status === 'monitoring').length,
@@ -49209,7 +49342,7 @@ Final Score: ${score}/100`;
           ranking: rankingCard,
           moneyPages: moneyPagesCard,
           optimisation: optCard,
-          domainStrength: { note: 'See Ranking & AI tab for latest Domain Strength snapshot table' }
+          domainStrength: { note: 'See Ranking & AI tab for latest Domain Strength snapshot table', rag: 'neutral', ragLabel: 'Snapshot table' }
         });
       };
 
@@ -49681,6 +49814,11 @@ Final Score: ${score}/100`;
   </div>
 
 </body>
+</html>
+
+
+
+
 </html>
 
 
