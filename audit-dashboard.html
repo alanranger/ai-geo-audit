@@ -3911,6 +3911,9 @@
               </div>
             </div>
             <div id="dashboard-money-share-mini" style="margin-top: 0.75rem;"></div>
+            <div style="margin-top: 0.75rem;">
+              <canvas id="dashboard-money-share-radar" width="340" height="200" style="width: 100%; height: 200px;"></canvas>
+            </div>
           </div>
 
           <div class="card dashboard-dial-card">
@@ -49149,6 +49152,28 @@ Final Score: ${score}/100`;
         return { money, total, pct };
       }
 
+      function computeMoneyCitationsSplitFromRankingRows(rows) {
+        const fn = typeof window.computeAiCitationsByCitedUrlSegment === 'function'
+          ? window.computeAiCitationsByCitedUrlSegment
+          : null;
+        if (!fn) return null;
+        const counts = fn(rows || []);
+        const moneyTotal = (counts.money || 0);
+        const landing = (counts.landing || 0);
+        const event = (counts.event || 0);
+        const product = (counts.product || 0);
+        const denom = moneyTotal > 0 ? moneyTotal : 0;
+        return {
+          moneyTotal,
+          landing,
+          event,
+          product,
+          landingPct: denom > 0 ? Math.round((landing / denom) * 100) : 0,
+          eventPct: denom > 0 ? Math.round((event / denom) * 100) : 0,
+          productPct: denom > 0 ? Math.round((product / denom) * 100) : 0
+        };
+      }
+
       function toNum(v) {
         const n = typeof v === 'number' ? v : (v == null ? NaN : Number(v));
         return Number.isFinite(n) ? n : null;
@@ -49468,6 +49493,7 @@ Final Score: ${score}/100`;
 
         const rankingRows = getRankingAiRowsFromStorage();
         const moneyShare = computeMoneyCitationsShareFromRankingRows(rankingRows);
+        const moneyShareSplit = computeMoneyCitationsSplitFromRankingRows(rankingRows);
         const rankingKpis = computeRankingKpisFromRows(rankingRows);
 
         const pillars = computePillarScoresFromAudit(audit);
@@ -49517,6 +49543,7 @@ Final Score: ${score}/100`;
           moneyCitations: moneyShare.money,
           totalCitations: moneyShare.total,
           moneySharePct: moneyShare.pct,
+          moneyShareSplit,
           moneyAgg,
           execActive: exec.active,
           execUpdated30d: exec.updated30d,
@@ -49939,6 +49966,72 @@ Final Score: ${score}/100`;
         }
       }
 
+      function renderDashboardMoneyShareRadar(moneyShareSplit) {
+        const canvas = document.getElementById('dashboard-money-share-radar');
+        if (!canvas || typeof Chart === 'undefined') return;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        const s = moneyShareSplit || null;
+        const labels = ['Landing', 'Event', 'Product'];
+        const values = [
+          toNum(s?.landingPct) ?? 0,
+          toNum(s?.eventPct) ?? 0,
+          toNum(s?.productPct) ?? 0
+        ];
+
+        try {
+          if (window.__dashboardMoneyShareRadarChart) {
+            window.__dashboardMoneyShareRadarChart.destroy();
+            window.__dashboardMoneyShareRadarChart = null;
+          }
+        } catch {
+          // ignore
+        }
+
+        const title = s
+          ? `Money citations split (of ${s.moneyTotal || 0}): Landing ${s.landing || 0}, Event ${s.event || 0}, Product ${s.product || 0}`
+          : 'Money citations split: run Ranking & AI scan to populate';
+        canvas.title = title;
+
+        try {
+          window.__dashboardMoneyShareRadarChart = new Chart(ctx, {
+            type: 'radar',
+            data: {
+              labels,
+              datasets: [{
+                label: '% of Money citations',
+                data: values,
+                borderColor: 'rgba(245, 158, 11, 0.95)',
+                backgroundColor: 'rgba(245, 158, 11, 0.16)',
+                borderWidth: 2,
+                pointBackgroundColor: '#ffffff',
+                pointBorderColor: 'rgba(245, 158, 11, 0.95)',
+                pointRadius: 3
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { display: false } },
+              scales: {
+                r: {
+                  beginAtZero: true,
+                  min: 0,
+                  max: 100,
+                  ticks: { display: false },
+                  grid: { color: 'rgba(148,163,184,0.25)' },
+                  angleLines: { color: 'rgba(148,163,184,0.25)' },
+                  pointLabels: { color: 'rgba(226,232,240,0.9)', font: { size: 11, weight: '600' } }
+                }
+              }
+            }
+          });
+        } catch {
+          // ignore
+        }
+      }
+
       window.renderDashboardTab = function renderDashboardTab() {
         // Always show LIVE latest-available metrics (from the latest independent audits).
         // Deltas are computed against the previous global run snapshot, if present.
@@ -50041,6 +50134,7 @@ Final Score: ${score}/100`;
               <div class="dashboard-mini-note">Goal: move citations toward Money Pages (commercial intent).</div>
             `;
           }
+          renderDashboardMoneyShareRadar(metrics?.moneyShareSplit || null);
         }
 
         // Dial: Uplift remaining (Money Pages CTR target)
