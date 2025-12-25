@@ -49416,7 +49416,8 @@ Final Score: ${score}/100`;
           optimisationPotentialClicks = Math.round(sum);
         }
 
-        const domainCache = dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v2'), null)
+        const domainCache = dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v3'), null)
+          || dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v2'), null)
           || dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v1'), null);
 
         return {
@@ -49512,7 +49513,6 @@ Final Score: ${score}/100`;
           return `
             <div class="dashboard-kpi-tile" title="${title || ''}">
               <div class="dashboard-kpi-label">${label}</div>
-              <div class="dashboard-kpi-value" style="font-size: 1rem; font-weight: 900;">W/S/B</div>
               <div class="dashboard-traffic-row">
                 <span class="dashboard-traffic-pill" data-bucket="worse">${w} Worse</span>
                 <span class="dashboard-traffic-pill" data-bucket="same">${s} Same</span>
@@ -49617,7 +49617,7 @@ Final Score: ${score}/100`;
               ${tile('Your score', domainStrength?.kpis?.selfScore ?? '—', domainStrength?.deltas?.selfScore ?? '', domainStrength?.dirs?.selfScore ?? 'flat', 'Your domain strength score (0–100).')}
               ${tile('Gap to top', domainStrength?.kpis?.gapTop ?? '—', domainStrength?.deltas?.gapTop ?? '', domainStrength?.dirs?.gapTop ?? 'flat', 'Difference between the strongest competitor score and your score (lower is better).')}
               ${tile('# stronger domains', domainStrength?.kpis?.stronger ?? '—', domainStrength?.deltas?.stronger ?? '', domainStrength?.dirs?.stronger ?? 'flat', 'How many competitors in the snapshot set have a higher score than you.')}
-              ${tile('Snapshot date', domainStrength?.kpis?.snapshotDate ?? '—', '', 'flat', 'Date of the snapshot used for this tile.')}
+              ${tile('Rank vs set', domainStrength?.kpis?.rankVs ?? '—', '', 'flat', 'Your rank among the comparison set (you + competitors). Example: 1/16 means strongest in the set.')}
             </div>
           </div>
         `;
@@ -49718,18 +49718,23 @@ Final Score: ${score}/100`;
 
       async function refreshDashboardDomainStrengthCacheIfNeeded() {
         const now = Date.now();
-        // v2: cache key bump to avoid "fresh-but-null" caches created by older parsers
+        // v3: cache key bump to avoid "fresh-but-null" caches created by older parsers,
+        // and to include competitor counts for ranking.
+        const cacheV3 = dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v3'), null);
         const cacheV2 = dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v2'), null);
         const cacheV1 = dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v1'), null);
-        const cache = cacheV2 || cacheV1 || null;
+        const cache = cacheV3 || cacheV2 || cacheV1 || null;
         const lastMs = cache?.fetchedAtMs ? Number(cache.fetchedAtMs) : 0;
         const hasUsefulValues = (() => {
           const selfScore = toNum(cache?.selfScore);
           const topScore = toNum(cache?.topCompetitorScore);
           const stronger = toNum(cache?.strongerCount);
+          const competitorsCount = toNum(cache?.competitorsCount);
           const snapshotDate = cache?.snapshotDate || null;
           // Treat null-valued caches as stale (common when older code wrote "fresh" cache with nulls).
-          return (typeof selfScore === 'number' || typeof topScore === 'number' || typeof stronger === 'number') && !!snapshotDate;
+          return (typeof selfScore === 'number' || typeof topScore === 'number' || typeof stronger === 'number')
+            && !!snapshotDate
+            && (typeof competitorsCount === 'number'); // needed for rank tile
         })();
         const stale = !lastMs || (now - lastMs) > (6 * 60 * 60 * 1000) || !hasUsefulValues; // 6 hours
         if (!stale) return { cache, updated: false };
@@ -49758,6 +49763,7 @@ Final Score: ${score}/100`;
           const strongerCount = (typeof selfScore === 'number')
             ? competitors.filter(it => typeof it.score === 'number' && it.score > selfScore).length
             : null;
+          const competitorsCount = competitors.length;
 
           const next = {
             fetchedAtMs: now,
@@ -49765,9 +49771,10 @@ Final Score: ${score}/100`;
             selfDomain: normalizedSelf,
             selfScore,
             topCompetitorScore,
-            strongerCount
+            strongerCount,
+            competitorsCount
           };
-          localStorage.setItem('dashboard_domain_strength_cache_v2', JSON.stringify(next));
+          localStorage.setItem('dashboard_domain_strength_cache_v3', JSON.stringify(next));
           return { cache: next, updated: true };
         } catch {
           return { cache, updated: false };
@@ -50074,6 +50081,9 @@ Final Score: ${score}/100`;
         const topScore = toNum(ds?.topCompetitorScore);
         const gapTop = (selfScore != null && topScore != null) ? (topScore - selfScore) : null;
         const strongerCount = toNum(ds?.strongerCount);
+        const competitorsCount = toNum(ds?.competitorsCount);
+        const rank = (typeof strongerCount === 'number') ? (strongerCount + 1) : null;
+        const rankDenom = (typeof competitorsCount === 'number') ? (competitorsCount + 1) : null; // +1 includes you in the set
         const domainRag = scoreToRag(selfScore, { greenAt: 70, amberAt: 50 });
         const domainCard = {
           note: ds?.snapshotDate ? `Snapshot date: ${ds.snapshotDate}` : 'Run snapshot to populate (Ranking & AI tab)',
@@ -50088,7 +50098,7 @@ Final Score: ${score}/100`;
             selfScore: (typeof selfScore === 'number') ? formatFixed(selfScore, 1) : '—',
             gapTop: (typeof gapTop === 'number') ? `+${formatFixed(Math.max(0, gapTop), 1)}` : '—',
             stronger: (typeof strongerCount === 'number') ? formatInt(strongerCount) : '—',
-            snapshotDate: ds?.snapshotDate || '—'
+            rankVs: (typeof rank === 'number' && typeof rankDenom === 'number') ? `${formatInt(rank)}/${formatInt(rankDenom)}` : '—'
           },
           deltas: {
             selfScore: (prevDs ? formatDeltaNumber(selfScore, prevDs.selfScore, { decimals: 1 }) : ''),
