@@ -1323,6 +1323,84 @@
       transform: translateY(-2px);
       box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
     }
+
+    /* Dashboard: dials */
+    section[data-panel="dashboard"] .dashboard-dials-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    section[data-panel="dashboard"] .dashboard-summary-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+
+    section[data-panel="dashboard"] .dashboard-dial-card {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      align-items: center;
+      text-align: center;
+    }
+
+    section[data-panel="dashboard"] .dashboard-dial-header {
+      width: 100%;
+    }
+
+    section[data-panel="dashboard"] .dashboard-dial-title {
+      font-weight: 800;
+      font-size: 1.05rem;
+      color: var(--dark-text) !important;
+    }
+
+    section[data-panel="dashboard"] .dashboard-dial-subtitle {
+      font-size: 0.85rem;
+      color: var(--dark-text-muted) !important;
+      margin-top: 0.15rem;
+    }
+
+    section[data-panel="dashboard"] .dashboard-dial-ring {
+      --pct: 0;
+      --ring: rgba(148, 163, 184, 0.25);
+      --accent: var(--dark-brand);
+      width: 150px;
+      height: 150px;
+      border-radius: 999px;
+      background: conic-gradient(var(--accent) calc(var(--pct) * 1%), var(--ring) 0);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: inset 0 0 0 2px rgba(148, 163, 184, 0.15);
+    }
+
+    section[data-panel="dashboard"] .dashboard-dial-inner {
+      width: 118px;
+      height: 118px;
+      border-radius: 999px;
+      background: var(--dark-panel);
+      border: 1px solid var(--dark-border);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.35rem;
+    }
+
+    section[data-panel="dashboard"] .dashboard-dial-value {
+      font-size: 1.45rem;
+      font-weight: 900;
+      letter-spacing: -0.02em;
+    }
+
+    section[data-panel="dashboard"] .dashboard-dial-delta {
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: var(--dark-text-muted);
+    }
     
     /* Optimisation module tiles - dark theme with green centered counts and orange hover animation */
     .optimisation-summary-cards .card,
@@ -3159,6 +3237,36 @@
       </div>
     </div>
 
+    <!-- Dashboard: Global Run Modal -->
+    <div id="dashboardRunModal" class="modal" style="display: none;">
+      <div class="modal-content" style="max-width: 760px; background: var(--dark-panel); color: var(--dark-text); border: 1px solid var(--dark-border);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+          <h2 style="margin: 0; color: var(--dark-brand);">Running Global Audit</h2>
+          <button id="dashboardRunClose" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: var(--dark-text-muted);" title="Close">&times;</button>
+        </div>
+
+        <div style="margin-bottom: 1rem;">
+          <div style="width: 100%; height: 22px; background-color: rgba(148,163,184,0.25); border-radius: 999px; overflow: hidden; position: relative;">
+            <div id="dashboardRunProgressFill" style="width: 0%; height: 100%; background: linear-gradient(90deg, var(--dark-brand), #ff8c42); transition: width 0.25s ease;"></div>
+          </div>
+          <div id="dashboardRunProgressText" style="margin-top: 0.5rem; text-align: center; font-size: 0.9rem; color: var(--dark-text-muted); font-weight: 600;">0%</div>
+        </div>
+
+        <div id="dashboardRunCurrentStep" style="font-size: 1rem; font-weight: 700; margin-bottom: 0.5rem;">Initializing…</div>
+        <div id="dashboardRunNarrative" style="font-size: 0.95rem; color: var(--dark-text-muted); line-height: 1.5; margin-bottom: 1rem;">Preparing to run all audits and updates.</div>
+
+        <div style="border-top: 1px solid var(--dark-border); padding-top: 1rem;">
+          <div style="font-size: 0.8rem; font-weight: 700; color: var(--dark-text-muted); margin-bottom: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;">Steps</div>
+          <div id="dashboardRunStepsList" style="display: flex; flex-direction: column; gap: 0.5rem;"></div>
+        </div>
+
+        <div id="dashboardRunSummary" style="display: none; border-top: 2px solid #10b981; padding-top: 1rem; margin-top: 1rem;">
+          <div style="font-weight: 800; color: #10b981; margin-bottom: 0.5rem;">✓ Global run complete</div>
+          <div id="dashboardRunSummaryContent" style="color: var(--dark-text); font-size: 0.95rem;"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Ranking & AI Progress Modal -->
     <div id="rankingAiProgressModal" class="modal" style="display: none;">
       <div class="modal-content" style="max-width: 700px;">
@@ -3511,15 +3619,82 @@
         <div class="card--section-header">
           <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap;">
             <div>
-              <h2 style="margin: 0 0 0.5rem 0;">Dashboard</h2>
-              <p style="margin: 0;">(Placeholder) This tab will become the global summary dashboard.</p>
+              <h2 style="margin: 0 0 0.25rem 0;">Dashboard</h2>
+              <p style="margin: 0;">Global run + executive summary across all modules. Deltas compare against the previous global run.</p>
+              <div style="margin-top: 0.5rem; font-size: 0.9rem; color: var(--dark-text-muted);">
+                <strong>Last global run:</strong> <span id="dashboard-last-run">—</span>
+                <span style="margin-left: 0.75rem;"><strong>Status:</strong> <span id="dashboard-last-status">—</span></span>
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
+              <button id="dashboard-run-all-btn" class="btn" type="button" title="Runs Audit Scan, Ranking & AI scan, Domain Strength snapshot, then updates all tasks with latest data.">
+                ▶ Run All Audits & Updates
+              </button>
             </div>
           </div>
         </div>
 
-        <div class="card">
-          <div style="color: var(--dark-text-muted); font-size: 0.95rem;">
-            Nothing here yet — next step is to define what the Dashboard contains.
+        <div class="dashboard-dials-grid" id="dashboard-dials-grid">
+          <div class="card dashboard-dial-card">
+            <div class="dashboard-dial-header">
+              <div class="dashboard-dial-title">AI Health (GAIO)</div>
+              <div class="dashboard-dial-subtitle">Score (0–100)</div>
+            </div>
+            <div class="dashboard-dial-ring" id="dashboard-dial-gaio" data-pct="0">
+              <div class="dashboard-dial-inner">
+                <div class="dashboard-dial-value" data-field="value">—</div>
+                <div class="dashboard-dial-delta" data-field="delta">—</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card dashboard-dial-card">
+            <div class="dashboard-dial-header">
+              <div class="dashboard-dial-title">AI Summary Likelihood</div>
+              <div class="dashboard-dial-subtitle">Score (0–100)</div>
+            </div>
+            <div class="dashboard-dial-ring" id="dashboard-dial-ai-summary" data-pct="0">
+              <div class="dashboard-dial-inner">
+                <div class="dashboard-dial-value" data-field="value">—</div>
+                <div class="dashboard-dial-delta" data-field="delta">—</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card dashboard-dial-card">
+            <div class="dashboard-dial-header">
+              <div class="dashboard-dial-title">AI Citations (Money Share)</div>
+              <div class="dashboard-dial-subtitle">Money citations / total</div>
+            </div>
+            <div class="dashboard-dial-ring" id="dashboard-dial-money-share" data-pct="0">
+              <div class="dashboard-dial-inner">
+                <div class="dashboard-dial-value" data-field="value">—</div>
+                <div class="dashboard-dial-delta" data-field="delta">—</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card dashboard-dial-card">
+            <div class="dashboard-dial-header">
+              <div class="dashboard-dial-title">Execution</div>
+              <div class="dashboard-dial-subtitle">Active tasks updated (30d)</div>
+            </div>
+            <div class="dashboard-dial-ring" id="dashboard-dial-execution" data-pct="0">
+              <div class="dashboard-dial-inner">
+                <div class="dashboard-dial-value" data-field="value">—</div>
+                <div class="dashboard-dial-delta" data-field="delta">—</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="dashboard-summary-grid" id="dashboard-summary-grid">
+          <div class="card">
+            <div style="font-weight: 700; margin-bottom: 0.5rem;">Module summary cards</div>
+            <div style="color: var(--dark-text-muted);">
+              Next: we’ll add compact summary panels from each tab (Portfolio, Ranking & AI, Money Pages, Optimisation Tracking, etc.).
+            </div>
           </div>
         </div>
       </section>
@@ -15172,6 +15347,15 @@
               window.renderPortfolioTab();
             }
           }, 100);
+        }
+
+        // Dashboard: render lightweight summary (no heavy work)
+        if (isActive && panelId === 'dashboard') {
+          setTimeout(() => {
+            if (typeof window.renderDashboardTab === 'function') {
+              window.renderDashboardTab();
+            }
+          }, 50);
         }
         
         // CRITICAL: When Money Pages tab becomes active, re-fetch statuses from database
@@ -48593,6 +48777,415 @@ Final Score: ${score}/100`;
       // Make functions globally available
       window.renderAiSourcesTab = renderAiSourcesTab;
       window.wireAiSourcesFilters = wireAiSourcesFilters;
+
+      // =========================
+      // Dashboard (Global Summary)
+      // =========================
+
+      const DASHBOARD_RUNS_KEY = 'dashboard_global_runs_v1';
+
+      function dashboardSafeJsonParse(text, fallback = null) {
+        try {
+          if (!text) return fallback;
+          return JSON.parse(text);
+        } catch {
+          return fallback;
+        }
+      }
+
+      function formatUtcTimestamp(iso) {
+        if (!iso) return '—';
+        const d = new Date(iso);
+        if (Number.isNaN(d.getTime())) return '—';
+        const day = String(d.getUTCDate()).padStart(2, '0');
+        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const month = monthNames[d.getUTCMonth()];
+        const year = d.getUTCFullYear();
+        const hh = String(d.getUTCHours()).padStart(2, '0');
+        const mm = String(d.getUTCMinutes()).padStart(2, '0');
+        const ss = String(d.getUTCSeconds()).padStart(2, '0');
+        return `${day} ${month} ${year}, ${hh}:${mm}:${ss} GMT`;
+      }
+
+      function scoreToRag(score, { greenAt = 70, amberAt = 50 } = {}) {
+        const s = typeof score === 'number' ? score : null;
+        if (s === null) return 'neutral';
+        if (s >= greenAt) return 'green';
+        if (s >= amberAt) return 'amber';
+        return 'red';
+      }
+
+      function ragToAccent(rag) {
+        if (rag === 'green') return '#10b981';
+        if (rag === 'amber') return '#f59e0b';
+        if (rag === 'red') return '#ef4444';
+        return 'rgba(148, 163, 184, 0.6)';
+      }
+
+      function getDashboardRuns() {
+        const runs = dashboardSafeJsonParse(localStorage.getItem(DASHBOARD_RUNS_KEY), []);
+        return Array.isArray(runs) ? runs : [];
+      }
+
+      function saveDashboardRun(run) {
+        const existing = getDashboardRuns();
+        const next = [...existing, run].slice(-50);
+        localStorage.setItem(DASHBOARD_RUNS_KEY, JSON.stringify(next));
+      }
+
+      function getRankingAiRowsFromStorage() {
+        const local = dashboardSafeJsonParse(localStorage.getItem('rankingAiData'), null);
+        if (local && Array.isArray(local.combinedRows)) return local.combinedRows;
+        if (Array.isArray(window.rankingAiData)) return window.rankingAiData;
+        return [];
+      }
+
+      function computeMoneyCitationsShareFromRankingRows(rows) {
+        const fn = typeof window.computeAiCitationsByCitedUrlSegment === 'function'
+          ? window.computeAiCitationsByCitedUrlSegment
+          : null;
+        if (!fn) return { money: null, total: null, pct: null };
+        const counts = fn(rows || []);
+        const money = (counts.money || 0);
+        const total = (counts.site || 0);
+        const pct = total > 0 ? Math.round((money / total) * 100) : 0;
+        return { money, total, pct };
+      }
+
+      function getOptimisationTasksForDashboard() {
+        const state = window.optimisationModuleState;
+        if (!state || !Array.isArray(state.allTasks)) return [];
+
+        let tasks = state.allTasks;
+        const includeTestCheckbox = document.getElementById('optimisation-filter-include-test');
+        if (!includeTestCheckbox || !includeTestCheckbox.checked) {
+          tasks = tasks.filter(t => !t.is_test_task);
+        }
+        return tasks;
+      }
+
+      function computeExecutionFromTasks(tasks) {
+        const activeStatuses = ['planned', 'in_progress', 'monitoring'];
+        const activeTasks = (tasks || []).filter(t => activeStatuses.includes(t.status));
+
+        const scope = window.optimisationModuleState?.scope || 'active_cycle';
+        const getLatest = typeof window.getLatestMeasurementInScope === 'function'
+          ? window.getLatestMeasurementInScope
+          : null;
+
+        if (!getLatest) {
+          return { active: activeTasks.length, updated30d: null, pct: null };
+        }
+
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+        let updated = 0;
+        for (const task of activeTasks) {
+          const latest = getLatest(task, scope);
+          if (!latest || !latest.captured_at) continue;
+          const d = new Date(latest.captured_at);
+          if (!Number.isNaN(d.getTime()) && d >= thirtyDaysAgo) updated += 1;
+        }
+
+        const pct = activeTasks.length > 0 ? Math.round((updated / activeTasks.length) * 100) : 100;
+        return { active: activeTasks.length, updated30d: updated, pct };
+      }
+
+      function computeDashboardSnapshot() {
+        const audit = dashboardSafeJsonParse(localStorage.getItem('last_audit_results'), null);
+        const hasAudit = audit && audit.scores;
+
+        let gaioScore = null;
+        let aiSummaryScore = null;
+        if (hasAudit && typeof window.calculateAiGeoScore === 'function') {
+          const health = window.calculateAiGeoScore(audit.scores, audit.schemaAudit || null, audit.snippetReadiness || null);
+          gaioScore = typeof health.aiGeoScore === 'number' ? health.aiGeoScore : null;
+          aiSummaryScore = typeof health.aiSummary?.score === 'number' ? Math.round(health.aiSummary.score) : null;
+        }
+
+        const rankingRows = getRankingAiRowsFromStorage();
+        const moneyShare = computeMoneyCitationsShareFromRankingRows(rankingRows);
+
+        const tasks = getOptimisationTasksForDashboard();
+        const exec = computeExecutionFromTasks(tasks);
+
+        return {
+          gaioScore,
+          aiSummaryScore,
+          moneyCitations: moneyShare.money,
+          totalCitations: moneyShare.total,
+          moneySharePct: moneyShare.pct,
+          execActive: exec.active,
+          execUpdated30d: exec.updated30d,
+          execPct: exec.pct
+        };
+      }
+
+      function setDial(el, { valueText, pct, rag, deltaText }) {
+        if (!el) return;
+        const safePct = Math.max(0, Math.min(100, typeof pct === 'number' ? pct : 0));
+        el.style.setProperty('--pct', String(safePct));
+        el.style.setProperty('--accent', ragToAccent(rag));
+        const valueEl = el.querySelector('[data-field="value"]');
+        const deltaEl = el.querySelector('[data-field="delta"]');
+        if (valueEl) valueEl.textContent = valueText || '—';
+        if (deltaEl) deltaEl.textContent = deltaText || '—';
+      }
+
+      function formatDelta(curr, prev) {
+        if (typeof curr !== 'number' || typeof prev !== 'number') return '—';
+        const d = curr - prev;
+        if (d === 0) return '0';
+        return `${d > 0 ? '+' : ''}${d}`;
+      }
+
+      window.renderDashboardTab = function renderDashboardTab() {
+        const runs = getDashboardRuns();
+        const last = runs.length ? runs[runs.length - 1] : null;
+        const prev = runs.length > 1 ? runs[runs.length - 2] : null;
+
+        const lastRunEl = document.getElementById('dashboard-last-run');
+        const lastStatusEl = document.getElementById('dashboard-last-status');
+        if (lastRunEl) lastRunEl.textContent = last ? formatUtcTimestamp(last.timestamp) : '—';
+        if (lastStatusEl) lastStatusEl.textContent = last ? (last.status || 'ok') : '—';
+
+        const metrics = last?.metrics || null;
+        const prevMetrics = prev?.metrics || null;
+
+        // Dial: GAIO
+        {
+          const v = metrics?.gaioScore ?? null;
+          const p = typeof v === 'number' ? v : null;
+          const rag = scoreToRag(p, { greenAt: 70, amberAt: 50 });
+          setDial(document.getElementById('dashboard-dial-gaio'), {
+            valueText: typeof v === 'number' ? `${v}/100` : '—',
+            pct: p,
+            rag,
+            deltaText: formatDelta(metrics?.gaioScore, prevMetrics?.gaioScore)
+          });
+        }
+
+        // Dial: AI Summary
+        {
+          const v = metrics?.aiSummaryScore ?? null;
+          const p = typeof v === 'number' ? v : null;
+          const rag = scoreToRag(p, { greenAt: 70, amberAt: 50 });
+          setDial(document.getElementById('dashboard-dial-ai-summary'), {
+            valueText: typeof v === 'number' ? `${v}/100` : '—',
+            pct: p,
+            rag,
+            deltaText: formatDelta(metrics?.aiSummaryScore, prevMetrics?.aiSummaryScore)
+          });
+        }
+
+        // Dial: Money share
+        {
+          const pct = metrics?.moneySharePct ?? null;
+          const money = metrics?.moneyCitations ?? null;
+          const total = metrics?.totalCitations ?? null;
+          const rag = scoreToRag(typeof pct === 'number' ? pct : null, { greenAt: 70, amberAt: 50 });
+          const text = (typeof money === 'number' && typeof total === 'number')
+            ? `${money}/${total} (${pct ?? 0}%)`
+            : '—';
+          setDial(document.getElementById('dashboard-dial-money-share'), {
+            valueText: text,
+            pct: typeof pct === 'number' ? pct : null,
+            rag,
+            deltaText: formatDelta(metrics?.moneySharePct, prevMetrics?.moneySharePct)
+          });
+        }
+
+        // Dial: Execution
+        {
+          const pct = metrics?.execPct ?? null;
+          const active = metrics?.execActive ?? null;
+          const updated = metrics?.execUpdated30d ?? null;
+          const rag = scoreToRag(typeof pct === 'number' ? pct : null, { greenAt: 70, amberAt: 40 });
+          const text = (typeof active === 'number' && typeof updated === 'number' && typeof pct === 'number')
+            ? `${updated}/${active} (${pct}%)`
+            : '—';
+          setDial(document.getElementById('dashboard-dial-execution'), {
+            valueText: text,
+            pct: typeof pct === 'number' ? pct : null,
+            rag,
+            deltaText: formatDelta(metrics?.execPct, prevMetrics?.execPct)
+          });
+        }
+      };
+
+      function dashboardRunModalSetProgress(pct) {
+        const fill = document.getElementById('dashboardRunProgressFill');
+        const text = document.getElementById('dashboardRunProgressText');
+        const p = Math.max(0, Math.min(100, pct));
+        if (fill) fill.style.width = `${p}%`;
+        if (text) text.textContent = `${p}%`;
+      }
+
+      function dashboardRunModalSetStep(title, narrative) {
+        const elTitle = document.getElementById('dashboardRunCurrentStep');
+        const elNarr = document.getElementById('dashboardRunNarrative');
+        if (elTitle) elTitle.textContent = title || '';
+        if (elNarr) elNarr.textContent = narrative || '';
+      }
+
+      function dashboardRunModalRenderSteps(steps) {
+        const list = document.getElementById('dashboardRunStepsList');
+        if (!list) return;
+        list.innerHTML = '';
+        steps.forEach(s => {
+          const row = document.createElement('div');
+          row.style.display = 'flex';
+          row.style.justifyContent = 'space-between';
+          row.style.gap = '0.75rem';
+          row.style.padding = '0.5rem 0.75rem';
+          row.style.border = '1px solid var(--dark-border)';
+          row.style.borderRadius = '8px';
+          row.style.background = 'rgba(15, 20, 25, 0.35)';
+
+          const left = document.createElement('div');
+          left.textContent = s.label;
+          left.style.fontWeight = '700';
+
+          const right = document.createElement('div');
+          right.textContent = s.status;
+          right.style.fontWeight = '800';
+          right.style.color = s.status === 'Done' ? '#10b981' : (s.status === 'Running' ? '#f59e0b' : (s.status === 'Failed' ? '#ef4444' : 'var(--dark-text-muted)'));
+
+          row.appendChild(left);
+          row.appendChild(right);
+          list.appendChild(row);
+        });
+      }
+
+      function showDashboardRunModal() {
+        const modal = document.getElementById('dashboardRunModal');
+        const closeBtn = document.getElementById('dashboardRunClose');
+        const summary = document.getElementById('dashboardRunSummary');
+        if (summary) summary.style.display = 'none';
+        if (modal) modal.style.display = 'block';
+        if (closeBtn) closeBtn.disabled = true;
+        dashboardRunModalSetProgress(0);
+      }
+
+      function finishDashboardRunModal({ ok, summaryHtml }) {
+        const closeBtn = document.getElementById('dashboardRunClose');
+        const summary = document.getElementById('dashboardRunSummary');
+        const content = document.getElementById('dashboardRunSummaryContent');
+        if (content) content.innerHTML = summaryHtml || '';
+        if (summary) summary.style.display = 'block';
+        if (closeBtn) {
+          closeBtn.disabled = false;
+          closeBtn.style.opacity = '1';
+          closeBtn.title = 'Close';
+        }
+      }
+
+      window.runDashboardGlobalRun = async function runDashboardGlobalRun() {
+        const runBtn = document.getElementById('dashboard-run-all-btn');
+        if (runBtn) runBtn.disabled = true;
+
+        // Warn if admin key missing (task update step will likely fail)
+        if (typeof window.hasAdminKey === 'function' && !window.hasAdminKey()) {
+          const proceed = confirm('Admin key is not set. The "Update All Tasks" step will likely fail.\n\nRun anyway?');
+          if (!proceed) {
+            if (runBtn) runBtn.disabled = false;
+            return;
+          }
+        }
+
+        const startIso = new Date().toISOString();
+        const stepDefs = [
+          { key: 'sync_csv', label: 'Sync CSV', runner: async () => { if (typeof window.syncCsv === 'function') await window.syncCsv(); } },
+          { key: 'audit_scan', label: 'Run Audit Scan', runner: async () => { if (typeof window.runAudit === 'function') await window.runAudit(); } },
+          { key: 'ranking_ai', label: 'Run Ranking & AI Scan', runner: async () => { if (typeof window.loadRankingAiData === 'function') await window.loadRankingAiData(true); } },
+          { key: 'domain_strength', label: 'Run Domain Strength Snapshot', runner: async () => { if (typeof window.runDomainStrengthSnapshot === 'function') await window.runDomainStrengthSnapshot(); } },
+          { key: 'update_tasks', label: 'Update All Tasks with Latest Data', runner: async () => { if (typeof window.bulkUpdateAllTasks === 'function') await window.bulkUpdateAllTasks(); } }
+        ];
+
+        const steps = stepDefs.map(s => ({ key: s.key, label: s.label, status: 'Pending' }));
+        const results = { ok: true, errors: [] };
+
+        showDashboardRunModal();
+        dashboardRunModalRenderSteps(steps);
+
+        const closeBtn = document.getElementById('dashboardRunClose');
+        if (closeBtn) {
+          closeBtn.onclick = () => {
+            const modal = document.getElementById('dashboardRunModal');
+            if (modal) modal.style.display = 'none';
+          };
+        }
+
+        for (let i = 0; i < stepDefs.length; i++) {
+          const s = stepDefs[i];
+          steps[i].status = 'Running';
+          dashboardRunModalRenderSteps(steps);
+          dashboardRunModalSetProgress(Math.round((i / stepDefs.length) * 100));
+          dashboardRunModalSetStep(s.label, 'Working…');
+
+          try {
+            await s.runner();
+            steps[i].status = 'Done';
+          } catch (err) {
+            steps[i].status = 'Failed';
+            results.ok = false;
+            results.errors.push({ step: s.key, message: err?.message || String(err) });
+          }
+
+          dashboardRunModalRenderSteps(steps);
+        }
+
+        dashboardRunModalSetProgress(100);
+        dashboardRunModalSetStep('Done', results.ok ? 'All steps completed.' : 'Completed with errors.');
+
+        // Refresh optimisation tasks so execution dial reflects latest measurements
+        try {
+          if (typeof window.loadAllOptimisationTasks === 'function') {
+            await window.loadAllOptimisationTasks();
+          }
+        } catch {
+          // ignore
+        }
+
+        const snapshot = computeDashboardSnapshot();
+        const runRecord = {
+          timestamp: startIso,
+          status: results.ok ? 'ok' : 'partial',
+          steps,
+          metrics: snapshot
+        };
+        saveDashboardRun(runRecord);
+
+        window.renderDashboardTab();
+
+        const summaryHtml = results.ok
+          ? `<div>Saved a new global run snapshot.</div>`
+          : `<div><strong>Saved a partial global run snapshot.</strong><div style="margin-top:0.5rem; color: var(--dark-text-muted);">Errors: ${results.errors.map(e => `${e.step}: ${e.message}`).join(' | ')}</div></div>`;
+
+        finishDashboardRunModal({ ok: results.ok, summaryHtml });
+
+        if (runBtn) runBtn.disabled = false;
+      };
+
+      window.addEventListener('DOMContentLoaded', () => {
+        const btn = document.getElementById('dashboard-run-all-btn');
+        if (btn) {
+          btn.addEventListener('click', () => {
+            if (typeof window.runDashboardGlobalRun === 'function') window.runDashboardGlobalRun();
+          });
+        }
+        const closeBtn = document.getElementById('dashboardRunClose');
+        if (closeBtn) {
+          closeBtn.onclick = () => {
+            const modal = document.getElementById('dashboardRunModal');
+            if (modal) modal.style.display = 'none';
+          };
+        }
+        if (typeof window.renderDashboardTab === 'function') {
+          window.renderDashboardTab();
+        }
+      });
   </script>
 
   <!-- Optimisation Tracking Modals (Phase 2) -->
