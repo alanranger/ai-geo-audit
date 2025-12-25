@@ -3364,7 +3364,7 @@
     <h1>GAIO (Generative AI Optimization) Audit Dashboard</h1>
     <p>Automated GAIO Performance Tracking & Optimisation</p>
     <p style="font-size: 0.9rem; margin-top: 0.5rem; opacity: 1; background: rgba(0,0,0,0.3); padding: 0.25rem 0.5rem; border-radius: 4px; display: inline-block;">
-      <strong>Version: <span id="gitVersion">8af080a</span></strong> | Built: <span id="buildDate"></span> |
+      <strong>Version: <span id="gitVersion">098e0ac</span></strong> | Built: <span id="buildDate"></span> |
       <span id="loadTime" style="color: #4f4;">Loaded: <span id="loadTimeValue"></span></span>
     </p>
     <script>
@@ -49726,6 +49726,8 @@ Final Score: ${score}/100`;
         const cacheV1 = dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v1'), null);
         const cache = cacheV4 || cacheV3 || cacheV2 || cacheV1 || null;
         const lastMs = cache?.fetchedAtMs ? Number(cache.fetchedAtMs) : 0;
+        // If the user has an older cache but not v4 yet, force an upgrade pass
+        const needsUpgradeToV4 = !cacheV4 && (cacheV3 || cacheV2 || cacheV1);
         const hasUsefulValues = (() => {
           const selfScore = toNum(cache?.selfScore);
           const topScore = toNum(cache?.topCompetitorScore);
@@ -49737,7 +49739,7 @@ Final Score: ${score}/100`;
             && !!snapshotDate
             && (typeof competitorsCount === 'number'); // needed for rank tile
         })();
-        const stale = !lastMs || (now - lastMs) > (6 * 60 * 60 * 1000) || !hasUsefulValues; // 6 hours
+        const stale = needsUpgradeToV4 || !lastMs || (now - lastMs) > (6 * 60 * 60 * 1000) || !hasUsefulValues; // 6 hours
         if (!stale) return { cache, updated: false };
         if (window.__dashboardDomainStrengthRefreshing) return { cache, updated: false };
         window.__dashboardDomainStrengthRefreshing = true;
