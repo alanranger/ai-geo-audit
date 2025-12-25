@@ -49073,6 +49073,21 @@ Final Score: ${score}/100`;
         return `${d > 0 ? '+' : ''}${d}`;
       }
 
+      function computeFreshnessBadge(timestampIso, { warnDays = 3, staleDays = 7 } = {}) {
+        if (!timestampIso) {
+          return { rag: 'neutral', label: 'Not run', daysOld: null };
+        }
+        const d = new Date(timestampIso);
+        if (Number.isNaN(d.getTime())) {
+          return { rag: 'neutral', label: 'Not run', daysOld: null };
+        }
+        const ms = Date.now() - d.getTime();
+        const daysOld = Math.floor(ms / (1000 * 60 * 60 * 24));
+        if (daysOld >= staleDays) return { rag: 'red', label: `Stale (${daysOld}d)`, daysOld };
+        if (daysOld >= warnDays) return { rag: 'amber', label: `Stale (${daysOld}d)`, daysOld };
+        return { rag: 'green', label: 'Fresh', daysOld };
+      }
+
       function renderDashboardSummaryCards({ audit, ranking, moneyPages, optimisation, domainStrength }) {
         const grid = document.getElementById('dashboard-summary-grid');
         if (!grid) return;
@@ -49080,6 +49095,14 @@ Final Score: ${score}/100`;
         const jumpBtn = (label, panelId) => `
           <button type="button" class="btn" style="padding: 0.45rem 0.85rem; font-size: 0.9rem;"
             onclick="if (typeof setActivePanel === 'function') setActivePanel('${panelId}')">
+            ${label}
+          </button>
+        `;
+
+        const runBtn = (label, onClick, title = '') => `
+          <button type="button" class="btn" style="padding: 0.45rem 0.85rem; font-size: 0.9rem; background:#0f172a; border:1px solid rgba(148,163,184,0.25);"
+            title="${title || ''}"
+            onclick="${onClick}">
             ${label}
           </button>
         `;
@@ -49125,6 +49148,7 @@ Final Score: ${score}/100`;
               </div>
               <div style="display:flex; gap:0.5rem; flex-wrap: wrap; align-items: center;">
                 ${ragPill(ranking?.rag || 'neutral', ranking?.ragLabel || 'Unknown')}
+                ${ranking?.run ? runBtn(ranking.run.label || 'Run scan', ranking.run.onClick || '', ranking.run.title || '') : ''}
                 ${jumpBtn('Open', 'ranking')}
               </div>
             </div>
@@ -49144,6 +49168,7 @@ Final Score: ${score}/100`;
               </div>
               <div style="display:flex; gap:0.5rem; flex-wrap: wrap; align-items: center;">
                 ${ragPill(moneyPages?.rag || 'neutral', moneyPages?.ragLabel || 'Unknown')}
+                ${moneyPages?.run ? runBtn(moneyPages.run.label || 'Run scan', moneyPages.run.onClick || '', moneyPages.run.title || '') : ''}
                 ${jumpBtn('Open', 'money')}
               </div>
             </div>
@@ -49277,6 +49302,9 @@ Final Score: ${score}/100`;
         const rankingStore = dashboardSafeJsonParse(localStorage.getItem('rankingAiData'), null);
         const rankingRows = (rankingStore && Array.isArray(rankingStore.combinedRows)) ? rankingStore.combinedRows : [];
 
+        const rankingFresh = computeFreshnessBadge(rankingStore?.timestamp || null, { warnDays: 3, staleDays: 7 });
+        const moneyFresh = computeFreshnessBadge(audit?.timestamp || null, { warnDays: 3, staleDays: 7 });
+
         const gaioRag = scoreToRag(metrics?.gaioScore ?? null, { greenAt: 70, amberAt: 50 });
         const aiSummaryRag = scoreToRag(metrics?.aiSummaryScore ?? null, { greenAt: 70, amberAt: 50 });
         const moneyShareRag = scoreToRag(metrics?.moneySharePct ?? null, { greenAt: 70, amberAt: 50 });
@@ -49294,25 +49322,36 @@ Final Score: ${score}/100`;
           } : null
         } : null;
 
-        const rankingCard = rankingStore ? {
-          timestamp: rankingStore.timestamp || null,
-          rag: moneyShareRag,
-          ragLabel: (typeof metrics?.moneySharePct === 'number') ? `Money share: ${metrics.moneySharePct}%` : 'Unknown',
+        const rankingCard = {
+          timestamp: rankingStore?.timestamp || null,
+          rag: rankingFresh.rag,
+          ragLabel: rankingFresh.label,
+          run: {
+            label: 'Run scan',
+            title: 'Runs the Ranking & AI check now (uses existing keywords list).',
+            onClick: "if (typeof window.dashboardRunRankingAiScan === 'function') window.dashboardRunRankingAiScan();"
+          },
           summary: {
-            tracked: rankingStore.summary?.trackedKeywords ?? rankingRows.length ?? 0,
-            withRank: rankingStore.summary?.rankedKeywords ?? rankingStore.summary?.withRank ?? '—',
-            aiOverviews: rankingStore.summary?.aiOverviewPresent ?? rankingStore.summary?.withAiOverview ?? '—',
-            citations: rankingStore.summary?.aiCitationsTotal ?? rankingStore.summary?.withCitations ?? '—'
+            tracked: rankingStore?.summary?.trackedKeywords ?? rankingRows.length ?? '—',
+            withRank: rankingStore?.summary?.rankedKeywords ?? rankingStore?.summary?.withRank ?? '—',
+            aiOverviews: rankingStore?.summary?.aiOverviewPresent ?? rankingStore?.summary?.withAiOverview ?? '—',
+            citations: rankingStore?.summary?.aiCitationsTotal ?? rankingStore?.summary?.withCitations ?? '—'
           }
-        } : null;
+        };
 
         const moneyShare = computeMoneyCitationsShareFromRankingRows(rankingRows);
+        const hasMoneyPages = !!(window.moneyPagesMetrics && Array.isArray(window.moneyPagesMetrics.rows) && window.moneyPagesMetrics.rows.length);
         const moneyPagesCard = {
-          note: 'Uses latest available Money Pages + Ranking & AI data in this browser',
-          rag: moneyShareRag,
-          ragLabel: (typeof metrics?.moneySharePct === 'number')
-            ? `Money share: ${metrics.moneySharePct}%`
-            : 'Unknown',
+          note: hasMoneyPages
+            ? (audit?.timestamp ? `Last audit: ${formatUtcTimestamp(audit.timestamp)}` : 'Loaded money pages metrics in this browser')
+            : (audit?.timestamp ? `No money pages metrics loaded in this browser (last audit: ${formatUtcTimestamp(audit.timestamp)})` : 'No money pages metrics loaded in this browser'),
+          rag: hasMoneyPages ? moneyFresh.rag : 'neutral',
+          ragLabel: hasMoneyPages ? moneyFresh.label : 'Not run',
+          run: {
+            label: 'Run scan',
+            title: 'Refreshes Money Pages using the latest audit in Supabase (does not run a new audit).',
+            onClick: "if (typeof window.dashboardRunMoneyPagesScan === 'function') window.dashboardRunMoneyPagesScan();"
+          },
           counts: {
             opportunityRows: Array.isArray(window.moneyPagesMetrics?.rows) ? window.moneyPagesMetrics.rows.length : '—',
             priorityRows: Array.isArray(window.moneyPagePriorityData) ? window.moneyPagePriorityData.length : '—',
@@ -49498,6 +49537,64 @@ Final Score: ${score}/100`;
         finishDashboardRunModal({ ok: results.ok, summaryHtml });
 
         if (runBtn) runBtn.disabled = false;
+      };
+
+      window.dashboardRunRankingAiScan = async function dashboardRunRankingAiScan() {
+        try {
+          if (typeof window.loadRankingAiData !== 'function') {
+            alert('Ranking & AI scan is not available on this page.');
+            return;
+          }
+          await window.loadRankingAiData(true);
+          if (typeof window.renderDashboardTab === 'function') window.renderDashboardTab();
+        } catch (e) {
+          alert(`Ranking & AI scan failed: ${e?.message || e}`);
+        }
+      };
+
+      window.dashboardRunMoneyPagesScan = async function dashboardRunMoneyPagesScan() {
+        try {
+          const propertyUrl =
+            (window.getPropertyUrl ? window.getPropertyUrl() : '') ||
+            localStorage.getItem('gsc_property_url') ||
+            localStorage.getItem('last_property_url') ||
+            '';
+
+          if (!propertyUrl) {
+            alert('Property URL not set. Go to Configuration & Reporting and set it first.');
+            return;
+          }
+
+          // Reuse the existing Supabase fetch helper (loads timestamp first, then full data).
+          const latest = await fetchLatestAuditFromSupabase(propertyUrl, false);
+          if (!latest) {
+            alert('No latest audit found in Supabase for this property.');
+            return;
+          }
+
+          // Store as current audit snapshot (so Dashboard cards have a timestamp baseline).
+          try {
+            localStorage.setItem('last_audit_results', JSON.stringify(latest));
+          } catch (storageErr) {
+            // Non-fatal: continue without localStorage.
+          }
+
+          const metrics = latest?.scores?.moneyPagesMetrics || latest?.moneyPagesMetrics || null;
+          window.currentMoneyPagesMetrics = metrics;
+          window.moneyPagesMetrics = metrics;
+
+          // If Money Pages panel exists and renderer is available, rebuild it now.
+          if (typeof window.renderMoneyPagesSection === 'function') {
+            await window.renderMoneyPagesSection(metrics);
+            if (typeof window.wireTopLevelFilter === 'function') window.wireTopLevelFilter();
+            if (typeof window.wireMoneyKpiMetricSelector === 'function') window.wireMoneyKpiMetricSelector();
+            if (typeof window.__initMoneyPagesPanelAfterRender === 'function') window.__initMoneyPagesPanelAfterRender();
+          }
+
+          if (typeof window.renderDashboardTab === 'function') window.renderDashboardTab();
+        } catch (e) {
+          alert(`Money Pages refresh failed: ${e?.message || e}`);
+        }
       };
 
       window.addEventListener('DOMContentLoaded', () => {
