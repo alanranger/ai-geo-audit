@@ -3939,6 +3939,9 @@
               </div>
             </div>
             <div id="dashboard-eeat-mini" style="margin-top: 0.75rem;"></div>
+            <div style="margin-top: 0.75rem;">
+              <canvas id="dashboard-eeat-radar" width="340" height="200" style="width: 100%; height: 200px;"></canvas>
+            </div>
           </div>
         </div>
 
@@ -49872,6 +49875,70 @@ Final Score: ${score}/100`;
         }
       }
 
+      function renderDashboardEeatRadar(eeatSubscores) {
+        const canvas = document.getElementById('dashboard-eeat-radar');
+        if (!canvas || typeof Chart === 'undefined') return;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        const s = eeatSubscores || {};
+        const labels = ['Experience', 'Expertise', 'Authoritativeness', 'Trustworthiness'];
+        const values = [
+          toNum(s.experience) ?? 0,
+          toNum(s.expertise) ?? 0,
+          toNum(s.authoritativeness) ?? 0,
+          toNum(s.trustworthiness) ?? 0
+        ];
+
+        try {
+          if (window.__dashboardEeatRadarChart) {
+            window.__dashboardEeatRadarChart.destroy();
+            window.__dashboardEeatRadarChart = null;
+          }
+        } catch {
+          // ignore
+        }
+
+        try {
+          window.__dashboardEeatRadarChart = new Chart(ctx, {
+            type: 'radar',
+            data: {
+              labels,
+              datasets: [{
+                label: 'EEAT',
+                data: values,
+                borderColor: 'rgba(16, 185, 129, 0.9)',
+                backgroundColor: 'rgba(16, 185, 129, 0.16)',
+                borderWidth: 2,
+                pointBackgroundColor: '#ffffff',
+                pointBorderColor: 'rgba(16, 185, 129, 0.9)',
+                pointRadius: 3
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { display: false }
+              },
+              scales: {
+                r: {
+                  beginAtZero: true,
+                  min: 0,
+                  max: 100,
+                  ticks: { display: false },
+                  grid: { color: 'rgba(148,163,184,0.25)' },
+                  angleLines: { color: 'rgba(148,163,184,0.25)' },
+                  pointLabels: { color: 'rgba(226,232,240,0.9)', font: { size: 11, weight: '600' } }
+                }
+              }
+            }
+          });
+        } catch {
+          // ignore
+        }
+      }
+
       window.renderDashboardTab = function renderDashboardTab() {
         // Always show LIVE latest-available metrics (from the latest independent audits).
         // Deltas are computed against the previous global run snapshot, if present.
@@ -50039,6 +50106,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
               <div class="dashboard-mini-note">Confidence: <strong>${c}</strong> · E ${toNum(s.experience) ?? '—'} · Ex ${toNum(s.expertise) ?? '—'} · A ${toNum(s.authoritativeness) ?? '—'} · T ${toNum(s.trustworthiness) ?? '—'}</div>
             `;
           }
+          renderDashboardEeatRadar(metrics?.eeatSubscores || null);
         }
 
         // Summary cards (use latest available data from localStorage/window)
