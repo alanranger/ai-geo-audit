@@ -19391,6 +19391,10 @@
             if (supabaseData.timestamp) {
               updateAuditTimestamp(supabaseData.timestamp);
             }
+              // Dashboard: ensure the new Dashboard tab reflects freshly-loaded audit data.
+              if (typeof window.renderDashboardTab === 'function') {
+                try { window.renderDashboardTab(); } catch {}
+              }
           } catch (storageError) {
             debugLog(`⚠ Could not store Supabase data in localStorage: ${storageError.message}`, 'warn');
           }
@@ -45691,6 +45695,10 @@ Final Score: ${score}/100`;
                         safeSetLocalStorage('last_audit_results', freshData);
                         updateAuditTimestamp(freshTimestamp);
                         debugLog(`✓ Tab switch: Refreshed audit data from Supabase (newer timestamp)`, 'success');
+                        // Dashboard: refresh live dials/cards if we just pulled newer audit data.
+                        if (typeof window.renderDashboardTab === 'function') {
+                          try { window.renderDashboardTab(); } catch {}
+                        }
                       } else {
                         debugLog(`⚠ Tab switch: Supabase data is not newer than cached data`, 'info');
                       }
