@@ -3364,7 +3364,7 @@
     <h1>GAIO (Generative AI Optimization) Audit Dashboard</h1>
     <p>Automated GAIO Performance Tracking & Optimisation</p>
     <p style="font-size: 0.9rem; margin-top: 0.5rem; opacity: 1; background: rgba(0,0,0,0.3); padding: 0.25rem 0.5rem; border-radius: 4px; display: inline-block;">
-      <strong>Version: <span id="gitVersion">2a6c1b8</span></strong> | Built: <span id="buildDate"></span> |
+      <strong>Version: <span id="gitVersion">8af080a</span></strong> | Built: <span id="buildDate"></span> |
       <span id="loadTime" style="color: #4f4;">Loaded: <span id="loadTimeValue"></span></span>
     </p>
     <script>
@@ -49416,7 +49416,8 @@ Final Score: ${score}/100`;
           optimisationPotentialClicks = Math.round(sum);
         }
 
-        const domainCache = dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v3'), null)
+        const domainCache = dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v4'), null)
+          || dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v3'), null)
           || dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v2'), null)
           || dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v1'), null);
 
@@ -49718,12 +49719,12 @@ Final Score: ${score}/100`;
 
       async function refreshDashboardDomainStrengthCacheIfNeeded() {
         const now = Date.now();
-        // v3: cache key bump to avoid "fresh-but-null" caches created by older parsers,
-        // and to include competitor counts for ranking.
+        // v4: cache key bump to ensure rank/gap are computed against competitor-only set (isCompetitor=true)
+        const cacheV4 = dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v4'), null);
         const cacheV3 = dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v3'), null);
         const cacheV2 = dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v2'), null);
         const cacheV1 = dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v1'), null);
-        const cache = cacheV3 || cacheV2 || cacheV1 || null;
+        const cache = cacheV4 || cacheV3 || cacheV2 || cacheV1 || null;
         const lastMs = cache?.fetchedAtMs ? Number(cache.fetchedAtMs) : 0;
         const hasUsefulValues = (() => {
           const selfScore = toNum(cache?.selfScore);
@@ -49752,18 +49753,20 @@ Final Score: ${score}/100`;
               // API shape: overview items expose metrics under `latest` (but support flat fields too).
               score: toNum(it?.latest?.score ?? it.score),
               band: (it?.latest?.band ?? it.band ?? it.label) || null,
-              snapshotDate: it?.latest?.snapshotDate || it.snapshotDate || it.snapshot_date || null
+              snapshotDate: it?.latest?.snapshotDate || it.snapshotDate || it.snapshot_date || null,
+              isCompetitor: (it?.isCompetitor === true) || (it?.is_competitor === true) || (it?.domain_type === 'competitor')
             }))
             .filter(it => it.domain);
           const selfItem = normItems.find(it => it.domain === normalizedSelf) || null;
-          const competitors = normItems.filter(it => it.domain !== normalizedSelf && typeof it.score === 'number');
+          // Only compare against explicitly marked competitors
+          const competitors = normItems.filter(it => it.isCompetitor === true && it.domain !== normalizedSelf && typeof it.score === 'number');
           const selfScore = selfItem?.score ?? null;
           const topCompetitor = competitors.slice().sort((a, b) => (b.score ?? -1) - (a.score ?? -1))[0] || null;
           const topCompetitorScore = topCompetitor?.score ?? null;
           const strongerCount = (typeof selfScore === 'number')
             ? competitors.filter(it => typeof it.score === 'number' && it.score > selfScore).length
             : null;
-          const competitorsCount = competitors.length;
+          const competitorsCount = competitors.length; // competitor-only denominator
 
           const next = {
             fetchedAtMs: now,
@@ -49774,7 +49777,7 @@ Final Score: ${score}/100`;
             strongerCount,
             competitorsCount
           };
-          localStorage.setItem('dashboard_domain_strength_cache_v3', JSON.stringify(next));
+          localStorage.setItem('dashboard_domain_strength_cache_v4', JSON.stringify(next));
           return { cache: next, updated: true };
         } catch {
           return { cache, updated: false };
@@ -50083,7 +50086,7 @@ Final Score: ${score}/100`;
         const strongerCount = toNum(ds?.strongerCount);
         const competitorsCount = toNum(ds?.competitorsCount);
         const rank = (typeof strongerCount === 'number') ? (strongerCount + 1) : null;
-        const rankDenom = (typeof competitorsCount === 'number') ? (competitorsCount + 1) : null; // +1 includes you in the set
+        const rankDenom = (typeof competitorsCount === 'number') ? competitorsCount : null; // competitor-only set
         const domainRag = scoreToRag(selfScore, { greenAt: 70, amberAt: 50 });
         const domainCard = {
           note: ds?.snapshotDate ? `Snapshot date: ${ds.snapshotDate}` : 'Run snapshot to populate (Ranking & AI tab)',
