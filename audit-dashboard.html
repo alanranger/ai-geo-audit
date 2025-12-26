@@ -19281,6 +19281,23 @@
         }
         debugLog(`✓ Audit results saved to localStorage (propertyUrl: ${propertyUrl})`, 'success');
         
+        // Save dashboard snapshot for delta comparisons (only if not preserving timestamp - i.e., this is a new audit)
+        if (!preserveTimestamp && typeof computeDashboardSnapshot === 'function' && typeof saveDashboardRun === 'function') {
+          try {
+            const snapshot = computeDashboardSnapshot();
+            const runRecord = {
+              timestamp: auditData.timestamp,
+              status: 'ok',
+              steps: [{ label: 'Audit completed', status: 'ok' }],
+              metrics: snapshot
+            };
+            saveDashboardRun(runRecord);
+            debugLog(`✓ Dashboard snapshot saved for delta comparisons`, 'success');
+          } catch (snapshotError) {
+            debugLog(`⚠ Failed to save dashboard snapshot: ${snapshotError.message}`, 'warn');
+          }
+        }
+        
         // Update timestamp display
         updateAuditTimestamp(auditData.timestamp);
 
