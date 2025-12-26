@@ -49440,7 +49440,11 @@ Final Score: ${score}/100`;
         // an empty default state as "loaded" (otherwise dashboard shows misleading 0s / 100%).
         const hasKey = (typeof window.hasAdminKey === 'function') ? window.hasAdminKey() : false;
         const hasState = !!state && Array.isArray(state.allTasks);
+        const hasTasks = hasState && state.allTasks.length > 0;
+        // Consider loaded if we have tasks OR if dashboard tiles/impact/timeseries are available
+        // (dashboard tiles might not always be available, but tasks are the important part)
         const loadedViaApi = !!state && (
+          hasTasks ||
           state.dashboardTiles !== null ||
           state.dashboardImpact !== null ||
           state.dashboardTimeseries !== null
@@ -50732,6 +50736,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         try {
           if (typeof window.loadAllOptimisationTasks === 'function') {
             await window.loadAllOptimisationTasks();
+            // Small delay to ensure tasks are fully processed
+            await new Promise(resolve => setTimeout(resolve, 500));
           }
         } catch {
           // ignore
