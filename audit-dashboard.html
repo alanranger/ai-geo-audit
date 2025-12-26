@@ -1611,6 +1611,7 @@
       flex-direction: column;
       justify-content: center;
       gap: 0.25rem;
+      position: relative;
     }
     section[data-panel="dashboard"] .dashboard-kpi-label {
       font-size: 0.8rem;
@@ -1632,6 +1633,45 @@
     section[data-panel="dashboard"] .dashboard-kpi-delta[data-dir="up"] { color: #10b981; }
     section[data-panel="dashboard"] .dashboard-kpi-delta[data-dir="down"] { color: #ef4444; }
     section[data-panel="dashboard"] .dashboard-kpi-delta[data-dir="flat"] { color: rgba(148, 163, 184, 0.95); }
+
+    /* Delta indicator badge for KPI tiles - top right corner */
+    section[data-panel="dashboard"] .dashboard-kpi-tile-indicator {
+      position: absolute;
+      top: 0.4rem;
+      right: 0.4rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.2rem;
+      padding: 0.15rem 0.4rem;
+      border-radius: 999px;
+      font-size: 0.65rem;
+      font-weight: 700;
+      background: rgba(15, 20, 25, 0.85);
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      color: rgba(226, 232, 240, 0.95);
+      z-index: 10;
+      white-space: nowrap;
+      backdrop-filter: blur(4px);
+    }
+    section[data-panel="dashboard"] .dashboard-kpi-tile-indicator[data-dir="up"] {
+      border-color: rgba(16, 185, 129, 0.5);
+      background: rgba(16, 185, 129, 0.15);
+      color: #10b981;
+    }
+    section[data-panel="dashboard"] .dashboard-kpi-tile-indicator[data-dir="down"] {
+      border-color: rgba(239, 68, 68, 0.5);
+      background: rgba(239, 68, 68, 0.15);
+      color: #ef4444;
+    }
+    section[data-panel="dashboard"] .dashboard-kpi-tile-indicator[data-dir="flat"] {
+      border-color: rgba(148, 163, 184, 0.3);
+      background: rgba(148, 163, 184, 0.1);
+      color: rgba(148, 163, 184, 0.8);
+    }
+    section[data-panel="dashboard"] .dashboard-kpi-tile-indicator .delta-arrow {
+      font-size: 0.6rem;
+      line-height: 1;
+    }
 
     section[data-panel="dashboard"] .dashboard-pillar-strip {
       display: grid;
@@ -49701,13 +49741,30 @@ Final Score: ${score}/100`;
           </span>
         `;
 
-        const tile = (label, value, deltaText, dir = 'flat', title = '') => `
-          <div class="dashboard-kpi-tile" title="${title || ''}">
-            <div class="dashboard-kpi-label">${label}</div>
-            <div class="dashboard-kpi-value">${value}</div>
-            ${deltaText ? `<div class="dashboard-kpi-delta" data-dir="${dir}">${deltaText}</div>` : ''}
-          </div>
-        `;
+        const tile = (label, value, deltaText, dir = 'flat', title = '') => {
+          // Create indicator badge for top-right corner
+          let indicatorHtml = '';
+          // Always show indicator - show delta if available, otherwise N/A
+          if (deltaText && deltaText !== '—' && deltaText !== '' && deltaText !== '0') {
+            const arrow = dir === 'up' ? '↑' : dir === 'down' ? '↓' : '—';
+            indicatorHtml = `<div class="dashboard-kpi-tile-indicator" data-dir="${dir}"><span class="delta-arrow">${arrow}</span> ${deltaText}</div>`;
+          } else if (deltaText === '0') {
+            // Show 0 with flat styling
+            indicatorHtml = `<div class="dashboard-kpi-tile-indicator" data-dir="flat"><span class="delta-arrow">—</span> 0</div>`;
+          } else {
+            // Show N/A when no delta data available
+            indicatorHtml = `<div class="dashboard-kpi-tile-indicator" data-dir="flat"><span class="delta-arrow">—</span> N/A</div>`;
+          }
+          
+          return `
+            <div class="dashboard-kpi-tile" title="${title || ''}">
+              ${indicatorHtml}
+              <div class="dashboard-kpi-label">${label}</div>
+              <div class="dashboard-kpi-value">${value}</div>
+              ${deltaText ? `<div class="dashboard-kpi-delta" data-dir="${dir}">${deltaText}</div>` : ''}
+            </div>
+          `;
+        };
 
         const trafficTile = (label, counts, title = '') => {
           const c = counts || {};
@@ -49728,7 +49785,6 @@ Final Score: ${score}/100`;
 
         grid.innerHTML = `
           <div class="card dashboard-summary-card" data-rag="${audit?.rag || 'neutral'}" title="Audit Scan: latest GSC clicks/impressions/avg position/CTR for the whole site. Deltas compare vs the previous global run.">
-            <div class="dashboard-delta-indicator" id="dashboard-delta-audit" style="display: none;"></div>
             <div class="dashboard-summary-header">
               <div>
                 <div class="dashboard-summary-title">📊 Audit Scan</div>
@@ -49748,7 +49804,6 @@ Final Score: ${score}/100`;
           </div>
 
           <div class="card dashboard-summary-card" data-rag="${ranking?.rag || 'neutral'}" title="Ranking & AI: top-3/top-10 share plus AI citations signals from the latest keyword scan.">
-            <div class="dashboard-delta-indicator" id="dashboard-delta-ranking" style="display: none;"></div>
             <div class="dashboard-summary-header">
               <div>
                 <div class="dashboard-summary-title">🔍 Ranking & AI</div>
@@ -49769,7 +49824,6 @@ Final Score: ${score}/100`;
           </div>
 
           <div class="card dashboard-summary-card" data-rag="${moneyPages?.rag || 'neutral'}" title="Money Pages: business-impact metrics for your Money Pages segment (last 28 days) and the CTR-gap uplift estimate.">
-            <div class="dashboard-delta-indicator" id="dashboard-delta-money-pages" style="display: none;"></div>
             <div class="dashboard-summary-header">
               <div>
                 <div class="dashboard-summary-title">💰 Money Pages</div>
@@ -49790,7 +49844,6 @@ Final Score: ${score}/100`;
           </div>
 
           <div class="card dashboard-summary-card" data-rag="${optimisation?.rag || 'neutral'}" title="Optimisation: live task movement using the Optimisation module traffic-light logic (worse/same/better) plus remaining uplift.">
-            <div class="dashboard-delta-indicator" id="dashboard-delta-optimisation" style="display: none;"></div>
             <div class="dashboard-summary-header">
               <div>
                 <div class="dashboard-summary-title">✅ Optimisation</div>
@@ -49810,7 +49863,6 @@ Final Score: ${score}/100`;
           </div>
 
           <div class="card dashboard-summary-card" data-rag="${domainStrength?.rag || 'neutral'}" title="Domain Strength: your latest monthly score and the gap vs the strongest competitor in the snapshot set.">
-            <div class="dashboard-delta-indicator" id="dashboard-delta-domain-strength" style="display: none;"></div>
             <div class="dashboard-summary-header">
               <div>
                 <div class="dashboard-summary-title">📈 Domain Strength</div>
@@ -50482,34 +50534,6 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           optimisation: optCard,
           domainStrength: domainCard
         });
-
-        // Update delta indicators for summary cards (using primary metric for each)
-        // Audit: use clicks as primary metric
-        if (auditCard) {
-          const auditClicks = metrics?.auditKpis?.clicks ?? null;
-          const prevAuditClicks = prevMetrics?.auditKpis?.clicks ?? null;
-          updateDeltaIndicator('dashboard-delta-audit', auditClicks, prevAuditClicks, { betterLower: false, decimals: 0 });
-        }
-        // Ranking: use top3Share as primary metric
-        if (rankingCard) {
-          const top3Share = rankingK?.top3SharePct ?? null;
-          const prevTop3Share = prevRankingK?.top3SharePct ?? null;
-          updateDeltaIndicator('dashboard-delta-ranking', top3Share, prevTop3Share, { betterLower: false, decimals: 0, pp: true });
-        }
-        // Money Pages: use CTR as primary metric
-        if (moneyPagesCard) {
-          const moneyCtr = moneyAgg?.ctrPct ?? null;
-          const prevMoneyCtr = prevMoneyAgg?.ctrPct ?? null;
-          updateDeltaIndicator('dashboard-delta-money-pages', moneyCtr, prevMoneyCtr, { betterLower: false, decimals: 1, pp: true });
-        }
-        // Optimisation: use potential uplift as primary metric
-        if (optCard) {
-          updateDeltaIndicator('dashboard-delta-optimisation', optPotential, prevOptPotential, { betterLower: true, decimals: 0 });
-        }
-        // Domain Strength: use selfScore as primary metric
-        if (domainCard) {
-          updateDeltaIndicator('dashboard-delta-domain-strength', selfScore, prevDs?.selfScore ?? null, { betterLower: false, decimals: 1 });
-        }
 
         // Async: refresh Domain Strength cache occasionally so the tile isn't stale.
         // Keep it non-blocking and avoid loops.
