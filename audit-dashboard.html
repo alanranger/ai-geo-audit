@@ -1349,6 +1349,7 @@
 
     section[data-panel="dashboard"] .dashboard-dial-header {
       width: 100%;
+      position: relative;
     }
 
     section[data-panel="dashboard"] .dashboard-dial-title {
@@ -1465,6 +1466,45 @@
       position: relative;
       overflow: hidden;
       transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    /* Delta indicator badge - top right corner */
+    section[data-panel="dashboard"] .dashboard-delta-indicator {
+      position: absolute;
+      top: 0.5rem;
+      right: 0.5rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      padding: 0.25rem 0.5rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      background: rgba(15, 20, 25, 0.85);
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      color: rgba(226, 232, 240, 0.95);
+      z-index: 10;
+      white-space: nowrap;
+      backdrop-filter: blur(4px);
+    }
+    section[data-panel="dashboard"] .dashboard-delta-indicator[data-dir="up"] {
+      border-color: rgba(16, 185, 129, 0.5);
+      background: rgba(16, 185, 129, 0.15);
+      color: #10b981;
+    }
+    section[data-panel="dashboard"] .dashboard-delta-indicator[data-dir="down"] {
+      border-color: rgba(239, 68, 68, 0.5);
+      background: rgba(239, 68, 68, 0.15);
+      color: #ef4444;
+    }
+    section[data-panel="dashboard"] .dashboard-delta-indicator[data-dir="flat"] {
+      border-color: rgba(148, 163, 184, 0.3);
+      background: rgba(148, 163, 184, 0.1);
+      color: rgba(148, 163, 184, 0.8);
+    }
+    section[data-panel="dashboard"] .dashboard-delta-indicator .delta-arrow {
+      font-size: 0.7rem;
+      line-height: 1;
     }
     /* Dashboard tiles: match Optimisation hover animation */
     section[data-panel="dashboard"] .dashboard-summary-card::after,
@@ -3870,6 +3910,7 @@
         <div class="dashboard-dials-grid" id="dashboard-dials-grid">
           <div class="card dashboard-dial-card">
             <div class="dashboard-dial-header">
+              <div class="dashboard-delta-indicator" id="dashboard-delta-gaio" style="display: none;"></div>
               <div class="dashboard-dial-title">AI Health (GAIO)</div>
               <div class="dashboard-dial-subtitle">Score (0–100)</div>
             </div>
@@ -3887,6 +3928,7 @@
 
           <div class="card dashboard-dial-card">
             <div class="dashboard-dial-header">
+              <div class="dashboard-delta-indicator" id="dashboard-delta-ai-summary" style="display: none;"></div>
               <div class="dashboard-dial-title">AI Summary Likelihood</div>
               <div class="dashboard-dial-subtitle">Score (0–100)</div>
             </div>
@@ -3901,6 +3943,7 @@
 
           <div class="card dashboard-dial-card">
             <div class="dashboard-dial-header">
+              <div class="dashboard-delta-indicator" id="dashboard-delta-money-share" style="display: none;"></div>
               <div class="dashboard-dial-title">AI Citations (Money Share)</div>
               <div class="dashboard-dial-subtitle">Money citations / total</div>
             </div>
@@ -3918,6 +3961,7 @@
 
           <div class="card dashboard-dial-card">
             <div class="dashboard-dial-header">
+              <div class="dashboard-delta-indicator" id="dashboard-delta-uplift" style="display: none;"></div>
               <div class="dashboard-dial-title">Uplift Remaining</div>
               <div class="dashboard-dial-subtitle">Estimated extra clicks (28d)</div>
             </div>
@@ -3932,6 +3976,7 @@
 
           <div class="card dashboard-dial-card">
             <div class="dashboard-dial-header">
+              <div class="dashboard-delta-indicator" id="dashboard-delta-eeat" style="display: none;"></div>
               <div class="dashboard-dial-title">EEAT</div>
               <div class="dashboard-dial-subtitle">Score (0–100)</div>
             </div>
@@ -49564,6 +49609,37 @@ Final Score: ${score}/100`;
         if (deltaEl) deltaEl.textContent = deltaText || '—';
       }
 
+      function updateDeltaIndicator(elId, curr, prev, { betterLower = false, decimals = 0, pp = false } = {}) {
+        const el = document.getElementById(elId);
+        if (!el) return;
+        
+        if (typeof curr !== 'number' || typeof prev !== 'number') {
+          el.style.display = 'none';
+          return;
+        }
+        
+        const delta = curr - prev;
+        if (delta === 0) {
+          el.style.display = 'none';
+          return;
+        }
+        
+        const isBetter = betterLower ? delta < 0 : delta > 0;
+        const dir = isBetter ? 'up' : 'down';
+        const arrow = isBetter ? '↑' : '↓';
+        
+        let deltaText = '';
+        if (pp) {
+          deltaText = `${delta > 0 ? '+' : ''}${delta.toFixed(decimals)}pp`;
+        } else {
+          deltaText = `${delta > 0 ? '+' : ''}${delta.toFixed(decimals)}`;
+        }
+        
+        el.setAttribute('data-dir', dir);
+        el.innerHTML = `<span class="delta-arrow">${arrow}</span> ${deltaText}`;
+        el.style.display = 'inline-flex';
+      }
+
       function formatDelta(curr, prev) {
         if (typeof curr !== 'number' || typeof prev !== 'number') return '—';
         const d = curr - prev;
@@ -49639,6 +49715,7 @@ Final Score: ${score}/100`;
 
         grid.innerHTML = `
           <div class="card dashboard-summary-card" data-rag="${audit?.rag || 'neutral'}" title="Audit Scan: latest GSC clicks/impressions/avg position/CTR for the whole site. Deltas compare vs the previous global run.">
+            <div class="dashboard-delta-indicator" id="dashboard-delta-audit" style="display: none;"></div>
             <div class="dashboard-summary-header">
               <div>
                 <div class="dashboard-summary-title">📊 Audit Scan</div>
@@ -49658,6 +49735,7 @@ Final Score: ${score}/100`;
           </div>
 
           <div class="card dashboard-summary-card" data-rag="${ranking?.rag || 'neutral'}" title="Ranking & AI: top-3/top-10 share plus AI citations signals from the latest keyword scan.">
+            <div class="dashboard-delta-indicator" id="dashboard-delta-ranking" style="display: none;"></div>
             <div class="dashboard-summary-header">
               <div>
                 <div class="dashboard-summary-title">🔍 Ranking & AI</div>
@@ -49678,6 +49756,7 @@ Final Score: ${score}/100`;
           </div>
 
           <div class="card dashboard-summary-card" data-rag="${moneyPages?.rag || 'neutral'}" title="Money Pages: business-impact metrics for your Money Pages segment (last 28 days) and the CTR-gap uplift estimate.">
+            <div class="dashboard-delta-indicator" id="dashboard-delta-money-pages" style="display: none;"></div>
             <div class="dashboard-summary-header">
               <div>
                 <div class="dashboard-summary-title">💰 Money Pages</div>
@@ -49698,6 +49777,7 @@ Final Score: ${score}/100`;
           </div>
 
           <div class="card dashboard-summary-card" data-rag="${optimisation?.rag || 'neutral'}" title="Optimisation: live task movement using the Optimisation module traffic-light logic (worse/same/better) plus remaining uplift.">
+            <div class="dashboard-delta-indicator" id="dashboard-delta-optimisation" style="display: none;"></div>
             <div class="dashboard-summary-header">
               <div>
                 <div class="dashboard-summary-title">✅ Optimisation</div>
@@ -49717,6 +49797,7 @@ Final Score: ${score}/100`;
           </div>
 
           <div class="card dashboard-summary-card" data-rag="${domainStrength?.rag || 'neutral'}" title="Domain Strength: your latest monthly score and the gap vs the strongest competitor in the snapshot set.">
+            <div class="dashboard-delta-indicator" id="dashboard-delta-domain-strength" style="display: none;"></div>
             <div class="dashboard-summary-header">
               <div>
                 <div class="dashboard-summary-title">📈 Domain Strength</div>
@@ -50078,6 +50159,7 @@ Final Score: ${score}/100`;
             rag,
             deltaText: formatDelta(metrics?.gaioScore, prevMetrics?.gaioScore)
           });
+          updateDeltaIndicator('dashboard-delta-gaio', v, prevMetrics?.gaioScore ?? null, { betterLower: false, decimals: 0 });
           renderDashboardGaioPillarsAndRadar(metrics?.pillars || null, prevMetrics?.pillars || null);
         }
 
@@ -50092,6 +50174,7 @@ Final Score: ${score}/100`;
             rag,
             deltaText: formatDelta(metrics?.aiSummaryScore, prevMetrics?.aiSummaryScore)
           });
+          updateDeltaIndicator('dashboard-delta-ai-summary', v, prevMetrics?.aiSummaryScore ?? null, { betterLower: false, decimals: 0 });
           const host = document.getElementById('dashboard-ai-summary-mini');
           if (host) {
             const markerLeft = (typeof p === 'number') ? Math.max(0, Math.min(100, Math.round(p))) : null;
@@ -50120,6 +50203,7 @@ Final Score: ${score}/100`;
             rag,
             deltaText: formatDelta(metrics?.moneySharePct, prevMetrics?.moneySharePct)
           });
+          updateDeltaIndicator('dashboard-delta-money-share', pct, prevMetrics?.moneySharePct ?? null, { betterLower: false, decimals: 0, pp: true });
           const host = document.getElementById('dashboard-money-share-mini');
           if (host) {
             const m = (typeof money === 'number') ? money : null;
@@ -50157,6 +50241,7 @@ Final Score: ${score}/100`;
             rag,
             deltaText: (typeof extra === 'number' && typeof prevExtra === 'number') ? deltaText : '—'
           });
+          updateDeltaIndicator('dashboard-delta-uplift', extra, prevExtra ?? null, { betterLower: true, decimals: 0 });
           const host = document.getElementById('dashboard-uplift-mini');
           if (host) {
             const markerLeft = (typeof progressPct === 'number') ? Math.max(0, Math.min(100, Math.round(progressPct))) : null;
@@ -50181,6 +50266,7 @@ Final Score: ${score}/100`;
             rag,
             deltaText: formatDelta(metrics?.eeatScore, prevMetrics?.eeatScore)
           });
+          updateDeltaIndicator('dashboard-delta-eeat', v, prevMetrics?.eeatScore ?? null, { betterLower: false, decimals: 0 });
           const host = document.getElementById('dashboard-eeat-mini');
           if (host) {
             const c = metrics?.eeatConfidence || '—';
@@ -50383,6 +50469,34 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           optimisation: optCard,
           domainStrength: domainCard
         });
+
+        // Update delta indicators for summary cards (using primary metric for each)
+        // Audit: use clicks as primary metric
+        if (auditCard) {
+          const auditClicks = metrics?.auditKpis?.clicks ?? null;
+          const prevAuditClicks = prevMetrics?.auditKpis?.clicks ?? null;
+          updateDeltaIndicator('dashboard-delta-audit', auditClicks, prevAuditClicks, { betterLower: false, decimals: 0 });
+        }
+        // Ranking: use top3Share as primary metric
+        if (rankingCard) {
+          const top3Share = rankingK?.top3SharePct ?? null;
+          const prevTop3Share = prevRankingK?.top3SharePct ?? null;
+          updateDeltaIndicator('dashboard-delta-ranking', top3Share, prevTop3Share, { betterLower: false, decimals: 0, pp: true });
+        }
+        // Money Pages: use CTR as primary metric
+        if (moneyPagesCard) {
+          const moneyCtr = moneyAgg?.ctrPct ?? null;
+          const prevMoneyCtr = prevMoneyAgg?.ctrPct ?? null;
+          updateDeltaIndicator('dashboard-delta-money-pages', moneyCtr, prevMoneyCtr, { betterLower: false, decimals: 1, pp: true });
+        }
+        // Optimisation: use potential uplift as primary metric
+        if (optCard) {
+          updateDeltaIndicator('dashboard-delta-optimisation', optPotential, prevOptPotential, { betterLower: true, decimals: 0 });
+        }
+        // Domain Strength: use selfScore as primary metric
+        if (domainCard) {
+          updateDeltaIndicator('dashboard-delta-domain-strength', selfScore, prevDs?.selfScore ?? null, { betterLower: false, decimals: 1 });
+        }
 
         // Async: refresh Domain Strength cache occasionally so the tile isn't stale.
         // Keep it non-blocking and avoid loops.
