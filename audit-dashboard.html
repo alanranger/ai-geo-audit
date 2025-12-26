@@ -8409,26 +8409,9 @@
             debugLog(`[Traffic Lights] Task "${task.title || task.id}": objectiveKpiKey=${task.objectiveKpiKey}, baselineFields=[${baselineKeys.join(', ')}], latestFields=[${latestKeys.join(', ')}]`, 'info');
           }
           
-          // Classify each metric - but only count tasks that have this metric as their objective
-          // Map objective KPI keys to metric keys for matching
-          const objectiveKpiToMetricKey = {
-            'ctr_28d': 'ctr_28d',
-            'impressions_28d': 'impressions_28d',
-            'clicks_28d': 'clicks_28d',
-            'current_rank': 'current_rank',
-            'rank': 'current_rank',
-            'ai_citations': 'ai_citations',
-            'ai_overview': 'ai_overview'
-          };
-          
-          const taskObjectiveMetricKey = task.objectiveKpiKey ? objectiveKpiToMetricKey[task.objectiveKpiKey] : null;
-          
+          // Classify ALL metrics for ALL tasks (regardless of task objective)
+          // This ensures traffic lights show improvements/declines across all metrics, not just the objective
           for (const metricKey of metricKeys) {
-            // Only classify metrics that match the task's objective KPI
-            if (taskObjectiveMetricKey && metricKey !== taskObjectiveMetricKey) {
-              continue; // Skip metrics that don't match the task's objective
-            }
-            
             const baselineValue = getMetricValue(baselineLatest.baseline, metricKey);
             const latestValue = getMetricValue(baselineLatest.latest, metricKey);
             const classification = classifyMetric(
@@ -8437,9 +8420,9 @@
               baselineLatest.latest
             );
 
-            // DEBUG: Log classification for all tasks with objectives
+            // DEBUG: Log classification for all tasks
             if (typeof debugLog === 'function' && task.objectiveKpiKey) {
-              debugLog(`[Traffic Lights] ${metricKey}: baselineValue=${baselineValue}, latestValue=${latestValue}, classification=${classification || 'null'}, taskObjectiveMetricKey=${taskObjectiveMetricKey}`, 'info');
+              debugLog(`[Traffic Lights] ${metricKey}: baselineValue=${baselineValue}, latestValue=${latestValue}, classification=${classification || 'null'}`, 'info');
             }
 
             if (classification) {
