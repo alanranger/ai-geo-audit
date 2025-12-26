@@ -50653,13 +50653,52 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           { key: 'ranking_ai', label: 'Run Ranking & AI Scan', runner: async () => { if (typeof window.loadRankingAiData === 'function') await window.loadRankingAiData(true); } },
           { key: 'domain_strength', label: 'Run Domain Strength Snapshot', runner: async () => { if (typeof window.runDomainStrengthSnapshot === 'function') await window.runDomainStrengthSnapshot(); } },
           { key: 'update_tasks', label: 'Update All Tasks with Latest Data', runner: async () => {
+            // Wait a moment to ensure audit data is fully saved from previous steps
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            // Verify audit data is available (needed for URL-based tasks)
+            const auditData = dashboardSafeJsonParse(localStorage.getItem('last_audit_results'), null);
+            if (!auditData || !auditData.searchData) {
+              console.warn('[Global Run] Audit data not yet available, but continuing with task update...');
+            }
+            
             // Ensure tasks are actually loaded before/after bulk update so the dashboard reflects real outcomes.
             if (typeof window.loadAllOptimisationTasks === 'function') {
-              try { await window.loadAllOptimisationTasks(); } catch {}
+              try { 
+                await window.loadAllOptimisationTasks();
+                // Wait for tasks to fully load
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                // Verify tasks are loaded
+                if (!window.optimisationModuleState || !window.optimisationModuleState.allTasks) {
+                  throw new Error('Tasks failed to load - optimisationModuleState.allTasks is empty');
+                }
+              } catch (err) {
+                console.error('[Global Run] Failed to load tasks:', err);
+                throw new Error(`Failed to load optimisation tasks: ${err?.message || err}`);
+              }
+            } else {
+              throw new Error('loadAllOptimisationTasks function not available');
             }
-            if (typeof window.bulkUpdateAllTasks === 'function') await window.bulkUpdateAllTasks();
+            
+            if (typeof window.bulkUpdateAllTasks === 'function') {
+              try {
+                await window.bulkUpdateAllTasks();
+              } catch (err) {
+                console.error('[Global Run] Bulk update failed:', err);
+                throw new Error(`Bulk update failed: ${err?.message || err}`);
+              }
+            } else {
+              throw new Error('bulkUpdateAllTasks function not available');
+            }
+            
+            // Reload tasks to reflect updates
             if (typeof window.loadAllOptimisationTasks === 'function') {
-              try { await window.loadAllOptimisationTasks(); } catch {}
+              try { 
+                await window.loadAllOptimisationTasks();
+              } catch (err) {
+                console.warn('[Global Run] Failed to reload tasks after update:', err);
+              }
             }
           } }
         ];
