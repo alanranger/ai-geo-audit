@@ -14725,16 +14725,29 @@
           }));
         }
 
-        // Reload tasks to show updated data
+        // Show results in modal first (so user sees progress)
+        showBulkUpdateResultsModal(successCount, skippedCount, failCount, errors, activeTasks.length);
+        
+        // Reload tasks to show updated data (even if all were skipped, refresh to show current state)
+        // This ensures the UI reflects the latest data from the backend
+        console.log('[Optimisation] Reloading tasks after bulk update (even if skipped)...');
         await window.loadAllOptimisationTasks();
+
+        // Force refresh of optimization tab UI components
+        if (typeof window.renderOptimisationTasksTable === 'function') {
+          window.renderOptimisationTasksTable();
+        }
+        if (typeof window.updateOptimisationSummaryCards === 'function') {
+          window.updateOptimisationSummaryCards();
+        }
+        if (typeof window.updateTrafficLights === 'function') {
+          window.updateTrafficLights();
+        }
 
         // Dashboard: refresh live dials/cards after bulk update completes
         if (typeof window.renderDashboardTab === 'function') {
           try { window.renderDashboardTab(); } catch {}
         }
-
-        // Show results in modal
-        showBulkUpdateResultsModal(successCount, skippedCount, failCount, errors, activeTasks.length);
 
       } catch (error) {
         console.error('[Optimisation] Bulk update error:', error);
