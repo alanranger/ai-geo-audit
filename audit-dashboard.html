@@ -8094,6 +8094,14 @@
       // Latest = most recent measurement after baseline (or baseline itself if it's the newest)
       const latest = eligibleMeasurements.length > 1 ? eligibleMeasurements[eligibleMeasurements.length - 1] : baseline;
 
+      // DEBUG: Log what we're returning
+      if (typeof debugLog === 'function' && eligibleMeasurements.length > 0) {
+        const baselineDate = baseline?.captured_at || baseline?.created_at || 'no-date';
+        const latestDate = latest?.captured_at || latest?.created_at || 'no-date';
+        const isSame = baseline === latest;
+        debugLog(`[getBaselineLatest] eligibleMeasurements.length=${eligibleMeasurements.length}, baselineIdx=${baselineIdx}, baselineDate=${baselineDate}, latestDate=${latestDate}, isSameObject=${isSame}`, isSame ? 'warn' : 'info');
+      }
+
       return { baseline, latest };
     }
 
@@ -8389,7 +8397,16 @@
 
         // Get measurements
         const measurements = task.measurements || [];
-        const baselineLatest = getBaselineLatest(measurements, scope, activeCycle);
+        let baselineLatest = getBaselineLatest(measurements, scope, activeCycle);
+        
+        // FALLBACK: If no measurements array or getBaselineLatest returned null, try using baseline_metrics/latest_metrics
+        if (!baselineLatest && task.baseline_metrics && task.latest_metrics) {
+          debugLog(`[Traffic Lights] Task "${task.title || task.id}": No measurements array, using baseline_metrics/latest_metrics fallback`, 'info');
+          baselineLatest = {
+            baseline: { ...task.baseline_metrics, captured_at: task.baseline_metrics.captured_at || null },
+            latest: { ...task.latest_metrics, captured_at: task.latest_metrics.captured_at || null }
+          };
+        }
 
         // DEBUG: Log task details for troubleshooting
         if (task.title && (task.title.includes('Landscape') || task.title.includes('photography-courses'))) {
@@ -8406,7 +8423,16 @@
           if (typeof debugLog === 'function' && task.objectiveKpiKey) {
             const baselineKeys = Object.keys(baselineLatest.baseline || {}).filter(k => k.includes('ctr') || k.includes('citation') || k.includes('clicks') || k.includes('impression') || k.includes('rank') || k.includes('overview'));
             const latestKeys = Object.keys(baselineLatest.latest || {}).filter(k => k.includes('ctr') || k.includes('citation') || k.includes('clicks') || k.includes('impression') || k.includes('rank') || k.includes('overview'));
-            debugLog(`[Traffic Lights] Task "${task.title || task.id}": objectiveKpiKey=${task.objectiveKpiKey}, baselineFields=[${baselineKeys.join(', ')}], latestFields=[${latestKeys.join(', ')}]`, 'info');
+            debugLog(`[Traffic Lights] Task "${task.title || task.id}": objectiveKpiKey=${task.objectiveKpiKey}, measurementsCount=${measurements.length}, baselineFields=[${baselineKeys.join(', ')}], latestFields=[${latestKeys.join(', ')}]`, 'info');
+            // Log measurement details
+            if (measurements.length > 0) {
+              const measurementDates = measurements.map(m => m.captured_at || m.created_at || 'no-date').join(', ');
+              debugLog(`[Traffic Lights] Task "${task.title || task.id}": measurement dates: [${measurementDates}]`, 'info');
+              debugLog(`[Traffic Lights] Task "${task.title || task.id}": baseline.captured_at=${baselineLatest.baseline?.captured_at || baselineLatest.baseline?.created_at || 'N/A'}, latest.captured_at=${baselineLatest.latest?.captured_at || baselineLatest.latest?.created_at || 'N/A'}`, 'info');
+              // Check if baseline and latest are the same object
+              const isSameObject = baselineLatest.baseline === baselineLatest.latest;
+              debugLog(`[Traffic Lights] Task "${task.title || task.id}": baseline === latest (same object)? ${isSameObject}`, isSameObject ? 'warn' : 'info');
+            }
           }
           
           // Classify ALL metrics for ALL tasks (regardless of task objective)
@@ -8537,6 +8563,17 @@
 
         const data = await response.json();
         debugLog(`[Optimisation] API returned ${data.tasks?.length || 0} tasks. Sample: ${data.tasks?.[0]?.title || 'N/A'} (ID: ${data.tasks?.[0]?.id || 'N/A'}, latest_metrics.captured_at: ${data.tasks?.[0]?.latest_metrics?.captured_at || 'N/A'})`, 'info');
+        // DEBUG: Check if tasks have measurements array
+        if (data.tasks && data.tasks.length > 0) {
+          const sampleTask = data.tasks[0];
+          const hasMeasurements = Array.isArray(sampleTask.measurements);
+          const measurementsCount = hasMeasurements ? sampleTask.measurements.length : 0;
+          debugLog(`[Optimisation] Sample task "${sampleTask.title || sampleTask.id}": hasMeasurements=${hasMeasurements}, measurementsCount=${measurementsCount}, hasLatestMetrics=${!!sampleTask.latest_metrics}, hasBaselineMetrics=${!!sampleTask.baseline_metrics}`, 'info');
+          if (hasMeasurements && measurementsCount > 0) {
+            const measurementDates = sampleTask.measurements.map(m => m.captured_at || m.created_at || 'no-date').join(', ');
+            debugLog(`[Optimisation] Sample task measurements dates: [${measurementDates}]`, 'info');
+          }
+        }
         window.optimisationModuleState.allTasks = data.tasks || [];
         window.optimisationModuleState.filteredTasks = [...window.optimisationModuleState.allTasks];
         debugLog(`[Optimisation] State updated - allTasks count: ${window.optimisationModuleState.allTasks.length}`, 'info');
