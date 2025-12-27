@@ -14743,29 +14743,33 @@
         if (typeof window.loadAllOptimisationTasks === 'function') {
           console.log('[Optimisation] Reloading tasks after bulk update...');
           try {
+            // Store current task ID if drawer is open
+            const drawer = document.getElementById('optimisation-drawer');
+            const isDrawerOpen = drawer && drawer.style.display !== 'none' && drawer.style.display !== '';
+            const currentTaskId = (isDrawerOpen && window.optimisationModuleState && window.optimisationModuleState.currentTaskId) 
+              ? window.optimisationModuleState.currentTaskId 
+              : null;
+            
+            // Reload all tasks
             await window.loadAllOptimisationTasks();
             
-            // Refresh task drawer if open
-            if (typeof window.renderOptimisationTasksTable === 'function') {
-              window.renderOptimisationTasksTable();
-            }
-            
-            // Refresh optimization summary cards
-            if (typeof window.updateOptimisationSummaryCards === 'function') {
-              window.updateOptimisationSummaryCards();
-            }
-            
-            // Refresh task details drawer if a task is open
-            if (window.optimisationModuleState && window.optimisationModuleState.currentTaskId) {
-              const currentTaskId = window.optimisationModuleState.currentTaskId;
-              // Check if task drawer is open
-              const drawer = document.getElementById('optimisation-drawer');
-              if (drawer && drawer.style.display !== 'none') {
-                // Reload the task details
+            // Refresh task drawer if it was open - re-open the same task to refresh its data
+            if (currentTaskId && isDrawerOpen) {
+              console.log(`[Optimisation] Refreshing task details drawer for task ${currentTaskId}...`);
+              // Find the task in the reloaded data
+              const reloadedTask = window.optimisationModuleState.allTasks.find(t => t.id === currentTaskId);
+              if (reloadedTask) {
+                // Try multiple methods to refresh the task details
                 if (typeof window.openTaskDetails === 'function') {
                   window.openTaskDetails(currentTaskId);
                 } else if (typeof window.renderTaskDetailsDrawer === 'function') {
                   window.renderTaskDetailsDrawer(currentTaskId);
+                } else {
+                  // Fallback: trigger a click on the task row to refresh
+                  const taskRow = document.querySelector(`[data-task-id="${currentTaskId}"]`);
+                  if (taskRow) {
+                    taskRow.click();
+                  }
                 }
               }
             }
