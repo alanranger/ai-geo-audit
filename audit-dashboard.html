@@ -9356,9 +9356,15 @@
       // Phase 6: Fetch full task details including cycles
       try {
         const headers = window.getOptimisationHeaders();
-        const taskResponse = await fetch(apiUrl(`/api/optimisation/task/${taskId}`), {
+        // Add cache-busting to ensure fresh task data
+        const cacheBuster = `_t=${Date.now()}`;
+        const taskResponse = await fetch(apiUrl(`/api/optimisation/task/${taskId}?${cacheBuster}`), {
           method: 'GET',
-          headers: headers
+          headers: {
+            ...headers,
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache'
+          }
         });
         if (taskResponse.ok) {
           const taskData = await taskResponse.json();
@@ -14743,8 +14749,26 @@
         
         // CRITICAL: Wait longer for backend to fully process and persist all updates
         // Even if tasks were skipped, we need fresh data from the backend
-        console.log('[Optimisation] Waiting for backend to process updates...');
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        console.log('[Optimisation] Waiting for backend to process updates (3 seconds)...');
+        await new Promise(resolve => setTimeout(resolve, 3000)); // Increased to 3 seconds
+        
+        // Store current task ID if drawer is open (before clearing state)
+        const drawer = document.getElementById('optimisation-task-drawer');
+        const isDrawerOpen = drawer && drawer.style.display !== 'none' && drawer.style.display !== '';
+        const currentTaskId = (isDrawerOpen && window.optimisationModuleState && window.optimisationModuleState.currentTaskId) 
+          ? window.optimisationModuleState.currentTaskId 
+          : null;
+        
+        // Store timestamps of tasks before reload to verify they changed
+        const beforeReloadTimestamps = new Map();
+        if (window.optimisationModuleState && window.optimisationModuleState.allTasks) {
+          window.optimisationModuleState.allTasks.forEach(task => {
+            const timestamp = task.latest_metrics?.captured_at || task.latest_metrics?.created_at || null;
+            if (timestamp) {
+              beforeReloadTimestamps.set(task.id, timestamp);
+            }
+          });
+        }
         
         // Reload tasks to show updated data (even if all were skipped, refresh to show current state)
         // This ensures the UI reflects the latest data from the backend
@@ -14755,25 +14779,67 @@
           // Clear tasks to force fresh fetch
           window.optimisationModuleState.allTasks = [];
           window.optimisationModuleState.filteredTasks = [];
+          console.log('[Optimisation] Cleared existing tasks state to force fresh fetch.');
         }
         
-        // Reload with aggressive cache-busting
-        await window.loadAllOptimisationTasks();
+        // Reload with aggressive cache-busting - retry up to 3 times if data seems stale
+        let fetchedTasks = null;
+        let retryCount = 0;
+        const maxRetries = 3;
+        
+        while (retryCount < maxRetries) {
+          console.log(`[Optimisation] Fetching fresh task data from API (attempt ${retryCount + 1}/${maxRetries})...`);
+          fetchedTasks = await window.loadAllOptimisationTasks();
+          
+          // Verify data freshness: check if any task has a newer timestamp
+          let hasNewData = false;
+          if (fetchedTasks && fetchedTasks.length > 0) {
+            for (const task of fetchedTasks) {
+              const newTimestamp = task.latest_metrics?.captured_at || task.latest_metrics?.created_at || null;
+              const oldTimestamp = beforeReloadTimestamps.get(task.id);
+              
+              if (newTimestamp && (!oldTimestamp || new Date(newTimestamp) > new Date(oldTimestamp))) {
+                hasNewData = true;
+                console.log(`[Optimisation] Task ${task.id} has new data: ${oldTimestamp} -> ${newTimestamp}`);
+                break;
+              }
+            }
+          }
+          
+          // If we have new data or this is the first attempt (might be skipped tasks), proceed
+          if (hasNewData || retryCount === 0 || !beforeReloadTimestamps.size) {
+            console.log(`[Optimisation] API returned ${fetchedTasks?.length || 0} tasks. Sample first task latest_metrics.captured_at: ${fetchedTasks?.[0]?.latest_metrics?.captured_at || 'N/A'}`);
+            console.log(`[Optimisation] State updated - allTasks count: ${window.optimisationModuleState.allTasks.length}, filteredTasks count: ${window.optimisationModuleState.filteredTasks.length}`);
+            break;
+          }
+          
+          // If no new data and we have retries left, wait and retry
+          retryCount++;
+          if (retryCount < maxRetries) {
+            console.log(`[Optimisation] No new data detected, waiting 2 seconds before retry...`);
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          } else {
+            console.warn(`[Optimisation] No new data detected after ${maxRetries} attempts. Proceeding with current data.`);
+          }
+        }
 
         // Force refresh of optimization tab UI components - call multiple times to ensure update
         console.log('[Optimisation] Force refreshing all UI components...');
         if (typeof window.renderOptimisationTasksTable === 'function') {
           window.renderOptimisationTasksTable();
           // Call again after a brief delay to ensure it takes
-          setTimeout(() => window.renderOptimisationTasksTable(), 100);
+          await new Promise(resolve => setTimeout(resolve, 100));
+          window.renderOptimisationTasksTable();
         }
         if (typeof window.updateOptimisationSummaryCards === 'function') {
           window.updateOptimisationSummaryCards();
-          setTimeout(() => window.updateOptimisationSummaryCards(), 100);
+          await new Promise(resolve => setTimeout(resolve, 100));
+          window.updateOptimisationSummaryCards();
         }
         if (typeof window.updateTrafficLights === 'function') {
           window.updateTrafficLights();
-          setTimeout(() => window.updateTrafficLights(), 100);
+          await new Promise(resolve => setTimeout(resolve, 100));
+          window.updateTrafficLights();
         }
         if (typeof window.updateKPITiles === 'function') {
           window.updateKPITiles();
@@ -14785,15 +14851,55 @@
           window.updateTimeseriesCharts();
         }
 
+        // Refresh task drawer if it was open - force close and reopen to ensure fresh data
+        if (currentTaskId && isDrawerOpen) {
+          console.log(`[Optimisation] Force refreshing task details drawer for task ${currentTaskId}...`);
+          
+          // Find the task in the reloaded data first to verify it exists
+          const reloadedTask = window.optimisationModuleState.allTasks.find(t => t.id === currentTaskId);
+          if (!reloadedTask) {
+            console.warn(`[Optimisation] Task ${currentTaskId} not found in reloaded data - closing drawer`);
+            if (drawer) {
+              drawer.style.display = 'none';
+            }
+            if (window.optimisationModuleState) {
+              window.optimisationModuleState.currentTaskId = null;
+            }
+          } else {
+            // Clear the drawer content to force a complete re-render
+            const drawerContent = document.getElementById('optimisation-drawer-content');
+            if (drawerContent) {
+              drawerContent.innerHTML = '<div style="padding: 2rem; text-align: center; color: var(--dark-text-muted);">Refreshing task details...</div>';
+            }
+            
+            // Clear currentTaskId to force openOptimisationTaskDrawer to re-render
+            if (window.optimisationModuleState) {
+              window.optimisationModuleState.currentTaskId = null;
+            }
+            
+            // Wait a moment for state to clear
+            await new Promise(resolve => setTimeout(resolve, 200));
+            
+            // Re-open the drawer with the same task - this will fetch fresh data
+            if (typeof window.openOptimisationTaskDrawer === 'function') {
+              console.log(`[Optimisation] Re-opening drawer for task ${currentTaskId} with fresh data`);
+              await window.openOptimisationTaskDrawer(currentTaskId);
+            } else {
+              console.warn(`[Optimisation] openOptimisationTaskDrawer function not found.`);
+            }
+          }
+        }
+
         // Dashboard: refresh live dials/cards after bulk update completes
         if (typeof window.renderDashboardTab === 'function') {
           try { 
             window.renderDashboardTab();
             // Call again after delay
-            setTimeout(() => {
-              try { window.renderDashboardTab(); } catch {}
-            }, 200);
-          } catch {}
+            await new Promise(resolve => setTimeout(resolve, 200));
+            window.renderDashboardTab();
+          } catch (e) {
+            console.warn('[Optimisation] Error refreshing dashboard:', e);
+          }
         }
         
         console.log('[Optimisation] UI refresh complete - check if data updated');
@@ -14805,93 +14911,6 @@
         if (bulkUpdateBtn) {
           bulkUpdateBtn.disabled = false;
           bulkUpdateBtn.textContent = originalText;
-        }
-        
-        // Reload tasks to reflect the updated measurements
-        if (typeof window.loadAllOptimisationTasks === 'function') {
-          console.log('[Optimisation] Reloading tasks after bulk update...');
-          try {
-            // Wait a moment for backend to finish processing all the updates
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            
-            // Store current task ID if drawer is open
-            const drawer = document.getElementById('optimisation-drawer');
-            const isDrawerOpen = drawer && drawer.style.display !== 'none' && drawer.style.display !== '';
-            const currentTaskId = (isDrawerOpen && window.optimisationModuleState && window.optimisationModuleState.currentTaskId) 
-              ? window.optimisationModuleState.currentTaskId 
-              : null;
-            
-            // Reload all tasks - this updates window.optimisationModuleState.allTasks
-            // Add cache-busting timestamp to ensure fresh data
-            console.log('[Optimisation] Fetching fresh task data from API...');
-            await window.loadAllOptimisationTasks();
-            
-            // Force refresh of optimization tab UI components
-            // These are called by loadAllOptimisationTasks, but ensure they run
-            if (typeof window.renderOptimisationTasksTable === 'function') {
-              window.renderOptimisationTasksTable();
-            }
-            if (typeof window.updateOptimisationSummaryCards === 'function') {
-              window.updateOptimisationSummaryCards();
-            }
-            if (typeof window.updateTrafficLights === 'function') {
-              window.updateTrafficLights();
-            }
-            
-            // Refresh task drawer if it was open - force close and reopen to ensure fresh data
-            if (currentTaskId && isDrawerOpen) {
-              console.log(`[Optimisation] Force refreshing task details drawer for task ${currentTaskId}...`);
-              
-              // Find the task in the reloaded data first to verify it exists
-              const reloadedTask = window.optimisationModuleState.allTasks.find(t => t.id === currentTaskId);
-              if (!reloadedTask) {
-                console.warn(`[Optimisation] Task ${currentTaskId} not found in reloaded data - closing drawer`);
-                if (drawer) {
-                  drawer.style.display = 'none';
-                }
-                if (window.optimisationModuleState) {
-                  window.optimisationModuleState.currentTaskId = null;
-                }
-              } else {
-                // Clear the drawer content to force a complete re-render
-                const drawerContent = document.getElementById('optimisation-drawer-content');
-                if (drawerContent) {
-                  drawerContent.innerHTML = '<div style="padding: 2rem; text-align: center; color: var(--dark-text-muted);">Refreshing task details...</div>';
-                }
-                
-                // Clear currentTaskId to force openOptimisationTaskDrawer to re-render
-                if (window.optimisationModuleState) {
-                  window.optimisationModuleState.currentTaskId = null;
-                }
-                
-                // Wait a moment for state to clear
-                await new Promise(resolve => setTimeout(resolve, 150));
-                
-                // Re-open the drawer with the same task - this will fetch fresh data from allTasks
-                if (typeof window.openOptimisationTaskDrawer === 'function') {
-                  console.log(`[Optimisation] Re-opening drawer for task ${currentTaskId} with fresh data`);
-                  await window.openOptimisationTaskDrawer(currentTaskId);
-                } else {
-                  // Fallback: trigger a click on the task row to refresh
-                  const taskRow = document.querySelector(`[data-task-id="${currentTaskId}"]`);
-                  if (taskRow) {
-                    taskRow.click();
-                  } else {
-                    console.warn(`[Optimisation] Could not find task row for ${currentTaskId}`);
-                  }
-                }
-              }
-            }
-            
-            // Refresh dashboard if visible
-            if (typeof window.renderDashboardTab === 'function') {
-              window.renderDashboardTab();
-            }
-            
-            console.log('[Optimisation] Tasks reloaded and UI refreshed successfully');
-          } catch (reloadError) {
-            console.warn('[Optimisation] Failed to reload tasks after bulk update:', reloadError);
-          }
         }
       }
     };
