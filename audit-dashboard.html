@@ -8505,9 +8505,15 @@
 
         const headers = window.getOptimisationHeaders();
         const scope = window.optimisationModuleState.scope || 'active_cycle';
-        const response = await fetch(apiUrl(`/api/optimisation/dashboard?scope=${scope}`), {
+        // Add cache-busting timestamp to ensure fresh data
+        const cacheBuster = `_t=${Date.now()}`;
+        const response = await fetch(apiUrl(`/api/optimisation/dashboard?scope=${scope}&${cacheBuster}`), {
           method: 'GET',
-          headers: headers
+          headers: {
+            ...headers,
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache'
+          }
         });
 
         if (!response.ok) {
@@ -14743,6 +14749,9 @@
         if (typeof window.loadAllOptimisationTasks === 'function') {
           console.log('[Optimisation] Reloading tasks after bulk update...');
           try {
+            // Wait a moment for backend to finish processing all the updates
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
             // Store current task ID if drawer is open
             const drawer = document.getElementById('optimisation-drawer');
             const isDrawerOpen = drawer && drawer.style.display !== 'none' && drawer.style.display !== '';
@@ -14751,6 +14760,8 @@
               : null;
             
             // Reload all tasks - this updates window.optimisationModuleState.allTasks
+            // Add cache-busting timestamp to ensure fresh data
+            console.log('[Optimisation] Fetching fresh task data from API...');
             await window.loadAllOptimisationTasks();
             
             // Force refresh of optimization tab UI components
