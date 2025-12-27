@@ -14738,6 +14738,48 @@
           bulkUpdateBtn.disabled = false;
           bulkUpdateBtn.textContent = originalText;
         }
+        
+        // Reload tasks to reflect the updated measurements
+        if (typeof window.loadAllOptimisationTasks === 'function') {
+          console.log('[Optimisation] Reloading tasks after bulk update...');
+          try {
+            await window.loadAllOptimisationTasks();
+            
+            // Refresh task drawer if open
+            if (typeof window.renderOptimisationTasksTable === 'function') {
+              window.renderOptimisationTasksTable();
+            }
+            
+            // Refresh optimization summary cards
+            if (typeof window.updateOptimisationSummaryCards === 'function') {
+              window.updateOptimisationSummaryCards();
+            }
+            
+            // Refresh task details drawer if a task is open
+            if (window.optimisationModuleState && window.optimisationModuleState.currentTaskId) {
+              const currentTaskId = window.optimisationModuleState.currentTaskId;
+              // Check if task drawer is open
+              const drawer = document.getElementById('optimisation-drawer');
+              if (drawer && drawer.style.display !== 'none') {
+                // Reload the task details
+                if (typeof window.openTaskDetails === 'function') {
+                  window.openTaskDetails(currentTaskId);
+                } else if (typeof window.renderTaskDetailsDrawer === 'function') {
+                  window.renderTaskDetailsDrawer(currentTaskId);
+                }
+              }
+            }
+            
+            // Refresh dashboard if visible
+            if (typeof window.renderDashboardTab === 'function') {
+              window.renderDashboardTab();
+            }
+            
+            console.log('[Optimisation] Tasks reloaded successfully');
+          } catch (reloadError) {
+            console.warn('[Optimisation] Failed to reload tasks after bulk update:', reloadError);
+          }
+        }
       }
     };
 
