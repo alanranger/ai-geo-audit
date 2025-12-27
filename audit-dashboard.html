@@ -8400,19 +8400,42 @@
         let baselineLatest = getBaselineLatest(measurements, scope, activeCycle);
         
         // FALLBACK: If no measurements array or getBaselineLatest returned null, try using baseline_metrics/latest_metrics
+        // ALSO: If baseline === latest (same object, meaning only 1 measurement), use baseline_metrics/latest_metrics
         if (!baselineLatest && task.baseline_metrics && task.latest_metrics) {
           debugLog(`[Traffic Lights] Task "${task.title || task.id}": No measurements array, using baseline_metrics/latest_metrics fallback`, 'info');
           baselineLatest = {
             baseline: { ...task.baseline_metrics, captured_at: task.baseline_metrics.captured_at || null },
             latest: { ...task.latest_metrics, captured_at: task.latest_metrics.captured_at || null }
           };
+        } else if (baselineLatest && baselineLatest.baseline === baselineLatest.latest) {
+          // Only 1 measurement - baseline and latest are the same object
+          // Use baseline_metrics/latest_metrics if available (they should have different values)
+          if (task.baseline_metrics && task.latest_metrics) {
+            const baselineDate = task.baseline_metrics.captured_at || task.baseline_metrics.created_at || null;
+            const latestDate = task.latest_metrics.captured_at || task.latest_metrics.created_at || null;
+            const datesAreDifferent = baselineDate !== latestDate;
+            debugLog(`[Traffic Lights] Task "${task.title || task.id}": Only 1 measurement (baseline === latest), using baseline_metrics/latest_metrics fallback. baselineDate=${baselineDate}, latestDate=${latestDate}, datesAreDifferent=${datesAreDifferent}`, 'info');
+            baselineLatest = {
+              baseline: { ...task.baseline_metrics, captured_at: baselineDate },
+              latest: { ...task.latest_metrics, captured_at: latestDate }
+            };
+          } else {
+            debugLog(`[Traffic Lights] Task "${task.title || task.id}": Only 1 measurement and no baseline_metrics/latest_metrics available - metrics will show as 'same'`, 'warn');
+          }
         }
 
         // DEBUG: Log task details for troubleshooting
         if (task.title && (task.title.includes('Landscape') || task.title.includes('photography-courses'))) {
           if (typeof debugLog === 'function') {
-            debugLog(`[Traffic Lights] Task: id=${task.id}, title="${task.title}", status=${task.status}, objectiveKpiKey=${task.objectiveKpiKey}, measurementsCount=${measurements.length}, hasBaselineLatest=${!!baselineLatest}`, 'info');
+            debugLog(`[Traffic Lights] Task: id=${task.id}, title="${task.title}", status=${task.status}, objectiveKpiKey=${task.objectiveKpiKey}, measurementsCount=${measurements.length}, hasBaselineLatest=${!!baselineLatest}, hasBaselineMetrics=${!!task.baseline_metrics}, hasLatestMetrics=${!!task.latest_metrics}`, 'info');
           }
+        }
+        
+        // DEBUG: Log data structure for all tasks with objectives
+        if (typeof debugLog === 'function' && task.objectiveKpiKey) {
+          const baselineMetricsKeys = task.baseline_metrics ? Object.keys(task.baseline_metrics).filter(k => k.includes('ctr') || k.includes('citation') || k.includes('clicks') || k.includes('impression') || k.includes('rank') || k.includes('overview')).join(', ') : 'none';
+          const latestMetricsKeys = task.latest_metrics ? Object.keys(task.latest_metrics).filter(k => k.includes('ctr') || k.includes('citation') || k.includes('clicks') || k.includes('impression') || k.includes('rank') || k.includes('overview')).join(', ') : 'none';
+          debugLog(`[Traffic Lights] Task "${task.title || task.id}": measurements.length=${measurements.length}, baseline_metrics keys=[${baselineMetricsKeys}], latest_metrics keys=[${latestMetricsKeys}]`, 'info');
         }
 
         // Track classifications for all metrics to compute aggregated count
@@ -8446,9 +8469,13 @@
               baselineLatest.latest
             );
 
-            // DEBUG: Log classification for all tasks
-            if (typeof debugLog === 'function' && task.objectiveKpiKey) {
-              debugLog(`[Traffic Lights] ${metricKey}: baselineValue=${baselineValue}, latestValue=${latestValue}, classification=${classification || 'null'}`, 'info');
+            // DEBUG: Log classification for all tasks with detailed value comparison
+            if (typeof debugLog === 'function') {
+              const baselineDate = baselineLatest.baseline?.captured_at || baselineLatest.baseline?.created_at || 'no-date';
+              const latestDate = baselineLatest.latest?.captured_at || baselineLatest.latest?.created_at || 'no-date';
+              const isSameObject = baselineLatest.baseline === baselineLatest.latest;
+              const delta = (baselineValue != null && latestValue != null) ? (latestValue - baselineValue) : null;
+              debugLog(`[Traffic Lights] Task "${task.title || task.id}" ${metricKey}: baselineValue=${baselineValue}, latestValue=${latestValue}, delta=${delta}, classification=${classification || 'null'}, baselineDate=${baselineDate}, latestDate=${latestDate}, isSameObject=${isSameObject}`, classification === 'same' && delta !== 0 ? 'warn' : 'info');
             }
 
             if (classification) {
