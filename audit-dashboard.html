@@ -13944,10 +13944,10 @@
                       if (ctrValue != null) {
                         // If CTR is > 1, assume it's a percentage and convert to ratio
                         if (ctrValue > 1 && ctrValue <= 100) {
-                          console.warn('[Optimisation] Money Pages CTR appears to be percentage, converting to ratio:', ctrValue, '->', ctrValue / 100);
+                          debugLog(`[Optimisation] Money Pages CTR appears to be percentage, converting to ratio: ${ctrValue} -> ${ctrValue / 100}`, 'warn');
                           ctrValue = ctrValue / 100;
                         } else if (ctrValue > 100) {
-                          console.error('[Optimisation] Money Pages CTR value seems invalid (>100%):', ctrValue);
+                          debugLog(`[Optimisation] Money Pages CTR value seems invalid (>100%): ${ctrValue}`, 'error');
                           ctrValue = null;
                         }
                         // If CTR is <= 1, assume it's already a ratio (0-1)
@@ -14135,10 +14135,10 @@
                         if (ctrValue != null) {
                           // If CTR is > 1, assume it's a percentage and convert to ratio
                           if (ctrValue > 1 && ctrValue <= 100) {
-                            console.warn('[Optimisation] Money Pages CTR appears to be percentage, converting to ratio:', ctrValue, '->', ctrValue / 100);
+                            debugLog(`[Optimisation] Money Pages CTR appears to be percentage, converting to ratio: ${ctrValue} -> ${ctrValue / 100}`, 'warn');
                             ctrValue = ctrValue / 100;
                           } else if (ctrValue > 100) {
-                            console.error('[Optimisation] Money Pages CTR value seems invalid (>100%):', ctrValue);
+                            debugLog(`[Optimisation] Money Pages CTR value seems invalid (>100%): ${ctrValue}`, 'error');
                             ctrValue = null;
                           }
                           // If CTR is <= 1, assume it's already a ratio (0-1)
@@ -14546,7 +14546,7 @@
           await window.renderRankingAiTab();
           await new Promise(resolve => setTimeout(resolve, 1000)); // Give time for data to load
         } catch (e) {
-          console.warn('[Optimisation] Could not refresh Ranking & AI data:', e);
+          debugLog(`[Optimisation] Could not refresh Ranking & AI data: ${e.message || e}`, 'warn');
         }
       }
 
@@ -14675,7 +14675,11 @@
             // If still no data, check localStorage/Supabase audit results
             if (!currentMetrics) {
               try {
-                const savedAudit = localStorage.getItem('aigeo_audit_data');
+                // Check both keys: last_audit_results (current) and aigeo_audit_data (legacy)
+                let savedAudit = localStorage.getItem('last_audit_results');
+                if (!savedAudit) {
+                  savedAudit = localStorage.getItem('aigeo_audit_data');
+                }
                 if (savedAudit) {
                   const parsed = JSON.parse(savedAudit);
                   const moneyPagesData = parsed.scores?.moneyPagesMetrics || parsed.moneyPagesMetrics;
@@ -14693,10 +14697,10 @@
                       if (ctrValue != null) {
                         // If CTR is > 1, assume it's a percentage and convert to ratio
                         if (ctrValue > 1 && ctrValue <= 100) {
-                          console.warn('[Optimisation] Money Pages CTR appears to be percentage, converting to ratio:', ctrValue, '->', ctrValue / 100);
+                          debugLog(`[Optimisation] Money Pages CTR appears to be percentage, converting to ratio: ${ctrValue} -> ${ctrValue / 100}`, 'warn');
                           ctrValue = ctrValue / 100;
                         } else if (ctrValue > 100) {
-                          console.error('[Optimisation] Money Pages CTR value seems invalid (>100%):', ctrValue);
+                          debugLog(`[Optimisation] Money Pages CTR value seems invalid (>100%): ${ctrValue}`, 'error');
                           ctrValue = null;
                         }
                         // If CTR is <= 1, assume it's already a ratio (0-1)
@@ -14739,7 +14743,7 @@
                         // Use best rank from the query with highest clicks
                         const bestQuery = matchingQueries.reduce((best, qt) => 
                           (qt.clicks || 0) > (best.clicks || 0) ? qt : best, matchingQueries[0]);
-                        console.log(`[Optimisation] Aggregated ${matchingQueries.length} queries for URL in bulk update: ${totalClicks} clicks, ${totalImpressions} impressions`);
+                        debugLog(`[Optimisation] Aggregated ${matchingQueries.length} queries for URL in bulk update: ${totalClicks} clicks, ${totalImpressions} impressions`, 'info');
                         currentMetrics = {
                           gsc_clicks_28d: totalClicks || null,
                           gsc_impressions_28d: totalImpressions || null,
@@ -14776,7 +14780,7 @@
                   }
                 }
               } catch (e) {
-                console.warn(`[Optimisation] Error checking localStorage for task ${task.id}:`, e);
+                debugLog(`[Optimisation] Error checking localStorage for task ${task.id}: ${e.message || e}`, 'warn');
               }
             }
           }
@@ -14807,7 +14811,7 @@
           
             // Fallback to baseline if no current data found
           if (!currentMetrics && task.baseline_metrics) {
-            console.log(`[Optimisation] No current data for ${task.keyword_text || taskUrl}, using baseline`);
+            debugLog(`[Optimisation] No current data for ${task.keyword_text || taskUrl}, using baseline`, 'info');
             currentMetrics = { ...task.baseline_metrics, captured_at: new Date().toISOString() };
             // Remove null GSC metrics to avoid stale nulls
             if (currentMetrics.gsc_clicks_28d === null) delete currentMetrics.gsc_clicks_28d;
@@ -14847,7 +14851,7 @@
             } catch (error) {
               failCount++;
               errors.push(`${task.keyword_text}: ${error.message}`);
-              console.error(`[Optimisation] Error updating task ${task.id}:`, error);
+              debugLog(`[Optimisation] Error updating task ${task.id}: ${error.message || error}`, 'error');
             }
           }));
         }
@@ -15006,14 +15010,14 @@
             await new Promise(resolve => setTimeout(resolve, 200));
             window.renderDashboardTab();
           } catch (e) {
-            console.warn('[Optimisation] Error refreshing dashboard:', e);
+            debugLog(`[Optimisation] Error refreshing dashboard: ${e.message || e}`, 'warn');
           }
         }
         
         debugLog('[Optimisation] UI refresh complete - check if data updated', 'info');
 
       } catch (error) {
-        console.error('[Optimisation] Bulk update error:', error);
+        debugLog(`[Optimisation] Bulk update error: ${error.message || error}`, 'error');
         showBulkUpdateResultsModal(0, 0, activeTasks.length, [`Bulk update failed: ${error.message}`], activeTasks.length);
       } finally {
         if (bulkUpdateBtn) {
