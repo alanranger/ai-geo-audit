@@ -8403,10 +8403,26 @@
         // ALSO: If baseline === latest (same object, meaning only 1 measurement), use baseline_metrics/latest_metrics
         if (!baselineLatest && task.baseline_metrics && task.latest_metrics) {
           debugLog(`[Traffic Lights] Task "${task.title || task.id}": No measurements array, using baseline_metrics/latest_metrics fallback`, 'info');
+          
+          // DEBUG: Log raw values from baseline_metrics and latest_metrics for each metric
+          const metricKeysForDebug = ['ctr_28d', 'impressions_28d', 'clicks_28d', 'current_rank', 'ai_citations', 'ai_overview'];
+          for (const mk of metricKeysForDebug) {
+            const baselineRaw = task.baseline_metrics[mk] ?? task.baseline_metrics[`gsc_${mk}`] ?? task.baseline_metrics[`gsc_${mk.replace('_28d', '')}`] ?? 'NOT_FOUND';
+            const latestRaw = task.latest_metrics[mk] ?? task.latest_metrics[`gsc_${mk}`] ?? task.latest_metrics[`gsc_${mk.replace('_28d', '')}`] ?? 'NOT_FOUND';
+            debugLog(`[Traffic Lights] Task "${task.title || task.id}" RAW ${mk}: baseline_metrics=${baselineRaw}, latest_metrics=${latestRaw}`, 'info');
+          }
+          
           baselineLatest = {
             baseline: { ...task.baseline_metrics, captured_at: task.baseline_metrics.captured_at || null },
             latest: { ...task.latest_metrics, captured_at: task.latest_metrics.captured_at || null }
           };
+          
+          // DEBUG: Log what getMetricValue extracts after creating baselineLatest
+          for (const mk of metricKeysForDebug) {
+            const baselineExtracted = getMetricValue(baselineLatest.baseline, mk);
+            const latestExtracted = getMetricValue(baselineLatest.latest, mk);
+            debugLog(`[Traffic Lights] Task "${task.title || task.id}" EXTRACTED ${mk}: baselineValue=${baselineExtracted}, latestValue=${latestExtracted}`, baselineExtracted === latestExtracted ? 'warn' : 'info');
+          }
         } else if (baselineLatest && baselineLatest.baseline === baselineLatest.latest) {
           // Only 1 measurement - baseline and latest are the same object
           // Use baseline_metrics/latest_metrics if available (they should have different values)
@@ -8415,10 +8431,26 @@
             const latestDate = task.latest_metrics.captured_at || task.latest_metrics.created_at || null;
             const datesAreDifferent = baselineDate !== latestDate;
             debugLog(`[Traffic Lights] Task "${task.title || task.id}": Only 1 measurement (baseline === latest), using baseline_metrics/latest_metrics fallback. baselineDate=${baselineDate}, latestDate=${latestDate}, datesAreDifferent=${datesAreDifferent}`, 'info');
+            
+            // DEBUG: Log raw values from baseline_metrics and latest_metrics for each metric
+            const metricKeysForDebug = ['ctr_28d', 'impressions_28d', 'clicks_28d', 'current_rank', 'ai_citations', 'ai_overview'];
+            for (const mk of metricKeysForDebug) {
+              const baselineRaw = task.baseline_metrics[mk] ?? task.baseline_metrics[`gsc_${mk}`] ?? task.baseline_metrics[`gsc_${mk.replace('_28d', '')}`] ?? 'NOT_FOUND';
+              const latestRaw = task.latest_metrics[mk] ?? task.latest_metrics[`gsc_${mk}`] ?? task.latest_metrics[`gsc_${mk.replace('_28d', '')}`] ?? 'NOT_FOUND';
+              debugLog(`[Traffic Lights] Task "${task.title || task.id}" RAW ${mk}: baseline_metrics=${baselineRaw}, latest_metrics=${latestRaw}`, 'info');
+            }
+            
             baselineLatest = {
               baseline: { ...task.baseline_metrics, captured_at: baselineDate },
               latest: { ...task.latest_metrics, captured_at: latestDate }
             };
+            
+            // DEBUG: Log what getMetricValue extracts after creating baselineLatest
+            for (const mk of metricKeysForDebug) {
+              const baselineExtracted = getMetricValue(baselineLatest.baseline, mk);
+              const latestExtracted = getMetricValue(baselineLatest.latest, mk);
+              debugLog(`[Traffic Lights] Task "${task.title || task.id}" EXTRACTED ${mk}: baselineValue=${baselineExtracted}, latestValue=${latestExtracted}`, baselineExtracted === latestExtracted ? 'warn' : 'info');
+            }
           } else {
             debugLog(`[Traffic Lights] Task "${task.title || task.id}": Only 1 measurement and no baseline_metrics/latest_metrics available - metrics will show as 'same'`, 'warn');
           }
@@ -8436,6 +8468,13 @@
           const baselineMetricsKeys = task.baseline_metrics ? Object.keys(task.baseline_metrics).filter(k => k.includes('ctr') || k.includes('citation') || k.includes('clicks') || k.includes('impression') || k.includes('rank') || k.includes('overview')).join(', ') : 'none';
           const latestMetricsKeys = task.latest_metrics ? Object.keys(task.latest_metrics).filter(k => k.includes('ctr') || k.includes('citation') || k.includes('clicks') || k.includes('impression') || k.includes('rank') || k.includes('overview')).join(', ') : 'none';
           debugLog(`[Traffic Lights] Task "${task.title || task.id}": measurements.length=${measurements.length}, baseline_metrics keys=[${baselineMetricsKeys}], latest_metrics keys=[${latestMetricsKeys}]`, 'info');
+          
+          // DEBUG: Log ALL keys in baseline_metrics and latest_metrics to see full structure
+          if (task.baseline_metrics || task.latest_metrics) {
+            const allBaselineKeys = task.baseline_metrics ? Object.keys(task.baseline_metrics).join(', ') : 'none';
+            const allLatestKeys = task.latest_metrics ? Object.keys(task.latest_metrics).join(', ') : 'none';
+            debugLog(`[Traffic Lights] Task "${task.title || task.id}": ALL baseline_metrics keys=[${allBaselineKeys}], ALL latest_metrics keys=[${allLatestKeys}]`, 'info');
+          }
         }
 
         // Track classifications for all metrics to compute aggregated count
