@@ -29346,14 +29346,17 @@ Final Score: ${score}/100`;
         if (window.moneyPagesMetrics && window.moneyPagesMetrics.rows) {
           moneyPagesData = window.moneyPagesMetrics;
         } else {
-          // Try localStorage
-          const savedAudit = localStorage.getItem('aigeo_audit_data');
+          // Try localStorage - check last_audit_results first, then fallback to aigeo_audit_data
+          let savedAudit = localStorage.getItem('last_audit_results');
+          if (!savedAudit) {
+            savedAudit = localStorage.getItem('aigeo_audit_data');
+          }
           if (savedAudit) {
             try {
               const parsed = JSON.parse(savedAudit);
               moneyPagesData = parsed.scores?.moneyPagesMetrics || parsed.moneyPagesMetrics || null;
             } catch (e) {
-              console.error('[Money Pages Tasks] Error parsing localStorage:', e);
+              debugLog('[Money Pages Tasks] Error parsing localStorage: ' + (e.message || e), 'error');
             }
           }
         }
