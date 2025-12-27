@@ -13909,31 +13909,61 @@
                   }
                   
                   // Also check query_pages for URL-based matching (query+page level data)
-                  if (!currentMetrics && parsed.scores && parsed.scores.query_pages) {
-                    const queryPages = Array.isArray(parsed.scores.query_pages) ? parsed.scores.query_pages : [];
-                    const matchingQueryPage = queryPages.find(qp => {
-                      const qpUrl = (qp.page || qp.url || '').toLowerCase();
-                      const normalizedQpUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(qpUrl) : qpUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
-                      return normalizedQpUrl === normalizedTaskUrl;
-                    });
+                  // First try scores.query_pages, then searchData.queryPages (where fresh audit data stores it)
+                  if (!currentMetrics) {
+                    let queryPages = [];
+                    if (parsed.scores && parsed.scores.query_pages && Array.isArray(parsed.scores.query_pages)) {
+                      queryPages = parsed.scores.query_pages;
+                    } else if (parsed.searchData && parsed.searchData.queryPages && Array.isArray(parsed.searchData.queryPages)) {
+                      queryPages = parsed.searchData.queryPages;
+                    }
                     
-                    if (matchingQueryPage) {
-                      console.log('[Optimisation] Found matching query_pages entry:', matchingQueryPage);
-                      currentMetrics = {
-                        gsc_clicks_28d: matchingQueryPage.clicks || null,
-                        gsc_impressions_28d: matchingQueryPage.impressions || null,
-                        gsc_ctr_28d: matchingQueryPage.ctr != null ? (matchingQueryPage.ctr / 100) : null,
-                        current_rank: matchingQueryPage.position || matchingQueryPage.avg_position || null,
-                        opportunity_score: null,
-                        ai_overview: false,
-                        ai_citations: 0,
-                        ai_citations_total: 0,
-                        classic_ranking_url: matchingQueryPage.page || matchingQueryPage.url || taskUrl,
-                        page_type: null,
-                        segment: null,
-                        captured_at: new Date().toISOString()
-                      };
-                      console.log('[Optimisation] Built currentMetrics from query_pages:', currentMetrics);
+                    if (queryPages.length > 0) {
+                      // For keyword-based tasks, match by keyword first, then URL
+                      // For URL-based tasks, match by URL
+                      let matchingQueryPage = null;
+                      if (taskKeyword && taskKeyword.length > 0) {
+                        // Keyword-based: find by keyword, then match URL if provided
+                        matchingQueryPage = queryPages.find(qp => {
+                          const qpKeyword = (qp.query || qp.keyword || '').toLowerCase();
+                          if (qpKeyword !== taskKeyword.toLowerCase()) return false;
+                          // If URL is provided, also match URL
+                          if (normalizedTaskUrl && normalizedTaskUrl.length > 0) {
+                            const qpUrl = (qp.page || qp.url || '').toLowerCase();
+                            const normalizedQpUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(qpUrl) : qpUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+                            return normalizedQpUrl === normalizedTaskUrl;
+                          }
+                          return true; // Keyword match is enough if no URL
+                        });
+                      }
+                      
+                      // If no keyword match or URL-based task, try URL matching
+                      if (!matchingQueryPage && normalizedTaskUrl && normalizedTaskUrl.length > 0) {
+                        matchingQueryPage = queryPages.find(qp => {
+                          const qpUrl = (qp.page || qp.url || '').toLowerCase();
+                          const normalizedQpUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(qpUrl) : qpUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+                          return normalizedQpUrl === normalizedTaskUrl;
+                        });
+                      }
+                      
+                      if (matchingQueryPage) {
+                        console.log('[Optimisation] Found matching query_pages entry:', matchingQueryPage);
+                        currentMetrics = {
+                          gsc_clicks_28d: matchingQueryPage.clicks || null,
+                          gsc_impressions_28d: matchingQueryPage.impressions || null,
+                          gsc_ctr_28d: matchingQueryPage.ctr != null ? (matchingQueryPage.ctr / 100) : null,
+                          current_rank: matchingQueryPage.position || matchingQueryPage.avg_position || null,
+                          opportunity_score: null,
+                          ai_overview: false,
+                          ai_citations: 0,
+                          ai_citations_total: 0,
+                          classic_ranking_url: matchingQueryPage.page || matchingQueryPage.url || taskUrl,
+                          page_type: null,
+                          segment: null,
+                          captured_at: new Date().toISOString()
+                        };
+                        console.log('[Optimisation] Built currentMetrics from query_pages:', currentMetrics);
+                      }
                     }
                   }
                 }
@@ -14065,31 +14095,61 @@
                     }
                     
                     // Check query_pages from Supabase (query+page level data)
-                    if (!currentMetrics && supabaseData.scores && supabaseData.scores.query_pages) {
-                      const queryPages = Array.isArray(supabaseData.scores.query_pages) ? supabaseData.scores.query_pages : [];
-                      const matchingQueryPage = queryPages.find(qp => {
-                        const qpUrl = (qp.page || qp.url || '').toLowerCase();
-                        const normalizedQpUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(qpUrl) : qpUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
-                        return normalizedQpUrl === normalizedTaskUrl;
-                      });
+                    // First try scores.query_pages, then searchData.queryPages (where fresh audit data stores it)
+                    if (!currentMetrics) {
+                      let queryPages = [];
+                      if (supabaseData.scores && supabaseData.scores.query_pages && Array.isArray(supabaseData.scores.query_pages)) {
+                        queryPages = supabaseData.scores.query_pages;
+                      } else if (supabaseData.searchData && supabaseData.searchData.queryPages && Array.isArray(supabaseData.searchData.queryPages)) {
+                        queryPages = supabaseData.searchData.queryPages;
+                      }
                       
-                      if (matchingQueryPage) {
-                        console.log('[Optimisation] Found matching query_pages in Supabase:', matchingQueryPage);
-                        currentMetrics = {
-                          gsc_clicks_28d: matchingQueryPage.clicks || null,
-                          gsc_impressions_28d: matchingQueryPage.impressions || null,
-                          gsc_ctr_28d: matchingQueryPage.ctr != null ? (matchingQueryPage.ctr / 100) : null,
-                          current_rank: matchingQueryPage.position || matchingQueryPage.avg_position || null,
-                          opportunity_score: null,
-                          ai_overview: false,
-                          ai_citations: 0,
-                          ai_citations_total: 0,
-                          classic_ranking_url: matchingQueryPage.page || matchingQueryPage.url || taskUrl,
-                          page_type: null,
-                          segment: null,
-                          captured_at: new Date().toISOString()
-                        };
-                        console.log('[Optimisation] Built currentMetrics from Supabase query_pages:', currentMetrics);
+                      if (queryPages.length > 0) {
+                        // For keyword-based tasks, match by keyword first, then URL
+                        // For URL-based tasks, match by URL
+                        let matchingQueryPage = null;
+                        if (taskKeyword && taskKeyword.length > 0) {
+                          // Keyword-based: find by keyword, then match URL if provided
+                          matchingQueryPage = queryPages.find(qp => {
+                            const qpKeyword = (qp.query || qp.keyword || '').toLowerCase();
+                            if (qpKeyword !== taskKeyword.toLowerCase()) return false;
+                            // If URL is provided, also match URL
+                            if (normalizedTaskUrl && normalizedTaskUrl.length > 0) {
+                              const qpUrl = (qp.page || qp.url || '').toLowerCase();
+                              const normalizedQpUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(qpUrl) : qpUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+                              return normalizedQpUrl === normalizedTaskUrl;
+                            }
+                            return true; // Keyword match is enough if no URL
+                          });
+                        }
+                        
+                        // If no keyword match or URL-based task, try URL matching
+                        if (!matchingQueryPage && normalizedTaskUrl && normalizedTaskUrl.length > 0) {
+                          matchingQueryPage = queryPages.find(qp => {
+                            const qpUrl = (qp.page || qp.url || '').toLowerCase();
+                            const normalizedQpUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(qpUrl) : qpUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+                            return normalizedQpUrl === normalizedTaskUrl;
+                          });
+                        }
+                        
+                        if (matchingQueryPage) {
+                          console.log('[Optimisation] Found matching query_pages in Supabase:', matchingQueryPage);
+                          currentMetrics = {
+                            gsc_clicks_28d: matchingQueryPage.clicks || null,
+                            gsc_impressions_28d: matchingQueryPage.impressions || null,
+                            gsc_ctr_28d: matchingQueryPage.ctr != null ? (matchingQueryPage.ctr / 100) : null,
+                            current_rank: matchingQueryPage.position || matchingQueryPage.avg_position || null,
+                            opportunity_score: null,
+                            ai_overview: false,
+                            ai_citations: 0,
+                            ai_citations_total: 0,
+                            classic_ranking_url: matchingQueryPage.page || matchingQueryPage.url || taskUrl,
+                            page_type: null,
+                            segment: null,
+                            captured_at: new Date().toISOString()
+                          };
+                          console.log('[Optimisation] Built currentMetrics from Supabase query_pages:', currentMetrics);
+                        }
                       }
                     }
                   }
