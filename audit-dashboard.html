@@ -14473,6 +14473,23 @@
 
     // Bulk update all tasks with latest data
     window.bulkUpdateAllTasks = async function bulkUpdateAllTasks() {
+      debugLog('[Optimisation] ===== bulkUpdateAllTasks START =====', 'info');
+      
+      // Check available data sources
+      const hasLastAuditResults = !!localStorage.getItem('last_audit_results');
+      const hasAigeoAuditData = !!localStorage.getItem('aigeo_audit_data');
+      const hasWindowMoneyPages = !!(window.moneyPagesMetrics && window.moneyPagesMetrics.rows);
+      debugLog(`[Optimisation] Data sources available: last_audit_results=${hasLastAuditResults}, aigeo_audit_data=${hasAigeoAuditData}, window.moneyPagesMetrics=${hasWindowMoneyPages}`, 'info');
+      
+      if (hasLastAuditResults) {
+        try {
+          const auditData = JSON.parse(localStorage.getItem('last_audit_results'));
+          debugLog(`[Optimisation] last_audit_results structure: hasScores=${!!auditData.scores}, hasMoneyPagesMetrics=${!!(auditData.scores?.moneyPagesMetrics)}, hasSearchData=${!!auditData.searchData}, queryTotalsCount=${auditData.searchData?.queryTotals?.length || 0}`, 'info');
+        } catch (e) {
+          debugLog(`[Optimisation] Error parsing last_audit_results: ${e.message || e}`, 'warn');
+        }
+      }
+      
       if (!window.optimisationModuleState || !window.optimisationModuleState.allTasks) {
         alert('No tasks loaded. Please wait for tasks to load first.');
         return;
@@ -14672,17 +14689,21 @@
               }
             }
             
-            // If still no data, check localStorage/Supabase audit results
-            if (!currentMetrics) {
-              try {
-                // Check both keys: last_audit_results (current) and aigeo_audit_data (legacy)
-                let savedAudit = localStorage.getItem('last_audit_results');
-                if (!savedAudit) {
-                  savedAudit = localStorage.getItem('aigeo_audit_data');
-                }
-                if (savedAudit) {
-                  const parsed = JSON.parse(savedAudit);
-                  const moneyPagesData = parsed.scores?.moneyPagesMetrics || parsed.moneyPagesMetrics;
+          // If still no data, check localStorage/Supabase audit results
+          if (!currentMetrics) {
+            try {
+              // Check both keys: last_audit_results (current) and aigeo_audit_data (legacy)
+              let savedAudit = localStorage.getItem('last_audit_results');
+              let dataSource = 'last_audit_results';
+              if (!savedAudit) {
+                savedAudit = localStorage.getItem('aigeo_audit_data');
+                dataSource = 'aigeo_audit_data';
+              }
+              if (savedAudit) {
+                debugLog(`[Optimisation] Reading audit data from ${dataSource} for task ${task.id} (${task.keyword_text || taskUrl})`, 'info');
+                const parsed = JSON.parse(savedAudit);
+                const moneyPagesData = parsed.scores?.moneyPagesMetrics || parsed.moneyPagesMetrics;
+                debugLog(`[Optimisation] Parsed audit data: hasMoneyPagesData=${!!moneyPagesData}, moneyPagesRows=${moneyPagesData?.rows?.length || 0}, hasSearchData=${!!parsed.searchData}, queryTotalsCount=${parsed.searchData?.queryTotals?.length || 0}`, 'info');
                   
                   if (moneyPagesData && moneyPagesData.rows) {
                     const moneyPageRow = moneyPagesData.rows.find(row => {
@@ -51005,7 +51026,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             // Verify audit data is available (needed for URL-based tasks)
             const auditData = dashboardSafeJsonParse(localStorage.getItem('last_audit_results'), null);
             if (!auditData || !auditData.searchData) {
-              console.warn('[Global Run] Audit data not yet available, but continuing with task update...');
+              debugLog('[Global Run] Audit data not yet available, but continuing with task update...', 'warn');
+            } else {
+              debugLog(`[Global Run] Audit data found: hasSearchData=${!!auditData.searchData}, hasMoneyPagesMetrics=${!!(auditData.scores?.moneyPagesMetrics)}, queryTotalsCount=${auditData.searchData?.queryTotals?.length || 0}`, 'info');
             }
             
             // Ensure tasks are actually loaded before/after bulk update so the dashboard reflects real outcomes.
@@ -51020,7 +51043,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
                   throw new Error('Tasks failed to load - optimisationModuleState.allTasks is empty');
                 }
               } catch (err) {
-                console.error('[Global Run] Failed to load tasks:', err);
+                debugLog(`[Global Run] Failed to load tasks: ${err?.message || err}`, 'error');
                 throw new Error(`Failed to load optimisation tasks: ${err?.message || err}`);
               }
             } else {
@@ -51031,7 +51054,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
               try {
                 await window.bulkUpdateAllTasks();
               } catch (err) {
-                console.error('[Global Run] Bulk update failed:', err);
+                debugLog(`[Global Run] Bulk update failed: ${err?.message || err}`, 'error');
                 throw new Error(`Bulk update failed: ${err?.message || err}`);
               }
             } else {
@@ -51043,7 +51066,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
               try { 
                 await window.loadAllOptimisationTasks();
               } catch (err) {
-                console.warn('[Global Run] Failed to reload tasks after update:', err);
+                debugLog(`[Global Run] Failed to reload tasks after update: ${err?.message || err}`, 'warn');
               }
             }
           } }
