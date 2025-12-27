@@ -8536,8 +8536,21 @@
         window.optimisationModuleState.authError = null;
 
         const data = await response.json();
+        console.log('[Optimisation] API returned tasks:', {
+          count: data.tasks?.length || 0,
+          sampleTask: data.tasks?.[0] ? {
+            id: data.tasks[0].id,
+            title: data.tasks[0].title,
+            latest_metrics: data.tasks[0].latest_metrics ? {
+              clicks_28d: data.tasks[0].latest_metrics.clicks_28d,
+              impressions_28d: data.tasks[0].latest_metrics.impressions_28d,
+              captured_at: data.tasks[0].latest_metrics.captured_at
+            } : null
+          } : null
+        });
         window.optimisationModuleState.allTasks = data.tasks || [];
         window.optimisationModuleState.filteredTasks = [...window.optimisationModuleState.allTasks];
+        console.log('[Optimisation] State updated - allTasks count:', window.optimisationModuleState.allTasks.length);
         window.optimisationModuleState.dashboardTiles = data.tiles || null;
         window.optimisationModuleState.dashboardImpact = data.impact || null;
         window.optimisationModuleState.dashboardTimeseries = data.timeseries || null;
@@ -14728,26 +14741,62 @@
         // Show results in modal first (so user sees progress)
         showBulkUpdateResultsModal(successCount, skippedCount, failCount, errors, activeTasks.length);
         
+        // CRITICAL: Wait longer for backend to fully process and persist all updates
+        // Even if tasks were skipped, we need fresh data from the backend
+        console.log('[Optimisation] Waiting for backend to process updates...');
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
         // Reload tasks to show updated data (even if all were skipped, refresh to show current state)
         // This ensures the UI reflects the latest data from the backend
         console.log('[Optimisation] Reloading tasks after bulk update (even if skipped)...');
+        
+        // Force clear any cached state before reloading
+        if (window.optimisationModuleState) {
+          // Clear tasks to force fresh fetch
+          window.optimisationModuleState.allTasks = [];
+          window.optimisationModuleState.filteredTasks = [];
+        }
+        
+        // Reload with aggressive cache-busting
         await window.loadAllOptimisationTasks();
 
-        // Force refresh of optimization tab UI components
+        // Force refresh of optimization tab UI components - call multiple times to ensure update
+        console.log('[Optimisation] Force refreshing all UI components...');
         if (typeof window.renderOptimisationTasksTable === 'function') {
           window.renderOptimisationTasksTable();
+          // Call again after a brief delay to ensure it takes
+          setTimeout(() => window.renderOptimisationTasksTable(), 100);
         }
         if (typeof window.updateOptimisationSummaryCards === 'function') {
           window.updateOptimisationSummaryCards();
+          setTimeout(() => window.updateOptimisationSummaryCards(), 100);
         }
         if (typeof window.updateTrafficLights === 'function') {
           window.updateTrafficLights();
+          setTimeout(() => window.updateTrafficLights(), 100);
+        }
+        if (typeof window.updateKPITiles === 'function') {
+          window.updateKPITiles();
+        }
+        if (typeof window.updateImpactTiles === 'function') {
+          window.updateImpactTiles();
+        }
+        if (typeof window.updateTimeseriesCharts === 'function') {
+          window.updateTimeseriesCharts();
         }
 
         // Dashboard: refresh live dials/cards after bulk update completes
         if (typeof window.renderDashboardTab === 'function') {
-          try { window.renderDashboardTab(); } catch {}
+          try { 
+            window.renderDashboardTab();
+            // Call again after delay
+            setTimeout(() => {
+              try { window.renderDashboardTab(); } catch {}
+            }, 200);
+          } catch {}
         }
+        
+        console.log('[Optimisation] UI refresh complete - check if data updated');
 
       } catch (error) {
         console.error('[Optimisation] Bulk update error:', error);
