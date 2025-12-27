@@ -8399,10 +8399,15 @@
         const measurements = task.measurements || [];
         let baselineLatest = getBaselineLatest(measurements, scope, activeCycle);
         
-        // FALLBACK: If no measurements array or getBaselineLatest returned null, try using baseline_metrics/latest_metrics
+        // FALLBACK: If getBaselineLatest returned null (no measurements or only 1), try using baseline_metrics/latest_metrics
         // ALSO: If baseline === latest (same object, meaning only 1 measurement), use baseline_metrics/latest_metrics
+        // BUT: Only use fallback if baseline_metrics and latest_metrics actually have different captured_at dates
         if (!baselineLatest && task.baseline_metrics && task.latest_metrics) {
-          debugLog(`[Traffic Lights] Task "${task.title || task.id}": No measurements array, using baseline_metrics/latest_metrics fallback`, 'info');
+          const baselineDate = task.baseline_metrics.captured_at || task.baseline_metrics.created_at || null;
+          const latestDate = task.latest_metrics.captured_at || task.latest_metrics.created_at || null;
+          // Only use fallback if dates are actually different (indicating different snapshots)
+          if (baselineDate && latestDate && baselineDate !== latestDate) {
+            debugLog(`[Traffic Lights] Task "${task.title || task.id}": No measurements array, using baseline_metrics/latest_metrics fallback (dates differ: ${baselineDate} vs ${latestDate})`, 'info');
           
           // DEBUG: Log raw values from baseline_metrics and latest_metrics for each metric
           const metricKeysForDebug = ['ctr_28d', 'impressions_28d', 'clicks_28d', 'current_rank', 'ai_citations', 'ai_overview'];
@@ -8430,7 +8435,9 @@
             const baselineDate = task.baseline_metrics.captured_at || task.baseline_metrics.created_at || null;
             const latestDate = task.latest_metrics.captured_at || task.latest_metrics.created_at || null;
             const datesAreDifferent = baselineDate !== latestDate;
-            debugLog(`[Traffic Lights] Task "${task.title || task.id}": Only 1 measurement (baseline === latest), using baseline_metrics/latest_metrics fallback. baselineDate=${baselineDate}, latestDate=${latestDate}, datesAreDifferent=${datesAreDifferent}`, 'info');
+            // Only use fallback if dates are actually different (indicating different snapshots)
+            if (baselineDate && latestDate && datesAreDifferent) {
+              debugLog(`[Traffic Lights] Task "${task.title || task.id}": Only 1 measurement (baseline === latest), using baseline_metrics/latest_metrics fallback. baselineDate=${baselineDate}, latestDate=${latestDate}`, 'info');
             
             // DEBUG: Log raw values from baseline_metrics and latest_metrics for each metric
             const metricKeysForDebug = ['ctr_28d', 'impressions_28d', 'clicks_28d', 'current_rank', 'ai_citations', 'ai_overview'];
@@ -8451,9 +8458,15 @@
               const latestExtracted = getMetricValue(baselineLatest.latest, mk);
               debugLog(`[Traffic Lights] Task "${task.title || task.id}" EXTRACTED ${mk}: baselineValue=${baselineExtracted}, latestValue=${latestExtracted}`, baselineExtracted === latestExtracted ? 'warn' : 'info');
             }
+            } else {
+              debugLog(`[Traffic Lights] Task "${task.title || task.id}": Only 1 measurement but baseline_metrics/latest_metrics have same date (${baselineDate}) - cannot compute delta`, 'warn');
+            }
           } else {
             debugLog(`[Traffic Lights] Task "${task.title || task.id}": Only 1 measurement and no baseline_metrics/latest_metrics available - metrics will show as 'same'`, 'warn');
           }
+        } else if (!baselineLatest) {
+          // No baselineLatest could be computed - log why
+          debugLog(`[Traffic Lights] Task "${task.title || task.id}": Cannot compute baselineLatest - measurements.length=${measurements.length}, hasBaselineMetrics=${!!task.baseline_metrics}, hasLatestMetrics=${!!task.latest_metrics}`, 'warn');
         }
 
         // DEBUG: Log task details for troubleshooting
