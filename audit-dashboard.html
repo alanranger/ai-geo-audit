@@ -14769,32 +14769,44 @@
             if (currentTaskId && isDrawerOpen) {
               console.log(`[Optimisation] Force refreshing task details drawer for task ${currentTaskId}...`);
               
-              // Close the drawer first to clear any cached state
-              if (drawer) {
-                drawer.style.display = 'none';
+              // Find the task in the reloaded data first to verify it exists
+              const reloadedTask = window.optimisationModuleState.allTasks.find(t => t.id === currentTaskId);
+              if (!reloadedTask) {
+                console.warn(`[Optimisation] Task ${currentTaskId} not found in reloaded data - closing drawer`);
+                if (drawer) {
+                  drawer.style.display = 'none';
+                }
                 if (window.optimisationModuleState) {
                   window.optimisationModuleState.currentTaskId = null;
                 }
-              }
-              
-              // Wait a moment for state to clear
-              await new Promise(resolve => setTimeout(resolve, 100));
-              
-              // Find the task in the reloaded data
-              const reloadedTask = window.optimisationModuleState.allTasks.find(t => t.id === currentTaskId);
-              if (reloadedTask) {
-                // Re-open the drawer with the same task - this should use fresh data
+              } else {
+                // Clear the drawer content to force a complete re-render
+                const drawerContent = document.getElementById('optimisation-drawer-content');
+                if (drawerContent) {
+                  drawerContent.innerHTML = '<div style="padding: 2rem; text-align: center; color: var(--dark-text-muted);">Refreshing task details...</div>';
+                }
+                
+                // Clear currentTaskId to force openOptimisationTaskDrawer to re-render
+                if (window.optimisationModuleState) {
+                  window.optimisationModuleState.currentTaskId = null;
+                }
+                
+                // Wait a moment for state to clear
+                await new Promise(resolve => setTimeout(resolve, 150));
+                
+                // Re-open the drawer with the same task - this will fetch fresh data from allTasks
                 if (typeof window.openOptimisationTaskDrawer === 'function') {
+                  console.log(`[Optimisation] Re-opening drawer for task ${currentTaskId} with fresh data`);
                   await window.openOptimisationTaskDrawer(currentTaskId);
                 } else {
                   // Fallback: trigger a click on the task row to refresh
                   const taskRow = document.querySelector(`[data-task-id="${currentTaskId}"]`);
                   if (taskRow) {
                     taskRow.click();
+                  } else {
+                    console.warn(`[Optimisation] Could not find task row for ${currentTaskId}`);
                   }
                 }
-              } else {
-                console.warn(`[Optimisation] Task ${currentTaskId} not found in reloaded data`);
               }
             }
             
