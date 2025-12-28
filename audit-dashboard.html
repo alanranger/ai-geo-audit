@@ -51020,6 +51020,43 @@ Final Score: ${score}/100`;
       }
 
       window.renderDashboardTab = async function renderDashboardTab() {
+        // CRITICAL: Fetch latest audit from Supabase to ensure we have fresh data
+        // This ensures Audit Scan and Money Pages tiles show the latest data after global audit
+        try {
+          const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+          if (propertyUrl) {
+            let latestAuditFromSupabase = null;
+            if (typeof window.fetchLatestAuditFromSupabase === 'function') {
+              latestAuditFromSupabase = await window.fetchLatestAuditFromSupabase(propertyUrl, false);
+            } else {
+              // Fallback: fetch directly from API
+              try {
+                const apiBase = window.apiUrl ? window.apiUrl('') : (window.location.origin.includes('localhost') ? 'http://localhost:3000' : 'https://ai-geo-audit.vercel.app');
+                const response = await fetch(`${apiBase}/api/supabase/get-latest-audit?property_url=${encodeURIComponent(propertyUrl)}`);
+                if (response.ok) {
+                  latestAuditFromSupabase = await response.json();
+                }
+              } catch (apiErr) {
+                debugLog(`[Dashboard] Error fetching latest audit from API: ${apiErr.message || apiErr}`, 'warn');
+              }
+            }
+            
+            if (latestAuditFromSupabase) {
+              // Update localStorage with latest audit data to ensure snapshot uses fresh data
+              localStorage.setItem('last_audit_results', JSON.stringify(latestAuditFromSupabase));
+              debugLog(`[Dashboard] Updated localStorage with latest audit from Supabase (audit_date: ${latestAuditFromSupabase.auditDate || latestAuditFromSupabase.audit_date || 'unknown'})`, 'info');
+              // Also update window.moneyPagesMetrics if available
+              if (latestAuditFromSupabase.scores?.moneyPagesMetrics || latestAuditFromSupabase.moneyPagesMetrics) {
+                window.moneyPagesMetrics = latestAuditFromSupabase.scores?.moneyPagesMetrics || latestAuditFromSupabase.moneyPagesMetrics;
+                window.currentMoneyPagesMetrics = window.moneyPagesMetrics;
+              }
+            }
+          }
+        } catch (fetchErr) {
+          debugLog(`[Dashboard] Error fetching latest audit for dashboard refresh: ${fetchErr.message || fetchErr}`, 'warn');
+          // Continue with localStorage data as fallback
+        }
+        
         // Always show LIVE latest-available metrics (from the latest independent audits).
         // Deltas are computed against the previous audit_date (not global run snapshots).
         const liveSnapshot = computeDashboardSnapshot();
