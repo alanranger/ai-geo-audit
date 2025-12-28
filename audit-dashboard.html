@@ -14623,11 +14623,22 @@
         return;
       }
 
-      // Ensure Ranking & AI data is loaded (ONLY needed for keyword-based tasks)
-      if (hasKeywordTasks && typeof window.renderRankingAiTab === 'function') {
+      // CRITICAL: Load Ranking & AI data for ALL tasks (needed for AI Overview and AI Citations)
+      // Even URL-based tasks need Ranking & AI data to populate AI metrics
+      if (typeof window.renderRankingAiTab === 'function') {
         try {
+          debugLog(`[Optimisation] Loading Ranking & AI data for AI metrics (Overview and Citations)...`, 'info');
           await window.renderRankingAiTab();
-          await new Promise(resolve => setTimeout(resolve, 1000)); // Give time for data to load
+          await new Promise(resolve => setTimeout(resolve, 2000)); // Give more time for data to load
+          // Verify data is loaded
+          const rankingDataLoaded = (typeof RankingAiModule !== 'undefined' && RankingAiModule.state) 
+            ? (RankingAiModule.state().combinedRows || []).length > 0
+            : false;
+          if (rankingDataLoaded) {
+            debugLog(`[Optimisation] Ranking & AI data loaded successfully`, 'success');
+          } else {
+            debugLog(`[Optimisation] WARNING: Ranking & AI data not loaded - AI Overview and Citations may be missing`, 'warn');
+          }
         } catch (e) {
           debugLog(`[Optimisation] Could not refresh Ranking & AI data: ${e.message || e}`, 'warn');
         }
@@ -14768,14 +14779,37 @@
                   }
                   // If CTR is <= 1, assume it's already a ratio (0-1)
                 }
-                const aiForUrl = (typeof window.computeAiMetricsForPageUrl === 'function')
-                  ? window.computeAiMetricsForPageUrl(moneyPageRow.url || moneyPageRow.page_url || taskUrl, combinedRows)
-                  : { ai_overview: false, ai_citations: null };
+                // Get AI metrics - try multiple data sources
+                let aiForUrl = { ai_overview: false, ai_citations: null };
+                if (typeof window.computeAiMetricsForPageUrl === 'function') {
+                  // Try with combinedRows first
+                  aiForUrl = window.computeAiMetricsForPageUrl(moneyPageRow.url || moneyPageRow.page_url || taskUrl, combinedRows);
+                  // If no data found, try with RankingAiModule state
+                  if ((aiForUrl.ai_overview === false || aiForUrl.ai_overview === null) && aiForUrl.ai_citations === null) {
+                    if (typeof RankingAiModule !== 'undefined' && RankingAiModule.state) {
+                      const state = RankingAiModule.state();
+                      const stateRows = state.combinedRows || [];
+                      if (stateRows.length > 0) {
+                        debugLog(`[Optimisation] Task ${task.id}: Retrying AI metrics with RankingAiModule state (${stateRows.length} rows)`, 'info');
+                        aiForUrl = window.computeAiMetricsForPageUrl(moneyPageRow.url || moneyPageRow.page_url || taskUrl, stateRows);
+                      }
+                    }
+                  }
+                  debugLog(`[Optimisation] Task ${task.id}: AI metrics result: overview=${aiForUrl.ai_overview}, citations=${aiForUrl.ai_citations}`, 'info');
+                } else {
+                  debugLog(`[Optimisation] Task ${task.id}: computeAiMetricsForPageUrl function not available`, 'warn');
+                }
+                
+                // Get current rank - ensure we use the correct field name
+                const currentRank = moneyPageRow.avg_position != null ? moneyPageRow.avg_position : 
+                                   (moneyPageRow.position != null ? moneyPageRow.position : null);
+                debugLog(`[Optimisation] Task ${task.id}: Current rank from Money Pages: avg_position=${moneyPageRow.avg_position}, position=${moneyPageRow.position}, final=${currentRank}`, 'info');
+                
                 currentMetrics = {
                   gsc_clicks_28d: moneyPageRow.clicks || moneyPageRow.clicks_28d || null,
                   gsc_impressions_28d: moneyPageRow.impressions || moneyPageRow.impressions_28d || null,
                   gsc_ctr_28d: ctrValue, // Normalized to ratio (0-1)
-                  current_rank: moneyPageRow.avg_position || moneyPageRow.position || null,
+                  current_rank: currentRank,
                   opportunity_score: null,
                   ai_overview: aiForUrl.ai_overview === true ? true : (aiForUrl.ai_overview === false ? false : null),
                   ai_citations: aiForUrl.ai_citations != null ? Number(aiForUrl.ai_citations) : null,
@@ -14785,6 +14819,7 @@
                   segment: 'money_pages',
                   captured_at: new Date().toISOString()
                 };
+                debugLog(`[Optimisation] Task ${task.id}: Final metrics being saved: rank=${currentMetrics.current_rank}, ai_overview=${currentMetrics.ai_overview}, ai_citations=${currentMetrics.ai_citations}`, 'info');
               }
             }
             
@@ -14836,14 +14871,38 @@
                         }
                         // If CTR is <= 1, assume it's already a ratio (0-1)
                       }
-                      const aiForUrl = (typeof window.computeAiMetricsForPageUrl === 'function')
-                        ? window.computeAiMetricsForPageUrl(moneyPageRow.url || moneyPageRow.page_url || taskUrl, combinedRows)
-                        : { ai_overview: false, ai_citations: null };
+                      
+                      // Get AI metrics - try multiple data sources
+                      let aiForUrl = { ai_overview: false, ai_citations: null };
+                      if (typeof window.computeAiMetricsForPageUrl === 'function') {
+                        // Try with combinedRows first
+                        aiForUrl = window.computeAiMetricsForPageUrl(moneyPageRow.url || moneyPageRow.page_url || taskUrl, combinedRows);
+                        // If no data found, try with RankingAiModule state
+                        if ((aiForUrl.ai_overview === false || aiForUrl.ai_overview === null) && aiForUrl.ai_citations === null) {
+                          if (typeof RankingAiModule !== 'undefined' && RankingAiModule.state) {
+                            const state = RankingAiModule.state();
+                            const stateRows = state.combinedRows || [];
+                            if (stateRows.length > 0) {
+                              debugLog(`[Optimisation] Task ${task.id}: Retrying AI metrics with RankingAiModule state (${stateRows.length} rows)`, 'info');
+                              aiForUrl = window.computeAiMetricsForPageUrl(moneyPageRow.url || moneyPageRow.page_url || taskUrl, stateRows);
+                            }
+                          }
+                        }
+                        debugLog(`[Optimisation] Task ${task.id}: AI metrics result from ${dataSource}: overview=${aiForUrl.ai_overview}, citations=${aiForUrl.ai_citations}`, 'info');
+                      } else {
+                        debugLog(`[Optimisation] Task ${task.id}: computeAiMetricsForPageUrl function not available`, 'warn');
+                      }
+                      
+                      // Get current rank - ensure we use the correct field name
+                      const currentRank = moneyPageRow.avg_position != null ? moneyPageRow.avg_position : 
+                                         (moneyPageRow.position != null ? moneyPageRow.position : null);
+                      debugLog(`[Optimisation] Task ${task.id}: Current rank from ${dataSource}: avg_position=${moneyPageRow.avg_position}, position=${moneyPageRow.position}, final=${currentRank}`, 'info');
+                      
                       currentMetrics = {
                         gsc_clicks_28d: moneyPageRow.clicks || moneyPageRow.clicks_28d || null,
                         gsc_impressions_28d: moneyPageRow.impressions || moneyPageRow.impressions_28d || null,
                         gsc_ctr_28d: ctrValue, // Normalized to ratio (0-1)
-                        current_rank: moneyPageRow.avg_position || moneyPageRow.position || null,
+                        current_rank: currentRank,
                         opportunity_score: null,
                         ai_overview: aiForUrl.ai_overview === true ? true : (aiForUrl.ai_overview === false ? false : null),
                         ai_citations: aiForUrl.ai_citations != null ? Number(aiForUrl.ai_citations) : null,
@@ -14853,6 +14912,7 @@
                         segment: 'money_pages',
                         captured_at: new Date().toISOString()
                       };
+                      debugLog(`[Optimisation] Task ${task.id}: Final metrics from ${dataSource}: rank=${currentMetrics.current_rank}, ai_overview=${currentMetrics.ai_overview}, ai_citations=${currentMetrics.ai_citations}`, 'info');
                     }
                   }
                   
@@ -14860,7 +14920,11 @@
                   if (!currentMetrics && parsed.searchData && parsed.searchData.queryTotals) {
                     const matchingQueries = parsed.searchData.queryTotals.filter(qt => {
                       const qtUrl = (qt.best_url || qt.targetUrl || '').toLowerCase();
-                      const normalizedQtUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(qtUrl) : qtUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+                      // Normalize queryTotals URL the same way as task URL (simple normalization, no normalizeUrlForDedupe)
+                      let normalizedQtUrl = qtUrl
+                        .replace(/^https?:\/\//, '')
+                        .replace(/^www\./, '')
+                        .replace(/\/$/, '');
                       return normalizedQtUrl === normalizedTaskUrl;
                     });
                     
