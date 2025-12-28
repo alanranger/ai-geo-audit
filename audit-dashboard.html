@@ -51706,8 +51706,18 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         };
         saveDashboardRun(runRecord);
 
+        // Wait a moment to ensure audit data is fully saved to Supabase before refreshing dashboard
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
         // Refresh all tabs to ensure they show fresh data
-        window.renderDashboardTab();
+        // CRITICAL: Await renderDashboardTab to ensure it fetches latest audit from Supabase
+        if (typeof window.renderDashboardTab === 'function') {
+          try {
+            await window.renderDashboardTab();
+          } catch (e) {
+            debugLog(`[Global Run] Failed to refresh Dashboard tab: ${e?.message || e}`, 'warn');
+          }
+        }
         
         // Explicitly refresh other module tabs to ensure they're updated
         if (typeof window.renderRankingAiTab === 'function') {
