@@ -14690,7 +14690,21 @@
           // Find matching row - search by both keyword AND URL
           const taskUrl = task.target_url_clean || task.target_url || '';
           const taskKeyword = task.keyword_text || '';
-          const normalizedTaskUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(taskUrl) : taskUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+          // Normalize URL: remove protocol, www, trailing slash, and convert to lowercase
+          // Handle both formats: "www.alanranger.com/path" and "https://www.alanranger.com/path"
+          let normalizedTaskUrl = taskUrl.toLowerCase()
+            .replace(/^https?:\/\//, '')  // Remove http:// or https://
+            .replace(/^www\./, '')        // Remove www.
+            .replace(/\/$/, '');          // Remove trailing slash
+          // If normalizeUrlForDedupe exists, use it (but ensure it doesn't add protocol back)
+          if (normalizeUrlForDedupe && typeof normalizeUrlForDedupe === 'function') {
+            const deduped = normalizeUrlForDedupe(taskUrl);
+            // Ensure deduped result doesn't have protocol or www
+            normalizedTaskUrl = deduped.toLowerCase()
+              .replace(/^https?:\/\//, '')
+              .replace(/^www\./, '')
+              .replace(/\/$/, '');
+          }
           
           let matchingRow = null;
           let currentMetrics = null;
@@ -14717,12 +14731,23 @@
             
             // Check window.moneyPagesMetrics first
             if (window.moneyPagesMetrics && window.moneyPagesMetrics.rows) {
-              debugLog(`[Optimisation] Task ${task.id}: Checking window.moneyPagesMetrics (${window.moneyPagesMetrics.rows.length} rows)`, 'info');
+              debugLog(`[Optimisation] Task ${task.id}: Checking window.moneyPagesMetrics (${window.moneyPagesMetrics.rows.length} rows) for normalized URL: "${normalizedTaskUrl}"`, 'info');
               const moneyPageRow = window.moneyPagesMetrics.rows.find(row => {
                 const rowUrl = row.url || row.page_url || '';
-                const normalizedRowUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(rowUrl) : rowUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+                // Normalize row URL the same way as task URL
+                let normalizedRowUrl = rowUrl.toLowerCase()
+                  .replace(/^https?:\/\//, '')
+                  .replace(/^www\./, '')
+                  .replace(/\/$/, '');
+                if (normalizeUrlForDedupe && typeof normalizeUrlForDedupe === 'function') {
+                  const deduped = normalizeUrlForDedupe(rowUrl);
+                  normalizedRowUrl = deduped.toLowerCase()
+                    .replace(/^https?:\/\//, '')
+                    .replace(/^www\./, '')
+                    .replace(/\/$/, '');
+                }
                 if (normalizedRowUrl === normalizedTaskUrl) {
-                  debugLog(`[Optimisation] Task ${task.id}: Found match in window.moneyPagesMetrics: ${rowUrl} -> ${normalizedRowUrl}`, 'success');
+                  debugLog(`[Optimisation] Task ${task.id}: Found match in window.moneyPagesMetrics: ${rowUrl} -> ${normalizedRowUrl} (task: ${normalizedTaskUrl})`, 'success');
                   return true;
                 }
                 return false;
@@ -14780,12 +14805,23 @@
                 debugLog(`[Optimisation] Parsed audit data: hasMoneyPagesData=${!!moneyPagesData}, moneyPagesRows=${moneyPagesData?.rows?.length || 0}, hasSearchData=${!!parsed.searchData}, queryTotalsCount=${parsed.searchData?.queryTotals?.length || 0}`, 'info');
                   
                   if (moneyPagesData && moneyPagesData.rows) {
-                    debugLog(`[Optimisation] Task ${task.id}: Searching ${moneyPagesData.rows.length} rows in ${dataSource} for URL "${normalizedTaskUrl}"`, 'info');
+                    debugLog(`[Optimisation] Task ${task.id}: Searching ${moneyPagesData.rows.length} rows in ${dataSource} for normalized URL: "${normalizedTaskUrl}" (original: "${taskUrl}")`, 'info');
                     const moneyPageRow = moneyPagesData.rows.find(row => {
                       const rowUrl = row.url || row.page_url || '';
-                      const normalizedRowUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(rowUrl) : rowUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+                      // Normalize row URL the same way as task URL
+                      let normalizedRowUrl = rowUrl.toLowerCase()
+                        .replace(/^https?:\/\//, '')
+                        .replace(/^www\./, '')
+                        .replace(/\/$/, '');
+                      if (normalizeUrlForDedupe && typeof normalizeUrlForDedupe === 'function') {
+                        const deduped = normalizeUrlForDedupe(rowUrl);
+                        normalizedRowUrl = deduped.toLowerCase()
+                          .replace(/^https?:\/\//, '')
+                          .replace(/^www\./, '')
+                          .replace(/\/$/, '');
+                      }
                       if (normalizedRowUrl === normalizedTaskUrl) {
-                        debugLog(`[Optimisation] Task ${task.id}: Found match in ${dataSource}: ${rowUrl} -> ${normalizedRowUrl}`, 'success');
+                        debugLog(`[Optimisation] Task ${task.id}: Found match in ${dataSource}: ${rowUrl} -> ${normalizedRowUrl} (task: ${normalizedTaskUrl})`, 'success');
                         return true;
                       }
                       return false;
