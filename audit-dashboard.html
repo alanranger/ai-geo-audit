@@ -14625,9 +14625,32 @@
 
       // CRITICAL: Load Ranking & AI data for ALL tasks (needed for AI Overview and AI Citations)
       // Even URL-based tasks need Ranking & AI data to populate AI metrics
+      // First, try to load from latest audit's ranking_ai_data if available
+      if (latestAuditFromSupabase && latestAuditFromSupabase.ranking_ai_data) {
+        try {
+          debugLog(`[Optimisation] Loading Ranking & AI data from latest audit's ranking_ai_data...`, 'info');
+          const rankingAiData = latestAuditFromSupabase.ranking_ai_data;
+          if (rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
+            // Store in localStorage for RankingAiModule to use
+            localStorage.setItem('rankingAiData', JSON.stringify(rankingAiData));
+            debugLog(`[Optimisation] Loaded ${rankingAiData.combinedRows.length} keywords from latest audit's ranking_ai_data`, 'success');
+            // Also set window.combinedRows if RankingAiModule expects it
+            if (typeof RankingAiModule !== 'undefined' && RankingAiModule.state) {
+              // Trigger state update by calling renderRankingAiTab
+          await window.renderRankingAiTab();
+            }
+          } else {
+            debugLog(`[Optimisation] Latest audit ranking_ai_data does not contain combinedRows array`, 'warn');
+          }
+        } catch (rankingErr) {
+          debugLog(`[Optimisation] Error loading ranking_ai_data from latest audit: ${rankingErr.message || rankingErr}`, 'warn');
+        }
+      }
+      
+      // Also try to load via renderRankingAiTab (will use localStorage or fetch from API)
       if (typeof window.renderRankingAiTab === 'function') {
         try {
-          debugLog(`[Optimisation] Loading Ranking & AI data for AI metrics (Overview and Citations)...`, 'info');
+          debugLog(`[Optimisation] Loading Ranking & AI data via renderRankingAiTab...`, 'info');
           await window.renderRankingAiTab();
           await new Promise(resolve => setTimeout(resolve, 2000)); // Give more time for data to load
           // Verify data is loaded
@@ -14635,9 +14658,21 @@
             ? (RankingAiModule.state().combinedRows || []).length > 0
             : false;
           if (rankingDataLoaded) {
-            debugLog(`[Optimisation] Ranking & AI data loaded successfully`, 'success');
+            debugLog(`[Optimisation] Ranking & AI data loaded successfully via renderRankingAiTab`, 'success');
           } else {
             debugLog(`[Optimisation] WARNING: Ranking & AI data not loaded - AI Overview and Citations may be missing`, 'warn');
+            // Try to get from localStorage as fallback
+            const localRankingData = localStorage.getItem('rankingAiData');
+            if (localRankingData) {
+              try {
+                const parsed = JSON.parse(localRankingData);
+                if (parsed.combinedRows && parsed.combinedRows.length > 0) {
+                  debugLog(`[Optimisation] Found ${parsed.combinedRows.length} keywords in localStorage rankingAiData`, 'info');
+                }
+              } catch (e) {
+                debugLog(`[Optimisation] Error parsing localStorage rankingAiData: ${e.message}`, 'warn');
+              }
+            }
           }
         } catch (e) {
           debugLog(`[Optimisation] Could not refresh Ranking & AI data: ${e.message || e}`, 'warn');
@@ -14795,7 +14830,24 @@
                       }
                     }
                   }
-                  debugLog(`[Optimisation] Task ${task.id}: AI metrics result: overview=${aiForUrl.ai_overview}, citations=${aiForUrl.ai_citations}`, 'info');
+                  // If still no data, try latest audit's ranking_ai_data directly (keyword-based lookup)
+                  if ((aiForUrl.ai_overview === false || aiForUrl.ai_overview === null) && aiForUrl.ai_citations === null && taskKeyword) {
+                    if (latestAuditFromSupabase && latestAuditFromSupabase.ranking_ai_data && latestAuditFromSupabase.ranking_ai_data.combinedRows) {
+                      const auditRows = latestAuditFromSupabase.ranking_ai_data.combinedRows;
+                      const keywordMatch = auditRows.find(r => 
+                        (r.keyword || '').toLowerCase() === taskKeyword.toLowerCase()
+                      );
+                      if (keywordMatch) {
+                        debugLog(`[Optimisation] Task ${task.id}: Found keyword "${taskKeyword}" in latest audit's ranking_ai_data`, 'success');
+                        aiForUrl = {
+                          ai_overview: keywordMatch.has_ai_overview === true || keywordMatch.ai_overview_present_any === true,
+                          ai_citations: keywordMatch.ai_alan_citations_count != null ? keywordMatch.ai_alan_citations_count : (keywordMatch.ai_total_citations || 0)
+                        };
+                        debugLog(`[Optimisation] Task ${task.id}: AI metrics from latest audit: overview=${aiForUrl.ai_overview}, citations=${aiForUrl.ai_citations}`, 'info');
+                      }
+                    }
+                  }
+                  debugLog(`[Optimisation] Task ${task.id}: Final AI metrics result: overview=${aiForUrl.ai_overview}, citations=${aiForUrl.ai_citations}`, 'info');
                 } else {
                   debugLog(`[Optimisation] Task ${task.id}: computeAiMetricsForPageUrl function not available`, 'warn');
                 }
@@ -14888,7 +14940,24 @@
                             }
                           }
                         }
-                        debugLog(`[Optimisation] Task ${task.id}: AI metrics result from ${dataSource}: overview=${aiForUrl.ai_overview}, citations=${aiForUrl.ai_citations}`, 'info');
+                        // If still no data, try latest audit's ranking_ai_data directly (keyword-based lookup)
+                        if ((aiForUrl.ai_overview === false || aiForUrl.ai_overview === null) && aiForUrl.ai_citations === null && taskKeyword) {
+                          if (latestAuditFromSupabase && latestAuditFromSupabase.ranking_ai_data && latestAuditFromSupabase.ranking_ai_data.combinedRows) {
+                            const auditRows = latestAuditFromSupabase.ranking_ai_data.combinedRows;
+                            const keywordMatch = auditRows.find(r => 
+                              (r.keyword || '').toLowerCase() === taskKeyword.toLowerCase()
+                            );
+                            if (keywordMatch) {
+                              debugLog(`[Optimisation] Task ${task.id}: Found keyword "${taskKeyword}" in latest audit's ranking_ai_data`, 'success');
+                              aiForUrl = {
+                                ai_overview: keywordMatch.has_ai_overview === true || keywordMatch.ai_overview_present_any === true,
+                                ai_citations: keywordMatch.ai_alan_citations_count != null ? keywordMatch.ai_alan_citations_count : (keywordMatch.ai_total_citations || 0)
+                              };
+                              debugLog(`[Optimisation] Task ${task.id}: AI metrics from latest audit: overview=${aiForUrl.ai_overview}, citations=${aiForUrl.ai_citations}`, 'info');
+                            }
+                          }
+                        }
+                        debugLog(`[Optimisation] Task ${task.id}: Final AI metrics result from ${dataSource}: overview=${aiForUrl.ai_overview}, citations=${aiForUrl.ai_citations}`, 'info');
                       } else {
                         debugLog(`[Optimisation] Task ${task.id}: computeAiMetricsForPageUrl function not available`, 'warn');
                       }
