@@ -513,7 +513,7 @@ export default async function handler(req, res) {
       }
       console.log('[Supabase Save] ⚠ Partial update detected - only updating query_totals to prevent data loss');
     }
-
+    
     // SAFETY: Prevent partial audits from overwriting existing full audit data with nulls.
     // This can happen if you run an audit and it is missing heavy payload fields (schema_pages_detail, gsc_timeseries, query_pages),
     // which would otherwise PATCH those columns to null for the same (property_url, audit_date).

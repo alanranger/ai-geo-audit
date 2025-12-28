@@ -13837,7 +13837,7 @@
             let queryTotal = null;
             if (typeof getQueryTotalForKeyword === 'function') {
               queryTotal = getQueryTotalForKeyword(task.keyword_text);
-              console.log('[Optimisation] QueryTotal for keyword:', queryTotal);
+              debugLog(`[Optimisation] QueryTotal for keyword: ${JSON.stringify(queryTotal)}`, 'info');
             }
             
             currentMetrics = {
@@ -13856,39 +13856,39 @@
               captured_at: new Date().toISOString()
             };
             
-            console.log('[Optimisation] Built currentMetrics from matching row:', currentMetrics);
+            debugLog(`[Optimisation] Built currentMetrics from matching row: ${JSON.stringify(currentMetrics)}`, 'info');
           }
 
           // If no current data from Ranking & AI, try Money Pages data
           if (!currentMetrics) {
-            console.log('[Optimisation] No Ranking & AI data found, checking Money Pages data...');
+            debugLog('[Optimisation] No Ranking & AI data found, checking Money Pages data...', 'info');
             const taskUrl = task.target_url_clean || task.target_url || '';
             const taskKeyword = task.keyword_text || '';
             const normalizedTaskUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(taskUrl) : taskUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
             
-            // Check window.moneyPagesMetrics
-            if (window.moneyPagesMetrics && window.moneyPagesMetrics.rows) {
-              const moneyPageRow = window.moneyPagesMetrics.rows.find(row => {
-                const rowUrl = row.url || row.page_url || '';
-                const normalizedRowUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(rowUrl) : rowUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
-                return normalizedRowUrl === normalizedTaskUrl;
-              });
-              
-              if (moneyPageRow) {
-                debugLog(`[Optimisation] Found matching Money Page row: ${JSON.stringify({ url: moneyPageRow.url || moneyPageRow.page_url, clicks: moneyPageRow.clicks, impressions: moneyPageRow.impressions, ctr: moneyPageRow.ctr })}`, 'info');
-                // Normalize CTR: Money Pages stores CTR as ratio (0-1), but check if it's actually a percentage
-                let ctrValue = moneyPageRow.ctr || moneyPageRow.ctr_28d || null;
-                if (ctrValue != null) {
-                  // If CTR is > 1, assume it's a percentage and convert to ratio
-                  if (ctrValue > 1 && ctrValue <= 100) {
-                    console.warn('[Optimisation] Money Pages CTR appears to be percentage, converting to ratio:', ctrValue, '->', ctrValue / 100);
-                    ctrValue = ctrValue / 100;
-                  } else if (ctrValue > 100) {
-                    console.error('[Optimisation] Money Pages CTR value seems invalid (>100%):', ctrValue);
-                    ctrValue = null;
+              // Check window.moneyPagesMetrics
+              if (window.moneyPagesMetrics && window.moneyPagesMetrics.rows) {
+                const moneyPageRow = window.moneyPagesMetrics.rows.find(row => {
+                  const rowUrl = row.url || row.page_url || '';
+                  const normalizedRowUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(rowUrl) : rowUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+                  return normalizedRowUrl === normalizedTaskUrl;
+                });
+                
+                if (moneyPageRow) {
+                  debugLog(`[Optimisation] Found matching Money Page row: ${JSON.stringify({ url: moneyPageRow.url || moneyPageRow.page_url, clicks: moneyPageRow.clicks, impressions: moneyPageRow.impressions, ctr: moneyPageRow.ctr })}`, 'info');
+                  // Normalize CTR: Money Pages stores CTR as ratio (0-1), but check if it's actually a percentage
+                  let ctrValue = moneyPageRow.ctr || moneyPageRow.ctr_28d || null;
+                  if (ctrValue != null) {
+                    // If CTR is > 1, assume it's a percentage and convert to ratio
+                    if (ctrValue > 1 && ctrValue <= 100) {
+                      debugLog(`[Optimisation] Money Pages CTR appears to be percentage, converting to ratio: ${ctrValue} -> ${ctrValue / 100}`, 'warn');
+                      ctrValue = ctrValue / 100;
+                    } else if (ctrValue > 100) {
+                      debugLog(`[Optimisation] Money Pages CTR value seems invalid (>100%): ${ctrValue}`, 'error');
+                      ctrValue = null;
+                    }
+                    // If CTR is <= 1, assume it's already a ratio (0-1)
                   }
-                  // If CTR is <= 1, assume it's already a ratio (0-1)
-                }
                 currentMetrics = {
                   gsc_clicks_28d: moneyPageRow.clicks || moneyPageRow.clicks_28d || null,
                   gsc_impressions_28d: moneyPageRow.impressions || moneyPageRow.impressions_28d || null,
@@ -13908,13 +13908,13 @@
                   segment: 'money_pages',
                   captured_at: new Date().toISOString()
                 };
-                console.log('[Optimisation] Built currentMetrics from Money Page row:', currentMetrics);
+                debugLog(`[Optimisation] Built currentMetrics from Money Page row: ${JSON.stringify(currentMetrics)}`, 'info');
               }
             }
             
             // If still no data, check localStorage/Supabase audit results
             if (!currentMetrics) {
-              console.log('[Optimisation] Checking localStorage/Supabase audit results...');
+              debugLog('[Optimisation] Checking localStorage/Supabase audit results...', 'info');
               try {
                 // Check both keys: last_audit_results (current) and aigeo_audit_data (legacy)
                 let savedAudit = localStorage.getItem('last_audit_results');
@@ -13965,7 +13965,7 @@
                         segment: 'money_pages',
                         captured_at: new Date().toISOString()
                       };
-                      console.log('[Optimisation] Built currentMetrics from localStorage Money Page row:', currentMetrics);
+                      debugLog(`[Optimisation] Built currentMetrics from localStorage Money Page row: clicks=${currentMetrics.gsc_clicks_28d}, impressions=${currentMetrics.gsc_impressions_28d}, ctr=${currentMetrics.gsc_ctr_28d}, rank=${currentMetrics.current_rank}`, 'info');
                     }
                   }
                   
@@ -14002,7 +14002,7 @@
                         // Use best rank from the query with highest clicks
                         const bestQuery = matchingQueries.reduce((best, qt) => 
                           (qt.clicks || 0) > (best.clicks || 0) ? qt : best, matchingQueries[0]);
-                        console.log(`[Optimisation] Aggregated ${matchingQueries.length} queries for URL: ${totalClicks} clicks, ${totalImpressions} impressions`);
+                        debugLog(`[Optimisation] Aggregated ${matchingQueries.length} queries for URL: ${totalClicks} clicks, ${totalImpressions} impressions`, 'info');
                         currentMetrics = {
                           gsc_clicks_28d: totalClicks || null,
                           gsc_impressions_28d: totalImpressions || null,
@@ -14036,7 +14036,7 @@
                           captured_at: new Date().toISOString()
                         };
                       }
-                      console.log('[Optimisation] Built currentMetrics from query totals:', currentMetrics);
+                      debugLog(`[Optimisation] Built currentMetrics from query totals: clicks=${currentMetrics.gsc_clicks_28d}, impressions=${currentMetrics.gsc_impressions_28d}, ctr=${currentMetrics.gsc_ctr_28d}, rank=${currentMetrics.current_rank}`, 'info');
                     }
                   }
                   
@@ -14106,7 +14106,7 @@
             
             // If still no data, query Supabase directly for latest audit data
             if (!currentMetrics) {
-              console.log('[Optimisation] Querying Supabase for latest audit data...');
+              debugLog('[Optimisation] Querying Supabase for latest audit data...', 'info');
               try {
                 const propertyUrl = document.getElementById('propertyUrl')?.value || localStorage.getItem('gsc_property_url') || 'https://www.alanranger.com';
                 if (typeof fetchLatestAuditFromSupabase === 'function') {
@@ -14294,10 +14294,7 @@
 
           // If no current data, try to use baseline metrics (if no new audit, current = baseline)
           if (!currentMetrics) {
-            console.warn('[Optimisation] No matching row found in Ranking & AI, Money Pages, or audit data for:', {
-              keyword: task.keyword_text,
-              url: task.target_url_clean || task.target_url
-            });
+            debugLog(`[Optimisation] No matching row found in Ranking & AI, Money Pages, or audit data for task ${task.id}: keyword="${task.keyword_text || 'none'}", url="${task.target_url_clean || task.target_url || 'none'}"`, 'warn');
             
             // Check if we have baseline metrics to reuse
             const baselineMetrics = task.baseline_metrics;
@@ -14656,10 +14653,10 @@
                 if (ctrValue != null) {
                   // If CTR is > 1, assume it's a percentage and convert to ratio
                   if (ctrValue > 1 && ctrValue <= 100) {
-                    console.warn('[Optimisation] Money Pages CTR appears to be percentage, converting to ratio:', ctrValue, '->', ctrValue / 100);
+                    debugLog(`[Optimisation] Money Pages CTR appears to be percentage, converting to ratio: ${ctrValue} -> ${ctrValue / 100}`, 'warn');
                     ctrValue = ctrValue / 100;
                   } else if (ctrValue > 100) {
-                    console.error('[Optimisation] Money Pages CTR value seems invalid (>100%):', ctrValue);
+                    debugLog(`[Optimisation] Money Pages CTR value seems invalid (>100%): ${ctrValue}`, 'error');
                     ctrValue = null;
                   }
                   // If CTR is <= 1, assume it's already a ratio (0-1)
@@ -14708,6 +14705,7 @@
                     });
                     
                     if (moneyPageRow) {
+                      debugLog(`[Optimisation] Task ${task.id} (${task.keyword_text || taskUrl}): Found matching Money Page row in ${dataSource}: clicks=${moneyPageRow.clicks || moneyPageRow.clicks_28d}, impressions=${moneyPageRow.impressions || moneyPageRow.impressions_28d}, ctr=${moneyPageRow.ctr || moneyPageRow.ctr_28d}, rank=${moneyPageRow.avg_position || moneyPageRow.position}`, 'info');
                       // Normalize CTR: Money Pages stores CTR as ratio (0-1), but check if it's actually a percentage
                       let ctrValue = moneyPageRow.ctr || moneyPageRow.ctr_28d || null;
                       if (ctrValue != null) {
@@ -14750,6 +14748,7 @@
                     });
                     
                     if (matchingQueries.length > 0) {
+                      debugLog(`[Optimisation] Task ${task.id} (${task.keyword_text || taskUrl}): Found ${matchingQueries.length} matching query(ies) in ${dataSource}`, 'info');
                       // For URL-based matching, aggregate all queries for that URL (page-level data)
                       if (matchingQueries.length > 1) {
                         // Aggregate all queries for this URL
@@ -14827,7 +14826,7 @@
           
             // Fallback to baseline if no current data found
           if (!currentMetrics && task.baseline_metrics) {
-            debugLog(`[Optimisation] No current data for ${task.keyword_text || taskUrl}, using baseline`, 'info');
+            debugLog(`[Optimisation] Task ${task.id} (${task.keyword_text || taskUrl}): No current data found, using baseline metrics as fallback`, 'warn');
             currentMetrics = { ...task.baseline_metrics, captured_at: new Date().toISOString() };
             // Remove null GSC metrics to avoid stale nulls
             if (currentMetrics.gsc_clicks_28d === null) delete currentMetrics.gsc_clicks_28d;
@@ -14837,7 +14836,10 @@
 
           if (!currentMetrics) {
             failCount++;
-            errors.push(`${task.keyword_text || taskUrl}: No data found in Ranking & AI, Money Pages, or audit results`);
+            const errorMsg = `${task.keyword_text || taskUrl}: No data found in Ranking & AI, Money Pages, or audit results`;
+            errors.push(errorMsg);
+            debugLog(`[Optimisation] Task ${task.id} (${task.keyword_text || taskUrl}): FAILED - ${errorMsg}`, 'error');
+            debugLog(`[Optimisation] Task ${task.id} search details: keyword="${task.keyword_text || 'none'}", url="${taskUrl || 'none'}", hasRankingData=${!!matchingRow}, hasMoneyPagesData=${!!(window.moneyPagesMetrics && window.moneyPagesMetrics.rows)}, hasLastAuditResults=${!!localStorage.getItem('last_audit_results')}`, 'error');
             return;
           }
 
@@ -14861,8 +14863,10 @@
               const result = await response.json();
               if (result.skipped) {
                 skippedCount++;
+                debugLog(`[Optimisation] Task ${task.id} (${task.keyword_text || taskUrl}) skipped: measurement too recent (within 5-minute window)`, 'info');
               } else {
                 successCount++;
+                debugLog(`[Optimisation] Task ${task.id} (${task.keyword_text || taskUrl}) updated successfully: clicks=${currentMetrics.gsc_clicks_28d}, impressions=${currentMetrics.gsc_impressions_28d}, ctr=${currentMetrics.gsc_ctr_28d}, rank=${currentMetrics.current_rank}`, 'success');
               }
             } catch (error) {
               failCount++;

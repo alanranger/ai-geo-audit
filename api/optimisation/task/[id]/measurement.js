@@ -111,32 +111,32 @@ export default async function handler(req, res) {
     // Idempotency check: If a measurement was created in the last 5 minutes, return existing.
     // Exception: allow explicit baseline resets even if a measurement was just taken.
     if (!is_baseline) {
-      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-      const { data: recentMeasurement } = await supabase
-        .from('optimisation_task_events')
-        .select('id, created_at, metrics')
-        .eq('task_id', id)
-        .eq('event_type', 'measurement')
-        .or(`cycle_id.eq.${task.active_cycle_id},cycle_number.eq.${cycleNo}`)
-        .gte('created_at', fiveMinutesAgo)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const { data: recentMeasurement } = await supabase
+      .from('optimisation_task_events')
+      .select('id, created_at, metrics')
+      .eq('task_id', id)
+      .eq('event_type', 'measurement')
+      .or(`cycle_id.eq.${task.active_cycle_id},cycle_number.eq.${cycleNo}`)
+      .gte('created_at', fiveMinutesAgo)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-      if (recentMeasurement) {
-        // Return existing measurement (idempotent)
-        const { data: updatedTask } = await supabase
-          .from('vw_optimisation_task_status')
-          .select('*')
-          .eq('id', id)
-          .single();
-        
-        return sendJSON(res, 200, { 
-          event: recentMeasurement, 
-          task: updatedTask,
-          skipped: true,
-          message: 'Measurement already captured recently (within 5 minutes). Returning existing measurement.'
-        });
+    if (recentMeasurement) {
+      // Return existing measurement (idempotent)
+      const { data: updatedTask } = await supabase
+        .from('vw_optimisation_task_status')
+        .select('*')
+        .eq('id', id)
+        .single();
+      
+      return sendJSON(res, 200, { 
+        event: recentMeasurement, 
+        task: updatedTask,
+        skipped: true,
+        message: 'Measurement already captured recently (within 5 minutes). Returning existing measurement.'
+      });
       }
     }
 
