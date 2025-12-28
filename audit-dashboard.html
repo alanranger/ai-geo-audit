@@ -14754,7 +14754,8 @@
               });
               
               if (moneyPageRow) {
-                debugLog(`[Optimisation] Task ${task.id}: Using window.moneyPagesMetrics data: clicks=${moneyPageRow.clicks || moneyPageRow.clicks_28d}, impressions=${moneyPageRow.impressions || moneyPageRow.impressions_28d}`, 'success');
+                debugLog(`[Optimisation] Task ${task.id}: Using window.moneyPagesMetrics data: clicks=${moneyPageRow.clicks || moneyPageRow.clicks_28d}, impressions=${moneyPageRow.impressions || moneyPageRow.impressions_28d}, ctr=${moneyPageRow.ctr || moneyPageRow.ctr_28d}, rank=${moneyPageRow.avg_position || moneyPageRow.position}`, 'success');
+                debugLog(`[Optimisation] Task ${task.id}: Full moneyPageRow data: ${JSON.stringify({url: moneyPageRow.url, clicks: moneyPageRow.clicks, clicks_28d: moneyPageRow.clicks_28d, impressions: moneyPageRow.impressions, impressions_28d: moneyPageRow.impressions_28d, ctr: moneyPageRow.ctr, ctr_28d: moneyPageRow.ctr_28d, avg_position: moneyPageRow.avg_position, position: moneyPageRow.position})}`, 'info');
                 // Normalize CTR: Money Pages stores CTR as ratio (0-1), but check if it's actually a percentage
                 let ctrValue = moneyPageRow.ctr || moneyPageRow.ctr_28d || null;
                 if (ctrValue != null) {
@@ -14829,6 +14830,7 @@
                     
                     if (moneyPageRow) {
                       debugLog(`[Optimisation] Task ${task.id} (${task.keyword_text || taskUrl}): Found matching Money Page row in ${dataSource}: clicks=${moneyPageRow.clicks || moneyPageRow.clicks_28d}, impressions=${moneyPageRow.impressions || moneyPageRow.impressions_28d}, ctr=${moneyPageRow.ctr || moneyPageRow.ctr_28d}, rank=${moneyPageRow.avg_position || moneyPageRow.position}`, 'success');
+                      debugLog(`[Optimisation] Task ${task.id}: Full moneyPageRow from ${dataSource}: ${JSON.stringify({url: moneyPageRow.url, clicks: moneyPageRow.clicks, clicks_28d: moneyPageRow.clicks_28d, impressions: moneyPageRow.impressions, impressions_28d: moneyPageRow.impressions_28d, ctr: moneyPageRow.ctr, ctr_28d: moneyPageRow.ctr_28d, avg_position: moneyPageRow.avg_position, position: moneyPageRow.position})}`, 'info');
                       // Normalize CTR: Money Pages stores CTR as ratio (0-1), but check if it's actually a percentage
                       let ctrValue = moneyPageRow.ctr || moneyPageRow.ctr_28d || null;
                       if (ctrValue != null) {
@@ -14953,11 +14955,22 @@
             debugLog(`[Optimisation] Task ${task.id} search details: keyword="${task.keyword_text || 'none'}", url="${taskUrl || 'none'}", normalizedUrl="${normalizedTaskUrl}", hasRankingData=${!!matchingRow}, hasWindowMoneyPages=${!!(window.moneyPagesMetrics && window.moneyPagesMetrics.rows)}, hasLastAuditResults=${!!localStorage.getItem('last_audit_results')}`, 'warn');
             // Log sample URLs from available data sources for debugging
             if (window.moneyPagesMetrics && window.moneyPagesMetrics.rows && window.moneyPagesMetrics.rows.length > 0) {
-              const sampleUrls = window.moneyPagesMetrics.rows.slice(0, 3).map(r => {
+              const sampleUrls = window.moneyPagesMetrics.rows.slice(0, 5).map(r => {
                 const u = r.url || r.page_url || '';
-                return normalizeUrlForDedupe ? normalizeUrlForDedupe(u) : u.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+                let normalized = u.toLowerCase()
+                  .replace(/^https?:\/\//, '')
+                  .replace(/^www\./, '')
+                  .replace(/\/$/, '');
+                if (normalizeUrlForDedupe && typeof normalizeUrlForDedupe === 'function') {
+                  const deduped = normalizeUrlForDedupe(u);
+                  normalized = deduped.toLowerCase()
+                    .replace(/^https?:\/\//, '')
+                    .replace(/^www\./, '')
+                    .replace(/\/$/, '');
+                }
+                return `${u} -> ${normalized}`;
               });
-              debugLog(`[Optimisation] Task ${task.id}: Sample normalized URLs from window.moneyPagesMetrics: ${sampleUrls.join(', ')}`, 'warn');
+              debugLog(`[Optimisation] Task ${task.id}: Sample URLs from window.moneyPagesMetrics (original -> normalized): ${sampleUrls.join('; ')}`, 'warn');
             }
             try {
               const savedAudit = localStorage.getItem('last_audit_results');
@@ -14965,11 +14978,41 @@
                 const parsed = JSON.parse(savedAudit);
                 const moneyPagesData = parsed.scores?.moneyPagesMetrics || parsed.moneyPagesMetrics;
                 if (moneyPagesData && moneyPagesData.rows && moneyPagesData.rows.length > 0) {
-                  const sampleUrls = moneyPagesData.rows.slice(0, 3).map(r => {
+                  // Check if the exact URL we're looking for exists
+                  const exactMatch = moneyPagesData.rows.find(r => {
                     const u = r.url || r.page_url || '';
-                    return normalizeUrlForDedupe ? normalizeUrlForDedupe(u) : u.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+                    let normalized = u.toLowerCase()
+                      .replace(/^https?:\/\//, '')
+                      .replace(/^www\./, '')
+                      .replace(/\/$/, '');
+                    if (normalizeUrlForDedupe && typeof normalizeUrlForDedupe === 'function') {
+                      const deduped = normalizeUrlForDedupe(u);
+                      normalized = deduped.toLowerCase()
+                        .replace(/^https?:\/\//, '')
+                        .replace(/^www\./, '')
+                        .replace(/\/$/, '');
+                    }
+                    return normalized === normalizedTaskUrl;
                   });
-                  debugLog(`[Optimisation] Task ${task.id}: Sample normalized URLs from localStorage: ${sampleUrls.join(', ')}`, 'warn');
+                  if (exactMatch) {
+                    debugLog(`[Optimisation] Task ${task.id}: EXACT MATCH FOUND in localStorage but not used! URL: ${exactMatch.url || exactMatch.page_url}, clicks=${exactMatch.clicks || exactMatch.clicks_28d}, impressions=${exactMatch.impressions || exactMatch.impressions_28d}`, 'error');
+                  }
+                  const sampleUrls = moneyPagesData.rows.slice(0, 5).map(r => {
+                    const u = r.url || r.page_url || '';
+                    let normalized = u.toLowerCase()
+                      .replace(/^https?:\/\//, '')
+                      .replace(/^www\./, '')
+                      .replace(/\/$/, '');
+                    if (normalizeUrlForDedupe && typeof normalizeUrlForDedupe === 'function') {
+                      const deduped = normalizeUrlForDedupe(u);
+                      normalized = deduped.toLowerCase()
+                        .replace(/^https?:\/\//, '')
+                        .replace(/^www\./, '')
+                        .replace(/\/$/, '');
+                    }
+                    return `${u} -> ${normalized}`;
+                  });
+                  debugLog(`[Optimisation] Task ${task.id}: Sample URLs from localStorage (original -> normalized): ${sampleUrls.join('; ')}`, 'warn');
                 }
               }
             } catch (e) {
@@ -14993,6 +15036,7 @@
 
             // Create measurement
             try {
+              debugLog(`[Optimisation] Task ${task.id}: Creating measurement with metrics: ${JSON.stringify(currentMetrics)}`, 'info');
               const headers = window.getOptimisationHeaders();
               const response = await fetch(apiUrl(`/api/optimisation/task/${task.id}/measurement`), {
                 method: 'POST',
