@@ -14473,19 +14473,45 @@
       let latestAuditFromSupabase = null;
       try {
         const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
-        if (propertyUrl && typeof window.fetchLatestAuditFromSupabase === 'function') {
-          debugLog(`[Optimisation] Fetching latest audit from Supabase for ${propertyUrl} to ensure we use the correct audit_date...`, 'info');
-          latestAuditFromSupabase = await window.fetchLatestAuditFromSupabase(propertyUrl, false);
+        if (propertyUrl) {
+          // Try using fetchLatestAuditFromSupabase function if available
+          if (typeof window.fetchLatestAuditFromSupabase === 'function') {
+            debugLog(`[Optimisation] Fetching latest audit from Supabase using fetchLatestAuditFromSupabase for ${propertyUrl}...`, 'info');
+            latestAuditFromSupabase = await window.fetchLatestAuditFromSupabase(propertyUrl, false);
+          } else {
+            // Fallback: fetch directly from API
+            debugLog(`[Optimisation] fetchLatestAuditFromSupabase not available, fetching directly from API for ${propertyUrl}...`, 'info');
+            try {
+              const apiBase = window.apiUrl ? window.apiUrl('') : (window.location.origin.includes('localhost') ? 'http://localhost:3000' : 'https://ai-geo-audit.vercel.app');
+              const response = await fetch(`${apiBase}/api/supabase/get-latest-audit?property_url=${encodeURIComponent(propertyUrl)}`);
+              if (response.ok) {
+                latestAuditFromSupabase = await response.json();
+                debugLog(`[Optimisation] Successfully fetched latest audit from API`, 'success');
+              } else {
+                debugLog(`[Optimisation] API returned ${response.status}: ${response.statusText}`, 'warn');
+              }
+            } catch (apiErr) {
+              debugLog(`[Optimisation] Error fetching from API: ${apiErr.message || apiErr}`, 'warn');
+            }
+          }
+          
           if (latestAuditFromSupabase) {
             // Update localStorage with latest audit data to ensure bulk update uses it
             try {
               localStorage.setItem('last_audit_results', JSON.stringify(latestAuditFromSupabase));
-              debugLog(`[Optimisation] Updated localStorage with latest audit from Supabase (audit_date: ${latestAuditFromSupabase.auditDate || 'unknown'})`, 'success');
+              debugLog(`[Optimisation] Updated localStorage with latest audit from Supabase (audit_date: ${latestAuditFromSupabase.auditDate || latestAuditFromSupabase.audit_date || 'unknown'})`, 'success');
               // Also update window.moneyPagesMetrics if available
               if (latestAuditFromSupabase.scores?.moneyPagesMetrics || latestAuditFromSupabase.moneyPagesMetrics) {
                 window.moneyPagesMetrics = latestAuditFromSupabase.scores?.moneyPagesMetrics || latestAuditFromSupabase.moneyPagesMetrics;
                 window.currentMoneyPagesMetrics = window.moneyPagesMetrics;
-                debugLog(`[Optimisation] Updated window.moneyPagesMetrics from latest audit`, 'success');
+                const rowCount = window.moneyPagesMetrics?.rows?.length || 0;
+                debugLog(`[Optimisation] Updated window.moneyPagesMetrics from latest audit: ${rowCount} rows available`, 'success');
+                if (rowCount > 0) {
+                  const sampleUrl = window.moneyPagesMetrics.rows[0].url || window.moneyPagesMetrics.rows[0].page_url || 'N/A';
+                  debugLog(`[Optimisation] Sample Money Pages URL: ${sampleUrl}`, 'info');
+                }
+              } else {
+                debugLog(`[Optimisation] Latest audit from Supabase does not contain moneyPagesMetrics`, 'warn');
               }
             } catch (storageErr) {
               debugLog(`[Optimisation] Failed to update localStorage: ${storageErr.message}`, 'warn');
@@ -14493,6 +14519,8 @@
           } else {
             debugLog(`[Optimisation] No latest audit found in Supabase, will use localStorage data`, 'warn');
           }
+        } else {
+          debugLog(`[Optimisation] No property URL found in localStorage, skipping Supabase fetch`, 'warn');
         }
       } catch (fetchErr) {
         debugLog(`[Optimisation] Error fetching latest audit from Supabase: ${fetchErr.message || fetchErr}`, 'warn');
@@ -14685,15 +14713,23 @@
           
           // If no keyword match, try URL-based matching in Money Pages data
           if (!matchingRow && normalizedTaskUrl && normalizedTaskUrl.length > 0) {
-            // Check window.moneyPagesMetrics
+            debugLog(`[Optimisation] Task ${task.id}: Searching for URL "${normalizedTaskUrl}" in Money Pages data`, 'info');
+            
+            // Check window.moneyPagesMetrics first
             if (window.moneyPagesMetrics && window.moneyPagesMetrics.rows) {
+              debugLog(`[Optimisation] Task ${task.id}: Checking window.moneyPagesMetrics (${window.moneyPagesMetrics.rows.length} rows)`, 'info');
               const moneyPageRow = window.moneyPagesMetrics.rows.find(row => {
                 const rowUrl = row.url || row.page_url || '';
                 const normalizedRowUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(rowUrl) : rowUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
-                return normalizedRowUrl === normalizedTaskUrl;
+                if (normalizedRowUrl === normalizedTaskUrl) {
+                  debugLog(`[Optimisation] Task ${task.id}: Found match in window.moneyPagesMetrics: ${rowUrl} -> ${normalizedRowUrl}`, 'success');
+                  return true;
+                }
+                return false;
               });
               
               if (moneyPageRow) {
+                debugLog(`[Optimisation] Task ${task.id}: Using window.moneyPagesMetrics data: clicks=${moneyPageRow.clicks || moneyPageRow.clicks_28d}, impressions=${moneyPageRow.impressions || moneyPageRow.impressions_28d}`, 'success');
                 // Normalize CTR: Money Pages stores CTR as ratio (0-1), but check if it's actually a percentage
                 let ctrValue = moneyPageRow.ctr || moneyPageRow.ctr_28d || null;
                 if (ctrValue != null) {
@@ -14744,14 +14780,19 @@
                 debugLog(`[Optimisation] Parsed audit data: hasMoneyPagesData=${!!moneyPagesData}, moneyPagesRows=${moneyPagesData?.rows?.length || 0}, hasSearchData=${!!parsed.searchData}, queryTotalsCount=${parsed.searchData?.queryTotals?.length || 0}`, 'info');
                   
                   if (moneyPagesData && moneyPagesData.rows) {
+                    debugLog(`[Optimisation] Task ${task.id}: Searching ${moneyPagesData.rows.length} rows in ${dataSource} for URL "${normalizedTaskUrl}"`, 'info');
                     const moneyPageRow = moneyPagesData.rows.find(row => {
                       const rowUrl = row.url || row.page_url || '';
                       const normalizedRowUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(rowUrl) : rowUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
-                      return normalizedRowUrl === normalizedTaskUrl;
+                      if (normalizedRowUrl === normalizedTaskUrl) {
+                        debugLog(`[Optimisation] Task ${task.id}: Found match in ${dataSource}: ${rowUrl} -> ${normalizedRowUrl}`, 'success');
+                        return true;
+                      }
+                      return false;
                     });
                     
                     if (moneyPageRow) {
-                      debugLog(`[Optimisation] Task ${task.id} (${task.keyword_text || taskUrl}): Found matching Money Page row in ${dataSource}: clicks=${moneyPageRow.clicks || moneyPageRow.clicks_28d}, impressions=${moneyPageRow.impressions || moneyPageRow.impressions_28d}, ctr=${moneyPageRow.ctr || moneyPageRow.ctr_28d}, rank=${moneyPageRow.avg_position || moneyPageRow.position}`, 'info');
+                      debugLog(`[Optimisation] Task ${task.id} (${task.keyword_text || taskUrl}): Found matching Money Page row in ${dataSource}: clicks=${moneyPageRow.clicks || moneyPageRow.clicks_28d}, impressions=${moneyPageRow.impressions || moneyPageRow.impressions_28d}, ctr=${moneyPageRow.ctr || moneyPageRow.ctr_28d}, rank=${moneyPageRow.avg_position || moneyPageRow.position}`, 'success');
                       // Normalize CTR: Money Pages stores CTR as ratio (0-1), but check if it's actually a percentage
                       let ctrValue = moneyPageRow.ctr || moneyPageRow.ctr_28d || null;
                       if (ctrValue != null) {
@@ -14873,6 +14914,31 @@
             // Fallback to baseline if no current data found
           if (!currentMetrics && task.baseline_metrics) {
             debugLog(`[Optimisation] Task ${task.id} (${task.keyword_text || taskUrl}): No current data found, using baseline metrics as fallback`, 'warn');
+            debugLog(`[Optimisation] Task ${task.id} search details: keyword="${task.keyword_text || 'none'}", url="${taskUrl || 'none'}", normalizedUrl="${normalizedTaskUrl}", hasRankingData=${!!matchingRow}, hasWindowMoneyPages=${!!(window.moneyPagesMetrics && window.moneyPagesMetrics.rows)}, hasLastAuditResults=${!!localStorage.getItem('last_audit_results')}`, 'warn');
+            // Log sample URLs from available data sources for debugging
+            if (window.moneyPagesMetrics && window.moneyPagesMetrics.rows && window.moneyPagesMetrics.rows.length > 0) {
+              const sampleUrls = window.moneyPagesMetrics.rows.slice(0, 3).map(r => {
+                const u = r.url || r.page_url || '';
+                return normalizeUrlForDedupe ? normalizeUrlForDedupe(u) : u.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+              });
+              debugLog(`[Optimisation] Task ${task.id}: Sample normalized URLs from window.moneyPagesMetrics: ${sampleUrls.join(', ')}`, 'warn');
+            }
+            try {
+              const savedAudit = localStorage.getItem('last_audit_results');
+              if (savedAudit) {
+                const parsed = JSON.parse(savedAudit);
+                const moneyPagesData = parsed.scores?.moneyPagesMetrics || parsed.moneyPagesMetrics;
+                if (moneyPagesData && moneyPagesData.rows && moneyPagesData.rows.length > 0) {
+                  const sampleUrls = moneyPagesData.rows.slice(0, 3).map(r => {
+                    const u = r.url || r.page_url || '';
+                    return normalizeUrlForDedupe ? normalizeUrlForDedupe(u) : u.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+                  });
+                  debugLog(`[Optimisation] Task ${task.id}: Sample normalized URLs from localStorage: ${sampleUrls.join(', ')}`, 'warn');
+                }
+              }
+            } catch (e) {
+              // ignore
+            }
             currentMetrics = { ...task.baseline_metrics, captured_at: new Date().toISOString() };
             // Remove null GSC metrics to avoid stale nulls
             if (currentMetrics.gsc_clicks_28d === null) delete currentMetrics.gsc_clicks_28d;
@@ -14885,7 +14951,7 @@
             const errorMsg = `${task.keyword_text || taskUrl}: No data found in Ranking & AI, Money Pages, or audit results`;
             errors.push(errorMsg);
             debugLog(`[Optimisation] Task ${task.id} (${task.keyword_text || taskUrl}): FAILED - ${errorMsg}`, 'error');
-            debugLog(`[Optimisation] Task ${task.id} search details: keyword="${task.keyword_text || 'none'}", url="${taskUrl || 'none'}", hasRankingData=${!!matchingRow}, hasMoneyPagesData=${!!(window.moneyPagesMetrics && window.moneyPagesMetrics.rows)}, hasLastAuditResults=${!!localStorage.getItem('last_audit_results')}`, 'error');
+            debugLog(`[Optimisation] Task ${task.id} search details: keyword="${task.keyword_text || 'none'}", url="${taskUrl || 'none'}", normalizedUrl="${normalizedTaskUrl}", hasRankingData=${!!matchingRow}, hasMoneyPagesData=${!!(window.moneyPagesMetrics && window.moneyPagesMetrics.rows)}, hasLastAuditResults=${!!localStorage.getItem('last_audit_results')}`, 'error');
             return;
           }
 
