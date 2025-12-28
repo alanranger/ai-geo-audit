@@ -14467,11 +14467,57 @@
     window.bulkUpdateAllTasks = async function bulkUpdateAllTasks() {
       debugLog('[Optimisation] ===== bulkUpdateAllTasks START =====', 'info');
       
+      // CRITICAL: Ensure we're using the latest audit data from Supabase (by audit_date, not just localStorage)
+      // Fetch latest audit from Supabase to ensure we have the most recent audit_date data
+      // Note: GSC data is 2 days behind the audit_date, so audit_date 2025-12-28 means GSC data is from 2025-12-26
+      let latestAuditFromSupabase = null;
+      try {
+        const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+        if (propertyUrl && typeof window.fetchLatestAuditFromSupabase === 'function') {
+          debugLog(`[Optimisation] Fetching latest audit from Supabase for ${propertyUrl} to ensure we use the correct audit_date...`, 'info');
+          latestAuditFromSupabase = await window.fetchLatestAuditFromSupabase(propertyUrl, false);
+          if (latestAuditFromSupabase) {
+            // Update localStorage with latest audit data to ensure bulk update uses it
+            try {
+              localStorage.setItem('last_audit_results', JSON.stringify(latestAuditFromSupabase));
+              debugLog(`[Optimisation] Updated localStorage with latest audit from Supabase (audit_date: ${latestAuditFromSupabase.auditDate || 'unknown'})`, 'success');
+              // Also update window.moneyPagesMetrics if available
+              if (latestAuditFromSupabase.scores?.moneyPagesMetrics || latestAuditFromSupabase.moneyPagesMetrics) {
+                window.moneyPagesMetrics = latestAuditFromSupabase.scores?.moneyPagesMetrics || latestAuditFromSupabase.moneyPagesMetrics;
+                window.currentMoneyPagesMetrics = window.moneyPagesMetrics;
+                debugLog(`[Optimisation] Updated window.moneyPagesMetrics from latest audit`, 'success');
+              }
+            } catch (storageErr) {
+              debugLog(`[Optimisation] Failed to update localStorage: ${storageErr.message}`, 'warn');
+            }
+          } else {
+            debugLog(`[Optimisation] No latest audit found in Supabase, will use localStorage data`, 'warn');
+          }
+        }
+      } catch (fetchErr) {
+        debugLog(`[Optimisation] Error fetching latest audit from Supabase: ${fetchErr.message || fetchErr}`, 'warn');
+        // Continue with localStorage data as fallback
+      }
+      
       // Check available data sources
       const hasLastAuditResults = !!localStorage.getItem('last_audit_results');
       const hasAigeoAuditData = !!localStorage.getItem('aigeo_audit_data');
       const hasWindowMoneyPages = !!(window.moneyPagesMetrics && window.moneyPagesMetrics.rows);
-      debugLog(`[Optimisation] Data sources available: last_audit_results=${hasLastAuditResults}, aigeo_audit_data=${hasAigeoAuditData}, window.moneyPagesMetrics=${hasWindowMoneyPages}`, 'info');
+      const auditDate = latestAuditFromSupabase?.auditDate || (() => {
+        try {
+          const stored = localStorage.getItem('last_audit_results');
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            return parsed.auditDate || null;
+          }
+        } catch {}
+        return null;
+      })();
+      debugLog(`[Optimisation] Data sources available: last_audit_results=${hasLastAuditResults}, aigeo_audit_data=${hasAigeoAuditData}, window.moneyPagesMetrics=${hasWindowMoneyPages}, audit_date=${auditDate || 'unknown'}`, 'info');
+      if (auditDate) {
+        const gscDataDate = new Date(new Date(auditDate).getTime() - 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        debugLog(`[Optimisation] Note: GSC data is 2 days behind audit_date, so data reflects: ${gscDataDate}`, 'info');
+      }
       
       if (hasLastAuditResults) {
         try {
@@ -50561,9 +50607,168 @@ Final Score: ${score}/100`;
         }
       }
 
-      window.renderDashboardTab = function renderDashboardTab() {
+      // Helper function to compute dashboard snapshot from audit data
+      function computeDashboardSnapshotFromAuditData(auditData) {
+        if (!auditData) return null;
+        
+        const scores = auditData.scores || {};
+        const searchData = auditData.searchData || {};
+        const rankingAiData = auditData.rankingAiData || {};
+        
+        // Compute GAIO score from pillar scores
+        const pillars = {
+          visibility: scores.visibility || null,
+          authority: typeof scores.authority === 'object' ? scores.authority.score : (scores.authority || null),
+          contentSchema: scores.contentSchema || null,
+          localEntity: scores.localEntity || null,
+          serviceArea: scores.serviceArea || null
+        };
+        
+        const weights = { visibility: 0.20, authority: 0.30, contentSchema: 0.25, localEntity: 0.15, serviceArea: 0.10 };
+        let gaioScore = null;
+        if (Object.values(pillars).some(v => typeof v === 'number')) {
+          const weightedSum = (pillars.visibility || 0) * weights.visibility +
+                             (pillars.authority || 0) * weights.authority +
+                             (pillars.contentSchema || 0) * weights.contentSchema +
+                             (pillars.localEntity || 0) * weights.localEntity +
+                             (pillars.serviceArea || 0) * weights.serviceArea;
+          gaioScore = Math.round(weightedSum);
+        }
+        
+        return {
+          gaioScore,
+          aiSummaryScore: scores.aiSummaryScore || (typeof auditData.ai_summary_score === 'number' ? auditData.ai_summary_score : null),
+          pillars,
+          auditKpis: searchData.overview ? {
+            clicks: searchData.overview.clicks || searchData.totalClicks || 0,
+            impressions: searchData.overview.impressions || searchData.totalImpressions || 0,
+            avgPosition: searchData.overview.position || searchData.averagePosition || null,
+            ctrPct: searchData.overview.ctr || searchData.ctr || 0
+          } : null,
+          moneySharePct: scores.moneyPagesMetrics?.overview ? 
+            (scores.moneyPagesMetrics.overview.shareOfImpressions || 0) * 100 : null
+        };
+      }
+
+      // Helper function to fetch previous audit by audit_date for delta calculations
+      async function fetchPreviousAuditForDeltas(propertyUrl, currentAuditDate) {
+        if (!propertyUrl || !currentAuditDate) return null;
+        
+        try {
+          const urlHelper = window.apiUrl || ((path) => {
+            const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+            const baseUrl = isLocal ? 'https://ai-geo-audit.vercel.app' : '';
+            const cleanPath = path.startsWith('/') ? path : `/${path}`;
+            return baseUrl ? `${baseUrl}${cleanPath}` : cleanPath;
+          });
+          
+          // Fetch audit history to find the previous audit_date
+          // The endpoint returns audits sorted by audit_date ascending
+          const historyResponse = await fetch(urlHelper(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}`));
+          if (!historyResponse.ok) {
+            debugLog(`[Dashboard] Audit history fetch failed: ${historyResponse.status}`, 'warn');
+            return null;
+          }
+          
+          const historyResult = await historyResponse.json();
+          if (historyResult.status === 'ok' && Array.isArray(historyResult.data) && historyResult.data.length >= 2) {
+            // Sort audits by date descending (most recent first)
+            const sortedAudits = historyResult.data
+              .map(a => ({
+                audit_date: a.audit_date || a.auditDate,
+                data: a
+              }))
+              .filter(a => a.audit_date) // Filter out any without dates
+              .sort((a, b) => {
+                const dateA = new Date(a.audit_date);
+                const dateB = new Date(b.audit_date);
+                return dateB - dateA; // Descending order (newest first)
+              });
+            
+            // Find current audit index
+            const currentIndex = sortedAudits.findIndex(a => a.audit_date === currentAuditDate);
+            
+            // Get previous audit (the one before current)
+            if (currentIndex > 0) {
+              const prevAuditDate = sortedAudits[currentIndex - 1].audit_date;
+              
+              // Fetch full data for previous audit
+              // Note: get-latest-audit doesn't support auditDate param, so we'll use the history data
+              // and compute snapshot from it, or fetch via a different method
+              // For now, we'll compute snapshot from the history data which has the scores
+              const prevAuditFromHistory = sortedAudits[currentIndex - 1].data;
+              
+              // Reconstruct audit data structure from history record
+              const prevAuditData = {
+                auditDate: prevAuditDate,
+                scores: {
+                  visibility: prevAuditFromHistory.visibility_score,
+                  authority: prevAuditFromHistory.authority_score,
+                  contentSchema: prevAuditFromHistory.content_schema_score,
+                  localEntity: prevAuditFromHistory.local_entity_score,
+                  serviceArea: prevAuditFromHistory.service_area_score,
+                  aiSummaryScore: prevAuditFromHistory.ai_summary_score
+                },
+                searchData: {
+                  overview: {
+                    clicks: prevAuditFromHistory.gsc_clicks || 0,
+                    impressions: prevAuditFromHistory.gsc_impressions || 0,
+                    position: prevAuditFromHistory.gsc_avg_position || null,
+                    ctr: prevAuditFromHistory.gsc_ctr || 0
+                  }
+                },
+                moneyPagesMetrics: prevAuditFromHistory.money_pages_summary ? {
+                  overview: prevAuditFromHistory.money_pages_summary
+                } : null
+              };
+              
+              debugLog(`[Dashboard] Found previous audit_date: ${prevAuditDate} (current: ${currentAuditDate})`, 'info');
+              return prevAuditData;
+            } else if (currentIndex === -1 && sortedAudits.length > 0) {
+              // Current audit not found in history, use the most recent one as previous
+              const mostRecentDate = sortedAudits[0].audit_date;
+              if (mostRecentDate !== currentAuditDate) {
+                const mostRecentData = sortedAudits[0].data;
+                const prevAuditData = {
+                  auditDate: mostRecentDate,
+                  scores: {
+                    visibility: mostRecentData.visibility_score,
+                    authority: mostRecentData.authority_score,
+                    contentSchema: mostRecentData.content_schema_score,
+                    localEntity: mostRecentData.local_entity_score,
+                    serviceArea: mostRecentData.service_area_score,
+                    aiSummaryScore: mostRecentData.ai_summary_score
+                  },
+                  searchData: {
+                    overview: {
+                      clicks: mostRecentData.gsc_clicks || 0,
+                      impressions: mostRecentData.gsc_impressions || 0,
+                      position: mostRecentData.gsc_avg_position || null,
+                      ctr: mostRecentData.gsc_ctr || 0
+                    }
+                  },
+                  moneyPagesMetrics: mostRecentData.money_pages_summary ? {
+                    overview: mostRecentData.money_pages_summary
+                  } : null
+                };
+                debugLog(`[Dashboard] Using most recent audit as previous: ${mostRecentDate}`, 'info');
+                return prevAuditData;
+              }
+            }
+          } else {
+            debugLog(`[Dashboard] Not enough audit history (found ${historyResult.data?.length || 0} audits, need at least 2)`, 'warn');
+          }
+          
+          return null;
+        } catch (err) {
+          debugLog(`[Dashboard] Failed to fetch previous audit for deltas: ${err?.message || err}`, 'warn');
+          return null;
+        }
+      }
+
+      window.renderDashboardTab = async function renderDashboardTab() {
         // Always show LIVE latest-available metrics (from the latest independent audits).
-        // Deltas are computed against the previous global run snapshot, if present.
+        // Deltas are computed against the previous audit_date (not global run snapshots).
         const liveSnapshot = computeDashboardSnapshot();
 
         // If admin key exists, auto-load optimisation tasks so the dashboard isn't blank.
@@ -50593,7 +50798,28 @@ Final Score: ${score}/100`;
         if (lastRunEl) lastRunEl.textContent = lastGlobal ? formatUtcTimestamp(lastGlobal.timestamp) : '—';
         if (lastStatusEl) lastStatusEl.textContent = lastGlobal ? (lastGlobal.status || 'ok') : '—';
 
-        const prevMetrics = prevGlobal?.metrics || null;
+        // CRITICAL: Fetch previous audit by audit_date for proper delta calculations
+        let prevMetricsFromAuditDate = null;
+        try {
+          const currentAudit = dashboardSafeJsonParse(localStorage.getItem('last_audit_results'), null);
+          if (currentAudit && currentAudit.auditDate) {
+            const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+            if (propertyUrl) {
+              const prevAuditData = await fetchPreviousAuditForDeltas(propertyUrl, currentAudit.auditDate);
+              if (prevAuditData) {
+                // Compute snapshot from previous audit data
+                const prevSnapshot = computeDashboardSnapshotFromAuditData(prevAuditData);
+                prevMetricsFromAuditDate = prevSnapshot;
+                debugLog(`[Dashboard] Using previous audit_date (${prevAuditData.auditDate}) for delta calculations`, 'info');
+              }
+            }
+          }
+        } catch (err) {
+          debugLog(`[Dashboard] Error fetching previous audit for deltas: ${err?.message || err}`, 'warn');
+        }
+
+        // Use audit_date-based deltas if available, otherwise fall back to global run snapshots
+        const prevMetrics = prevMetricsFromAuditDate || prevGlobal?.metrics || null;
         const metrics = liveSnapshot;
 
         // Dial: GAIO
@@ -51016,7 +51242,21 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const stepDefs = [
           { key: 'sync_csv', label: 'Sync CSV', runner: async () => { if (typeof window.syncCsv === 'function') await window.syncCsv(); } },
           { key: 'audit_scan', label: 'Run Audit Scan', runner: async () => { if (typeof window.runAudit === 'function') await window.runAudit(); } },
-          { key: 'ranking_ai', label: 'Run Ranking & AI Scan', runner: async () => { if (typeof window.loadRankingAiData === 'function') await window.loadRankingAiData(true); } },
+          { key: 'ranking_ai', label: 'Run Ranking & AI Scan', runner: async () => { 
+            if (typeof window.loadRankingAiData === 'function') {
+              await window.loadRankingAiData(true);
+              // Ensure Ranking & AI tab is refreshed after data loads
+              if (typeof window.renderRankingAiTab === 'function') {
+                await new Promise(resolve => setTimeout(resolve, 500)); // Small delay to ensure data is set
+                window.renderRankingAiTab();
+              }
+            }
+          } },
+          { key: 'money_pages', label: 'Run Money Pages Scan', runner: async () => { 
+            if (typeof window.dashboardRunMoneyPagesScan === 'function') {
+              await window.dashboardRunMoneyPagesScan();
+            }
+          } },
           { key: 'domain_strength', label: 'Run Domain Strength Snapshot', runner: async () => { if (typeof window.runDomainStrengthSnapshot === 'function') await window.runDomainStrengthSnapshot(); } },
           { key: 'update_tasks', label: 'Update All Tasks with Latest Data', runner: async () => {
             // Wait a moment to ensure audit data is fully saved from previous steps
@@ -51127,7 +51367,29 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         };
         saveDashboardRun(runRecord);
 
+        // Refresh all tabs to ensure they show fresh data
         window.renderDashboardTab();
+        
+        // Explicitly refresh other module tabs to ensure they're updated
+        if (typeof window.renderRankingAiTab === 'function') {
+          try {
+            window.renderRankingAiTab();
+          } catch (e) {
+            debugLog(`[Global Run] Failed to refresh Ranking & AI tab: ${e?.message || e}`, 'warn');
+          }
+        }
+        
+        // Money Pages tab is refreshed by dashboardRunMoneyPagesScan, but ensure it's rendered if needed
+        if (typeof window.renderMoneyPagesSection === 'function' && window.currentMoneyPagesMetrics) {
+          try {
+            await window.renderMoneyPagesSection(window.currentMoneyPagesMetrics);
+            if (typeof window.wireTopLevelFilter === 'function') window.wireTopLevelFilter();
+            if (typeof window.wireMoneyKpiMetricSelector === 'function') window.wireMoneyKpiMetricSelector();
+            if (typeof window.__initMoneyPagesPanelAfterRender === 'function') window.__initMoneyPagesPanelAfterRender();
+          } catch (e) {
+            debugLog(`[Global Run] Failed to refresh Money Pages tab: ${e?.message || e}`, 'warn');
+          }
+        }
 
         const summaryHtml = results.ok
           ? `<div>Saved a new global run snapshot.</div>`
