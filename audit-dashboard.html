@@ -41198,6 +41198,48 @@ Final Score: ${score}/100`;
     }
 
     // ======================
+    // Ranking & AI: Compute AI metrics for a page URL
+    // ======================
+    // This function looks up AI Overview and AI Citations for a given URL by matching against ranking data
+    window.computeAiMetricsForPageUrl = function computeAiMetricsForPageUrl(pageUrl, rankingRows) {
+      if (!pageUrl || !rankingRows || !Array.isArray(rankingRows) || rankingRows.length === 0) {
+        return { ai_overview: false, ai_citations: null };
+      }
+      
+      // Normalize the page URL for matching
+      const normalizedPageUrl = (pageUrl || '').toLowerCase()
+        .replace(/^https?:\/\//, '')
+        .replace(/^www\./, '')
+        .replace(/\/$/, '');
+      
+      // Try to find matching rows by URL
+      const matchingRows = rankingRows.filter(row => {
+        const rowUrl = (row.best_url || row.targetUrl || row.ranking_url || '').toLowerCase();
+        const normalizedRowUrl = rowUrl
+          .replace(/^https?:\/\//, '')
+          .replace(/^www\./, '')
+          .replace(/\/$/, '');
+        return normalizedRowUrl === normalizedPageUrl;
+      });
+      
+      // If no URL match, return default
+      if (matchingRows.length === 0) {
+        return { ai_overview: false, ai_citations: null };
+      }
+      
+      // Use the first matching row (or aggregate if multiple)
+      const bestMatch = matchingRows[0];
+      const aiOverview = bestMatch.has_ai_overview === true || bestMatch.ai_overview_present_any === true;
+      const aiCitations = bestMatch.ai_alan_citations_count != null 
+        ? bestMatch.ai_alan_citations_count 
+        : (bestMatch.ai_total_citations != null ? bestMatch.ai_total_citations : null);
+      
+      return {
+        ai_overview: aiOverview,
+        ai_citations: aiCitations
+      };
+    };
+
     // Ranking & AI: Domain Strength context (read-only)
     // ======================
     let __rankingAiAuthorityContext = null;
