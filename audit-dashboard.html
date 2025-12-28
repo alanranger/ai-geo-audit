@@ -14692,19 +14692,25 @@
           const taskKeyword = task.keyword_text || '';
           // Normalize URL: remove protocol, www, trailing slash, and convert to lowercase
           // Handle both formats: "www.alanranger.com/path" and "https://www.alanranger.com/path"
+          // CRITICAL: Do NOT use normalizeUrlForDedupe here as it may add domain back
+          // Simple normalization: lowercase, remove protocol, remove www, remove trailing slash
           let normalizedTaskUrl = taskUrl.toLowerCase()
             .replace(/^https?:\/\//, '')  // Remove http:// or https://
             .replace(/^www\./, '')        // Remove www.
             .replace(/\/$/, '');          // Remove trailing slash
-          // If normalizeUrlForDedupe exists, use it (but ensure it doesn't add protocol back)
-          if (normalizeUrlForDedupe && typeof normalizeUrlForDedupe === 'function') {
-            const deduped = normalizeUrlForDedupe(taskUrl);
-            // Ensure deduped result doesn't have protocol or www
-            normalizedTaskUrl = deduped.toLowerCase()
-              .replace(/^https?:\/\//, '')
-              .replace(/^www\./, '')
-              .replace(/\/$/, '');
+          
+          // Safety check: detect and fix malformed URLs (duplicate domain)
+          if (normalizedTaskUrl.includes('/www.') || normalizedTaskUrl.match(/^[^\/]+\/[^\/]+\//)) {
+            debugLog(`[Optimisation] Task ${task.id}: Detected malformed normalized URL: "${normalizedTaskUrl}", fixing...`, 'warn');
+            // Extract just the path part after the domain
+            const pathMatch = normalizedTaskUrl.match(/\/[^\/]+(\/.*)$/);
+            if (pathMatch) {
+              normalizedTaskUrl = normalizedTaskUrl.replace(/^[^\/]+\/[^\/]+/, '').replace(/^\/+/, '');
+              debugLog(`[Optimisation] Task ${task.id}: Fixed normalized URL: "${normalizedTaskUrl}"`, 'info');
+            }
           }
+          
+          debugLog(`[Optimisation] Task ${task.id}: URL normalization - original: "${taskUrl}" -> normalized: "${normalizedTaskUrl}"`, 'info');
           
           let matchingRow = null;
           let currentMetrics = null;
@@ -14734,18 +14740,11 @@
               debugLog(`[Optimisation] Task ${task.id}: Checking window.moneyPagesMetrics (${window.moneyPagesMetrics.rows.length} rows) for normalized URL: "${normalizedTaskUrl}"`, 'info');
               const moneyPageRow = window.moneyPagesMetrics.rows.find(row => {
                 const rowUrl = row.url || row.page_url || '';
-                // Normalize row URL the same way as task URL
+                // Normalize row URL the same way as task URL (simple normalization, no normalizeUrlForDedupe)
                 let normalizedRowUrl = rowUrl.toLowerCase()
                   .replace(/^https?:\/\//, '')
                   .replace(/^www\./, '')
                   .replace(/\/$/, '');
-                if (normalizeUrlForDedupe && typeof normalizeUrlForDedupe === 'function') {
-                  const deduped = normalizeUrlForDedupe(rowUrl);
-                  normalizedRowUrl = deduped.toLowerCase()
-                    .replace(/^https?:\/\//, '')
-                    .replace(/^www\./, '')
-                    .replace(/\/$/, '');
-                }
                 if (normalizedRowUrl === normalizedTaskUrl) {
                   debugLog(`[Optimisation] Task ${task.id}: Found match in window.moneyPagesMetrics: ${rowUrl} -> ${normalizedRowUrl} (task: ${normalizedTaskUrl})`, 'success');
                   return true;
@@ -14809,18 +14808,11 @@
                     debugLog(`[Optimisation] Task ${task.id}: Searching ${moneyPagesData.rows.length} rows in ${dataSource} for normalized URL: "${normalizedTaskUrl}" (original: "${taskUrl}")`, 'info');
                     const moneyPageRow = moneyPagesData.rows.find(row => {
                       const rowUrl = row.url || row.page_url || '';
-                      // Normalize row URL the same way as task URL
+                      // Normalize row URL the same way as task URL (simple normalization, no normalizeUrlForDedupe)
                       let normalizedRowUrl = rowUrl.toLowerCase()
                         .replace(/^https?:\/\//, '')
                         .replace(/^www\./, '')
                         .replace(/\/$/, '');
-                      if (normalizeUrlForDedupe && typeof normalizeUrlForDedupe === 'function') {
-                        const deduped = normalizeUrlForDedupe(rowUrl);
-                        normalizedRowUrl = deduped.toLowerCase()
-                          .replace(/^https?:\/\//, '')
-                          .replace(/^www\./, '')
-                          .replace(/\/$/, '');
-                      }
                       if (normalizedRowUrl === normalizedTaskUrl) {
                         debugLog(`[Optimisation] Task ${task.id}: Found match in ${dataSource}: ${rowUrl} -> ${normalizedRowUrl} (task: ${normalizedTaskUrl})`, 'success');
                         return true;
@@ -14955,19 +14947,13 @@
             debugLog(`[Optimisation] Task ${task.id} search details: keyword="${task.keyword_text || 'none'}", url="${taskUrl || 'none'}", normalizedUrl="${normalizedTaskUrl}", hasRankingData=${!!matchingRow}, hasWindowMoneyPages=${!!(window.moneyPagesMetrics && window.moneyPagesMetrics.rows)}, hasLastAuditResults=${!!localStorage.getItem('last_audit_results')}`, 'warn');
             // Log sample URLs from available data sources for debugging
             if (window.moneyPagesMetrics && window.moneyPagesMetrics.rows && window.moneyPagesMetrics.rows.length > 0) {
-              const sampleUrls = window.moneyPagesMetrics.rows.slice(0, 5).map(r => {
+                  const sampleUrls = window.moneyPagesMetrics.rows.slice(0, 5).map(r => {
                 const u = r.url || r.page_url || '';
+                // Simple normalization (no normalizeUrlForDedupe)
                 let normalized = u.toLowerCase()
                   .replace(/^https?:\/\//, '')
                   .replace(/^www\./, '')
                   .replace(/\/$/, '');
-                if (normalizeUrlForDedupe && typeof normalizeUrlForDedupe === 'function') {
-                  const deduped = normalizeUrlForDedupe(u);
-                  normalized = deduped.toLowerCase()
-                    .replace(/^https?:\/\//, '')
-                    .replace(/^www\./, '')
-                    .replace(/\/$/, '');
-                }
                 return `${u} -> ${normalized}`;
               });
               debugLog(`[Optimisation] Task ${task.id}: Sample URLs from window.moneyPagesMetrics (original -> normalized): ${sampleUrls.join('; ')}`, 'warn');
@@ -14981,17 +14967,11 @@
                   // Check if the exact URL we're looking for exists
                   const exactMatch = moneyPagesData.rows.find(r => {
                     const u = r.url || r.page_url || '';
+                    // Simple normalization (no normalizeUrlForDedupe)
                     let normalized = u.toLowerCase()
                       .replace(/^https?:\/\//, '')
                       .replace(/^www\./, '')
                       .replace(/\/$/, '');
-                    if (normalizeUrlForDedupe && typeof normalizeUrlForDedupe === 'function') {
-                      const deduped = normalizeUrlForDedupe(u);
-                      normalized = deduped.toLowerCase()
-                        .replace(/^https?:\/\//, '')
-                        .replace(/^www\./, '')
-                        .replace(/\/$/, '');
-                    }
                     return normalized === normalizedTaskUrl;
                   });
                   if (exactMatch) {
@@ -14999,17 +14979,11 @@
                   }
                   const sampleUrls = moneyPagesData.rows.slice(0, 5).map(r => {
                     const u = r.url || r.page_url || '';
+                    // Simple normalization (no normalizeUrlForDedupe)
                     let normalized = u.toLowerCase()
                       .replace(/^https?:\/\//, '')
                       .replace(/^www\./, '')
                       .replace(/\/$/, '');
-                    if (normalizeUrlForDedupe && typeof normalizeUrlForDedupe === 'function') {
-                      const deduped = normalizeUrlForDedupe(u);
-                      normalized = deduped.toLowerCase()
-                        .replace(/^https?:\/\//, '')
-                        .replace(/^www\./, '')
-                        .replace(/\/$/, '');
-                    }
                     return `${u} -> ${normalized}`;
                   });
                   debugLog(`[Optimisation] Task ${task.id}: Sample URLs from localStorage (original -> normalized): ${sampleUrls.join('; ')}`, 'warn');
