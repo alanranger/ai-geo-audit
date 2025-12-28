@@ -50930,6 +50930,12 @@ Final Score: ${score}/100`;
           gaioScore = Math.round(weightedSum);
         }
         
+        // Compute Money Pages aggregate from metrics (needed for Money Pages tile deltas)
+        const moneyMetricsFromAudit = scores.moneyPagesMetrics || auditData.moneyPagesMetrics || null;
+        const moneyAgg = (typeof computeMoneyPagesAggregateFromMetrics === 'function') 
+          ? computeMoneyPagesAggregateFromMetrics(moneyMetricsFromAudit)
+          : null;
+        
         return {
           gaioScore,
           aiSummaryScore: scores.aiSummaryScore || (typeof auditData.ai_summary_score === 'number' ? auditData.ai_summary_score : null),
@@ -50941,7 +50947,8 @@ Final Score: ${score}/100`;
             ctrPct: searchData.overview.ctr || searchData.ctr || 0
           } : null,
           moneySharePct: scores.moneyPagesMetrics?.overview ? 
-            (scores.moneyPagesMetrics.overview.shareOfImpressions || 0) * 100 : null
+            (scores.moneyPagesMetrics.overview.shareOfImpressions || 0) * 100 : null,
+          moneyAgg: moneyAgg // Add moneyAgg for Money Pages tile deltas
         };
       }
 
@@ -51012,9 +51019,9 @@ Final Score: ${score}/100`;
                     ctr: prevAuditFromHistory.gsc_ctr || 0
                   }
                 },
-                moneyPagesMetrics: prevAuditFromHistory.money_pages_summary ? {
+                moneyPagesMetrics: prevAuditFromHistory.money_pages_metrics || (prevAuditFromHistory.money_pages_summary ? {
                   overview: prevAuditFromHistory.money_pages_summary
-                } : null
+                } : null)
               };
               
               debugLog(`[Dashboard] Found previous audit_date: ${prevAuditDate} (current: ${currentAuditDate})`, 'info');
@@ -51042,9 +51049,9 @@ Final Score: ${score}/100`;
                       ctr: mostRecentData.gsc_ctr || 0
                     }
                   },
-                  moneyPagesMetrics: mostRecentData.money_pages_summary ? {
+                  moneyPagesMetrics: mostRecentData.money_pages_metrics || (mostRecentData.money_pages_summary ? {
                     overview: mostRecentData.money_pages_summary
-                  } : null
+                  } : null)
                 };
                 debugLog(`[Dashboard] Using most recent audit as previous: ${mostRecentDate}`, 'info');
                 return prevAuditData;
