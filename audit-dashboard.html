@@ -9047,21 +9047,39 @@
             goalText += `<div style="font-size: 0.7rem; color: #d1d5db; margin-top: 0.25rem; font-weight: 500;">${targetText}${dueText}</div>`;
           }
           
-          // Add delta if available (from progress or legacy) - format to 4 decimal places
+          // Add delta if available (from progress or legacy) - use same formatting as deltaLabel
           if (task.objective_progress && task.objective_progress.delta != null) {
             const delta = task.objective_progress.delta;
             const deltaColor = delta >= 0 ? '#34d399' : '#f87171'; // Brighter colors
-            const deltaSign = delta >= 0 ? '+' : '';
-            // Format delta to 4 decimal places for readability
-            const deltaFormatted = typeof delta === 'number' ? delta.toFixed(4) : String(delta);
-            goalText += `<div style="font-size: 0.7rem; color: ${deltaColor}; margin-top: 0.125rem; font-weight: 700;">Δ ${deltaSign}${deltaFormatted}</div>`;
+            
+            // Use same formatting as deltaLabel (percentage points for CTR, etc.)
+            const taskKpi = task.objective_kpi || task.primary_kpi || task.objective_metric || null;
+            let deltaFormatted;
+            if (taskKpi && KPI_DISPLAY_METADATA[taskKpi] && KPI_DISPLAY_METADATA[taskKpi].formatDelta) {
+              // Use KPI-specific formatting (e.g., converts 0.0016 to "+0.16pp" for CTR)
+              deltaFormatted = KPI_DISPLAY_METADATA[taskKpi].formatDelta(delta);
+            } else {
+              // Fallback: format to 4 decimal places
+              const deltaSign = delta >= 0 ? '+' : '';
+              deltaFormatted = `${deltaSign}${typeof delta === 'number' ? delta.toFixed(4) : String(delta)}`;
+            }
+            goalText += `<div style="font-size: 0.7rem; color: ${deltaColor}; margin-top: 0.125rem; font-weight: 700;">Δ ${deltaFormatted}</div>`;
           } else if (task.objective_delta != null) {
             // Legacy fallback
             const deltaColor = task.objective_delta >= 0 ? '#34d399' : '#f87171'; // Brighter colors
-            const deltaSign = task.objective_delta >= 0 ? '+' : '';
-            // Format delta to 4 decimal places for readability
-            const deltaFormatted = typeof task.objective_delta === 'number' ? task.objective_delta.toFixed(4) : String(task.objective_delta);
-            goalText += `<div style="font-size: 0.7rem; color: ${deltaColor}; margin-top: 0.125rem; font-weight: 700;">Δ ${deltaSign}${deltaFormatted}</div>`;
+            
+            // Use same formatting as deltaLabel
+            const taskKpi = task.objective_kpi || task.primary_kpi || task.objective_metric || null;
+            let deltaFormatted;
+            if (taskKpi && KPI_DISPLAY_METADATA[taskKpi] && KPI_DISPLAY_METADATA[taskKpi].formatDelta) {
+              // Use KPI-specific formatting
+              deltaFormatted = KPI_DISPLAY_METADATA[taskKpi].formatDelta(task.objective_delta);
+            } else {
+              // Fallback: format to 4 decimal places
+              const deltaSign = task.objective_delta >= 0 ? '+' : '';
+              deltaFormatted = `${deltaSign}${typeof task.objective_delta === 'number' ? task.objective_delta.toFixed(4) : String(task.objective_delta)}`;
+            }
+            goalText += `<div style="font-size: 0.7rem; color: ${deltaColor}; margin-top: 0.125rem; font-weight: 700;">Δ ${deltaFormatted}</div>`;
           }
           
           goalHtml = goalText;
