@@ -166,15 +166,43 @@ export default async function handler(req, res) {
         all_tracked: []
       };
 
-      // Get tracked URLs from active optimization tasks for all_tracked segment
-      const { data: activeTasks } = await supabase
+      // Get tracked URLs from optimization tasks for all_tracked segment
+      // IMPORTANT: For historical backfills, we need to include tasks that were active
+      // during the period being backfilled, not just currently active tasks.
+      // Strategy: Query ALL tasks and include:
+      // 1. Tasks that are currently active (status in ['in_progress', 'monitoring', 'planned'] with cycle_active > 0)
+      // 2. Tasks that were created before or during the period (dateEnd) - these were likely active during the period
+      // This prevents "All tracked" from showing zero when tasks are completed between periods.
+      const periodDate = new Date(dateEnd);
+      periodDate.setHours(23, 59, 59, 999); // End of day for the period
+      
+      // Query all tasks (we'll filter by date/status below)
+      const { data: allTasks } = await supabase
         .from('optimisation_tasks')
-        .select('target_url, target_url_clean')
-        .in('status', ['in_progress', 'monitoring', 'planned'])
-        .gt('cycle_active', 0);
+        .select('target_url, target_url_clean, status, cycle_active, created_at, updated_at');
       
       const trackedUrlPatterns = [];
-      if (activeTasks) {
+      if (allTasks && allTasks.length > 0) {
+        // Filter to tasks that are likely to have been active during the period
+        const activeTasks = allTasks.filter(task => {
+          // Always include if currently active (most reliable indicator)
+          if (['in_progress', 'monitoring', 'planned'].includes(task.status) && 
+              (task.cycle_active > 0)) {
+            return true;
+          }
+          // Include if task was created before/during the period
+          // (Even if now completed, it was likely active during the historical period)
+          if (task.created_at) {
+            const createdDate = new Date(task.created_at);
+            if (!isNaN(createdDate.getTime()) && createdDate <= periodDate) {
+              return true;
+            }
+          }
+          return false;
+        });
+        
+        console.log(`[Backfill] ${currentRunId} (${dateEnd}): Found ${activeTasks.length} active tasks (out of ${allTasks.length} total) for all_tracked segment`);
+        
         activeTasks.forEach(task => {
           // Normalize URLs - handle both full URLs and relative paths
           let url = task.target_url_clean || task.target_url;
@@ -206,6 +234,10 @@ export default async function handler(req, res) {
             }
           }
         });
+        
+        console.log(`[Backfill] ${currentRunId} (${dateEnd}): Found ${activeTasks.length} active tasks (out of ${allTasks.length} total) for all_tracked segment`);
+      } else {
+        console.warn(`[Backfill] ${currentRunId} (${dateEnd}): No optimization tasks found - all_tracked will be empty`);
       }
 
       pages.forEach(page => {

@@ -9047,17 +9047,21 @@
             goalText += `<div style="font-size: 0.7rem; color: #d1d5db; margin-top: 0.25rem; font-weight: 500;">${targetText}${dueText}</div>`;
           }
           
-          // Add delta if available (from progress or legacy)
+          // Add delta if available (from progress or legacy) - format to 4 decimal places
           if (task.objective_progress && task.objective_progress.delta != null) {
             const delta = task.objective_progress.delta;
             const deltaColor = delta >= 0 ? '#34d399' : '#f87171'; // Brighter colors
             const deltaSign = delta >= 0 ? '+' : '';
-            goalText += `<div style="font-size: 0.7rem; color: ${deltaColor}; margin-top: 0.125rem; font-weight: 700;">Δ ${deltaSign}${delta}</div>`;
+            // Format delta to 4 decimal places for readability
+            const deltaFormatted = typeof delta === 'number' ? delta.toFixed(4) : String(delta);
+            goalText += `<div style="font-size: 0.7rem; color: ${deltaColor}; margin-top: 0.125rem; font-weight: 700;">Δ ${deltaSign}${deltaFormatted}</div>`;
           } else if (task.objective_delta != null) {
             // Legacy fallback
             const deltaColor = task.objective_delta >= 0 ? '#34d399' : '#f87171'; // Brighter colors
             const deltaSign = task.objective_delta >= 0 ? '+' : '';
-            goalText += `<div style="font-size: 0.7rem; color: ${deltaColor}; margin-top: 0.125rem; font-weight: 700;">Δ ${deltaSign}${task.objective_delta}</div>`;
+            // Format delta to 4 decimal places for readability
+            const deltaFormatted = typeof task.objective_delta === 'number' ? task.objective_delta.toFixed(4) : String(task.objective_delta);
+            goalText += `<div style="font-size: 0.7rem; color: ${deltaColor}; margin-top: 0.125rem; font-weight: 700;">Δ ${deltaSign}${deltaFormatted}</div>`;
           }
           
           goalHtml = goalText;
@@ -9096,10 +9100,12 @@
             deltaHtml = `<span style="color: ${deltaColor}; font-weight: 600;">${deltaFormatted}</span>`;
           }
           
-          // Sparkline
+          // Sparkline - use delta direction for color, not first vs last point
           const sparklinePoints = task.sparklinePoints || [];
           if (sparklinePoints.length > 1) {
-            sparklineHtml = renderSparkline(sparklinePoints, 80, 24);
+            // Pass delta to determine color correctly
+            const sparklineDelta = delta != null ? delta : null;
+            sparklineHtml = renderSparkline(sparklinePoints, 80, 24, sparklineDelta);
           }
         }
         
@@ -10713,7 +10719,7 @@
     // Phase 9: Helper functions for dashboard features
     
     // Render sparkline SVG
-    function renderSparkline(points, width = 80, height = 24) {
+    function renderSparkline(points, width = 80, height = 24, delta = null) {
       if (!points || points.length < 2) return '–';
       
       const filtered = points.filter(p => p != null);
@@ -10733,7 +10739,15 @@
         return `${x},${y}`;
       }).join(' ');
       
-      const color = filtered[filtered.length - 1] >= filtered[0] ? '#10b981' : '#ef4444';
+      // Use delta direction if provided (matches delta column color), otherwise fall back to first vs last
+      let color = '#f59e0b'; // Amber default
+      if (delta != null) {
+        // Use delta direction: positive = green, negative = red
+        color = delta >= 0 ? '#10b981' : '#ef4444';
+      } else {
+        // Fallback: compare last point to first point
+        color = filtered[filtered.length - 1] >= filtered[0] ? '#10b981' : '#ef4444';
+      }
       
       return `<svg width="${width}" height="${height}" style="display: block;">
         <polyline points="${path}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
