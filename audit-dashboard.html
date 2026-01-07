@@ -12763,27 +12763,6 @@
           return { ai_overview: null, ai_citations: null };
         }
 
-        // CRITICAL: Log start with target URL (always log this for diagnosis)
-        // Also log to console for immediate visibility
-        console.log('[computeAiMetricsForPageUrl] START:', {
-          target: pageUrl,
-          normalized: canonTarget,
-          rowsCount: rows.length
-        });
-        debugLog(`[computeAiMetricsForPageUrl] START: target="${pageUrl}" → normalized="${canonTarget}", checking ${rows.length} rows`, 'warn');
-        
-        // Check first row structure
-        if (rows.length > 0) {
-          const firstRow = rows[0];
-          const sampleUrl = firstRow.best_url || firstRow.bestUrl || firstRow.targetUrl || firstRow.target_url || firstRow.ranking_url || firstRow.rankingUrl || firstRow.url || 'NO URL FIELD';
-          console.log('[computeAiMetricsForPageUrl] Sample row:', {
-            keyword: firstRow.keyword,
-            url: sampleUrl,
-            has_ai_overview: firstRow.has_ai_overview,
-            ai_alan_citations_count: firstRow.ai_alan_citations_count
-          });
-          debugLog(`[computeAiMetricsForPageUrl] Sample row: keyword="${firstRow.keyword || 'unknown'}", url="${sampleUrl}", has_ai_overview=${firstRow.has_ai_overview}, ai_alan_citations_count=${firstRow.ai_alan_citations_count}`, 'warn');
-        }
 
         let citations = 0;
         let overviewOn = false;
@@ -12838,33 +12817,6 @@
           
           const urlMatches = exactMatch || lastSegmentMatch || segmentContainsMatch || domainPathMatch || keywordMatch;
           
-          // Log photography-courses URLs to console for immediate debugging
-          if (rowBestUrl && rowBestUrl.toLowerCase().includes('photography-courses')) {
-            console.log('[computeAiMetricsForPageUrl] PHOTOGRAPHY-URL:', {
-              keyword: r.keyword,
-              rowUrl: rowBestUrl,
-              normalized: rowBestUrlCanon,
-              target: canonTarget,
-              targetPath: targetPath,
-              rowPath: rowPath,
-              targetLastSegment: targetLastSegment,
-              rowLastSegment: rowLastSegment,
-              urlMatches: urlMatches,
-              hasOverview: r.has_ai_overview === true || r.ai_overview_present_any === true,
-              citations: r.ai_alan_citations_count
-            });
-          }
-          
-          // Log successful matches to console
-          if (urlMatches) {
-            console.log('[computeAiMetricsForPageUrl] ✓ MATCH FOUND:', {
-              keyword: r.keyword,
-              rowUrl: rowBestUrl,
-              target: canonTarget,
-              hasOverview: r.has_ai_overview === true || r.ai_overview_present_any === true,
-              citations: r.ai_alan_citations_count
-            });
-          }
           
           if (urlMatches) {
             // This keyword has this URL as its target - use its AI data
