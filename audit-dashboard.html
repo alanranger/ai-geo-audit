@@ -12784,6 +12784,21 @@
           }, null, 2)}`, 'info');
         }
         
+        // TARGETED DIAGNOSTIC: Find and log all rows that contain the target URL path
+        const targetPathSegment = canonTarget.includes('/') ? canonTarget.split('/').pop() : canonTarget;
+        const relevantRows = rows.filter(r => {
+          const rowUrl = r.best_url || r.bestUrl || r.targetUrl || r.target_url || r.ranking_url || r.rankingUrl || r.url || '';
+          return rowUrl && (rowUrl.toLowerCase().includes(targetPathSegment) || rowUrl.toLowerCase().includes('photography-courses'));
+        });
+        if (relevantRows.length > 0) {
+          debugLog(`[computeAiMetricsForPageUrl] TARGETED DIAGNOSTIC: Found ${relevantRows.length} rows containing "${targetPathSegment}" or "photography-courses":`, 'info');
+          relevantRows.slice(0, 5).forEach((r, idx) => {
+            const rowUrl = r.best_url || r.bestUrl || r.targetUrl || r.target_url || r.ranking_url || r.rankingUrl || r.url || '';
+            const normalizedRowUrl = normalizeUrl(rowUrl);
+            debugLog(`[computeAiMetricsForPageUrl] TARGETED DIAGNOSTIC [${idx}]: keyword="${r.keyword || 'unknown'}", rowUrl="${rowUrl}", normalized="${normalizedRowUrl}", target="${canonTarget}", match=${normalizedRowUrl === canonTarget}, hasOverview=${r.has_ai_overview === true || r.ai_overview_present_any === true}, citations=${r.ai_alan_citations_count != null ? r.ai_alan_citations_count : 'null'}`, 'info');
+          });
+        }
+        
         // Log sample of available URLs in the data for debugging (enhanced logging)
         const sampleUrls = rows.slice(0, 10).map(r => {
           const bestUrl = r.best_url || r.targetUrl || r.ranking_url || '';
@@ -12916,21 +12931,42 @@
         let finalCitations = null;
         
         // Fix 4: Ensure consistent return values
-        if (matchedKeyword) {
+        // CRITICAL: Check if matchedKeyword is truthy (not null, not empty string, not undefined)
+        const hasMatch = matchedKeyword && String(matchedKeyword).trim() !== '';
+        
+        if (hasMatch) {
           // We found a match - return actual values (even if overview is false or citations is 0)
           finalOverview = overviewOn; // boolean (true/false)
           // CRITICAL FIX: Ensure totalCitations is a valid number (handle NaN, null, undefined)
           const safeTotalCitations = (typeof totalCitations === 'number' && !isNaN(totalCitations) && totalCitations >= 0) ? totalCitations : 0;
           finalCitations = safeTotalCitations; // Ensure it's always a number, never null
-          debugLog(`[computeAiMetricsForPageUrl] DIAGNOSTIC: Match found - finalOverview=${finalOverview}, safeTotalCitations=${safeTotalCitations}, finalCitations=${finalCitations}`, 'info');
+          
+          // DEFENSIVE: Double-check that finalCitations is actually a number (should never be null here)
+          if (finalCitations === null || finalCitations === undefined) {
+            console.error(`[computeAiMetricsForPageUrl] CRITICAL ERROR: finalCitations is ${finalCitations} despite match found! matchedKeyword="${matchedKeyword}", totalCitations=${totalCitations}, safeTotalCitations=${safeTotalCitations}`);
+            finalCitations = 0; // Force to 0 as fallback
+          }
+          
+          debugLog(`[computeAiMetricsForPageUrl] DIAGNOSTIC: Match found - matchedKeyword="${matchedKeyword}", finalOverview=${finalOverview}, safeTotalCitations=${safeTotalCitations}, finalCitations=${finalCitations}`, 'info');
         } else {
           // No match found - return null for both (unknown state)
           finalOverview = null;
           finalCitations = null;
-          debugLog(`[computeAiMetricsForPageUrl] DIAGNOSTIC: No match found - returning null for both`, 'info');
+          debugLog(`[computeAiMetricsForPageUrl] DIAGNOSTIC: No match found - matchedKeyword="${matchedKeyword || 'null'}", returning null for both`, 'info');
         }
         
-        debugLog(`[computeAiMetricsForPageUrl] Final result: targetUrl="${canonTarget}", matchedKeyword="${matchedKeyword || 'none'}", overview=${finalOverview}, citations=${finalCitations}, citationsFromTargetUrl=${citationsFromTargetUrl}`, matchedKeyword ? 'success' : 'warn');
+        // FINAL VALIDATION: Ensure return values are consistent
+        if ((finalOverview !== null && finalCitations === null) || (finalOverview === null && finalCitations !== null)) {
+          console.error(`[computeAiMetricsForPageUrl] INCONSISTENCY DETECTED: overview=${finalOverview}, citations=${finalCitations}, matchedKeyword="${matchedKeyword}"`);
+          // Force consistency: if one is null, both must be null
+          if (finalOverview === null || finalCitations === null) {
+            finalOverview = null;
+            finalCitations = null;
+            debugLog(`[computeAiMetricsForPageUrl] Forced consistency: both set to null due to inconsistency`, 'warn');
+          }
+        }
+        
+        debugLog(`[computeAiMetricsForPageUrl] Final result: targetUrl="${canonTarget}", matchedKeyword="${matchedKeyword || 'none'}", overview=${finalOverview}, citations=${finalCitations}, citationsFromTargetUrl=${citationsFromTargetUrl}`, hasMatch ? 'success' : 'warn');
 
         return { ai_overview: finalOverview, ai_citations: finalCitations };
       };
