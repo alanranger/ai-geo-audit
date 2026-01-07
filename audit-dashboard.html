@@ -6647,6 +6647,50 @@
                       segment: 'money_pages',
                       captured_at: new Date().toISOString()
                     };
+                    
+                    // FIX: Also fetch AI data for this URL (same logic as Add Measurement)
+                    try {
+                      const propertyUrl = document.getElementById('propertyUrl')?.value || 
+                                          localStorage.getItem('gsc_property_url') || 
+                                          localStorage.getItem('last_property_url') || 
+                                          'https://www.alanranger.com';
+                      if (typeof fetchLatestAuditFromSupabase === 'function') {
+                        const latestAuditFromSupabase = await fetchLatestAuditFromSupabase(propertyUrl, false);
+                        if (latestAuditFromSupabase && latestAuditFromSupabase.ranking_ai_data) {
+                          try {
+                            const rankingAiData = latestAuditFromSupabase.ranking_ai_data;
+                            if (rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
+                              let aiRows = rankingAiData.combinedRows;
+                              // Try both URL formats
+                              const urlsToTry = [pageUrlForGsc, taskUrl];
+                              let aiForUrl = { ai_overview: null, ai_citations: null };
+                              
+                              for (const urlToCheck of urlsToTry) {
+                                if (urlToCheck) {
+                                  const result = (typeof window.computeAiMetricsForPageUrl === 'function')
+                                    ? window.computeAiMetricsForPageUrl(urlToCheck, aiRows)
+                                    : { ai_overview: null, ai_citations: null };
+                                  
+                                  if (result.ai_overview !== null && result.ai_citations !== null) {
+                                    aiForUrl = result;
+                                    break;
+                                  }
+                                }
+                              }
+                              
+                              if (aiForUrl.ai_overview !== null && aiForUrl.ai_citations !== null) {
+                                baselineMetrics.ai_overview = aiForUrl.ai_overview === true ? true : (aiForUrl.ai_overview === false ? false : null);
+                                baselineMetrics.ai_citations = aiForUrl.ai_citations != null ? Number(aiForUrl.ai_citations) : null;
+                              }
+                            }
+                          } catch (rankingErr) {
+                            // ignore - continue without AI data
+                          }
+                        }
+                      }
+                    } catch (aiErr) {
+                      // ignore - continue without AI data
+                    }
                   }
                 }
               } catch (e) {
@@ -6672,6 +6716,101 @@
                 segment: src.segment || 'money_pages',
                 captured_at: new Date().toISOString()
               };
+            }
+
+            // FIX: For URL tasks, fetch AI Overview/Citations using same logic as "Add Measurement"
+            // This ensures consistency between task creation and subsequent measurements
+            if (baselineMetrics && taskUrl) {
+              try {
+                // Fetch latest audit from Supabase to get ranking_ai_data (same as Add Measurement)
+                const propertyUrl = document.getElementById('propertyUrl')?.value || 
+                                    localStorage.getItem('gsc_property_url') || 
+                                    localStorage.getItem('last_property_url') || 
+                                    'https://www.alanranger.com';
+                if (typeof fetchLatestAuditFromSupabase === 'function') {
+                  const latestAuditFromSupabase = await fetchLatestAuditFromSupabase(propertyUrl, false);
+                  if (latestAuditFromSupabase && latestAuditFromSupabase.ranking_ai_data) {
+                    try {
+                      const rankingAiData = latestAuditFromSupabase.ranking_ai_data;
+                      if (rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
+                        // Get combinedRows from multiple sources (same priority as Add Measurement)
+                        let aiRows = [];
+                        if (typeof window.getRankingAiCombinedRows === 'function') {
+                          aiRows = window.getRankingAiCombinedRows();
+                        }
+                        if (aiRows.length === 0 && typeof window.rankingAiData !== 'undefined' && Array.isArray(window.rankingAiData)) {
+                          aiRows = window.rankingAiData;
+                        }
+                        if (aiRows.length === 0 && rankingAiData.combinedRows) {
+                          aiRows = rankingAiData.combinedRows;
+                        }
+                        if (aiRows.length === 0) {
+                          try {
+                            const local = localStorage.getItem('rankingAiData');
+                            if (local) {
+                              const parsed = JSON.parse(local);
+                              if (parsed && Array.isArray(parsed.combinedRows)) {
+                                aiRows = parsed.combinedRows;
+                              }
+                            }
+                          } catch (e) {
+                            // ignore
+                          }
+                        }
+                        
+                        // Fix 1: Ensure combinedRows is loaded before calling computeAiMetricsForPageUrl
+                        if (aiRows.length === 0) {
+                          debugLog(`[Optimisation] URL task creation: No combinedRows loaded, attempting to reload from latest audit...`, 'warn');
+                          // Try to reload from latest audit if we just fetched it
+                          if (latestAuditFromSupabase && latestAuditFromSupabase.ranking_ai_data) {
+                            const rankingAiData = latestAuditFromSupabase.ranking_ai_data;
+                            if (rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
+                              aiRows = rankingAiData.combinedRows;
+                              debugLog(`[Optimisation] URL task creation: Reloaded ${aiRows.length} combinedRows from latest audit`, 'info');
+                            }
+                          }
+                        }
+                        
+                        // Try both the full GSC URL and the original task URL (same as Add Measurement)
+                        const urlsToTry = [taskUrlAbs || taskUrl, taskUrl];
+                        let aiForUrl = { ai_overview: null, ai_citations: null };
+                        
+                        // Only call computeAiMetricsForPageUrl if we have data
+                        if (aiRows.length > 0) {
+                          for (const urlToCheck of urlsToTry) {
+                            if (urlToCheck) {
+                              const result = (typeof window.computeAiMetricsForPageUrl === 'function')
+                                ? window.computeAiMetricsForPageUrl(urlToCheck, aiRows)
+                                : { ai_overview: null, ai_citations: null };
+                              
+                              // Use first result where BOTH values are non-null (consistent match found)
+                              if (result.ai_overview !== null && result.ai_citations !== null) {
+                                aiForUrl = result;
+                                debugLog(`[Optimisation] URL task creation: AI lookup for ${urlToCheck} - Overview: ${aiForUrl.ai_overview}, Citations: ${aiForUrl.ai_citations}`, 'info');
+                                break;
+                              }
+                            }
+                          }
+                        } else {
+                          debugLog(`[Optimisation] URL task creation: Cannot lookup AI data - no combinedRows available (${aiRows.length} rows)`, 'warn');
+                        }
+                        
+                        // Add AI data to baselineMetrics (same format as Add Measurement)
+                        if (aiForUrl.ai_overview !== null && aiForUrl.ai_citations !== null) {
+                          baselineMetrics.ai_overview = aiForUrl.ai_overview === true ? true : (aiForUrl.ai_overview === false ? false : null);
+                          baselineMetrics.ai_citations = aiForUrl.ai_citations != null ? Number(aiForUrl.ai_citations) : null;
+                          debugLog(`[Optimisation] URL task creation: Added AI data to baseline - Overview: ${baselineMetrics.ai_overview}, Citations: ${baselineMetrics.ai_citations}`, 'success');
+                        }
+                      }
+                    } catch (rankingErr) {
+                      debugLog(`[Optimisation] URL task creation: Error loading ranking_ai_data: ${rankingErr.message}`, 'warn');
+                    }
+                  }
+                }
+              } catch (fetchErr) {
+                debugLog(`[Optimisation] URL task creation: Error fetching AI data: ${fetchErr.message}`, 'warn');
+                // Don't fail task creation if AI data fetch fails - continue without it
+              }
             }
 
             // If impressions are missing, don't create a baseline measurement (avoids "0/0/0%" baselines).
@@ -12626,12 +12765,18 @@
 
         debugLog(`[computeAiMetricsForPageUrl] Starting lookup for URL: "${pageUrl}" (normalized: "${canonTarget}") with ${rows.length} rows`, 'info');
         
-        // Log sample of available URLs in the data for debugging
-        const sampleUrls = rows.slice(0, 5).map(r => {
+        // Log sample of available URLs in the data for debugging (enhanced logging)
+        const sampleUrls = rows.slice(0, 10).map(r => {
           const bestUrl = r.best_url || r.targetUrl || r.ranking_url || '';
-          return { keyword: r.keyword, bestUrl: bestUrl, normalized: normalizeUrl(bestUrl) };
+          return {
+            keyword: r.keyword,
+            bestUrl: bestUrl,
+            normalized: normalizeUrl(bestUrl),
+            hasOverview: r.has_ai_overview === true || r.ai_overview_present_any === true,
+            citations: r.ai_alan_citations_count != null ? Number(r.ai_alan_citations_count) : 0
+          };
         });
-        debugLog(`[computeAiMetricsForPageUrl] Sample URLs from data (first 5): ${JSON.stringify(sampleUrls)}`, 'info');
+        debugLog(`[computeAiMetricsForPageUrl] Sample URLs from data (first 10): ${JSON.stringify(sampleUrls, null, 2)}`, 'info');
 
         let citations = 0;
         let overviewOn = false;
@@ -12644,17 +12789,32 @@
         rows.forEach((r, idx) => {
           // Check if this URL is the target/best URL for this keyword
           const rowBestUrl = r.best_url || r.targetUrl || r.ranking_url || '';
+          if (!rowBestUrl) return; // Skip if no URL
+          
           const rowBestUrlCanon = normalizeUrl(rowBestUrl);
           
           // Also check path-only matching (in case domains differ slightly)
           const targetPath = canonTarget.includes('/') ? canonTarget.split('/').slice(1).join('/') : '';
           const rowPath = rowBestUrlCanon.includes('/') ? rowBestUrlCanon.split('/').slice(1).join('/') : '';
           
-          // Match if exact URL matches OR path matches (more flexible)
+          // Enhanced matching logic (Fix 2)
           const exactMatch = rowBestUrlCanon === canonTarget;
           const pathMatch = rowPath === targetPath && rowPath !== '';
-          const includesMatch = rowBestUrlCanon && (rowBestUrlCanon.includes(canonTarget) || canonTarget.includes(rowBestUrlCanon));
-          const urlMatches = (rowBestUrlCanon && (exactMatch || pathMatch || includesMatch));
+          
+          // Flexible matching (handles partial matches and path-only comparisons)
+          const includesMatch = rowBestUrlCanon && (
+            rowBestUrlCanon.includes(canonTarget) || 
+            canonTarget.includes(rowBestUrlCanon) ||
+            (targetPath && rowBestUrlCanon.includes(targetPath)) ||
+            (rowPath && canonTarget.includes(rowPath))
+          );
+          
+          const urlMatches = exactMatch || pathMatch || includesMatch;
+          
+          // Enhanced debug logging (Fix 3) - log match attempts for relevant rows
+          if (urlMatches || (rowBestUrlCanon && (rowBestUrlCanon.includes('photography-courses') || canonTarget.includes('photography-courses')))) {
+            debugLog(`[computeAiMetricsForPageUrl] Match attempt: keyword="${r.keyword}", rowUrl="${rowBestUrl}", normalized="${rowBestUrlCanon}", target="${canonTarget}", exactMatch=${exactMatch}, pathMatch=${pathMatch}, includesMatch=${includesMatch}, urlMatches=${urlMatches}`, 'info');
+          }
           
           // Log detailed comparison for first few rows or if there's a potential match
           if (idx < 3 || urlMatches || (rowBestUrlCanon && rowBestUrlCanon.includes('photography-courses'))) {
@@ -12719,17 +12879,18 @@
         let finalOverview = null;
         let finalCitations = null;
         
+        // Fix 4: Ensure consistent return values
         if (matchedKeyword) {
           // We found a match - return actual values (even if overview is false or citations is 0)
           finalOverview = overviewOn; // boolean (true/false)
-          finalCitations = totalCitations; // number (0 or higher)
+          finalCitations = totalCitations >= 0 ? totalCitations : 0; // Ensure it's always a number, never null
         } else {
           // No match found - return null for both (unknown state)
           finalOverview = null;
           finalCitations = null;
         }
         
-        debugLog(`[computeAiMetricsForPageUrl] Final result: targetUrl="${canonTarget}", overviewOn=${finalOverview}, totalCitations=${finalCitations}, citationsFromTargetUrl=${citationsFromTargetUrl}, matchedKeyword="${matchedKeyword || 'none'}"`, matchedKeyword ? 'success' : 'warn');
+        debugLog(`[computeAiMetricsForPageUrl] Final result: targetUrl="${canonTarget}", matchedKeyword="${matchedKeyword || 'none'}", overview=${finalOverview}, citations=${finalCitations}, citationsFromTargetUrl=${citationsFromTargetUrl}`, matchedKeyword ? 'success' : 'warn');
 
         return { ai_overview: finalOverview, ai_citations: finalCitations };
       };
@@ -13903,31 +14064,49 @@
                   
                   debugLog(`[Optimisation] URL task: Found ${aiRows.length} combinedRows for AI lookup`, 'info');
                   
-                  // Try both the full GSC URL and the original task URL (in case formats differ)
-                  const urlsToTry = [pageUrlForGsc, taskUrlForPage];
-                  
-                  let aiForUrl = { ai_overview: null, ai_citations: null };
-                  for (const urlToCheck of urlsToTry) {
-                    if (urlToCheck) {
-                      const result = (typeof window.computeAiMetricsForPageUrl === 'function')
-                        ? window.computeAiMetricsForPageUrl(urlToCheck, aiRows)
-                        : { ai_overview: null, ai_citations: null };
-                      
-                      // Use first result where BOTH values are non-null (consistent match found)
-                      // This ensures we only use results where a match was definitively found
-                      if (result.ai_overview !== null && result.ai_citations !== null) {
-                        aiForUrl = result;
-                        debugLog(`[Optimisation] URL task: AI lookup for ${urlToCheck} - Overview: ${aiForUrl.ai_overview}, Citations: ${aiForUrl.ai_citations}`, 'info');
-                        break;
-                      } else if (result.ai_overview !== null || result.ai_citations !== null) {
-                        // Inconsistent result (shouldn't happen, but log it for debugging)
-                        debugLog(`[Optimisation] URL task: Inconsistent result from computeAiMetricsForPageUrl for ${urlToCheck} - Overview: ${result.ai_overview}, Citations: ${result.ai_citations}`, 'warn');
+                  // Fix 1: Ensure combinedRows is loaded before calling computeAiMetricsForPageUrl
+                  if (aiRows.length === 0) {
+                    debugLog(`[Optimisation] URL task: No combinedRows loaded, attempting to reload from Supabase...`, 'warn');
+                    // Try to reload from Supabase if we just fetched it
+                    if (latestAuditFromSupabase && latestAuditFromSupabase.ranking_ai_data) {
+                      const rankingAiData = latestAuditFromSupabase.ranking_ai_data;
+                      if (rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
+                        aiRows = rankingAiData.combinedRows;
+                        debugLog(`[Optimisation] URL task: Reloaded ${aiRows.length} combinedRows from latest audit`, 'info');
                       }
                     }
                   }
                   
-                  if (aiForUrl.ai_overview === null && aiForUrl.ai_citations === null) {
-                    debugLog(`[Optimisation] URL task: No AI data found for ${pageUrlForGsc} or ${taskUrlForPage} in ${aiRows.length} rows`, 'warn');
+                  // Only call computeAiMetricsForPageUrl if we have data
+                  let aiForUrl = { ai_overview: null, ai_citations: null };
+                  if (aiRows.length > 0) {
+                    // Try both the full GSC URL and the original task URL (in case formats differ)
+                    const urlsToTry = [pageUrlForGsc, taskUrlForPage];
+                    
+                    for (const urlToCheck of urlsToTry) {
+                      if (urlToCheck) {
+                        const result = (typeof window.computeAiMetricsForPageUrl === 'function')
+                          ? window.computeAiMetricsForPageUrl(urlToCheck, aiRows)
+                          : { ai_overview: null, ai_citations: null };
+                        
+                        // Use first result where BOTH values are non-null (consistent match found)
+                        // This ensures we only use results where a match was definitively found
+                        if (result.ai_overview !== null && result.ai_citations !== null) {
+                          aiForUrl = result;
+                          debugLog(`[Optimisation] URL task: AI lookup for ${urlToCheck} - Overview: ${aiForUrl.ai_overview}, Citations: ${aiForUrl.ai_citations}`, 'info');
+                          break;
+                        } else if (result.ai_overview !== null || result.ai_citations !== null) {
+                          // Inconsistent result (shouldn't happen, but log it for debugging)
+                          debugLog(`[Optimisation] URL task: Inconsistent result from computeAiMetricsForPageUrl for ${urlToCheck} - Overview: ${result.ai_overview}, Citations: ${result.ai_citations}`, 'warn');
+                        }
+                      }
+                    }
+                    
+                    if (aiForUrl.ai_overview === null && aiForUrl.ai_citations === null) {
+                      debugLog(`[Optimisation] URL task: No AI data found for ${pageUrlForGsc} or ${taskUrlForPage} in ${aiRows.length} rows`, 'warn');
+                    }
+                  } else {
+                    debugLog(`[Optimisation] URL task: Cannot lookup AI data - no combinedRows available (${aiRows.length} rows)`, 'warn');
                   }
                   
                   currentMetrics = {
@@ -14896,31 +15075,49 @@
                   
                   debugLog(`[Optimisation] Rebaseline URL task: Found ${aiRows.length} combinedRows for AI lookup`, 'info');
                   
-                  // Try both the full GSC URL and the original task URL (in case formats differ)
-                  const urlsToTry = [pageUrlForGsc, taskUrlForPage];
-                  
-                  let aiForUrl = { ai_overview: null, ai_citations: null };
-                  for (const urlToCheck of urlsToTry) {
-                    if (urlToCheck) {
-                      const result = (typeof window.computeAiMetricsForPageUrl === 'function')
-                        ? window.computeAiMetricsForPageUrl(urlToCheck, aiRows)
-                        : { ai_overview: null, ai_citations: null };
-                      
-                      // Use first result where BOTH values are non-null (consistent match found)
-                      // This ensures we only use results where a match was definitively found
-                      if (result.ai_overview !== null && result.ai_citations !== null) {
-                        aiForUrl = result;
-                        debugLog(`[Optimisation] Rebaseline URL task: AI lookup for ${urlToCheck} - Overview: ${aiForUrl.ai_overview}, Citations: ${aiForUrl.ai_citations}`, 'info');
-                        break;
-                      } else if (result.ai_overview !== null || result.ai_citations !== null) {
-                        // Inconsistent result (shouldn't happen, but log it for debugging)
-                        debugLog(`[Optimisation] Rebaseline URL task: Inconsistent result from computeAiMetricsForPageUrl for ${urlToCheck} - Overview: ${result.ai_overview}, Citations: ${result.ai_citations}`, 'warn');
+                  // Fix 1: Ensure combinedRows is loaded before calling computeAiMetricsForPageUrl
+                  if (aiRows.length === 0) {
+                    debugLog(`[Optimisation] Rebaseline URL task: No combinedRows loaded, attempting to reload from Supabase...`, 'warn');
+                    // Try to reload from Supabase if we just fetched it
+                    if (latestAuditFromSupabase && latestAuditFromSupabase.ranking_ai_data) {
+                      const rankingAiData = latestAuditFromSupabase.ranking_ai_data;
+                      if (rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
+                        aiRows = rankingAiData.combinedRows;
+                        debugLog(`[Optimisation] Rebaseline URL task: Reloaded ${aiRows.length} combinedRows from latest audit`, 'info');
                       }
                     }
                   }
                   
-                  if (aiForUrl.ai_overview === null && aiForUrl.ai_citations === null) {
-                    debugLog(`[Optimisation] Rebaseline URL task: No AI data found for ${pageUrlForGsc} or ${taskUrlForPage} in ${aiRows.length} rows`, 'warn');
+                  // Only call computeAiMetricsForPageUrl if we have data
+                  let aiForUrl = { ai_overview: null, ai_citations: null };
+                  if (aiRows.length > 0) {
+                    // Try both the full GSC URL and the original task URL (in case formats differ)
+                    const urlsToTry = [pageUrlForGsc, taskUrlForPage];
+                    
+                    for (const urlToCheck of urlsToTry) {
+                      if (urlToCheck) {
+                        const result = (typeof window.computeAiMetricsForPageUrl === 'function')
+                          ? window.computeAiMetricsForPageUrl(urlToCheck, aiRows)
+                          : { ai_overview: null, ai_citations: null };
+                        
+                        // Use first result where BOTH values are non-null (consistent match found)
+                        // This ensures we only use results where a match was definitively found
+                        if (result.ai_overview !== null && result.ai_citations !== null) {
+                          aiForUrl = result;
+                          debugLog(`[Optimisation] Rebaseline URL task: AI lookup for ${urlToCheck} - Overview: ${aiForUrl.ai_overview}, Citations: ${aiForUrl.ai_citations}`, 'info');
+                          break;
+                        } else if (result.ai_overview !== null || result.ai_citations !== null) {
+                          // Inconsistent result (shouldn't happen, but log it for debugging)
+                          debugLog(`[Optimisation] Rebaseline URL task: Inconsistent result from computeAiMetricsForPageUrl for ${urlToCheck} - Overview: ${result.ai_overview}, Citations: ${result.ai_citations}`, 'warn');
+                        }
+                      }
+                    }
+                    
+                    if (aiForUrl.ai_overview === null && aiForUrl.ai_citations === null) {
+                      debugLog(`[Optimisation] Rebaseline URL task: No AI data found for ${pageUrlForGsc} or ${taskUrlForPage} in ${aiRows.length} rows`, 'warn');
+                    }
+                  } else {
+                    debugLog(`[Optimisation] Rebaseline URL task: Cannot lookup AI data - no combinedRows available (${aiRows.length} rows)`, 'warn');
                   }
                   
                   currentMetrics = {
