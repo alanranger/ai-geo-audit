@@ -29402,6 +29402,9 @@ Final Score: ${score}/100`;
                   <th id="money-sort-position" style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; transition: background 0.2s; line-height: 1.2;" onmouseover="this.style.background='#e2e8f0';" onmouseout="this.style.background='transparent';" title="Click to sort by Avg Position">
                     <div>Avg</div><div>Position</div>${getSortIcon('position')}
                   </th>
+                  <th style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap;" title="AI citations (unique keywords that cite this URL in AI Overview). Latest audit only; fetched on demand.">
+                    AI citations
+                  </th>
                   <th id="money-sort-opportunity" style="text-align: center; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; transition: background 0.2s; white-space: nowrap;" onmouseover="this.style.background='#e2e8f0';" onmouseout="this.style.background='transparent';" title="Click to sort by Opportunity">
                     Opportunity${getSortIcon('opportunity')}
                   </th>
@@ -29510,6 +29513,7 @@ Final Score: ${score}/100`;
                 })()}
               </td>
               <td style="padding: 0.75rem; text-align: right; color: ${posColor}; font-weight: 600; vertical-align: top; white-space: nowrap;">${row.avgPosition ? row.avgPosition.toFixed(1) : '—'}</td>
+              <td style="padding: 0.75rem; text-align: right; font-weight: 600; vertical-align: top; white-space: nowrap;" class="ai-citation-cell-opportunity" data-page-url="${row.url || ''}">⏳</td>
               <td style="padding: 0.75rem; text-align: center; vertical-align: top;">
                 ${(() => {
                   // Split categoryLabel into main part and bracketed part
@@ -30474,6 +30478,10 @@ Final Score: ${score}/100`;
           const tableHtml = await renderMoneyPagesTable(filteredRows, currentPage, rowsPerPage);
           if (tableHtml && typeof tableHtml === 'string' && tableHtml.trim().length > 0) {
             tableContainer.innerHTML = tableHtml;
+            // Populate AI citations per URL (latest audit only)
+            if (typeof populateMoneyPagesAiCitations === 'function') {
+              populateMoneyPagesAiCitations(tableContainer);
+            }
           } else {
             debugLog(`⚠ renderMoneyPagesTable returned invalid value: ${typeof tableHtml}, length: ${tableHtml?.length || 0}`, 'warn');
             tableContainer.innerHTML = '<div style="font-size: 0.85rem; color: #999; padding: 1rem; text-align: center;">Error rendering table. Please refresh the page.</div>';
@@ -36243,6 +36251,65 @@ Final Score: ${score}/100`;
         `;
         
         return tableHtml;
+      }
+
+      // Populate AI citations for Money Pages Opportunity table (latest audit only)
+      function populateMoneyPagesAiCitations(container) {
+        if (!container) return;
+        if (!window.moneyPagesAiCitationCache) {
+          window.moneyPagesAiCitationCache = new Map();
+        }
+        const propertyUrl =
+          document.getElementById('propertyUrl')?.value ||
+          localStorage.getItem('gsc_property_url') ||
+          localStorage.getItem('last_property_url') ||
+          'https://www.alanranger.com';
+
+        const renderCitation = (cell, count, keywords) => {
+          cell.textContent = typeof count === 'number' ? count.toString() : '—';
+          if (keywords && keywords.length) {
+            cell.title = `Keywords citing this URL: ${keywords.join(', ')}`;
+          }
+        };
+
+        const cells = container.querySelectorAll('.ai-citation-cell-opportunity');
+        cells.forEach(cell => {
+          const url = cell.getAttribute('data-page-url');
+          if (!url) {
+            cell.textContent = '—';
+            return;
+          }
+          const cacheKey = url.toLowerCase();
+          if (window.moneyPagesAiCitationCache.has(cacheKey)) {
+            const cached = window.moneyPagesAiCitationCache.get(cacheKey);
+            renderCitation(cell, cached.count, cached.keywords);
+            return;
+          }
+
+          cell.textContent = '⏳';
+          const endpoint = apiUrl(
+            `/api/supabase/query-keywords-citing-url?property_url=${encodeURIComponent(propertyUrl)}&target_url=${encodeURIComponent(url)}`
+          );
+
+          fetch(endpoint)
+            .then(async res => {
+              if (!res.ok) {
+                const txt = await res.text().catch(() => 'error');
+                throw new Error(`HTTP ${res.status}: ${txt}`);
+              }
+              return res.json();
+            })
+            .then(data => {
+              const keywords = Array.isArray(data?.data) ? data.data.map(k => k.keyword).filter(Boolean) : [];
+              const count = typeof data?.count === 'number' ? data.count : keywords.length;
+              window.moneyPagesAiCitationCache.set(cacheKey, { count, keywords });
+              renderCitation(cell, count, keywords);
+            })
+            .catch(err => {
+              debugLog(`[Money Pages] AI citations fetch failed for ${url}: ${err.message}`, 'warn');
+              cell.textContent = '—';
+            });
+        });
       }
       
       // Function to create Top Pages section (full width, below pillar cards)
