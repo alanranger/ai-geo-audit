@@ -17026,19 +17026,18 @@
     const debugLogEntries = [];
     let debugLogFilter = 'all'; // 'all', 'warnings-errors'
     
-    // Verbosity control: 'minimal' (errors/warnings only), 'normal' (errors/warnings/info), 'verbose' (everything)
-    // Only 'minimal' and 'normal' save to Supabase to reduce database bloat
-    let debugLogVerbosity = 'minimal'; // Default: only save important logs
-    
     // Patterns to suppress (common verbose logs that aren't needed)
     const suppressedPatterns = [
       /✓.*rendered successfully/i,
       /✓.*loaded successfully/i,
       /✓.*stored globally/i,
       /✓.*initialized/i,
-      /Money Pages:.*/i, // Too verbose, only log errors
-      /🎯.*renderMoneyPages/i, // Too verbose
-      /\[Optimisation\].*URL task:.*Inconsistent result/i, // This is handled by the actual error log
+      /Money Pages:.*/i,
+      /🎯.*renderMoneyPages/i,
+      /\[Optimisation\].*URL task:.*Inconsistent result/i,
+      /\[Optimisation\].*Loaded.*keywords/i,
+      /\[Optimisation\].*Found.*combinedRows/i,
+      /\[Optimisation\].*Fetching.*audit/i,
     ];
     
     // Generate session ID for tracking browser sessions (persists for page lifetime)
@@ -17063,27 +17062,10 @@
         ? message.substring(0, maxMessageLength) + '...[truncated]'
         : message;
       
-      // Check if this log should be suppressed
+      // Check if this log should be suppressed (don't show in UI at all)
       const shouldSuppress = suppressedPatterns.some(pattern => pattern.test(truncatedMessage));
       if (shouldSuppress && type === 'info') {
-        // Still show in UI but don't save to Supabase
-        const timestamp = new Date().toISOString();
-        const entry = {
-          timestamp,
-          message: truncatedMessage,
-          type
-        };
-        debugLogEntries.push(entry);
-        
-        const logElement = document.getElementById('debugLog');
-        if (logElement && debugLogFilter === 'all') {
-          const entryDiv = document.createElement('div');
-          entryDiv.className = `debug-log-entry ${type}`;
-          entryDiv.innerHTML = `<span class="debug-timestamp">[${new Date(timestamp).toLocaleTimeString()}]</span>${truncatedMessage}`;
-          logElement.appendChild(entryDiv);
-          logElement.scrollTop = logElement.scrollHeight;
-        }
-        return; // Don't save suppressed logs to Supabase
+        return; // Completely suppress these logs
       }
       
       const timestamp = new Date().toISOString();
@@ -17108,62 +17090,8 @@
         }
       }
       
-      // Only save important logs to Supabase (errors, warnings, and critical info)
-      // This reduces database bloat and makes logs more useful
-      const shouldSaveToSupabase = 
-        type === 'error' || 
-        type === 'warn' || 
-        (type === 'info' && debugLogVerbosity === 'normal' && !shouldSuppress);
-      
-      if (shouldSaveToSupabase) {
-        // Automatically save to Supabase (non-blocking, fire and forget)
-        (async () => {
-          try {
-            // Get property URL from page
-            const propertyUrl = window.getPropertyUrl ? window.getPropertyUrl() : 
-                               (document.getElementById('propertyUrl')?.value || 
-                                localStorage.getItem('gsc_property_url') || 
-                                localStorage.getItem('last_property_url') || 
-                                null);
-            
-            // Save to Supabase via API endpoint
-            const response = await fetch(apiUrl('/api/supabase/save-debug-log-entry'), {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                timestamp: timestamp,
-                message: truncatedMessage,
-                type: type,
-                propertyUrl: propertyUrl,
-                sessionId: debugLogSessionId,
-                userAgent: navigator.userAgent
-              })
-            });
-            
-            // Silently handle errors - don't spam console
-            // Only log if it's a critical error (not just table missing or network issues)
-            if (!response.ok) {
-              try {
-                const errorData = await response.json();
-                // Only log if it's not a "table doesn't exist" error (expected during development)
-                if (errorData.error && !errorData.error.includes('does not exist') && !errorData.error.includes('relation')) {
-                  console.warn('[debugLog] Failed to save to Supabase:', errorData.error);
-                }
-              } catch (e) {
-                // Response wasn't JSON, ignore silently
-              }
-            }
-          } catch (err) {
-            // Silently ignore network errors - don't spam console
-            // Only log critical errors
-            if (type === 'error' && err.message && !err.message.includes('fetch')) {
-              console.error('[debugLog] Critical error saving to Supabase:', err.message);
-            }
-          }
-        })();
-      }
+      // DISABLED: Supabase saving is causing schema cache issues and spam
+      // Re-enable later once schema cache is stable
       
       // Only log critical errors to browser console (for debugging production issues)
       // All other logs go to UI debug console only
