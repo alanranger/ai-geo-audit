@@ -14435,20 +14435,56 @@
                           }
                           
                           // Use first result where BOTH values are non-null (consistent match found)
-                          // This ensures we only use results where a match was definitively found
                           if (result.ai_overview !== null && result.ai_citations !== null) {
                             aiForUrl = result;
                             debugLog(`[Optimisation] URL task: AI lookup for ${urlToCheck} - Overview: ${aiForUrl.ai_overview}, Citations: ${aiForUrl.ai_citations}`, 'info');
                             break;
                           } else if (result.ai_overview !== null || result.ai_citations !== null) {
-                            // Inconsistent result (shouldn't happen, but log it for debugging)
                             debugLog(`[Optimisation] URL task: Inconsistent result from computeAiMetricsForPageUrl for ${urlToCheck} - Overview: ${result.ai_overview}, Citations: ${result.ai_citations}`, 'warn');
                           }
                         }
                       }
                       
+                      // HARD FALLBACK: If arrays exist but we still have null, force Supabase lookup to avoid stale local data
                       if (aiForUrl.ai_overview === null && aiForUrl.ai_citations === null) {
-                        debugLog(`[Optimisation] URL task: No AI data found for ${pageUrlForGsc} or ${taskUrlForPage} in ${aiRows.length} rows`, 'warn');
+                        debugLog(`[Optimisation] URL task: Local arrays yielded null; forcing Supabase citation lookup`, 'warn');
+                        try {
+                          const propertyUrl = document.getElementById('propertyUrl')?.value || 
+                                            localStorage.getItem('gsc_property_url') || 
+                                            'https://www.alanranger.com';
+                          const queryUrl = apiUrl(`/api/supabase/query-keywords-citing-url?` +
+                            `property_url=${encodeURIComponent(propertyUrl)}&` +
+                            `target_url=${encodeURIComponent(pageUrlForGsc || taskUrlForPage)}`
+                          );
+                          
+                          const citationResponse = await fetch(queryUrl);
+                          if (citationResponse.ok) {
+                            const citationData = await citationResponse.json();
+                            if (citationData.status === 'ok' && citationData.data && citationData.data.length > 0) {
+                              const citingKeywords = citationData.data;
+                              const uniqueKeywordsCount = citingKeywords.length;
+                              const hasOverview = citingKeywords.some(k => k.has_ai_overview === true);
+                              
+                              aiForUrl = {
+                                ai_overview: hasOverview,
+                                ai_citations: uniqueKeywordsCount
+                              };
+                              
+                              debugLog(
+                                `[Optimisation] URL task: Supabase fallback found ${uniqueKeywordsCount} citing keywords: ` +
+                                `${citingKeywords.map(k => k.keyword).join(', ')}`,
+                                'success'
+                              );
+                            } else {
+                              debugLog(`[Optimisation] URL task: Supabase fallback found no citations (status=${citationData.status})`, 'warn');
+                            }
+                          } else {
+                            const errorText = await citationResponse.text().catch(() => 'Unable to read error');
+                            debugLog(`[Optimisation] URL task: Supabase fallback failed: ${citationResponse.status} - ${errorText}`, 'error');
+                          }
+                        } catch (supabaseErr) {
+                          debugLog(`[Optimisation] URL task: Supabase fallback error: ${supabaseErr.message}`, 'error');
+                        }
                       }
                     }
                   } else {
