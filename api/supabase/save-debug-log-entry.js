@@ -50,19 +50,45 @@ export default async function handler(req, res) {
       need('SUPABASE_SERVICE_ROLE_KEY')
     );
 
-    // Insert log entry
-    const { data, error } = await supabase
+    // Insert log entry - try with all fields first
+    let insertData = {
+      timestamp: timestamp || new Date().toISOString(),
+      message: message.substring(0, 10000), // Limit message length to 10KB
+      type: type
+    };
+    
+    // Add optional fields if they exist (handle schema cache issues gracefully)
+    if (propertyUrl) insertData.property_url = propertyUrl;
+    if (sessionId) insertData.session_id = sessionId;
+    if (userAgent) insertData.user_agent = userAgent;
+    
+    let { data, error } = await supabase
       .from('debug_logs')
-      .insert({
-        timestamp: timestamp || new Date().toISOString(),
-        message: message.substring(0, 10000), // Limit message length to 10KB
-        type: type,
-        property_url: propertyUrl || null,
-        session_id: sessionId || null,
-        user_agent: userAgent || null
-      })
+      .insert(insertData)
       .select()
       .single();
+
+    // If property_url column error (schema cache issue), retry without optional fields
+    if (error && error.message && error.message.includes('property_url')) {
+      console.warn('[save-debug-log-entry] Schema cache issue with property_url, retrying without optional fields');
+      const { data: retryData, error: retryError } = await supabase
+        .from('debug_logs')
+        .insert({
+          timestamp: timestamp || new Date().toISOString(),
+          message: message.substring(0, 10000),
+          type: type
+        })
+        .select()
+        .single();
+      
+      if (retryError) {
+        console.error('[save-debug-log-entry] Retry also failed:', retryError);
+        return sendJSON(res, 500, { error: retryError.message });
+      }
+      
+      data = retryData;
+      error = null;
+    }
 
     if (error) {
       // If table doesn't exist, return a helpful error (don't crash)
