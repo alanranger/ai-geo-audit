@@ -29605,7 +29605,9 @@ Final Score: ${score}/100`;
                   <th id="money-sort-opportunity" style="text-align: center; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; transition: background 0.2s; white-space: nowrap;" onmouseover="this.style.background='#e2e8f0';" onmouseout="this.style.background='transparent';" title="Click to sort by Opportunity">
                     Opportunity${getSortIcon('opportunity')}
                   </th>
-                  <th style="text-align: left; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; width: 200px; min-width: 200px;">Schema Types</th>
+                  <th style="text-align: left; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; width: 120px; min-width: 120px; white-space: normal; line-height: 1.2;">
+                    <div>Schema</div><div>Types</div>
+                  </th>
                   <th style="text-align: left; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; width: 260px;">Recommended action</th>
                   <th style="text-align: center; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; width: 120px; min-width: 120px;">Track / Manage</th>
                 </tr>
@@ -29739,11 +29741,11 @@ Final Score: ${score}/100`;
                   </span>`;
                 })()}
               </td>
-              <td style="padding: 0.75rem; vertical-align: top; width: 200px; min-width: 200px;">
+              <td style="padding: 0.75rem; vertical-align: top; width: 120px; min-width: 120px;">
                 ${(() => {
                   const schemaTypes = row.schemaTypes || [];
                   if (schemaTypes.length === 0) {
-                    return '<span style="color: #94a3b8; font-style: italic; font-size: 0.8rem;">None</span>';
+                    return '<span style="color: #94a3b8; font-style: italic; font-size: 0.8rem;">0</span>';
                   }
                   // Ensure schemaTypes are strings (handle both string arrays and object arrays)
                   const typeStrings = schemaTypes.map(t => {
@@ -29756,15 +29758,14 @@ Final Score: ${score}/100`;
                   }).filter(Boolean);
                   
                   if (typeStrings.length === 0) {
-                    return '<span style="color: #94a3b8; font-style: italic; font-size: 0.8rem;">None</span>';
+                    return '<span style="color: #94a3b8; font-style: italic; font-size: 0.8rem;">0</span>';
                   }
                   
-                  // Show first 5 types, then "+X more" if there are more
-                  const displayTypes = typeStrings.slice(0, 5);
-                  const remaining = typeStrings.length - 5;
-                  const typesText = displayTypes.join(', ');
-                  const moreText = remaining > 0 ? ` <span style="color: #64748b; font-size: 0.75rem;">+${remaining} more</span>` : '';
-                  return `<span style="color: #475569; font-size: 0.8rem; line-height: 1.4;" title="${typeStrings.join(', ')}">${typesText}${moreText}</span>`;
+                  // Show just the count with hover tooltip showing full list
+                  const count = typeStrings.length;
+                  const fullList = typeStrings.join(', ');
+                  const countText = count === 1 ? '1 schema type' : `${count} schema types`;
+                  return `<span style="color: #475569; font-size: 0.85rem; font-weight: 600; cursor: help; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px;" title="${fullList}">${countText}</span>`;
                 })()}
               </td>
               <td style="padding: 0.55rem 0.75rem; color: #475569; font-size: 0.8rem; line-height: 1.35; vertical-align: top;">
@@ -30214,7 +30215,13 @@ Final Score: ${score}/100`;
       
       // Function to populate AI citations for Money Pages table
       async function populateMoneyPagesAiCitations(rows) {
-        if (!rows || rows.length === 0) return;
+        if (!rows || rows.length === 0) {
+          debugLog('[Money Pages] No rows provided to populate AI citations', 'warn');
+          return;
+        }
+        
+        // Wait a bit for DOM to be ready
+        await new Promise(resolve => setTimeout(resolve, 200));
         
         // Check if table container exists
         const tableContainer = document.getElementById('money-pages-table-container');
@@ -30230,6 +30237,8 @@ Final Score: ${score}/100`;
           return;
         }
         
+        debugLog(`[Money Pages] Populating AI citations for ${cells.length} cells`, 'info');
+        
         // Get property URL for API calls
         const propertyUrl = document.getElementById('propertyUrl')?.value || localStorage.getItem('property_url') || '';
         if (!propertyUrl) {
@@ -30237,31 +30246,44 @@ Final Score: ${score}/100`;
           return;
         }
         
+        // Normalize URL helper function
+        const normalizeUrl = (url) => {
+          if (!url) return '';
+          let normalized = String(url).toLowerCase().trim();
+          normalized = normalized.replace(/^https?:\/\//, '');
+          normalized = normalized.replace(/^www\./, '');
+          normalized = normalized.split('?')[0].split('#')[0];
+          normalized = normalized.replace(/\/$/, '');
+          return normalized;
+        };
+        
         // Try to get citation counts from localStorage cache first (from latest audit)
         let citationCache = {};
         try {
           const lastAuditResults = localStorage.getItem('last_audit_results');
           if (lastAuditResults) {
             const auditData = JSON.parse(lastAuditResults);
-            const rankingAiData = auditData?.ranking_ai_data || auditData?.searchData?.ranking_ai_data;
-            const combinedRows = rankingAiData?.combinedRows || rankingAiData || [];
+            debugLog('[Money Pages] Found last_audit_results in localStorage', 'info');
+            
+            // Try multiple paths to find ranking_ai_data
+            let combinedRows = [];
+            if (auditData?.ranking_ai_data?.combinedRows) {
+              combinedRows = auditData.ranking_ai_data.combinedRows;
+            } else if (auditData?.searchData?.ranking_ai_data?.combinedRows) {
+              combinedRows = auditData.searchData.ranking_ai_data.combinedRows;
+            } else if (Array.isArray(auditData?.ranking_ai_data)) {
+              combinedRows = auditData.ranking_ai_data;
+            } else if (Array.isArray(auditData?.searchData?.ranking_ai_data)) {
+              combinedRows = auditData.searchData.ranking_ai_data;
+            }
+            
+            debugLog(`[Money Pages] Found ${combinedRows.length} combinedRows in localStorage`, 'info');
             
             if (Array.isArray(combinedRows) && combinedRows.length > 0) {
               // Build cache: for each URL, count how many keywords cite it
               rows.forEach(row => {
                 const targetUrl = row.url || '';
                 if (!targetUrl) return;
-                
-                // Normalize URL for matching
-                const normalizeUrl = (url) => {
-                  if (!url) return '';
-                  let normalized = String(url).toLowerCase().trim();
-                  normalized = normalized.replace(/^https?:\/\//, '');
-                  normalized = normalized.replace(/^www\./, '');
-                  normalized = normalized.split('?')[0].split('#')[0];
-                  normalized = normalized.replace(/\/$/, '');
-                  return normalized;
-                };
                 
                 const targetNormalized = normalizeUrl(targetUrl);
                 let citationCount = 0;
@@ -30272,10 +30294,15 @@ Final Score: ${score}/100`;
                     citations.forEach(citation => {
                       const citedUrl = typeof citation === 'string' 
                         ? citation 
-                        : (citation?.url || citation?.URL || citation?.link || '');
+                        : (citation?.url || citation?.URL || citation?.link || citation?.href || citation?.page || citation?.pageUrl || citation?.target || citation?.targetUrl || citation?.best_url || citation?.bestUrl || '');
                       if (citedUrl) {
                         const citedNormalized = normalizeUrl(citedUrl);
-                        if (citedNormalized === targetNormalized || citedNormalized.includes(targetNormalized) || targetNormalized.includes(citedNormalized)) {
+                        // More flexible matching
+                        if (citedNormalized === targetNormalized || 
+                            citedNormalized.includes(targetNormalized) || 
+                            targetNormalized.includes(citedNormalized) ||
+                            citedNormalized.endsWith(targetNormalized) ||
+                            targetNormalized.endsWith(citedNormalized)) {
                           citationCount++;
                         }
                       }
@@ -30284,15 +30311,23 @@ Final Score: ${score}/100`;
                 });
                 
                 // Cache the count (including 0) so we don't refetch
-                citationCache[targetUrl] = citationCount;
+                if (citationCount > 0 || citationCache.hasOwnProperty(targetUrl)) {
+                  citationCache[targetUrl] = citationCount;
+                }
               });
+              
+              debugLog(`[Money Pages] Built citation cache for ${Object.keys(citationCache).length} URLs from localStorage`, 'info');
             }
+          } else {
+            debugLog('[Money Pages] No last_audit_results found in localStorage', 'info');
           }
         } catch (err) {
           debugLog(`[Money Pages] Error reading citation cache from localStorage: ${err.message}`, 'warn');
+          console.error('[Money Pages] localStorage error:', err);
         }
         
-        // Update cells with cached data first (cells already queried above)
+        // Update cells with cached data first
+        let updatedFromCache = 0;
         cells.forEach(cell => {
           const pageUrl = cell.getAttribute('data-page-url');
           if (!pageUrl) return;
@@ -30307,16 +30342,20 @@ Final Score: ${score}/100`;
             if (row) {
               row._aiCitations = cachedCount;
             }
+            updatedFromCache++;
           }
-          // If not in cache, keep spinner (⏳) until API call completes
         });
+        
+        debugLog(`[Money Pages] Updated ${updatedFromCache} cells from localStorage cache`, 'info');
         
         // For URLs not in cache, fetch from API (batch requests)
         const urlsToFetch = rows
           .map(row => row.url)
-          .filter(url => url && !citationCache[url]);
+          .filter(url => url && !citationCache.hasOwnProperty(url));
         
         if (urlsToFetch.length > 0) {
+          debugLog(`[Money Pages] Fetching AI citations from API for ${urlsToFetch.length} URLs`, 'info');
+          
           // Fetch citations for all URLs in parallel (limit to 10 at a time to avoid overwhelming API)
           const batchSize = 10;
           for (let i = 0; i < urlsToFetch.length; i += batchSize) {
@@ -30329,6 +30368,8 @@ Final Score: ${score}/100`;
                   if (result.status === 'ok' && typeof result.count === 'number') {
                     return { url, count: result.count };
                   }
+                } else {
+                  debugLog(`[Money Pages] API returned ${response.status} for ${url}`, 'warn');
                 }
               } catch (err) {
                 debugLog(`[Money Pages] Error fetching AI citations for ${url}: ${err.message}`, 'warn');
@@ -30337,12 +30378,14 @@ Final Score: ${score}/100`;
             });
             
             const results = await Promise.all(promises);
+            let updatedFromApi = 0;
             results.forEach(({ url, count }) => {
               // Cache the result (including 0) to avoid refetching
               citationCache[url] = count;
               
-              // Find cell by iterating through already-queried cells (more robust than CSS selector with special chars)
-              const cell = Array.from(cells).find(c => c.getAttribute('data-page-url') === url);
+              // Re-query cells in case DOM changed
+              const allCells = tableContainer.querySelectorAll('.ai-citation-cell-opportunity');
+              const cell = Array.from(allCells).find(c => c.getAttribute('data-page-url') === url);
               if (cell) {
                 cell.textContent = count.toLocaleString();
                 cell.style.color = '#0f172a';
@@ -30352,10 +30395,16 @@ Final Score: ${score}/100`;
                 if (row) {
                   row._aiCitations = count;
                 }
+                updatedFromApi++;
               }
             });
+            debugLog(`[Money Pages] Updated ${updatedFromApi} cells from API batch ${Math.floor(i/batchSize) + 1}`, 'info');
           }
+        } else {
+          debugLog('[Money Pages] All URLs found in cache, no API calls needed', 'info');
         }
+        
+        debugLog('[Money Pages] AI citations population complete', 'success');
       }
 
       // Function to render Money Pages Performance section
