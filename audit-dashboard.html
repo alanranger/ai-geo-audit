@@ -30215,29 +30215,36 @@ Final Score: ${score}/100`;
       
       // Function to populate AI citations for Money Pages table
       async function populateMoneyPagesAiCitations(rows) {
-        console.log('[Money Pages AI Citations] ===== FUNCTION CALLED =====');
-        console.log('[Money Pages AI Citations] Rows provided:', rows?.length || 0);
-        
-        // If no rows provided, try to get from window.moneyPagesData
-        if (!rows || rows.length === 0) {
-          rows = window.moneyPagesData || [];
-          console.log('[Money Pages AI Citations] Using window.moneyPagesData:', rows.length, 'rows');
-        }
-        
-        if (!rows || rows.length === 0) {
-          console.warn('[Money Pages AI Citations] No rows available at all');
-          return;
-        }
-        
-        // Wait a bit for DOM to be ready
-        await new Promise(resolve => setTimeout(resolve, 300));
-        
-        // Check if table container exists
-        const tableContainer = document.getElementById('money-pages-table-container');
-        if (!tableContainer) {
-          console.warn('[Money Pages AI Citations] Table container not found');
-          return;
-        }
+        try {
+          console.log('[Money Pages AI Citations] ===== FUNCTION CALLED =====');
+          console.log('[Money Pages AI Citations] Rows provided:', rows?.length || 0);
+          
+          // If no rows provided, try to get from window.moneyPagesData
+          if (!rows || rows.length === 0) {
+            rows = window.moneyPagesData || [];
+            console.log('[Money Pages AI Citations] Using window.moneyPagesData:', rows.length, 'rows');
+          }
+          
+          if (!rows || rows.length === 0) {
+            console.warn('[Money Pages AI Citations] No rows available at all');
+            return;
+          }
+          
+          // Wait a bit for DOM to be ready
+          await new Promise(resolve => setTimeout(resolve, 300));
+          
+          // Check if table container exists
+          let tableContainer = document.getElementById('money-pages-table-container');
+          if (!tableContainer) {
+            console.warn('[Money Pages AI Citations] Table container not found');
+            return;
+          }
+          
+          // Verify tableContainer is a valid DOM element
+          if (typeof tableContainer.querySelectorAll !== 'function') {
+            console.error('[Money Pages AI Citations] tableContainer is not a valid DOM element. Type:', typeof tableContainer, 'Value:', tableContainer);
+            return;
+          }
         
         // Check if cells exist in the table
         const cells = tableContainer.querySelectorAll('.ai-citation-cell-opportunity');
@@ -30440,8 +30447,13 @@ Final Score: ${score}/100`;
             results.forEach(({ url, count }) => {
               citationCache[url] = count;
               
-              // Re-query cells
-              const allCells = tableContainer.querySelectorAll('.ai-citation-cell-opportunity');
+              // Re-query tableContainer and cells to ensure they still exist
+              const currentTableContainer = document.getElementById('money-pages-table-container');
+              if (!currentTableContainer || typeof currentTableContainer.querySelectorAll !== 'function') {
+                console.error('[Money Pages AI Citations] tableContainer is invalid when updating API results');
+                return;
+              }
+              const allCells = currentTableContainer.querySelectorAll('.ai-citation-cell-opportunity');
               const cell = Array.from(allCells).find(c => c.getAttribute('data-page-url') === url);
               if (cell) {
                 cell.textContent = count.toLocaleString();
@@ -30461,7 +30473,12 @@ Final Score: ${score}/100`;
           }
         }
         
-        console.log('[Money Pages AI Citations] Population complete. Final cache:', Object.keys(citationCache).length, 'URLs');
+          console.log('[Money Pages AI Citations] Population complete. Final cache:', Object.keys(citationCache).length, 'URLs');
+        } catch (err) {
+          console.error('[Money Pages AI Citations] CRITICAL ERROR in function:', err);
+          console.error('[Money Pages AI Citations] Error stack:', err.stack);
+          debugLog(`[Money Pages] Critical error in populateMoneyPagesAiCitations: ${err.message}`, 'error');
+        }
       }
       
       // Debug function: manually test AI citations population
