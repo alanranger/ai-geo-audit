@@ -29645,6 +29645,8 @@ Final Score: ${score}/100`;
           
           // Meta description from row data
           const metaDescription = row.metaDescription || null;
+          const safeUrl = String(row.url || '').replace(/'/g, "\\'").replace(/\"/g, '&quot;');
+          const safeTitle = String(pageTitle || row.url || 'Untitled').replace(/'/g, "\\'").replace(/\"/g, '&quot;');
           
           // Store row data by normalized URL for Track button access
           // Ensure we store a complete copy with all metrics
@@ -29678,7 +29680,7 @@ Final Score: ${score}/100`;
           tableHtml += `
             <tr style="border-bottom: 1px solid #f1f5f9; background: ${rowBg}; transition: background 0.2s;" onmouseover="this.style.background='#f8f9fa';" onmouseout="this.style.background='${rowBg}';">
               <td style="padding: 0.75rem; color: #0f172a; font-weight: 600; vertical-align: top; width: 40px;">${filteredStartIdx + idx + 1}</td>
-              <td style="padding: 0.55rem 0.75rem; vertical-align: top; width: 380px;">
+              <td style="padding: 0.55rem 0.75rem; vertical-align: top; width: 380px; cursor: pointer;" onclick="window.showMoneyPagePerformance('${safeUrl}', '${safeTitle}')">
                 <a href="${row.url}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: none; font-weight: 500; border-bottom: 1px solid transparent; transition: all 0.2s;" onmouseover="this.style.color='#1d4ed8'; this.style.borderBottomColor='#1d4ed8';" onmouseout="this.style.color='#2563eb'; this.style.borderBottomColor='transparent';" title="Open ${row.url} in new tab">
                   <div style="font-size: 0.85rem; color: #64748b; margin-bottom: 0.25rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${row.url}</div>
                 </a>
@@ -33200,10 +33202,12 @@ Final Score: ${score}/100`;
             localStorage.getItem('last_property_url') ||
             'https://www.alanranger.com';
 
-          const renderCitation = (cell, count, keywords) => {
+          const renderCitation = (cell, count, keywords, errorText = null) => {
             cell.textContent = typeof count === 'number' ? count.toString() : '—';
             if (keywords && keywords.length) {
               cell.title = `Keywords citing this URL: ${keywords.join(', ')}`;
+            } else if (errorText) {
+              cell.title = errorText;
             }
             // Write back to underlying row for sorting
             const url = cell.getAttribute('data-page-url');
@@ -33256,7 +33260,7 @@ Final Score: ${score}/100`;
               })
               .catch(err => {
                 debugLog(`[Money Pages] AI citations fetch failed for ${url}: ${err.message}`, 'warn');
-                cell.textContent = '—';
+                renderCitation(cell, 0, [], err.message);
               });
           });
         })();
