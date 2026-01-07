@@ -12829,13 +12829,15 @@
             const citationsCount = r.ai_alan_citations_count != null ? r.ai_alan_citations_count : 
                                    (r.aiAlanCitationsCount != null ? r.aiAlanCitationsCount : null);
             const citationsArray = r.ai_alan_citations || r.aiAlanCitations || [];
+            // CRITICAL: Always ensure rowCitations is a number, never null
             const rowCitations = citationsCount != null ? Number(citationsCount) : 
-                                 (Array.isArray(citationsArray) ? citationsArray.length : 0);
-            citationsFromTargetUrl = Math.max(citationsFromTargetUrl, rowCitations);
+                                 (Array.isArray(citationsArray) && citationsArray.length > 0 ? citationsArray.length : 0);
+            // Ensure it's a valid number
+            const safeRowCitations = (typeof rowCitations === 'number' && !isNaN(rowCitations) && rowCitations >= 0) ? rowCitations : 0;
+            citationsFromTargetUrl = Math.max(citationsFromTargetUrl, safeRowCitations);
             if (!matchedKeyword) {
               matchedKeyword = r.keyword || 'unknown';
             }
-            debugLog(`[computeAiMetricsForPageUrl] ✓ Found URL match: keyword="${r.keyword || 'unknown'}", taskUrl="${canonTarget}", rowBestUrl="${rowBestUrlCanon}", hasOverview=${rowHasOverview}, citations=${rowCitations}, citationsCount=${citationsCount}, citationsArrayLength=${Array.isArray(citationsArray) ? citationsArray.length : 'N/A'}`, 'success');
           }
           
           // Also check if URL appears in citation arrays (original logic)
@@ -12860,51 +12862,30 @@
         // Ensure totalCitations is always a number (never null/undefined)
         const totalCitations = Math.max(citations || 0, citationsFromTargetUrl || 0);
         
-        // Always log final result for diagnosis (use 'warn' so it's always saved)
-        if (!matchedKeyword) {
-          debugLog(`[computeAiMetricsForPageUrl] ✗ FINAL: No match found for "${canonTarget}" in ${rows.length} rows. matchedKeyword=null, overviewOn=${overviewOn}, citations=${citations}, citationsFromTargetUrl=${citationsFromTargetUrl}`, 'warn');
-        } else {
-          debugLog(`[computeAiMetricsForPageUrl] ✓ FINAL: Match found! keyword="${matchedKeyword}", overview=${overviewOn}, citations=${totalCitations}, finalOverview=${finalOverview}, finalCitations=${finalCitations}`, 'warn');
-        }
-        
         // CRITICAL: Ensure consistency - if matchedKeyword is set, both values must be non-null
         // If matchedKeyword is null, both must be null (unknown)
         let finalOverview = null;
         let finalCitations = null;
         
-        // Fix 4: Ensure consistent return values
-        // CRITICAL: Check if matchedKeyword is truthy (not null, not empty string, not undefined)
+        // Check if matchedKeyword is truthy (not null, not empty string, not undefined)
         const hasMatch = matchedKeyword && String(matchedKeyword).trim() !== '';
         
         if (hasMatch) {
           // We found a match - return actual values (even if overview is false or citations is 0)
           finalOverview = overviewOn; // boolean (true/false)
-          // CRITICAL FIX: Ensure totalCitations is a valid number (handle NaN, null, undefined)
-          const safeTotalCitations = (typeof totalCitations === 'number' && !isNaN(totalCitations) && totalCitations >= 0) ? totalCitations : 0;
-          finalCitations = safeTotalCitations; // Ensure it's always a number, never null
-          
-          // DEFENSIVE: Double-check that finalCitations is actually a number (should never be null here)
-          if (finalCitations === null || finalCitations === undefined) {
-            console.error(`[computeAiMetricsForPageUrl] CRITICAL ERROR: finalCitations is ${finalCitations} despite match found! matchedKeyword="${matchedKeyword}", totalCitations=${totalCitations}, safeTotalCitations=${safeTotalCitations}`);
-            finalCitations = 0; // Force to 0 as fallback
-          }
-          
+          // CRITICAL: Ensure totalCitations is always a valid number, never null
+          finalCitations = (typeof totalCitations === 'number' && !isNaN(totalCitations) && totalCitations >= 0) ? totalCitations : 0;
         } else {
           // No match found - return null for both (unknown state)
           finalOverview = null;
           finalCitations = null;
         }
         
-        // FINAL VALIDATION: Ensure return values are consistent
+        // FINAL VALIDATION: Force consistency - if one is null, both must be null
         if ((finalOverview !== null && finalCitations === null) || (finalOverview === null && finalCitations !== null)) {
-          console.error(`[computeAiMetricsForPageUrl] INCONSISTENCY: overview=${finalOverview}, citations=${finalCitations}`);
+          // This should never happen, but if it does, force both to null (unknown state)
           finalOverview = null;
           finalCitations = null;
-        }
-        
-        // Only log final result if match found (success) or if it's an error
-        if (hasMatch) {
-          debugLog(`[computeAiMetricsForPageUrl] ✓ Match: "${canonTarget}" → keyword="${matchedKeyword}", overview=${finalOverview}, citations=${finalCitations}`, 'success');
         }
 
         return { ai_overview: finalOverview, ai_citations: finalCitations };
