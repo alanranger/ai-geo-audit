@@ -12874,7 +12874,14 @@
           // We found a match - return actual values (even if overview is false or citations is 0)
           finalOverview = overviewOn; // boolean (true/false)
           // CRITICAL: Ensure totalCitations is always a valid number, never null
-          finalCitations = (typeof totalCitations === 'number' && !isNaN(totalCitations) && totalCitations >= 0) ? totalCitations : 0;
+          // Force to 0 if invalid to prevent null
+          const safeCitations = (typeof totalCitations === 'number' && !isNaN(totalCitations) && totalCitations >= 0) ? totalCitations : 0;
+          finalCitations = safeCitations;
+          
+          // DEFENSIVE: Double-check - this should never be null here
+          if (finalCitations === null || finalCitations === undefined) {
+            finalCitations = 0; // Force to 0
+          }
         } else {
           // No match found - return null for both (unknown state)
           finalOverview = null;
@@ -12882,8 +12889,13 @@
         }
         
         // FINAL VALIDATION: Force consistency - if one is null, both must be null
-        if ((finalOverview !== null && finalCitations === null) || (finalOverview === null && finalCitations !== null)) {
-          // This should never happen, but if it does, force both to null (unknown state)
+        // BUT: if overview is false (not null), citations must be a number (0 or higher), never null
+        if (finalOverview === false && finalCitations === null) {
+          // This is the bug - overview is false but citations is null
+          // Force citations to 0 to fix inconsistency
+          finalCitations = 0;
+        } else if ((finalOverview !== null && finalCitations === null) || (finalOverview === null && finalCitations !== null)) {
+          // Other inconsistencies - force both to null (unknown state)
           finalOverview = null;
           finalCitations = null;
         }
