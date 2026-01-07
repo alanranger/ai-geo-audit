@@ -29239,7 +29239,7 @@ Final Score: ${score}/100`;
 
       // Show inline performance cards for Money Pages rows (replaces modal)
       if (typeof window.showMoneyPagePerformanceInline !== 'function') {
-        window.showMoneyPagePerformanceInline = function(pageUrl, pageTitle, rowElement) {
+        window.showMoneyPagePerformanceInline = async function(pageUrl, pageTitle, rowElement) {
           try {
             if (!window.moneyPagesRowDataByUrl || window.moneyPagesRowDataByUrl.size === 0) {
               alert('No page data available yet. Please wait for the table to finish loading.');
@@ -29279,34 +29279,35 @@ Final Score: ${score}/100`;
               return;
             }
 
-            // Get data
+            // Get current data
             const clicks = row.clicks || 0;
             const impressions = row.impressions || 0;
             const ctr = impressions > 0 ? (clicks / impressions) * 100 : ((row.ctr || 0) * 100);
             const pos = row.avgPosition != null ? row.avgPosition : (row.position || null);
-            const ai = typeof row._aiCitations === 'number' ? row._aiCitations : (typeof row.aiCitations === 'number' ? row.aiCitations : '—');
+
+            // Get property URL for API calls
+            const propertyUrl = document.getElementById('propertyUrl')?.value || localStorage.getItem('property_url') || '';
 
             // Create inline cards container - 3 performance cards as agreed
             const cardsContainer = document.createElement('td');
             cardsContainer.colSpan = 13; // Span all columns
             cardsContainer.className = 'money-page-inline-cards';
             cardsContainer.style.cssText = 'padding: 1.25rem; background: #f8fafc; border-top: 2px solid #e2e8f0;';
+            
+            // Initial loading state
             cardsContainer.innerHTML = `
               <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.25rem;">
-                <div style="background: white; padding: 1.25rem; border-radius: 8px; border: 1px solid #e2e8f0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                  <div style="font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin-bottom: 0.75rem;">Clicks (28d)</div>
-                  <div style="font-size: 2rem; font-weight: 800; color: #0f172a; line-height: 1.2;">${clicks.toLocaleString()}</div>
-                  <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 0.5rem;">of ${impressions.toLocaleString()} impressions</div>
+                <div id="money-card-1" style="background: white; padding: 1.25rem; border-radius: 8px; border: 1px solid #e2e8f0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                  <div style="font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin-bottom: 0.75rem;">Performance Trends</div>
+                  <div style="text-align: center; padding: 2rem 0; color: #94a3b8;">Loading...</div>
                 </div>
-                <div style="background: white; padding: 1.25rem; border-radius: 8px; border: 1px solid #e2e8f0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                  <div style="font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin-bottom: 0.75rem;">CTR (28d)</div>
-                  <div style="font-size: 2rem; font-weight: 800; color: #0f172a; line-height: 1.2;">${ctr.toFixed(2)}%</div>
-                  <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 0.5rem;">Click-through rate</div>
+                <div id="money-card-2" style="background: white; padding: 1.25rem; border-radius: 8px; border: 1px solid #e2e8f0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                  <div style="font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin-bottom: 0.75rem;">AI Citations</div>
+                  <div style="text-align: center; padding: 2rem 0; color: #94a3b8;">Loading...</div>
                 </div>
-                <div style="background: white; padding: 1.25rem; border-radius: 8px; border: 1px solid #e2e8f0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                  <div style="font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin-bottom: 0.75rem;">Avg Position</div>
-                  <div style="font-size: 2rem; font-weight: 800; color: #0f172a; line-height: 1.2;">${pos ? pos.toFixed(1) : '—'}</div>
-                  <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 0.5rem;">${ai !== '—' ? `AI Citations: ${ai}` : 'Average ranking'}</div>
+                <div id="money-card-3" style="background: white; padding: 1.25rem; border-radius: 8px; border: 1px solid #e2e8f0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                  <div style="font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin-bottom: 0.75rem;">Top Competitors</div>
+                  <div style="text-align: center; padding: 2rem 0; color: #94a3b8;">Loading...</div>
                 </div>
               </div>
               <div style="display: flex; justify-content: flex-end; margin-top: 1rem;">
@@ -29322,11 +29323,352 @@ Final Score: ${score}/100`;
               newRow.appendChild(cardsContainer);
               currentRow.parentNode.insertBefore(newRow, currentRow.nextSibling);
             }
+
+            // Load data asynchronously for each card
+            loadMoneyPageCard1(cardsContainer, row, clicks, impressions, ctr, pos);
+            loadMoneyPageCard2(cardsContainer, pageUrl, propertyUrl);
+            loadMoneyPageCard3(cardsContainer, pageUrl, propertyUrl, row);
+
           } catch (err) {
             console.error('[Money Pages] Error showing inline performance cards:', err);
             alert('Unable to show performance cards. See console for details.');
           }
         };
+
+        // Card 1: Performance Trends (with historical data if available)
+        async function loadMoneyPageCard1(container, row, clicks, impressions, ctr, pos) {
+          try {
+            const card1 = container.querySelector('#money-card-1');
+            if (!card1) return;
+
+            // Try to get historical data from localStorage
+            let trendData = null;
+            try {
+              const lastAuditResults = localStorage.getItem('last_audit_results');
+              if (lastAuditResults) {
+                const auditData = JSON.parse(lastAuditResults);
+                // Look for timeseries data for this page
+                const timeseries = auditData?.timeseries || auditData?.gscData?.timeseries;
+                if (timeseries && Array.isArray(timeseries)) {
+                  // Find data for this page URL
+                  const pageData = timeseries.find(t => {
+                    const url = t.page || t.url || '';
+                    return url.toLowerCase().includes(row.url?.toLowerCase() || '') || 
+                           (row.url && url.toLowerCase().includes(row.url.toLowerCase()));
+                  });
+                  if (pageData && pageData.data && Array.isArray(pageData.data)) {
+                    trendData = pageData.data;
+                  }
+                }
+              }
+            } catch (e) {
+              // Ignore errors
+            }
+
+            // Calculate trends if we have historical data
+            let clicksTrend = null;
+            let impressionsTrend = null;
+            let ctrTrend = null;
+            let posTrend = null;
+
+            if (trendData && trendData.length >= 2) {
+              const recent = trendData.slice(-4); // Last 4 weeks
+              const older = trendData.slice(-8, -4); // Previous 4 weeks
+              
+              if (recent.length > 0 && older.length > 0) {
+                const recentClicks = recent.reduce((sum, d) => sum + (d.clicks || 0), 0);
+                const olderClicks = older.reduce((sum, d) => sum + (d.clicks || 0), 0);
+                clicksTrend = olderClicks > 0 ? ((recentClicks - olderClicks) / olderClicks * 100) : 0;
+
+                const recentImpr = recent.reduce((sum, d) => sum + (d.impressions || 0), 0);
+                const olderImpr = older.reduce((sum, d) => sum + (d.impressions || 0), 0);
+                impressionsTrend = olderImpr > 0 ? ((recentImpr - olderImpr) / olderImpr * 100) : 0;
+
+                const recentCtr = recentImpr > 0 ? (recentClicks / recentImpr * 100) : 0;
+                const olderCtr = olderImpr > 0 ? (olderClicks / olderImpr * 100) : 0;
+                ctrTrend = olderCtr > 0 ? ((recentCtr - olderCtr) / olderCtr * 100) : 0;
+
+                const recentPos = recent.filter(d => d.position).map(d => d.position);
+                const olderPos = older.filter(d => d.position).map(d => d.position);
+                if (recentPos.length > 0 && olderPos.length > 0) {
+                  const avgRecentPos = recentPos.reduce((a, b) => a + b, 0) / recentPos.length;
+                  const avgOlderPos = olderPos.reduce((a, b) => a + b, 0) / olderPos.length;
+                  posTrend = avgOlderPos > 0 ? ((avgOlderPos - avgRecentPos) / avgOlderPos * 100) : 0; // Positive is better (lower position)
+                }
+              }
+            }
+
+            const trendIcon = (val) => {
+              if (val === null || val === undefined) return '';
+              if (val > 5) return '<span style="color: #10b981;">↗</span>';
+              if (val < -5) return '<span style="color: #ef4444;">↘</span>';
+              return '<span style="color: #64748b;">→</span>';
+            };
+
+            const trendText = (val, label) => {
+              if (val === null || val === undefined) return '';
+              const abs = Math.abs(val).toFixed(1);
+              const dir = val > 0 ? 'up' : 'down';
+              return `<div style="font-size: 0.75rem; color: ${val > 5 ? '#10b981' : val < -5 ? '#ef4444' : '#64748b'}; margin-top: 0.25rem;">${trendIcon(val)} ${abs}% vs previous period</div>`;
+            };
+
+            card1.innerHTML = `
+              <div style="font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin-bottom: 0.75rem;">Performance Trends</div>
+              <div style="margin-bottom: 1rem;">
+                <div style="font-size: 1.5rem; font-weight: 800; color: #0f172a; line-height: 1.2;">${clicks.toLocaleString()}</div>
+                <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 0.25rem;">Clicks (28d) ${trendText(clicksTrend, 'clicks')}</div>
+              </div>
+              <div style="margin-bottom: 1rem; padding-top: 0.75rem; border-top: 1px solid #e2e8f0;">
+                <div style="font-size: 1.1rem; font-weight: 700; color: #0f172a;">${impressions.toLocaleString()}</div>
+                <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 0.25rem;">Impressions ${trendText(impressionsTrend, 'impressions')}</div>
+              </div>
+              <div style="margin-bottom: 1rem; padding-top: 0.75rem; border-top: 1px solid #e2e8f0;">
+                <div style="font-size: 1.1rem; font-weight: 700; color: #0f172a;">${ctr.toFixed(2)}%</div>
+                <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 0.25rem;">CTR ${trendText(ctrTrend, 'ctr')}</div>
+              </div>
+              <div style="padding-top: 0.75rem; border-top: 1px solid #e2e8f0;">
+                <div style="font-size: 1.1rem; font-weight: 700; color: #0f172a;">${pos ? pos.toFixed(1) : '—'}</div>
+                <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 0.25rem;">Avg Position ${trendText(posTrend, 'position')}</div>
+              </div>
+            `;
+          } catch (err) {
+            console.error('[Money Pages] Error loading card 1:', err);
+            const card1 = container.querySelector('#money-card-1');
+            if (card1) {
+              card1.innerHTML = `
+                <div style="font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin-bottom: 0.75rem;">Performance Trends</div>
+                <div style="text-align: center; padding: 2rem 0; color: #ef4444;">Error loading data</div>
+              `;
+            }
+          }
+        }
+
+        // Card 2: AI Citations with keywords and search volumes
+        async function loadMoneyPageCard2(container, pageUrl, propertyUrl) {
+          try {
+            const card2 = container.querySelector('#money-card-2');
+            if (!card2) return;
+
+            if (!propertyUrl) {
+              card2.innerHTML = `
+                <div style="font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin-bottom: 0.75rem;">AI Citations</div>
+                <div style="text-align: center; padding: 2rem 0; color: #94a3b8;">Property URL not available</div>
+              `;
+              return;
+            }
+
+            // Fetch keywords citing this URL
+            const apiUrlFull = apiUrl(`/api/supabase/query-keywords-citing-url?property_url=${encodeURIComponent(propertyUrl)}&target_url=${encodeURIComponent(pageUrl)}`);
+            const response = await fetch(apiUrlFull);
+            
+            if (!response.ok) {
+              throw new Error(`HTTP ${response.status}`);
+            }
+
+            const result = await response.json();
+            const citingKeywords = result.data || [];
+            const totalCitations = citingKeywords.length;
+
+            // Get search volumes from localStorage (ranking_ai_data)
+            let keywordsWithVolume = [];
+            try {
+              const lastAuditResults = localStorage.getItem('last_audit_results');
+              if (lastAuditResults) {
+                const auditData = JSON.parse(lastAuditResults);
+                const combinedRows = auditData?.ranking_ai_data?.combinedRows || 
+                                   auditData?.searchData?.ranking_ai_data?.combinedRows ||
+                                   (Array.isArray(auditData?.ranking_ai_data) ? auditData.ranking_ai_data : []) ||
+                                   (Array.isArray(auditData?.searchData?.ranking_ai_data) ? auditData.searchData.ranking_ai_data : []);
+
+                if (Array.isArray(combinedRows)) {
+                  citingKeywords.forEach(citing => {
+                    const keyword = citing.keyword || '';
+                    const match = combinedRows.find(r => (r.keyword || '').toLowerCase() === keyword.toLowerCase());
+                    if (match) {
+                      keywordsWithVolume.push({
+                        keyword: keyword,
+                        volume: match.searchVolume || match.volume || match.monthlySearchVolume || 0,
+                        rank: match.best_rank || match.rank || match.currentRank || null
+                      });
+                    } else {
+                      keywordsWithVolume.push({
+                        keyword: keyword,
+                        volume: 0,
+                        rank: null
+                      });
+                    }
+                  });
+                }
+              }
+            } catch (e) {
+              // If we can't get volumes, just show keywords
+              keywordsWithVolume = citingKeywords.map(c => ({ keyword: c.keyword || '', volume: 0, rank: null }));
+            }
+
+            // Sort by volume descending
+            keywordsWithVolume.sort((a, b) => (b.volume || 0) - (a.volume || 0));
+
+            if (totalCitations === 0) {
+              card2.innerHTML = `
+                <div style="font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin-bottom: 0.75rem;">AI Citations</div>
+                <div style="text-align: center; padding: 2rem 0; color: #94a3b8;">
+                  <div style="font-size: 1.5rem; font-weight: 800; color: #0f172a; margin-bottom: 0.5rem;">0</div>
+                  <div style="font-size: 0.8rem;">No keywords citing this URL</div>
+                </div>
+              `;
+              return;
+            }
+
+            const topKeywords = keywordsWithVolume.slice(0, 5);
+            const totalVolume = keywordsWithVolume.reduce((sum, k) => sum + (k.volume || 0), 0);
+
+            card2.innerHTML = `
+              <div style="font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin-bottom: 0.75rem;">AI Citations</div>
+              <div style="margin-bottom: 1rem;">
+                <div style="font-size: 1.5rem; font-weight: 800; color: #0f172a; line-height: 1.2;">${totalCitations}</div>
+                <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 0.25rem;">Keywords citing this URL</div>
+                <div style="font-size: 0.75rem; color: #64748b; margin-top: 0.5rem;">Total search volume: ${totalVolume.toLocaleString()}/mo</div>
+              </div>
+              <div style="max-height: 200px; overflow-y: auto; padding-top: 0.75rem; border-top: 1px solid #e2e8f0;">
+                ${topKeywords.map(k => `
+                  <div style="margin-bottom: 0.75rem; padding-bottom: 0.75rem; border-bottom: 1px solid #f1f5f9;">
+                    <div style="font-size: 0.85rem; font-weight: 600; color: #0f172a; margin-bottom: 0.25rem;">${k.keyword}</div>
+                    <div style="font-size: 0.75rem; color: #64748b;">
+                      ${k.volume > 0 ? `Volume: ${k.volume.toLocaleString()}/mo` : 'Volume: N/A'}
+                      ${k.rank ? ` • Rank: #${k.rank}` : ''}
+                    </div>
+                  </div>
+                `).join('')}
+                ${keywordsWithVolume.length > 5 ? `<div style="font-size: 0.75rem; color: #94a3b8; text-align: center; margin-top: 0.5rem;">+${keywordsWithVolume.length - 5} more</div>` : ''}
+              </div>
+            `;
+          } catch (err) {
+            console.error('[Money Pages] Error loading card 2:', err);
+            const card2 = container.querySelector('#money-card-2');
+            if (card2) {
+              card2.innerHTML = `
+                <div style="font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin-bottom: 0.75rem;">AI Citations</div>
+                <div style="text-align: center; padding: 2rem 0; color: #ef4444;">Error loading data</div>
+              `;
+            }
+          }
+        }
+
+        // Card 3: Top Competitors
+        async function loadMoneyPageCard3(container, pageUrl, propertyUrl, row) {
+          try {
+            const card3 = container.querySelector('#money-card-3');
+            if (!card3) return;
+
+            // Try to get competitor data from ranking_ai_data
+            let competitors = [];
+            try {
+              const lastAuditResults = localStorage.getItem('last_audit_results');
+              if (lastAuditResults) {
+                const auditData = JSON.parse(lastAuditResults);
+                const combinedRows = auditData?.ranking_ai_data?.combinedRows || 
+                                   auditData?.searchData?.ranking_ai_data?.combinedRows ||
+                                   (Array.isArray(auditData?.ranking_ai_data) ? auditData.ranking_ai_data : []) ||
+                                   (Array.isArray(auditData?.searchData?.ranking_ai_data) ? auditData.searchData.ranking_ai_data : []);
+
+                if (Array.isArray(combinedRows)) {
+                  // Find keywords where this page ranks
+                  const pageKeywords = combinedRows.filter(r => {
+                    const bestUrl = r.best_url || r.bestUrl || '';
+                    return bestUrl.toLowerCase().includes(pageUrl.toLowerCase()) || 
+                           pageUrl.toLowerCase().includes(bestUrl.toLowerCase());
+                  });
+
+                  // Get main keyword (highest volume or best rank)
+                  const mainKeyword = pageKeywords.sort((a, b) => {
+                    const aVol = a.searchVolume || a.volume || 0;
+                    const bVol = b.searchVolume || b.volume || 0;
+                    if (aVol !== bVol) return bVol - aVol;
+                    return (a.best_rank || 99) - (b.best_rank || 99);
+                  })[0];
+
+                  if (mainKeyword) {
+                    // Get competitors from AI citations for this keyword
+                    const aiCitations = mainKeyword.ai_alan_citations || [];
+                    const competitorDomains = new Map();
+
+                    aiCitations.forEach(citation => {
+                      let domain = '';
+                      if (typeof citation === 'string') {
+                        try {
+                          const url = new URL(citation);
+                          domain = url.hostname.replace(/^www\./, '');
+                        } catch (e) {
+                          domain = citation.split('/')[0].replace(/^www\./, '');
+                        }
+                      } else if (citation && typeof citation === 'object') {
+                        const url = citation.url || citation.URL || citation.link || citation.href || '';
+                        if (url) {
+                          try {
+                            const urlObj = new URL(url);
+                            domain = urlObj.hostname.replace(/^www\./, '');
+                          } catch (e) {
+                            domain = url.split('/')[0].replace(/^www\./, '');
+                          }
+                        }
+                      }
+
+                      if (domain && !domain.includes('alanranger.com')) {
+                        const count = competitorDomains.get(domain) || 0;
+                        competitorDomains.set(domain, count + 1);
+                      }
+                    });
+
+                    // Convert to array and sort by citation count
+                    competitors = Array.from(competitorDomains.entries())
+                      .map(([domain, count]) => ({ domain, citations: count }))
+                      .sort((a, b) => b.citations - a.citations)
+                      .slice(0, 10);
+                  }
+                }
+              }
+            } catch (e) {
+              console.error('[Money Pages] Error getting competitors:', e);
+            }
+
+            if (competitors.length === 0) {
+              card3.innerHTML = `
+                <div style="font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin-bottom: 0.75rem;">Top Competitors</div>
+                <div style="text-align: center; padding: 2rem 0; color: #94a3b8;">
+                  <div style="font-size: 0.85rem; margin-bottom: 0.5rem;">No competitor data available</div>
+                  <div style="font-size: 0.75rem;">Competitors appear in AI citations for keywords this page ranks for</div>
+                </div>
+              `;
+              return;
+            }
+
+            card3.innerHTML = `
+              <div style="font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin-bottom: 0.75rem;">Top Competitors</div>
+              <div style="font-size: 0.8rem; color: #64748b; margin-bottom: 1rem;">Competing in AI citations</div>
+              <div style="max-height: 250px; overflow-y: auto;">
+                ${competitors.map((comp, idx) => `
+                  <div style="margin-bottom: 0.75rem; padding-bottom: 0.75rem; border-bottom: ${idx < competitors.length - 1 ? '1px solid #f1f5f9' : 'none'};">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                      <div style="flex: 1;">
+                        <div style="font-size: 0.85rem; font-weight: 600; color: #0f172a; margin-bottom: 0.25rem;">${comp.domain}</div>
+                        <div style="font-size: 0.75rem; color: #64748b;">${comp.citations} ${comp.citations === 1 ? 'citation' : 'citations'}</div>
+                      </div>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            `;
+          } catch (err) {
+            console.error('[Money Pages] Error loading card 3:', err);
+            const card3 = container.querySelector('#money-card-3');
+            if (card3) {
+              card3.innerHTML = `
+                <div style="font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin-bottom: 0.75rem;">Top Competitors</div>
+                <div style="text-align: center; padding: 2rem 0; color: #ef4444;">Error loading data</div>
+              `;
+            }
+          }
+        }
       }
 
       // Lightweight performance cards for Money Pages rows (kept globally so buttons don't error) - MODAL VERSION (kept for backward compatibility)
