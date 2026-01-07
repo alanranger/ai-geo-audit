@@ -29438,14 +29438,19 @@ Final Score: ${score}/100`;
                     }
                     
                     // Map API response to keywords with search volumes
+                    // API now returns search_volume directly, but also check combinedRows as fallback
                     apiData.data.forEach(kw => {
                       const keyword = kw.keyword || '';
                       if (keyword) {
                         const lookup = keywordLookup.get(keyword.toLowerCase()) || {};
+                        // Prefer API response search_volume, fallback to combinedRows lookup
+                        const searchVolume = kw.search_volume !== undefined && kw.search_volume !== null 
+                          ? kw.search_volume 
+                          : (lookup.searchVolume || null);
                         citingKeywords.push({
                           keyword: keyword,
-                          searchVolume: lookup.searchVolume || null,
-                          bestRank: kw.best_rank || lookup.bestRank || null,
+                          searchVolume: searchVolume,
+                          bestRank: kw.best_rank || kw.best_rank_group || lookup.bestRank || null,
                           hasAiOverview: kw.has_ai_overview !== undefined ? kw.has_ai_overview : lookup.hasAiOverview || false
                         });
                       }

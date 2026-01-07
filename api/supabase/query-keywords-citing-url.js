@@ -101,9 +101,10 @@ export default async function handler(req, res) {
     }
 
     // Get all keywords for this property and audit date
+    // Include search_volume field for Card 2 display
     const { data: keywords, error } = await supabase
       .from('keyword_rankings')
-      .select('keyword, has_ai_overview, ai_alan_citations, best_url, best_rank_group')
+      .select('keyword, has_ai_overview, ai_alan_citations, best_url, best_rank_group, search_volume, monthly_search_volume, volume')
       .eq('audit_date', auditDateToUse)
       .eq('property_url', property_url);
 
@@ -141,7 +142,9 @@ export default async function handler(req, res) {
             keyword: row.keyword,
             has_ai_overview: row.has_ai_overview === true,
             best_url: row.best_url || '',
-            best_rank_group: row.best_rank_group || null
+            best_rank_group: row.best_rank_group || null,
+            search_volume: row.search_volume || row.monthly_search_volume || row.volume || null,
+            best_rank: row.best_rank_group || null
           });
         }
       });
