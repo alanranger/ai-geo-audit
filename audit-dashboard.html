@@ -29306,18 +29306,25 @@ Final Score: ${score}/100`;
             // Fetch 90-day average from Supabase historical audits
             let clicks90d = null, impressions90d = null, ctr90d = null, pos90d = null;
             let trendData = null;
+            let historicalError = null;
             try {
               const propertyUrl = document.getElementById('propertyUrl')?.value || localStorage.getItem('property_url') || '';
               if (propertyUrl) {
                 // Fetch historical money pages data from Supabase (last 90 days)
-                const response = await fetch(apiUrl(`/api/supabase/money-pages-historical?property_url=${encodeURIComponent(propertyUrl)}&target_url=${encodeURIComponent(pageUrl)}&days=90`));
+                const apiEndpoint = apiUrl(`/api/supabase/money-pages-historical?property_url=${encodeURIComponent(propertyUrl)}&target_url=${encodeURIComponent(pageUrl)}&days=90`);
+                console.log('[Money Pages Card 1] Fetching 90-day data from:', apiEndpoint);
+                const response = await fetch(apiEndpoint);
+                console.log('[Money Pages Card 1] Response status:', response.status);
                 if (response.ok) {
                   const historicalData = await response.json();
+                  console.log('[Money Pages Card 1] Historical data response:', historicalData);
                   if (historicalData.status === 'ok' && historicalData.data) {
                     clicks90d = historicalData.data.clicks_90d || null;
                     impressions90d = historicalData.data.impressions_90d || null;
                     ctr90d = historicalData.data.ctr_90d || null;
                     pos90d = historicalData.data.avg_position_90d || null;
+                    
+                    console.log('[Money Pages Card 1] Parsed 90-day data:', { clicks90d, impressions90d, ctr90d, pos90d });
                     
                     if (clicks90d !== null && impressions90d !== null) {
                       trendData = {
@@ -29332,9 +29339,18 @@ Final Score: ${score}/100`;
                         pos28d: pos28d,
                         pos90d: pos90d
                       };
+                      console.log('[Money Pages Card 1] Trend data calculated:', trendData);
+                    } else {
+                      console.warn('[Money Pages Card 1] 90-day data missing clicks or impressions');
                     }
+                  } else {
+                    console.warn('[Money Pages Card 1] API returned non-ok status or missing data:', historicalData);
+                    historicalError = historicalData.message || historicalData.error || 'No data available';
                   }
                 } else {
+                  const errorText = await response.text().catch(() => 'Unknown error');
+                  console.warn('[Money Pages Card 1] API request failed:', response.status, errorText);
+                  historicalError = `API error: ${response.status}`;
                   // Fallback: Try to get from timeseries in localStorage
                   const lastAuditResults = localStorage.getItem('last_audit_results');
                   if (lastAuditResults) {
@@ -29515,9 +29531,13 @@ Final Score: ${score}/100`;
                 </div>
               `;
             } else {
+              let fallbackMessage = '90-day average will appear when historical audit data is available in Supabase';
+              if (historicalError) {
+                fallbackMessage = `90-day data unavailable: ${historicalError}`;
+              }
               card1Html += `
                 <div style="border-top: 1px solid #e2e8f0; padding-top: 0.75rem; margin-top: 0.75rem; font-size: 0.75rem; color: #94a3b8; font-style: italic;">
-                  90-day average will appear when historical audit data is available in Supabase
+                  ${fallbackMessage}
                 </div>
               `;
             }
