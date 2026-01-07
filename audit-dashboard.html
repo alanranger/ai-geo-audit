@@ -29223,6 +29223,20 @@ Final Score: ${score}/100`;
         // renderFullWidthTopPagesTable is now defined in shared scope above
       }
       
+      // Helper to set sort and re-apply filters from anywhere (header clicks)
+      window.moneyPagesSetSort = function(column) {
+        if (window.moneyPagesSortColumn === column) {
+          window.moneyPagesSortDirection = window.moneyPagesSortDirection === 'asc' ? 'desc' : 'asc';
+        } else {
+          window.moneyPagesSortColumn = column;
+          window.moneyPagesSortDirection = 'asc';
+        }
+        window.moneyPagesCurrentPage = 1;
+        if (typeof window.moneyPagesApplyFilters === 'function') {
+          window.moneyPagesApplyFilters();
+        }
+      };
+
       // Function to render Money Pages table (with pagination and sorting, matching Top Pages format)
       async function renderMoneyPagesTable(moneyRows, currentPage = 1, rowsPerPage = 10) {
         try {
@@ -29275,6 +29289,10 @@ Final Score: ${score}/100`;
               case 'position':
                 aVal = a.avgPosition || 99;
                 bVal = b.avgPosition || 99;
+                break;
+              case 'aiCitations':
+                aVal = typeof a._aiCitations === 'number' ? a._aiCitations : -1;
+                bVal = typeof b._aiCitations === 'number' ? b._aiCitations : -1;
                 break;
               case 'opportunity':
                 // Sort by category priority: HIGH_OPPORTUNITY=0, VISIBILITY_FIX=1, MAINTAIN=2
@@ -29399,11 +29417,11 @@ Final Score: ${score}/100`;
                   <th id="money-sort-clickPotential" style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; transition: background 0.2s; white-space: normal; line-height: 1.1; width: 100px; min-width: 100px;" onmouseover="this.style.background='#e2e8f0';" onmouseout="this.style.background='transparent';" title="Click potential = expected additional clicks in this period if CTR hit 2.5%: max(0, impressions × 0.025 − clicks). Click to sort.">
                     <div>Click</div><div>potential</div>${getSortIcon('clickPotential')}
                   </th>
-                  <th id="money-sort-position" style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; transition: background 0.2s; line-height: 1.2;" onmouseover="this.style.background='#e2e8f0';" onmouseout="this.style.background='transparent';" title="Click to sort by Avg Position">
+                  <th id="money-sort-position" style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; transition: background 0.2s; line-height: 1.2;" onmouseover="this.style.background='#e2e8f0';" onmouseout="this.style.background='transparent';" title="Click to sort by Avg Position" onclick="window.moneyPagesSetSort('position')">
                     <div>Avg</div><div>Position</div>${getSortIcon('position')}
                   </th>
-                  <th style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap;" title="AI citations (unique keywords that cite this URL in AI Overview). Latest audit only; fetched on demand.">
-                    AI citations
+                  <th id="money-sort-ai-citations" style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; white-space: normal; line-height: 1.15; cursor: pointer; user-select: none;" title="AI citations (unique keywords that cite this URL in AI Overview). Latest audit only; fetched on demand." onclick="window.moneyPagesSetSort('aiCitations')">
+                    <div>AI citations</div>${getSortIcon('aiCitations')}
                   </th>
                   <th id="money-sort-opportunity" style="text-align: center; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; transition: background 0.2s; white-space: nowrap;" onmouseover="this.style.background='#e2e8f0';" onmouseout="this.style.background='transparent';" title="Click to sort by Opportunity">
                     Opportunity${getSortIcon('opportunity')}
@@ -29482,8 +29500,12 @@ Final Score: ${score}/100`;
             console.log('[Money Pages] Stored row data for landscape page:', rowDataToStore);
           }
           
+          // Safe strings for inline handlers
+          const safeUrl = String(row.url || '').replace(/'/g, "\\'").replace(/\"/g, '&quot;');
+          const safeTitle = String(pageTitle || row.url || 'Untitled').replace(/'/g, "\\'").replace(/\"/g, '&quot;');
+
           tableHtml += `
-            <tr style="border-bottom: 1px solid #f1f5f9; background: ${rowBg}; transition: background 0.2s;" onmouseover="this.style.background='#f8f9fa';" onmouseout="this.style.background='${rowBg}';">
+            <tr style="border-bottom: 1px solid #f1f5f9; background: ${rowBg}; transition: background 0.2s; cursor: pointer;" onmouseover="this.style.background='#f8f9fa';" onmouseout="this.style.background='${rowBg}';" onclick="window.trackMoneyPage('${safeUrl}', '${safeTitle}')">
               <td style="padding: 0.75rem; color: #0f172a; font-weight: 600; vertical-align: top; width: 40px;">${filteredStartIdx + idx + 1}</td>
               <td style="padding: 0.55rem 0.75rem; vertical-align: top; width: 380px;">
                 <a href="${row.url}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: none; font-weight: 500; border-bottom: 1px solid transparent; transition: all 0.2s;" onmouseover="this.style.color='#1d4ed8'; this.style.borderBottomColor='#1d4ed8';" onmouseout="this.style.color='#2563eb'; this.style.borderBottomColor='transparent';" title="Open ${row.url} in new tab">
@@ -29668,7 +29690,7 @@ Final Score: ${score}/100`;
                           Not tracked
                         </span>
                         <button 
-                          onclick="window.trackMoneyPage('${row.url.replace(/'/g, "\\'")}', '${(row.title || row.url).replace(/'/g, "\\'")}')"
+                          onclick="event.stopPropagation(); window.trackMoneyPage('${row.url.replace(/'/g, "\\'")}', '${(row.title || row.url).replace(/'/g, "\\'")}')"
                           data-row-url="${row.url.replace(/"/g, '&quot;')}"
                           style="font-size: 0.75rem; padding: 0.375rem 0.75rem; border-radius: 4px; border: 1px solid #10b981; background: #10b981; cursor: pointer; color: white; font-weight: 600; transition: all 0.2s; white-space: nowrap;"
                           onmouseover="this.style.background='#059669'; this.style.borderColor='#059669';"
@@ -29779,7 +29801,7 @@ Final Score: ${score}/100`;
                       escapeHtml(cycleText) +
                     '</div>' +
                     '<button ' +
-                      'onclick="window.openOptimisationTaskDrawer(\'' + taskIdEscaped + '\')" ' +
+                      'onclick="event.stopPropagation(); window.openOptimisationTaskDrawer(\'' + taskIdEscaped + '\')" ' +
                       'style="font-size: 0.75rem; padding: 0.375rem 0.75rem; border-radius: 4px; border: 1px solid #a3d977; background: #E5FFCC; cursor: pointer; color: #000000; font-weight: 600; transition: all 0.2s; white-space: nowrap;" ' +
                       'onmouseover="this.style.background=\'#d4f5a8\'; this.style.borderColor=\'#8bc34a\';" ' +
                       'onmouseout="this.style.background=\'#E5FFCC\'; this.style.borderColor=\'#a3d977\';" ' +
@@ -30528,6 +30550,9 @@ Final Score: ${score}/100`;
             window.renderMoneyPagesSuggestedTop10();
           }
         };
+
+        // Expose for header sort clicks
+        window.moneyPagesApplyFilters = applyFiltersAndRender;
         
         // CRITICAL: Fetch optimisation statuses for ALL rows before initial render
         // (only if admin key set; otherwise will 401 and clear cache)
@@ -32978,6 +33003,21 @@ Final Score: ${score}/100`;
           if (!window.moneyPagesAiCitationCache) {
             window.moneyPagesAiCitationCache = new Map();
           }
+          // Load from localStorage if available to prime cache
+          try {
+            const stored = localStorage.getItem('moneyPagesAiCitationCache');
+            if (stored) {
+              const parsed = JSON.parse(stored);
+              if (parsed && typeof parsed === 'object') {
+                Object.entries(parsed).forEach(([k,v]) => {
+                  window.moneyPagesAiCitationCache.set(k, v);
+                });
+              }
+            }
+          } catch (e) {
+            debugLog(`[Money Pages] Failed to load cached citations: ${e.message}`, 'warn');
+          }
+
           const propertyUrl =
             document.getElementById('propertyUrl')?.value ||
             localStorage.getItem('gsc_property_url') ||
@@ -32988,6 +33028,14 @@ Final Score: ${score}/100`;
             cell.textContent = typeof count === 'number' ? count.toString() : '—';
             if (keywords && keywords.length) {
               cell.title = `Keywords citing this URL: ${keywords.join(', ')}`;
+            }
+            // Write back to underlying row for sorting
+            const url = cell.getAttribute('data-page-url');
+            if (url && window.moneyPagesData) {
+              const match = window.moneyPagesData.find(r => (r.url || '').toLowerCase() === url.toLowerCase());
+              if (match) {
+                match._aiCitations = typeof count === 'number' ? count : null;
+              }
             }
           };
 
@@ -33022,6 +33070,12 @@ Final Score: ${score}/100`;
                 const keywords = Array.isArray(data?.data) ? data.data.map(k => k.keyword).filter(Boolean) : [];
                 const count = typeof data?.count === 'number' ? data.count : keywords.length;
                 window.moneyPagesAiCitationCache.set(cacheKey, { count, keywords });
+                try {
+                  const obj = Object.fromEntries(window.moneyPagesAiCitationCache.entries());
+                  localStorage.setItem('moneyPagesAiCitationCache', JSON.stringify(obj));
+                } catch (e) {
+                  debugLog(`[Money Pages] Failed to persist citations cache: ${e.message}`, 'warn');
+                }
                 renderCitation(cell, count, keywords);
               })
               .catch(err => {
@@ -36259,18 +36313,40 @@ Final Score: ${score}/100`;
         if (!window.moneyPagesAiCitationCache) {
           window.moneyPagesAiCitationCache = new Map();
         }
+        // Load from localStorage if available
+        try {
+          const stored = localStorage.getItem('moneyPagesAiCitationCache');
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            if (parsed && typeof parsed === 'object') {
+              Object.entries(parsed).forEach(([k,v]) => {
+                window.moneyPagesAiCitationCache.set(k, v);
+              });
+            }
+          }
+        } catch (e) {
+          debugLog(`[Money Pages] Failed to load cached citations (opportunity): ${e.message}`, 'warn');
+        }
         const propertyUrl =
           document.getElementById('propertyUrl')?.value ||
           localStorage.getItem('gsc_property_url') ||
           localStorage.getItem('last_property_url') ||
           'https://www.alanranger.com';
 
-        const renderCitation = (cell, count, keywords) => {
-          cell.textContent = typeof count === 'number' ? count.toString() : '—';
-          if (keywords && keywords.length) {
-            cell.title = `Keywords citing this URL: ${keywords.join(', ')}`;
-          }
-        };
+          const renderCitation = (cell, count, keywords) => {
+            cell.textContent = typeof count === 'number' ? count.toString() : '—';
+            if (keywords && keywords.length) {
+              cell.title = `Keywords citing this URL: ${keywords.join(', ')}`;
+            }
+            // Write back to underlying row for sorting
+            const url = cell.getAttribute('data-page-url');
+            if (url && window.moneyPagesData) {
+              const match = window.moneyPagesData.find(r => (r.url || '').toLowerCase() === url.toLowerCase());
+              if (match) {
+                match._aiCitations = typeof count === 'number' ? count : null;
+              }
+            }
+          };
 
         const cells = container.querySelectorAll('.ai-citation-cell-opportunity');
         cells.forEach(cell => {
