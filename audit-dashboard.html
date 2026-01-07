@@ -12741,19 +12741,37 @@
       window.computeAiMetricsForPageUrl = window.computeAiMetricsForPageUrl || function computeAiMetricsForPageUrl(pageUrl, combinedRows) {
         const rows = Array.isArray(combinedRows) ? combinedRows : [];
         
-        // Normalize the target URL for comparison (remove protocol, www, trailing slash, query params, hash)
+        // Normalize the target URL for comparison - handles all URL format variations
         const normalizeUrl = (url) => {
           if (!url) return '';
           let normalized = String(url).toLowerCase().trim();
+          
           // Remove protocol
           normalized = normalized.replace(/^https?:\/\//, '');
+          
           // Remove www.
           normalized = normalized.replace(/^www\./, '');
+          
           // Remove query params and hash
           normalized = normalized.split('?')[0].split('#')[0];
-          // Remove trailing slash (except for root)
-          normalized = normalized.replace(/\/$/, '');
-          return normalized;
+          
+          // Extract path portion (everything after domain, or entire string if no domain)
+          // Handle both absolute URLs (with domain) and relative paths (with/without leading slash)
+          let path = normalized;
+          const domainMatch = normalized.match(/^[^\/]+(\/.*)?$/);
+          if (domainMatch && normalized.includes('/')) {
+            // Has domain - extract path
+            path = normalized.split('/').slice(1).join('/');
+          } else if (normalized.startsWith('/')) {
+            // Relative path with leading slash
+            path = normalized.substring(1);
+          }
+          // If no leading slash and no domain, it's already just the path
+          
+          // Remove leading and trailing slashes
+          path = path.replace(/^\/+/, '').replace(/\/+$/, '');
+          
+          return path;
         };
         
         const canonTarget = normalizeUrl(pageUrl);
@@ -12766,6 +12784,7 @@
         // CRITICAL DEBUG: Log the exact normalized target for this URL
         if (canonTarget.includes('photography-courses-coventry')) {
           debugLog(`[computeAiMetricsForPageUrl] START (NEW LOGIC): pageUrl="${pageUrl}", canonTarget="${canonTarget}", rowsCount=${rows.length}`, 'error');
+          debugLog(`[computeAiMetricsForPageUrl] DIAGNOSTIC: Normalization test - Input: "${pageUrl}" → Output: "${canonTarget}"`, 'error');
           
           // Check what fields are available in the first row
           if (rows.length > 0) {
@@ -14276,40 +14295,121 @@
                   // Only call computeAiMetricsForPageUrl if we have data
                   let aiForUrl = { ai_overview: null, ai_citations: null };
                   if (aiRows.length > 0) {
-                    // Try both the full GSC URL and the original task URL (in case formats differ)
-                    const urlsToTry = [pageUrlForGsc, taskUrlForPage];
+                    // CRITICAL FIX: Check if combinedRows has ai_alan_citations arrays
+                    // If not, we need to fetch from Supabase directly
+                    const hasCitationsArrays = aiRows.some(r => 
+                      Array.isArray(r.ai_alan_citations) && r.ai_alan_citations.length > 0
+                    );
                     
-                    for (const urlToCheck of urlsToTry) {
-                      if (urlToCheck) {
-                        // ENHANCED DIAGNOSTIC: Log before calling function
-                        if (urlToCheck.includes('photography-courses-coventry')) {
-                          debugLog(`[Optimisation] URL task DIAGNOSTIC: About to call computeAiMetricsForPageUrl with url="${urlToCheck}", rowsCount=${aiRows.length}`, 'error');
+                    if (!hasCitationsArrays) {
+                      // combinedRows doesn't have citations arrays - try to get from latest audit first
+                      let citationsFound = false;
+                      
+                      if (latestAuditFromSupabase && latestAuditFromSupabase.ranking_ai_data) {
+                        const rankingAiData = latestAuditFromSupabase.ranking_ai_data;
+                        if (rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
+                          const auditRows = rankingAiData.combinedRows;
+                          const auditHasArrays = auditRows.some(r => 
+                            Array.isArray(r.ai_alan_citations) && r.ai_alan_citations.length > 0
+                          );
+                          
+                          if (auditHasArrays) {
+                            // Latest audit has citations arrays - use those
+                            debugLog(`[Optimisation] URL task: Using citations from latest audit ranking_ai_data`, 'info');
+                            aiRows = auditRows;
+                            citationsFound = true;
+                          }
                         }
+                      }
+                      
+                      if (!citationsFound) {
+                        // Still no citations arrays - fetch from Supabase directly
+                        debugLog(`[Optimisation] URL task: combinedRows missing ai_alan_citations arrays, fetching from Supabase...`, 'warn');
                         
-                        const result = (typeof window.computeAiMetricsForPageUrl === 'function')
-                          ? window.computeAiMetricsForPageUrl(urlToCheck, aiRows)
-                          : { ai_overview: null, ai_citations: null };
-                        
-                        // ENHANCED DIAGNOSTIC: Log result immediately
-                        if (urlToCheck.includes('photography-courses-coventry')) {
-                          debugLog(`[Optimisation] URL task DIAGNOSTIC: computeAiMetricsForPageUrl returned: ${JSON.stringify(result)}`, 'error');
-                        }
-                        
-                        // Use first result where BOTH values are non-null (consistent match found)
-                        // This ensures we only use results where a match was definitively found
-                        if (result.ai_overview !== null && result.ai_citations !== null) {
-                          aiForUrl = result;
-                          debugLog(`[Optimisation] URL task: AI lookup for ${urlToCheck} - Overview: ${aiForUrl.ai_overview}, Citations: ${aiForUrl.ai_citations}`, 'info');
-                          break;
-                        } else if (result.ai_overview !== null || result.ai_citations !== null) {
-                          // Inconsistent result (shouldn't happen, but log it for debugging)
-                          debugLog(`[Optimisation] URL task: Inconsistent result from computeAiMetricsForPageUrl for ${urlToCheck} - Overview: ${result.ai_overview}, Citations: ${result.ai_citations}`, 'warn');
+                        try {
+                          const propertyUrl = document.getElementById('propertyUrl')?.value || 
+                                            localStorage.getItem('gsc_property_url') || 
+                                            'https://www.alanranger.com';
+                          
+                          // Use API endpoint to query Supabase
+                          const queryUrl = apiUrl(`/api/supabase/query-keywords-citing-url?` +
+                            `property_url=${encodeURIComponent(propertyUrl)}&` +
+                            `target_url=${encodeURIComponent(pageUrlForGsc || taskUrlForPage)}`
+                          );
+                          
+                          const citationResponse = await fetch(queryUrl);
+                          if (citationResponse.ok) {
+                            const citationData = await citationResponse.json();
+                            if (citationData.status === 'ok' && citationData.data && citationData.data.length > 0) {
+                              const citingKeywords = citationData.data;
+                              const uniqueKeywordsCount = citingKeywords.length;
+                              const hasOverview = citingKeywords.some(k => k.has_ai_overview === true);
+                              
+                              aiForUrl = {
+                                ai_overview: hasOverview,
+                                ai_citations: uniqueKeywordsCount
+                              };
+                              
+                              debugLog(
+                                `[Optimisation] URL task: Found ${uniqueKeywordsCount} keywords citing URL from Supabase: ` +
+                                `${citingKeywords.map(k => k.keyword).join(', ')}`,
+                                'success'
+                              );
+                            } else {
+                              debugLog(`[Optimisation] URL task: No keywords found citing URL in Supabase`, 'info');
+                            }
+                          } else {
+                            debugLog(`[Optimisation] URL task: Failed to query Supabase for citations: ${citationResponse.status}`, 'warn');
+                          }
+                        } catch (supabaseErr) {
+                          debugLog(`[Optimisation] URL task: Error querying Supabase for citations: ${supabaseErr.message}`, 'warn');
                         }
                       }
                     }
                     
-                    if (aiForUrl.ai_overview === null && aiForUrl.ai_citations === null) {
-                      debugLog(`[Optimisation] URL task: No AI data found for ${pageUrlForGsc} or ${taskUrlForPage} in ${aiRows.length} rows`, 'warn');
+                    // If we have citations arrays (either from combinedRows or latest audit), use computeAiMetricsForPageUrl
+                    // Check again after potentially updating aiRows from latest audit
+                    const finalHasArrays = aiRows.some(r => 
+                      Array.isArray(r.ai_alan_citations) && r.ai_alan_citations.length > 0
+                    );
+                    
+                    if (finalHasArrays && aiForUrl.ai_overview === null && aiForUrl.ai_citations === null) {
+                      // combinedRows has citations arrays - use existing logic
+                      // Try both the full GSC URL and the original task URL (in case formats differ)
+                      const urlsToTry = [pageUrlForGsc, taskUrlForPage];
+                      
+                      for (const urlToCheck of urlsToTry) {
+                        if (urlToCheck) {
+                          // ENHANCED DIAGNOSTIC: Log before calling function
+                          if (urlToCheck.includes('photography-courses-coventry')) {
+                            debugLog(`[Optimisation] URL task DIAGNOSTIC: About to call computeAiMetricsForPageUrl with url="${urlToCheck}", rowsCount=${aiRows.length}`, 'error');
+                          }
+                          
+                          const result = (typeof window.computeAiMetricsForPageUrl === 'function')
+                            ? window.computeAiMetricsForPageUrl(urlToCheck, aiRows)
+                            : { ai_overview: null, ai_citations: null };
+                          
+                          // ENHANCED DIAGNOSTIC: Log result immediately
+                          if (urlToCheck.includes('photography-courses-coventry')) {
+                            debugLog(`[Optimisation] URL task DIAGNOSTIC: computeAiMetricsForPageUrl returned: ${JSON.stringify(result)}`, 'error');
+                          }
+                          
+                          // Use first result where BOTH values are non-null (consistent match found)
+                          // This ensures we only use results where a match was definitively found
+                          if (result.ai_overview !== null && result.ai_citations !== null) {
+                            aiForUrl = result;
+                            debugLog(`[Optimisation] URL task: AI lookup for ${urlToCheck} - Overview: ${aiForUrl.ai_overview}, Citations: ${aiForUrl.ai_citations}`, 'info');
+                            break;
+                          } else if (result.ai_overview !== null || result.ai_citations !== null) {
+                            // Inconsistent result (shouldn't happen, but log it for debugging)
+                            debugLog(`[Optimisation] URL task: Inconsistent result from computeAiMetricsForPageUrl for ${urlToCheck} - Overview: ${result.ai_overview}, Citations: ${result.ai_citations}`, 'warn');
+                          }
+                        }
+                      }
+                      
+                      if (aiForUrl.ai_overview === null && aiForUrl.ai_citations === null) {
+                        debugLog(`[Optimisation] URL task: No AI data found for ${pageUrlForGsc} or ${taskUrlForPage} in ${aiRows.length} rows`, 'warn');
+                      }
                     }
                   } else {
                     debugLog(`[Optimisation] URL task: Cannot lookup AI data - no combinedRows available (${aiRows.length} rows)`, 'warn');
