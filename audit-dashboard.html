@@ -13775,13 +13775,44 @@
           }
 
           // Try to ensure Ranking & AI data is loaded (keyword-based tasks only)
-          if (!currentMetrics && hasKeyword && typeof window.renderRankingAiTab === 'function') {
+          if (!currentMetrics && hasKeyword) {
+            // CRITICAL: Fetch latest audit from Supabase to get fresh ranking_ai_data
+            let latestAuditFromSupabase = null;
             try {
-              await window.renderRankingAiTab();
-              // Small delay to let data load
-              await new Promise(resolve => setTimeout(resolve, 500));
-            } catch (e) {
-              console.warn('[Optimisation] Could not refresh Ranking & AI data:', e);
+              const propertyUrl = document.getElementById('propertyUrl')?.value || 
+                                  localStorage.getItem('gsc_property_url') || 
+                                  'https://www.alanranger.com';
+              if (typeof fetchLatestAuditFromSupabase === 'function') {
+                debugLog(`[Optimisation] Fetching latest audit from Supabase for Ranking & AI data...`, 'info');
+                latestAuditFromSupabase = await fetchLatestAuditFromSupabase(propertyUrl, false);
+                if (latestAuditFromSupabase && latestAuditFromSupabase.ranking_ai_data) {
+                  try {
+                    const rankingAiData = latestAuditFromSupabase.ranking_ai_data;
+                    if (rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
+                      // Store in localStorage for RankingAiModule to use
+                      localStorage.setItem('rankingAiData', JSON.stringify(rankingAiData));
+                      debugLog(`[Optimisation] Loaded ${rankingAiData.combinedRows.length} keywords from latest audit's ranking_ai_data`, 'success');
+                      // Also set window.rankingAiData
+                      window.rankingAiData = rankingAiData.combinedRows;
+                    }
+                  } catch (rankingErr) {
+                    debugLog(`[Optimisation] Error loading ranking_ai_data from latest audit: ${rankingErr.message}`, 'warn');
+                  }
+                }
+              }
+            } catch (fetchErr) {
+              debugLog(`[Optimisation] Error fetching latest audit from Supabase: ${fetchErr.message}`, 'warn');
+            }
+            
+            // Also try renderRankingAiTab to refresh data
+            if (typeof window.renderRankingAiTab === 'function') {
+              try {
+                await window.renderRankingAiTab();
+                // Small delay to let data load
+                await new Promise(resolve => setTimeout(resolve, 500));
+              } catch (e) {
+                console.warn('[Optimisation] Could not refresh Ranking & AI data:', e);
+              }
             }
           }
           
@@ -13790,11 +13821,33 @@
             const { combinedRows } = RankingAiModule.state();
             console.log('[Optimisation] Searching in combinedRows:', combinedRows?.length, 'rows');
             
+            // If combinedRows is empty, try to get from window.rankingAiData or localStorage
+            let rowsToSearch = combinedRows;
+            if (!rowsToSearch || rowsToSearch.length === 0) {
+              if (typeof window.rankingAiData !== 'undefined' && Array.isArray(window.rankingAiData) && window.rankingAiData.length > 0) {
+                rowsToSearch = window.rankingAiData;
+                debugLog(`[Optimisation] Using window.rankingAiData (${rowsToSearch.length} rows)`, 'info');
+              } else {
+                try {
+                  const local = localStorage.getItem('rankingAiData');
+                  if (local) {
+                    const parsed = JSON.parse(local);
+                    if (parsed && Array.isArray(parsed.combinedRows) && parsed.combinedRows.length > 0) {
+                      rowsToSearch = parsed.combinedRows;
+                      debugLog(`[Optimisation] Using localStorage rankingAiData (${rowsToSearch.length} rows)`, 'info');
+                    }
+                  }
+                } catch (e) {
+                  debugLog(`[Optimisation] Error reading localStorage rankingAiData: ${e.message}`, 'warn');
+                }
+              }
+            }
+            
             // Normalize URLs for comparison
             const taskUrlClean = (task.target_url_clean || task.target_url || '').replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
             const taskUrlPath = taskUrlClean.includes('/') ? taskUrlClean.split('/').slice(1).join('/') : '';
             
-            matchingRow = combinedRows?.find(r => {
+            matchingRow = rowsToSearch?.find(r => {
               const keywordMatch = (r.keyword || '').toLowerCase() === (task.keyword_text || '').toLowerCase();
               if (!keywordMatch) return false;
               
@@ -13820,7 +13873,7 @@
               return urlMatch || true; // Always accept keyword match for keyword tasks
             });
             
-            debugLog(`[Optimisation] Found matching row: ${matchingRow ? 'YES' : 'NO'} (taskKeyword: ${task.keyword_text}, taskUrl: ${task.target_url_clean || task.target_url}, matchingRowKeyword: ${matchingRow?.keyword}, matchingRowUrl: ${matchingRow?.best_url || matchingRow?.targetUrl})`, matchingRow ? 'info' : 'warn');
+            debugLog(`[Optimisation] Found matching row: ${matchingRow ? 'YES' : 'NO'} (taskKeyword: ${task.keyword_text}, taskUrl: ${task.target_url_clean || task.target_url}, rowsSearched: ${rowsToSearch?.length || 0}, matchingRowKeyword: ${matchingRow?.keyword}, matchingRowUrl: ${matchingRow?.best_url || matchingRow?.targetUrl})`, matchingRow ? 'info' : 'warn');
             
             if (matchingRow) {
               // Get queryTotal data for clicks, impressions, and CTR (same as submitTrackKeyword)
@@ -13847,14 +13900,35 @@
             }
           }
           
-          // If still no data, try to get from window.rankingAiData
-          if (!matchingRow && typeof window.rankingAiData !== 'undefined' && Array.isArray(window.rankingAiData)) {
-            console.log('[Optimisation] Searching in window.rankingAiData:', window.rankingAiData.length, 'rows');
+          // If still no data, try to get from window.rankingAiData or localStorage
+          if (!matchingRow && hasKeyword) {
+            let rowsToSearch = null;
             
-            const taskUrlClean = (task.target_url_clean || task.target_url || '').replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
-            const taskUrlPath = taskUrlClean.includes('/') ? taskUrlClean.split('/').slice(1).join('/') : '';
+            // Try window.rankingAiData first
+            if (typeof window.rankingAiData !== 'undefined' && Array.isArray(window.rankingAiData) && window.rankingAiData.length > 0) {
+              rowsToSearch = window.rankingAiData;
+              console.log('[Optimisation] Searching in window.rankingAiData:', rowsToSearch.length, 'rows');
+            } else {
+              // Fallback to localStorage
+              try {
+                const local = localStorage.getItem('rankingAiData');
+                if (local) {
+                  const parsed = JSON.parse(local);
+                  if (parsed && Array.isArray(parsed.combinedRows) && parsed.combinedRows.length > 0) {
+                    rowsToSearch = parsed.combinedRows;
+                    console.log('[Optimisation] Searching in localStorage rankingAiData:', rowsToSearch.length, 'rows');
+                  }
+                }
+              } catch (e) {
+                debugLog(`[Optimisation] Error reading localStorage rankingAiData: ${e.message}`, 'warn');
+              }
+            }
             
-            matchingRow = window.rankingAiData.find(r => {
+            if (rowsToSearch && rowsToSearch.length > 0) {
+              const taskUrlClean = (task.target_url_clean || task.target_url || '').replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
+              const taskUrlPath = taskUrlClean.includes('/') ? taskUrlClean.split('/').slice(1).join('/') : '';
+              
+              matchingRow = rowsToSearch.find(r => {
               const keywordMatch = (r.keyword || '').toLowerCase() === (task.keyword_text || '').toLowerCase();
               if (!keywordMatch) return false;
               
@@ -13880,12 +13954,39 @@
               return urlMatch || true; // Always accept keyword match for keyword tasks
             });
             
-            debugLog(`[Optimisation] Found matching row in window.rankingAiData: ${matchingRow ? 'YES' : 'NO'}`, matchingRow ? 'info' : 'warn');
-            
+              debugLog(`[Optimisation] Found matching row in window.rankingAiData/localStorage: ${matchingRow ? 'YES' : 'NO'} (rowsSearched: ${rowsToSearch.length})`, matchingRow ? 'info' : 'warn');
+              
+              // Build metrics from matching row if found
+              if (matchingRow && !currentMetrics) {
+                // Get queryTotal data for clicks, impressions, and CTR
+                let queryTotal = null;
+                if (typeof getQueryTotalForKeyword === 'function') {
+                  queryTotal = getQueryTotalForKeyword(task.keyword_text);
+                }
+                
+                currentMetrics = {
+                  gsc_clicks_28d: queryTotal?.clicks || matchingRow.gsc_clicks_28d || matchingRow.clicks_28d || null,
+                  gsc_impressions_28d: queryTotal?.impressions || matchingRow.gsc_impressions_28d || matchingRow.impressions_28d || null,
+                  gsc_ctr_28d: queryTotal?.ctr != null ? (queryTotal.ctr / 100) : (matchingRow.gsc_ctr_28d || matchingRow.ctr_28d || null),
+                  current_rank: matchingRow.best_rank_group || matchingRow.current_rank || null,
+                  opportunity_score: matchingRow.opportunityScore || null,
+                  ai_overview: matchingRow.has_ai_overview === true || matchingRow.ai_overview_present_any === true,
+                  ai_citations: matchingRow.ai_alan_citations_count != null ? Number(matchingRow.ai_alan_citations_count) : 0,
+                  ai_citations_total: matchingRow.ai_total_citations != null ? Number(matchingRow.ai_total_citations) : 0,
+                  classic_ranking_url: matchingRow.best_url || matchingRow.targetUrl || matchingRow.ranking_url || taskUrl,
+                  page_type: matchingRow.pageType || null,
+                  segment: matchingRow.segment || null,
+                  captured_at: new Date().toISOString()
+                };
+                debugLog(`[Optimisation] Built currentMetrics from window.rankingAiData/localStorage: rank=${currentMetrics.current_rank}, ai_overview=${currentMetrics.ai_overview}`, 'success');
+              }
+            } else {
+              debugLog(`[Optimisation] No ranking AI data available in window.rankingAiData or localStorage`, 'warn');
+            }
           }
           
-          // Build metrics from matching row if found
-          if (matchingRow) {
+          // Build metrics from matching row if found (legacy fallback - should already be set above)
+          if (matchingRow && !currentMetrics) {
             // Get queryTotal data for clicks, impressions, and CTR (same as submitTrackKeyword)
             let queryTotal = null;
             if (typeof getQueryTotalForKeyword === 'function') {
