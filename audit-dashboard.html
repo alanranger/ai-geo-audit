@@ -17142,31 +17142,25 @@
               })
             });
             
-            // Log errors to console for debugging (especially for warn/error types)
+            // Silently handle errors - don't spam console
+            // Only log if it's a critical error (not just table missing or network issues)
             if (!response.ok) {
-              const errorData = await response.json().catch(() => ({}));
-              console.warn('[debugLog] Failed to save to Supabase:', {
-                status: response.status,
-                error: errorData.error,
-                message: truncatedMessage.substring(0, 100),
-                type: type
-              });
-            } else {
-              // Log success for warn/error types to verify it's working
-              if (type === 'warn' || type === 'error') {
-                console.log('[debugLog] Saved to Supabase:', {
-                  type: type,
-                  message: truncatedMessage.substring(0, 100)
-                });
+              try {
+                const errorData = await response.json();
+                // Only log if it's not a "table doesn't exist" error (expected during development)
+                if (errorData.error && !errorData.error.includes('does not exist') && !errorData.error.includes('relation')) {
+                  console.warn('[debugLog] Failed to save to Supabase:', errorData.error);
+                }
+              } catch (e) {
+                // Response wasn't JSON, ignore silently
               }
             }
           } catch (err) {
-            // Always log errors to console for debugging
-            console.error('[debugLog] Error saving to Supabase:', {
-              error: err.message,
-              type: type,
-              message: truncatedMessage.substring(0, 100)
-            });
+            // Silently ignore network errors - don't spam console
+            // Only log critical errors
+            if (type === 'error' && err.message && !err.message.includes('fetch')) {
+              console.error('[debugLog] Critical error saving to Supabase:', err.message);
+            }
           }
         })();
       }
