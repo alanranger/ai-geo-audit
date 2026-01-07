@@ -124,16 +124,18 @@ export default async function handler(req, res) {
         // Check if any citation matches the target URL
         let urlIsCited = false;
         citationsArray.forEach(citation => {
+          // Try multiple field names to extract citation URL
           const citedUrl = typeof citation === 'string' 
             ? citation 
             : (citation && typeof citation === 'object' 
-                ? (citation.url || citation.URL || citation.link) 
+                ? (citation.url || citation.URL || citation.link || citation.href || citation.page || citation.pageUrl || citation.target || citation.targetUrl || citation.best_url || citation.bestUrl || '') 
                 : null);
           
           if (!citedUrl) return;
           
           const citedUrlNormalized = normalizeUrl(citedUrl);
-          if (citedUrlNormalized === targetUrlNormalized) {
+          // Match if normalized URLs are equal OR if citation contains the target slug
+          if (citedUrlNormalized === targetUrlNormalized || citedUrlNormalized.includes(targetUrlNormalized)) {
             urlIsCited = true;
           }
         });
