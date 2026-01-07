@@ -12763,54 +12763,7 @@
           return { ai_overview: null, ai_citations: null };
         }
 
-        debugLog(`[computeAiMetricsForPageUrl] Starting lookup for URL: "${pageUrl}" (normalized: "${canonTarget}") with ${rows.length} rows`, 'info');
-        
-        // DIAGNOSTIC: Log actual field names from first row to understand data structure
-        if (rows.length > 0) {
-          const firstRow = rows[0];
-          const fieldNames = Object.keys(firstRow).filter(k => 
-            k.includes('url') || k.includes('Url') || k.includes('overview') || k.includes('citation') || k.includes('keyword')
-          );
-          debugLog(`[computeAiMetricsForPageUrl] DIAGNOSTIC: Field names in first row (URL/overview/citation related): ${JSON.stringify(fieldNames)}`, 'info');
-          debugLog(`[computeAiMetricsForPageUrl] DIAGNOSTIC: First row sample (filtered): ${JSON.stringify({
-            keyword: firstRow.keyword,
-            best_url: firstRow.best_url,
-            targetUrl: firstRow.targetUrl,
-            ranking_url: firstRow.ranking_url,
-            has_ai_overview: firstRow.has_ai_overview,
-            ai_overview_present_any: firstRow.ai_overview_present_any,
-            ai_alan_citations_count: firstRow.ai_alan_citations_count,
-            ai_alan_citations: Array.isArray(firstRow.ai_alan_citations) ? `[${firstRow.ai_alan_citations.length} items]` : firstRow.ai_alan_citations
-          }, null, 2)}`, 'info');
-        }
-        
-        // TARGETED DIAGNOSTIC: Find and log all rows that contain the target URL path
-        const targetPathSegment = canonTarget.includes('/') ? canonTarget.split('/').pop() : canonTarget;
-        const relevantRows = rows.filter(r => {
-          const rowUrl = r.best_url || r.bestUrl || r.targetUrl || r.target_url || r.ranking_url || r.rankingUrl || r.url || '';
-          return rowUrl && (rowUrl.toLowerCase().includes(targetPathSegment) || rowUrl.toLowerCase().includes('photography-courses'));
-        });
-        if (relevantRows.length > 0) {
-          debugLog(`[computeAiMetricsForPageUrl] TARGETED DIAGNOSTIC: Found ${relevantRows.length} rows containing "${targetPathSegment}" or "photography-courses":`, 'info');
-          relevantRows.slice(0, 5).forEach((r, idx) => {
-            const rowUrl = r.best_url || r.bestUrl || r.targetUrl || r.target_url || r.ranking_url || r.rankingUrl || r.url || '';
-            const normalizedRowUrl = normalizeUrl(rowUrl);
-            debugLog(`[computeAiMetricsForPageUrl] TARGETED DIAGNOSTIC [${idx}]: keyword="${r.keyword || 'unknown'}", rowUrl="${rowUrl}", normalized="${normalizedRowUrl}", target="${canonTarget}", match=${normalizedRowUrl === canonTarget}, hasOverview=${r.has_ai_overview === true || r.ai_overview_present_any === true}, citations=${r.ai_alan_citations_count != null ? r.ai_alan_citations_count : 'null'}`, 'info');
-          });
-        }
-        
-        // Log sample of available URLs in the data for debugging (enhanced logging)
-        const sampleUrls = rows.slice(0, 10).map(r => {
-          const bestUrl = r.best_url || r.targetUrl || r.ranking_url || '';
-          return {
-            keyword: r.keyword,
-            bestUrl: bestUrl,
-            normalized: normalizeUrl(bestUrl),
-            hasOverview: r.has_ai_overview === true || r.ai_overview_present_any === true,
-            citations: r.ai_alan_citations_count != null ? Number(r.ai_alan_citations_count) : 0
-          };
-        });
-        debugLog(`[computeAiMetricsForPageUrl] Sample URLs from data (first 10): ${JSON.stringify(sampleUrls, null, 2)}`, 'info');
+        // Only log if no match found (reduce noise)
 
         let citations = 0;
         let overviewOn = false;
@@ -12820,16 +12773,11 @@
         
         // FIX: For URL tasks, also check if this URL is the best_url/targetUrl for any keyword
         // This is how the original baseline got AI Overview data for URL tasks
-        debugLog(`[computeAiMetricsForPageUrl] Starting forEach loop with ${rows.length} rows, target="${canonTarget}"`, 'info');
         rows.forEach((r, idx) => {
           // Check if this URL is the target/best URL for this keyword
           // Try multiple field name variations to handle different data structures
           const rowBestUrl = r.best_url || r.bestUrl || r.targetUrl || r.target_url || r.ranking_url || r.rankingUrl || r.url || '';
           if (!rowBestUrl) {
-            // Log if we're missing URL data for debugging
-            if (idx < 5) {
-              debugLog(`[computeAiMetricsForPageUrl] Row ${idx} has no URL field (keyword="${r.keyword || 'unknown'}")`, 'warn');
-            }
             return; // Skip if no URL
           }
           
@@ -12843,55 +12791,34 @@
           const targetDomain = canonTarget.split('/')[0];
           const rowDomain = rowBestUrlCanon.split('/')[0];
           
-          // Enhanced matching logic (Fix 2)
+          // Enhanced matching logic - simplified and more permissive
           const exactMatch = rowBestUrlCanon === canonTarget;
-          // Path match requires both path AND domain to match (more precise)
+          // Path match: paths must match AND domains must match
           const pathMatch = rowPath === targetPath && rowPath !== '' && targetDomain === rowDomain;
-          
-          // More strict matching: only match if paths are the same or one is a direct parent/child
-          // AND domains must match (critical fix)
+          // Strict path match: exact path or parent/child relationship
           const strictPathMatch = targetPath && rowPath && targetDomain === rowDomain && (
-            targetPath === rowPath || // Exact path match
-            targetPath.startsWith(rowPath + '/') || // Target is child of row
-            rowPath.startsWith(targetPath + '/') // Row is child of target
+            targetPath === rowPath || 
+            targetPath.startsWith(rowPath + '/') || 
+            rowPath.startsWith(targetPath + '/')
           );
-          
-          // Only use includes for domain-only matching (when paths are empty or very short)
+          // Domain-only match: for root or very short paths
           const domainOnlyMatch = (!targetPath || targetPath.length < 3) && (!rowPath || rowPath.length < 3) && 
                                   rowBestUrlCanon && canonTarget && 
                                   targetDomain === rowDomain;
           
-          const urlMatches = exactMatch || pathMatch || strictPathMatch || domainOnlyMatch;
+          // CRITICAL FIX: Also try path segment matching (e.g., "photography-courses-coventry" in path)
+          const targetPathSegments = targetPath.split('/');
+          const rowPathSegments = rowPath.split('/');
+          const pathSegmentMatch = targetPathSegments.length > 0 && rowPathSegments.length > 0 &&
+                                   targetDomain === rowDomain &&
+                                   targetPathSegments.some(seg => rowPathSegments.includes(seg)) &&
+                                   rowPathSegments.some(seg => targetPathSegments.includes(seg));
           
-          // Enhanced debug logging (Fix 3) - ALWAYS log first 30 rows for diagnosis, plus any matches
-          const shouldLogMatch = idx < 30 || urlMatches || (rowBestUrlCanon && (rowBestUrlCanon.includes(canonTarget.split('/').pop() || '') || canonTarget.includes(rowBestUrlCanon.split('/').pop() || '')));
-          if (shouldLogMatch) {
-            debugLog(`[computeAiMetricsForPageUrl] Match attempt [${idx}]: keyword="${r.keyword || 'unknown'}", rowUrl="${rowBestUrl}", normalized="${rowBestUrlCanon}", target="${canonTarget}", targetDomain="${targetDomain}", rowDomain="${rowDomain}", targetPath="${targetPath}", rowPath="${rowPath}", exactMatch=${exactMatch}, pathMatch=${pathMatch}, strictPathMatch=${strictPathMatch}, domainOnlyMatch=${domainOnlyMatch}, urlMatches=${urlMatches}`, 'info');
-          }
+          const urlMatches = exactMatch || pathMatch || strictPathMatch || domainOnlyMatch || pathSegmentMatch;
           
-          // CRITICAL: Also log if this row contains "photography-courses" in URL for targeted diagnosis
-          if (rowBestUrl && rowBestUrl.toLowerCase().includes('photography-courses')) {
-            debugLog(`[computeAiMetricsForPageUrl] PHOTOGRAPHY-COURSES ROW [${idx}]: keyword="${r.keyword || 'unknown'}", rowUrl="${rowBestUrl}", normalized="${rowBestUrlCanon}", target="${canonTarget}", exactMatch=${exactMatch}, pathMatch=${pathMatch}, strictPathMatch=${strictPathMatch}, domainOnlyMatch=${domainOnlyMatch}, urlMatches=${urlMatches}, hasOverview=${r.has_ai_overview === true || r.ai_overview_present_any === true}, citations=${r.ai_alan_citations_count != null ? r.ai_alan_citations_count : 'null'}`, 'warn');
-          }
-          
-          // Log detailed comparison for first few rows or if there's a potential match
-          if (idx < 3 || urlMatches || (rowBestUrlCanon && rowBestUrlCanon.includes('photography-courses'))) {
-            matchDetails.push({
-              idx,
-              keyword: r.keyword,
-              rowBestUrl: rowBestUrl,
-              rowBestUrlCanon: rowBestUrlCanon,
-              targetDomain: targetDomain,
-              rowDomain: rowDomain,
-              targetPath: targetPath,
-              rowPath: rowPath,
-              exactMatch,
-              pathMatch,
-              strictPathMatch,
-              domainOnlyMatch,
-              urlMatches,
-              hasOverview: r.has_ai_overview === true || r.ai_overview_present_any === true
-            });
+          // Only log if match found or if it's a photography-courses URL (for diagnosis)
+          if (urlMatches || (rowBestUrl && rowBestUrl.toLowerCase().includes('photography-courses'))) {
+            debugLog(`[computeAiMetricsForPageUrl] ${urlMatches ? '✓ MATCH' : 'CHECK'}: keyword="${r.keyword || 'unknown'}", rowUrl="${rowBestUrl}", normalized="${rowBestUrlCanon}", target="${canonTarget}", match=${urlMatches}, hasOverview=${r.has_ai_overview === true || r.ai_overview_present_any === true}, citations=${r.ai_alan_citations_count != null ? r.ai_alan_citations_count : 'null'}`, urlMatches ? 'success' : 'warn');
           }
           
           if (urlMatches) {
@@ -12936,12 +12863,9 @@
         // Ensure totalCitations is always a number (never null/undefined)
         const totalCitations = Math.max(citations || 0, citationsFromTargetUrl || 0);
         
-        // DIAGNOSTIC: Log intermediate values before final calculation
-        debugLog(`[computeAiMetricsForPageUrl] DIAGNOSTIC: Before final calculation - matchedKeyword="${matchedKeyword || 'null'}", overviewOn=${overviewOn}, citations=${citations}, citationsFromTargetUrl=${citationsFromTargetUrl}, totalCitations=${totalCitations}`, 'info');
-        
-        // Log detailed match attempts if no match found
-        if (!matchedKeyword && matchDetails.length > 0) {
-          debugLog(`[computeAiMetricsForPageUrl] No match found. Match attempt details: ${JSON.stringify(matchDetails.slice(0, 10))}`, 'warn');
+        // Only log if no match found (reduce noise)
+        if (!matchedKeyword) {
+          debugLog(`[computeAiMetricsForPageUrl] No match found for "${canonTarget}" in ${rows.length} rows`, 'warn');
         }
         
         // CRITICAL: Ensure consistency - if matchedKeyword is set, both values must be non-null
@@ -12966,26 +12890,23 @@
             finalCitations = 0; // Force to 0 as fallback
           }
           
-          debugLog(`[computeAiMetricsForPageUrl] DIAGNOSTIC: Match found - matchedKeyword="${matchedKeyword}", finalOverview=${finalOverview}, safeTotalCitations=${safeTotalCitations}, finalCitations=${finalCitations}`, 'info');
         } else {
           // No match found - return null for both (unknown state)
           finalOverview = null;
           finalCitations = null;
-          debugLog(`[computeAiMetricsForPageUrl] DIAGNOSTIC: No match found - matchedKeyword="${matchedKeyword || 'null'}", returning null for both`, 'info');
         }
         
         // FINAL VALIDATION: Ensure return values are consistent
         if ((finalOverview !== null && finalCitations === null) || (finalOverview === null && finalCitations !== null)) {
-          console.error(`[computeAiMetricsForPageUrl] INCONSISTENCY DETECTED: overview=${finalOverview}, citations=${finalCitations}, matchedKeyword="${matchedKeyword}"`);
-          // Force consistency: if one is null, both must be null
-          if (finalOverview === null || finalCitations === null) {
-            finalOverview = null;
-            finalCitations = null;
-            debugLog(`[computeAiMetricsForPageUrl] Forced consistency: both set to null due to inconsistency`, 'warn');
-          }
+          console.error(`[computeAiMetricsForPageUrl] INCONSISTENCY: overview=${finalOverview}, citations=${finalCitations}`);
+          finalOverview = null;
+          finalCitations = null;
         }
         
-        debugLog(`[computeAiMetricsForPageUrl] Final result: targetUrl="${canonTarget}", matchedKeyword="${matchedKeyword || 'none'}", overview=${finalOverview}, citations=${finalCitations}, citationsFromTargetUrl=${citationsFromTargetUrl}`, hasMatch ? 'success' : 'warn');
+        // Only log final result if match found (success) or if it's an error
+        if (hasMatch) {
+          debugLog(`[computeAiMetricsForPageUrl] ✓ Match: "${canonTarget}" → keyword="${matchedKeyword}", overview=${finalOverview}, citations=${finalCitations}`, 'success');
+        }
 
         return { ai_overview: finalOverview, ai_citations: finalCitations };
       };
@@ -17052,9 +16973,24 @@
       console.error('[RankingAiModule] ✗ FAILED to assign to window');
     }
     
-    // Debug logging system
+    // Debug logging system - cleaned up to reduce noise
     const debugLogEntries = [];
     let debugLogFilter = 'all'; // 'all', 'warnings-errors'
+    
+    // Verbosity control: 'minimal' (errors/warnings only), 'normal' (errors/warnings/info), 'verbose' (everything)
+    // Only 'minimal' and 'normal' save to Supabase to reduce database bloat
+    let debugLogVerbosity = 'minimal'; // Default: only save important logs
+    
+    // Patterns to suppress (common verbose logs that aren't needed)
+    const suppressedPatterns = [
+      /✓.*rendered successfully/i,
+      /✓.*loaded successfully/i,
+      /✓.*stored globally/i,
+      /✓.*initialized/i,
+      /Money Pages:.*/i, // Too verbose, only log errors
+      /🎯.*renderMoneyPages/i, // Too verbose
+      /\[Optimisation\].*URL task:.*Inconsistent result/i, // This is handled by the actual error log
+    ];
     
     // Generate session ID for tracking browser sessions (persists for page lifetime)
     const debugLogSessionId = (() => {
@@ -17072,10 +17008,39 @@
     
     // Expose debugLog globally for use throughout the application
     window.debugLog = function debugLog(message, type = 'info') {
+      // Truncate very long messages (limit to 500 chars to prevent database bloat)
+      const maxMessageLength = 500;
+      const truncatedMessage = message.length > maxMessageLength 
+        ? message.substring(0, maxMessageLength) + '...[truncated]'
+        : message;
+      
+      // Check if this log should be suppressed
+      const shouldSuppress = suppressedPatterns.some(pattern => pattern.test(truncatedMessage));
+      if (shouldSuppress && type === 'info') {
+        // Still show in UI but don't save to Supabase
+        const timestamp = new Date().toISOString();
+        const entry = {
+          timestamp,
+          message: truncatedMessage,
+          type
+        };
+        debugLogEntries.push(entry);
+        
+        const logElement = document.getElementById('debugLog');
+        if (logElement && debugLogFilter === 'all') {
+          const entryDiv = document.createElement('div');
+          entryDiv.className = `debug-log-entry ${type}`;
+          entryDiv.innerHTML = `<span class="debug-timestamp">[${new Date(timestamp).toLocaleTimeString()}]</span>${truncatedMessage}`;
+          logElement.appendChild(entryDiv);
+          logElement.scrollTop = logElement.scrollHeight;
+        }
+        return; // Don't save suppressed logs to Supabase
+      }
+      
       const timestamp = new Date().toISOString();
       const entry = {
         timestamp,
-        message,
+        message: truncatedMessage,
         type
       };
       debugLogEntries.push(entry);
@@ -17086,62 +17051,70 @@
         const shouldShow = debugLogFilter === 'all' || (debugLogFilter === 'warnings-errors' && (type === 'warn' || type === 'error'));
         
         if (shouldShow) {
-        const entryDiv = document.createElement('div');
-        entryDiv.className = `debug-log-entry ${type}`;
-        entryDiv.innerHTML = `<span class="debug-timestamp">[${new Date(timestamp).toLocaleTimeString()}]</span>${message}`;
-        logElement.appendChild(entryDiv);
-        logElement.scrollTop = logElement.scrollHeight;
+          const entryDiv = document.createElement('div');
+          entryDiv.className = `debug-log-entry ${type}`;
+          entryDiv.innerHTML = `<span class="debug-timestamp">[${new Date(timestamp).toLocaleTimeString()}]</span>${truncatedMessage}`;
+          logElement.appendChild(entryDiv);
+          logElement.scrollTop = logElement.scrollHeight;
         }
       }
       
-      // Automatically save to Supabase (non-blocking, fire and forget)
-      // This allows searching and inspecting logs without copy-paste
-      (async () => {
-        try {
-          // Get property URL from page
-          const propertyUrl = window.getPropertyUrl ? window.getPropertyUrl() : 
-                             (document.getElementById('propertyUrl')?.value || 
-                              localStorage.getItem('gsc_property_url') || 
-                              localStorage.getItem('last_property_url') || 
-                              null);
-          
-          // Save to Supabase via API endpoint
-          const response = await fetch(apiUrl('/api/supabase/save-debug-log-entry'), {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              timestamp: timestamp,
-              message: message,
-              type: type,
-              propertyUrl: propertyUrl,
-              sessionId: debugLogSessionId,
-              userAgent: navigator.userAgent
-            })
-          });
-          
-          // Silently handle errors - don't break UI if Supabase is down
-          if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            // Only log to console if it's a critical error (not just table missing)
-            if (errorData.error && !errorData.error.includes('does not exist')) {
-              console.warn('[debugLog] Failed to save to Supabase:', errorData.error);
+      // Only save important logs to Supabase (errors, warnings, and critical info)
+      // This reduces database bloat and makes logs more useful
+      const shouldSaveToSupabase = 
+        type === 'error' || 
+        type === 'warn' || 
+        (type === 'info' && debugLogVerbosity === 'normal' && !shouldSuppress);
+      
+      if (shouldSaveToSupabase) {
+        // Automatically save to Supabase (non-blocking, fire and forget)
+        (async () => {
+          try {
+            // Get property URL from page
+            const propertyUrl = window.getPropertyUrl ? window.getPropertyUrl() : 
+                               (document.getElementById('propertyUrl')?.value || 
+                                localStorage.getItem('gsc_property_url') || 
+                                localStorage.getItem('last_property_url') || 
+                                null);
+            
+            // Save to Supabase via API endpoint
+            const response = await fetch(apiUrl('/api/supabase/save-debug-log-entry'), {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                timestamp: timestamp,
+                message: truncatedMessage,
+                type: type,
+                propertyUrl: propertyUrl,
+                sessionId: debugLogSessionId,
+                userAgent: navigator.userAgent
+              })
+            });
+            
+            // Silently handle errors - don't break UI if Supabase is down
+            if (!response.ok) {
+              const errorData = await response.json().catch(() => ({}));
+              // Only log to console if it's a critical error (not just table missing)
+              if (errorData.error && !errorData.error.includes('does not exist')) {
+                console.warn('[debugLog] Failed to save to Supabase:', errorData.error);
+              }
+            }
+          } catch (err) {
+            // Silently ignore errors - don't break UI if API is unavailable
+            // Only log to console for debugging
+            if (type === 'error') {
+              console.warn('[debugLog] Error saving to Supabase:', err.message);
             }
           }
-        } catch (err) {
-          // Silently ignore errors - don't break UI if API is unavailable
-          // Only log to console for debugging
-          if (type === 'error') {
-            console.warn('[debugLog] Error saving to Supabase:', err.message);
-          }
-        }
-      })();
+        })();
+      }
       
       // Only log critical errors to browser console (for debugging production issues)
       // All other logs go to UI debug console only
       if (type === 'error') {
-        console.error(`[DEBUG ERROR]`, message);
+        console.error(`[DEBUG ERROR]`, truncatedMessage);
       }
     }
     
