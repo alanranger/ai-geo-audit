@@ -29584,19 +29584,182 @@ Final Score: ${score}/100`;
             }
             card2Html += `</div>`;
 
-            // Card 3: Competitor Ranking
+            // Card 3: Recommended Actions
+            // Generate recommendations based on Card 1 (performance) and Card 2 (AI citations)
+            // Priority: Performance issues first, then AI citation opportunities
+            const recommendations = [];
+            
+            // ============================================
+            // PERFORMANCE-BASED RECOMMENDATIONS (Priority 1)
+            // ============================================
+            
+            // Check for declining clicks/impressions
+            if (trendData && trendData.clicksChange < 0) {
+              const declinePercent = clicks28d > 0 ? Math.abs((trendData.clicksChange / clicks28d) * 100) : 0;
+              if (declinePercent >= 20) {
+                recommendations.push({
+                  priority: 'High',
+                  title: 'Traffic Declining',
+                  nextSteps: 'Refresh content, build backlinks, or check for technical issues',
+                  estimatedImpact: `Could recover ${Math.abs(trendData.clicksChange).toLocaleString()} clicks/month if trend reverses`,
+                  reason: `Clicks down ${declinePercent.toFixed(0)}% vs 90-day average`
+                });
+              } else if (declinePercent >= 10) {
+                recommendations.push({
+                  priority: 'Medium',
+                  title: 'Traffic Slightly Declining',
+                  nextSteps: 'Monitor closely and consider content updates or link building',
+                  estimatedImpact: `Could recover ${Math.abs(trendData.clicksChange).toLocaleString()} clicks/month`,
+                  reason: `Clicks down ${declinePercent.toFixed(0)}% vs 90-day average`
+                });
+              }
+            }
+            
+            // Check for low CTR
+            if (ctr28d < 2.0 && impressions28d > 100) {
+              const ctrGap = 2.0 - ctr28d;
+              const potentialClicks = Math.round(impressions28d * (ctrGap / 100));
+              recommendations.push({
+                priority: ctr28d < 1.0 ? 'High' : 'Medium',
+                title: 'Low Click-Through Rate',
+                nextSteps: 'Optimize title tags and meta descriptions to improve CTR',
+                estimatedImpact: `Could gain ~${potentialClicks.toLocaleString()} additional clicks/month with better CTR`,
+                reason: `Current CTR ${ctr28d.toFixed(2)}% is below 2% benchmark`
+              });
+            }
+            
+            // Check for position issues
+            if (pos28d && pos28d > 10 && impressions28d > 100) {
+              const positionGap = pos28d - 10;
+              recommendations.push({
+                priority: pos28d > 20 ? 'High' : 'Medium',
+                title: 'Ranking Below Top 10',
+                nextSteps: 'Improve on-page SEO, build authority, or optimize for target keywords',
+                estimatedImpact: `Moving to top 10 could increase clicks by 50-100%`,
+                reason: `Current position ${pos28d.toFixed(1)} is outside top 10`
+              });
+            }
+            
+            // Check for declining position
+            if (trendData && trendData.pos28d && trendData.pos90d && trendData.pos28d > trendData.pos90d) {
+              const positionDecline = trendData.pos28d - trendData.pos90d;
+              if (positionDecline >= 3) {
+                recommendations.push({
+                  priority: 'High',
+                  title: 'Position Declining',
+                  nextSteps: 'Check for content quality issues, competitor changes, or algorithm updates',
+                  estimatedImpact: `Could recover ${positionDecline.toFixed(1)} positions with optimization`,
+                  reason: `Position dropped ${positionDecline.toFixed(1)} positions vs 90-day average`
+                });
+              }
+            }
+            
+            // Check for improving trends (positive reinforcement)
+            if (trendData && trendData.clicksChange > 0 && trendData.clicksChange > clicks28d * 0.1) {
+              recommendations.push({
+                priority: 'Low',
+                title: 'Traffic Improving',
+                nextSteps: 'Continue current strategy and double down on what\'s working',
+                estimatedImpact: 'Maintain growth trajectory',
+                reason: `Clicks up ${((trendData.clicksChange / clicks28d) * 100).toFixed(0)}% vs 90-day average`
+              });
+            }
+            
+            // ============================================
+            // AI CITATION RECOMMENDATIONS (Priority 2)
+            // ============================================
+            
+            // Check for missing AI citations
+            if (citingKeywords.length === 0) {
+              recommendations.push({
+                priority: 'Medium',
+                title: 'No AI Citations',
+                nextSteps: 'Add structured data (Schema.org) and optimize content for AI overview eligibility',
+                estimatedImpact: 'Could capture AI overview features for high-value keywords',
+                reason: 'This URL has no AI citations in search results'
+              });
+            } else {
+              // Check for high search volume keywords that could benefit from better rankings
+              const highVolumeKeywords = citingKeywords.filter(kw => kw.searchVolume && kw.searchVolume >= 1000);
+              const lowRankingHighVolume = highVolumeKeywords.filter(kw => kw.bestRank && kw.bestRank > 10);
+              
+              if (lowRankingHighVolume.length > 0) {
+                const totalVolume = lowRankingHighVolume.reduce((sum, kw) => sum + (kw.searchVolume || 0), 0);
+                recommendations.push({
+                  priority: 'Medium',
+                  title: 'High-Value Keywords Below Top 10',
+                  nextSteps: `Optimize content for "${lowRankingHighVolume[0].keyword}" and similar high-volume terms`,
+                  estimatedImpact: `Could capture ${Math.round(totalVolume * 0.1).toLocaleString()}+ monthly impressions by ranking in top 10`,
+                  reason: `${lowRankingHighVolume.length} high-volume keyword${lowRankingHighVolume.length > 1 ? 's' : ''} ranking below position 10`
+                });
+              }
+              
+              // Check if we have citations but they're for low-volume keywords
+              const lowVolumeKeywords = citingKeywords.filter(kw => !kw.searchVolume || kw.searchVolume < 100);
+              if (lowVolumeKeywords.length > citingKeywords.length * 0.5) {
+                recommendations.push({
+                  priority: 'Low',
+                  title: 'Focus on Higher Volume Keywords',
+                  nextSteps: 'Expand content to target keywords with 100+ monthly search volume',
+                  estimatedImpact: 'Could increase potential traffic by targeting higher-volume opportunities',
+                  reason: `Most citations are for low-volume keywords (<100 searches/month)`
+                });
+              }
+            }
+            
+            // Sort recommendations: High priority first, then by type (performance before citations)
+            recommendations.sort((a, b) => {
+              const priorityOrder = { 'High': 3, 'Medium': 2, 'Low': 1 };
+              const priorityDiff = priorityOrder[b.priority] - priorityOrder[a.priority];
+              if (priorityDiff !== 0) return priorityDiff;
+              // If same priority, performance recommendations come first
+              const aIsPerformance = a.title.includes('Traffic') || a.title.includes('CTR') || a.title.includes('Position') || a.title.includes('Ranking');
+              const bIsPerformance = b.title.includes('Traffic') || b.title.includes('CTR') || b.title.includes('Position') || b.title.includes('Ranking');
+              if (aIsPerformance && !bIsPerformance) return -1;
+              if (!aIsPerformance && bIsPerformance) return 1;
+              return 0;
+            });
+            
+            // Limit to top 3 recommendations
+            const topRecommendations = recommendations.slice(0, 3);
+            
+            // Build Card 3 HTML
             let card3Html = `
               <div style="background: white; padding: 1.25rem; border-radius: 8px; border: 1px solid #e2e8f0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                <div style="font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin-bottom: 0.75rem;">Competitor Analysis</div>
+                <div style="font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin-bottom: 0.75rem;">Recommended Actions</div>
             `;
             
-            if (competitorData) {
-              // TODO: Implement when competitor data is available
-              card3Html += `<div>Competitor data coming soon</div>`;
+            if (topRecommendations.length > 0) {
+              topRecommendations.forEach((rec, idx) => {
+                const priorityColors = {
+                  'High': { bg: '#fee2e2', border: '#ef4444', text: '#991b1b', badge: '#ef4444' },
+                  'Medium': { bg: '#fef3c7', border: '#f59e0b', text: '#92400e', badge: '#f59e0b' },
+                  'Low': { bg: '#dbeafe', border: '#3b82f6', text: '#1e40af', badge: '#3b82f6' }
+                };
+                const colors = priorityColors[rec.priority] || priorityColors['Medium'];
+                
+                card3Html += `
+                  <div style="margin-bottom: ${idx < topRecommendations.length - 1 ? '1rem' : '0'}; padding: 0.875rem; background: ${colors.bg}; border-left: 3px solid ${colors.border}; border-radius: 4px;">
+                    <div style="display: flex; align-items: center; margin-bottom: 0.5rem;">
+                      <span style="display: inline-block; padding: 0.25rem 0.5rem; background: ${colors.badge}; color: white; border-radius: 4px; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; margin-right: 0.5rem;">${rec.priority}</span>
+                      <div style="font-weight: 600; color: ${colors.text}; font-size: 0.85rem;">${rec.title}</div>
+                    </div>
+                    <div style="font-size: 0.8rem; color: #475569; margin-bottom: 0.5rem; line-height: 1.4;">
+                      <strong>Next steps:</strong> ${rec.nextSteps}
+                    </div>
+                    <div style="font-size: 0.75rem; color: #64748b; font-style: italic; margin-bottom: 0.25rem;">
+                      ${rec.estimatedImpact}
+                    </div>
+                    <div style="font-size: 0.7rem; color: #94a3b8;">
+                      ${rec.reason}
+                    </div>
+                  </div>
+                `;
+              });
             } else {
               card3Html += `
                 <div style="font-size: 0.85rem; color: #94a3b8; font-style: italic; padding: 1rem 0; text-align: center;">
-                  Competitor ranking data will be available in a future update
+                  No specific recommendations at this time. Performance metrics look good!
                 </div>
               `;
             }
