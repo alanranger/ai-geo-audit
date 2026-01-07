@@ -1,5 +1,7 @@
 # Keyword vs URL Task Logic Comparison
 
+**⚠️ NOTE**: For the most current status of fixes and ongoing issues, see **`HANDOVER.md`** (created 2026-01-07).
+
 ## Summary
 
 This document compares the logic used for keyword-based tasks vs URL-only tasks across all optimization task operations.

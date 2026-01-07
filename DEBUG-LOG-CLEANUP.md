@@ -40,7 +40,32 @@ Added patterns to suppress common verbose logs:
 - Easier to search and diagnose problems
 - UI still shows all logs if needed (via filter)
 
+## Current Status (2026-01-07)
+
+### Supabase Saving: DISABLED
+
+**Reason**: Persistent Supabase schema cache issues with `property_url` column (PGRST204 errors)
+
+**Status**: 
+- ✅ API endpoint created (`/api/supabase/save-debug-log-entry.js`)
+- ✅ Retry logic implemented (retries without optional fields if schema cache error)
+- ❌ Currently DISABLED in `audit-dashboard.html` (commented out)
+- ⚠️ Re-enable once schema cache is stable
+
+**Code Location**: `audit-dashboard.html` - `debugLog()` function has Supabase saving commented out
+
+### Log Verbosity: Still Too High
+
+**User Feedback**: "the log is still huge so you didn't clean it up did you"
+
+**Status**:
+- ✅ Suppression patterns added
+- ✅ `info` level logs matching patterns are completely hidden
+- ⚠️ Still too verbose for effective diagnosis
+- 🔄 Needs further cleanup
+
 ## Next Steps
-1. Find `computeAiMetricsForPageUrl` function
-2. Fix URL matching logic
-3. Test with actual URL task
+1. Re-enable Supabase saving once schema cache is stable
+2. Further reduce log verbosity (review all `debugLog` calls)
+3. Fix URL matching logic (see `URL-TASK-AI-DATA-SUMMARY.md`)
+4. Test with actual URL task

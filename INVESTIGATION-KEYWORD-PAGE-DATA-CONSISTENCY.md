@@ -1,5 +1,7 @@
 # Investigation: Keyword vs Page Task Data Consistency
 
+**⚠️ NOTE**: This document is from an earlier investigation. For the most current status of fixes and issues, see **`HANDOVER.md`** (created 2026-01-07).
+
 ## Issue Summary
 
 **Problem**: The "photography tuition" keyword task shows different data in:

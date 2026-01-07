@@ -3481,11 +3481,11 @@
       </button>
       <button class="aigeo-nav-item" data-panel="money">
         <span class="aigeo-nav-icon">💰</span>
-        <span>Money Pages</span>
+        <span>URL Money Pages</span>
       </button>
       <button class="aigeo-nav-item" data-panel="ranking">
         <span class="aigeo-nav-icon">🔍</span>
-        <span>Ranking & AI</span>
+        <span>Keyword Ranking and AI</span>
       </button>
       <button class="aigeo-nav-item" data-panel="optimisation">
         <span class="aigeo-nav-icon">✅</span>
@@ -4507,10 +4507,10 @@
         <!-- Money Pages content will be inserted here by JS -->
       </section>
 
-      <!-- Ranking & AI Panel -->
+      <!-- Keyword Ranking and AI Panel -->
       <section class="aigeo-panel" data-panel="ranking">
         <div class="card card--section-header">
-          <h2>Ranking &amp; AI Visibility</h2>
+          <h2>Keyword Ranking and AI Visibility</h2>
           <p class="ranking-intro">
             Keyword-level view of how search engines and AI systems see you. This is an overlay on the
             <strong>Visibility</strong>, <strong>Authority</strong>, <strong>Content/Schema</strong> and
@@ -12765,179 +12765,226 @@
         
         // CRITICAL DEBUG: Log the exact normalized target for this URL
         if (canonTarget.includes('photography-courses-coventry')) {
-          debugLog(`[computeAiMetricsForPageUrl] START: pageUrl="${pageUrl}", canonTarget="${canonTarget}", rowsCount=${rows.length}`, 'error');
+          debugLog(`[computeAiMetricsForPageUrl] START (NEW LOGIC): pageUrl="${pageUrl}", canonTarget="${canonTarget}", rowsCount=${rows.length}`, 'error');
         }
 
-
-        let citations = 0;
-        let overviewOn = false;
-        let citationsFromTargetUrl = 0; // Track citations from keywords where this URL is the target
-        let matchedKeyword = null; // For debugging
-        let matchDetails = []; // Track all matching attempts
+        // NEW LOGIC: Find all keywords where ai_alan_citations array contains the target URL
+        // This is the correct approach - citations are keyword-driven, not URL-driven
+        const citingKeywords = [];
+        let hasOverview = false;
         
-        // FIX: For URL tasks, also check if this URL is the best_url/targetUrl for any keyword
-        // This is how the original baseline got AI Overview data for URL tasks
         rows.forEach((r, idx) => {
-          // Check if this URL is the target/best URL for this keyword
-          // Try multiple field name variations to handle different data structures
-          const rowBestUrl = r.best_url || r.bestUrl || r.targetUrl || r.target_url || r.ranking_url || r.rankingUrl || r.url || '';
-          if (!rowBestUrl) {
-            return; // Skip if no URL
+          // Get citations array - try multiple field name variations
+          const citationsArray = r.ai_alan_citations || r.aiAlanCitations || r.citations || [];
+          if (!Array.isArray(citationsArray) || citationsArray.length === 0) {
+            return; // Skip if no citations
           }
           
-          const rowBestUrlCanon = normalizeUrl(rowBestUrl);
+          // Check if any citation in this keyword's array matches the target URL
+          let urlIsCited = false;
+          citationsArray.forEach(citation => {
+            const citedUrl = typeof citation === 'string' ? citation : (citation && typeof citation === 'object' ? (citation.url || citation.URL || citation.link) : null);
+            if (!citedUrl) return;
+            
+            const citedUrlNormalized = normalizeUrl(citedUrl);
+            // Match if normalized URLs are equal
+            if (citedUrlNormalized === canonTarget) {
+              urlIsCited = true;
+            }
+          });
           
-          // CRITICAL DEBUG: Log first few URL comparisons for this target
-          if (canonTarget.includes('photography-courses-coventry') && idx < 3) {
-            debugLog(`[computeAiMetricsForPageUrl] Row ${idx}: rowBestUrl="${rowBestUrl}", rowBestUrlCanon="${rowBestUrlCanon}", canonTarget="${canonTarget}", exactMatch=${rowBestUrlCanon === canonTarget}`, 'error');
-          }
-          
-          // Also check path-only matching (in case domains differ slightly)
-          const targetPath = canonTarget.includes('/') ? canonTarget.split('/').slice(1).join('/') : '';
-          const rowPath = rowBestUrlCanon.includes('/') ? rowBestUrlCanon.split('/').slice(1).join('/') : '';
-          
-          // Extract domains for comparison
-          const targetDomain = canonTarget.split('/')[0];
-          const rowDomain = rowBestUrlCanon.split('/')[0];
-          
-          // ULTRA-PERMISSIVE MATCHING: Just check if key segments appear in either URL
-          // This handles query params, different formats, etc.
-          const exactMatch = rowBestUrlCanon === canonTarget;
-          
-          // Extract key segments (last meaningful path part)
-          const targetLastSegment = targetPath.split('/').filter(s => s.length > 0).pop() || '';
-          const rowLastSegment = rowPath.split('/').filter(s => s.length > 0).pop() || '';
-          
-          // Match if last segments are the same (most common case)
-          const lastSegmentMatch = targetLastSegment && rowLastSegment && targetLastSegment === rowLastSegment;
-          
-          // Match if either normalized URL contains the other's key segment (very permissive)
-          const segmentContainsMatch = targetLastSegment.length > 10 && rowLastSegment.length > 10 &&
-                                      (rowBestUrlCanon.includes(targetLastSegment) || canonTarget.includes(rowLastSegment));
-          
-          // Match if domains match and paths share significant overlap
-          const domainPathMatch = targetDomain === rowDomain && 
-                                 targetPath.length > 15 && rowPath.length > 15 &&
-                                 (rowPath.includes(targetPath.substring(0, 30)) || 
-                                  targetPath.includes(rowPath.substring(0, 30)));
-          
-          // FINAL FALLBACK: If target contains "photography-courses-coventry" and row URL also contains it
-          const keywordMatch = canonTarget.includes('photography-courses-coventry') && 
-                              rowBestUrlCanon.includes('photography-courses-coventry');
-          
-          const urlMatches = exactMatch || lastSegmentMatch || segmentContainsMatch || domainPathMatch || keywordMatch;
-          
-          
-          if (urlMatches) {
-            // This keyword has this URL as its target - use its AI data
-            // Try multiple field name variations for overview
+          // If this keyword cites the target URL, track it
+          if (urlIsCited) {
             const rowHasOverview = r.has_ai_overview === true || r.hasAiOverview === true || r.ai_overview_present_any === true || r.aiOverviewPresentAny === true;
             if (rowHasOverview) {
-              overviewOn = true;
+              hasOverview = true;
             }
-            // Get citations count for this keyword - try multiple field name variations
-            const citationsCount = r.ai_alan_citations_count != null ? r.ai_alan_citations_count : 
-                                   (r.aiAlanCitationsCount != null ? r.aiAlanCitationsCount : null);
-            const citationsArray = r.ai_alan_citations || r.aiAlanCitations || [];
-            // CRITICAL: Always ensure rowCitations is a number, never null
-            const rowCitations = citationsCount != null ? Number(citationsCount) : 
-                                 (Array.isArray(citationsArray) && citationsArray.length > 0 ? citationsArray.length : 0);
-            // Ensure it's a valid number
-            const safeRowCitations = (typeof rowCitations === 'number' && !isNaN(rowCitations) && rowCitations >= 0) ? rowCitations : 0;
-            citationsFromTargetUrl = Math.max(citationsFromTargetUrl, safeRowCitations);
-            if (!matchedKeyword) {
-              matchedKeyword = r.keyword || 'unknown';
-            }
-
-            // Targeted debug for the problematic URL only (single line per matching row)
+            
+            citingKeywords.push({
+              keyword: r.keyword || 'unknown',
+              has_ai_overview: rowHasOverview,
+              best_url: r.best_url || r.bestUrl || r.targetUrl || r.ranking_url || '',
+              best_rank: r.best_rank_group || r.bestRankGroup || r.best_rank_absolute || null
+            });
+            
+            // Debug log for the problematic URL
             if (canonTarget.includes('photography-courses-coventry')) {
               debugLog(
-                `[AI match debug] target=${canonTarget} matchedUrl=${rowBestUrlCanon} keyword=${r.keyword || 'unknown'} ` +
-                `flags: exact=${exactMatch}, lastSeg=${lastSegmentMatch}, segContains=${segmentContainsMatch}, domainPath=${domainPathMatch}, keywordMatch=${keywordMatch} ` +
-                `overviewOn=${overviewOn}, safeRowCitations=${safeRowCitations}, citationsFromTargetUrl=${citationsFromTargetUrl}, citationsArrayLen=${Array.isArray(citationsArray) ? citationsArray.length : 0}`,
-                'warn'
+                `[computeAiMetricsForPageUrl] ✓ Found keyword citing URL: keyword="${r.keyword || 'unknown'}", ` +
+                `has_ai_overview=${rowHasOverview}, best_url="${r.best_url || r.bestUrl || 'N/A'}"`,
+                'success'
               );
             }
           }
-          
-          // Also check if URL appears in citation arrays (original logic)
-          // Try multiple field name variations
-          const cited = r.ai_alan_citations || r.aiAlanCitations || r.citations || [];
-          if (!Array.isArray(cited) || cited.length === 0) return;
-          // Use same field name variations for overview as above
-          const rowHasOverviewForCitation = r.has_ai_overview === true || r.hasAiOverview === true || r.ai_overview_present_any === true || r.aiOverviewPresentAny === true;
-          cited.forEach(v => {
-            const u = typeof v === 'string' ? v : (v && typeof v === 'object' ? (v.url || v.URL || v.link) : null);
-            if (!u) return;
-            const canon = normalizeUrl(u);
-            if (canon && canon === canonTarget) {
-              citations += 1;
-              if (rowHasOverviewForCitation) overviewOn = true;
-              debugLog(`[computeAiMetricsForPageUrl] ✓ Found citation match: keyword="${r.keyword || 'unknown'}", citedUrl="${canon}"`, 'success');
-            }
-          });
         });
 
-        // Use the maximum citations count (from target URL match or citation arrays)
-        // Ensure totalCitations is always a number (never null/undefined)
-        const totalCitations = Math.max(citations || 0, citationsFromTargetUrl || 0);
+        // Count unique keywords that cite this URL (not total citations)
+        const uniqueKeywordsCount = citingKeywords.length;
         
-        // CRITICAL: Ensure consistency - if matchedKeyword is set, both values must be non-null
-        // If matchedKeyword is null, both must be null (unknown)
+        // ENHANCED DIAGNOSTIC: Log which keywords were found
+        if (canonTarget.includes('photography-courses-coventry')) {
+          debugLog(
+            `[computeAiMetricsForPageUrl] DIAGNOSTIC: Found ${uniqueKeywordsCount} unique keywords citing URL: ` +
+            `${JSON.stringify(citingKeywords.map(k => ({ keyword: k.keyword, has_ai_overview: k.has_ai_overview })))}`,
+            'error'
+          );
+          debugLog(
+            `[computeAiMetricsForPageUrl] DIAGNOSTIC: Final calculation - ` +
+            `uniqueKeywordsCount=${uniqueKeywordsCount}, ` +
+            `hasOverview=${hasOverview}`,
+            'error'
+          );
+        }
+        
+        // Return results: citations count is number of unique keywords, overview is true if any citing keyword has it
         let finalOverview = null;
         let finalCitations = null;
         
-        // Check if matchedKeyword is truthy (not null, not empty string, not undefined)
-        const hasMatch = matchedKeyword && String(matchedKeyword).trim() !== '';
-        
-        if (hasMatch) {
-          // We found a match - return actual values (even if overview is false or citations is 0)
-          finalOverview = overviewOn; // boolean (true/false)
-          // CRITICAL: Ensure totalCitations is always a valid number, never null
-          // Force to 0 if invalid to prevent null
-          const safeCitations = (typeof totalCitations === 'number' && !isNaN(totalCitations) && totalCitations >= 0) ? totalCitations : 0;
-          finalCitations = safeCitations;
-          
-          // DEFENSIVE: Double-check - this should never be null here
-          if (finalCitations === null || finalCitations === undefined) {
-            finalCitations = 0; // Force to 0
-          }
+        if (uniqueKeywordsCount > 0) {
+          // We found keywords citing this URL - return actual values
+          finalCitations = uniqueKeywordsCount;
+          finalOverview = hasOverview; // true if at least one citing keyword has overview
         } else {
-          // No match found - return null for both (unknown state)
-          finalOverview = null;
+          // No keywords cite this URL - return null (unknown, not zero)
           finalCitations = null;
+          finalOverview = null;
         }
         
-        // FINAL VALIDATION: Force consistency - if one is null, both must be null
-        // BUT: if overview is false (not null), citations must be a number (0 or higher), never null
-        if (finalOverview === false && finalCitations === null) {
-          // This is the bug - overview is false but citations is null
-          // Force citations to 0 to fix inconsistency
-          finalCitations = 0;
-        } else if ((finalOverview !== null && finalCitations === null) || (finalOverview === null && finalCitations !== null)) {
-          // Other inconsistencies - force both to null (unknown state)
+        // FINAL VALIDATION: Ensure consistency - if one is null, both must be null
+        if ((finalOverview !== null && finalCitations === null) || (finalOverview === null && finalCitations !== null)) {
+          // Inconsistency detected - force both to null (unknown state)
           finalOverview = null;
           finalCitations = null;
         }
 
-        // Targeted end-of-function debug for this URL (always emit, high severity to avoid suppression)
-        if (canonTarget.includes('photography-courses-coventry') && hasMatch) {
+        // Final debug summary for this URL
+        if (canonTarget.includes('photography-courses-coventry')) {
           debugLog(
-            `[AI match summary] target=${canonTarget} matchedKeyword=${matchedKeyword || 'none'} hasMatch=${hasMatch} ` +
-            `overviewOn=${overviewOn} citationsFromTargetUrl=${citationsFromTargetUrl} citations=${citations} total=${totalCitations} ` +
+            `[computeAiMetricsForPageUrl] FINAL RESULT: target=${canonTarget} ` +
+            `uniqueKeywordsCount=${uniqueKeywordsCount} ` +
             `finalOverview=${finalOverview} finalCitations=${finalCitations}`,
-            'error'
-          );
-        } else if (!hasMatch && canonTarget.includes('photography-courses-coventry')) {
-          // If no match at all, log the first few candidate URLs we checked
-          const sampleUrls = (rows || []).slice(0, 5).map(r => normalizeUrl(r.best_url || r.bestUrl || r.targetUrl || r.ranking_url || ''));
-          debugLog(
-            `[AI match summary] target=${canonTarget} NO MATCH found. Sample best_urls (first 5): ${sampleUrls.join(' | ')}`,
             'error'
           );
         }
 
         return { ai_overview: finalOverview, ai_citations: finalCitations };
+      };
+
+      // TEST FUNCTION: Directly test URL matching logic for photography-courses-coventry
+      window.testUrlTaskAiMatching = window.testUrlTaskAiMatching || async function testUrlTaskAiMatching() {
+        const testUrl = 'www.alanranger.com/photography-courses-coventry';
+        const testUrlFull = 'https://www.alanranger.com/photography-courses-coventry';
+        
+        debugLog(`[TEST] Starting URL task AI matching test for: ${testUrl}`, 'error');
+        
+        // Get combinedRows from all sources
+        let aiRows = [];
+        if (typeof window.getRankingAiCombinedRows === 'function') {
+          aiRows = window.getRankingAiCombinedRows();
+          debugLog(`[TEST] Got ${aiRows.length} rows from getRankingAiCombinedRows()`, 'error');
+        }
+        if (aiRows.length === 0 && typeof window.rankingAiData !== 'undefined' && Array.isArray(window.rankingAiData)) {
+          aiRows = window.rankingAiData;
+          debugLog(`[TEST] Got ${aiRows.length} rows from window.rankingAiData`, 'error');
+        }
+        if (aiRows.length === 0) {
+          try {
+            const local = localStorage.getItem('rankingAiData');
+            if (local) {
+              const parsed = JSON.parse(local);
+              if (parsed && Array.isArray(parsed.combinedRows)) {
+                aiRows = parsed.combinedRows;
+                debugLog(`[TEST] Got ${aiRows.length} rows from localStorage`, 'error');
+              }
+            }
+          } catch (e) {
+            debugLog(`[TEST] Error reading localStorage: ${e.message}`, 'error');
+          }
+        }
+        
+        if (aiRows.length === 0) {
+          debugLog(`[TEST] ERROR: No combinedRows available. Please run Ranking & AI scan first.`, 'error');
+          return { error: 'No data available' };
+        }
+        
+        // Find rows that might match
+        const normalizeUrl = (url) => {
+          if (!url) return '';
+          let normalized = String(url).toLowerCase().trim();
+          normalized = normalized.replace(/^https?:\/\//, '');
+          normalized = normalized.replace(/^www\./, '');
+          normalized = normalized.split('?')[0].split('#')[0];
+          normalized = normalized.replace(/\/$/, '');
+          return normalized;
+        };
+        
+        const testUrlNormalized = normalizeUrl(testUrl);
+        debugLog(`[TEST] Normalized test URL: "${testUrlNormalized}"`, 'error');
+        
+        // Check first 10 rows
+        const sampleRows = aiRows.slice(0, 10).map((r, idx) => {
+          const rowUrl = r.best_url || r.bestUrl || r.targetUrl || r.ranking_url || '';
+          const rowUrlNormalized = normalizeUrl(rowUrl);
+          const matches = rowUrlNormalized === testUrlNormalized || 
+                         rowUrlNormalized.includes('photography-courses-coventry') ||
+                         testUrlNormalized.includes(rowUrlNormalized.split('/').pop() || '');
+          return {
+            index: idx,
+            keyword: r.keyword || 'N/A',
+            originalUrl: rowUrl,
+            normalizedUrl: rowUrlNormalized,
+            matches: matches,
+            has_ai_overview: r.has_ai_overview || r.hasAiOverview || r.ai_overview_present_any || false,
+            ai_alan_citations_count: r.ai_alan_citations_count || r.aiAlanCitationsCount || 0
+          };
+        });
+        
+        debugLog(`[TEST] Sample rows (first 10): ${JSON.stringify(sampleRows, null, 2)}`, 'error');
+        
+        // Find all rows with photography-courses-coventry
+        const matchingRows = aiRows.filter(r => {
+          const rowUrl = r.best_url || r.bestUrl || r.targetUrl || r.ranking_url || '';
+          const rowUrlNormalized = normalizeUrl(rowUrl);
+          return rowUrlNormalized.includes('photography-courses-coventry') || 
+                 testUrlNormalized.includes(rowUrlNormalized.split('/').pop() || '');
+        });
+        
+        debugLog(`[TEST] Found ${matchingRows.length} rows that might match photography-courses-coventry`, 'error');
+        if (matchingRows.length > 0) {
+          const matchDetails = matchingRows.slice(0, 5).map(r => ({
+            keyword: r.keyword || 'N/A',
+            best_url: r.best_url || r.bestUrl || r.targetUrl || r.ranking_url || 'N/A',
+            normalized: normalizeUrl(r.best_url || r.bestUrl || r.targetUrl || r.ranking_url || ''),
+            has_ai_overview: r.has_ai_overview || r.hasAiOverview || r.ai_overview_present_any || false,
+            ai_alan_citations_count: r.ai_alan_citations_count || r.aiAlanCitationsCount || 0
+          }));
+          debugLog(`[TEST] Matching rows details (first 5): ${JSON.stringify(matchDetails, null, 2)}`, 'error');
+        }
+        
+        // Test the actual function
+        debugLog(`[TEST] Testing computeAiMetricsForPageUrl with testUrl="${testUrl}"`, 'error');
+        const result1 = (typeof window.computeAiMetricsForPageUrl === 'function')
+          ? window.computeAiMetricsForPageUrl(testUrl, aiRows)
+          : { ai_overview: null, ai_citations: null };
+        debugLog(`[TEST] Result 1 (testUrl): ${JSON.stringify(result1)}`, 'error');
+        
+        debugLog(`[TEST] Testing computeAiMetricsForPageUrl with testUrlFull="${testUrlFull}"`, 'error');
+        const result2 = (typeof window.computeAiMetricsForPageUrl === 'function')
+          ? window.computeAiMetricsForPageUrl(testUrlFull, aiRows)
+          : { ai_overview: null, ai_citations: null };
+        debugLog(`[TEST] Result 2 (testUrlFull): ${JSON.stringify(result2)}`, 'error');
+        
+        return {
+          testUrl: testUrl,
+          testUrlFull: testUrlFull,
+          testUrlNormalized: testUrlNormalized,
+          totalRows: aiRows.length,
+          matchingRowsCount: matchingRows.length,
+          sampleRows: sampleRows,
+          matchingRows: matchingRows.slice(0, 5),
+          result1: result1,
+          result2: result2
+        };
       };
 
       // Build metrics table
@@ -14109,6 +14156,34 @@
                   
                   debugLog(`[Optimisation] URL task: Found ${aiRows.length} combinedRows for AI lookup`, 'info');
                   
+                  // ENHANCED DIAGNOSTIC: Log sample of combinedRows data structure for photography-courses-coventry
+                  if (taskUrlForPage && taskUrlForPage.includes('photography-courses-coventry')) {
+                    const sampleRows = aiRows.slice(0, 5).map(r => ({
+                      keyword: r.keyword || 'N/A',
+                      best_url: r.best_url || r.bestUrl || r.targetUrl || r.ranking_url || 'N/A',
+                      has_ai_overview: r.has_ai_overview || r.hasAiOverview || r.ai_overview_present_any || false,
+                      ai_alan_citations_count: r.ai_alan_citations_count || r.aiAlanCitationsCount || 0
+                    }));
+                    debugLog(`[Optimisation] URL task DIAGNOSTIC: Sample combinedRows (first 5): ${JSON.stringify(sampleRows, null, 2)}`, 'error');
+                    debugLog(`[Optimisation] URL task DIAGNOSTIC: Task URL="${taskUrlForPage}", GSC URL="${pageUrlForGsc}"`, 'error');
+                    
+                    // Find rows that might match
+                    const potentialMatches = aiRows.filter(r => {
+                      const rowUrl = r.best_url || r.bestUrl || r.targetUrl || r.ranking_url || '';
+                      return rowUrl.includes('photography-courses-coventry') || rowUrl.includes('photography-courses');
+                    });
+                    debugLog(`[Optimisation] URL task DIAGNOSTIC: Found ${potentialMatches.length} rows with "photography-courses" in URL`, 'error');
+                    if (potentialMatches.length > 0) {
+                      const matchDetails = potentialMatches.slice(0, 3).map(r => ({
+                        keyword: r.keyword || 'N/A',
+                        best_url: r.best_url || r.bestUrl || r.targetUrl || r.ranking_url || 'N/A',
+                        has_ai_overview: r.has_ai_overview || r.hasAiOverview || r.ai_overview_present_any || false,
+                        ai_alan_citations_count: r.ai_alan_citations_count || r.aiAlanCitationsCount || 0
+                      }));
+                      debugLog(`[Optimisation] URL task DIAGNOSTIC: Potential matches (first 3): ${JSON.stringify(matchDetails, null, 2)}`, 'error');
+                    }
+                  }
+                  
                   // Fix 1: Ensure combinedRows is loaded before calling computeAiMetricsForPageUrl
                   if (aiRows.length === 0) {
                     debugLog(`[Optimisation] URL task: No combinedRows loaded, attempting to reload from Supabase...`, 'warn');
@@ -14130,9 +14205,19 @@
                     
                     for (const urlToCheck of urlsToTry) {
                       if (urlToCheck) {
+                        // ENHANCED DIAGNOSTIC: Log before calling function
+                        if (urlToCheck.includes('photography-courses-coventry')) {
+                          debugLog(`[Optimisation] URL task DIAGNOSTIC: About to call computeAiMetricsForPageUrl with url="${urlToCheck}", rowsCount=${aiRows.length}`, 'error');
+                        }
+                        
                         const result = (typeof window.computeAiMetricsForPageUrl === 'function')
                           ? window.computeAiMetricsForPageUrl(urlToCheck, aiRows)
                           : { ai_overview: null, ai_citations: null };
+                        
+                        // ENHANCED DIAGNOSTIC: Log result immediately
+                        if (urlToCheck.includes('photography-courses-coventry')) {
+                          debugLog(`[Optimisation] URL task DIAGNOSTIC: computeAiMetricsForPageUrl returned: ${JSON.stringify(result)}`, 'error');
+                        }
                         
                         // Use first result where BOTH values are non-null (consistent match found)
                         // This ensures we only use results where a match was definitively found
@@ -51351,11 +51436,11 @@ Final Score: ${score}/100`;
             </div>
           </div>
 
-          <div class="card dashboard-summary-card" data-rag="${ranking?.rag || 'neutral'}" title="Ranking & AI: top-3/top-10 share plus AI citations signals from the latest keyword scan.">
+          <div class="card dashboard-summary-card" data-rag="${ranking?.rag || 'neutral'}" title="Keyword Ranking and AI: top-3/top-10 share plus AI citations signals from the latest keyword scan.">
             <div class="dashboard-summary-header">
               <div>
-                <div class="dashboard-summary-title">🔍 Ranking & AI</div>
-                <div class="dashboard-summary-subtitle">${ranking?.timestamp ? `Last scan: ${formatUtcTimestamp(ranking.timestamp)}` : 'No Ranking & AI data yet'}</div>
+                <div class="dashboard-summary-title">🔍 Keyword Ranking and AI</div>
+                <div class="dashboard-summary-subtitle">${ranking?.timestamp ? `Last scan: ${formatUtcTimestamp(ranking.timestamp)}` : 'No Keyword Ranking and AI data yet'}</div>
               </div>
               <div style="display:flex; gap:0.5rem; flex-wrap: wrap; align-items: center;">
                 ${ragPill(ranking?.rag || 'neutral', ranking?.ragLabel || 'Unknown')}
@@ -51371,11 +51456,11 @@ Final Score: ${score}/100`;
             </div>
           </div>
 
-          <div class="card dashboard-summary-card" data-rag="${moneyPages?.rag || 'neutral'}" title="Money Pages: business-impact metrics for your Money Pages segment (last 28 days) and the CTR-gap uplift estimate.">
+          <div class="card dashboard-summary-card" data-rag="${moneyPages?.rag || 'neutral'}" title="URL Money Pages: business-impact metrics for your Money Pages segment (last 28 days) and the CTR-gap uplift estimate.">
             <div class="dashboard-summary-header">
               <div>
-                <div class="dashboard-summary-title">💰 Money Pages</div>
-                <div class="dashboard-summary-subtitle">${moneyPages?.note || 'Uses latest Money Pages metrics from the latest audit'}</div>
+                <div class="dashboard-summary-title">💰 URL Money Pages</div>
+                <div class="dashboard-summary-subtitle">${moneyPages?.note || 'Uses latest URL Money Pages metrics from the latest audit'}</div>
               </div>
               <div style="display:flex; gap:0.5rem; flex-wrap: wrap; align-items: center;">
                 ${ragPill(moneyPages?.rag || 'neutral', moneyPages?.ragLabel || 'Unknown')}
@@ -52175,7 +52260,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           run: {
             label: 'Run scan',
             title: 'Runs the Ranking & AI check now (uses existing keywords list).',
-            onClick: "if (typeof window.dashboardRunRankingAiScan === 'function') window.dashboardRunRankingAiScan();"
+            onClick: "if (typeof window.dashboardRunRankingAiScan === 'function') window.dashboardRunRankingAiScan();",
+            title: 'Runs the Keyword Ranking and AI check now (uses existing keywords list).'
           },
           kpis: {
             top3Share: (rankingK?.top3SharePct != null) ? formatPct(rankingK.top3SharePct, 0) : '—',

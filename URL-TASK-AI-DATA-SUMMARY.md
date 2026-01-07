@@ -133,4 +133,71 @@ Added critical debug logs (error level) that will show:
 - First 3 row URLs and their normalized versions
 - Whether `exactMatch` is true/false for each comparison
 
-**Next Step:** Run "Add Measurement" again and check for new `[computeAiMetricsForPageUrl] START` and `Row 0/1/2` debug lines to see exactly what's being compared.  
+**Next Step:** Run "Add Measurement" again and check for new `[computeAiMetricsForPageUrl] START` and `Row 0/1/2` debug lines to see exactly what's being compared.
+
+---
+
+## Update: 2026-01-07 16:30 UTC
+
+### Matching Logic Enhanced (Ultra-Permissive)
+
+**Current State**: Matching logic has been made "ultra-permissive" with multiple fallback strategies:
+
+1. **exactMatch**: Normalized URLs match exactly
+2. **lastSegmentMatch**: Last path segment matches (e.g., "photography-courses-coventry")
+3. **segmentContainsMatch**: Any segment contains the target segment
+4. **pathOverlapMatch**: Paths have any overlap
+5. **keywordMatch**: Both URLs contain the same keyword string (e.g., "photography-courses-coventry")
+
+**Code Location**: `audit-dashboard.html` line ~12700-12900
+
+### Critical Debug Logs Not Appearing
+
+**Problem**: New critical debug logs (set to `error` level) are NOT appearing in UI debug log:
+- `[computeAiMetricsForPageUrl] START` - Should log at function start
+- `[computeAiMetricsForPageUrl] Row 0/1/2` - Should log first 3 row comparisons
+- `[AI match debug]` - Should log when match found
+- `[AI match summary]` - Should log final decision
+
+**Possible Causes**:
+1. Browser caching preventing latest code from loading
+2. Function not being called
+3. Logs being suppressed despite `error` level
+4. Deployment not active in user's browser
+
+### Current Status
+
+**✅ Confirmed**:
+- Data exists in Supabase `keyword_rankings` table
+- `normalizeUrl` function should handle query parameters
+- Matching logic is ultra-permissive with multiple fallback strategies
+
+**❌ Still Failing**:
+- URL matching not finding matches
+- Debug logs not appearing
+- AI Overview/Citations not displaying for URL tasks
+
+**🔍 Needs Investigation**:
+- Why matching logic is still failing despite ultra-permissive approach
+- Why debug logs aren't appearing (browser cache?)
+- Actual structure of `combinedRows` vs expected structure
+- Whether `rowBestUrl` extraction is working correctly
+
+### Next Actions
+
+1. **Verify Latest Code is Running**:
+   - Check browser cache (hard refresh: Ctrl+Shift+R)
+   - Add unique marker string to verify latest code is loaded
+   - Temporarily add `console.log` to confirm function is being called
+
+2. **Verify Data Structure**:
+   - Query Supabase to confirm `combinedRows` structure
+   - Verify field names (`best_url` vs `targetUrl` vs `ranking_url`)
+   - Check if `combinedRows` are being loaded from correct source
+
+3. **Diagnose Matching Failure**:
+   - Add temporary console.log to see actual URL values being compared
+   - Verify `normalizeUrl` is working correctly on both URLs
+   - Check if `rowBestUrl` extraction is finding the correct field
+
+**See `HANDOVER.md` for comprehensive handover document with all context.**  

@@ -96,6 +96,8 @@ Vercel will automatically rebuild and deploy (usually takes 1-2 minutes).
 
 ## Current Status
 
+**⚠️ NOTE**: For current known issues and fix status (as of 2026-01-07), see **`HANDOVER.md`**.
+
 - ✅ **Fully Implemented**: All core features are production-ready
 - ✅ **Site AI Health Dashboard**: Speedometer with multiple score indicators, RAG pills with breakdown boxes
 - ✅ **5 Core Pillars**: All pillars fully implemented with real data sources

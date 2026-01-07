@@ -2,6 +2,49 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-01-07] - v1.7.4 - Keyword Task Fixes + Debug Log System
+
+### Fixed
+- **Keyword Task URL Matching**: Made URL matching optional for keyword-based tasks in "Add Measurement" and "Update Task Latest" functions
+  - Keyword tasks can now find ranking/AI data even when URL doesn't match
+  - Implemented in `addMeasurementBtn` handler and `updateTaskLatest()` function
+  - Fixes issue where keyword tasks showed no ranking or AI data
+
+- **Data Freshness**: Always fetch latest audit from Supabase before using cached localStorage data
+  - Ensures "Add Measurement" and "Rebaseline" use latest data
+  - Prevents stale data issues
+
+- **Debug Log Consistency**: Fixed `computeAiMetricsForPageUrl` to return consistent results
+  - Ensures `ai_citations` is always a valid number (0 or higher) when match found
+  - Prevents inconsistent `Overview: false, Citations: null` returns
+
+### Added
+- **Debug Log System**: Created infrastructure for saving UI debug logs to Supabase
+  - Created `debug_logs` table (migration: `20250117_create_debug_logs_table.sql`)
+  - Created API endpoint `/api/supabase/save-debug-log-entry.js` with retry logic for schema cache issues
+  - Modified `debugLog()` function to support async saving (currently disabled due to schema cache issues)
+
+- **Debug Log Cleanup**: Added suppression patterns to reduce UI debug log verbosity
+  - Suppressed `[Traffic Lights]`, `[getBaselineLatest]`, `Money Pages` logs
+  - `info` level logs matching suppressed patterns are completely hidden
+
+### Changed
+- **URL Task AI Data Matching**: Enhanced `computeAiMetricsForPageUrl` with ultra-permissive matching logic
+  - Added multiple fallback matching strategies (exactMatch, lastSegmentMatch, segmentContainsMatch, pathOverlapMatch, keywordMatch)
+  - **Status**: Still not working - matching logic failing despite multiple iterations
+  - **See**: `URL-TASK-AI-DATA-SUMMARY.md` and `HANDOVER.md` for details
+
+### Known Issues
+- **URL Task AI Data**: URL tasks for `www.alanranger.com/photography-courses-coventry` still not displaying AI Overview/Citations
+  - Data exists in Supabase `keyword_rankings` table
+  - Matching logic enhanced but still failing
+  - Critical debug logs not appearing (possible browser cache issue)
+  - **See**: `HANDOVER.md` for comprehensive diagnosis and next steps
+
+- **Debug Log Saving**: Supabase saving currently disabled due to schema cache issues with `property_url` column
+  - Retry logic implemented but needs schema cache to stabilize
+  - Re-enable once schema cache is stable
+
 ## [2025-12-24] - v1.7.3 - Data Integrity + AI Citation Consistency (Portfolio + Tasks)
 
 ### Added

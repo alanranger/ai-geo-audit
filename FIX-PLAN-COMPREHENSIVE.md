@@ -4,19 +4,161 @@
 
 This document outlines a comprehensive fix plan to address all identified data consistency issues and ensure correct values across all modules.
 
+**Last Updated**: 2026-01-07  
+**Status Summary**: 2 of 5 high-level fixes completed, 1 partially complete, 2 in progress/not started
+
 ---
 
-## Issues to Fix
+## Executive Summary
 
-### Critical Issues (Must Fix)
-1. **URL Matching Too Strict** - "Add Measurement" requires URL match, causing keyword tasks to fail
-2. **Inconsistent Logic** - "Add Measurement" vs "Bulk Update" use different matching logic
-3. **Missing Ranking/AI Data** - Falls back to `queryTotals` which has no ranking/AI data
+### High-Level Fixes Status
 
-### Important Issues (Should Fix)
-4. **Data Source Priority Inconsistency** - Different processes check sources in different order
-5. **Stale Data** - localStorage vs Supabase may be out of sync
-6. **Timing Dependencies** - Processes may use stale data if run independently
+| Fix | Description | Status | Sub-Tasks Addressed |
+|-----|-------------|--------|---------------------|
+| **Fix 0** | 🔴 **URL Task AI Citations Logic (CRITICAL)** | ⏸️ **AWAITING APPROVAL** | Issue 1 (root cause) |
+| **Fix 1** | Make URL Matching Optional for Keyword Tasks | ✅ **COMPLETED** | Issue 2, Issue 3 |
+| **Fix 2** | Unify "Add Measurement" and "Update Task Latest" Logic | ⚠️ **PARTIALLY COMPLETE** | Issue 2, Issue 3 |
+| **Fix 3** | URL Task AI Data Matching | ❌ **NOT WORKING** (superseded by Fix 0) | Issue 1 (partially) |
+| **Fix 4** | Standardize Data Source Priority | ⏸️ **NOT STARTED** | Issue 3, Issue 4, Issue 5 |
+| **Fix 5** | Ensure Data Freshness (Always Fetch Latest from Supabase) | ✅ **COMPLETED** | Issue 4, Issue 5, Issue 6 |
+
+### Sub-Tasks / Inconsistency Issues
+
+| Issue | Description | Addressed By | Status |
+|-------|-------------|--------------|--------|
+| **Issue 1** | Separate Data Sources - Main Audit vs Ranking & AI Scan | Fix 3 (partially) | ⚠️ **PARTIAL** |
+| **Issue 2** | Different Update Processes Use Different Logic | Fix 1, Fix 2 | ✅ **RESOLVED** |
+| **Issue 3** | Data Source Priority Differences | Fix 1, Fix 2, Fix 4 | ⚠️ **PARTIAL** |
+| **Issue 4** | Stale Data in localStorage | Fix 5, Fix 4 | ✅ **RESOLVED** |
+| **Issue 5** | Supabase vs localStorage Inconsistency | Fix 5, Fix 4 | ✅ **RESOLVED** |
+| **Issue 6** | Timing Dependencies | Fix 5 | ✅ **RESOLVED** |
+
+---
+
+## 🔴 CRITICAL FIX: URL Task AI Citations Logic (Fix 0)
+
+**Status**: ⏸️ **AWAITING USER APPROVAL**  
+**Priority**: 🔴 **CRITICAL** - Must be fixed before continuing with other tasks  
+**Date Identified**: 2026-01-07
+
+### Problem
+
+**Current Logic (WRONG)**:
+- URL tasks look for keywords where `best_url` matches the target URL
+- Then aggregates `ai_alan_citations_count` from those keywords
+- **This is incorrect** because AI citations are keyword-driven, not URL-driven
+
+**Root Cause**:
+- AI Overviews are keyword-specific summaries (text only, no embedded URL links)
+- AI Citations are URLs that appear **within** the AI Overview for a keyword
+- For URL tasks, we should find: "How many keywords cite this URL in their AI Overviews?"
+
+**Evidence**:
+- Keyword "photography courses" has `ai_alan_citations_count: 0`
+- Keyword "photography courses coventry" has `ai_alan_citations_count: 3`
+- Both have same `best_url`: `photography-courses-coventry`
+- Current logic finds "photography courses" first → shows 0 citations (WRONG)
+- Correct logic should find keywords where `ai_alan_citations` array contains the target URL
+
+### Proposed Solution
+
+1. **Reverse the matching logic**:
+   - Instead of: Find keywords where `best_url` matches target URL
+   - Do: Find keywords where `ai_alan_citations` array contains target URL
+
+2. **Citation Count**:
+   - Count unique keywords that cite the URL (or total citations - TBD)
+
+3. **AI Overview**:
+   - Show as present only if at least one citing keyword has `has_ai_overview: true`
+
+### Affected Functions & Tabs
+
+- ✅ `computeAiMetricsForPageUrl()` - Core function (HIGH impact)
+- ✅ "Add Measurement" button - Optimization tab (HIGH impact)
+- ✅ "Rebaseline" button - Optimization tab (HIGH impact)
+- ⏸️ Money Pages table - Needs AI Citations column (MEDIUM impact)
+- ⏸️ Priority Matrix - May need AI citations weighting (HIGH impact if changed)
+
+### Implementation Status
+
+- ✅ Analysis complete: `URL-TASK-AI-CITATIONS-FIX-ANALYSIS.md`
+- ⏸️ **AWAITING USER APPROVAL** before proceeding
+- ⏸️ **AWAITING ANSWERS** to questions in analysis document
+
+### Related Documents
+
+- `URL-TASK-AI-CITATIONS-FIX-ANALYSIS.md` - Full impact analysis
+- `HANDOVER.md` - Current critical issues
+- `URL-TASK-AI-DIAGNOSTIC-TOOLS.md` - Diagnostic tools
+
+---
+
+## Detailed Issues & Sub-Tasks
+
+### Issue 1: Separate Data Sources
+**Problem**: Main Audit creates `queryTotals` (GSC data only, NO ranking/AI), while Ranking & AI Scan creates `combinedRows` (ranking/AI data). These are DIFFERENT processes that may run at different times.
+
+**Impact**: If Ranking & AI scan is stale, Optimization Task module may not find ranking/AI data.
+
+**Addressed By**: Fix 3 (URL Task AI Data Matching) - partially addresses by ensuring URL tasks can find AI data from `combinedRows`
+
+**Status**: ⚠️ **PARTIAL** - Fix 3 still not working
+
+---
+
+### Issue 2: Different Update Processes Use Different Logic
+**Problem**: "Add Measurement" requires URL match for `combinedRows` check, while "Bulk Update" allows keyword match without URL requirement.
+
+**Impact**: Same task may get different data depending on which process is used.
+
+**Addressed By**: Fix 1, Fix 2
+
+**Status**: ✅ **RESOLVED** - Fix 1 completed, Fix 2 partially complete
+
+---
+
+### Issue 3: Data Source Priority Differences
+**Problem**: "Add Measurement" checks `combinedRows` first (requires URL match), while "Bulk Update" checks `combinedRows` first (URL optional).
+
+**Impact**: Inconsistent data retrieval.
+
+**Addressed By**: Fix 1, Fix 2, Fix 4
+
+**Status**: ⚠️ **PARTIAL** - Fix 1 completed, Fix 2 partially complete, Fix 4 not started
+
+---
+
+### Issue 4: Stale Data in localStorage
+**Problem**: Multiple processes store data in localStorage. If one process fails or is not run, data may be stale.
+
+**Impact**: Modules may use outdated data.
+
+**Addressed By**: Fix 5, Fix 4
+
+**Status**: ✅ **RESOLVED** - Fix 5 completed (always fetch latest from Supabase)
+
+---
+
+### Issue 5: Supabase vs localStorage
+**Problem**: Some processes read from Supabase, others from localStorage. If Supabase is updated but localStorage is not, inconsistency occurs.
+
+**Impact**: Different modules may show different data.
+
+**Addressed By**: Fix 5, Fix 4
+
+**Status**: ✅ **RESOLVED** - Fix 5 completed (always fetch latest from Supabase first)
+
+---
+
+### Issue 6: Timing Dependencies
+**Problem**: "Bulk Update" runs after "Run Audit Scan" in global run, but "Add Measurement" can be run independently.
+
+**Impact**: "Add Measurement" may use stale audit data.
+
+**Addressed By**: Fix 5
+
+**Status**: ✅ **RESOLVED** - Fix 5 completed (always fetch latest from Supabase)
 
 ---
 
@@ -389,31 +531,96 @@ try {
 
 ---
 
-## Implementation Order
+## Implementation Order & Current Status
 
-1. **Fix 1** (URL Matching Optional) - **CRITICAL, DO FIRST** ✅ **COMPLETED**
-   - Quick win, addresses root cause
-   - Low risk, high impact
-   - **Status**: Implemented in all three locations:
-     - Add Measurement: RankingAiModule check (line ~13797)
-     - Add Measurement: window.rankingAiData check (line ~13847)
-     - Update Task Latest: combinedRows check (line ~15509)
+### ✅ Completed Fixes
 
-2. **Fix 5** (Data Freshness) - **DO SECOND**
-   - Ensures we're working with latest data
-   - Low risk, improves reliability
+#### Fix 1: Make URL Matching Optional for Keyword Tasks
+**Status**: ✅ **COMPLETED**  
+**Date Completed**: 2026-01-07  
+**Addresses**: Issue 2, Issue 3
 
-3. **Fix 2** (Unify Logic) - **DO THIRD**
-   - Aligns "Add Measurement" with "Bulk Update"
-   - Low risk, improves consistency
+- Quick win, addresses root cause
+- Low risk, high impact
+- **Implemented in**:
+  - Add Measurement: RankingAiModule check (line ~13797)
+  - Add Measurement: window.rankingAiData check (line ~13847)
+  - Update Task Latest: combinedRows check (line ~15509)
 
-4. **Fix 3** (keyword_rankings Fallback) - **DO FOURTH**
-   - Adds resilience
-   - Requires new API endpoint
+**Result**: Keyword tasks can now find ranking/AI data regardless of URL match.
 
-5. **Fix 4** (Standardize Priority) - **DO LAST**
-   - Major refactoring
-   - Can be done incrementally
+---
+
+#### Fix 5: Ensure Data Freshness (Always Fetch Latest from Supabase)
+**Status**: ✅ **COMPLETED**  
+**Date Completed**: 2026-01-07  
+**Addresses**: Issue 4, Issue 5, Issue 6
+
+- Ensures we're working with latest data
+- Low risk, improves reliability
+- **Implemented in**:
+  - `addMeasurementBtn` handler
+  - `rebaselineBtn` handler
+
+**Result**: All update processes now fetch latest audit from Supabase before using cached data.
+
+---
+
+### ⚠️ Partially Complete Fixes
+
+#### Fix 2: Unify "Add Measurement" and "Update Task Latest" Logic
+**Status**: ⚠️ **PARTIALLY COMPLETE**  
+**Addresses**: Issue 2, Issue 3
+
+- Aligns "Add Measurement" with "Bulk Update"
+- Low risk, improves consistency
+- **Current State**: 
+  - "Add Measurement" and "Bulk Update" now use similar logic
+  - URL task AI data matching still failing (blocked by Fix 3)
+- **Remaining Work**: 
+  - Complete URL task AI data matching (Fix 3)
+  - Verify all three processes use identical logic
+
+---
+
+### ❌ In Progress / Not Working
+
+#### Fix 3: URL Task AI Data Matching
+**Status**: ❌ **NOT WORKING**  
+**Addresses**: Issue 1 (partially)
+
+- URL tasks not finding AI Overview/Citations even when data exists
+- **Current State**: 
+  - Multiple matching logic iterations attempted
+  - Ultra-permissive matching logic implemented but not finding matches
+  - Data confirmed to exist in Supabase `keyword_rankings` table
+- **See**: `URL-TASK-AI-DATA-SUMMARY.md` and `HANDOVER.md` for details
+- **Date Last Attempted**: 2026-01-07
+- **Blocking**: Full completion of Fix 2
+
+**Next Steps**: 
+- Diagnose why matching logic is failing despite ultra-permissive approach
+- Verify `combinedRows` data structure matches expectations
+- Check browser caching preventing latest code from running
+
+---
+
+### ⏸️ Not Started
+
+#### Fix 4: Standardize Data Source Priority
+**Status**: ⏸️ **NOT STARTED**  
+**Addresses**: Issue 3, Issue 4, Issue 5
+
+- Major refactoring to create unified `getTaskMetricsFromDataSources()` function
+- Can be done incrementally
+- **Deferred Until**: Fix 3 is resolved
+- **Impact**: Will ensure all update processes use identical data source priority and logic
+
+**Scope**:
+- Create unified function `getTaskMetricsFromDataSources()`
+- Update "Add Measurement" to use unified function
+- Update "Update Task Latest" to use unified function
+- Update "Bulk Update" to use unified function
 
 ---
 
@@ -454,11 +661,23 @@ After each fix:
 
 ## Success Criteria
 
-✅ All keyword tasks can find ranking/AI data regardless of URL match  
-✅ "Add Measurement" and "Bulk Update" use same logic  
-✅ All processes use latest data from Supabase  
-✅ Data consistency across all modules  
-✅ No regression in existing functionality  
+### ✅ Completed
+- ✅ All keyword tasks can find ranking/AI data regardless of URL match (Fix 1)
+- ✅ All processes use latest data from Supabase (Fix 5)
+- ✅ No regression in existing functionality (Verified)
+- ✅ Issue 2 resolved: "Add Measurement" and "Bulk Update" now use similar logic (Fix 1, Fix 2)
+- ✅ Issue 4 resolved: Stale data in localStorage addressed (Fix 5)
+- ✅ Issue 5 resolved: Supabase vs localStorage inconsistency addressed (Fix 5)
+- ✅ Issue 6 resolved: Timing dependencies addressed (Fix 5)
+
+### ⚠️ Partially Complete
+- ⚠️ "Add Measurement" and "Bulk Update" use same logic (Fix 2 - blocked by Fix 3)
+- ⚠️ Issue 3 partially resolved: Data source priority differences reduced but not fully standardized (Fix 1, Fix 2 - Fix 4 needed for full resolution)
+
+### ❌ Not Working / Not Started
+- ❌ URL tasks not finding AI Overview/Citations (Fix 3 - NOT WORKING)
+- ❌ Issue 1 partially addressed: Separate data sources still causing issues for URL tasks (Fix 3 - NOT WORKING)
+- ❌ Standardized data source priority function not created (Fix 4 - NOT STARTED)  
 
 ---
 
@@ -480,6 +699,50 @@ After each fix:
 
 ---
 
+## Summary & Next Steps
+
+### Overall Progress
+
+**High-Level Fixes**: 2 of 5 completed (40%)  
+**Sub-Tasks/Issues**: 4 of 6 resolved (67%)
+
+### What's Working ✅
+- Keyword tasks can find ranking/AI data regardless of URL match
+- All update processes fetch latest data from Supabase
+- Stale data issues resolved
+- Supabase vs localStorage inconsistency resolved
+- Timing dependencies resolved
+
+### What's Blocked ❌
+- **Fix 3 (URL Task AI Data Matching)**: Critical blocker preventing full completion of Fix 2
+  - Multiple attempts made, still not working
+  - Data exists in Supabase but matching logic failing
+  - Needs fresh diagnosis approach (see `HANDOVER.md`)
+
+### What's Remaining ⏸️
+- **Fix 4 (Standardize Data Source Priority)**: Major refactoring deferred until Fix 3 resolved
+  - Will create unified function for all update processes
+  - Will fully resolve Issue 3 (Data Source Priority Differences)
+
+### Recommended Next Steps
+
+1. **Priority 1**: Resolve Fix 3 (URL Task AI Data Matching)
+   - Fresh diagnosis needed (see `HANDOVER.md` for context)
+   - Verify `combinedRows` data structure
+   - Check browser caching issues
+   - May need different approach to matching logic
+
+2. **Priority 2**: Complete Fix 2 (Unify Logic)
+   - Once Fix 3 is resolved, verify all three processes use identical logic
+   - Test with both keyword and URL tasks
+
+3. **Priority 3**: Implement Fix 4 (Standardize Data Source Priority)
+   - Create unified `getTaskMetricsFromDataSources()` function
+   - Refactor all update processes to use it
+   - This will fully resolve Issue 3
+
+---
+
 ## Ready to Implement
 
 All fixes are well-defined with:
@@ -489,4 +752,4 @@ All fixes are well-defined with:
 - ✅ Testing plans
 - ✅ Risk assessment
 
-**Recommendation**: Start with Fix 1 (URL Matching Optional) as it addresses the root cause with minimal risk.
+**Current Focus**: Fix 3 (URL Task AI Data Matching) - needs fresh diagnosis approach

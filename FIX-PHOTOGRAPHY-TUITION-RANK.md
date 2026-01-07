@@ -1,5 +1,7 @@
 # Fix: Photography Tuition Rank/AI Data Not Showing in Optimization Task Module
 
+**⚠️ NOTE**: This document describes Fix 1 (completed 2026-01-07). For the most current status of all fixes and ongoing issues, see **`HANDOVER.md`** (created 2026-01-07).
+
 ## Issue
 - **Ranking & AI tab** shows: rank #5, AI Overview: On, AI Citations: 0 for "photography tuition"
 - **Optimization task drawer** showed: rank —, AI Overview: —, AI Citations: —

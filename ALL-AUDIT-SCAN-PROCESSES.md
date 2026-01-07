@@ -1,5 +1,7 @@
 # All Audit/Scan/Update/Refresh Processes
 
+**⚠️ NOTE**: For the most current status of fixes and ongoing issues (as of 2026-01-07), see **`HANDOVER.md`**.
+
 ## Overview
 
 This document lists ALL processes that can update/refresh/scan/audit data in the AI GEO Audit application. Understanding these processes is critical for identifying data consistency issues.
