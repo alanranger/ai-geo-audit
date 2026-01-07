@@ -12763,7 +12763,15 @@
           return { ai_overview: null, ai_citations: null };
         }
 
-        // Only log if no match found (reduce noise)
+        // CRITICAL: Log start with target URL (always log this for diagnosis)
+        debugLog(`[computeAiMetricsForPageUrl] START: target="${pageUrl}" → normalized="${canonTarget}", checking ${rows.length} rows`, 'warn');
+        
+        // Check first row structure
+        if (rows.length > 0) {
+          const firstRow = rows[0];
+          const sampleUrl = firstRow.best_url || firstRow.bestUrl || firstRow.targetUrl || firstRow.target_url || firstRow.ranking_url || firstRow.rankingUrl || firstRow.url || 'NO URL FIELD';
+          debugLog(`[computeAiMetricsForPageUrl] Sample row: keyword="${firstRow.keyword || 'unknown'}", url="${sampleUrl}", has_ai_overview=${firstRow.has_ai_overview}, ai_alan_citations_count=${firstRow.ai_alan_citations_count}`, 'warn');
+        }
 
         let citations = 0;
         let overviewOn = false;
@@ -12824,9 +12832,9 @@
           
           const urlMatches = exactMatch || pathMatch || strictPathMatch || domainOnlyMatch || pathSegmentMatch || pathContainsMatch;
           
-          // Always log photography-courses URLs for diagnosis (even if no match)
+          // Always log photography-courses URLs for diagnosis (even if no match) - use 'warn' so it's always saved
           if (rowBestUrl && rowBestUrl.toLowerCase().includes('photography-courses')) {
-            debugLog(`[computeAiMetricsForPageUrl] PHOTOGRAPHY-URL: keyword="${r.keyword || 'unknown'}", rowUrl="${rowBestUrl}", normalized="${rowBestUrlCanon}", target="${canonTarget}", targetPath="${targetPath}", rowPath="${rowPath}", exactMatch=${exactMatch}, pathMatch=${pathMatch}, strictPathMatch=${strictPathMatch}, pathSegmentMatch=${pathSegmentMatch}, pathContainsMatch=${pathContainsMatch}, urlMatches=${urlMatches}, hasOverview=${r.has_ai_overview === true || r.ai_overview_present_any === true}, citations=${r.ai_alan_citations_count != null ? r.ai_alan_citations_count : 'null'}`, urlMatches ? 'success' : 'warn');
+            debugLog(`[computeAiMetricsForPageUrl] PHOTOGRAPHY-URL: keyword="${r.keyword || 'unknown'}", rowUrl="${rowBestUrl}", normalized="${rowBestUrlCanon}", target="${canonTarget}", targetPath="${targetPath}", rowPath="${rowPath}", exactMatch=${exactMatch}, pathMatch=${pathMatch}, strictPathMatch=${strictPathMatch}, pathSegmentMatch=${pathSegmentMatch}, pathContainsMatch=${pathContainsMatch}, urlMatches=${urlMatches}, hasOverview=${r.has_ai_overview === true || r.ai_overview_present_any === true}, citations=${r.ai_alan_citations_count != null ? r.ai_alan_citations_count : 'null'}`, 'warn');
           }
           
           // Log successful matches
@@ -12876,11 +12884,11 @@
         // Ensure totalCitations is always a number (never null/undefined)
         const totalCitations = Math.max(citations || 0, citationsFromTargetUrl || 0);
         
-        // Always log final result for diagnosis
+        // Always log final result for diagnosis (use 'warn' so it's always saved)
         if (!matchedKeyword) {
-          debugLog(`[computeAiMetricsForPageUrl] ✗ No match found for "${canonTarget}" in ${rows.length} rows. Check logs above for photography-courses URLs.`, 'warn');
+          debugLog(`[computeAiMetricsForPageUrl] ✗ FINAL: No match found for "${canonTarget}" in ${rows.length} rows. matchedKeyword=null, overviewOn=${overviewOn}, citations=${citations}, citationsFromTargetUrl=${citationsFromTargetUrl}`, 'warn');
         } else {
-          debugLog(`[computeAiMetricsForPageUrl] ✓ Match found: keyword="${matchedKeyword}", overview=${overviewOn}, citations=${totalCitations}`, 'success');
+          debugLog(`[computeAiMetricsForPageUrl] ✓ FINAL: Match found! keyword="${matchedKeyword}", overview=${overviewOn}, citations=${totalCitations}, finalOverview=${finalOverview}, finalCitations=${finalCitations}`, 'warn');
         }
         
         // CRITICAL: Ensure consistency - if matchedKeyword is set, both values must be non-null
