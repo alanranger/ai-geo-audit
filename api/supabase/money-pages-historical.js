@@ -79,12 +79,36 @@ export default async function handler(req, res) {
       });
     }
 
+    // Normalize target URL for query (same as get-gsc-page-metrics.js)
+    const normalizeUrlForQuery = (url, siteUrl) => {
+      if (!url || typeof url !== 'string') return '';
+      
+      let u = url.trim();
+      if (u.startsWith("/")) {
+        u = (siteUrl || property_url).replace(/\/+$/, '') + u;
+      } else if (!u.startsWith("http")) {
+        u = (siteUrl || property_url).replace(/\/+$/, '') + "/" + u.replace(/^\/+/, "");
+      }
+      
+      try {
+        const urlObj = new URL(u);
+        let path = urlObj.pathname || "/";
+        if (path.length > 1) path = path.replace(/\/+$/, "");
+        return urlObj.origin.toLowerCase() + path;
+      } catch {
+        return u.split('?')[0].split('#')[0].replace(/\/+$/, '').toLowerCase();
+      }
+    };
+
+    const normalizedPageUrl = normalizeUrlForQuery(target_url, property_url);
+
     // Query gsc_page_metrics_28d for historical snapshots within the date range
     // We'll aggregate multiple 28-day periods to get 90-day average
     const { data: pageMetrics, error: metricsError } = await supabase
       .from('gsc_page_metrics_28d')
-      .select('clicks, impressions, ctr, avg_position, date_start, date_end, captured_at')
+      .select('clicks, impressions, ctr, avg_position, page_url, date_start, date_end, captured_at')
       .eq('site_url', property_url)
+      .eq('page_url', normalizedPageUrl)
       .gte('captured_at', cutoffDate.toISOString().split('T')[0])
       .order('captured_at', { ascending: false });
 
@@ -96,18 +120,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // Find matching page by normalizing URLs
-    const matchingMetrics = [];
-    if (pageMetrics && Array.isArray(pageMetrics)) {
-      pageMetrics.forEach(metric => {
-        const metricUrlNormalized = normalizeUrl(metric.page_url || '');
-        if (metricUrlNormalized === targetUrlNormalized || 
-            metricUrlNormalized.includes(targetUrlNormalized) ||
-            targetUrlNormalized.includes(metricUrlNormalized)) {
-          matchingMetrics.push(metric);
-        }
-      });
-    }
+    const matchingMetrics = pageMetrics || [];
 
     if (matchingMetrics.length === 0) {
       return sendJSON(res, 200, {
