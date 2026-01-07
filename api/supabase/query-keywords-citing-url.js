@@ -153,7 +153,7 @@ export default async function handler(req, res) {
       count: citingKeywords.length,
       target_url: target_url,
       target_url_normalized: targetUrlNormalized,
-      audit_dates_searched: audit_date ? [audit_date] : [...new Set(keywords.map(k => k.audit_date))]
+      audit_date: auditDateToUse
     });
 
   } catch (err) {
