@@ -14539,6 +14539,117 @@
           const taskUrlForPage = task.target_url_clean || task.target_url || '';
           const hasKeyword = !!(task.keyword_text && String(task.keyword_text).trim());
 
+          // FIX: For keyword tasks, use same logic as "Add Measurement" to fetch Ranking & AI data
+          if (hasKeyword) {
+            // CRITICAL: Fetch latest audit from Supabase to get fresh ranking_ai_data
+            let latestAuditFromSupabase = null;
+            try {
+              const propertyUrl = document.getElementById('propertyUrl')?.value || 
+                                  localStorage.getItem('gsc_property_url') || 
+                                  'https://www.alanranger.com';
+              if (typeof fetchLatestAuditFromSupabase === 'function') {
+                debugLog(`[Optimisation] Rebaseline: Fetching latest audit from Supabase for Ranking & AI data...`, 'info');
+                latestAuditFromSupabase = await fetchLatestAuditFromSupabase(propertyUrl, false);
+                if (latestAuditFromSupabase && latestAuditFromSupabase.ranking_ai_data) {
+                  try {
+                    const rankingAiData = latestAuditFromSupabase.ranking_ai_data;
+                    if (rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
+                      localStorage.setItem('rankingAiData', JSON.stringify(rankingAiData));
+                      window.rankingAiData = rankingAiData.combinedRows;
+                      debugLog(`[Optimisation] Rebaseline: Loaded ${rankingAiData.combinedRows.length} keywords from latest audit`, 'success');
+                    }
+                  } catch (rankingErr) {
+                    debugLog(`[Optimisation] Rebaseline: Error loading ranking_ai_data: ${rankingErr.message}`, 'warn');
+                  }
+                }
+              }
+            } catch (fetchErr) {
+              debugLog(`[Optimisation] Rebaseline: Error fetching latest audit: ${fetchErr.message}`, 'warn');
+            }
+
+            // Try to get from RankingAiModule or window.rankingAiData or localStorage
+            let combinedRows = [];
+            if (typeof RankingAiModule !== 'undefined' && RankingAiModule.state) {
+              const state = RankingAiModule.state();
+              combinedRows = state.combinedRows || [];
+            }
+            if (combinedRows.length === 0 && typeof window.rankingAiData !== 'undefined' && Array.isArray(window.rankingAiData)) {
+              combinedRows = window.rankingAiData;
+            }
+            if (combinedRows.length === 0) {
+              try {
+                const local = localStorage.getItem('rankingAiData');
+                if (local) {
+                  const parsed = JSON.parse(local);
+                  if (parsed && Array.isArray(parsed.combinedRows)) {
+                    combinedRows = parsed.combinedRows;
+                  }
+                }
+              } catch (e) {
+                debugLog(`[Optimisation] Rebaseline: Error reading localStorage rankingAiData: ${e.message}`, 'warn');
+              }
+            }
+
+            // Find matching row with optional URL matching (same as Add Measurement)
+            if (combinedRows.length > 0) {
+              const taskUrlClean = (task.target_url_clean || task.target_url || '').replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
+              const taskUrlPath = taskUrlClean.includes('/') ? taskUrlClean.split('/').slice(1).join('/') : '';
+              
+              const matchingRow = combinedRows.find(r => {
+                const keywordMatch = (r.keyword || '').toLowerCase() === (task.keyword_text || '').toLowerCase();
+                if (!keywordMatch) return false;
+                
+                // FIX 1: For keyword-based tasks, URL matching is optional
+                if (!taskUrlClean || taskUrlClean.length === 0) {
+                  return true; // Keyword match only - no URL required
+                }
+                
+                // If task has URL, try to match it (preferred but not required)
+                const rowUrl = (r.best_url || r.targetUrl || r.ranking_url || '').toLowerCase();
+                const rowUrlClean = rowUrl.replace(/^https?:\/\//, '').replace(/^www\./, '');
+                const rowUrlPath = rowUrlClean.includes('/') ? rowUrlClean.split('/').slice(1).join('/') : '';
+                
+                const urlMatch = rowUrl === taskUrlClean || 
+                                rowUrlClean === taskUrlClean ||
+                                rowUrlPath === taskUrlPath ||
+                                rowUrl.includes(taskUrlClean) ||
+                                taskUrlClean.includes(rowUrlClean);
+                
+                return urlMatch || true; // Always accept keyword match for keyword tasks
+              });
+
+              if (matchingRow) {
+                debugLog(`[Optimisation] Rebaseline: Found matching row for keyword "${task.keyword_text}"`, 'success');
+                
+                // Get queryTotal data for clicks, impressions, and CTR
+                let queryTotal = null;
+                if (typeof getQueryTotalForKeyword === 'function') {
+                  queryTotal = getQueryTotalForKeyword(task.keyword_text);
+                }
+                
+                currentMetrics = {
+                  gsc_clicks_28d: queryTotal?.clicks || matchingRow.gsc_clicks_28d || matchingRow.clicks_28d || null,
+                  gsc_impressions_28d: queryTotal?.impressions || matchingRow.gsc_impressions_28d || matchingRow.impressions_28d || null,
+                  gsc_ctr_28d: queryTotal?.ctr != null ? (queryTotal.ctr / 100) : (matchingRow.gsc_ctr_28d || matchingRow.ctr_28d || null),
+                  current_rank: matchingRow.best_rank_group || matchingRow.current_rank || null,
+                  opportunity_score: matchingRow.opportunityScore || null,
+                  ai_overview: matchingRow.has_ai_overview === true || matchingRow.ai_overview_present_any === true,
+                  ai_citations: matchingRow.ai_alan_citations_count != null ? Number(matchingRow.ai_alan_citations_count) : 0,
+                  ai_citations_total: matchingRow.ai_total_citations != null ? Number(matchingRow.ai_total_citations) : 0,
+                  classic_ranking_url: matchingRow.best_url || matchingRow.targetUrl || matchingRow.ranking_url || taskUrlForPage,
+                  page_type: matchingRow.pageType || null,
+                  segment: matchingRow.segment || null,
+                  captured_at: new Date().toISOString()
+                };
+                debugLog(`[Optimisation] Rebaseline: Built metrics from Ranking & AI data - rank=${currentMetrics.current_rank}, ai_overview=${currentMetrics.ai_overview}, impressions=${currentMetrics.gsc_impressions_28d}`, 'success');
+              } else {
+                debugLog(`[Optimisation] Rebaseline: No matching row found for keyword "${task.keyword_text}" in ${combinedRows.length} rows`, 'warn');
+              }
+            } else {
+              debugLog(`[Optimisation] Rebaseline: No combinedRows available for keyword task`, 'warn');
+            }
+          }
+
           // Prefer exact GSC page totals for URL-only tasks
           if (!hasKeyword && taskUrlForPage) {
             try {
@@ -14578,13 +14689,19 @@
             }
           }
 
-          // Fallback to existing baseline metrics (still records a new baseline marker)
+          // Fallback to existing baseline metrics ONLY if all data sources failed
+          // For keyword tasks, this should rarely happen if Ranking & AI data is available
           if (!currentMetrics) {
             const baselineMetrics = task.baseline_metrics;
             if (baselineMetrics && typeof baselineMetrics === 'object') {
+              debugLog(`[Optimisation] Rebaseline: Falling back to existing baseline metrics (no fresh data found)`, 'warn');
               currentMetrics = { ...baselineMetrics, captured_at: new Date().toISOString() };
             } else {
-              alert('Could not find metrics to rebaseline. Try again after running an audit.');
+              if (hasKeyword) {
+                alert('Could not find Ranking & AI data to rebaseline. Please run "Run Ranking & AI Scan" first, then try again.');
+              } else {
+                alert('Could not find metrics to rebaseline. Try again after running an audit.');
+              }
               return;
             }
           }
