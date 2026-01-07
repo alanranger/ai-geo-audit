@@ -110,21 +110,66 @@ export default async function handler(req, res) {
     // Get task's keyword and URL to query keyword_rankings table
     const taskKeyword = task.keyword_text || task.keyword_key;
     const taskUrl = task.target_url_clean || task.target_url;
+    const hasKeyword = !!(taskKeyword && String(taskKeyword).trim());
     let baselineFromAudit = null;
 
-    if (taskKeyword && taskUrl) {
-      // Normalize URL for query (remove protocol, www)
-      const normalizedUrl = taskUrl.replace(/^https?:\/\//, '').replace(/^www\./, '');
+    // FIX: For keyword tasks, URL matching should be optional (same as frontend Fix 1)
+    if (hasKeyword) {
+      // Get property URL (site domain) for querying keyword_rankings
+      // property_url in keyword_rankings is the site domain (e.g., "https://www.alanranger.com")
+      // best_url is the specific page URL
+      const propertyUrl = task.property_url || 'https://www.alanranger.com';
+      const normalizedPropertyUrl = propertyUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
       
-      // Fetch latest audit data for this keyword/URL from keyword_rankings table
-      const { data: auditRows, error: auditError } = await supabase
+      // Normalize task URL for best_url matching (if provided)
+      const normalizedTaskUrl = taskUrl ? taskUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase() : null;
+      
+      // Fetch latest audit data for this keyword from keyword_rankings table
+      // For keyword tasks: match by keyword + property_url (site domain), best_url is optional
+      let auditRows = null;
+      let auditError = null;
+      
+      // Query by keyword and property_url (site domain) - this is required
+      // If task has a URL, we can optionally filter by best_url, but don't require it
+      let query = supabase
         .from('keyword_rankings')
         .select('*')
         .eq('keyword', taskKeyword)
-        .eq('property_url', normalizedUrl)
-        .order('audit_date', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .eq('property_url', propertyUrl) // Match site domain
+        .order('audit_date', { ascending: false });
+      
+      // Execute query
+      const { data: allMatches, error: queryError } = await query;
+      
+      if (!queryError && allMatches && allMatches.length > 0) {
+        // If task has URL, prefer exact best_url match, but accept any match
+        if (normalizedTaskUrl) {
+          // Try to find exact best_url match first
+          const exactMatch = allMatches.find(row => {
+            const rowBestUrl = (row.best_url || '').replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
+            return rowBestUrl === normalizedTaskUrl || rowBestUrl.includes(normalizedTaskUrl) || normalizedTaskUrl.includes(rowBestUrl);
+          });
+          
+          if (exactMatch) {
+            auditRows = exactMatch;
+            auditError = null;
+            console.log('[Optimisation Cycle] Found keyword match with URL match');
+          } else {
+            // No URL match, but keyword matches - use first result (URL optional for keyword tasks)
+            auditRows = allMatches[0];
+            auditError = null;
+            console.log('[Optimisation Cycle] Found keyword match without URL match (using first result)');
+          }
+        } else {
+          // No task URL - use first keyword match
+          auditRows = allMatches[0];
+          auditError = null;
+          console.log('[Optimisation Cycle] Found keyword match (no task URL)');
+        }
+      } else {
+        auditRows = null;
+        auditError = queryError;
+      }
 
       if (!auditError && auditRows) {
         // Extract metrics from audit row
@@ -133,19 +178,35 @@ export default async function handler(req, res) {
         let gscImpressions = null;
         let gscCtr = null;
         
-        // Try to get from searchData.queryTotals (stored in keyword_rankings or needs to be fetched)
-        // For now, use direct fields if available, or fetch from queryTotals
-        if (auditRows.search_data) {
-          const searchData = typeof auditRows.search_data === 'string' 
-            ? JSON.parse(auditRows.search_data) 
-            : auditRows.search_data;
-          const queryTotal = searchData?.queryTotals?.find(qt => 
-            qt.query?.toLowerCase() === taskKeyword.toLowerCase()
-          );
-          if (queryTotal) {
-            gscClicks = queryTotal.clicks || null;
-            gscImpressions = queryTotal.impressions || null;
-            gscCtr = queryTotal.ctr != null ? (queryTotal.ctr / 100) : null; // Convert percentage to decimal
+        // Try to get from latest audit's queryTotals
+        // Fetch latest audit to get queryTotals
+        const { data: latestAudit } = await supabase
+          .from('audit_results')
+          .select('search_data, query_totals')
+          .eq('property_url', task.property_url || 'https://www.alanranger.com')
+          .order('audit_date', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        
+        if (latestAudit) {
+          // Try query_totals field first (newer format)
+          let queryTotals = latestAudit.query_totals;
+          if (!queryTotals && latestAudit.search_data) {
+            const searchData = typeof latestAudit.search_data === 'string' 
+              ? JSON.parse(latestAudit.search_data) 
+              : latestAudit.search_data;
+            queryTotals = searchData?.queryTotals;
+          }
+          
+          if (Array.isArray(queryTotals)) {
+            const queryTotal = queryTotals.find(qt => 
+              (qt.query || qt.keyword || '').toLowerCase() === taskKeyword.toLowerCase()
+            );
+            if (queryTotal) {
+              gscClicks = queryTotal.clicks || null;
+              gscImpressions = queryTotal.impressions || null;
+              gscCtr = queryTotal.ctr != null ? (queryTotal.ctr / 100) : null; // Convert percentage to decimal
+            }
           }
         }
 
@@ -180,14 +241,20 @@ export default async function handler(req, res) {
         console.log('[Optimisation Cycle] Found baseline from audit:', {
           audit_date: auditRows.audit_date,
           keyword: taskKeyword,
-          url: normalizedUrl,
-          metrics: baselineFromAudit
+          url: normalizedTaskUrl || '(no URL)',
+          best_url: auditRows.best_url || '(no best_url)',
+          metrics: baselineFromAudit,
+          match_type: normalizedTaskUrl && auditRows.best_url ? 'keyword+best_url' : 'keyword-only'
         });
       } else if (auditError) {
         console.warn('[Optimisation Cycle] Error fetching audit data:', auditError);
       } else {
-        console.log('[Optimisation Cycle] No audit data found for keyword/URL:', { keyword: taskKeyword, url: normalizedUrl });
+        console.log('[Optimisation Cycle] No audit data found for keyword:', { keyword: taskKeyword, url: normalizedTaskUrl || '(no URL)' });
       }
+    } else if (!hasKeyword && taskUrl) {
+      // URL-only task: Could fetch from Money Pages, but for now fall back to latest measurement
+      // This matches the frontend behavior where URL tasks use Money Pages data
+      console.log('[Optimisation Cycle] URL-only task - will use latest measurement as baseline');
     }
 
     // Fallback: Find most recent measurement event for current cycle (if no audit data)
