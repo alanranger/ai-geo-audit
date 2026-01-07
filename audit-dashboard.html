@@ -12911,11 +12911,18 @@
         }
 
         // Targeted end-of-function debug for this URL (always emit, high severity to avoid suppression)
-        if (canonTarget.includes('photography-courses-coventry')) {
+        if (canonTarget.includes('photography-courses-coventry') && hasMatch) {
           debugLog(
             `[AI match summary] target=${canonTarget} matchedKeyword=${matchedKeyword || 'none'} hasMatch=${hasMatch} ` +
             `overviewOn=${overviewOn} citationsFromTargetUrl=${citationsFromTargetUrl} citations=${citations} total=${totalCitations} ` +
             `finalOverview=${finalOverview} finalCitations=${finalCitations}`,
+            'error'
+          );
+        } else if (!hasMatch && canonTarget.includes('photography-courses-coventry')) {
+          // If no match at all, log the first few candidate URLs we checked
+          const sampleUrls = (rows || []).slice(0, 5).map(r => normalizeUrl(r.best_url || r.bestUrl || r.targetUrl || r.ranking_url || ''));
+          debugLog(
+            `[AI match summary] target=${canonTarget} NO MATCH found. Sample best_urls (first 5): ${sampleUrls.join(' | ')}`,
             'error'
           );
         }
