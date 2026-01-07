@@ -30216,6 +30216,20 @@ Final Score: ${score}/100`;
       async function populateMoneyPagesAiCitations(rows) {
         if (!rows || rows.length === 0) return;
         
+        // Check if table container exists
+        const tableContainer = document.getElementById('money-pages-table-container');
+        if (!tableContainer) {
+          debugLog('[Money Pages] Table container not found, skipping AI citations population', 'warn');
+          return;
+        }
+        
+        // Check if cells exist in the table
+        const cells = tableContainer.querySelectorAll('.ai-citation-cell-opportunity');
+        if (!cells || cells.length === 0) {
+          debugLog('[Money Pages] No AI citation cells found in table, skipping population', 'info');
+          return;
+        }
+        
         // Get property URL for API calls
         const propertyUrl = document.getElementById('propertyUrl')?.value || localStorage.getItem('property_url') || '';
         if (!propertyUrl) {
@@ -30278,8 +30292,7 @@ Final Score: ${score}/100`;
           debugLog(`[Money Pages] Error reading citation cache from localStorage: ${err.message}`, 'warn');
         }
         
-        // Update cells with cached data first
-        const cells = document.querySelectorAll('.ai-citation-cell-opportunity');
+        // Update cells with cached data first (cells already queried above)
         cells.forEach(cell => {
           const pageUrl = cell.getAttribute('data-page-url');
           if (!pageUrl) return;
@@ -30328,9 +30341,8 @@ Final Score: ${score}/100`;
               // Cache the result (including 0) to avoid refetching
               citationCache[url] = count;
               
-              // Find cell by iterating through all cells (more robust than CSS selector with special chars)
-              const allCells = document.querySelectorAll('.ai-citation-cell-opportunity');
-              const cell = Array.from(allCells).find(c => c.getAttribute('data-page-url') === url);
+              // Find cell by iterating through already-queried cells (more robust than CSS selector with special chars)
+              const cell = Array.from(cells).find(c => c.getAttribute('data-page-url') === url);
               if (cell) {
                 cell.textContent = count.toLocaleString();
                 cell.style.color = '#0f172a';
@@ -30818,8 +30830,16 @@ Final Score: ${score}/100`;
           const tableHtml = await renderMoneyPagesTable(filteredRows, currentPage, rowsPerPage);
           if (tableHtml && typeof tableHtml === 'string' && tableHtml.trim().length > 0) {
             tableContainer.innerHTML = tableHtml;
-            // Populate AI citations per URL (latest audit only)
-            populateMoneyPagesAiCitations(filteredRows);
+            // Populate AI citations per URL (latest audit only) - async, non-blocking
+            setTimeout(() => {
+              try {
+                populateMoneyPagesAiCitations(filteredRows).catch(err => {
+                  debugLog(`[Money Pages] Error populating AI citations: ${err.message}`, 'warn');
+                });
+              } catch (err) {
+                debugLog(`[Money Pages] Error calling populateMoneyPagesAiCitations: ${err.message}`, 'warn');
+              }
+            }, 100);
           } else {
             debugLog(`⚠ renderMoneyPagesTable returned invalid value: ${typeof tableHtml}, length: ${tableHtml?.length || 0}`, 'warn');
             tableContainer.innerHTML = '<div style="font-size: 0.85rem; color: #999; padding: 1rem; text-align: center;">Error rendering table. Please refresh the page.</div>';
@@ -30890,8 +30910,18 @@ Final Score: ${score}/100`;
         const tableHtml = await renderMoneyPagesTable(rows, currentPage, rowsPerPage);
         if (tableHtml && typeof tableHtml === 'string' && tableHtml.trim().length > 0) {
           tableContainer.innerHTML = tableHtml;
-          // Populate AI citations after table is rendered
-          populateMoneyPagesAiCitations(rows);
+          // Populate AI citations after table is rendered (async, non-blocking)
+          setTimeout(() => {
+            try {
+              populateMoneyPagesAiCitations(rows).catch(err => {
+                debugLog(`[Money Pages] Error populating AI citations: ${err.message}`, 'warn');
+                console.error('[Money Pages] AI citations population error:', err);
+              });
+            } catch (err) {
+              debugLog(`[Money Pages] Error calling populateMoneyPagesAiCitations: ${err.message}`, 'warn');
+              console.error('[Money Pages] AI citations function error:', err);
+            }
+          }, 100); // Small delay to ensure DOM is ready
         } else {
           debugLog(`⚠ renderMoneyPagesTable returned invalid value: ${typeof tableHtml}, length: ${tableHtml?.length || 0}`, 'warn');
           tableContainer.innerHTML = '<div style="font-size: 0.85rem; color: #999; padding: 1rem; text-align: center;">Error rendering table. Please refresh the page.</div>';
@@ -30956,7 +30986,15 @@ Final Score: ${score}/100`;
           if (tableContainer) {
             const rowsPerPage = window.moneyPagesRowsPerPage || 10;
             tableContainer.innerHTML = await renderMoneyPagesTable(allRows, 1, rowsPerPage);
-            populateMoneyPagesAiCitations(allRows);
+            setTimeout(() => {
+              try {
+                populateMoneyPagesAiCitations(allRows).catch(err => {
+                  debugLog(`[Money Pages] Error populating AI citations: ${err.message}`, 'warn');
+                });
+              } catch (err) {
+                debugLog(`[Money Pages] Error calling populateMoneyPagesAiCitations: ${err.message}`, 'warn');
+              }
+            }, 100);
             attachMoneyPagesSortHandlers();
             attachMoneyPagesPaginationHandlers(allRows);
             attachMoneyPagesCopyHandler(allRows);
@@ -30986,7 +31024,15 @@ Final Score: ${score}/100`;
               const tableContainer = document.getElementById('money-pages-table-container');
               if (tableContainer) {
                 tableContainer.innerHTML = await renderMoneyPagesTable(sortedRows, 1, newRowsPerPage);
-                populateMoneyPagesAiCitations(sortedRows);
+                setTimeout(() => {
+                  try {
+                    populateMoneyPagesAiCitations(sortedRows).catch(err => {
+                      debugLog(`[Money Pages] Error populating AI citations: ${err.message}`, 'warn');
+                    });
+                  } catch (err) {
+                    debugLog(`[Money Pages] Error calling populateMoneyPagesAiCitations: ${err.message}`, 'warn');
+                  }
+                }, 100);
                 attachMoneyPagesSortHandlers();
                 attachMoneyPagesPaginationHandlers(sortedRows);
                 attachMoneyPagesCopyHandler(sortedRows);
@@ -31004,7 +31050,15 @@ Final Score: ${score}/100`;
                 if (tableContainer) {
                   const currentRowsPerPage = window.moneyPagesRowsPerPage || 10;
                   tableContainer.innerHTML = await renderMoneyPagesTable(sortedRows, window.moneyPagesCurrentPage, currentRowsPerPage);
-                  populateMoneyPagesAiCitations(sortedRows);
+                  setTimeout(() => {
+                    try {
+                      populateMoneyPagesAiCitations(sortedRows).catch(err => {
+                        debugLog(`[Money Pages] Error populating AI citations: ${err.message}`, 'warn');
+                      });
+                    } catch (err) {
+                      debugLog(`[Money Pages] Error calling populateMoneyPagesAiCitations: ${err.message}`, 'warn');
+                    }
+                  }, 100);
                   attachMoneyPagesSortHandlers();
                   attachMoneyPagesPaginationHandlers(sortedRows);
                   attachMoneyPagesCopyHandler(sortedRows);
@@ -31024,7 +31078,15 @@ Final Score: ${score}/100`;
                 const tableContainer = document.getElementById('money-pages-table-container');
                 if (tableContainer) {
                   tableContainer.innerHTML = await renderMoneyPagesTable(sortedRows, window.moneyPagesCurrentPage, currentRowsPerPage);
-                  populateMoneyPagesAiCitations(sortedRows);
+                  setTimeout(() => {
+                    try {
+                      populateMoneyPagesAiCitations(sortedRows).catch(err => {
+                        debugLog(`[Money Pages] Error populating AI citations: ${err.message}`, 'warn');
+                      });
+                    } catch (err) {
+                      debugLog(`[Money Pages] Error calling populateMoneyPagesAiCitations: ${err.message}`, 'warn');
+                    }
+                  }, 100);
                   attachMoneyPagesSortHandlers();
                   attachMoneyPagesPaginationHandlers(sortedRows);
                   attachMoneyPagesCopyHandler(sortedRows);
