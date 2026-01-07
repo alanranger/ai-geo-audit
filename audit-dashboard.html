@@ -12842,15 +12842,20 @@
           const exactMatch = rowBestUrlCanon === canonTarget;
           const pathMatch = rowPath === targetPath && rowPath !== '';
           
-          // Flexible matching (handles partial matches and path-only comparisons)
-          const includesMatch = rowBestUrlCanon && (
-            rowBestUrlCanon.includes(canonTarget) || 
-            canonTarget.includes(rowBestUrlCanon) ||
-            (targetPath && rowBestUrlCanon.includes(targetPath)) ||
-            (rowPath && canonTarget.includes(rowPath))
+          // More strict matching: only match if paths are the same or one is a direct parent/child
+          // Don't use loose includes() - it can match unrelated URLs
+          const strictPathMatch = targetPath && rowPath && (
+            targetPath === rowPath || // Exact path match
+            targetPath.startsWith(rowPath + '/') || // Target is child of row
+            rowPath.startsWith(targetPath + '/') // Row is child of target
           );
           
-          const urlMatches = exactMatch || pathMatch || includesMatch;
+          // Only use includes for domain-only matching (when paths are empty or very short)
+          const domainOnlyMatch = (!targetPath || targetPath.length < 3) && (!rowPath || rowPath.length < 3) && 
+                                  rowBestUrlCanon && canonTarget && 
+                                  rowBestUrlCanon.split('/')[0] === canonTarget.split('/')[0];
+          
+          const urlMatches = exactMatch || pathMatch || strictPathMatch || domainOnlyMatch;
           
           // Enhanced debug logging (Fix 3) - log ALL match attempts for the target URL or first 20 rows
           const shouldLogMatch = urlMatches || idx < 20 || (rowBestUrlCanon && (rowBestUrlCanon.includes(canonTarget.split('/').pop() || '') || canonTarget.includes(rowBestUrlCanon.split('/').pop() || '')));
