@@ -17056,7 +17056,22 @@
     const debugLogEntries = [];
     let debugLogFilter = 'all'; // 'all', 'warnings-errors'
     
-    function debugLog(message, type = 'info') {
+    // Generate session ID for tracking browser sessions (persists for page lifetime)
+    const debugLogSessionId = (() => {
+      let sessionId = sessionStorage.getItem('debug_log_session_id');
+      if (!sessionId) {
+        sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+        try {
+          sessionStorage.setItem('debug_log_session_id', sessionId);
+        } catch (e) {
+          // Ignore storage errors
+        }
+      }
+      return sessionId;
+    })();
+    
+    // Expose debugLog globally for use throughout the application
+    window.debugLog = function debugLog(message, type = 'info') {
       const timestamp = new Date().toISOString();
       const entry = {
         timestamp,
@@ -17078,6 +17093,50 @@
         logElement.scrollTop = logElement.scrollHeight;
         }
       }
+      
+      // Automatically save to Supabase (non-blocking, fire and forget)
+      // This allows searching and inspecting logs without copy-paste
+      (async () => {
+        try {
+          // Get property URL from page
+          const propertyUrl = window.getPropertyUrl ? window.getPropertyUrl() : 
+                             (document.getElementById('propertyUrl')?.value || 
+                              localStorage.getItem('gsc_property_url') || 
+                              localStorage.getItem('last_property_url') || 
+                              null);
+          
+          // Save to Supabase via API endpoint
+          const response = await fetch(apiUrl('/api/supabase/save-debug-log-entry'), {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              timestamp: timestamp,
+              message: message,
+              type: type,
+              propertyUrl: propertyUrl,
+              sessionId: debugLogSessionId,
+              userAgent: navigator.userAgent
+            })
+          });
+          
+          // Silently handle errors - don't break UI if Supabase is down
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            // Only log to console if it's a critical error (not just table missing)
+            if (errorData.error && !errorData.error.includes('does not exist')) {
+              console.warn('[debugLog] Failed to save to Supabase:', errorData.error);
+            }
+          }
+        } catch (err) {
+          // Silently ignore errors - don't break UI if API is unavailable
+          // Only log to console for debugging
+          if (type === 'error') {
+            console.warn('[debugLog] Error saving to Supabase:', err.message);
+          }
+        }
+      })();
       
       // Only log critical errors to browser console (for debugging production issues)
       // All other logs go to UI debug console only
