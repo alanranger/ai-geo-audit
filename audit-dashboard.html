@@ -12601,26 +12601,52 @@
 
       window.computeAiMetricsForPageUrl = window.computeAiMetricsForPageUrl || function computeAiMetricsForPageUrl(pageUrl, combinedRows) {
         const rows = Array.isArray(combinedRows) ? combinedRows : [];
-        const canonTarget = (typeof normalizeGscPageKey === 'function')
-          ? normalizeGscPageKey(pageUrl || '')
-          : String(pageUrl || '').split('?')[0].split('#')[0].replace(/\/$/, '');
+        
+        // Normalize the target URL for comparison (remove protocol, www, trailing slash, query params, hash)
+        const normalizeUrl = (url) => {
+          if (!url) return '';
+          let normalized = String(url).toLowerCase().trim();
+          // Remove protocol
+          normalized = normalized.replace(/^https?:\/\//, '');
+          // Remove www.
+          normalized = normalized.replace(/^www\./, '');
+          // Remove query params and hash
+          normalized = normalized.split('?')[0].split('#')[0];
+          // Remove trailing slash (except for root)
+          normalized = normalized.replace(/\/$/, '');
+          return normalized;
+        };
+        
+        const canonTarget = normalizeUrl(pageUrl);
         // If we don't have ranking rows loaded, we don't know (avoid false negatives).
-        if (!canonTarget || rows.length === 0) return { ai_overview: null, ai_citations: null };
+        if (!canonTarget || rows.length === 0) {
+          console.log('[computeAiMetricsForPageUrl] No rows or no target URL:', { canonTarget, rowsLength: rows.length });
+          return { ai_overview: null, ai_citations: null };
+        }
 
         let citations = 0;
         let overviewOn = false;
         let citationsFromTargetUrl = 0; // Track citations from keywords where this URL is the target
+        let matchedKeyword = null; // For debugging
         
         // FIX: For URL tasks, also check if this URL is the best_url/targetUrl for any keyword
         // This is how the original baseline got AI Overview data for URL tasks
         rows.forEach(r => {
           // Check if this URL is the target/best URL for this keyword
           const rowBestUrl = r.best_url || r.targetUrl || r.ranking_url || '';
-          const rowBestUrlCanon = rowBestUrl ? ((typeof normalizeGscPageKey === 'function')
-            ? normalizeGscPageKey(String(rowBestUrl))
-            : String(rowBestUrl).split('?')[0].split('#')[0].replace(/\/$/, '')) : '';
+          const rowBestUrlCanon = normalizeUrl(rowBestUrl);
           
-          if (rowBestUrlCanon && rowBestUrlCanon === canonTarget) {
+          // Also check path-only matching (in case domains differ slightly)
+          const targetPath = canonTarget.includes('/') ? canonTarget.split('/').slice(1).join('/') : '';
+          const rowPath = rowBestUrlCanon.includes('/') ? rowBestUrlCanon.split('/').slice(1).join('/') : '';
+          
+          // Match if exact URL matches OR path matches (more flexible)
+          const urlMatches = (rowBestUrlCanon && (rowBestUrlCanon === canonTarget || 
+                                                   rowPath === targetPath ||
+                                                   rowBestUrlCanon.includes(canonTarget) ||
+                                                   canonTarget.includes(rowBestUrlCanon)));
+          
+          if (urlMatches) {
             // This keyword has this URL as its target - use its AI data
             const rowHasOverview = r.has_ai_overview === true || r.ai_overview_present_any === true;
             if (rowHasOverview) {
@@ -12630,6 +12656,16 @@
             const rowCitations = r.ai_alan_citations_count != null ? Number(r.ai_alan_citations_count) : 
                                  (Array.isArray(r.ai_alan_citations) ? r.ai_alan_citations.length : 0);
             citationsFromTargetUrl = Math.max(citationsFromTargetUrl, rowCitations);
+            if (!matchedKeyword) {
+              matchedKeyword = r.keyword || 'unknown';
+            }
+            console.log('[computeAiMetricsForPageUrl] Found URL match:', {
+              keyword: r.keyword,
+              taskUrl: canonTarget,
+              rowBestUrl: rowBestUrlCanon,
+              hasOverview: rowHasOverview,
+              citations: rowCitations
+            });
           }
           
           // Also check if URL appears in citation arrays (original logic)
@@ -12639,9 +12675,7 @@
           cited.forEach(v => {
             const u = typeof v === 'string' ? v : (v && typeof v === 'object' ? v.url : null);
             if (!u) return;
-            const canon = (typeof normalizeGscPageKey === 'function')
-              ? normalizeGscPageKey(String(u))
-              : String(u).split('?')[0].split('#')[0].replace(/\/$/, '');
+            const canon = normalizeUrl(u);
             if (canon && canon === canonTarget) {
               citations += 1;
               if (rowHasOverview) overviewOn = true;
@@ -12651,6 +12685,14 @@
 
         // Use the maximum citations count (from target URL match or citation arrays)
         const totalCitations = Math.max(citations, citationsFromTargetUrl);
+        
+        console.log('[computeAiMetricsForPageUrl] Result:', {
+          targetUrl: canonTarget,
+          overviewOn,
+          totalCitations,
+          citationsFromTargetUrl,
+          matchedKeyword
+        });
 
         return { ai_overview: overviewOn, ai_citations: totalCitations };
       };
@@ -13822,12 +13864,30 @@
                     }
                   }
                   
-                  // FIX: Look up AI data for this URL (checks if URL is best_url/targetUrl for any keyword)
-                  const aiForUrl = (typeof window.computeAiMetricsForPageUrl === 'function')
-                    ? window.computeAiMetricsForPageUrl(pageUrlForGsc, aiRows)
-                    : { ai_overview: null, ai_citations: null };
+                  debugLog(`[Optimisation] URL task: Found ${aiRows.length} combinedRows for AI lookup`, 'info');
                   
-                  debugLog(`[Optimisation] URL task: AI lookup for ${pageUrlForGsc} - Overview: ${aiForUrl.ai_overview}, Citations: ${aiForUrl.ai_citations}`, 'info');
+                  // Try both the full GSC URL and the original task URL (in case formats differ)
+                  const urlsToTry = [pageUrlForGsc, taskUrlForPage];
+                  
+                  let aiForUrl = { ai_overview: null, ai_citations: null };
+                  for (const urlToCheck of urlsToTry) {
+                    if (urlToCheck) {
+                      const result = (typeof window.computeAiMetricsForPageUrl === 'function')
+                        ? window.computeAiMetricsForPageUrl(urlToCheck, aiRows)
+                        : { ai_overview: null, ai_citations: null };
+                      
+                      // Use first non-null result
+                      if (result.ai_overview !== null || result.ai_citations !== null) {
+                        aiForUrl = result;
+                        debugLog(`[Optimisation] URL task: AI lookup for ${urlToCheck} - Overview: ${aiForUrl.ai_overview}, Citations: ${aiForUrl.ai_citations}`, 'info');
+                        break;
+                      }
+                    }
+                  }
+                  
+                  if (aiForUrl.ai_overview === null && aiForUrl.ai_citations === null) {
+                    debugLog(`[Optimisation] URL task: No AI data found for ${pageUrlForGsc} or ${taskUrlForPage} in ${aiRows.length} rows`, 'warn');
+                  }
                   
                   currentMetrics = {
                     gsc_clicks_28d: Number(totals.clicks || 0),
@@ -14793,12 +14853,30 @@
                     }
                   }
                   
-                  // FIX: Look up AI data for this URL (checks if URL is best_url/targetUrl for any keyword)
-                  const aiForUrl = (typeof window.computeAiMetricsForPageUrl === 'function')
-                    ? window.computeAiMetricsForPageUrl(pageUrlForGsc, aiRows)
-                    : { ai_overview: null, ai_citations: null };
+                  debugLog(`[Optimisation] Rebaseline URL task: Found ${aiRows.length} combinedRows for AI lookup`, 'info');
                   
-                  debugLog(`[Optimisation] Rebaseline URL task: AI lookup for ${pageUrlForGsc} - Overview: ${aiForUrl.ai_overview}, Citations: ${aiForUrl.ai_citations}`, 'info');
+                  // Try both the full GSC URL and the original task URL (in case formats differ)
+                  const urlsToTry = [pageUrlForGsc, taskUrlForPage];
+                  
+                  let aiForUrl = { ai_overview: null, ai_citations: null };
+                  for (const urlToCheck of urlsToTry) {
+                    if (urlToCheck) {
+                      const result = (typeof window.computeAiMetricsForPageUrl === 'function')
+                        ? window.computeAiMetricsForPageUrl(urlToCheck, aiRows)
+                        : { ai_overview: null, ai_citations: null };
+                      
+                      // Use first non-null result
+                      if (result.ai_overview !== null || result.ai_citations !== null) {
+                        aiForUrl = result;
+                        debugLog(`[Optimisation] Rebaseline URL task: AI lookup for ${urlToCheck} - Overview: ${aiForUrl.ai_overview}, Citations: ${aiForUrl.ai_citations}`, 'info');
+                        break;
+                      }
+                    }
+                  }
+                  
+                  if (aiForUrl.ai_overview === null && aiForUrl.ai_citations === null) {
+                    debugLog(`[Optimisation] Rebaseline URL task: No AI data found for ${pageUrlForGsc} or ${taskUrlForPage} in ${aiRows.length} rows`, 'warn');
+                  }
                   
                   currentMetrics = {
                     gsc_clicks_28d: Number(totals.clicks || 0),
