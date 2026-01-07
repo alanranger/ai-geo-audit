@@ -13798,16 +13798,26 @@
               const keywordMatch = (r.keyword || '').toLowerCase() === (task.keyword_text || '').toLowerCase();
               if (!keywordMatch) return false;
               
-              // Try multiple URL matching strategies
+              // FIX 1: For keyword-based tasks, URL matching is optional
+              // If task has no URL, keyword match is sufficient
+              if (!taskUrlClean || taskUrlClean.length === 0) {
+                return true; // Keyword match only - no URL required
+              }
+              
+              // If task has URL, try to match it (preferred but not required for keyword tasks)
               const rowUrl = (r.best_url || r.targetUrl || r.ranking_url || '').toLowerCase();
               const rowUrlClean = rowUrl.replace(/^https?:\/\//, '').replace(/^www\./, '');
               const rowUrlPath = rowUrlClean.includes('/') ? rowUrlClean.split('/').slice(1).join('/') : '';
               
-              return rowUrl === taskUrlClean || 
-                     rowUrlClean === taskUrlClean ||
-                     rowUrlPath === taskUrlPath ||
-                     rowUrl.includes(taskUrlClean) ||
-                     taskUrlClean.includes(rowUrlClean);
+              const urlMatch = rowUrl === taskUrlClean || 
+                              rowUrlClean === taskUrlClean ||
+                              rowUrlPath === taskUrlPath ||
+                              rowUrl.includes(taskUrlClean) ||
+                              taskUrlClean.includes(rowUrlClean);
+              
+              // For keyword-based tasks: accept if URL matches OR if keyword matches (URL is optional)
+              // This ensures keyword tasks can find ranking/AI data even if URLs differ slightly
+              return urlMatch || true; // Always accept keyword match for keyword tasks
             });
             
             debugLog(`[Optimisation] Found matching row: ${matchingRow ? 'YES' : 'NO'} (taskKeyword: ${task.keyword_text}, taskUrl: ${task.target_url_clean || task.target_url}, matchingRowKeyword: ${matchingRow?.keyword}, matchingRowUrl: ${matchingRow?.best_url || matchingRow?.targetUrl})`, matchingRow ? 'info' : 'warn');
@@ -13848,15 +13858,26 @@
               const keywordMatch = (r.keyword || '').toLowerCase() === (task.keyword_text || '').toLowerCase();
               if (!keywordMatch) return false;
               
+              // FIX 1: For keyword-based tasks, URL matching is optional
+              // If task has no URL, keyword match is sufficient
+              if (!taskUrlClean || taskUrlClean.length === 0) {
+                return true; // Keyword match only - no URL required
+              }
+              
+              // If task has URL, try to match it (preferred but not required for keyword tasks)
               const rowUrl = (r.best_url || r.targetUrl || r.ranking_url || '').toLowerCase();
               const rowUrlClean = rowUrl.replace(/^https?:\/\//, '').replace(/^www\./, '');
               const rowUrlPath = rowUrlClean.includes('/') ? rowUrlClean.split('/').slice(1).join('/') : '';
               
-              return rowUrl === taskUrlClean || 
-                     rowUrlClean === taskUrlClean ||
-                     rowUrlPath === taskUrlPath ||
-                     rowUrl.includes(taskUrlClean) ||
-                     taskUrlClean.includes(rowUrlClean);
+              const urlMatch = rowUrl === taskUrlClean || 
+                              rowUrlClean === taskUrlClean ||
+                              rowUrlPath === taskUrlPath ||
+                              rowUrl.includes(taskUrlClean) ||
+                              taskUrlClean.includes(rowUrlClean);
+              
+              // For keyword-based tasks: accept if URL matches OR if keyword matches (URL is optional)
+              // This ensures keyword tasks can find ranking/AI data even if URLs differ slightly
+              return urlMatch || true; // Always accept keyword match for keyword tasks
             });
             
             debugLog(`[Optimisation] Found matching row in window.rankingAiData: ${matchingRow ? 'YES' : 'NO'}`, matchingRow ? 'info' : 'warn');
@@ -15510,15 +15531,26 @@
         const keywordMatch = (r.keyword || '').toLowerCase() === (task.keyword_text || '').toLowerCase();
         if (!keywordMatch) return false;
         
+        // FIX 1: For keyword-based tasks, URL matching is optional
+        // If task has no URL, keyword match is sufficient
+        if (!taskUrlClean || taskUrlClean.length === 0) {
+          return true; // Keyword match only - no URL required
+        }
+        
+        // If task has URL, try to match it (preferred but not required for keyword tasks)
         const rowUrl = (r.best_url || r.targetUrl || r.ranking_url || '').toLowerCase();
         const rowUrlClean = rowUrl.replace(/^https?:\/\//, '').replace(/^www\./, '');
         const rowUrlPath = rowUrlClean.includes('/') ? rowUrlClean.split('/').slice(1).join('/') : '';
         
-        return rowUrl === taskUrlClean || 
-               rowUrlClean === taskUrlClean ||
-               rowUrlPath === taskUrlPath ||
-               rowUrl.includes(taskUrlClean) ||
-               taskUrlClean.includes(rowUrlClean);
+        const urlMatch = rowUrl === taskUrlClean || 
+                        rowUrlClean === taskUrlClean ||
+                        rowUrlPath === taskUrlPath ||
+                        rowUrl.includes(taskUrlClean) ||
+                        taskUrlClean.includes(rowUrlClean);
+        
+        // For keyword-based tasks: accept if URL matches OR if keyword matches (URL is optional)
+        // This ensures keyword tasks can find ranking/AI data even if URLs differ slightly
+        return urlMatch || true; // Always accept keyword match for keyword tasks
       });
 
       let currentMetrics = null;
