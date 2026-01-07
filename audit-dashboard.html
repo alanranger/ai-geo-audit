@@ -29348,9 +29348,15 @@ Final Score: ${score}/100`;
                     historicalError = historicalData.message || historicalData.error || 'No data available';
                   }
                 } else {
-                  const errorText = await response.text().catch(() => 'Unknown error');
+                  let errorText = 'Unknown error';
+                  try {
+                    errorText = await response.text();
+                  } catch (e) {
+                    // Ignore
+                  }
                   console.warn('[Money Pages Card 1] API request failed:', response.status, errorText);
                   historicalError = `API error: ${response.status}`;
+                  
                   // Fallback: Try to get from timeseries in localStorage
                   const lastAuditResults = localStorage.getItem('last_audit_results');
                   if (lastAuditResults) {
@@ -30794,17 +30800,34 @@ Final Score: ${score}/100`;
         }
         
         // Update cells with cached data first
+        // Build a normalized URL lookup map for efficient matching
+        const normalizedCache = {};
+        Object.keys(citationCache).forEach(url => {
+          const normalized = normalizeUrl(url);
+          normalizedCache[normalized] = citationCache[url];
+        });
+        
         cells.forEach((cell) => {
           const pageUrl = cell.getAttribute('data-page-url');
           if (!pageUrl) return;
           
-          const cachedCount = citationCache[pageUrl];
+          // Try exact match first, then normalized match
+          let cachedCount = citationCache[pageUrl];
+          if (typeof cachedCount !== 'number') {
+            const pageUrlNormalized = normalizeUrl(pageUrl);
+            cachedCount = normalizedCache[pageUrlNormalized];
+          }
+          
           if (typeof cachedCount === 'number') {
             cell.textContent = cachedCount.toLocaleString();
             cell.style.color = '#0f172a';
             cell.style.fontWeight = '600';
             // Also store in row data for sorting
-            const row = rows.find(r => r.url === pageUrl);
+            const pageUrlNormalized = normalizeUrl(pageUrl);
+            const row = rows.find(r => {
+              const rowUrl = r.url || '';
+              return rowUrl === pageUrl || normalizeUrl(rowUrl) === pageUrlNormalized;
+            });
             if (row) {
               row._aiCitations = cachedCount;
             }
@@ -30854,17 +30877,39 @@ Final Score: ${score}/100`;
                 return;
               }
               const allCells = currentTableContainer.querySelectorAll('.ai-citation-cell-opportunity');
-              const cell = Array.from(allCells).find(c => c.getAttribute('data-page-url') === url);
+              
+              // Normalize the URL we're looking for
+              const urlNormalized = normalizeUrl(url);
+              
+              // Try to find cell by exact match first, then by normalized match
+              let cell = Array.from(allCells).find(c => {
+                const cellUrl = c.getAttribute('data-page-url');
+                if (!cellUrl) return false;
+                // Try exact match first
+                if (cellUrl === url) return true;
+                // Try normalized match
+                const cellUrlNormalized = normalizeUrl(cellUrl);
+                return cellUrlNormalized === urlNormalized;
+              });
+              
               if (cell) {
                 cell.textContent = count.toLocaleString();
                 cell.style.color = '#0f172a';
                 cell.style.fontWeight = '600';
-                const row = rows.find(r => r.url === url);
+                const row = rows.find(r => {
+                  const rowUrl = r.url || '';
+                  return rowUrl === url || normalizeUrl(rowUrl) === urlNormalized;
+                });
                 if (row) {
                   row._aiCitations = count;
                 }
               } else {
                 cellNotFoundCount++;
+                // Debug: log first few failures to understand the mismatch
+                if (cellNotFoundCount <= 3) {
+                  const sampleCells = Array.from(allCells).slice(0, 3).map(c => c.getAttribute('data-page-url'));
+                  console.warn(`[Money Pages AI Citations] Cell not found for URL: "${url}" (normalized: "${urlNormalized}"). Sample cell URLs:`, sampleCells);
+                }
               }
             });
           }
