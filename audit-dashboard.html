@@ -32626,7 +32626,7 @@ Final Score: ${score}/100`;
         const sourcePages = (moneyPages && moneyPages.length > 0) ? moneyPages : (window.moneyPagePriorityData || []);
         if (!sourcePages || sourcePages.length === 0) {
           debugLog('⚠ renderMoneyPagesPriorityTable: No money pages data available', 'warn');
-          tbody.innerHTML = '<tr><td colspan="9" style="padding: 2rem; text-align: center; color: #64748b;">No money pages data available. Run an audit to generate priority matrix data.</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="11" style="padding: 2rem; text-align: center; color: #64748b;">No money pages data available. Run an audit to generate priority matrix data.</td></tr>';
           // Clear pagination if no data
           const paginationContainer = document.getElementById('money-pages-priority-pagination');
           if (paginationContainer) {
@@ -32745,6 +32745,10 @@ Final Score: ${score}/100`;
             <th data-sort="avgPosition" class="sortable ${sortClass('avgPosition')}" style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0;" title="Average position: average ranking position in search results (1 = best, lower numbers are better). Click column header to sort.">
               <div style="text-align: right;">Avg pos. <span class="sort-indicator"></span></div>
               <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Average position: average ranking position in search results (1 = best, lower numbers are better). Click column header to sort.">ℹ</div>
+            </th>
+            <th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0;" title="AI citations (unique keywords that cite this URL in AI Overview). Latest audit only.">
+              <div style="text-align: right;">AI citations</div>
+              <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="AI citations (unique keywords that cite this URL in AI Overview). Latest audit only; fetched on demand.">ℹ</div>
             </th>
             <th data-sort="action" class="sortable ${sortClass('action')}" style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;" title="Recommended action based on priority level. HIGH = Fix CTR & strengthen content, MEDIUM = Improve SERP snippet & schema, LOW = Monitor & maintain.">
               <div>Action <span class="sort-indicator"></span></div>
@@ -32953,12 +32957,71 @@ Final Score: ${score}/100`;
                 })()}</td>
                 <td style="padding: 0.75rem; text-align: right;">${isAuthorityAction ? '—' : `${(p.impressions || 0).toLocaleString()}`}</td>
                 <td style="padding: 0.75rem; text-align: right;">${isAuthorityAction ? '—' : (p.avgPosition ? p.avgPosition.toFixed(1) : "—")}</td>
+                <td style="padding: 0.75rem; text-align: right;" class="ai-citation-cell" data-page-url="${p.url || ''}">⏳</td>
                 <td style="padding: 0.75rem;">${action}</td>
                 ${optimisationHtml}
               </tr>
             `;
           })
           .join("");
+
+        // Populate AI citations (latest audit) with per-URL caching
+        (async () => {
+          if (!window.moneyPagesAiCitationCache) {
+            window.moneyPagesAiCitationCache = new Map();
+          }
+          const propertyUrl =
+            document.getElementById('propertyUrl')?.value ||
+            localStorage.getItem('gsc_property_url') ||
+            localStorage.getItem('last_property_url') ||
+            'https://www.alanranger.com';
+
+          const renderCitation = (cell, count, keywords) => {
+            cell.textContent = typeof count === 'number' ? count.toString() : '—';
+            if (keywords && keywords.length) {
+              cell.title = `Keywords citing this URL: ${keywords.join(', ')}`;
+            }
+          };
+
+          const cells = tbody.querySelectorAll('.ai-citation-cell');
+          cells.forEach(cell => {
+            const url = cell.getAttribute('data-page-url');
+            if (!url) {
+              cell.textContent = '—';
+              return;
+            }
+            const cacheKey = url.toLowerCase();
+            if (window.moneyPagesAiCitationCache.has(cacheKey)) {
+              const cached = window.moneyPagesAiCitationCache.get(cacheKey);
+              renderCitation(cell, cached.count, cached.keywords);
+              return;
+            }
+
+            cell.textContent = '⏳';
+            const endpoint = apiUrl(
+              `/api/supabase/query-keywords-citing-url?property_url=${encodeURIComponent(propertyUrl)}&target_url=${encodeURIComponent(url)}`
+            );
+
+            fetch(endpoint)
+              .then(async res => {
+                if (!res.ok) {
+                  const txt = await res.text().catch(() => 'error');
+                  throw new Error(`HTTP ${res.status}: ${txt}`);
+                }
+                return res.json();
+              })
+              .then(data => {
+                const keywords = Array.isArray(data?.data) ? data.data.map(k => k.keyword).filter(Boolean) : [];
+                const count = typeof data?.count === 'number' ? data.count : keywords.length;
+                window.moneyPagesAiCitationCache.set(cacheKey, { count, keywords });
+                renderCitation(cell, count, keywords);
+              })
+              .catch(err => {
+                debugLog(`[Money Pages] AI citations fetch failed for ${url}: ${err.message}`, 'warn');
+                cell.textContent = '—';
+              });
+          });
+        })();
 
         // Copy URLs button - copy all filtered rows, not just current page
         const copyBtn = document.getElementById("money-pages-copy-urls-btn");
@@ -33581,6 +33644,12 @@ Final Score: ${score}/100`;
                 <div><span style="color:#64748b;">Upside:</span> <span style="font-weight:700; color:#1e293b;">${Number(expectedUp || 0).toLocaleString()}</span></div>
                 <div><span style="color:#64748b;">Impact:</span> <span style="font-weight:700; color:#1e293b;">${impact100}</span></div>
                 <div><span style="color:#64748b;">Difficulty:</span> <span style="font-weight:700; color:${diffColor};">${diff}</span></div>
+              </div>
+
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.35rem 1rem; font-size:0.85rem; color:#475569; margin: 0.35rem 0 0.35rem; padding-bottom: 0.6rem; border-bottom: 1px solid #e5e7eb;">
+                <div><span style="color:#64748b;">AI cites:</span>
+                  <span class="ai-citation-value" data-citation-url="${p.url.replace(/'/g, "\\'")}" style="font-weight:700; color:#1e293b; float:right;">⏳</span>
+                </div>
               </div>
 
               <div style="margin-bottom: 0.5rem; font-size:0.85rem; color:#64748b;">
