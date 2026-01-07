@@ -12806,19 +12806,32 @@
                                   rowBestUrlCanon && canonTarget && 
                                   targetDomain === rowDomain;
           
-          // CRITICAL FIX: Also try path segment matching (e.g., "photography-courses-coventry" in path)
-          const targetPathSegments = targetPath.split('/');
-          const rowPathSegments = rowPath.split('/');
-          const pathSegmentMatch = targetPathSegments.length > 0 && rowPathSegments.length > 0 &&
-                                   targetDomain === rowDomain &&
-                                   targetPathSegments.some(seg => rowPathSegments.includes(seg)) &&
-                                   rowPathSegments.some(seg => targetPathSegments.includes(seg));
+          // CRITICAL FIX: Also try path segment matching - check if key path segments overlap
+          // This handles cases where URLs have query params or slight format differences
+          const targetPathSegments = targetPath.split('/').filter(s => s.length > 0);
+          const rowPathSegments = rowPath.split('/').filter(s => s.length > 0);
+          // Match if domains match AND any significant path segment matches
+          const pathSegmentMatch = targetDomain === rowDomain && 
+                                   targetPathSegments.length > 0 && 
+                                   rowPathSegments.length > 0 &&
+                                   (targetPathSegments.some(seg => rowPathSegments.includes(seg)) ||
+                                    rowPathSegments.some(seg => targetPathSegments.includes(seg)));
           
-          const urlMatches = exactMatch || pathMatch || strictPathMatch || domainOnlyMatch || pathSegmentMatch;
+          // Also try simple contains match for the full path (more permissive)
+          const pathContainsMatch = targetDomain === rowDomain &&
+                                    targetPath.length > 5 && rowPath.length > 5 &&
+                                    (rowPath.includes(targetPath) || targetPath.includes(rowPath));
           
-          // Only log if match found or if it's a photography-courses URL (for diagnosis)
-          if (urlMatches || (rowBestUrl && rowBestUrl.toLowerCase().includes('photography-courses'))) {
-            debugLog(`[computeAiMetricsForPageUrl] ${urlMatches ? '✓ MATCH' : 'CHECK'}: keyword="${r.keyword || 'unknown'}", rowUrl="${rowBestUrl}", normalized="${rowBestUrlCanon}", target="${canonTarget}", match=${urlMatches}, hasOverview=${r.has_ai_overview === true || r.ai_overview_present_any === true}, citations=${r.ai_alan_citations_count != null ? r.ai_alan_citations_count : 'null'}`, urlMatches ? 'success' : 'warn');
+          const urlMatches = exactMatch || pathMatch || strictPathMatch || domainOnlyMatch || pathSegmentMatch || pathContainsMatch;
+          
+          // Always log photography-courses URLs for diagnosis (even if no match)
+          if (rowBestUrl && rowBestUrl.toLowerCase().includes('photography-courses')) {
+            debugLog(`[computeAiMetricsForPageUrl] PHOTOGRAPHY-URL: keyword="${r.keyword || 'unknown'}", rowUrl="${rowBestUrl}", normalized="${rowBestUrlCanon}", target="${canonTarget}", targetPath="${targetPath}", rowPath="${rowPath}", exactMatch=${exactMatch}, pathMatch=${pathMatch}, strictPathMatch=${strictPathMatch}, pathSegmentMatch=${pathSegmentMatch}, pathContainsMatch=${pathContainsMatch}, urlMatches=${urlMatches}, hasOverview=${r.has_ai_overview === true || r.ai_overview_present_any === true}, citations=${r.ai_alan_citations_count != null ? r.ai_alan_citations_count : 'null'}`, urlMatches ? 'success' : 'warn');
+          }
+          
+          // Log successful matches
+          if (urlMatches) {
+            debugLog(`[computeAiMetricsForPageUrl] ✓ MATCH: keyword="${r.keyword || 'unknown'}", rowUrl="${rowBestUrl}", normalized="${rowBestUrlCanon}", target="${canonTarget}", hasOverview=${r.has_ai_overview === true || r.ai_overview_present_any === true}, citations=${r.ai_alan_citations_count != null ? r.ai_alan_citations_count : 'null'}`, 'success');
           }
           
           if (urlMatches) {
@@ -12863,9 +12876,11 @@
         // Ensure totalCitations is always a number (never null/undefined)
         const totalCitations = Math.max(citations || 0, citationsFromTargetUrl || 0);
         
-        // Only log if no match found (reduce noise)
+        // Always log final result for diagnosis
         if (!matchedKeyword) {
-          debugLog(`[computeAiMetricsForPageUrl] No match found for "${canonTarget}" in ${rows.length} rows`, 'warn');
+          debugLog(`[computeAiMetricsForPageUrl] ✗ No match found for "${canonTarget}" in ${rows.length} rows. Check logs above for photography-courses URLs.`, 'warn');
+        } else {
+          debugLog(`[computeAiMetricsForPageUrl] ✓ Match found: keyword="${matchedKeyword}", overview=${overviewOn}, citations=${totalCitations}`, 'success');
         }
         
         // CRITICAL: Ensure consistency - if matchedKeyword is set, both values must be non-null
