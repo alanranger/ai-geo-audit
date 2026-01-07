@@ -12739,10 +12739,14 @@
       };
 
       window.computeAiMetricsForPageUrl = window.computeAiMetricsForPageUrl || function computeAiMetricsForPageUrl(pageUrl, combinedRows) {
-        const rows = Array.isArray(combinedRows) ? combinedRows : [];
-        
-        // Normalize the target URL for comparison - handles all URL format variations
-        const normalizeUrl = (url) => {
+        try {
+          // ALWAYS log function entry for debugging
+          debugLog(`[computeAiMetricsForPageUrl] ENTRY: pageUrl="${pageUrl}", combinedRows type=${typeof combinedRows}, isArray=${Array.isArray(combinedRows)}, length=${Array.isArray(combinedRows) ? combinedRows.length : 'N/A'}`, 'error');
+          
+          const rows = Array.isArray(combinedRows) ? combinedRows : [];
+          
+          // Normalize the target URL for comparison - handles all URL format variations
+          const normalizeUrl = (url) => {
           if (!url) return '';
           let normalized = String(url).toLowerCase().trim();
           
@@ -12774,47 +12778,49 @@
           return path;
         };
         
-        const canonTarget = normalizeUrl(pageUrl);
-        // If we don't have ranking rows loaded, we don't know (avoid false negatives).
-        if (!canonTarget || rows.length === 0) {
-          debugLog(`[computeAiMetricsForPageUrl] No rows or no target URL: canonTarget="${canonTarget}", rowsLength=${rows.length}`, 'warn');
-          return { ai_overview: null, ai_citations: null };
-        }
-        
-        // CRITICAL DEBUG: Log the exact normalized target for this URL
-        if (canonTarget.includes('photography-courses-coventry')) {
-          debugLog(`[computeAiMetricsForPageUrl] START (NEW LOGIC): pageUrl="${pageUrl}", canonTarget="${canonTarget}", rowsCount=${rows.length}`, 'error');
-          debugLog(`[computeAiMetricsForPageUrl] DIAGNOSTIC: Normalization test - Input: "${pageUrl}" → Output: "${canonTarget}"`, 'error');
+          const canonTarget = normalizeUrl(pageUrl);
+          debugLog(`[computeAiMetricsForPageUrl] Normalized URL: "${pageUrl}" → "${canonTarget}"`, 'error');
           
-          // Check what fields are available in the first row
-          if (rows.length > 0) {
-            const firstRow = rows[0];
-            const availableFields = Object.keys(firstRow).filter(k => 
-              k.toLowerCase().includes('citation') || 
-              k.toLowerCase().includes('ai') ||
-              k.toLowerCase().includes('overview')
-            );
-            debugLog(`[computeAiMetricsForPageUrl] DIAGNOSTIC: Available AI-related fields in rows: ${JSON.stringify(availableFields)}`, 'error');
+          // If we don't have ranking rows loaded, we don't know (avoid false negatives).
+          if (!canonTarget || rows.length === 0) {
+            debugLog(`[computeAiMetricsForPageUrl] No rows or no target URL: canonTarget="${canonTarget}", rowsLength=${rows.length}`, 'error');
+            return { ai_overview: null, ai_citations: null };
+          }
+        
+          // CRITICAL DEBUG: Log the exact normalized target for this URL
+          if (canonTarget.includes('photography-courses-coventry')) {
+            debugLog(`[computeAiMetricsForPageUrl] START (NEW LOGIC): pageUrl="${pageUrl}", canonTarget="${canonTarget}", rowsCount=${rows.length}`, 'error');
+            debugLog(`[computeAiMetricsForPageUrl] DIAGNOSTIC: Normalization test - Input: "${pageUrl}" → Output: "${canonTarget}"`, 'error');
             
-            // Check if ai_alan_citations exists and what it looks like
-            if (firstRow.ai_alan_citations !== undefined) {
-              debugLog(`[computeAiMetricsForPageUrl] DIAGNOSTIC: firstRow.ai_alan_citations type: ${typeof firstRow.ai_alan_citations}, isArray: ${Array.isArray(firstRow.ai_alan_citations)}, length: ${Array.isArray(firstRow.ai_alan_citations) ? firstRow.ai_alan_citations.length : 'N/A'}`, 'error');
-              if (Array.isArray(firstRow.ai_alan_citations) && firstRow.ai_alan_citations.length > 0) {
-                debugLog(`[computeAiMetricsForPageUrl] DIAGNOSTIC: First citation sample: ${JSON.stringify(firstRow.ai_alan_citations[0])}`, 'error');
+            // Check what fields are available in the first row
+            if (rows.length > 0) {
+              const firstRow = rows[0];
+              const availableFields = Object.keys(firstRow).filter(k => 
+                k.toLowerCase().includes('citation') || 
+                k.toLowerCase().includes('ai') ||
+                k.toLowerCase().includes('overview')
+              );
+              debugLog(`[computeAiMetricsForPageUrl] DIAGNOSTIC: Available AI-related fields in rows: ${JSON.stringify(availableFields)}`, 'error');
+              
+              // Check if ai_alan_citations exists and what it looks like
+              if (firstRow.ai_alan_citations !== undefined) {
+                debugLog(`[computeAiMetricsForPageUrl] DIAGNOSTIC: firstRow.ai_alan_citations type: ${typeof firstRow.ai_alan_citations}, isArray: ${Array.isArray(firstRow.ai_alan_citations)}, length: ${Array.isArray(firstRow.ai_alan_citations) ? firstRow.ai_alan_citations.length : 'N/A'}`, 'error');
+                if (Array.isArray(firstRow.ai_alan_citations) && firstRow.ai_alan_citations.length > 0) {
+                  debugLog(`[computeAiMetricsForPageUrl] DIAGNOSTIC: First citation sample: ${JSON.stringify(firstRow.ai_alan_citations[0])}`, 'error');
+                }
+              } else {
+                debugLog(`[computeAiMetricsForPageUrl] DIAGNOSTIC: firstRow.ai_alan_citations is undefined`, 'error');
               }
-            } else {
-              debugLog(`[computeAiMetricsForPageUrl] DIAGNOSTIC: firstRow.ai_alan_citations is undefined`, 'error');
             }
           }
-        }
 
-        // NEW LOGIC: Find all keywords where ai_alan_citations array contains the target URL
-        // This is the correct approach - citations are keyword-driven, not URL-driven
-        const citingKeywords = [];
-        let hasOverview = false;
-        
-        // ENHANCED DIAGNOSTIC: Log target URL and sample of data structure
-        if (canonTarget.includes('photography-courses-coventry')) {
+          // NEW LOGIC: Find all keywords where ai_alan_citations array contains the target URL
+          // This is the correct approach - citations are keyword-driven, not URL-driven
+          const citingKeywords = [];
+          let hasOverview = false;
+          
+          // ENHANCED DIAGNOSTIC: Log target URL and sample of data structure
+          if (canonTarget.includes('photography-courses-coventry')) {
           debugLog(`[computeAiMetricsForPageUrl] DIAGNOSTIC: Target normalized URL="${canonTarget}"`, 'error');
           // Check first few rows to see data structure
           const sampleRows = rows.slice(0, 3).map(r => ({
@@ -12827,13 +12833,13 @@
               : 'empty'
           }));
           debugLog(`[computeAiMetricsForPageUrl] DIAGNOSTIC: Sample rows structure: ${JSON.stringify(sampleRows, null, 2)}`, 'error');
-        }
-        
-        // Count rows with citations for diagnostic
-        let rowsWithCitations = 0;
-        let totalCitations = 0;
-        
-        rows.forEach((r, idx) => {
+          }
+          
+          // Count rows with citations for diagnostic
+          let rowsWithCitations = 0;
+          let totalCitations = 0;
+          
+          rows.forEach((r, idx) => {
           // Get citations array - try multiple field name variations
           const citationsArray = r.ai_alan_citations || r.aiAlanCitations || r.citations || [];
           if (!Array.isArray(citationsArray) || citationsArray.length === 0) {
@@ -12901,68 +12907,73 @@
               );
             }
           }
-        });
-        
-        // DIAGNOSTIC: Log summary of citations found
-        if (canonTarget.includes('photography-courses-coventry')) {
-          debugLog(
-            `[computeAiMetricsForPageUrl] DIAGNOSTIC: Scanned ${rows.length} rows, ` +
-            `found ${rowsWithCitations} rows with citations (${totalCitations} total citations), ` +
-            `found ${citingKeywords.length} keywords citing target URL`,
-            'error'
-          );
-        }
+          });
+          
+          // DIAGNOSTIC: Log summary of citations found
+          if (canonTarget.includes('photography-courses-coventry')) {
+            debugLog(
+              `[computeAiMetricsForPageUrl] DIAGNOSTIC: Scanned ${rows.length} rows, ` +
+              `found ${rowsWithCitations} rows with citations (${totalCitations} total citations), ` +
+              `found ${citingKeywords.length} keywords citing target URL`,
+              'error'
+            );
+          }
 
-        // Count unique keywords that cite this URL (not total citations)
-        const uniqueKeywordsCount = citingKeywords.length;
-        
-        // ENHANCED DIAGNOSTIC: Log which keywords were found
-        if (canonTarget.includes('photography-courses-coventry')) {
-          debugLog(
-            `[computeAiMetricsForPageUrl] DIAGNOSTIC: Found ${uniqueKeywordsCount} unique keywords citing URL: ` +
-            `${JSON.stringify(citingKeywords.map(k => ({ keyword: k.keyword, has_ai_overview: k.has_ai_overview })))}`,
-            'error'
-          );
-          debugLog(
-            `[computeAiMetricsForPageUrl] DIAGNOSTIC: Final calculation - ` +
-            `uniqueKeywordsCount=${uniqueKeywordsCount}, ` +
-            `hasOverview=${hasOverview}`,
-            'error'
-          );
-        }
-        
-        // Return results: citations count is number of unique keywords, overview is true if any citing keyword has it
-        let finalOverview = null;
-        let finalCitations = null;
-        
-        if (uniqueKeywordsCount > 0) {
-          // We found keywords citing this URL - return actual values
-          finalCitations = uniqueKeywordsCount;
-          finalOverview = hasOverview; // true if at least one citing keyword has overview
-        } else {
-          // No keywords cite this URL - return null (unknown, not zero)
-          finalCitations = null;
-          finalOverview = null;
-        }
-        
-        // FINAL VALIDATION: Ensure consistency - if one is null, both must be null
-        if ((finalOverview !== null && finalCitations === null) || (finalOverview === null && finalCitations !== null)) {
-          // Inconsistency detected - force both to null (unknown state)
-          finalOverview = null;
-          finalCitations = null;
-        }
+          // Count unique keywords that cite this URL (not total citations)
+          const uniqueKeywordsCount = citingKeywords.length;
+          
+          // ENHANCED DIAGNOSTIC: Log which keywords were found
+          if (canonTarget.includes('photography-courses-coventry')) {
+            debugLog(
+              `[computeAiMetricsForPageUrl] DIAGNOSTIC: Found ${uniqueKeywordsCount} unique keywords citing URL: ` +
+              `${JSON.stringify(citingKeywords.map(k => ({ keyword: k.keyword, has_ai_overview: k.has_ai_overview })))}`,
+              'error'
+            );
+            debugLog(
+              `[computeAiMetricsForPageUrl] DIAGNOSTIC: Final calculation - ` +
+              `uniqueKeywordsCount=${uniqueKeywordsCount}, ` +
+              `hasOverview=${hasOverview}`,
+              'error'
+            );
+          }
+          
+          // Return results: citations count is number of unique keywords, overview is true if any citing keyword has it
+          let finalOverview = null;
+          let finalCitations = null;
+          
+          if (uniqueKeywordsCount > 0) {
+            // We found keywords citing this URL - return actual values
+            finalCitations = uniqueKeywordsCount;
+            finalOverview = hasOverview; // true if at least one citing keyword has overview
+          } else {
+            // No keywords cite this URL - return null (unknown, not zero)
+            finalCitations = null;
+            finalOverview = null;
+          }
+          
+          // FINAL VALIDATION: Ensure consistency - if one is null, both must be null
+          if ((finalOverview !== null && finalCitations === null) || (finalOverview === null && finalCitations !== null)) {
+            // Inconsistency detected - force both to null (unknown state)
+            finalOverview = null;
+            finalCitations = null;
+          }
 
-        // Final debug summary for this URL
-        if (canonTarget.includes('photography-courses-coventry')) {
-          debugLog(
-            `[computeAiMetricsForPageUrl] FINAL RESULT: target=${canonTarget} ` +
-            `uniqueKeywordsCount=${uniqueKeywordsCount} ` +
-            `finalOverview=${finalOverview} finalCitations=${finalCitations}`,
-            'error'
-          );
-        }
+          // Final debug summary for this URL
+          if (canonTarget.includes('photography-courses-coventry')) {
+            debugLog(
+              `[computeAiMetricsForPageUrl] FINAL RESULT: target=${canonTarget} ` +
+              `uniqueKeywordsCount=${uniqueKeywordsCount} ` +
+              `finalOverview=${finalOverview} finalCitations=${finalCitations}`,
+              'error'
+            );
+          }
 
-        return { ai_overview: finalOverview, ai_citations: finalCitations };
+          return { ai_overview: finalOverview, ai_citations: finalCitations };
+        } catch (err) {
+          debugLog(`[computeAiMetricsForPageUrl] ERROR: ${err.message}`, 'error');
+          debugLog(`[computeAiMetricsForPageUrl] ERROR stack: ${err.stack}`, 'error');
+          return { ai_overview: null, ai_citations: null };
+        }
       };
 
       // TEST FUNCTION: Directly test URL matching logic for photography-courses-coventry
@@ -14301,6 +14312,21 @@
                       Array.isArray(r.ai_alan_citations) && r.ai_alan_citations.length > 0
                     );
                     
+                    // DIAGNOSTIC: Log the check result
+                    debugLog(`[Optimisation] URL task DIAGNOSTIC: Checking for citations arrays in ${aiRows.length} rows...`, 'error');
+                    debugLog(`[Optimisation] URL task DIAGNOSTIC: hasCitationsArrays=${hasCitationsArrays}`, 'error');
+                    
+                    // Check first few rows to see what citation data exists
+                    const sampleCheck = aiRows.slice(0, 3).map(r => ({
+                      keyword: r.keyword || 'N/A',
+                      has_ai_alan_citations_field: r.ai_alan_citations !== undefined,
+                      ai_alan_citations_type: typeof r.ai_alan_citations,
+                      is_array: Array.isArray(r.ai_alan_citations),
+                      array_length: Array.isArray(r.ai_alan_citations) ? r.ai_alan_citations.length : 'N/A',
+                      ai_alan_citations_count: r.ai_alan_citations_count || 'N/A'
+                    }));
+                    debugLog(`[Optimisation] URL task DIAGNOSTIC: Sample citation data check: ${JSON.stringify(sampleCheck, null, 2)}`, 'error');
+                    
                     if (!hasCitationsArrays) {
                       // combinedRows doesn't have citations arrays - try to get from latest audit first
                       let citationsFound = false;
@@ -14337,9 +14363,15 @@
                             `target_url=${encodeURIComponent(pageUrlForGsc || taskUrlForPage)}`
                           );
                           
+                          debugLog(`[Optimisation] URL task DIAGNOSTIC: Fetching from Supabase API: ${queryUrl}`, 'error');
+                          
                           const citationResponse = await fetch(queryUrl);
+                          debugLog(`[Optimisation] URL task DIAGNOSTIC: Supabase API response status: ${citationResponse.status}`, 'error');
+                          
                           if (citationResponse.ok) {
                             const citationData = await citationResponse.json();
+                            debugLog(`[Optimisation] URL task DIAGNOSTIC: Supabase API response: ${JSON.stringify(citationData)}`, 'error');
+                            
                             if (citationData.status === 'ok' && citationData.data && citationData.data.length > 0) {
                               const citingKeywords = citationData.data;
                               const uniqueKeywordsCount = citingKeywords.length;
@@ -14356,13 +14388,15 @@
                                 'success'
                               );
                             } else {
-                              debugLog(`[Optimisation] URL task: No keywords found citing URL in Supabase`, 'info');
+                              debugLog(`[Optimisation] URL task: No keywords found citing URL in Supabase (status: ${citationData.status}, data length: ${citationData.data?.length || 0})`, 'error');
                             }
                           } else {
-                            debugLog(`[Optimisation] URL task: Failed to query Supabase for citations: ${citationResponse.status}`, 'warn');
+                            const errorText = await citationResponse.text().catch(() => 'Unable to read error');
+                            debugLog(`[Optimisation] URL task: Failed to query Supabase for citations: ${citationResponse.status} - ${errorText}`, 'error');
                           }
                         } catch (supabaseErr) {
-                          debugLog(`[Optimisation] URL task: Error querying Supabase for citations: ${supabaseErr.message}`, 'warn');
+                          debugLog(`[Optimisation] URL task: Error querying Supabase for citations: ${supabaseErr.message}`, 'error');
+                          debugLog(`[Optimisation] URL task: Error stack: ${supabaseErr.stack}`, 'error');
                         }
                       }
                     }
