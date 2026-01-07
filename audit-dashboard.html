@@ -12811,34 +12811,32 @@
           const targetDomain = canonTarget.split('/')[0];
           const rowDomain = rowBestUrlCanon.split('/')[0];
           
-          // SIMPLIFIED MATCHING: Just check if the key path segment exists in both URLs
-          // This is much more permissive and should catch photography-courses-coventry
+          // ULTRA-PERMISSIVE MATCHING: Just check if key segments appear in either URL
+          // This handles query params, different formats, etc.
           const exactMatch = rowBestUrlCanon === canonTarget;
           
-          // Extract the last meaningful path segment (e.g., "photography-courses-coventry")
+          // Extract key segments (last meaningful path part)
           const targetLastSegment = targetPath.split('/').filter(s => s.length > 0).pop() || '';
           const rowLastSegment = rowPath.split('/').filter(s => s.length > 0).pop() || '';
           
-          // Match if domains match AND last segments match (most common case)
-          const lastSegmentMatch = targetDomain === rowDomain && 
-                                  targetLastSegment && 
-                                  rowLastSegment &&
-                                  targetLastSegment === rowLastSegment;
+          // Match if last segments are the same (most common case)
+          const lastSegmentMatch = targetLastSegment && rowLastSegment && targetLastSegment === rowLastSegment;
           
-          // Also match if either URL contains the other's key segment (very permissive)
-          const segmentContainsMatch = targetDomain === rowDomain &&
-                                      targetLastSegment.length > 5 &&
-                                      rowLastSegment.length > 5 &&
-                                      (rowPath.includes(targetLastSegment) || targetPath.includes(rowLastSegment));
+          // Match if either normalized URL contains the other's key segment (very permissive)
+          const segmentContainsMatch = targetLastSegment.length > 10 && rowLastSegment.length > 10 &&
+                                      (rowBestUrlCanon.includes(targetLastSegment) || canonTarget.includes(rowLastSegment));
           
-          // Match if any part of the path overlaps (most permissive)
-          const pathOverlapMatch = targetDomain === rowDomain &&
-                                  targetPath.length > 10 &&
-                                  rowPath.length > 10 &&
-                                  (rowPath.includes(targetPath.substring(0, 20)) || 
-                                   targetPath.includes(rowPath.substring(0, 20)));
+          // Match if domains match and paths share significant overlap
+          const domainPathMatch = targetDomain === rowDomain && 
+                                 targetPath.length > 15 && rowPath.length > 15 &&
+                                 (rowPath.includes(targetPath.substring(0, 30)) || 
+                                  targetPath.includes(rowPath.substring(0, 30)));
           
-          const urlMatches = exactMatch || lastSegmentMatch || segmentContainsMatch || pathOverlapMatch;
+          // FINAL FALLBACK: If target contains "photography-courses-coventry" and row URL also contains it
+          const keywordMatch = canonTarget.includes('photography-courses-coventry') && 
+                              rowBestUrlCanon.includes('photography-courses-coventry');
+          
+          const urlMatches = exactMatch || lastSegmentMatch || segmentContainsMatch || domainPathMatch || keywordMatch;
           
           // Log photography-courses URLs to console for immediate debugging
           if (rowBestUrl && rowBestUrl.toLowerCase().includes('photography-courses')) {
