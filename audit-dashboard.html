@@ -29237,7 +29237,99 @@ Final Score: ${score}/100`;
         }
       };
 
-      // Lightweight performance cards for Money Pages rows (kept globally so buttons don't error)
+      // Show inline performance cards for Money Pages rows (replaces modal)
+      if (typeof window.showMoneyPagePerformanceInline !== 'function') {
+        window.showMoneyPagePerformanceInline = function(pageUrl, pageTitle, rowElement) {
+          try {
+            if (!window.moneyPagesRowDataByUrl || window.moneyPagesRowDataByUrl.size === 0) {
+              alert('No page data available yet. Please wait for the table to finish loading.');
+              return;
+            }
+            const normalized = normalizeUrlForDedupe ? normalizeUrlForDedupe(pageUrl) : pageUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+            const row = window.moneyPagesRowDataByUrl.get(normalized);
+            if (!row) {
+              alert('Page data not found yet. Please try again after the table loads.');
+              return;
+            }
+
+            // Find the row element if not provided
+            let currentRow = rowElement;
+            if (!currentRow) {
+              // Try to find row by URL in table - look for data-page-url in AI citation cell
+              const allRows = document.querySelectorAll('#money-pages-table-container tbody tr');
+              currentRow = Array.from(allRows).find(tr => {
+                const aiCell = tr.querySelector('.ai-citation-cell-opportunity');
+                if (aiCell) {
+                  const cellUrl = aiCell.getAttribute('data-page-url');
+                  return cellUrl === pageUrl;
+                }
+                return false;
+              });
+            }
+            if (!currentRow) {
+              console.error('[Money Pages] Could not find row element for inline cards');
+              return;
+            }
+
+            // Check if cards already exist for this row (check next sibling row)
+            const nextRow = currentRow.nextElementSibling;
+            if (nextRow && nextRow.querySelector('.money-page-inline-cards')) {
+              // Toggle: remove if already showing
+              nextRow.remove();
+              return;
+            }
+
+            // Get data
+            const clicks = row.clicks || 0;
+            const impressions = row.impressions || 0;
+            const ctr = impressions > 0 ? (clicks / impressions) * 100 : ((row.ctr || 0) * 100);
+            const pos = row.avgPosition != null ? row.avgPosition : (row.position || null);
+            const ai = typeof row._aiCitations === 'number' ? row._aiCitations : (typeof row.aiCitations === 'number' ? row.aiCitations : '—');
+
+            // Create inline cards container - 3 performance cards as agreed
+            const cardsContainer = document.createElement('td');
+            cardsContainer.colSpan = 13; // Span all columns
+            cardsContainer.className = 'money-page-inline-cards';
+            cardsContainer.style.cssText = 'padding: 1.25rem; background: #f8fafc; border-top: 2px solid #e2e8f0;';
+            cardsContainer.innerHTML = `
+              <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.25rem;">
+                <div style="background: white; padding: 1.25rem; border-radius: 8px; border: 1px solid #e2e8f0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                  <div style="font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin-bottom: 0.75rem;">Clicks (28d)</div>
+                  <div style="font-size: 2rem; font-weight: 800; color: #0f172a; line-height: 1.2;">${clicks.toLocaleString()}</div>
+                  <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 0.5rem;">of ${impressions.toLocaleString()} impressions</div>
+                </div>
+                <div style="background: white; padding: 1.25rem; border-radius: 8px; border: 1px solid #e2e8f0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                  <div style="font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin-bottom: 0.75rem;">CTR (28d)</div>
+                  <div style="font-size: 2rem; font-weight: 800; color: #0f172a; line-height: 1.2;">${ctr.toFixed(2)}%</div>
+                  <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 0.5rem;">Click-through rate</div>
+                </div>
+                <div style="background: white; padding: 1.25rem; border-radius: 8px; border: 1px solid #e2e8f0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                  <div style="font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin-bottom: 0.75rem;">Avg Position</div>
+                  <div style="font-size: 2rem; font-weight: 800; color: #0f172a; line-height: 1.2;">${pos ? pos.toFixed(1) : '—'}</div>
+                  <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 0.5rem;">${ai !== '—' ? `AI Citations: ${ai}` : 'Average ranking'}</div>
+                </div>
+              </div>
+              <div style="display: flex; justify-content: flex-end; margin-top: 1rem;">
+                <button type="button" onclick="this.closest('tr').remove()" style="padding: 0.5rem 1rem; border-radius: 6px; border: 1px solid #cbd5e1; background: white; color: #475569; font-weight: 600; font-size: 0.8rem; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.background='#f1f5f9';" onmouseout="this.style.background='white';">
+                  Close
+                </button>
+              </div>
+            `;
+
+            // Insert after the current row
+            if (currentRow) {
+              const newRow = document.createElement('tr');
+              newRow.appendChild(cardsContainer);
+              currentRow.parentNode.insertBefore(newRow, currentRow.nextSibling);
+            }
+          } catch (err) {
+            console.error('[Money Pages] Error showing inline performance cards:', err);
+            alert('Unable to show performance cards. See console for details.');
+          }
+        };
+      }
+
+      // Lightweight performance cards for Money Pages rows (kept globally so buttons don't error) - MODAL VERSION (kept for backward compatibility)
       if (typeof window.showMoneyPagePerformance !== 'function') {
         window.showMoneyPagePerformance = function(pageUrl, pageTitle) {
           try {
@@ -29594,15 +29686,15 @@ Final Score: ${score}/100`;
           tableHtml += `
             <tr style="border-bottom: 1px solid #f1f5f9; background: ${rowBg}; transition: background 0.2s;" onmouseover="this.style.background='#f8f9fa';" onmouseout="this.style.background='${rowBg}';">
               <td style="padding: 0.75rem; color: #0f172a; font-weight: 600; vertical-align: top; width: 40px;">${filteredStartIdx + idx + 1}</td>
-              <td style="padding: 0.55rem 0.75rem; vertical-align: top; width: 380px; cursor: pointer;" onclick="window.showMoneyPagePerformance('${safeUrl}', '${safeTitle}')">
-                <a href="${row.url}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: none; font-weight: 500; border-bottom: 1px solid transparent; transition: all 0.2s;" onmouseover="this.style.color='#1d4ed8'; this.style.borderBottomColor='#1d4ed8';" onmouseout="this.style.color='#2563eb'; this.style.borderBottomColor='transparent';" title="Open ${row.url} in new tab">
+              <td style="padding: 0.55rem 0.75rem; vertical-align: top; width: 380px; cursor: pointer;" onclick="const row = this.closest('tr'); if (row) window.showMoneyPagePerformanceInline('${safeUrl}', '${safeTitle}', row);">
+                <a href="${row.url}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: none; font-weight: 500; border-bottom: 1px solid transparent; transition: all 0.2s;" onmouseover="this.style.color='#1d4ed8'; this.style.borderBottomColor='#1d4ed8';" onmouseout="this.style.color='#2563eb'; this.style.borderBottomColor='transparent';" onclick="event.stopPropagation();" title="Open ${row.url} in new tab">
                   <div style="font-size: 0.85rem; color: #64748b; margin-bottom: 0.25rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${row.url}</div>
                 </a>
                 ${pageTitle ? `<div style="font-weight: 600; color: #1e293b; font-size: 0.9rem; margin-top: 0.4rem; margin-bottom: 0.2rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${pageTitle}</div>` : ''}
                 ${metaDescription ? `<div style="font-size: 0.8rem; color: #64748b; line-height: 1.35; margin-top: ${pageTitle ? '0.2rem' : '0.4rem'}; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">${metaDescription}</div>` : '<div style="font-size: 0.8rem; color: #94a3b8; font-style: italic; margin-top: 0.4rem;">No meta description available</div>'}
               </td>
               <td style="padding: 0.55rem 0.35rem; vertical-align: top; text-align: center;">
-                <button type="button" onclick="event.stopPropagation(); window.showMoneyPagePerformance('${safeUrl}', '${safeTitle}')" style="padding: 0.35rem 0.6rem; border-radius: 6px; border: 1px solid #cbd5e1; background: #f8fafc; color: #1e293b; font-weight: 600; font-size: 0.75rem; cursor: pointer;" title="Open performance cards for this page">
+                <button type="button" onclick="event.stopPropagation(); const row = this.closest('tr'); if (row) window.showMoneyPagePerformanceInline('${safeUrl}', '${safeTitle}', row);" style="padding: 0.35rem 0.6rem; border-radius: 6px; border: 1px solid #cbd5e1; background: #f8fafc; color: #1e293b; font-weight: 600; font-size: 0.75rem; cursor: pointer;" title="Show performance cards inline for this page">
                   View
                 </button>
               </td>
