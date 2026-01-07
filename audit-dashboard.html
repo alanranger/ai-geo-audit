@@ -12811,38 +12811,34 @@
           const targetDomain = canonTarget.split('/')[0];
           const rowDomain = rowBestUrlCanon.split('/')[0];
           
-          // Enhanced matching logic - simplified and more permissive
+          // SIMPLIFIED MATCHING: Just check if the key path segment exists in both URLs
+          // This is much more permissive and should catch photography-courses-coventry
           const exactMatch = rowBestUrlCanon === canonTarget;
-          // Path match: paths must match AND domains must match
-          const pathMatch = rowPath === targetPath && rowPath !== '' && targetDomain === rowDomain;
-          // Strict path match: exact path or parent/child relationship
-          const strictPathMatch = targetPath && rowPath && targetDomain === rowDomain && (
-            targetPath === rowPath || 
-            targetPath.startsWith(rowPath + '/') || 
-            rowPath.startsWith(targetPath + '/')
-          );
-          // Domain-only match: for root or very short paths
-          const domainOnlyMatch = (!targetPath || targetPath.length < 3) && (!rowPath || rowPath.length < 3) && 
-                                  rowBestUrlCanon && canonTarget && 
-                                  targetDomain === rowDomain;
           
-          // CRITICAL FIX: Also try path segment matching - check if key path segments overlap
-          // This handles cases where URLs have query params or slight format differences
-          const targetPathSegments = targetPath.split('/').filter(s => s.length > 0);
-          const rowPathSegments = rowPath.split('/').filter(s => s.length > 0);
-          // Match if domains match AND any significant path segment matches
-          const pathSegmentMatch = targetDomain === rowDomain && 
-                                   targetPathSegments.length > 0 && 
-                                   rowPathSegments.length > 0 &&
-                                   (targetPathSegments.some(seg => rowPathSegments.includes(seg)) ||
-                                    rowPathSegments.some(seg => targetPathSegments.includes(seg)));
+          // Extract the last meaningful path segment (e.g., "photography-courses-coventry")
+          const targetLastSegment = targetPath.split('/').filter(s => s.length > 0).pop() || '';
+          const rowLastSegment = rowPath.split('/').filter(s => s.length > 0).pop() || '';
           
-          // Also try simple contains match for the full path (more permissive)
-          const pathContainsMatch = targetDomain === rowDomain &&
-                                    targetPath.length > 5 && rowPath.length > 5 &&
-                                    (rowPath.includes(targetPath) || targetPath.includes(rowPath));
+          // Match if domains match AND last segments match (most common case)
+          const lastSegmentMatch = targetDomain === rowDomain && 
+                                  targetLastSegment && 
+                                  rowLastSegment &&
+                                  targetLastSegment === rowLastSegment;
           
-          const urlMatches = exactMatch || pathMatch || strictPathMatch || domainOnlyMatch || pathSegmentMatch || pathContainsMatch;
+          // Also match if either URL contains the other's key segment (very permissive)
+          const segmentContainsMatch = targetDomain === rowDomain &&
+                                      targetLastSegment.length > 5 &&
+                                      rowLastSegment.length > 5 &&
+                                      (rowPath.includes(targetLastSegment) || targetPath.includes(rowLastSegment));
+          
+          // Match if any part of the path overlaps (most permissive)
+          const pathOverlapMatch = targetDomain === rowDomain &&
+                                  targetPath.length > 10 &&
+                                  rowPath.length > 10 &&
+                                  (rowPath.includes(targetPath.substring(0, 20)) || 
+                                   targetPath.includes(rowPath.substring(0, 20)));
+          
+          const urlMatches = exactMatch || lastSegmentMatch || segmentContainsMatch || pathOverlapMatch;
           
           // Always log photography-courses URLs for diagnosis (even if no match) - use 'warn' so it's always saved
           if (rowBestUrl && rowBestUrl.toLowerCase().includes('photography-courses')) {
