@@ -12838,13 +12838,18 @@
           const targetPath = canonTarget.includes('/') ? canonTarget.split('/').slice(1).join('/') : '';
           const rowPath = rowBestUrlCanon.includes('/') ? rowBestUrlCanon.split('/').slice(1).join('/') : '';
           
+          // Extract domains for comparison
+          const targetDomain = canonTarget.split('/')[0];
+          const rowDomain = rowBestUrlCanon.split('/')[0];
+          
           // Enhanced matching logic (Fix 2)
           const exactMatch = rowBestUrlCanon === canonTarget;
-          const pathMatch = rowPath === targetPath && rowPath !== '';
+          // Path match requires both path AND domain to match (more precise)
+          const pathMatch = rowPath === targetPath && rowPath !== '' && targetDomain === rowDomain;
           
           // More strict matching: only match if paths are the same or one is a direct parent/child
-          // Don't use loose includes() - it can match unrelated URLs
-          const strictPathMatch = targetPath && rowPath && (
+          // AND domains must match (critical fix)
+          const strictPathMatch = targetPath && rowPath && targetDomain === rowDomain && (
             targetPath === rowPath || // Exact path match
             targetPath.startsWith(rowPath + '/') || // Target is child of row
             rowPath.startsWith(targetPath + '/') // Row is child of target
@@ -12853,14 +12858,14 @@
           // Only use includes for domain-only matching (when paths are empty or very short)
           const domainOnlyMatch = (!targetPath || targetPath.length < 3) && (!rowPath || rowPath.length < 3) && 
                                   rowBestUrlCanon && canonTarget && 
-                                  rowBestUrlCanon.split('/')[0] === canonTarget.split('/')[0];
+                                  targetDomain === rowDomain;
           
           const urlMatches = exactMatch || pathMatch || strictPathMatch || domainOnlyMatch;
           
           // Enhanced debug logging (Fix 3) - log ALL match attempts for the target URL or first 20 rows
           const shouldLogMatch = urlMatches || idx < 20 || (rowBestUrlCanon && (rowBestUrlCanon.includes(canonTarget.split('/').pop() || '') || canonTarget.includes(rowBestUrlCanon.split('/').pop() || '')));
           if (shouldLogMatch) {
-            debugLog(`[computeAiMetricsForPageUrl] Match attempt [${idx}]: keyword="${r.keyword || 'unknown'}", rowUrl="${rowBestUrl}", normalized="${rowBestUrlCanon}", target="${canonTarget}", exactMatch=${exactMatch}, pathMatch=${pathMatch}, strictPathMatch=${strictPathMatch}, domainOnlyMatch=${domainOnlyMatch}, urlMatches=${urlMatches}`, 'info');
+            debugLog(`[computeAiMetricsForPageUrl] Match attempt [${idx}]: keyword="${r.keyword || 'unknown'}", rowUrl="${rowBestUrl}", normalized="${rowBestUrlCanon}", target="${canonTarget}", targetDomain="${targetDomain}", rowDomain="${rowDomain}", targetPath="${targetPath}", rowPath="${rowPath}", exactMatch=${exactMatch}, pathMatch=${pathMatch}, strictPathMatch=${strictPathMatch}, domainOnlyMatch=${domainOnlyMatch}, urlMatches=${urlMatches}`, 'info');
           }
           
           // Log detailed comparison for first few rows or if there's a potential match
@@ -12870,6 +12875,8 @@
               keyword: r.keyword,
               rowBestUrl: rowBestUrl,
               rowBestUrlCanon: rowBestUrlCanon,
+              targetDomain: targetDomain,
+              rowDomain: rowDomain,
               targetPath: targetPath,
               rowPath: rowPath,
               exactMatch,
