@@ -326,8 +326,8 @@ All of these functions now use the corrected logic (finding keywords that cite t
 
 ### Functions That May Need Updates (Future Phases)
 
-1. ⏸️ **Money Pages Table** - Will need AI Citations column (Phase 3)
-2. ⏸️ **Money Pages Row Click Breakdown** - Will show AI Citations count (Phase 4)
+1. ✅ **Money Pages Opportunity Table** - AI Citations column implemented (latest audit, cached from localStorage, falls back to Supabase API)
+2. ✅ **Money Pages Row Click Breakdown** - Performance modal available from URL/Title/Meta cell or "View" button; uses cached row data
 3. ⏸️ **Priority Matrix** - May need AI citations weighting (if changed)
 
 ---

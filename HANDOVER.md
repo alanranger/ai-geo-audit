@@ -14,6 +14,11 @@ This document consolidates all critical information about the AI GEO Audit proje
 4. **Technical Architecture**: Data flow, processes, and key functions
 5. **Next Steps**: What needs to be done
 
+### Latest Updates (2026-01-07)
+- **Money Pages Opportunity Table** now shows an **AI citations** column (latest audit only). Uses localStorage cache first, then Supabase `/api/supabase/query-keywords-citing-url` fallback; writes counts back into rows for sorting.
+- **Money Pages row interactions**: clicking the URL/Title/Meta cell or the **View** button opens a lightweight performance modal (click/imp/CTR/position + AI citations). Track/Manage buttons still stop propagation.
+- **Data reality check**: latest audits (2026-01-01 onward) have **0 citations** for `photography-courses-coventry`; older Dec 2025 audits contained citations. Add Measurement is correct for the latest audit but will surface 0 until upstream data is regenerated.
+
 ---
 
 ## Current Critical Issue: URL Task AI Data Not Displaying
