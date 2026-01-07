@@ -29296,147 +29296,172 @@ Final Score: ${score}/100`;
             const targetUrlNormalized = normalizeUrl(pageUrl);
 
             // ============================================
-            // CARD 1: Performance Trends (28d + 90d if available)
+            // CARD 1: Performance Trends (28d + 90d average from Supabase)
             // ============================================
             const clicks28d = row.clicks || 0;
             const impressions28d = row.impressions || 0;
             const ctr28d = impressions28d > 0 ? (clicks28d / impressions28d) * 100 : ((row.ctr || 0) * 100);
             const pos28d = row.avgPosition != null ? row.avgPosition : (row.position || null);
 
-            // Try to get 90-day data from localStorage (historical audits)
+            // Fetch 90-day average from Supabase historical audits
             let clicks90d = null, impressions90d = null, ctr90d = null, pos90d = null;
             let trendData = null;
             try {
-              const lastAuditResults = localStorage.getItem('last_audit_results');
-              if (lastAuditResults) {
-                const auditData = JSON.parse(lastAuditResults);
-                // Check for timeseries or historical data
-                if (auditData.gscData && auditData.gscData.timeseries) {
-                  // Look for page-level timeseries data
-                  const timeseries = auditData.gscData.timeseries;
-                  if (timeseries.pages && Array.isArray(timeseries.pages)) {
-                    const pageData = timeseries.pages.find(p => {
-                      const pUrl = normalizeUrl(p.page || p.url || '');
-                      return pUrl === targetUrlNormalized;
-                    });
-                    if (pageData && pageData.data && Array.isArray(pageData.data)) {
-                      // Aggregate last 90 days if available
-                      const now = new Date();
-                      const days90Ago = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
-                      const days28Ago = new Date(now.getTime() - 28 * 24 * 60 * 60 * 1000);
-                      
-                      let clicks90 = 0, impressions90 = 0, clicks28 = 0, impressions28 = 0;
-                      let positionSum90 = 0, positionSum28 = 0, positionCount90 = 0, positionCount28 = 0;
-                      
-                      pageData.data.forEach(point => {
-                        const pointDate = new Date(point.date || point.day);
-                        if (pointDate >= days90Ago) {
-                          clicks90 += point.clicks || 0;
-                          impressions90 += point.impressions || 0;
-                          if (point.position != null && point.impressions > 0) {
-                            positionSum90 += point.position * point.impressions;
-                            positionCount90 += point.impressions;
+              const propertyUrl = document.getElementById('propertyUrl')?.value || localStorage.getItem('property_url') || '';
+              if (propertyUrl) {
+                // Fetch historical money pages data from Supabase (last 90 days)
+                const response = await fetch(apiUrl(`/api/supabase/money-pages-historical?property_url=${encodeURIComponent(propertyUrl)}&target_url=${encodeURIComponent(pageUrl)}&days=90`));
+                if (response.ok) {
+                  const historicalData = await response.json();
+                  if (historicalData.status === 'ok' && historicalData.data) {
+                    clicks90d = historicalData.data.clicks_90d || null;
+                    impressions90d = historicalData.data.impressions_90d || null;
+                    ctr90d = historicalData.data.ctr_90d || null;
+                    pos90d = historicalData.data.avg_position_90d || null;
+                    
+                    if (clicks90d !== null && impressions90d !== null) {
+                      trendData = {
+                        clicks28d: clicks28d,
+                        clicks90d: clicks90d,
+                        clicksChange: clicks90d - clicks28d,
+                        impressions28d: impressions28d,
+                        impressions90d: impressions90d,
+                        impressionsChange: impressions90d - impressions28d,
+                        ctr28d: ctr28d,
+                        ctr90d: ctr90d || (impressions90d > 0 ? (clicks90d / impressions90d) * 100 : 0),
+                        pos28d: pos28d,
+                        pos90d: pos90d
+                      };
+                    }
+                  }
+                } else {
+                  // Fallback: Try to get from timeseries in localStorage
+                  const lastAuditResults = localStorage.getItem('last_audit_results');
+                  if (lastAuditResults) {
+                    const auditData = JSON.parse(lastAuditResults);
+                    if (auditData.gscData && auditData.gscData.timeseries) {
+                      const timeseries = auditData.gscData.timeseries;
+                      if (timeseries.pages && Array.isArray(timeseries.pages)) {
+                        const pageData = timeseries.pages.find(p => {
+                          const pUrl = normalizeUrl(p.page || p.url || '');
+                          return pUrl === targetUrlNormalized;
+                        });
+                        if (pageData && pageData.data && Array.isArray(pageData.data)) {
+                          const now = new Date();
+                          const days90Ago = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+                          
+                          let clicks90 = 0, impressions90 = 0;
+                          let positionSum90 = 0, positionCount90 = 0;
+                          
+                          pageData.data.forEach(point => {
+                            const pointDate = new Date(point.date || point.day);
+                            if (pointDate >= days90Ago) {
+                              clicks90 += point.clicks || 0;
+                              impressions90 += point.impressions || 0;
+                              if (point.position != null && point.impressions > 0) {
+                                positionSum90 += point.position * point.impressions;
+                                positionCount90 += point.impressions;
+                              }
+                            }
+                          });
+                          
+                          if (impressions90 > 0) {
+                            clicks90d = clicks90;
+                            impressions90d = impressions90;
+                            ctr90d = (clicks90 / impressions90) * 100;
+                            pos90d = positionCount90 > 0 ? positionSum90 / positionCount90 : null;
+                            
+                            trendData = {
+                              clicks28d: clicks28d,
+                              clicks90d: clicks90,
+                              clicksChange: clicks90 - clicks28d,
+                              impressions28d: impressions28d,
+                              impressions90d: impressions90,
+                              impressionsChange: impressions90 - impressions28d,
+                              ctr28d: ctr28d,
+                              ctr90d: ctr90d,
+                              pos28d: pos28d,
+                              pos90d: pos90d
+                            };
                           }
                         }
-                        if (pointDate >= days28Ago) {
-                          clicks28 += point.clicks || 0;
-                          impressions28 += point.impressions || 0;
-                          if (point.position != null && point.impressions > 0) {
-                            positionSum28 += point.position * point.impressions;
-                            positionCount28 += point.impressions;
-                          }
-                        }
-                      });
-                      
-                      if (impressions90 > 0) {
-                        clicks90d = clicks90;
-                        impressions90d = impressions90;
-                        ctr90d = (clicks90 / impressions90) * 100;
-                        pos90d = positionCount90 > 0 ? positionSum90 / positionCount90 : null;
-                      }
-                      
-                      // Calculate trends
-                      if (clicks28 > 0 && clicks90 > clicks28) {
-                        const clicks28From90 = clicks90 - clicks28;
-                        const impressions28From90 = impressions28;
-                        trendData = {
-                          clicks28d: clicks28,
-                          clicks90d: clicks90,
-                          clicks28From90: clicks28From90,
-                          impressions28d: impressions28,
-                          impressions90d: impressions90,
-                          impressions28From90: impressions28From90,
-                          ctr28d: impressions28 > 0 ? (clicks28 / impressions28) * 100 : 0,
-                          ctr90d: impressions90 > 0 ? (clicks90 / impressions90) * 100 : 0,
-                          pos28d: positionCount28 > 0 ? positionSum28 / positionCount28 : null,
-                          pos90d: pos90d
-                        };
                       }
                     }
                   }
                 }
               }
             } catch (e) {
-              console.warn('[Money Pages] Error getting historical data:', e);
+              console.warn('[Money Pages] Error getting 90-day historical data:', e);
             }
 
             // ============================================
             // CARD 2: AI Citations with Keywords & Search Volumes
             // ============================================
+            // Use the same API endpoint that the table uses to get accurate data
             let citingKeywords = [];
             try {
-              const lastAuditResults = localStorage.getItem('last_audit_results');
-              if (lastAuditResults) {
-                const auditData = JSON.parse(lastAuditResults);
-                let combinedRows = [];
-                if (auditData?.ranking_ai_data?.combinedRows) {
-                  combinedRows = auditData.ranking_ai_data.combinedRows;
-                } else if (auditData?.searchData?.ranking_ai_data?.combinedRows) {
-                  combinedRows = auditData.searchData.ranking_ai_data.combinedRows;
-                } else if (Array.isArray(auditData?.ranking_ai_data)) {
-                  combinedRows = auditData.ranking_ai_data;
-                } else if (Array.isArray(auditData?.searchData?.ranking_ai_data)) {
-                  combinedRows = auditData.searchData.ranking_ai_data;
-                }
-
-                if (Array.isArray(combinedRows) && combinedRows.length > 0) {
-                  combinedRows.forEach(keywordRow => {
-                    const citations = keywordRow.ai_alan_citations || [];
-                    if (Array.isArray(citations) && citations.length > 0) {
-                      let isCited = false;
-                      citations.forEach(citation => {
-                        let citedUrl = '';
-                        if (typeof citation === 'string') {
-                          citedUrl = citation;
-                        } else if (citation && typeof citation === 'object') {
-                          citedUrl = citation.url || citation.URL || citation.link || citation.href || citation.page || citation.pageUrl || citation.target || citation.targetUrl || citation.best_url || citation.bestUrl || '';
-                        }
-                        if (citedUrl) {
-                          const citedNormalized = normalizeUrl(citedUrl);
-                          if (citedNormalized === targetUrlNormalized || citedNormalized.includes(targetUrlNormalized) || targetUrlNormalized.includes(citedNormalized)) {
-                            isCited = true;
-                          }
-                        }
-                      });
-                      
-                      if (isCited) {
-                        citingKeywords.push({
-                          keyword: keywordRow.keyword || '',
-                          searchVolume: keywordRow.searchVolume || keywordRow.volume || keywordRow.monthly_search_volume || null,
-                          bestRank: keywordRow.best_rank || keywordRow.rank || null,
-                          hasAiOverview: keywordRow.has_ai_overview || false
-                        });
+              const propertyUrl = document.getElementById('propertyUrl')?.value || localStorage.getItem('property_url') || '';
+              if (propertyUrl) {
+                // Use the same API endpoint as populateMoneyPagesAiCitations
+                const apiResponse = await fetch(apiUrl(`/api/supabase/query-keywords-citing-url?property_url=${encodeURIComponent(propertyUrl)}&target_url=${encodeURIComponent(pageUrl)}`));
+                if (apiResponse.ok) {
+                  const apiData = await apiResponse.json();
+                  if (apiData.status === 'ok' && Array.isArray(apiData.data)) {
+                    // Get search volumes from combinedRows in localStorage
+                    const lastAuditResults = localStorage.getItem('last_audit_results');
+                    let combinedRows = [];
+                    if (lastAuditResults) {
+                      const auditData = JSON.parse(lastAuditResults);
+                      if (auditData?.ranking_ai_data?.combinedRows) {
+                        combinedRows = auditData.ranking_ai_data.combinedRows;
+                      } else if (auditData?.searchData?.ranking_ai_data?.combinedRows) {
+                        combinedRows = auditData.searchData.ranking_ai_data.combinedRows;
+                      } else if (Array.isArray(auditData?.ranking_ai_data)) {
+                        combinedRows = auditData.ranking_ai_data;
+                      } else if (Array.isArray(auditData?.searchData?.ranking_ai_data)) {
+                        combinedRows = auditData.searchData.ranking_ai_data;
                       }
                     }
-                  });
+                    
+                    // Create lookup map for search volumes
+                    const keywordLookup = new Map();
+                    if (Array.isArray(combinedRows)) {
+                      combinedRows.forEach(kwRow => {
+                        if (kwRow.keyword) {
+                          keywordLookup.set(kwRow.keyword.toLowerCase(), {
+                            searchVolume: kwRow.searchVolume || kwRow.volume || kwRow.monthly_search_volume || null,
+                            bestRank: kwRow.best_rank || kwRow.rank || null,
+                            hasAiOverview: kwRow.has_ai_overview || false
+                          });
+                        }
+                      });
+                    }
+                    
+                    // Map API response to keywords with search volumes
+                    apiData.data.forEach(kw => {
+                      const keyword = kw.keyword || '';
+                      if (keyword) {
+                        const lookup = keywordLookup.get(keyword.toLowerCase()) || {};
+                        citingKeywords.push({
+                          keyword: keyword,
+                          searchVolume: lookup.searchVolume || null,
+                          bestRank: kw.best_rank || lookup.bestRank || null,
+                          hasAiOverview: kw.has_ai_overview !== undefined ? kw.has_ai_overview : lookup.hasAiOverview || false
+                        });
+                      }
+                    });
+                  }
                 }
               }
             } catch (e) {
               console.warn('[Money Pages] Error getting AI citation keywords:', e);
             }
 
-            // Sort by search volume (descending)
-            citingKeywords.sort((a, b) => (b.searchVolume || 0) - (a.searchVolume || 0));
+            // Sort by search volume (descending), then by keyword
+            citingKeywords.sort((a, b) => {
+              const volDiff = (b.searchVolume || 0) - (a.searchVolume || 0);
+              return volDiff !== 0 ? volDiff : (a.keyword || '').localeCompare(b.keyword || '');
+            });
 
             // ============================================
             // CARD 3: Competitor Ranking (placeholder for now)
@@ -29468,26 +29493,26 @@ Final Score: ${score}/100`;
             `;
             
             if (trendData && clicks90d !== null) {
-              const clicksChange = trendData.clicks28From90 > 0 ? '+' : '';
-              const impressionsChange = trendData.impressions28From90 > 0 ? '+' : '';
-              const ctrChange = trendData.ctr28d > trendData.ctr90d ? '+' : '';
-              const posChange = trendData.pos28d && trendData.pos90d && trendData.pos28d < trendData.pos90d ? '↑' : trendData.pos28d && trendData.pos90d && trendData.pos28d > trendData.pos90d ? '↓' : '';
+              const clicksChange = trendData.clicksChange;
+              const impressionsChange = trendData.impressionsChange;
+              const ctrChange = trendData.ctr28d - trendData.ctr90d;
+              const posChange = trendData.pos28d && trendData.pos90d ? trendData.pos90d - trendData.pos28d : 0;
               
               card1Html += `
                 <div style="border-top: 1px solid #e2e8f0; padding-top: 0.75rem; margin-top: 0.75rem;">
-                  <div style="font-size: 0.7rem; color: #94a3b8; margin-bottom: 0.25rem;">Last 90 days</div>
+                  <div style="font-size: 0.7rem; color: #94a3b8; margin-bottom: 0.25rem;">90-day average</div>
                   <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5rem; font-size: 0.85rem;">
-                    <div><strong>Clicks:</strong> ${clicks90d.toLocaleString()} <span style="color: #10b981; font-size: 0.75rem;">(${clicksChange}${trendData.clicks28From90.toLocaleString()} in last 28d)</span></div>
-                    <div><strong>Impressions:</strong> ${impressions90d.toLocaleString()} <span style="color: #10b981; font-size: 0.75rem;">(${impressionsChange}${trendData.impressions28From90.toLocaleString()})</span></div>
-                    <div><strong>CTR:</strong> ${ctr90d.toFixed(2)}% <span style="color: ${trendData.ctr28d > trendData.ctr90d ? '#10b981' : '#ef4444'}; font-size: 0.75rem;">(${ctrChange}${(trendData.ctr28d - trendData.ctr90d).toFixed(2)}%)</span></div>
-                    <div><strong>Position:</strong> ${pos90d ? pos90d.toFixed(1) : '—'} <span style="color: ${posChange === '↑' ? '#10b981' : posChange === '↓' ? '#ef4444' : '#94a3b8'}; font-size: 0.75rem;">${posChange}</span></div>
+                    <div><strong>Clicks:</strong> ${clicks90d.toLocaleString()} <span style="color: ${clicksChange >= 0 ? '#10b981' : '#ef4444'}; font-size: 0.75rem;">(${clicksChange >= 0 ? '+' : ''}${clicksChange.toLocaleString()} vs 28d)</span></div>
+                    <div><strong>Impressions:</strong> ${impressions90d.toLocaleString()} <span style="color: ${impressionsChange >= 0 ? '#10b981' : '#ef4444'}; font-size: 0.75rem;">(${impressionsChange >= 0 ? '+' : ''}${impressionsChange.toLocaleString()})</span></div>
+                    <div><strong>CTR:</strong> ${ctr90d.toFixed(2)}% <span style="color: ${ctrChange >= 0 ? '#10b981' : '#ef4444'}; font-size: 0.75rem;">(${ctrChange >= 0 ? '+' : ''}${ctrChange.toFixed(2)}% vs 28d)</span></div>
+                    <div><strong>Position:</strong> ${pos90d ? pos90d.toFixed(1) : '—'} <span style="color: ${posChange < 0 ? '#10b981' : posChange > 0 ? '#ef4444' : '#94a3b8'}; font-size: 0.75rem;">${posChange < 0 ? '↑' : posChange > 0 ? '↓' : ''} ${posChange !== 0 ? Math.abs(posChange).toFixed(1) : ''}</span></div>
                   </div>
                 </div>
               `;
             } else {
               card1Html += `
                 <div style="border-top: 1px solid #e2e8f0; padding-top: 0.75rem; margin-top: 0.75rem; font-size: 0.75rem; color: #94a3b8; font-style: italic;">
-                  90-day trend data will appear as historical audits accumulate
+                  90-day average will appear when historical audit data is available in Supabase
                 </div>
               `;
             }
