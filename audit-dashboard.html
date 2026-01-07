@@ -12820,6 +12820,7 @@
         
         // FIX: For URL tasks, also check if this URL is the best_url/targetUrl for any keyword
         // This is how the original baseline got AI Overview data for URL tasks
+        debugLog(`[computeAiMetricsForPageUrl] Starting forEach loop with ${rows.length} rows, target="${canonTarget}"`, 'info');
         rows.forEach((r, idx) => {
           // Check if this URL is the target/best URL for this keyword
           // Try multiple field name variations to handle different data structures
@@ -12862,10 +12863,15 @@
           
           const urlMatches = exactMatch || pathMatch || strictPathMatch || domainOnlyMatch;
           
-          // Enhanced debug logging (Fix 3) - log ALL match attempts for the target URL or first 20 rows
-          const shouldLogMatch = urlMatches || idx < 20 || (rowBestUrlCanon && (rowBestUrlCanon.includes(canonTarget.split('/').pop() || '') || canonTarget.includes(rowBestUrlCanon.split('/').pop() || '')));
+          // Enhanced debug logging (Fix 3) - ALWAYS log first 30 rows for diagnosis, plus any matches
+          const shouldLogMatch = idx < 30 || urlMatches || (rowBestUrlCanon && (rowBestUrlCanon.includes(canonTarget.split('/').pop() || '') || canonTarget.includes(rowBestUrlCanon.split('/').pop() || '')));
           if (shouldLogMatch) {
             debugLog(`[computeAiMetricsForPageUrl] Match attempt [${idx}]: keyword="${r.keyword || 'unknown'}", rowUrl="${rowBestUrl}", normalized="${rowBestUrlCanon}", target="${canonTarget}", targetDomain="${targetDomain}", rowDomain="${rowDomain}", targetPath="${targetPath}", rowPath="${rowPath}", exactMatch=${exactMatch}, pathMatch=${pathMatch}, strictPathMatch=${strictPathMatch}, domainOnlyMatch=${domainOnlyMatch}, urlMatches=${urlMatches}`, 'info');
+          }
+          
+          // CRITICAL: Also log if this row contains "photography-courses" in URL for targeted diagnosis
+          if (rowBestUrl && rowBestUrl.toLowerCase().includes('photography-courses')) {
+            debugLog(`[computeAiMetricsForPageUrl] PHOTOGRAPHY-COURSES ROW [${idx}]: keyword="${r.keyword || 'unknown'}", rowUrl="${rowBestUrl}", normalized="${rowBestUrlCanon}", target="${canonTarget}", exactMatch=${exactMatch}, pathMatch=${pathMatch}, strictPathMatch=${strictPathMatch}, domainOnlyMatch=${domainOnlyMatch}, urlMatches=${urlMatches}, hasOverview=${r.has_ai_overview === true || r.ai_overview_present_any === true}, citations=${r.ai_alan_citations_count != null ? r.ai_alan_citations_count : 'null'}`, 'warn');
           }
           
           // Log detailed comparison for first few rows or if there's a potential match
