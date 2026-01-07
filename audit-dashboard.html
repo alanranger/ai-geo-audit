@@ -12620,18 +12620,28 @@
         const canonTarget = normalizeUrl(pageUrl);
         // If we don't have ranking rows loaded, we don't know (avoid false negatives).
         if (!canonTarget || rows.length === 0) {
-          console.log('[computeAiMetricsForPageUrl] No rows or no target URL:', { canonTarget, rowsLength: rows.length });
+          debugLog(`[computeAiMetricsForPageUrl] No rows or no target URL: canonTarget="${canonTarget}", rowsLength=${rows.length}`, 'warn');
           return { ai_overview: null, ai_citations: null };
         }
+
+        debugLog(`[computeAiMetricsForPageUrl] Starting lookup for URL: "${pageUrl}" (normalized: "${canonTarget}") with ${rows.length} rows`, 'info');
+        
+        // Log sample of available URLs in the data for debugging
+        const sampleUrls = rows.slice(0, 5).map(r => {
+          const bestUrl = r.best_url || r.targetUrl || r.ranking_url || '';
+          return { keyword: r.keyword, bestUrl: bestUrl, normalized: normalizeUrl(bestUrl) };
+        });
+        debugLog(`[computeAiMetricsForPageUrl] Sample URLs from data (first 5): ${JSON.stringify(sampleUrls)}`, 'info');
 
         let citations = 0;
         let overviewOn = false;
         let citationsFromTargetUrl = 0; // Track citations from keywords where this URL is the target
         let matchedKeyword = null; // For debugging
+        let matchDetails = []; // Track all matching attempts
         
         // FIX: For URL tasks, also check if this URL is the best_url/targetUrl for any keyword
         // This is how the original baseline got AI Overview data for URL tasks
-        rows.forEach(r => {
+        rows.forEach((r, idx) => {
           // Check if this URL is the target/best URL for this keyword
           const rowBestUrl = r.best_url || r.targetUrl || r.ranking_url || '';
           const rowBestUrlCanon = normalizeUrl(rowBestUrl);
@@ -12641,10 +12651,27 @@
           const rowPath = rowBestUrlCanon.includes('/') ? rowBestUrlCanon.split('/').slice(1).join('/') : '';
           
           // Match if exact URL matches OR path matches (more flexible)
-          const urlMatches = (rowBestUrlCanon && (rowBestUrlCanon === canonTarget || 
-                                                   rowPath === targetPath ||
-                                                   rowBestUrlCanon.includes(canonTarget) ||
-                                                   canonTarget.includes(rowBestUrlCanon)));
+          const exactMatch = rowBestUrlCanon === canonTarget;
+          const pathMatch = rowPath === targetPath && rowPath !== '';
+          const includesMatch = rowBestUrlCanon && (rowBestUrlCanon.includes(canonTarget) || canonTarget.includes(rowBestUrlCanon));
+          const urlMatches = (rowBestUrlCanon && (exactMatch || pathMatch || includesMatch));
+          
+          // Log detailed comparison for first few rows or if there's a potential match
+          if (idx < 3 || urlMatches || (rowBestUrlCanon && rowBestUrlCanon.includes('photography-courses'))) {
+            matchDetails.push({
+              idx,
+              keyword: r.keyword,
+              rowBestUrl: rowBestUrl,
+              rowBestUrlCanon: rowBestUrlCanon,
+              targetPath: targetPath,
+              rowPath: rowPath,
+              exactMatch,
+              pathMatch,
+              includesMatch,
+              urlMatches,
+              hasOverview: r.has_ai_overview === true || r.ai_overview_present_any === true
+            });
+          }
           
           if (urlMatches) {
             // This keyword has this URL as its target - use its AI data
@@ -12659,13 +12686,7 @@
             if (!matchedKeyword) {
               matchedKeyword = r.keyword || 'unknown';
             }
-            console.log('[computeAiMetricsForPageUrl] Found URL match:', {
-              keyword: r.keyword,
-              taskUrl: canonTarget,
-              rowBestUrl: rowBestUrlCanon,
-              hasOverview: rowHasOverview,
-              citations: rowCitations
-            });
+            debugLog(`[computeAiMetricsForPageUrl] ✓ Found URL match: keyword="${r.keyword}", taskUrl="${canonTarget}", rowBestUrl="${rowBestUrlCanon}", hasOverview=${rowHasOverview}, citations=${rowCitations}`, 'success');
           }
           
           // Also check if URL appears in citation arrays (original logic)
@@ -12679,6 +12700,7 @@
             if (canon && canon === canonTarget) {
               citations += 1;
               if (rowHasOverview) overviewOn = true;
+              debugLog(`[computeAiMetricsForPageUrl] ✓ Found citation match: keyword="${r.keyword}", citedUrl="${canon}"`, 'success');
             }
           });
         });
@@ -12686,15 +12708,19 @@
         // Use the maximum citations count (from target URL match or citation arrays)
         const totalCitations = Math.max(citations, citationsFromTargetUrl);
         
-        console.log('[computeAiMetricsForPageUrl] Result:', {
-          targetUrl: canonTarget,
-          overviewOn,
-          totalCitations,
-          citationsFromTargetUrl,
-          matchedKeyword
-        });
+        // Log detailed match attempts if no match found
+        if (!overviewOn && totalCitations === 0 && matchDetails.length > 0) {
+          debugLog(`[computeAiMetricsForPageUrl] No match found. Match attempt details: ${JSON.stringify(matchDetails.slice(0, 10))}`, 'warn');
+        }
+        
+        // Return null for "unknown" (no match found) so caller can try other URL formats
+        // Only return actual boolean/number if we found a match
+        const finalOverview = matchedKeyword ? overviewOn : null;
+        const finalCitations = matchedKeyword ? totalCitations : null;
+        
+        debugLog(`[computeAiMetricsForPageUrl] Final result: targetUrl="${canonTarget}", overviewOn=${finalOverview}, totalCitations=${finalCitations}, citationsFromTargetUrl=${citationsFromTargetUrl}, matchedKeyword="${matchedKeyword || 'none'}"`, finalOverview !== null || finalCitations !== null ? 'success' : 'warn');
 
-        return { ai_overview: overviewOn, ai_citations: totalCitations };
+        return { ai_overview: finalOverview, ai_citations: finalCitations };
       };
 
       // Build metrics table
