@@ -12609,7 +12609,30 @@
 
         let citations = 0;
         let overviewOn = false;
+        let citationsFromTargetUrl = 0; // Track citations from keywords where this URL is the target
+        
+        // FIX: For URL tasks, also check if this URL is the best_url/targetUrl for any keyword
+        // This is how the original baseline got AI Overview data for URL tasks
         rows.forEach(r => {
+          // Check if this URL is the target/best URL for this keyword
+          const rowBestUrl = r.best_url || r.targetUrl || r.ranking_url || '';
+          const rowBestUrlCanon = rowBestUrl ? ((typeof normalizeGscPageKey === 'function')
+            ? normalizeGscPageKey(String(rowBestUrl))
+            : String(rowBestUrl).split('?')[0].split('#')[0].replace(/\/$/, '')) : '';
+          
+          if (rowBestUrlCanon && rowBestUrlCanon === canonTarget) {
+            // This keyword has this URL as its target - use its AI data
+            const rowHasOverview = r.has_ai_overview === true || r.ai_overview_present_any === true;
+            if (rowHasOverview) {
+              overviewOn = true;
+            }
+            // Get citations count for this keyword
+            const rowCitations = r.ai_alan_citations_count != null ? Number(r.ai_alan_citations_count) : 
+                                 (Array.isArray(r.ai_alan_citations) ? r.ai_alan_citations.length : 0);
+            citationsFromTargetUrl = Math.max(citationsFromTargetUrl, rowCitations);
+          }
+          
+          // Also check if URL appears in citation arrays (original logic)
           const cited = r.ai_alan_citations || r.aiAlanCitations || [];
           if (!Array.isArray(cited) || cited.length === 0) return;
           const rowHasOverview = r.has_ai_overview === true || r.ai_overview_present_any === true;
@@ -12626,7 +12649,10 @@
           });
         });
 
-        return { ai_overview: overviewOn, ai_citations: citations };
+        // Use the maximum citations count (from target URL match or citation arrays)
+        const totalCitations = Math.max(citations, citationsFromTargetUrl);
+
+        return { ai_overview: overviewOn, ai_citations: totalCitations };
       };
 
       // Build metrics table
@@ -13732,7 +13758,34 @@
           const hasKeyword = !!(task.keyword_text && String(task.keyword_text).trim());
 
           // For URL-only tasks (e.g. Money Pages), prefer an exact GSC page totals fetch.
+          // FIX: Also fetch Ranking & AI data so we can look up AI Overview/Citations for this URL
           if (!hasKeyword && taskUrlForPage) {
+            // CRITICAL: Fetch latest audit from Supabase to get fresh ranking_ai_data for URL lookup
+            let latestAuditFromSupabase = null;
+            try {
+              const propertyUrl = document.getElementById('propertyUrl')?.value || 
+                                  localStorage.getItem('gsc_property_url') || 
+                                  'https://www.alanranger.com';
+              if (typeof fetchLatestAuditFromSupabase === 'function') {
+                debugLog(`[Optimisation] URL task: Fetching latest audit from Supabase for Ranking & AI data...`, 'info');
+                latestAuditFromSupabase = await fetchLatestAuditFromSupabase(propertyUrl, false);
+                if (latestAuditFromSupabase && latestAuditFromSupabase.ranking_ai_data) {
+                  try {
+                    const rankingAiData = latestAuditFromSupabase.ranking_ai_data;
+                    if (rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
+                      localStorage.setItem('rankingAiData', JSON.stringify(rankingAiData));
+                      window.rankingAiData = rankingAiData.combinedRows;
+                      debugLog(`[Optimisation] URL task: Loaded ${rankingAiData.combinedRows.length} keywords from latest audit`, 'success');
+                    }
+                  } catch (rankingErr) {
+                    debugLog(`[Optimisation] URL task: Error loading ranking_ai_data: ${rankingErr.message}`, 'warn');
+                  }
+                }
+              }
+            } catch (fetchErr) {
+              debugLog(`[Optimisation] URL task: Error fetching latest audit: ${fetchErr.message}`, 'warn');
+            }
+            
             try {
               const property = document.getElementById('propertyUrl')?.value ||
                 localStorage.getItem('gsc_property_url') ||
@@ -13747,10 +13800,35 @@
                 const totalsJson = await totalsRes.json().catch(() => null);
                 const totals = totalsRes.ok && totalsJson && totalsJson.status === 'ok' ? totalsJson.data : null;
                 if (totals) {
-                  const aiRows = (typeof window.getRankingAiCombinedRows === 'function') ? window.getRankingAiCombinedRows() : [];
+                  // Get combinedRows from multiple sources (prioritize fresh data)
+                  let aiRows = [];
+                  if (typeof window.getRankingAiCombinedRows === 'function') {
+                    aiRows = window.getRankingAiCombinedRows();
+                  }
+                  if (aiRows.length === 0 && typeof window.rankingAiData !== 'undefined' && Array.isArray(window.rankingAiData)) {
+                    aiRows = window.rankingAiData;
+                  }
+                  if (aiRows.length === 0) {
+                    try {
+                      const local = localStorage.getItem('rankingAiData');
+                      if (local) {
+                        const parsed = JSON.parse(local);
+                        if (parsed && Array.isArray(parsed.combinedRows)) {
+                          aiRows = parsed.combinedRows;
+                        }
+                      }
+                    } catch (e) {
+                      // ignore
+                    }
+                  }
+                  
+                  // FIX: Look up AI data for this URL (checks if URL is best_url/targetUrl for any keyword)
                   const aiForUrl = (typeof window.computeAiMetricsForPageUrl === 'function')
                     ? window.computeAiMetricsForPageUrl(pageUrlForGsc, aiRows)
-                    : { ai_overview: false, ai_citations: null };
+                    : { ai_overview: null, ai_citations: null };
+                  
+                  debugLog(`[Optimisation] URL task: AI lookup for ${pageUrlForGsc} - Overview: ${aiForUrl.ai_overview}, Citations: ${aiForUrl.ai_citations}`, 'info');
+                  
                   currentMetrics = {
                     gsc_clicks_28d: Number(totals.clicks || 0),
                     gsc_impressions_28d: Number(totals.impressions || 0),
@@ -14651,7 +14729,34 @@
           }
 
           // Prefer exact GSC page totals for URL-only tasks
+          // FIX: Also fetch Ranking & AI data so we can look up AI Overview/Citations for this URL
           if (!hasKeyword && taskUrlForPage) {
+            // CRITICAL: Fetch latest audit from Supabase to get fresh ranking_ai_data for URL lookup
+            let latestAuditFromSupabase = null;
+            try {
+              const propertyUrl = document.getElementById('propertyUrl')?.value || 
+                                  localStorage.getItem('gsc_property_url') || 
+                                  'https://www.alanranger.com';
+              if (typeof fetchLatestAuditFromSupabase === 'function') {
+                debugLog(`[Optimisation] Rebaseline URL task: Fetching latest audit from Supabase for Ranking & AI data...`, 'info');
+                latestAuditFromSupabase = await fetchLatestAuditFromSupabase(propertyUrl, false);
+                if (latestAuditFromSupabase && latestAuditFromSupabase.ranking_ai_data) {
+                  try {
+                    const rankingAiData = latestAuditFromSupabase.ranking_ai_data;
+                    if (rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
+                      localStorage.setItem('rankingAiData', JSON.stringify(rankingAiData));
+                      window.rankingAiData = rankingAiData.combinedRows;
+                      debugLog(`[Optimisation] Rebaseline URL task: Loaded ${rankingAiData.combinedRows.length} keywords from latest audit`, 'success');
+                    }
+                  } catch (rankingErr) {
+                    debugLog(`[Optimisation] Rebaseline URL task: Error loading ranking_ai_data: ${rankingErr.message}`, 'warn');
+                  }
+                }
+              }
+            } catch (fetchErr) {
+              debugLog(`[Optimisation] Rebaseline URL task: Error fetching latest audit: ${fetchErr.message}`, 'warn');
+            }
+            
             try {
               const property = document.getElementById('propertyUrl')?.value ||
                 localStorage.getItem('gsc_property_url') ||
@@ -14666,10 +14771,35 @@
                 const totalsJson = await totalsRes.json().catch(() => null);
                 const totals = totalsRes.ok && totalsJson && totalsJson.status === 'ok' ? totalsJson.data : null;
                 if (totals) {
-                  const aiRows = (typeof window.getRankingAiCombinedRows === 'function') ? window.getRankingAiCombinedRows() : [];
+                  // Get combinedRows from multiple sources (prioritize fresh data)
+                  let aiRows = [];
+                  if (typeof window.getRankingAiCombinedRows === 'function') {
+                    aiRows = window.getRankingAiCombinedRows();
+                  }
+                  if (aiRows.length === 0 && typeof window.rankingAiData !== 'undefined' && Array.isArray(window.rankingAiData)) {
+                    aiRows = window.rankingAiData;
+                  }
+                  if (aiRows.length === 0) {
+                    try {
+                      const local = localStorage.getItem('rankingAiData');
+                      if (local) {
+                        const parsed = JSON.parse(local);
+                        if (parsed && Array.isArray(parsed.combinedRows)) {
+                          aiRows = parsed.combinedRows;
+                        }
+                      }
+                    } catch (e) {
+                      // ignore
+                    }
+                  }
+                  
+                  // FIX: Look up AI data for this URL (checks if URL is best_url/targetUrl for any keyword)
                   const aiForUrl = (typeof window.computeAiMetricsForPageUrl === 'function')
                     ? window.computeAiMetricsForPageUrl(pageUrlForGsc, aiRows)
-                    : { ai_overview: false, ai_citations: null };
+                    : { ai_overview: null, ai_citations: null };
+                  
+                  debugLog(`[Optimisation] Rebaseline URL task: AI lookup for ${pageUrlForGsc} - Overview: ${aiForUrl.ai_overview}, Citations: ${aiForUrl.ai_citations}`, 'info');
+                  
                   currentMetrics = {
                     gsc_clicks_28d: Number(totals.clicks || 0),
                     gsc_impressions_28d: Number(totals.impressions || 0),
