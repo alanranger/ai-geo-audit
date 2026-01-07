@@ -95,4 +95,42 @@ Update matching logic to handle:
 ### Next actions
 1) Query Supabase `ranking_ai_data` for `%photography-courses-coventry%` and record `best_url`, overview flags, and citation counts/array length.  
 2) Emit a single no-match debug (error level) listing the first few normalized candidate `best_url` values when no match is found for this target.  
-3) Re-run “Add Measurement” once and capture the new log line to see exactly what URLs were checked.  
+3) Re-run “Add Measurement” once and capture the new log line to see exactly what URLs were checked.
+
+---
+
+## Update: 2026-01-07 15:56 UTC
+
+### Supabase Query Results (CONFIRMED)
+
+**Database:** `supabase-main` (project_ref=igzvwbvgvmzvvzoclufx)  
+**Table:** `keyword_rankings` (NOT `ranking_ai_data`)
+
+**Key Findings:**
+1. ✅ **Data EXISTS**: Found multiple rows with `best_url` containing `photography-courses-coventry`
+2. ✅ **AI Overview Present**: 
+   - "photography courses coventry": `has_ai_overview=true`, `ai_overview_present_any=true`, `ai_alan_citations_count=3`
+   - "photography courses": `has_ai_overview=true`, `ai_overview_present_any=true`, `ai_alan_citations_count=0`
+3. ⚠️ **Query Parameters**: All `best_url` values include query parameters like `?srsltid=AfmBOor95__fTIUJ_GMlKkAQoUjSIIal0CjjtW6Dp0QUuWyhvI3t5PAX`
+4. ✅ **Normalization Should Work**: The `normalizeUrl` function strips query params (line 12753: `normalized.split('?')[0]`), so both should normalize to `alanranger.com/photography-courses-coventry`
+
+### Root Cause Identified
+
+The matching logic **should** work because:
+- Task URL: `www.alanranger.com/photography-courses-coventry` → normalizes to `alanranger.com/photography-courses-coventry`
+- DB URL: `https://www.alanranger.com/photography-courses-coventry?srsltid=...` → normalizes to `alanranger.com/photography-courses-coventry`
+- These should match via `exactMatch` (line 12795)
+
+**But it's not matching**, which suggests:
+1. The `combinedRows` data structure might use different field names than expected
+2. The `rowBestUrl` extraction (line 12778) might be failing
+3. The rows might not be loaded correctly
+
+### Debug Logs Added
+
+Added critical debug logs (error level) that will show:
+- Exact normalized target URL at function start
+- First 3 row URLs and their normalized versions
+- Whether `exactMatch` is true/false for each comparison
+
+**Next Step:** Run "Add Measurement" again and check for new `[computeAiMetricsForPageUrl] START` and `Row 0/1/2` debug lines to see exactly what's being compared.  
