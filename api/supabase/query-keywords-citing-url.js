@@ -107,10 +107,6 @@ export default async function handler(req, res) {
       .eq('audit_date', auditDateToUse)
       .eq('property_url', property_url);
 
-    if (error) {
-      throw error;
-    }
-
     // Filter keywords where ai_alan_citations array contains the target URL
     const citingKeywords = [];
     
@@ -157,7 +153,7 @@ export default async function handler(req, res) {
       count: citingKeywords.length,
       target_url: target_url,
       target_url_normalized: targetUrlNormalized,
-      audit_date: auditDateToUse
+      audit_dates_searched: audit_date ? [audit_date] : [...new Set(keywords.map(k => k.audit_date))]
     });
 
   } catch (err) {
