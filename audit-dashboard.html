@@ -12706,19 +12706,30 @@
         });
 
         // Use the maximum citations count (from target URL match or citation arrays)
-        const totalCitations = Math.max(citations, citationsFromTargetUrl);
+        // Ensure totalCitations is always a number (never null/undefined)
+        const totalCitations = Math.max(citations || 0, citationsFromTargetUrl || 0);
         
         // Log detailed match attempts if no match found
-        if (!overviewOn && totalCitations === 0 && matchDetails.length > 0) {
+        if (!matchedKeyword && matchDetails.length > 0) {
           debugLog(`[computeAiMetricsForPageUrl] No match found. Match attempt details: ${JSON.stringify(matchDetails.slice(0, 10))}`, 'warn');
         }
         
-        // Return null for "unknown" (no match found) so caller can try other URL formats
-        // Only return actual boolean/number if we found a match
-        const finalOverview = matchedKeyword ? overviewOn : null;
-        const finalCitations = matchedKeyword ? totalCitations : null;
+        // CRITICAL: Ensure consistency - if matchedKeyword is set, both values must be non-null
+        // If matchedKeyword is null, both must be null (unknown)
+        let finalOverview = null;
+        let finalCitations = null;
         
-        debugLog(`[computeAiMetricsForPageUrl] Final result: targetUrl="${canonTarget}", overviewOn=${finalOverview}, totalCitations=${finalCitations}, citationsFromTargetUrl=${citationsFromTargetUrl}, matchedKeyword="${matchedKeyword || 'none'}"`, finalOverview !== null || finalCitations !== null ? 'success' : 'warn');
+        if (matchedKeyword) {
+          // We found a match - return actual values (even if overview is false or citations is 0)
+          finalOverview = overviewOn; // boolean (true/false)
+          finalCitations = totalCitations; // number (0 or higher)
+        } else {
+          // No match found - return null for both (unknown state)
+          finalOverview = null;
+          finalCitations = null;
+        }
+        
+        debugLog(`[computeAiMetricsForPageUrl] Final result: targetUrl="${canonTarget}", overviewOn=${finalOverview}, totalCitations=${finalCitations}, citationsFromTargetUrl=${citationsFromTargetUrl}, matchedKeyword="${matchedKeyword || 'none'}"`, matchedKeyword ? 'success' : 'warn');
 
         return { ai_overview: finalOverview, ai_citations: finalCitations };
       };
@@ -13902,11 +13913,15 @@
                         ? window.computeAiMetricsForPageUrl(urlToCheck, aiRows)
                         : { ai_overview: null, ai_citations: null };
                       
-                      // Use first non-null result
-                      if (result.ai_overview !== null || result.ai_citations !== null) {
+                      // Use first result where BOTH values are non-null (consistent match found)
+                      // This ensures we only use results where a match was definitively found
+                      if (result.ai_overview !== null && result.ai_citations !== null) {
                         aiForUrl = result;
                         debugLog(`[Optimisation] URL task: AI lookup for ${urlToCheck} - Overview: ${aiForUrl.ai_overview}, Citations: ${aiForUrl.ai_citations}`, 'info');
                         break;
+                      } else if (result.ai_overview !== null || result.ai_citations !== null) {
+                        // Inconsistent result (shouldn't happen, but log it for debugging)
+                        debugLog(`[Optimisation] URL task: Inconsistent result from computeAiMetricsForPageUrl for ${urlToCheck} - Overview: ${result.ai_overview}, Citations: ${result.ai_citations}`, 'warn');
                       }
                     }
                   }
@@ -14891,11 +14906,15 @@
                         ? window.computeAiMetricsForPageUrl(urlToCheck, aiRows)
                         : { ai_overview: null, ai_citations: null };
                       
-                      // Use first non-null result
-                      if (result.ai_overview !== null || result.ai_citations !== null) {
+                      // Use first result where BOTH values are non-null (consistent match found)
+                      // This ensures we only use results where a match was definitively found
+                      if (result.ai_overview !== null && result.ai_citations !== null) {
                         aiForUrl = result;
                         debugLog(`[Optimisation] Rebaseline URL task: AI lookup for ${urlToCheck} - Overview: ${aiForUrl.ai_overview}, Citations: ${aiForUrl.ai_citations}`, 'info');
                         break;
+                      } else if (result.ai_overview !== null || result.ai_citations !== null) {
+                        // Inconsistent result (shouldn't happen, but log it for debugging)
+                        debugLog(`[Optimisation] Rebaseline URL task: Inconsistent result from computeAiMetricsForPageUrl for ${urlToCheck} - Overview: ${result.ai_overview}, Citations: ${result.ai_citations}`, 'warn');
                       }
                     }
                   }
