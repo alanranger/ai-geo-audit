@@ -30114,7 +30114,7 @@ Final Score: ${score}/100`;
                   <th id="money-sort-position" style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; transition: background 0.2s; line-height: 1.2;" onmouseover="this.style.background='#e2e8f0';" onmouseout="this.style.background='transparent';" title="Click to sort by Avg Position" onclick="window.moneyPagesSetSort('position')">
                     <div>Avg</div><div>Position</div>${getSortIcon('position')}
                   </th>
-                  <th id="money-sort-ai-citations" style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; white-space: normal; line-height: 1.15; cursor: default; user-select: none; opacity: 0.6;" title="AI citations (total citations from your domain in AI Overview). Latest audit only; fetched on demand. Sorting disabled.">
+                  <th id="money-sort-ai-citations" style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; white-space: normal; line-height: 1.15; cursor: default !important; user-select: none; opacity: 0.6; pointer-events: none;" title="AI citations (total citations from your domain in AI Overview). Latest audit only; fetched on demand. Sorting disabled.">
                     <div>AI citations</div>
                   </th>
                   <th id="money-sort-opportunity" style="text-align: center; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; transition: background 0.2s; white-space: nowrap;" onmouseover="this.style.background='#e2e8f0';" onmouseout="this.style.background='transparent';" title="Click to sort by Opportunity">
@@ -30730,13 +30730,19 @@ Final Score: ${score}/100`;
       
       // Function to populate AI citations for Money Pages table
       async function populateMoneyPagesAiCitations(rows) {
+        const debugPrefix = '[Money Pages AI Citations DEBUG]';
         try {
+          console.log(`${debugPrefix} === FUNCTION START ===`);
+          console.log(`${debugPrefix} Rows provided: ${rows?.length || 0}`);
+          
           // If no rows provided, try to get from window.moneyPagesData
           if (!rows || rows.length === 0) {
             rows = window.moneyPagesData || [];
+            console.log(`${debugPrefix} Using window.moneyPagesData: ${rows?.length || 0} rows`);
           }
           
           if (!rows || rows.length === 0) {
+            console.log(`${debugPrefix} No rows available, exiting`);
             return;
           }
           
@@ -30746,12 +30752,13 @@ Final Score: ${score}/100`;
           // Check if table container exists
           let tableContainer = document.getElementById('money-pages-table-container');
           if (!tableContainer) {
+            console.log(`${debugPrefix} Table container not found, exiting`);
             return;
           }
           
           // Verify tableContainer is a valid DOM element
           if (typeof tableContainer.querySelectorAll !== 'function') {
-            console.error('[Money Pages AI Citations] tableContainer is not a valid DOM element');
+            console.error(`${debugPrefix} tableContainer is not a valid DOM element`);
             return;
           }
         
@@ -30759,11 +30766,19 @@ Final Score: ${score}/100`;
         const cells = tableContainer.querySelectorAll('.ai-citation-cell-opportunity');
         
         if (!cells || cells.length === 0) {
-          console.warn('[Money Pages AI Citations] No cells found in table');
+          console.warn(`${debugPrefix} No cells found in table`);
           return;
         }
         
-        console.log(`[Money Pages AI Citations] Found ${cells.length} cells to populate`);
+        console.log(`${debugPrefix} Found ${cells.length} cells to populate`);
+        
+        // Log initial cell values for first 5 cells
+        const initialCellValues = Array.from(cells).slice(0, 5).map((cell, idx) => {
+          const url = cell.getAttribute('data-page-url') || '';
+          const currentValue = cell.textContent || '';
+          return { idx, url, currentValue };
+        });
+        console.log(`${debugPrefix} Initial cell values (first 5):`, initialCellValues);
         
         // Get property URL for API calls
         const propertyUrl = document.getElementById('propertyUrl')?.value || localStorage.getItem('property_url') || '';
@@ -30896,9 +30911,13 @@ Final Score: ${score}/100`;
           
           // If cached value exists, render it and store on the row for sorting
           if (typeof cachedCount === 'number') {
+            const oldValue = cell.textContent || '';
             cell.textContent = cachedCount.toLocaleString();
             cell.style.color = '#0f172a';
             cell.style.fontWeight = '600';
+            if (oldValue !== cachedCount.toLocaleString()) {
+              console.log(`${debugPrefix} Updated cell from cache: ${pageUrl} | ${oldValue} → ${cachedCount.toLocaleString()}`);
+            }
             const pageUrlNormalized = normalizeUrl(pageUrl);
             const row = rows.find(r => {
               const rowUrl = r.url || '';
@@ -30914,6 +30933,7 @@ Final Score: ${score}/100`;
           // This prevents flickering from a valid number to 0
           const existingNumeric = parseInt(String(cell.textContent || '').replace(/,/g, ''), 10);
           if (!Number.isNaN(existingNumeric) && existingNumeric > 0) {
+            console.log(`${debugPrefix} Preserving existing displayed value: ${pageUrl} | ${existingNumeric} (no cache found)`);
             // Preserve the displayed value and set it on the row for sorting
             const pageUrlNormalized = normalizeUrl(pageUrl);
             const row = rows.find(r => {
@@ -31050,7 +31070,7 @@ Final Score: ${score}/100`;
               const existingCache = citationCache[url];
               if (typeof existingCache === 'number' && existingCache > 0) {
                 if (count === 0 || count === null || count < existingCache) {
-                  console.log(`[Money Pages AI Citations] Preserving existing count ${existingCache} for ${url} (API returned ${count})`);
+                  console.log(`${debugPrefix} Preserving cached count ${existingCache} for ${url} (API returned ${count})`);
                   return; // Skip updating if API returns 0, null, or lower valid count
                 }
               }
@@ -31098,10 +31118,11 @@ Final Score: ${score}/100`;
               if (cell) {
                 // STRICT PROTECTION: Don't overwrite a valid displayed value with 0, null, or lower value
                 const existingDisplay = parseInt(String(cell.textContent || '').replace(/,/g, ''), 10);
+                const oldDisplayValue = cell.textContent || '';
                 if (!Number.isNaN(existingDisplay) && existingDisplay > 0) {
                   // If API returned 0, null, or a lower value, preserve existing value
                   if (count === 0 || count === null || count < existingDisplay) {
-                    console.log(`[Money Pages AI Citations] Preserving displayed count ${existingDisplay} for ${url} (API returned ${count})`);
+                    console.log(`${debugPrefix} Preserving displayed count ${existingDisplay} for ${url} (API returned ${count})`);
                     return; // Skip updating if API returns 0, null, or lower valid count
                   }
                 }
@@ -31110,6 +31131,9 @@ Final Score: ${score}/100`;
                 cell.textContent = count.toLocaleString();
                 cell.style.color = '#0f172a';
                 cell.style.fontWeight = '600';
+                if (oldDisplayValue !== count.toLocaleString()) {
+                  console.log(`${debugPrefix} Updated cell from API: ${url} | ${oldDisplayValue} → ${count.toLocaleString()}`);
+                }
                 const row = rows.find(r => {
                   const rowUrl = r.url || '';
                   const rowUrlNormalized = normalizeUrl(rowUrl);
@@ -31133,7 +31157,10 @@ Final Score: ${score}/100`;
         } catch (err) {
           console.error('[Money Pages AI Citations] CRITICAL ERROR in function:', err);
           console.error('[Money Pages AI Citations] Error stack:', err.stack);
+          console.error(`${debugPrefix} Critical error: ${err.message}`, err);
           debugLog(`[Money Pages] Critical error in populateMoneyPagesAiCitations: ${err.message}`, 'error');
+        } finally {
+          console.log(`${debugPrefix} === FUNCTION COMPLETE ===`);
         }
       }
       
@@ -34276,7 +34303,7 @@ Final Score: ${score}/100`;
               return;
             }
 
-            cell.textContent = '⏳';
+            cell.textContent = '—';
             const endpoint = apiUrl(
               `/api/supabase/query-keywords-citing-url?property_url=${encodeURIComponent(propertyUrl)}&target_url=${encodeURIComponent(url)}`
             );
