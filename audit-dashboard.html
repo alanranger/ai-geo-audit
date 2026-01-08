@@ -29241,9 +29241,9 @@ Final Score: ${score}/100`;
       
       // Helper to set sort and re-apply filters from anywhere (header clicks)
       window.moneyPagesSetSort = function(column) {
-        // TEMPORARILY DISABLED: Disable sorting on AI Citations column to debug flickering
+        // COMPLETELY DISABLED: AI Citations column sorting is permanently disabled
         if (column === 'aiCitations') {
-          console.log('[Money Pages] AI Citations sorting disabled temporarily for debugging');
+          console.log('[Money Pages] AI Citations sorting is permanently disabled - ignoring sort request.');
           return;
         }
         if (window.moneyPagesSortColumn === column) {
@@ -30114,7 +30114,7 @@ Final Score: ${score}/100`;
                   <th id="money-sort-position" style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; transition: background 0.2s; line-height: 1.2;" onmouseover="this.style.background='#e2e8f0';" onmouseout="this.style.background='transparent';" title="Click to sort by Avg Position" onclick="window.moneyPagesSetSort('position')">
                     <div>Avg</div><div>Position</div>${getSortIcon('position')}
                   </th>
-                  <th id="money-sort-ai-citations" style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; white-space: normal; line-height: 1.15; cursor: default; user-select: none;" title="AI citations (sorting disabled)">
+                  <th id="money-sort-ai-citations" style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; white-space: normal; line-height: 1.15; cursor: default; user-select: none; opacity: 0.6;" title="AI citations (total citations from your domain in AI Overview). Latest audit only; fetched on demand. Sorting disabled.">
                     <div>AI citations</div>
                   </th>
                   <th id="money-sort-opportunity" style="text-align: center; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; transition: background 0.2s; white-space: nowrap;" onmouseover="this.style.background='#e2e8f0';" onmouseout="this.style.background='transparent';" title="Click to sort by Opportunity">
@@ -30236,7 +30236,7 @@ Final Score: ${score}/100`;
                 })()}
               </td>
               <td style="padding: 0.75rem; text-align: right; color: ${posColor}; font-weight: 600; vertical-align: top; white-space: nowrap;">${row.avgPosition ? row.avgPosition.toFixed(1) : '—'}</td>
-              <td style="padding: 0.75rem; text-align: right; font-weight: 600; vertical-align: top; white-space: nowrap;" class="ai-citation-cell-opportunity" data-page-url="${row.url || ''}">⏳</td>
+              <td style="padding: 0.75rem; text-align: right; font-weight: 600; vertical-align: top; white-space: nowrap;" class="ai-citation-cell-opportunity" data-page-url="${row.url || ''}">—</td>
               <td style="padding: 0.75rem; text-align: center; vertical-align: top;">
                 ${(() => {
                   // Split categoryLabel into main part and bracketed part
@@ -31046,11 +31046,13 @@ Final Score: ${score}/100`;
                 return;
               }
               
-              // Don't overwrite a valid cached value with 0 (prevent flickering)
+              // Don't overwrite a valid cached value with 0, null, or lower value (prevent flickering)
               const existingCache = citationCache[url];
-              if (typeof existingCache === 'number' && existingCache > 0 && count === 0) {
-                console.log(`[Money Pages AI Citations] Preserving existing count ${existingCache} for ${url} (API returned 0)`);
-                return;
+              if (typeof existingCache === 'number' && existingCache > 0) {
+                if (count === 0 || count === null || count < existingCache) {
+                  console.log(`[Money Pages AI Citations] Preserving existing count ${existingCache} for ${url} (API returned ${count})`);
+                  return; // Skip updating if API returns 0, null, or lower valid count
+                }
               }
               
               citationCache[url] = count;
@@ -31094,18 +31096,13 @@ Final Score: ${score}/100`;
               }
               
               if (cell) {
-                // STRICT PROTECTION: Don't overwrite a valid displayed value with 0 or lower value
+                // STRICT PROTECTION: Don't overwrite a valid displayed value with 0, null, or lower value
                 const existingDisplay = parseInt(String(cell.textContent || '').replace(/,/g, ''), 10);
                 if (!Number.isNaN(existingDisplay) && existingDisplay > 0) {
-                  // If API returned 0, preserve existing value
-                  if (count === 0) {
-                    console.log(`[Money Pages AI Citations] Preserving displayed count ${existingDisplay} for ${url} (API returned 0)`);
-                    return;
-                  }
-                  // If API returned a lower value, preserve existing (might be from better source)
-                  if (count < existingDisplay) {
-                    console.log(`[Money Pages AI Citations] Preserving displayed count ${existingDisplay} for ${url} (API returned lower: ${count})`);
-                    return;
+                  // If API returned 0, null, or a lower value, preserve existing value
+                  if (count === 0 || count === null || count < existingDisplay) {
+                    console.log(`[Money Pages AI Citations] Preserving displayed count ${existingDisplay} for ${url} (API returned ${count})`);
+                    return; // Skip updating if API returns 0, null, or lower valid count
                   }
                 }
                 
@@ -31785,9 +31782,9 @@ Final Score: ${score}/100`;
           const th = e?.target?.closest ? e.target.closest('th[id^="money-sort-"]') : null;
           if (!th || !th.id) return;
           const col = String(th.id).replace('money-sort-', '').replace('-', '');
-          // TEMPORARILY DISABLED: Disable sorting on AI Citations to debug citation count flickering issue
+          // COMPLETELY DISABLED: AI Citations column sorting is permanently disabled
           if (col === 'aiCitations' || col === 'aicitations' || col === 'ai-citations') {
-            console.log('[Money Pages] AI Citations sorting disabled temporarily for debugging');
+            console.log('[Money Pages] AI Citations sorting is permanently disabled - ignoring click.');
             e.preventDefault();
             e.stopPropagation();
             return false;
@@ -31803,9 +31800,11 @@ Final Score: ${score}/100`;
       
       // Handle sorting for Money Pages table
       async function handleMoneyPagesSort(column) {
-        // TEMPORARILY DISABLED: Disable sorting to debug citation count flickering issue
-        console.log('[Money Pages] Sorting disabled temporarily for debugging');
-        return;
+        // COMPLETELY DISABLED: AI Citations column sorting is permanently disabled
+        if (column === 'aiCitations') {
+          console.log('[Money Pages] AI Citations sorting is permanently disabled.');
+          return;
+        }
         
         if (window.moneyPagesSortColumn === column) {
           window.moneyPagesSortDirection = window.moneyPagesSortDirection === 'asc' ? 'desc' : 'asc';
