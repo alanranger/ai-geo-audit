@@ -29890,6 +29890,21 @@ Final Score: ${score}/100`;
             return '<div style="font-size: 0.85rem; color: #999; padding: 1rem; text-align: center;">No money-page data available for this audit period. Check that your money pages have impressions in the selected date range.</div>';
           }
         
+        // Define normalizeUrl function locally to avoid scope issues
+        const normalizeUrl = (url) => {
+          if (!url) return '';
+          let normalized = String(url).toLowerCase().trim();
+          normalized = normalized.replace(/^https?:\/\//, '');
+          normalized = normalized.replace(/^www\./, '');
+          normalized = normalized.split('?')[0].split('#')[0];
+          const parts = normalized.split('/');
+          if (parts.length > 1) {
+            normalized = parts.slice(1).join('/');
+          }
+          normalized = normalized.replace(/^\/+/, '').replace(/\/+$/, '');
+          return normalized;
+        };
+        
         // Store original data for sorting (across all pages) - update if new data provided
         window.moneyPagesData = moneyRows;
         if (window.moneyPagesSortColumn === undefined) {
@@ -29898,44 +29913,8 @@ Final Score: ${score}/100`;
         }
         
         // Sort data if needed (sort ALL rows, not just current page)
-        // CRITICAL: For AI citations sorting, ensure we read from cells if _aiCitations not set
         let sortedRows = [...moneyRows];
         if (window.moneyPagesSortColumn) {
-          // If sorting by AI citations, populate from cells first if needed
-          if (window.moneyPagesSortColumn === 'aiCitations') {
-            const tableContainer = document.getElementById('money-pages-table-container');
-            if (tableContainer) {
-              const cells = tableContainer.querySelectorAll('.ai-citation-cell-opportunity');
-              cells.forEach(cell => {
-                const cellUrl = cell.getAttribute('data-page-url');
-                if (cellUrl) {
-                  const cellText = cell.textContent.trim();
-                  // Parse count from cell text (handles "⏳", "0", "1,234", etc.)
-                  let count = 0;
-                  if (cellText !== '⏳' && cellText !== '') {
-                    const parsed = parseInt(cellText.replace(/,/g, ''), 10);
-                    if (!isNaN(parsed)) {
-                      count = parsed;
-                    }
-                  }
-                  // Find matching row and update _aiCitations
-                  const matchingRow = sortedRows.find(r => {
-                    const rowUrl = r.url || '';
-                    const rowUrlNormalized = normalizeUrl(rowUrl);
-                    const cellUrlNormalized = normalizeUrl(cellUrl);
-                    return rowUrl === cellUrl || 
-                           rowUrlNormalized === cellUrlNormalized ||
-                           rowUrlNormalized.includes(cellUrlNormalized) ||
-                           cellUrlNormalized.includes(rowUrlNormalized);
-                  });
-                  if (matchingRow) {
-                    matchingRow._aiCitations = count;
-                  }
-                }
-              });
-            }
-          }
-          
           sortedRows.sort((a, b) => {
             let aVal, bVal;
             switch(window.moneyPagesSortColumn) {
@@ -29973,9 +29952,12 @@ Final Score: ${score}/100`;
                 bVal = b.avgPosition || 99;
                 break;
               case 'aiCitations':
-                // Use _aiCitations if available, otherwise try to get from citationCache
-                aVal = typeof a._aiCitations === 'number' ? a._aiCitations : (window.moneyPagesCitationCache && window.moneyPagesCitationCache[a.url] !== undefined ? window.moneyPagesCitationCache[a.url] : -1);
-                bVal = typeof b._aiCitations === 'number' ? b._aiCitations : (window.moneyPagesCitationCache && window.moneyPagesCitationCache[b.url] !== undefined ? window.moneyPagesCitationCache[b.url] : -1);
+                // Use _aiCitations if available, otherwise try to get from global citationCache
+                // Fallback to -1 if not found (so rows without citations sort to bottom)
+                aVal = typeof a._aiCitations === 'number' ? a._aiCitations : 
+                       (window.moneyPagesCitationCache && typeof window.moneyPagesCitationCache[a.url] === 'number' ? window.moneyPagesCitationCache[a.url] : -1);
+                bVal = typeof b._aiCitations === 'number' ? b._aiCitations : 
+                       (window.moneyPagesCitationCache && typeof window.moneyPagesCitationCache[b.url] === 'number' ? window.moneyPagesCitationCache[b.url] : -1);
                 break;
               case 'opportunity':
                 // Sort by category priority: HIGH_OPPORTUNITY=0, VISIBILITY_FIX=1, MAINTAIN=2
