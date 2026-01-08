@@ -149,7 +149,9 @@ export default async function handler(req, res) {
     }
 
     // Filter keywords where ai_alan_citations array contains the target URL
+    // Count TOTAL citations (not just unique keywords) - same URL can be cited multiple times from different keywords
     const citingKeywords = [];
+    let totalCitationCount = 0; // Count total citations across all keywords
     
     combinedRows.forEach(row => {
       const citationsArray = row.ai_alan_citations || [];
@@ -157,8 +159,8 @@ export default async function handler(req, res) {
         return; // Skip if no citations
       }
       
-      // Check if any citation matches the target URL
-      let urlIsCited = false;
+      // Count how many citations in this keyword match the target URL
+      let keywordCitationCount = 0;
       citationsArray.forEach(citation => {
         // Try multiple field names to extract citation URL
         const citedUrl = typeof citation === 'string' 
@@ -170,20 +172,38 @@ export default async function handler(req, res) {
         if (!citedUrl) return;
         
         const citedUrlNormalized = normalizeUrl(citedUrl);
-        // Match if normalized URLs are equal OR if citation contains the target slug
-        if (citedUrlNormalized === targetUrlNormalized || citedUrlNormalized.includes(targetUrlNormalized)) {
-          urlIsCited = true;
+        
+        // Strict URL matching: exact match or same path segments (not substring matching)
+        // This prevents matching "photography-workshops" when looking for "landscape-photography-workshops"
+        const targetPathParts = targetUrlNormalized.split('/').filter(p => p);
+        const citedPathParts = citedUrlNormalized.split('/').filter(p => p);
+        
+        // Exact match
+        let matches = citedUrlNormalized === targetUrlNormalized;
+        
+        // If not exact, check if paths match (same segments, allowing query/fragment variants)
+        // Only match if the citation path starts with the target path (not substring matching)
+        if (!matches && targetPathParts.length > 0 && citedPathParts.length >= targetPathParts.length) {
+          // Check if citation path starts with target path segments
+          matches = targetPathParts.every((part, idx) => citedPathParts[idx] === part);
+        }
+        
+        if (matches) {
+          keywordCitationCount++; // Count this citation
         }
       });
       
-      if (urlIsCited) {
+      // If this keyword has citations for the target URL, track it
+      if (keywordCitationCount > 0) {
+        totalCitationCount += keywordCitationCount; // Add to total count
         citingKeywords.push({
           keyword: row.keyword || '',
           has_ai_overview: row.has_ai_overview === true || row.hasAiOverview === true,
           best_url: row.best_url || row.bestUrl || '',
           best_rank_group: row.best_rank_group || row.bestRankGroup || null,
           search_volume: row.search_volume || row.monthly_search_volume || row.volume || null,
-          best_rank: row.best_rank_group || row.bestRankGroup || null
+          best_rank: row.best_rank_group || row.bestRankGroup || null,
+          citation_count: keywordCitationCount // Track how many citations this keyword has for the URL
         });
       }
     });
@@ -191,7 +211,8 @@ export default async function handler(req, res) {
     return sendJSON(res, 200, {
       status: 'ok',
       data: citingKeywords,
-      count: citingKeywords.length,
+      count: totalCitationCount, // Return total citations, not unique keywords
+      unique_keywords: citingKeywords.length, // Also provide unique keyword count for reference
       target_url: target_url,
       target_url_normalized: targetUrlNormalized,
       audit_date: auditDateToUse

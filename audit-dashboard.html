@@ -12821,6 +12821,7 @@
           // This is the correct approach - citations are keyword-driven, not URL-driven
           const citingKeywords = [];
           let hasOverview = false;
+          let totalCitationCount = 0; // Count total citations (not just unique keywords)
           
           // ENHANCED DIAGNOSTIC: Log target URL and sample of data structure
           if (canonTarget.includes('photography-courses-coventry')) {
@@ -12862,8 +12863,8 @@
               debugLog(`[computeAiMetricsForPageUrl] DIAGNOSTIC: Keyword "${r.keyword || 'unknown'}" has ${citationsArray.length} citations. Sample: ${JSON.stringify(sampleCitations)}`, 'error');
             }
             
-            // Check if any citation in this keyword's array matches the target URL
-            let urlIsCited = false;
+            // Count how many citations in this keyword's array match the target URL
+            let keywordCitationCount = 0; // Count citations for this keyword
             citationsArray.forEach(citation => {
               // Try multiple field names to extract citation URL (matches API endpoint logic)
               const citedUrl = typeof citation === 'string' 
@@ -12874,27 +12875,39 @@
               if (!citedUrl) return;
               
               const citedUrlNormalized = normalizeUrl(citedUrl);
-              const targetSlug = canonTarget;
               
-              // ENHANCED DIAGNOSTIC: Log comparison for photography-courses-coventry
-              if (canonTarget.includes('photography-courses-coventry')) {
-                if (citedUrlNormalized.includes('photography-courses') || canonTarget.includes('photography-courses')) {
-                  debugLog(
-                    `[computeAiMetricsForPageUrl] DIAGNOSTIC: Comparing citation "${citedUrl}" (normalized: "${citedUrlNormalized}") ` +
-                    `with target "${canonTarget}" - Eq: ${citedUrlNormalized === canonTarget} | IncludesSlug: ${citedUrlNormalized.includes(targetSlug)}`,
-                    'error'
-                  );
-                }
+              // Strict URL matching: exact match or same path segments (not substring matching)
+              // This prevents matching "photography-workshops" when looking for "landscape-photography-workshops"
+              const targetPathParts = canonTarget.split('/').filter(p => p);
+              const citedPathParts = citedUrlNormalized.split('/').filter(p => p);
+              
+              // Exact match
+              let matches = citedUrlNormalized === canonTarget;
+              
+              // If not exact, check if paths match (same segments, allowing query/fragment variants)
+              // Only match if the citation path starts with the target path (not substring matching)
+              if (!matches && targetPathParts.length > 0 && citedPathParts.length >= targetPathParts.length) {
+                // Check if citation path starts with target path segments
+                matches = targetPathParts.every((part, idx) => citedPathParts[idx] === part);
               }
               
-              // Match if normalized URLs are equal OR contain the target slug (fallback for query/fragment variants)
-              if (citedUrlNormalized === canonTarget || citedUrlNormalized.includes(targetSlug)) {
-                urlIsCited = true;
+              // ENHANCED DIAGNOSTIC: Log comparison for photography-courses-coventry or landscape-photography-workshops
+              if (canonTarget.includes('photography-courses-coventry') || canonTarget.includes('landscape-photography-workshops')) {
+                debugLog(
+                  `[computeAiMetricsForPageUrl] DIAGNOSTIC: Comparing citation "${citedUrl}" (normalized: "${citedUrlNormalized}") ` +
+                  `with target "${canonTarget}" - Exact: ${citedUrlNormalized === canonTarget} | PathMatch: ${matches}`,
+                  'error'
+                );
+              }
+              
+              if (matches) {
+                keywordCitationCount++; // Count this citation
               }
             });
             
-            // If this keyword cites the target URL, track it
-            if (urlIsCited) {
+            // If this keyword cites the target URL, track it and add to total count
+            if (keywordCitationCount > 0) {
+              totalCitationCount += keywordCitationCount; // Add to total citation count
               const rowHasOverview = r.has_ai_overview === true || r.hasAiOverview === true || r.ai_overview_present_any === true || r.aiOverviewPresentAny === true;
               if (rowHasOverview) {
                 hasOverview = true;
@@ -12904,7 +12917,8 @@
                 keyword: r.keyword || 'unknown',
                 has_ai_overview: rowHasOverview,
                 best_url: r.best_url || r.bestUrl || r.targetUrl || r.ranking_url || '',
-                best_rank: r.best_rank_group || r.bestRankGroup || r.best_rank_absolute || null
+                best_rank: r.best_rank_group || r.bestRankGroup || r.best_rank_absolute || null,
+                citation_count: keywordCitationCount // Track how many citations this keyword has for the URL
               });
               
               // Debug log for the problematic URL
@@ -12928,34 +12942,34 @@
             );
           }
 
-          // Count unique keywords that cite this URL (not total citations)
+          // Count unique keywords that cite this URL (for display in card 2)
           const uniqueKeywordsCount = citingKeywords.length;
           
           // ENHANCED DIAGNOSTIC: Log which keywords were found
           if (canonTarget.includes('photography-courses-coventry')) {
             debugLog(
-              `[computeAiMetricsForPageUrl] DIAGNOSTIC: Found ${uniqueKeywordsCount} unique keywords citing URL: ` +
-              `${JSON.stringify(citingKeywords.map(k => ({ keyword: k.keyword, has_ai_overview: k.has_ai_overview })))}`,
+              `[computeAiMetricsForPageUrl] DIAGNOSTIC: Found ${uniqueKeywordsCount} unique keywords citing URL with ${totalCitationCount} total citations: ` +
+              `${JSON.stringify(citingKeywords.map(k => ({ keyword: k.keyword, citation_count: k.citation_count, has_ai_overview: k.has_ai_overview })))}`,
               'error'
             );
             debugLog(
               `[computeAiMetricsForPageUrl] DIAGNOSTIC: Final calculation - ` +
-              `uniqueKeywordsCount=${uniqueKeywordsCount}, ` +
+              `uniqueKeywordsCount=${uniqueKeywordsCount}, totalCitationCount=${totalCitationCount}, ` +
               `hasOverview=${hasOverview}`,
               'error'
             );
           }
           
-          // Return results: citations count is number of unique keywords, overview is true if any citing keyword has it
+          // Return results: citations count is TOTAL citations (sum across all keywords), overview is true if any citing keyword has it
           let finalOverview = null;
           let finalCitations = null;
           
-          if (uniqueKeywordsCount > 0) {
-            // We found keywords citing this URL - return actual values
-            finalCitations = uniqueKeywordsCount;
+          if (totalCitationCount > 0) {
+            // We found citations for this URL - return total count
+            finalCitations = totalCitationCount; // Return total citations, not unique keywords
             finalOverview = hasOverview; // true if at least one citing keyword has overview
           } else {
-            // No keywords cite this URL - return null (unknown, not zero)
+            // No citations found for this URL - return null (unknown, not zero)
             finalCitations = null;
             finalOverview = null;
           }
@@ -12971,7 +12985,7 @@
           if (canonTarget.includes('photography-courses-coventry')) {
             debugLog(
               `[computeAiMetricsForPageUrl] FINAL RESULT: target=${canonTarget} ` +
-              `uniqueKeywordsCount=${uniqueKeywordsCount} ` +
+              `uniqueKeywordsCount=${uniqueKeywordsCount} totalCitationCount=${totalCitationCount} ` +
               `finalOverview=${finalOverview} finalCitations=${finalCitations}`,
               'error'
             );
@@ -14385,16 +14399,17 @@
                             
                             if (citationData.status === 'ok' && citationData.data && citationData.data.length > 0) {
                               const citingKeywords = citationData.data;
-                              const uniqueKeywordsCount = citingKeywords.length;
+                              // Use total citation count from API (not unique keywords count)
+                              const totalCitationCount = typeof citationData.count === 'number' ? citationData.count : citingKeywords.reduce((sum, k) => sum + (k.citation_count || 1), 0);
                               const hasOverview = citingKeywords.some(k => k.has_ai_overview === true);
                               
                               aiForUrl = {
                                 ai_overview: hasOverview,
-                                ai_citations: uniqueKeywordsCount
+                                ai_citations: totalCitationCount // Use total citations, not unique keywords
                               };
                               
                               debugLog(
-                                `[Optimisation] URL task: Found ${uniqueKeywordsCount} keywords citing URL from Supabase: ` +
+                                `[Optimisation] URL task: Found ${citingKeywords.length} keywords with ${totalCitationCount} total citations citing URL from Supabase: ` +
                                 `${citingKeywords.map(k => k.keyword).join(', ')}`,
                                 'success'
                               );
@@ -14467,16 +14482,17 @@
                             const citationData = await citationResponse.json();
                             if (citationData.status === 'ok' && citationData.data && citationData.data.length > 0) {
                               const citingKeywords = citationData.data;
-                              const uniqueKeywordsCount = citingKeywords.length;
+                              // Use total citation count from API (not unique keywords count)
+                              const totalCitationCount = typeof citationData.count === 'number' ? citationData.count : citingKeywords.reduce((sum, k) => sum + (k.citation_count || 1), 0);
                               const hasOverview = citingKeywords.some(k => k.has_ai_overview === true);
                               
                               aiForUrl = {
                                 ai_overview: hasOverview,
-                                ai_citations: uniqueKeywordsCount
+                                ai_citations: totalCitationCount // Use total citations, not unique keywords
                               };
                               
                               debugLog(
-                                `[Optimisation] URL task: Supabase fallback found ${uniqueKeywordsCount} citing keywords: ` +
+                                `[Optimisation] URL task: Supabase fallback found ${citingKeywords.length} keywords with ${totalCitationCount} total citations: ` +
                                 `${citingKeywords.map(k => k.keyword).join(', ')}`,
                                 'success'
                               );
@@ -29421,6 +29437,7 @@ Final Score: ${score}/100`;
             // ============================================
             // Use the same API endpoint that the table uses to get accurate data
             let citingKeywords = [];
+            let totalCitationCount = 0; // Track total citations (not just unique keywords)
             try {
               const propertyUrl = document.getElementById('propertyUrl')?.value || localStorage.getItem('property_url') || '';
               if (propertyUrl) {
@@ -29429,6 +29446,8 @@ Final Score: ${score}/100`;
                 if (apiResponse.ok) {
                   const apiData = await apiResponse.json();
                   if (apiData.status === 'ok' && Array.isArray(apiData.data)) {
+                    // Get total citation count from API (sum across all keywords)
+                    totalCitationCount = typeof apiData.count === 'number' ? apiData.count : apiData.data.reduce((sum, k) => sum + (k.citation_count || 1), 0);
                     // Get search volumes from combinedRows in localStorage
                     const lastAuditResults = localStorage.getItem('last_audit_results');
                     let combinedRows = [];
@@ -29557,7 +29576,7 @@ Final Score: ${score}/100`;
             
             if (citingKeywords.length > 0) {
               card2Html += `
-                <div style="font-size: 0.85rem; color: #0f172a; margin-bottom: 0.5rem; font-weight: 600;">${citingKeywords.length} keyword${citingKeywords.length !== 1 ? 's' : ''} citing this URL</div>
+                <div style="font-size: 0.85rem; color: #0f172a; margin-bottom: 0.5rem; font-weight: 600;">${totalCitationCount} total citation${totalCitationCount !== 1 ? 's' : ''} from ${citingKeywords.length} keyword${citingKeywords.length !== 1 ? 's' : ''}</div>
                 <div style="max-height: 200px; overflow-y: auto; font-size: 0.8rem;">
               `;
               
@@ -30829,50 +30848,62 @@ Final Score: ${score}/100`;
             }
             
             if (Array.isArray(combinedRows) && combinedRows.length > 0) {
-              // Build cache: for each URL, count how many keywords cite it
+              // Build cache: for each URL, count TOTAL citations (sum across all keywords)
+              // Use computeAiMetricsForPageUrl for consistent counting logic
               rows.forEach((row) => {
                 const targetUrl = row.url || '';
                 if (!targetUrl) return;
                 
-                const targetNormalized = normalizeUrl(targetUrl);
-                let citationCount = 0;
-                
-                combinedRows.forEach(keywordRow => {
-                  const citations = keywordRow.ai_alan_citations || [];
-                  if (Array.isArray(citations) && citations.length > 0) {
-                    citations.forEach(citation => {
-                      let citedUrl = '';
-                      if (typeof citation === 'string') {
-                        citedUrl = citation;
-                      } else if (citation && typeof citation === 'object') {
-                        citedUrl = citation.url || citation.URL || citation.link || citation.href || citation.page || citation.pageUrl || citation.target || citation.targetUrl || citation.best_url || citation.bestUrl || '';
-                      }
-                      
-                      if (citedUrl) {
-                        const citedNormalized = normalizeUrl(citedUrl);
-                        // Try exact match first, then flexible matching
-                        if (citedNormalized === targetNormalized) {
-                          citationCount++;
-                        } else if (citedNormalized.includes(targetNormalized) || targetNormalized.includes(citedNormalized)) {
-                          citationCount++;
-                        } else {
-                          // Also try matching by last path segment
-                          const targetPath = targetNormalized.split('/').filter(p => p).pop() || '';
-                          const citedPath = citedNormalized.split('/').filter(p => p).pop() || '';
-                          if (targetPath && citedPath && targetPath === citedPath && targetPath.length > 5) {
+                // Use computeAiMetricsForPageUrl to get accurate citation count (total citations, not unique keywords)
+                if (typeof window.computeAiMetricsForPageUrl === 'function') {
+                  try {
+                    const result = window.computeAiMetricsForPageUrl(targetUrl, combinedRows);
+                    const citationCount = result?.ai_citations != null ? Number(result.ai_citations) : 0;
+                    
+                    // Cache the result (even if 0) for this URL
+                    citationCache[targetUrl] = citationCount;
+                    window.moneyPagesCitationCache[targetUrl] = citationCount;
+                    // Also set on row object for immediate sorting
+                    row._aiCitations = citationCount;
+                  } catch (err) {
+                    console.error('[Money Pages AI Citations] Error computing citations for', targetUrl, err);
+                    citationCache[targetUrl] = 0;
+                    window.moneyPagesCitationCache[targetUrl] = 0;
+                    row._aiCitations = 0;
+                  }
+                } else {
+                  // Fallback: manual counting (same logic as computeAiMetricsForPageUrl)
+                  const targetNormalized = normalizeUrl(targetUrl);
+                  let citationCount = 0;
+                  
+                  combinedRows.forEach(keywordRow => {
+                    const citations = keywordRow.ai_alan_citations || [];
+                    if (Array.isArray(citations) && citations.length > 0) {
+                      citations.forEach(citation => {
+                        let citedUrl = '';
+                        if (typeof citation === 'string') {
+                          citedUrl = citation;
+                        } else if (citation && typeof citation === 'object') {
+                          citedUrl = citation.url || citation.URL || citation.link || citation.href || citation.page || citation.pageUrl || citation.target || citation.targetUrl || citation.best_url || citation.bestUrl || '';
+                        }
+                        
+                        if (citedUrl) {
+                          const citedNormalized = normalizeUrl(citedUrl);
+                          // Match if normalized URLs are equal OR contain the target slug
+                          if (citedNormalized === targetNormalized || citedNormalized.includes(targetNormalized)) {
                             citationCount++;
                           }
                         }
-                      }
-                    });
-                  }
-                });
-                
-                // Always cache the result (even if 0) for this URL
-                citationCache[targetUrl] = citationCount;
-                window.moneyPagesCitationCache[targetUrl] = citationCount;
-                // Also set on row object for immediate sorting
-                row._aiCitations = citationCount;
+                      });
+                    }
+                  });
+                  
+                  // Cache the result (even if 0) for this URL
+                  citationCache[targetUrl] = citationCount;
+                  window.moneyPagesCitationCache[targetUrl] = citationCount;
+                  // Also set on row object for immediate sorting
+                  row._aiCitations = citationCount;
+                }
               });
             }
           }
@@ -30916,18 +30947,25 @@ Final Score: ${score}/100`;
           }
           
           // No cache: if the cell already has a numeric value (e.g., from initial render), keep it
+          // This prevents flickering from a valid number to 0
           const existingNumeric = parseInt(String(cell.textContent || '').replace(/,/g, ''), 10);
-          if (!Number.isNaN(existingNumeric)) {
+          if (!Number.isNaN(existingNumeric) && existingNumeric > 0) {
             // Preserve the displayed value and set it on the row for sorting
             const pageUrlNormalized = normalizeUrl(pageUrl);
             const row = rows.find(r => {
               const rowUrl = r.url || '';
               return rowUrl === pageUrl || normalizeUrl(rowUrl) === pageUrlNormalized;
             });
-            if (row && typeof row._aiCitations !== 'number') {
-              row._aiCitations = existingNumeric;
+            if (row) {
+              // Only update if we don't already have a value, or if existing is better
+              if (typeof row._aiCitations !== 'number' || row._aiCitations === 0) {
+                row._aiCitations = existingNumeric;
+              }
+              // Update cache to prevent API overwrite
+              citationCache[pageUrl] = existingNumeric;
+              window.moneyPagesCitationCache[pageUrl] = existingNumeric;
             }
-            return;
+            // Don't return - allow API to update if it has a better value, but don't overwrite with 0
           }
           
           // Otherwise, leave placeholder and allow API fetch to update
@@ -30987,6 +31025,39 @@ Final Score: ${score}/100`;
             
             const promises = batch.map(async (url) => {
               try {
+                // First try to compute client-side using computeAiMetricsForPageUrl (faster, no API call)
+                if (typeof window.computeAiMetricsForPageUrl === 'function') {
+                  try {
+                    // Get combinedRows from localStorage or window
+                    let combinedRows = [];
+                    const lastAuditResults = localStorage.getItem('last_audit_results');
+                    if (lastAuditResults) {
+                      const auditData = JSON.parse(lastAuditResults);
+                      if (auditData?.ranking_ai_data?.combinedRows) {
+                        combinedRows = auditData.ranking_ai_data.combinedRows;
+                      } else if (auditData?.searchData?.ranking_ai_data?.combinedRows) {
+                        combinedRows = auditData.searchData.ranking_ai_data.combinedRows;
+                      } else if (Array.isArray(auditData?.ranking_ai_data)) {
+                        combinedRows = auditData.ranking_ai_data;
+                      }
+                    }
+                    if (combinedRows.length === 0 && typeof window.getRankingAiCombinedRows === 'function') {
+                      combinedRows = window.getRankingAiCombinedRows();
+                    }
+                    
+                    if (combinedRows.length > 0) {
+                      const result = window.computeAiMetricsForPageUrl(url, combinedRows);
+                      const count = result?.ai_citations != null ? Number(result.ai_citations) : null;
+                      if (count !== null) {
+                        return { url, count };
+                      }
+                    }
+                  } catch (computeErr) {
+                    console.warn('[Money Pages AI Citations] Error computing client-side:', computeErr);
+                  }
+                }
+                
+                // Fallback to API if client-side computation fails
                 const apiUrlFull = apiUrl(`/api/supabase/query-keywords-citing-url?property_url=${encodeURIComponent(propertyUrl)}&target_url=${encodeURIComponent(url)}`);
                 const response = await fetch(apiUrlFull);
                 if (response.ok) {
@@ -30998,12 +31069,26 @@ Final Score: ${score}/100`;
               } catch (err) {
                 // Silently handle fetch errors
               }
-              return { url, count: 0 };
+              // Return null instead of 0 to indicate "unknown" - don't overwrite valid values
+              return { url, count: null };
             });
             
             const results = await Promise.all(promises);
             
             results.forEach(({ url, count }) => {
+              // Only update if we got a valid count (not null)
+              if (count === null) {
+                // Unknown - don't overwrite existing values
+                return;
+              }
+              
+              // Don't overwrite a valid cached value with 0 (prevent flickering)
+              const existingCache = citationCache[url];
+              if (typeof existingCache === 'number' && existingCache > 0 && count === 0) {
+                console.log(`[Money Pages AI Citations] Preserving existing count ${existingCache} for ${url} (API returned 0)`);
+                return;
+              }
+              
               citationCache[url] = count;
               // Also store in global cache for sorting
               window.moneyPagesCitationCache[url] = count;
@@ -31045,6 +31130,13 @@ Final Score: ${score}/100`;
               }
               
               if (cell) {
+                // Don't overwrite a valid displayed value with 0
+                const existingDisplay = parseInt(String(cell.textContent || '').replace(/,/g, ''), 10);
+                if (!Number.isNaN(existingDisplay) && existingDisplay > 0 && count === 0) {
+                  console.log(`[Money Pages AI Citations] Preserving displayed count ${existingDisplay} for ${url} (API returned 0)`);
+                  return;
+                }
+                
                 cell.textContent = count.toLocaleString();
                 cell.style.color = '#0f172a';
                 cell.style.fontWeight = '600';

@@ -179,9 +179,30 @@ export default async function handler(req, res) {
 
           const normalized = normalizeUrl(url);
           if (!normalized) return;
-          const matches = normalized === targetUrlNormalizedForMatch ||
-                          normalized.includes(targetUrlNormalizedForMatch) ||
-                          targetUrlNormalizedForMatch.includes(normalized);
+          
+          // Strict URL matching: exact match or same path segments (not substring matching)
+          // This prevents matching "landscape-photography-workshops" when looking for "photography-workshops"
+          const targetPathParts = targetUrlNormalizedForMatch.split('/').filter(p => p);
+          const normalizedPathParts = normalized.split('/').filter(p => p);
+          
+          // Exact match
+          let matches = normalized === targetUrlNormalizedForMatch;
+          
+          // If not exact, check if path segments match exactly (same depth, same segments)
+          if (!matches && targetPathParts.length > 0 && normalizedPathParts.length === targetPathParts.length) {
+            matches = targetPathParts.every((part, idx) => normalizedPathParts[idx] === part);
+          }
+          
+          // Also allow matching if one is a prefix of the other at path segment level
+          // (e.g., "photography-workshops" matches "photography-workshops/something")
+          if (!matches) {
+            const shorter = targetPathParts.length <= normalizedPathParts.length ? targetPathParts : normalizedPathParts;
+            const longer = targetPathParts.length > normalizedPathParts.length ? targetPathParts : normalizedPathParts;
+            if (shorter.length > 0 && longer.length >= shorter.length) {
+              matches = shorter.every((part, idx) => longer[idx] === part);
+            }
+          }
+          
           if (!matches) return;
 
           // Use newest audit first; if date already present, skip to avoid double count
@@ -224,10 +245,26 @@ export default async function handler(req, res) {
             const rowUrl = row.url || row.page_url || '';
             if (!rowUrl) return false;
             const rowUrlNormalized = normalizeUrl(rowUrl);
-            return rowUrlNormalized === targetUrlNormalizedForMatch || 
-                   rowUrl === target_url ||
-                   rowUrl.includes(targetUrlNormalizedForMatch) ||
-                   targetUrlNormalizedForMatch.includes(rowUrlNormalized);
+            
+            // Exact match first
+            if (rowUrlNormalized === targetUrlNormalizedForMatch || rowUrl === target_url) {
+              return true;
+            }
+            
+            // Strict path segment matching (same logic as timeseries matching)
+            const targetPathParts = targetUrlNormalizedForMatch.split('/').filter(p => p);
+            const rowPathParts = rowUrlNormalized.split('/').filter(p => p);
+            
+            if (targetPathParts.length > 0 && rowPathParts.length === targetPathParts.length) {
+              return targetPathParts.every((part, idx) => rowPathParts[idx] === part);
+            }
+            
+            // Prefix matching at path segment level
+            if (targetPathParts.length > 0 && rowPathParts.length >= targetPathParts.length) {
+              return targetPathParts.every((part, idx) => rowPathParts[idx] === part);
+            }
+            
+            return false;
           });
 
           if (matchingRow) {
