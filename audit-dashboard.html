@@ -30845,6 +30845,31 @@ Final Score: ${score}/100`;
           .filter(url => url && (citationCache[url] === undefined || citationCache[url] === 0));
         
         if (urlsToFetch.length > 0) {
+          // Build cell map ONCE before processing batches (more efficient)
+          const currentTableContainer = document.getElementById('money-pages-table-container');
+          if (!currentTableContainer || typeof currentTableContainer.querySelectorAll !== 'function') {
+            console.warn('[Money Pages AI Citations] Table container not found when building cell map');
+            return;
+          }
+          const allCells = currentTableContainer.querySelectorAll('.ai-citation-cell-opportunity');
+          
+          // Create a map: URL (exact and normalized) -> cell element
+          const cellMap = new Map();
+          Array.from(allCells).forEach(cell => {
+            const cellUrl = cell.getAttribute('data-page-url');
+            if (cellUrl) {
+              // Store exact URL
+              cellMap.set(cellUrl, cell);
+              // Also store normalized version for flexible matching
+              const cellUrlNormalized = normalizeUrl(cellUrl);
+              if (cellUrlNormalized !== cellUrl && !cellMap.has(cellUrlNormalized)) {
+                cellMap.set(cellUrlNormalized, cell);
+              }
+            }
+          });
+          
+          console.log(`[Money Pages AI Citations] Built cell map with ${cellMap.size} entries from ${allCells.length} cells`);
+          
           // Fetch citations for all URLs in parallel (limit to 10 at a time)
           const batchSize = 10;
           let cellNotFoundCount = 0;
@@ -30869,28 +30894,6 @@ Final Score: ${score}/100`;
             
             const results = await Promise.all(promises);
             
-            // Build a normalized lookup map of all cells for efficient matching
-            const currentTableContainer = document.getElementById('money-pages-table-container');
-            if (!currentTableContainer || typeof currentTableContainer.querySelectorAll !== 'function') {
-              console.warn('[Money Pages AI Citations] Table container not found when updating cells');
-              return;
-            }
-            const allCells = currentTableContainer.querySelectorAll('.ai-citation-cell-opportunity');
-            
-            // Create a map: normalized URL -> cell element
-            const cellMap = new Map();
-            Array.from(allCells).forEach(cell => {
-              const cellUrl = cell.getAttribute('data-page-url');
-              if (cellUrl) {
-                // Store both exact and normalized versions
-                cellMap.set(cellUrl, cell);
-                const cellUrlNormalized = normalizeUrl(cellUrl);
-                if (cellUrlNormalized !== cellUrl) {
-                  cellMap.set(cellUrlNormalized, cell);
-                }
-              }
-            });
-            
             results.forEach(({ url, count }) => {
               citationCache[url] = count;
               
@@ -30907,9 +30910,7 @@ Final Score: ${score}/100`;
                   if (cellUrl === url) return true;
                   // Try normalized match
                   const cellUrlNormalized = normalizeUrl(cellUrl);
-                  if (cellUrlNormalized === urlNormalized) return true;
-                  // Try reverse: normalize the cell URL and compare with normalized search URL
-                  return normalizeUrl(cellUrl) === urlNormalized;
+                  return cellUrlNormalized === urlNormalized;
                 });
               }
               
@@ -30927,7 +30928,7 @@ Final Score: ${score}/100`;
               } else {
                 cellNotFoundCount++;
                 // Debug: log first few failures to understand the mismatch
-                if (cellNotFoundCount <= 3) {
+                if (cellNotFoundCount <= 5) {
                   const sampleCells = Array.from(allCells).slice(0, 5).map(c => ({
                     raw: c.getAttribute('data-page-url'),
                     normalized: normalizeUrl(c.getAttribute('data-page-url') || '')
