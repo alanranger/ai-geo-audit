@@ -53,19 +53,10 @@ export default async function handler(req, res) {
       return sendJSON(res, 400, { error: 'property_url and target_url are required' });
     }
     
-    let supabase;
-    try {
-      supabase = createClient(
-        need('SUPABASE_URL'),
-        need('SUPABASE_SERVICE_ROLE_KEY')
-      );
-    } catch (envError) {
-      console.error('[Money Pages Historical] Environment variable error:', envError.message);
-      return sendJSON(res, 500, { 
-        status: 'error',
-        error: 'Server configuration error' 
-      });
-    }
+    const supabase = createClient(
+      need('SUPABASE_URL'),
+      need('SUPABASE_SERVICE_ROLE_KEY')
+    );
 
     const targetUrlNormalized = normalizeUrl(target_url);
     const daysNum = parseInt(days, 10) || 90;
@@ -73,30 +64,18 @@ export default async function handler(req, res) {
     cutoffDate.setDate(cutoffDate.getDate() - daysNum);
 
     // Get latest audit date
-    let latestAudit;
-    try {
-      const { data, error: auditError } = await supabase
-        .from('audit_results')
-        .select('audit_date')
-        .eq('property_url', property_url)
-        .order('audit_date', { ascending: false })
-        .limit(1)
-        .single();
-      
-      if (auditError || !data) {
-        console.error('[Money Pages Historical] Audit query error:', auditError);
-        return sendJSON(res, 404, { 
-          status: 'error',
-          error: 'No audit found for property URL' 
-        });
-      }
-      latestAudit = data;
-    } catch (queryError) {
-      console.error('[Money Pages Historical] Query exception:', queryError);
-      return sendJSON(res, 500, { 
+    const { data: latestAudit, error: auditError } = await supabase
+      .from('audit_results')
+      .select('audit_date')
+      .eq('property_url', property_url)
+      .order('audit_date', { ascending: false })
+      .limit(1)
+      .single();
+    
+    if (auditError || !latestAudit) {
+      return sendJSON(res, 404, { 
         status: 'error',
-        error: 'Database query failed',
-        details: queryError.message
+        error: 'No audit found for property URL' 
       });
     }
 
@@ -122,91 +101,59 @@ export default async function handler(req, res) {
     };
 
     const normalizedPageUrl = normalizeUrlForQuery(target_url, property_url);
-    const targetUrlNormalizedForMatch = normalizeUrl(target_url);
 
-    // Simplified approach: Use money_pages_metrics from latest audit
-    // This already contains aggregated 28-day data, which we'll use as a proxy for 90-day
-    // (Better than trying to aggregate query_pages which can be huge and cause timeouts)
-    let latestAuditWithData;
+    // Query gsc_page_metrics_28d for historical snapshots within the date range
+    // We'll aggregate multiple 28-day periods to get 90-day average
+    // Note: If table doesn't exist yet, return null data gracefully
+    let pageMetrics = [];
+    let metricsError = null;
+    
     try {
-      const { data, error: auditError } = await supabase
-        .from('audit_results')
-        .select('audit_date, money_pages_metrics')
-        .eq('property_url', property_url)
-        .order('audit_date', { ascending: false })
-        .limit(1)
-        .single();
-
-      if (auditError || !data) {
-        console.error('[Money Pages Historical] Audit data query error:', auditError);
-        return sendJSON(res, 404, { 
-          status: 'error',
-          error: 'No audit data found for property URL' 
-        });
+      const { data, error } = await supabase
+        .from('gsc_page_metrics_28d')
+        .select('clicks, impressions, ctr, avg_position, page_url, date_start, date_end, captured_at')
+        .eq('site_url', property_url)
+        .eq('page_url', normalizedPageUrl)
+        .gte('captured_at', cutoffDate.toISOString().split('T')[0])
+        .order('captured_at', { ascending: false });
+      
+      if (error) {
+        // Check if it's a "relation does not exist" error
+        if (error.message && error.message.includes('does not exist')) {
+          console.warn('[Money Pages Historical] Table gsc_page_metrics_28d does not exist yet. Historical data will be available once the table is created.');
+          // Return null data instead of error - this is expected until table exists
+          return sendJSON(res, 200, {
+            status: 'ok',
+            data: {
+              clicks_90d: null,
+              impressions_90d: null,
+              ctr_90d: null,
+              avg_position_90d: null
+            },
+            message: 'Historical data table not yet available. 90-day trends will appear once historical audit data is stored in Supabase.'
+          });
+        }
+        metricsError = error;
+      } else {
+        pageMetrics = data || [];
       }
-      latestAuditWithData = data;
-    } catch (queryError) {
-      console.error('[Money Pages Historical] Query exception:', queryError);
+    } catch (err) {
+      // Handle any other errors (network, etc.)
+      console.error('[Money Pages Historical] Query exception:', err);
+      metricsError = err;
+    }
+
+    if (metricsError) {
+      console.error('[Money Pages Historical] Query error:', metricsError);
       return sendJSON(res, 500, { 
         status: 'error',
-        error: 'Database query failed',
-        details: queryError.message
+        error: metricsError.message || 'Database query failed'
       });
     }
 
-    let totalClicks = 0;
-    let totalImpressions = 0;
-    let positionSum = 0;
-    let positionWeight = 0;
-    let dataPoints = 0;
+    const matchingMetrics = pageMetrics || [];
 
-    // Parse money_pages_metrics and find matching row
-    try {
-      let moneyPagesMetrics = latestAuditWithData.money_pages_metrics;
-      
-      if (typeof moneyPagesMetrics === 'string') {
-        try {
-          moneyPagesMetrics = JSON.parse(moneyPagesMetrics);
-        } catch (e) {
-          console.warn('[Money Pages Historical] Failed to parse money_pages_metrics JSON:', e.message);
-          moneyPagesMetrics = null;
-        }
-      }
-
-      if (moneyPagesMetrics && moneyPagesMetrics.rows && Array.isArray(moneyPagesMetrics.rows)) {
-        const matchingRow = moneyPagesMetrics.rows.find(row => {
-          const rowUrl = row.url || row.page_url || '';
-          if (!rowUrl) return false;
-          
-          const rowUrlNormalized = normalizeUrl(rowUrl);
-          return rowUrlNormalized === targetUrlNormalizedForMatch || 
-                 rowUrl === target_url ||
-                 rowUrl.includes(targetUrlNormalizedForMatch) ||
-                 targetUrlNormalizedForMatch.includes(rowUrlNormalized);
-        });
-
-        if (matchingRow) {
-          // Use the latest audit's data as 90-day proxy
-          // Note: This is the same as 28-day data, but it's better than nothing
-          // True 90-day aggregation would require timeseries data which may not be available
-          totalClicks = matchingRow.clicks || matchingRow.clicks_28d || 0;
-          totalImpressions = matchingRow.impressions || matchingRow.impressions_28d || 0;
-          const position = matchingRow.avg_position || matchingRow.position || matchingRow.avgPosition || null;
-          
-          if (position != null && totalImpressions > 0) {
-            positionSum = position * totalImpressions;
-            positionWeight = totalImpressions;
-          }
-          
-          dataPoints = 1;
-        }
-      }
-    } catch (parseError) {
-      console.error('[Money Pages Historical] Error parsing money_pages_metrics:', parseError);
-      // Continue to return null data rather than crash
-    }
-
-    if (dataPoints === 0) {
+    if (matchingMetrics.length === 0) {
       return sendJSON(res, 200, {
         status: 'ok',
         data: {
@@ -215,9 +162,24 @@ export default async function handler(req, res) {
           ctr_90d: null,
           avg_position_90d: null
         },
-        message: 'No historical data found for this URL in money_pages_metrics'
+        message: 'No historical data found for this URL'
       });
     }
+
+    // Aggregate metrics (weighted average for position, sum for clicks/impressions)
+    let totalClicks = 0;
+    let totalImpressions = 0;
+    let positionSum = 0;
+    let positionWeight = 0;
+
+    matchingMetrics.forEach(metric => {
+      totalClicks += metric.clicks || 0;
+      totalImpressions += metric.impressions || 0;
+      if (metric.avg_position != null && metric.impressions > 0) {
+        positionSum += metric.avg_position * metric.impressions;
+        positionWeight += metric.impressions;
+      }
+    });
 
     const avgCtr = totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : null;
     const avgPosition = positionWeight > 0 ? positionSum / positionWeight : null;
@@ -229,30 +191,16 @@ export default async function handler(req, res) {
         impressions_90d: totalImpressions,
         ctr_90d: avgCtr,
         avg_position_90d: avgPosition,
-        data_points: dataPoints,
-        data_source: 'money_pages_metrics',
-        note: 'Using latest audit data as proxy (true 90-day aggregation requires timeseries data)'
+        periods_count: matchingMetrics.length
       },
-      audit_date: latestAuditWithData.audit_date
+      audit_date: latestAudit.audit_date
     });
 
   } catch (err) {
-    console.error('[Money Pages Historical] Unhandled error:', err);
-    console.error('[Money Pages Historical] Error stack:', err.stack);
-    console.error('[Money Pages Historical] Error name:', err.name);
-    console.error('[Money Pages Historical] Error message:', err.message);
-    
-    // Always return 200 with error status to prevent frontend from showing 500
-    return sendJSON(res, 200, { 
+    console.error('[Money Pages Historical] Error:', err);
+    return sendJSON(res, 500, { 
       status: 'error',
-      error: err.message || 'Internal server error',
-      data: {
-        clicks_90d: null,
-        impressions_90d: null,
-        ctr_90d: null,
-        avg_position_90d: null
-      },
-      message: 'Failed to retrieve historical data'
+      error: err.message 
     });
   }
 }
