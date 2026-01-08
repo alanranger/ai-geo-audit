@@ -6524,85 +6524,91 @@
       // For Money Pages tasks, build recommendations from row data
       if (source === 'money_pages' || !row.keyword) {
         try {
-          // Get row data to build recommendations
-          const rowDataStr = modal.dataset.rowData;
-          if (rowDataStr) {
-            const rowData = JSON.parse(rowDataStr);
+          // Use row data directly (row is already available as a parameter)
+          // Build recommendations similar to how they're built for performance cards
+          const recommendations = [];
+          const clicks = row.clicks || 0;
+          const impressions = row.impressions || 0;
+          const ctr = row.ctr || 0;
+          const avgPosition = row.avgPosition || row.position || null;
+          const aiCitations = row._aiCitations || row.aiCitations || 0;
+          
+          debugLog('[Optimisation] Building recommendations from row: clicks=' + clicks + ', impressions=' + impressions + ', ctr=' + ctr + ', position=' + avgPosition + ', aiCitations=' + aiCitations);
+          
+          // High Priority: Low Click-Through Rate (shown first in View Details)
+          const ctrPercent = (ctr > 1 ? ctr : ctr * 100);
+          if (ctrPercent < 2 && impressions > 0) {
+            const potentialClicks = Math.round(impressions * 0.02);
+            const additionalClicks = Math.max(0, potentialClicks - clicks);
+            recommendations.push({
+              priority: 'High',
+              title: 'Low Click-Through Rate',
+              nextSteps: 'Optimize title tags and meta descriptions to improve CTR',
+              estimatedImpact: `Could gain ~${additionalClicks} additional clicks/month with better CTR`,
+              reason: `Current CTR ${ctrPercent.toFixed(2)}% is below 2% benchmark`
+            });
+          }
+          
+          // Medium Priority: Ranking Below Top 10
+          if (avgPosition != null && avgPosition > 10) {
+            const potentialClicksLow = Math.round(impressions * 0.025);
+            const potentialClicksHigh = Math.round(impressions * 0.05);
+            recommendations.push({
+              priority: 'Medium',
+              title: 'Ranking Below Top 10',
+              nextSteps: 'Improve on-page SEO, build authority, or optimize for target keywords',
+              estimatedImpact: `Moving to top 10 could increase clicks by ${potentialClicksLow} - ${potentialClicksHigh}`,
+              reason: `Current position ${avgPosition.toFixed(1)} is outside top 10`
+            });
+          }
+          
+          // Low Priority: Focus on Higher Volume Keywords (if AI citations exist but are low volume)
+          // Note: This recommendation typically appears when most citations are for low-volume keywords
+          // Since we don't have keyword volume data in the row, we'll add this if there are citations but low traffic
+          if (aiCitations > 0 && impressions < 1000) {
+            recommendations.push({
+              priority: 'Low',
+              title: 'Focus on Higher Volume Keywords',
+              nextSteps: 'Expand content to target keywords with 100+ monthly search volume',
+              estimatedImpact: 'Could increase potential traffic by targeting higher-volume opportunities',
+              reason: 'Most citations are for low-volume keywords (<100 searches/month)'
+            });
+          }
+          
+          // Sort by priority: High first, then Medium, then Low
+          recommendations.sort((a, b) => {
+            const priorityOrder = { 'High': 3, 'Medium': 2, 'Low': 1 };
+            return (priorityOrder[b.priority] || 0) - (priorityOrder[a.priority] || 0);
+          });
+          
+          debugLog('[Optimisation] Generated ' + recommendations.length + ' recommendations');
+          
+          // Build plan text from recommendations
+          if (recommendations.length > 0) {
+            const planLines = [];
+            planLines.push('CTR target: ≥ 2.5%');
+            planLines.push('');
             
-            // Build recommendations similar to how they're built for performance cards
-            const recommendations = [];
-            const clicks = rowData.clicks || 0;
-            const impressions = rowData.impressions || 0;
-            const ctr = rowData.ctr || 0;
-            const avgPosition = rowData.avgPosition || rowData.position || null;
-            const aiCitations = rowData._aiCitations || 0;
+            // Limit to top 3 recommendations
+            const topRecs = recommendations.slice(0, 3);
             
-            // High Priority: Ranking Below Top 10
-            if (avgPosition != null && avgPosition > 10) {
-              recommendations.push({
-                priority: 'High',
-                title: 'Ranking Below Top 10',
-                nextSteps: 'Improve on-page SEO, build authority, or optimize for target keywords',
-                estimatedImpact: `Moving to top 10 could increase clicks by 50-100%`,
-                reason: `Current position ${avgPosition.toFixed(1)} is outside top 10`
-              });
-            }
-            
-            // High Priority: Low Click-Through Rate
-            const ctrPercent = (ctr > 1 ? ctr : ctr * 100);
-            if (ctrPercent < 2.5 && impressions > 0) {
-              const potentialClicks = Math.round(impressions * 0.025);
-              const additionalClicks = Math.max(0, potentialClicks - clicks);
-              recommendations.push({
-                priority: 'High',
-                title: 'Low Click-Through Rate',
-                nextSteps: 'Optimize title tags and meta descriptions to improve CTR',
-                estimatedImpact: `Could gain ~${additionalClicks} additional clicks/month with better CTR`,
-                reason: `Current CTR ${ctrPercent.toFixed(2)}% is below 2.5% benchmark`
-              });
-            }
-            
-            // Medium Priority: No AI Citations
-            if (aiCitations === 0 || aiCitations == null) {
-              recommendations.push({
-                priority: 'Medium',
-                title: 'No AI Citations',
-                nextSteps: 'Add structured data (Schema.org) and optimize content for AI overview eligibility',
-                estimatedImpact: 'Could capture AI overview features for high-value keywords',
-                reason: 'This URL has no AI citations in search results'
-              });
-            }
-            
-            // Sort by priority: High first, then Medium, then Low
-            recommendations.sort((a, b) => {
-              const priorityOrder = { 'High': 3, 'Medium': 2, 'Low': 1 };
-              return (priorityOrder[b.priority] || 0) - (priorityOrder[a.priority] || 0);
+            topRecs.forEach((rec, idx) => {
+              planLines.push(`${rec.priority.toUpperCase()} PRIORITY: ${rec.title}`);
+              planLines.push(`Next steps: ${rec.nextSteps}`);
+              planLines.push(`Estimated impact: ${rec.estimatedImpact}`);
+              planLines.push(`Reason: ${rec.reason}`);
+              if (idx < topRecs.length - 1) planLines.push('');
             });
             
-            // Build plan text from recommendations
-            if (recommendations.length > 0) {
-              const planLines = [];
-              planLines.push('CTR target: ≥ 2.5%');
-              planLines.push('');
-              
-              // Limit to top 3 recommendations
-              const topRecs = recommendations.slice(0, 3);
-              
-              topRecs.forEach((rec, idx) => {
-                planLines.push(`${rec.priority.toUpperCase()} PRIORITY: ${rec.title}`);
-                planLines.push(`Next steps: ${rec.nextSteps}`);
-                planLines.push(`Estimated impact: ${rec.estimatedImpact}`);
-                planLines.push(`Reason: ${rec.reason}`);
-                if (idx < topRecs.length - 1) planLines.push('');
-              });
-              
-              planText = planLines.join('\n');
-            } else {
-              planText = 'CTR target: ≥ 2.5%';
-            }
+            planText = planLines.join('\n');
+            debugLog('[Optimisation] Plan text generated: ' + planText.substring(0, 100) + '...');
+          } else {
+            planText = 'CTR target: ≥ 2.5%';
+            debugLog('[Optimisation] No recommendations, using default plan text');
           }
         } catch (e) {
           console.warn('[Optimisation] Error generating plan from money pages recommendations:', e);
+          debugLog('[Optimisation] Error generating plan: ' + e.message);
           planText = 'CTR target: ≥ 2.5%';
         }
       } else {
