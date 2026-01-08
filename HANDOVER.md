@@ -1,7 +1,7 @@
 # AI GEO Audit - Comprehensive Handover Document
 
 **Last Updated**: 2026-01-XX  
-**Current Commit**: `e40c912` (fixes applied on baseline `8951fcf`)  
+**Current Commit**: `7307bab` (fixes applied on baseline `8951fcf`)  
 **Purpose**: Single source of truth for all projects, phases, tasks, fixes, and key information for any new chat thread.
 
 ---
@@ -90,7 +90,19 @@ This document consolidates ALL critical information about the AI GEO Audit proje
   - ✅ No syntax errors
   - ✅ Clean, synchronized codebase
 
-### Recent Fixes (v1.7.7 - Commit e40c912)
+### Recent Fixes (v1.7.8 - Commit 7307bab)
+1. **Unified Data Source**: Table now uses same API endpoint as cards
+   - Removed buggy client-side `computeAiMetricsForPageUrl` from API fallback
+   - Table and cards now use same source of truth (`/api/supabase/query-keywords-citing-url`)
+   - Ensures table shows same values as cards (e.g., 2 instead of 5)
+2. **Sorting Fix**: Fixed sorting to use cache instead of reading from cells
+   - Prevents values from becoming blank when sorting multiple times
+   - Uses strict URL matching (no substring) when reading from cache
+3. **Pre-populate from Cache**: Table cells now pre-populate from cache on initial render
+   - Shows cached value immediately (prevents flickering)
+   - Only shows placeholder if cache not yet available
+
+### Previous Fixes (v1.7.7 - Commit e40c912)
 1. **AI Citations Cell Update Protection**: Added protection to prevent cell display update when valid cached value exists
    - Cache is now checked before updating cell from API response
    - Prevents flickering from correct value (2) to incorrect API response (5)

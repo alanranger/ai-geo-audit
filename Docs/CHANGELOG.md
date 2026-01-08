@@ -2,6 +2,24 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-01-XX] - v1.7.8 - Fix AI Citations: Unify Table and Cards Data Source
+
+### Fixed
+- **Unified Data Source**: Table now uses same API endpoint as cards (`/api/supabase/query-keywords-citing-url`)
+  - Removed buggy client-side `computeAiMetricsForPageUrl` from API fallback path
+  - Ensures table and cards use same source of truth and show same values
+- **Sorting Fix**: Fixed sorting to use cache (not cells) and removed substring matching
+  - Prevents values from becoming blank when sorting multiple times
+  - Uses strict URL matching when reading from cache
+- **Pre-populate from Cache**: Table cells now pre-populate from cache on initial render
+  - Prevents flickering by showing cached value immediately
+  - Only shows placeholder if cache is not yet available
+
+### Technical Details
+- Table API calls now use same endpoint as cards (removed client-side computation fallback)
+- Sorting reads from `window.moneyPagesCitationCache` instead of cell text
+- Initial render checks cache and `row._aiCitations` before showing placeholder
+
 ## [2026-01-XX] - v1.7.7 - Fix AI Citations Cell Update Protection
 
 ### Fixed
