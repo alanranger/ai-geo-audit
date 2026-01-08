@@ -3444,7 +3444,7 @@
     <h1>GAIO (Generative AI Optimization) Audit Dashboard</h1>
     <p>Automated GAIO Performance Tracking & Optimisation</p>
     <p style="font-size: 0.9rem; margin-top: 0.5rem; opacity: 1; background: rgba(0,0,0,0.3); padding: 0.25rem 0.5rem; border-radius: 4px; display: inline-block;">
-      <strong>Version: <span id="gitVersion">bcd5928</span></strong> | Built: <span id="buildDate"></span> |
+      <strong>Version: <span id="gitVersion">838268d</span></strong> | Built: <span id="buildDate"></span> |
       <span id="loadTime" style="color: #4f4;">Loaded: <span id="loadTimeValue"></span></span>
     </p>
     <script>
@@ -8740,18 +8740,26 @@
     // Load all optimisation tasks (Phase 9: use dashboard API)
     window.loadAllOptimisationTasks = async function loadAllOptimisationTasks() {
       try {
-        // Check if admin key is set
-        if (!window.hasAdminKey || !window.hasAdminKey()) {
-          window.optimisationModuleState.allTasks = [];
-          window.optimisationModuleState.filteredTasks = [];
-          window.optimisationModuleState.authError = 'Admin key not set. Please set your admin key in the Configuration section.';
-          updateOptimisationSummaryCards();
-          renderOptimisationTasksTable();
-          return [];
-        }
-
-        const headers = window.getOptimisationHeaders();
+        // Get headers (will include admin key if available)
+        const headers = window.getOptimisationHeaders ? window.getOptimisationHeaders() : {};
         const scope = window.optimisationModuleState.scope || 'active_cycle';
+        
+        // Check if admin key is in headers (but still make API call - let server decide)
+        const hasKeyInHeaders = !!(headers['x-arp-admin-key'] || headers['x-arp-share-token']);
+        
+        if (!hasKeyInHeaders) {
+          // Only show warning if we're sure there's no key (check both storage locations)
+          const adminKey = window.getAdminKey ? window.getAdminKey() : (sessionStorage.getItem('arp_admin_key') || localStorage.getItem('arp_admin_key') || '');
+          if (!adminKey) {
+            window.optimisationModuleState.allTasks = [];
+            window.optimisationModuleState.filteredTasks = [];
+            window.optimisationModuleState.authError = 'Admin key not set. Please set your admin key in the Configuration section.';
+            updateOptimisationSummaryCards();
+            renderOptimisationTasksTable();
+            return [];
+          }
+        }
+        
         // Add cache-busting timestamp to ensure fresh data
         const cacheBuster = `_t=${Date.now()}`;
         const response = await fetch(apiUrl(`/api/optimisation/dashboard?scope=${scope}&${cacheBuster}`), {
@@ -8764,11 +8772,24 @@
         });
 
         if (!response.ok) {
-          if (response.status === 401) {
-            window.optimisationModuleState.authError = 'Unauthorized - admin key missing or invalid. Please check your admin key in the Configuration section.';
-          } else {
-            window.optimisationModuleState.authError = `Failed to load dashboard (${response.status}). Please try refreshing the page.`;
+          let errorMessage = `Failed to load dashboard (${response.status}).`;
+          
+          // Try to get error details from response
+          try {
+            const errorData = await response.json();
+            if (errorData.error) {
+              errorMessage = errorData.error;
+            }
+          } catch (e) {
+            // If JSON parsing fails, use status-based message
+            if (response.status === 401) {
+              errorMessage = 'Unauthorized - admin key missing or invalid. Please check your admin key in the Configuration section.';
+            } else if (response.status === 500) {
+              errorMessage = 'Server error - please try refreshing the page. If the issue persists, check the server logs.';
+            }
           }
+          
+          window.optimisationModuleState.authError = errorMessage;
           window.optimisationModuleState.allTasks = [];
           window.optimisationModuleState.filteredTasks = [];
           window.optimisationModuleState.dashboardTiles = null;
@@ -8776,6 +8797,15 @@
           window.optimisationModuleState.dashboardTimeseries = null;
           updateOptimisationSummaryCards();
           renderOptimisationTasksTable();
+          
+          // Log for debugging
+          console.error('[Optimisation Dashboard] API error:', {
+            status: response.status,
+            statusText: response.statusText,
+            hasAdminKey: hasKeyInHeaders,
+            headers: Object.keys(headers)
+          });
+          
           return [];
         }
 
