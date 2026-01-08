@@ -3444,7 +3444,7 @@
     <h1>GAIO (Generative AI Optimization) Audit Dashboard</h1>
     <p>Automated GAIO Performance Tracking & Optimisation</p>
     <p style="font-size: 0.9rem; margin-top: 0.5rem; opacity: 1; background: rgba(0,0,0,0.3); padding: 0.25rem 0.5rem; border-radius: 4px; display: inline-block;">
-      <strong>Version: <span id="gitVersion">4daa7d2</span></strong> | Built: <span id="buildDate"></span> |
+      <strong>Version: <span id="gitVersion">e77fdf0</span></strong> | Built: <span id="buildDate"></span> |
       <span id="loadTime" style="color: #4f4;">Loaded: <span id="loadTimeValue"></span></span>
     </p>
     <script>
@@ -30243,7 +30243,34 @@ Final Score: ${score}/100`;
               <td style="padding: 0.75rem; text-align: right; color: ${posColor}; font-weight: 600; vertical-align: top; white-space: nowrap;">${row.avgPosition ? row.avgPosition.toFixed(1) : '—'}</td>
               <td style="padding: 0.75rem; text-align: right; font-weight: 600; vertical-align: top; white-space: nowrap;" class="ai-citation-cell-opportunity" data-page-url="${row.url || ''}">${(() => {
                 // Use cache if available (same source as cards) - prevents flickering
-                const cached = window.moneyPagesCitationCache && window.moneyPagesCitationCache[row.url];
+                // Check exact URL match first
+                let cached = window.moneyPagesCitationCache && window.moneyPagesCitationCache[row.url];
+                
+                // If not found, try normalized URL matching (in case cache key format differs)
+                if (typeof cached !== 'number' && window.moneyPagesCitationCache) {
+                  const normalizeUrl = (url) => {
+                    if (!url) return '';
+                    let normalized = String(url).toLowerCase().trim();
+                    normalized = normalized.replace(/^https?:\/\//, '');
+                    normalized = normalized.replace(/^www\./, '');
+                    normalized = normalized.split('?')[0].split('#')[0];
+                    const parts = normalized.split('/');
+                    if (parts.length > 1) {
+                      normalized = parts.slice(1).join('/');
+                    }
+                    normalized = normalized.replace(/^\/+/, '').replace(/\/+$/, '');
+                    return normalized;
+                  };
+                  const rowUrlNormalized = normalizeUrl(row.url || '');
+                  const cacheKey = Object.keys(window.moneyPagesCitationCache).find(key => {
+                    const keyNormalized = normalizeUrl(key);
+                    return keyNormalized === rowUrlNormalized || key === row.url;
+                  });
+                  if (cacheKey && typeof window.moneyPagesCitationCache[cacheKey] === 'number') {
+                    cached = window.moneyPagesCitationCache[cacheKey];
+                  }
+                }
+                
                 if (typeof cached === 'number' && cached >= 0) {
                   row._aiCitations = cached; // Set on row for sorting
                   return cached.toLocaleString();
@@ -30942,10 +30969,13 @@ Final Score: ${score}/100`;
             return;
           }
           
-          // No cache: if the cell already has a numeric value (e.g., from initial render), keep it
-          // This prevents flickering from a valid number to 0
-          const existingNumeric = parseInt(String(cell.textContent || '').replace(/,/g, ''), 10);
-          if (!Number.isNaN(existingNumeric) && existingNumeric > 0) {
+          // No cache: Check if cell already has a valid numeric value from initial render
+          // This prevents clearing valid values when table is re-rendered after sorting
+          const existingText = String(cell.textContent || '').trim();
+          const existingNumeric = parseInt(existingText.replace(/,/g, ''), 10);
+          
+          // If cell has a valid number (not ⏳ or —), preserve it and update cache
+          if (!Number.isNaN(existingNumeric) && existingNumeric >= 0 && existingText !== '⏳' && existingText !== '—') {
             // Preserve the displayed value and set it on the row for sorting
             const pageUrlNormalized = normalizeUrl(pageUrl);
             const row = rows.find(r => {
@@ -30953,21 +30983,46 @@ Final Score: ${score}/100`;
               return rowUrl === pageUrl || normalizeUrl(rowUrl) === pageUrlNormalized;
             });
             if (row) {
-              // Only update if we don't already have a value, or if existing is better
-              if (typeof row._aiCitations !== 'number' || row._aiCitations === 0) {
-                row._aiCitations = existingNumeric;
-              }
+              // Set on row for sorting
+              row._aiCitations = existingNumeric;
               // Update cache to prevent API overwrite
               citationCache[pageUrl] = existingNumeric;
               window.moneyPagesCitationCache[pageUrl] = existingNumeric;
             }
-            // Don't return - allow API to update if it has a better value, but don't overwrite with 0
+            // Return early - don't clear valid displayed values
+            return;
           }
           
-          // Otherwise, leave placeholder and allow API fetch to update
-          cell.textContent = '—';
-          cell.style.color = '#94a3b8';
-          cell.style.fontWeight = '500';
+          // Also check global cache one more time with normalized URL (in case key format differs)
+          const pageUrlNormalized = normalizeUrl(pageUrl);
+          const globalCached = window.moneyPagesCitationCache && Object.keys(window.moneyPagesCitationCache).find(key => {
+            const keyNormalized = normalizeUrl(key);
+            return keyNormalized === pageUrlNormalized || key === pageUrl;
+          });
+          if (globalCached && typeof window.moneyPagesCitationCache[globalCached] === 'number') {
+            const globalCount = window.moneyPagesCitationCache[globalCached];
+            cell.textContent = globalCount.toLocaleString();
+            cell.style.color = '#0f172a';
+            cell.style.fontWeight = '600';
+            const row = rows.find(r => {
+              const rowUrl = r.url || '';
+              return rowUrl === pageUrl || normalizeUrl(rowUrl) === pageUrlNormalized;
+            });
+            if (row) {
+              row._aiCitations = globalCount;
+            }
+            // Also update local cache
+            citationCache[pageUrl] = globalCount;
+            return;
+          }
+          
+          // Only set placeholder if we truly have no cache and no existing value
+          if (existingText === '⏳' || existingText === '—' || existingText === '') {
+            cell.textContent = '⏳';
+            cell.style.color = '#94a3b8';
+            cell.style.fontWeight = '500';
+          }
+          // Otherwise, preserve whatever is already displayed
         });
         
         // For URLs not in cache (or showing 0), fetch from API to get accurate counts
@@ -31121,27 +31176,70 @@ Final Score: ${score}/100`;
                     cell.style.color = '#0f172a';
                     cell.style.fontWeight = '600';
                   }
+                  // Update row even if we don't update cell
+                  const urlNormalized = normalizeUrl(url);
+                  const row = rows.find(r => {
+                    const rowUrl = r.url || '';
+                    const rowUrlNormalized = normalizeUrl(rowUrl);
+                    return rowUrl === url || rowUrlNormalized === urlNormalized;
+                  });
+                  if (row) {
+                    row._aiCitations = cachedValue;
+                  }
                   return;
                 }
                 
-                // Don't overwrite a valid displayed value with 0
-                const existingDisplay = parseInt(String(cell.textContent || '').replace(/,/g, ''), 10);
-                if (!Number.isNaN(existingDisplay) && existingDisplay > 0 && count === 0) {
-                  console.log(`[Money Pages AI Citations] Preserving displayed count ${existingDisplay} for ${url} (API returned 0)`);
-                  return;
+                // Don't overwrite a valid displayed value with 0 or null
+                const existingText = String(cell.textContent || '').trim();
+                const existingDisplay = parseInt(existingText.replace(/,/g, ''), 10);
+                if (!Number.isNaN(existingDisplay) && existingDisplay > 0) {
+                  if (count === 0 || count === null) {
+                    console.log(`[Money Pages AI Citations] Preserving displayed count ${existingDisplay} for ${url} (API returned ${count})`);
+                    // Still update row with existing value
+                    const urlNormalized = normalizeUrl(url);
+                    const row = rows.find(r => {
+                      const rowUrl = r.url || '';
+                      const rowUrlNormalized = normalizeUrl(rowUrl);
+                      return rowUrl === url || rowUrlNormalized === urlNormalized;
+                    });
+                    if (row) {
+                      row._aiCitations = existingDisplay;
+                    }
+                    return;
+                  }
                 }
                 
-                cell.textContent = count.toLocaleString();
-                cell.style.color = '#0f172a';
-                cell.style.fontWeight = '600';
-                const row = rows.find(r => {
-                  const rowUrl = r.url || '';
-                  const rowUrlNormalized = normalizeUrl(rowUrl);
-                  // Strict matching: exact match or normalized match only (no substring)
-                  return rowUrl === url || rowUrlNormalized === urlNormalized;
-                });
-                if (row) {
-                  row._aiCitations = count;
+                // Only update if we have a valid count from API
+                if (count !== null && count !== undefined) {
+                  cell.textContent = count.toLocaleString();
+                  cell.style.color = '#0f172a';
+                  cell.style.fontWeight = '600';
+                  
+                  // Update row - use flexible matching to find the row
+                  const urlNormalized = normalizeUrl(url);
+                  let row = rows.find(r => {
+                    const rowUrl = r.url || '';
+                    const rowUrlNormalized = normalizeUrl(rowUrl);
+                    // Strict matching: exact match or normalized match only (no substring)
+                    return rowUrl === url || rowUrlNormalized === urlNormalized;
+                  });
+                  
+                  // If not found with strict matching, try matching by cell's data-page-url
+                  if (!row) {
+                    const cellUrl = cell.getAttribute('data-page-url');
+                    if (cellUrl) {
+                      const cellUrlNormalized = normalizeUrl(cellUrl);
+                      row = rows.find(r => {
+                        const rowUrl = r.url || '';
+                        const rowUrlNormalized = normalizeUrl(rowUrl);
+                        return rowUrl === cellUrl || rowUrlNormalized === cellUrlNormalized;
+                      });
+                    }
+                  }
+                  
+                  if (row) {
+                    row._aiCitations = count;
+                  }
                 }
               } else {
                 cellNotFoundCount++;
