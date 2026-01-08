@@ -20614,18 +20614,20 @@
 
         if (!response.ok) {
           let errorMessage = `HTTP ${response.status}`;
+          // Read response as text first (body can only be read once)
           try {
-            const errorData = await response.json();
-            errorMessage = errorData.error || errorMessage;
-          } catch (e) {
-            // If JSON parsing fails, try to get text
+            const text = await response.text();
+            // Try to parse as JSON
             try {
-              const text = await response.text();
+              const errorData = JSON.parse(text);
+              errorMessage = errorData.error || errorMessage;
+            } catch (jsonError) {
+              // Not JSON, use text as-is
               errorMessage = text || errorMessage;
-            } catch (e2) {
-              // If that fails too, use status
-              errorMessage = `HTTP ${response.status}: ${response.statusText || 'Unknown error'}`;
             }
+          } catch (e) {
+            // If reading fails, use status
+            errorMessage = `HTTP ${response.status}: ${response.statusText || 'Unknown error'}`;
           }
           throw new Error(errorMessage);
         }

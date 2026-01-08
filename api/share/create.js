@@ -45,7 +45,10 @@ export default async function handler(req, res) {
   }
 
   // Admin key gate (only admins can create share tokens)
+  // This checks ARP_ADMIN_KEY environment variable
   if (!requireAdmin(req, res, sendJSON)) {
+    // requireAdmin already sent error response (401 if key mismatch, 500 if ARP_ADMIN_KEY missing)
+    console.error('[Share Create] Admin authentication failed - check ARP_ADMIN_KEY in Vercel and ensure client admin key matches');
     return; // Response already sent
   }
 
@@ -53,10 +56,15 @@ export default async function handler(req, res) {
     // Check if ARP_SHARE_KEY is set
     const shareKey = process.env.ARP_SHARE_KEY;
     if (!shareKey || !String(shareKey).trim()) {
+      console.error('[Share Create] ARP_SHARE_KEY is missing or empty');
+      console.error('[Share Create] ARP_SHARE_KEY value:', shareKey ? `[${shareKey.length} chars, first 10: ${shareKey.substring(0, 10)}...]` : 'undefined');
       return sendJSON(res, 500, { 
-        error: 'ARP_SHARE_KEY environment variable is not set. Please configure it in Vercel environment variables.' 
+        error: 'ARP_SHARE_KEY environment variable is not set or is empty. Please configure it in Vercel environment variables with a non-empty value.' 
       });
     }
+    
+    console.log('[Share Create] Both ARP_ADMIN_KEY and ARP_SHARE_KEY are configured');
+    
     const { expiryDays = 30 } = req.body || {};
 
     // Validate expiry (1-90 days)
@@ -71,16 +79,28 @@ export default async function handler(req, res) {
     };
 
     // Encode payload
-    const payloadB64 = base64UrlEncode(JSON.stringify(payload));
+    let payloadB64;
+    try {
+      payloadB64 = base64UrlEncode(JSON.stringify(payload));
+    } catch (encodeError) {
+      console.error('[Share Create] Error encoding payload:', encodeError);
+      return sendJSON(res, 500, { error: `Failed to encode payload: ${encodeError.message}` });
+    }
 
     // Create signature
-    const signature = crypto
-      .createHmac('sha256', shareKey)
-      .update(payloadB64)
-      .digest('base64')
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=/g, '');
+    let signature;
+    try {
+      signature = crypto
+        .createHmac('sha256', shareKey)
+        .update(payloadB64)
+        .digest('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=/g, '');
+    } catch (cryptoError) {
+      console.error('[Share Create] Error creating signature:', cryptoError);
+      return sendJSON(res, 500, { error: `Failed to create signature: ${cryptoError.message}` });
+    }
 
     // Create token
     const token = `${payloadB64}.${signature}`;
@@ -98,8 +118,12 @@ export default async function handler(req, res) {
       expiresInDays: days
     });
   } catch (error) {
-    console.error('[Share Create] Error:', error);
-    return sendJSON(res, 500, { error: error.message || 'Internal server error' });
+    console.error('[Share Create] Unexpected error:', error);
+    console.error('[Share Create] Error stack:', error.stack);
+    return sendJSON(res, 500, { 
+      error: error.message || 'Internal server error',
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 }
 
