@@ -3,7 +3,7 @@
 
 export const config = { runtime: 'nodejs' };
 
-import { requireAdmin } from '../../../lib/api/requireAdmin.js';
+import { requireAdmin } from '../../lib/api/requireAdmin.js';
 import crypto from 'crypto';
 
 const need = (k) => {
