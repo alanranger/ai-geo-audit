@@ -31449,7 +31449,16 @@ Final Score: ${score}/100`;
           if (tableHtml && typeof tableHtml === 'string' && tableHtml.trim().length > 0) {
             tableContainer.innerHTML = tableHtml;
             // Populate AI citations per URL (latest audit only) - async, non-blocking
-            setTimeout(() => {
+            // Use longer delay and retry mechanism to ensure cells are rendered
+            let retryCount = 0;
+            const maxRetries = 3;
+            const tryPopulate = () => {
+              const cells = document.querySelectorAll('.ai-citation-cell-opportunity');
+              if (cells.length === 0 && retryCount < maxRetries) {
+                retryCount++;
+                setTimeout(tryPopulate, 200);
+                return;
+              }
               try {
                 populateMoneyPagesAiCitations(filteredRows).catch(err => {
                   debugLog(`[Money Pages] Error populating AI citations: ${err.message}`, 'warn');
@@ -31457,7 +31466,8 @@ Final Score: ${score}/100`;
               } catch (err) {
                 debugLog(`[Money Pages] Error calling populateMoneyPagesAiCitations: ${err.message}`, 'warn');
               }
-            }, 100);
+            };
+            setTimeout(tryPopulate, 300);
           } else {
             debugLog(`⚠ renderMoneyPagesTable returned invalid value: ${typeof tableHtml}, length: ${tableHtml?.length || 0}`, 'warn');
             tableContainer.innerHTML = '<div style="font-size: 0.85rem; color: #999; padding: 1rem; text-align: center;">Error rendering table. Please refresh the page.</div>';
@@ -31529,7 +31539,16 @@ Final Score: ${score}/100`;
         if (tableHtml && typeof tableHtml === 'string' && tableHtml.trim().length > 0) {
           tableContainer.innerHTML = tableHtml;
           // Populate AI citations after table is rendered (async, non-blocking)
-          setTimeout(() => {
+          // Use retry mechanism to ensure cells are rendered
+          let retryCountInitial = 0;
+          const maxRetriesInitial = 3;
+          const tryPopulateInitial = () => {
+            const cells = document.querySelectorAll('.ai-citation-cell-opportunity');
+            if (cells.length === 0 && retryCountInitial < maxRetriesInitial) {
+              retryCountInitial++;
+              setTimeout(tryPopulateInitial, 200);
+              return;
+            }
             try {
               populateMoneyPagesAiCitations(rows).catch(err => {
                 debugLog(`[Money Pages] Error populating AI citations: ${err.message}`, 'warn');
@@ -31539,7 +31558,8 @@ Final Score: ${score}/100`;
               debugLog(`[Money Pages] Error calling populateMoneyPagesAiCitations: ${err.message}`, 'warn');
               console.error('[Money Pages] AI citations function error:', err);
             }
-          }, 100); // Small delay to ensure DOM is ready
+          };
+          setTimeout(tryPopulateInitial, 300);
         } else {
           debugLog(`⚠ renderMoneyPagesTable returned invalid value: ${typeof tableHtml}, length: ${tableHtml?.length || 0}`, 'warn');
           tableContainer.innerHTML = '<div style="font-size: 0.85rem; color: #999; padding: 1rem; text-align: center;">Error rendering table. Please refresh the page.</div>';
