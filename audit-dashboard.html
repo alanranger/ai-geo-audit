@@ -30114,7 +30114,7 @@ Final Score: ${score}/100`;
                   <th id="money-sort-position" style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; transition: background 0.2s; line-height: 1.2;" onmouseover="this.style.background='#e2e8f0';" onmouseout="this.style.background='transparent';" title="Click to sort by Avg Position" onclick="window.moneyPagesSetSort('position')">
                     <div>Avg</div><div>Position</div>${getSortIcon('position')}
                   </th>
-                  <th id="money-sort-ai-citations" style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; white-space: normal; line-height: 1.15; cursor: default !important; user-select: none; opacity: 0.6; pointer-events: none;" title="AI citations (total citations from your domain in AI Overview). Latest audit only; fetched on demand. Sorting disabled.">
+                  <th id="money-sort-ai-citations" data-ai-citations-header="true" style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; white-space: normal; line-height: 1.15; cursor: default !important; user-select: none !important; opacity: 0.6 !important; pointer-events: none !important;" title="AI citations (total citations from your domain in AI Overview). Latest audit only; fetched on demand. Sorting disabled." onclick="return false;" onmousedown="return false;" onmouseup="return false;">
                     <div>AI citations</div>
                   </th>
                   <th id="money-sort-opportunity" style="text-align: center; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; transition: background 0.2s; white-space: nowrap;" onmouseover="this.style.background='#e2e8f0';" onmouseout="this.style.background='transparent';" title="Click to sort by Opportunity">
@@ -30728,12 +30728,49 @@ Final Score: ${score}/100`;
         }
       }
       
+      // Debounce mechanism to prevent multiple rapid calls
+      let populateMoneyPagesAiCitationsTimeout = null;
+      let populateMoneyPagesAiCitationsCallCount = 0;
+      
       // Function to populate AI citations for Money Pages table
-      async function populateMoneyPagesAiCitations(rows) {
+      async function populateMoneyPagesAiCitations(rows, immediate = false) {
         const debugPrefix = '[Money Pages AI Citations DEBUG]';
-        try {
-          console.log(`${debugPrefix} === FUNCTION START ===`);
-          console.log(`${debugPrefix} Rows provided: ${rows?.length || 0}`);
+        populateMoneyPagesAiCitationsCallCount++;
+        const callNumber = populateMoneyPagesAiCitationsCallCount;
+        const callStack = new Error().stack;
+        console.log(`${debugPrefix} === FUNCTION CALL #${callNumber} ===`);
+        console.log(`${debugPrefix} Immediate: ${immediate}`);
+        console.log(`${debugPrefix} Call stack:`, callStack);
+        console.log(`${debugPrefix} Rows provided: ${rows?.length || 0}`);
+        console.log(`${debugPrefix} Timestamp: ${new Date().toISOString()}`);
+        
+        // Clear any pending calls
+        if (populateMoneyPagesAiCitationsTimeout) {
+          console.log(`${debugPrefix} Clearing pending call (debounce)`);
+          clearTimeout(populateMoneyPagesAiCitationsTimeout);
+          populateMoneyPagesAiCitationsTimeout = null;
+        }
+        
+        // If not immediate, debounce the call
+        if (!immediate) {
+          console.log(`${debugPrefix} Debouncing call #${callNumber} (300ms delay)`);
+          return new Promise((resolve) => {
+            populateMoneyPagesAiCitationsTimeout = setTimeout(async () => {
+              console.log(`${debugPrefix} Executing debounced call #${callNumber}`);
+              await populateMoneyPagesAiCitationsImpl(rows, callNumber);
+              resolve();
+            }, 300);
+          });
+        }
+        
+        // Immediate execution
+        return populateMoneyPagesAiCitationsImpl(rows, callNumber);
+      }
+      
+      // Implementation function
+      async function populateMoneyPagesAiCitationsImpl(rows, callNumber) {
+        const debugPrefix = '[Money Pages AI Citations DEBUG]';
+        console.log(`${debugPrefix} === IMPLEMENTATION START (Call #${callNumber}) ===`);
           
           // If no rows provided, try to get from window.moneyPagesData
           if (!rows || rows.length === 0) {
@@ -30912,11 +30949,18 @@ Final Score: ${score}/100`;
           // If cached value exists, render it and store on the row for sorting
           if (typeof cachedCount === 'number') {
             const oldValue = cell.textContent || '';
-            cell.textContent = cachedCount.toLocaleString();
+            const newValue = cachedCount.toLocaleString();
+            console.log(`${debugPrefix} Updating cell from cache: ${pageUrl}`);
+            console.log(`${debugPrefix}   Old value: "${oldValue}"`);
+            console.log(`${debugPrefix}   Cached count: ${cachedCount}`);
+            console.log(`${debugPrefix}   New value: "${newValue}"`);
+            cell.textContent = newValue;
             cell.style.color = '#0f172a';
             cell.style.fontWeight = '600';
-            if (oldValue !== cachedCount.toLocaleString()) {
-              console.log(`${debugPrefix} Updated cell from cache: ${pageUrl} | ${oldValue} → ${cachedCount.toLocaleString()}`);
+            if (oldValue !== newValue) {
+              console.log(`${debugPrefix} ✓ Updated cell from cache: ${pageUrl} | "${oldValue}" → "${newValue}"`);
+            } else {
+              console.log(`${debugPrefix} ⊘ Cell value unchanged from cache: ${pageUrl} | "${oldValue}"`);
             }
             const pageUrlNormalized = normalizeUrl(pageUrl);
             const row = rows.find(r => {
@@ -30932,6 +30976,7 @@ Final Score: ${score}/100`;
           // No cache: if the cell already has a numeric value (e.g., from initial render), keep it
           // This prevents flickering from a valid number to 0
           const existingNumeric = parseInt(String(cell.textContent || '').replace(/,/g, ''), 10);
+          console.log(`${debugPrefix} No cache for ${pageUrl}, existing cell value: "${cell.textContent}" (parsed: ${existingNumeric})`);
           if (!Number.isNaN(existingNumeric) && existingNumeric > 0) {
             console.log(`${debugPrefix} Preserving existing displayed value: ${pageUrl} | ${existingNumeric} (no cache found)`);
             // Preserve the displayed value and set it on the row for sorting
@@ -31128,11 +31173,18 @@ Final Score: ${score}/100`;
                 }
                 
                 // Only update if we have a valid count that's >= existing value
-                cell.textContent = count.toLocaleString();
+                const newValue = count.toLocaleString();
+                console.log(`${debugPrefix} About to update cell from API: ${url}`);
+                console.log(`${debugPrefix}   Old value: "${oldDisplayValue}" (parsed: ${existingDisplay})`);
+                console.log(`${debugPrefix}   API count: ${count}`);
+                console.log(`${debugPrefix}   New value: "${newValue}"`);
+                cell.textContent = newValue;
                 cell.style.color = '#0f172a';
                 cell.style.fontWeight = '600';
-                if (oldDisplayValue !== count.toLocaleString()) {
-                  console.log(`${debugPrefix} Updated cell from API: ${url} | ${oldDisplayValue} → ${count.toLocaleString()}`);
+                if (oldDisplayValue !== newValue) {
+                  console.log(`${debugPrefix} ✓ Updated cell from API: ${url} | "${oldDisplayValue}" → "${newValue}"`);
+                } else {
+                  console.log(`${debugPrefix} ⊘ Cell value unchanged: ${url} | "${oldDisplayValue}"`);
                 }
                 const row = rows.find(r => {
                   const rowUrl = r.url || '';
@@ -31160,7 +31212,7 @@ Final Score: ${score}/100`;
           console.error(`${debugPrefix} Critical error: ${err.message}`, err);
           debugLog(`[Money Pages] Critical error in populateMoneyPagesAiCitations: ${err.message}`, 'error');
         } finally {
-          console.log(`${debugPrefix} === FUNCTION COMPLETE ===`);
+          console.log(`${debugPrefix} === IMPLEMENTATION COMPLETE (Call #${callNumber}) ===`);
         }
       }
       
@@ -31183,7 +31235,7 @@ Final Score: ${score}/100`;
         console.log('Available rows:', rows.length);
         if (rows.length > 0) {
           console.log('First 3 row URLs:', rows.slice(0, 3).map(r => r.url));
-          populateMoneyPagesAiCitations(rows);
+          populateMoneyPagesAiCitations(rows, true); // Immediate for test function
         } else {
           console.error('No rows data available');
         }
@@ -31811,9 +31863,16 @@ Final Score: ${score}/100`;
           const col = String(th.id).replace('money-sort-', '').replace('-', '');
           // COMPLETELY DISABLED: AI Citations column sorting is permanently disabled
           if (col === 'aiCitations' || col === 'aicitations' || col === 'ai-citations') {
-            console.log('[Money Pages] AI Citations sorting is permanently disabled - ignoring click.');
+            console.log('[Money Pages AI Citations DEBUG] Header click detected - sorting is permanently disabled');
+            console.log('[Money Pages AI Citations DEBUG] Event details:', {
+              target: e.target,
+              currentTarget: e.currentTarget,
+              thId: th.id,
+              col: col
+            });
             e.preventDefault();
             e.stopPropagation();
+            e.stopImmediatePropagation();
             return false;
           }
           if (!['type', 'clicks', 'impressions', 'ctr', 'clickPotential', 'position', 'opportunity'].includes(col)) return;
@@ -31823,6 +31882,56 @@ Final Score: ${score}/100`;
             console.warn('[Money Pages Opportunity] Sort handler error:', err);
           }
         });
+        
+        // Add additional safeguard: Watch for any attempts to modify the AI Citations header
+        const observeHeader = () => {
+          const header = document.getElementById('money-sort-ai-citations');
+          if (header) {
+            console.log('[Money Pages AI Citations DEBUG] Header found, ensuring it is non-interactive');
+            // Force non-interactive styles
+            header.style.pointerEvents = 'none';
+            header.style.cursor = 'default';
+            header.style.opacity = '0.6';
+            header.style.userSelect = 'none';
+            // Remove any onclick handlers
+            header.onclick = null;
+            header.removeAttribute('onclick');
+            // Add click blocker
+            header.addEventListener('click', (e) => {
+              console.log('[Money Pages AI Citations DEBUG] Direct click on header blocked');
+              e.preventDefault();
+              e.stopPropagation();
+              e.stopImmediatePropagation();
+              return false;
+            }, true); // Use capture phase
+            
+            // Watch for changes to the header
+            const observer = new MutationObserver((mutations) => {
+              mutations.forEach((mutation) => {
+                if (mutation.type === 'attributes' || mutation.type === 'childList') {
+                  console.log('[Money Pages AI Citations DEBUG] Header modified:', mutation.type, mutation);
+                  // Re-apply non-interactive styles
+                  header.style.pointerEvents = 'none';
+                  header.style.cursor = 'default';
+                  header.style.opacity = '0.6';
+                  header.style.userSelect = 'none';
+                  header.onclick = null;
+                  header.removeAttribute('onclick');
+                }
+              });
+            });
+            observer.observe(header, {
+              attributes: true,
+              childList: true,
+              subtree: true,
+              attributeFilter: ['onclick', 'style', 'class']
+            });
+          } else {
+            // Retry after a short delay if header not found yet
+            setTimeout(observeHeader, 100);
+          }
+        };
+        observeHeader();
       }
       
       // Handle sorting for Money Pages table
