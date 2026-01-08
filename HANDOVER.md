@@ -138,17 +138,17 @@ This document consolidates ALL critical information about the AI GEO Audit proje
    - Added `text-align: right` to cell styling
 
 ### Current Issues
-1. **AI Citations Initial Load**: Landscape URL still shows 2 then changes to 5 on initial load (sorting fixes it)
-   - This is a cache timing issue - initial render may show cached value, sorting triggers proper cache lookup
-   - Expected behavior but could be improved with better cache initialization
-2. **Excessive API Calls**: Needs debouncing and execution guards (was attempted but reverted)
-3. **URL Task AI Data**: Matching logic not working (was attempted but reverted)
+✅ **All previously listed issues have been resolved:**
+1. ✅ **AI Citations Initial Load**: Resolved - Cache timing issue addressed with improved cache initialization and normalized URL matching
+2. ✅ **Excessive API Calls**: Resolved - Debouncing and execution guards implemented
+3. ✅ **URL Task AI Data**: Resolved - Matching logic fixed and working correctly
 
-### What Was Lost in Rollback
-- Fix 1: URL matching optional for keyword tasks (was completed)
-- Fix 5: Always fetch latest from Supabase (was completed)
-- Fix 2: Partial unification of logic (was partially complete)
-- All AI Citations column fixes (sort icon removal, debouncing, etc.)
+### Completed Fixes (Previously Listed as Lost in Rollback)
+✅ **All fixes have been re-implemented and completed:**
+- ✅ Fix 1: URL matching optional for keyword tasks - **COMPLETE**
+- ✅ Fix 5: Always fetch latest from Supabase - **COMPLETE**
+- ✅ Fix 2: Partial unification of logic - **COMPLETE**
+- ✅ All AI Citations column fixes (sort icon removal, debouncing, etc.) - **COMPLETE**
 
 ---
 
@@ -177,7 +177,7 @@ This document consolidates ALL critical information about the AI GEO Audit proje
 ---
 
 ### Project 2: Optimisation Tracking Module
-**Status**: ✅ **89% COMPLETE** (Phases 1-8 complete, Phase 9 in progress)
+**Status**: ✅ **91% COMPLETE** (Phases 1-9 complete, Phase 10-11 planned)
 
 | Phase | Status | Date Completed | Deliverables |
 |-------|--------|----------------|--------------|
@@ -190,38 +190,38 @@ This document consolidates ALL critical information about the AI GEO Audit proje
 | Phase 6: Cycle Management | ✅ COMPLETE | 2025-12-19 | Per-task cycle numbering, history |
 | Phase 7: Cycle Completion | ✅ COMPLETE | 2025-12-19 | Complete/archive cycles, timeline events |
 | Phase 8: KPI Formatting | ✅ COMPLETE | 2025-12-19 | CTR as pp, rank lower better, no double % |
-| Phase 9: Enhanced Analytics | 🚧 IN PROGRESS | Planning | KPI tiles, progress columns, sparklines, impact estimates |
+| Phase 9: Enhanced Analytics | ✅ COMPLETE | 2026-01-07 | KPI tiles, progress columns, sparklines, impact estimates |
 | Phase 10: Advanced Reporting | ⏸️ PLANNED | Not started | Monthly rollups, export, regression detection |
 | Phase 11: Automation | ⏸️ PLANNED | Not started | Automated reminders, stale monitoring alerts |
 
-**Phase 9 Deliverables (In Progress)**:
-- [ ] KPI Tiles (RAG) reflecting objectives
-- [ ] Objective progress columns in table
-- [ ] Mini sparklines (per-task or per-KPI)
-- [ ] Estimated impact tiles
-- [ ] Time-based charts
+**Phase 9 Deliverables (Complete)**:
+- [x] KPI Tiles (RAG) reflecting objectives
+- [x] Objective progress columns in table
+- [x] Mini sparklines (per-task or per-KPI)
+- [x] Estimated impact tiles
+- [x] Time-based charts
 
 **Documentation**: `Docs/OPTIMISATION_TRACKING_MODULE_PLAN.md`, `Docs/OPTIMISATION_TRACKING_PHASES_COMPLETE.md`
 
 ---
 
 ### Project 3: Fix Plan - Data Consistency & AI Citations
-**Status**: ❌ **0% COMPLETE** (All fixes reverted in rollback)
+**Status**: ✅ **40% COMPLETE** (Phases 1-2 complete, Phases 3-5 pending)
 
 **5-Phase Implementation Plan**:
 
-#### Phase 1: AI Citations Column Fixes (Current Priority)
-**Status**: ⏸️ **NOT STARTED** (reverted to baseline)
+#### Phase 1: AI Citations Column Fixes
+**Status**: ✅ **COMPLETE** (2026-01-07)
 
 **Tasks**:
-- [ ] Remove sort icon from AI Citations column header
-- [ ] Disable sorting functionality completely
-- [ ] Add CSS to hide all sort indicators
-- [ ] Prevent header interaction (pointer-events, cursor, onclick handlers)
-- [ ] Ensure `getSortIcon` never returns icon for 'aiCitations' column
-- [ ] Test that column is completely non-interactive
+- [x] Remove sort icon from AI Citations column header
+- [x] Disable sorting functionality completely
+- [x] Add CSS to hide all sort indicators
+- [x] Prevent header interaction (pointer-events, cursor, onclick handlers)
+- [x] Ensure `getSortIcon` never returns icon for 'aiCitations' column
+- [x] Test that column is completely non-interactive
 
-**Files to Modify**:
+**Files Modified**:
 - `audit-dashboard.html`: AI Citations header (`#money-sort-ai-citations`)
 - `audit-dashboard.html`: `getSortIcon()` function
 - `audit-dashboard.html`: CSS stylesheet section
@@ -229,20 +229,20 @@ This document consolidates ALL critical information about the AI GEO Audit proje
 ---
 
 #### Phase 2: Prevent Flickering & Reduce API Calls
-**Status**: ⏸️ **NOT STARTED** (reverted to baseline)
+**Status**: ✅ **COMPLETE** (2026-01-07)
 
 **Tasks**:
-- [ ] Implement debounce mechanism for `populateMoneyPagesAiCitations` (300ms delay)
-- [ ] Add global execution flag to prevent simultaneous calls
-- [ ] Replace `console.log` with `debugLog` for UI visibility
-- [ ] Enhance cell update logic:
+- [x] Implement debounce mechanism for `populateMoneyPagesAiCitations` (300ms delay)
+- [x] Add global execution flag to prevent simultaneous calls
+- [x] Replace `console.log` with `debugLog` for UI visibility
+- [x] Enhance cell update logic:
   - Skip API calls for cells with valid numeric values (>0)
   - Only update if new value is higher than existing
   - Preserve cached values even if API returns 0 or null
-- [ ] Reduce DOM wait time (100ms instead of 300ms)
-- [ ] Wrap logic in try...finally to ensure flag reset
+- [x] Reduce DOM wait time (100ms instead of 300ms)
+- [x] Wrap logic in try...finally to ensure flag reset
 
-**Files to Modify**:
+**Files Modified**:
 - `audit-dashboard.html`: `populateMoneyPagesAiCitations()` function (~line 30768)
 
 ---
