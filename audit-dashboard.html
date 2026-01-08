@@ -3444,7 +3444,7 @@
     <h1>GAIO (Generative AI Optimization) Audit Dashboard</h1>
     <p>Automated GAIO Performance Tracking & Optimisation</p>
     <p style="font-size: 0.9rem; margin-top: 0.5rem; opacity: 1; background: rgba(0,0,0,0.3); padding: 0.25rem 0.5rem; border-radius: 4px; display: inline-block;">
-      <strong>Version: <span id="gitVersion">cef42fd</span></strong> | Built: <span id="buildDate"></span> |
+      <strong>Version: <span id="gitVersion">7a3d804</span></strong> | Built: <span id="buildDate"></span> |
       <span id="loadTime" style="color: #4f4;">Loaded: <span id="loadTimeValue"></span></span>
     </p>
     <script>
@@ -30471,7 +30471,8 @@ Final Score: ${score}/100`;
             categoryLabel: row.categoryLabel,
             categoryColor: row.categoryColor,
             recommendation: row.recommendation,
-            schemaTypes: row.schemaTypes || []
+            schemaTypes: row.schemaTypes || [],
+            _aiCitations: typeof row._aiCitations === 'number' ? row._aiCitations : (row.aiCitations || 0)
           };
           window.moneyPagesRowDataByUrl.set(normalizedRowUrl, rowDataToStore);
           // Debug: Log if this is the landscape page
@@ -32724,7 +32725,6 @@ Final Score: ${score}/100`;
         document.getElementById('track-target-direction').value = 'at_least';
         document.getElementById('track-target-value').value = '2.5';
         document.getElementById('track-timeframe-days').value = '';
-        document.getElementById('track-plan').value = 'Created from Money Pages segment (CTR target: ≥ 2.5%).';
         
         // Store row data for baseline metrics (needed in submitTrackKeyword)
         modal.dataset.rowKeyword = ''; // Empty for page-level tasks
@@ -32732,6 +32732,115 @@ Final Score: ${score}/100`;
         modal.dataset.taskType = 'on_page';
         modal.dataset.source = 'money_pages';
         modal.dataset.rowData = JSON.stringify(row);
+        
+        // Build recommendations from row data and populate Plan / Hypothesis field
+        let planText = '';
+        try {
+          debugLog('[Money Pages] Building recommendations from row data', 'info');
+          debugLog('[Money Pages] Row data: ' + JSON.stringify({
+            clicks: row.clicks,
+            impressions: row.impressions,
+            ctr: row.ctr,
+            avgPosition: row.avgPosition || row.position,
+            aiCitations: row._aiCitations || row.aiCitations,
+            url: row.url
+          }));
+          
+          const recommendations = [];
+          const clicks = row.clicks || 0;
+          const impressions = row.impressions || 0;
+          const ctr = row.ctr || 0;
+          const avgPosition = row.avgPosition != null ? row.avgPosition : (row.position || null);
+          const aiCitations = row._aiCitations || row.aiCitations || 0;
+          
+          debugLog('[Money Pages] Building recommendations: clicks=' + clicks + ', impressions=' + impressions + ', ctr=' + ctr + ', position=' + avgPosition + ', aiCitations=' + aiCitations);
+          
+          // High Priority: Low Click-Through Rate (shown first in View Details)
+          const ctrPercent = (ctr > 1 ? ctr : ctr * 100);
+          if (ctrPercent < 2 && impressions > 0) {
+            const potentialClicks = Math.round(impressions * 0.02);
+            const additionalClicks = Math.max(0, potentialClicks - clicks);
+            recommendations.push({
+              priority: 'High',
+              title: 'Low Click-Through Rate',
+              nextSteps: 'Optimize title tags and meta descriptions to improve CTR',
+              estimatedImpact: `Could gain ~${additionalClicks} additional clicks/month with better CTR`,
+              reason: `Current CTR ${ctrPercent.toFixed(2)}% is below 2% benchmark`
+            });
+            debugLog('[Money Pages] Added High priority: Low Click-Through Rate');
+          }
+          
+          // Medium Priority: Ranking Below Top 10
+          if (avgPosition != null && avgPosition > 10) {
+            const potentialClicksLow = Math.round(impressions * 0.025);
+            const potentialClicksHigh = Math.round(impressions * 0.05);
+            recommendations.push({
+              priority: 'Medium',
+              title: 'Ranking Below Top 10',
+              nextSteps: 'Improve on-page SEO, build authority, or optimize for target keywords',
+              estimatedImpact: `Moving to top 10 could increase clicks by ${potentialClicksLow} - ${potentialClicksHigh}`,
+              reason: `Current position ${avgPosition.toFixed(1)} is outside top 10`
+            });
+            debugLog('[Money Pages] Added Medium priority: Ranking Below Top 10');
+          }
+          
+          // Low Priority: Focus on Higher Volume Keywords (if AI citations exist but are low volume)
+          if (aiCitations > 0 && impressions < 1000) {
+            recommendations.push({
+              priority: 'Low',
+              title: 'Focus on Higher Volume Keywords',
+              nextSteps: 'Expand content to target keywords with 100+ monthly search volume',
+              estimatedImpact: 'Could increase potential traffic by targeting higher-volume opportunities',
+              reason: 'Most citations are for low-volume keywords (<100 searches/month)'
+            });
+            debugLog('[Money Pages] Added Low priority: Focus on Higher Volume Keywords');
+          }
+          
+          // Sort by priority: High first, then Medium, then Low
+          recommendations.sort((a, b) => {
+            const priorityOrder = { 'High': 3, 'Medium': 2, 'Low': 1 };
+            return (priorityOrder[b.priority] || 0) - (priorityOrder[a.priority] || 0);
+          });
+          
+          debugLog('[Money Pages] Generated ' + recommendations.length + ' recommendations');
+          
+          // Build plan text from recommendations
+          if (recommendations.length > 0) {
+            const planLines = [];
+            planLines.push('CTR target: ≥ 2.5%');
+            planLines.push('');
+            
+            // Limit to top 3 recommendations
+            const topRecs = recommendations.slice(0, 3);
+            
+            topRecs.forEach((rec, idx) => {
+              planLines.push(`${rec.priority.toUpperCase()} PRIORITY: ${rec.title}`);
+              planLines.push(`Next steps: ${rec.nextSteps}`);
+              planLines.push(`Estimated impact: ${rec.estimatedImpact}`);
+              planLines.push(`Reason: ${rec.reason}`);
+              if (idx < topRecs.length - 1) planLines.push('');
+            });
+            
+            planText = planLines.join('\n');
+            debugLog('[Money Pages] Plan text generated (length: ' + planText.length + '): ' + planText.substring(0, 200) + '...');
+          } else {
+            planText = 'CTR target: ≥ 2.5%';
+            debugLog('[Money Pages] No recommendations generated, using default plan text');
+          }
+        } catch (e) {
+          console.error('[Money Pages] Error generating plan from recommendations:', e);
+          debugLog('[Money Pages] Error generating plan: ' + e.message + ' - ' + e.stack, 'error');
+          planText = 'CTR target: ≥ 2.5%';
+        }
+        
+        // Set the plan field with generated recommendations
+        const planField = document.getElementById('track-plan');
+        if (planField) {
+          planField.value = planText;
+          debugLog('[Money Pages] Plan field updated successfully');
+        } else {
+          debugLog('[Money Pages] ERROR: track-plan field not found!', 'error');
+        }
         
         // Update modal title and subtitle to indicate Money Pages
         const modalTitle = modal.querySelector('h3');
@@ -32855,7 +32964,8 @@ Final Score: ${score}/100`;
                 avgPosition: matchingRow.avgPosition != null ? matchingRow.avgPosition : (matchingRow.position || null),
                 position: matchingRow.position || matchingRow.avgPosition || null,
                 segment: matchingRow.segment || 'money_pages',
-                metaDescription: matchingRow.metaDescription || null
+                metaDescription: matchingRow.metaDescription || null,
+                _aiCitations: typeof matchingRow._aiCitations === 'number' ? matchingRow._aiCitations : (matchingRow.aiCitations || 0)
               };
               console.log('[Money Pages] Extracted row data:', rowData);
             } else {
@@ -32876,7 +32986,8 @@ Final Score: ${score}/100`;
               clicks: 0,
               impressions: 0,
               ctr: 0,
-              avgPosition: null
+              avgPosition: null,
+              _aiCitations: 0
             };
           }
           
