@@ -18608,12 +18608,15 @@
             cell.style.cssText = 'text-align: center; padding: 0.75rem; border-bottom: 1px solid var(--dark-border); color: var(--dark-text);';
             
             // Monthly KPI Tracker:
-            // - For CLOSED months: we only accept month-end snapshots (run_id=YYYY-MM, or date_end=last day of month)
+            // - For CLOSED months: prefer month-end snapshots (run_id=YYYY-MM, or date_end=last day of month)
+            //   BUT if month-end snapshot has 0/null for the KPI, fall back to latest snapshot with actual data
             // - For CURRENT month: show the latest available snapshot in the month, but mark it as partial (*)
             const monthEnd = monthEndDateFromKey(month);
             const monthEndStr = toDateOnlyStr(monthEnd); // YYYY-MM-DD (local)
             const isCurrentMonth = month === monthKeyFromDate(today);
-            const monthSnapshots = allData[segment]?.filter(s => {
+            
+            // First, try to get month-end snapshots (preferred for closed months)
+            const monthEndSnapshots = allData[segment]?.filter(s => {
               // Preferred: explicit month backfill snapshot
               if (s.run_id && s.run_id.match(/^\d{4}-\d{2}$/)) {
                 return s.run_id === month;
@@ -18630,8 +18633,56 @@
               return false;
             });
             
-            // Get the latest snapshot in this month (prefer max date_end, not max created_at)
-            const snapshot = pickLatestSnapshotInMonth(monthSnapshots);
+            // Get the latest month-end snapshot
+            let snapshot = monthEndSnapshots?.length > 0 ? pickLatestSnapshotInMonth(monthEndSnapshots) : null;
+            
+            // Helper function to check if snapshot has valid data for the KPI
+            const hasValidData = (snap) => {
+              if (!snap) return false;
+              if (kpiField === 'impressions_28d') {
+                return parseFloat(snap.impressions_28d || 0) > 0;
+              } else if (kpiField === 'clicks_28d') {
+                return parseFloat(snap.clicks_28d || 0) > 0;
+              } else if (kpiField === 'position_28d') {
+                return snap.position_28d !== null && snap.position_28d !== undefined && !isNaN(parseFloat(snap.position_28d));
+              } else if (kpiField === 'ctr_28d') {
+                return parseFloat(snap.ctr_28d || 0) > 0;
+              } else if (kpiField === 'ai_citations_28d') {
+                return parseInt(snap.ai_citations_28d || 0) > 0;
+              } else if (kpiField === 'ai_overview_present_count') {
+                return parseInt(snap.ai_overview_present_count || 0) > 0;
+              }
+              return true; // For other KPIs, assume any value is valid
+            };
+            
+            // If month-end snapshot doesn't have valid data, fall back to latest snapshot in month with actual data
+            if (snapshot && !hasValidData(snapshot) && !isCurrentMonth) {
+              // Get all snapshots in the month (not just month-end)
+              const allMonthSnapshots = allData[segment]?.filter(s => {
+                if (s.run_id && s.run_id.match(/^\d{4}-\d{2}$/)) {
+                  return s.run_id === month;
+                }
+                if (s.date_end) {
+                  const mStr = String(s.date_end).slice(0, 7);  // YYYY-MM
+                  return mStr === month;
+                }
+                // Fallback to created_at month
+                if (s.created_at) {
+                  const createdDate = new Date(s.created_at);
+                  const mStr = `${createdDate.getFullYear()}-${String(createdDate.getMonth() + 1).padStart(2, '0')}`;
+                  return mStr === month;
+                }
+                return false;
+              });
+              
+              // Find the latest snapshot with valid data
+              if (allMonthSnapshots && allMonthSnapshots.length > 0) {
+                const validSnapshots = allMonthSnapshots.filter(hasValidData);
+                if (validSnapshots.length > 0) {
+                  snapshot = pickLatestSnapshotInMonth(validSnapshots);
+                }
+              }
+            }
             
             if (snapshot) {
               // Extract value based on KPI field
