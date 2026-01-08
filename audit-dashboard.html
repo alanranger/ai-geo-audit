@@ -30889,8 +30889,22 @@ Final Score: ${score}/100`;
                         
                         if (citedUrl) {
                           const citedNormalized = normalizeUrl(citedUrl);
-                          // Match if normalized URLs are equal OR contain the target slug
-                          if (citedNormalized === targetNormalized || citedNormalized.includes(targetNormalized)) {
+                          // Strict URL matching: exact match or same path segments (not substring matching)
+                          // This prevents matching "photography-workshops" when looking for "landscape-photography-workshops"
+                          const targetPathParts = targetNormalized.split('/').filter(p => p);
+                          const citedPathParts = citedNormalized.split('/').filter(p => p);
+                          
+                          // Exact match
+                          let matches = citedNormalized === targetNormalized;
+                          
+                          // If not exact, check if paths match (same segments, allowing query/fragment variants)
+                          // Only match if the citation path starts with the target path (not substring matching)
+                          if (!matches && targetPathParts.length > 0 && citedPathParts.length >= targetPathParts.length) {
+                            // Check if citation path starts with target path segments
+                            matches = targetPathParts.every((part, idx) => citedPathParts[idx] === part);
+                          }
+                          
+                          if (matches) {
                             citationCount++;
                           }
                         }
@@ -31082,13 +31096,18 @@ Final Score: ${score}/100`;
                 return;
               }
               
-              // Don't overwrite a valid cached value with 0 (prevent flickering)
+              // Don't overwrite a valid cached value (prevent flickering and incorrect overwrites)
+              // The cache is built from localStorage (latest audit data) and is more reliable than API
+              // Only update if cache is missing/undefined/0 - never overwrite a valid cached value
               const existingCache = citationCache[url];
-              if (typeof existingCache === 'number' && existingCache > 0 && count === 0) {
-                console.log(`[Money Pages AI Citations] Preserving existing count ${existingCache} for ${url} (API returned 0)`);
+              if (typeof existingCache === 'number' && existingCache > 0) {
+                // We have a valid cached value from localStorage - trust it over API response
+                // This prevents overwriting correct values (e.g., 2) with incorrect API responses (e.g., 5 from historical data or URL matching issues)
+                console.log(`[Money Pages AI Citations] Preserving cached count ${existingCache} for ${url} (API returned ${count}, but cache is trusted)`);
                 return;
               }
               
+              // Only update if cache is missing/0 - API is fallback for missing data
               citationCache[url] = count;
               // Also store in global cache for sorting
               window.moneyPagesCitationCache[url] = count;
