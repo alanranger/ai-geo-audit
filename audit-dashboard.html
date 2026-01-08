@@ -31094,13 +31094,22 @@ Final Score: ${score}/100`;
               }
               
               if (cell) {
-                // Don't overwrite a valid displayed value with 0
+                // STRICT PROTECTION: Don't overwrite a valid displayed value with 0 or lower value
                 const existingDisplay = parseInt(String(cell.textContent || '').replace(/,/g, ''), 10);
-                if (!Number.isNaN(existingDisplay) && existingDisplay > 0 && count === 0) {
-                  console.log(`[Money Pages AI Citations] Preserving displayed count ${existingDisplay} for ${url} (API returned 0)`);
-                  return;
+                if (!Number.isNaN(existingDisplay) && existingDisplay > 0) {
+                  // If API returned 0, preserve existing value
+                  if (count === 0) {
+                    console.log(`[Money Pages AI Citations] Preserving displayed count ${existingDisplay} for ${url} (API returned 0)`);
+                    return;
+                  }
+                  // If API returned a lower value, preserve existing (might be from better source)
+                  if (count < existingDisplay) {
+                    console.log(`[Money Pages AI Citations] Preserving displayed count ${existingDisplay} for ${url} (API returned lower: ${count})`);
+                    return;
+                  }
                 }
                 
+                // Only update if we have a valid count that's >= existing value
                 cell.textContent = count.toLocaleString();
                 cell.style.color = '#0f172a';
                 cell.style.fontWeight = '600';
