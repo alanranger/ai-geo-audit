@@ -29898,8 +29898,44 @@ Final Score: ${score}/100`;
         }
         
         // Sort data if needed (sort ALL rows, not just current page)
+        // CRITICAL: For AI citations sorting, ensure we read from cells if _aiCitations not set
         let sortedRows = [...moneyRows];
         if (window.moneyPagesSortColumn) {
+          // If sorting by AI citations, populate from cells first if needed
+          if (window.moneyPagesSortColumn === 'aiCitations') {
+            const tableContainer = document.getElementById('money-pages-table-container');
+            if (tableContainer) {
+              const cells = tableContainer.querySelectorAll('.ai-citation-cell-opportunity');
+              cells.forEach(cell => {
+                const cellUrl = cell.getAttribute('data-page-url');
+                if (cellUrl) {
+                  const cellText = cell.textContent.trim();
+                  // Parse count from cell text (handles "⏳", "0", "1,234", etc.)
+                  let count = 0;
+                  if (cellText !== '⏳' && cellText !== '') {
+                    const parsed = parseInt(cellText.replace(/,/g, ''), 10);
+                    if (!isNaN(parsed)) {
+                      count = parsed;
+                    }
+                  }
+                  // Find matching row and update _aiCitations
+                  const matchingRow = sortedRows.find(r => {
+                    const rowUrl = r.url || '';
+                    const rowUrlNormalized = normalizeUrl(rowUrl);
+                    const cellUrlNormalized = normalizeUrl(cellUrl);
+                    return rowUrl === cellUrl || 
+                           rowUrlNormalized === cellUrlNormalized ||
+                           rowUrlNormalized.includes(cellUrlNormalized) ||
+                           cellUrlNormalized.includes(rowUrlNormalized);
+                  });
+                  if (matchingRow) {
+                    matchingRow._aiCitations = count;
+                  }
+                }
+              });
+            }
+          }
+          
           sortedRows.sort((a, b) => {
             let aVal, bVal;
             switch(window.moneyPagesSortColumn) {
@@ -29937,8 +29973,9 @@ Final Score: ${score}/100`;
                 bVal = b.avgPosition || 99;
                 break;
               case 'aiCitations':
-                aVal = typeof a._aiCitations === 'number' ? a._aiCitations : -1;
-                bVal = typeof b._aiCitations === 'number' ? b._aiCitations : -1;
+                // Use _aiCitations if available, otherwise try to get from citationCache
+                aVal = typeof a._aiCitations === 'number' ? a._aiCitations : (window.moneyPagesCitationCache && window.moneyPagesCitationCache[a.url] !== undefined ? window.moneyPagesCitationCache[a.url] : -1);
+                bVal = typeof b._aiCitations === 'number' ? b._aiCitations : (window.moneyPagesCitationCache && window.moneyPagesCitationCache[b.url] !== undefined ? window.moneyPagesCitationCache[b.url] : -1);
                 break;
               case 'opportunity':
                 // Sort by category priority: HIGH_OPPORTUNITY=0, VISIBILITY_FIX=1, MAINTAIN=2
@@ -30743,6 +30780,10 @@ Final Score: ${score}/100`;
         
         // Try to get citation counts from localStorage cache first
         let citationCache = {};
+        // Store cache globally for sorting to access
+        if (!window.moneyPagesCitationCache) {
+          window.moneyPagesCitationCache = {};
+        }
         try {
           const lastAuditResults = localStorage.getItem('last_audit_results');
           if (lastAuditResults) {
@@ -30802,9 +30843,10 @@ Final Score: ${score}/100`;
                 
                 // Always cache the result (even if 0) for this URL
                 citationCache[targetUrl] = citationCount;
+                window.moneyPagesCitationCache[targetUrl] = citationCount;
+                // Also set on row object for immediate sorting
+                row._aiCitations = citationCount;
               });
-              
-              console.log(`[Money Pages AI Citations] Built cache from localStorage for ${Object.keys(citationCache).length} URLs`);
             }
           }
         } catch (err) {
@@ -30920,6 +30962,8 @@ Final Score: ${score}/100`;
             
             results.forEach(({ url, count }) => {
               citationCache[url] = count;
+              // Also store in global cache for sorting
+              window.moneyPagesCitationCache[url] = count;
               
               // Try to find cell: exact match first, then normalized, then flexible matching
               const urlNormalized = normalizeUrl(url);
@@ -30974,22 +31018,12 @@ Final Score: ${score}/100`;
                 }
               } else {
                 cellNotFoundCount++;
-                // Only log first few failures to reduce console noise
-                if (cellNotFoundCount <= 3) {
-                  const sampleCells = Array.from(allCells).slice(0, 3).map(c => ({
-                    raw: c.getAttribute('data-page-url'),
-                    normalized: normalizeUrl(c.getAttribute('data-page-url') || '')
-                  }));
-                  console.warn(`[Money Pages AI Citations] Cell not found for URL: "${url}" (normalized: "${urlNormalized}"). Sample cell URLs:`, sampleCells);
-                }
+                // Suppress all console warnings - URL matching is complex and warnings are not actionable
               }
             });
           }
           
-          // Only log if many cells weren't found (potential issue)
-          if (cellNotFoundCount > 5) {
-            console.warn(`[Money Pages AI Citations] ${cellNotFoundCount} cells not found when updating from API`);
-          }
+          // Suppress console warnings - URL matching issues are expected and not actionable
         }
         } catch (err) {
           console.error('[Money Pages AI Citations] CRITICAL ERROR in function:', err);
@@ -31643,7 +31677,7 @@ Final Score: ${score}/100`;
           const th = e?.target?.closest ? e.target.closest('th[id^="money-sort-"]') : null;
           if (!th || !th.id) return;
           const col = String(th.id).replace('money-sort-', '');
-          if (!['type', 'clicks', 'impressions', 'ctr', 'clickPotential', 'position', 'opportunity'].includes(col)) return;
+          if (!['type', 'clicks', 'impressions', 'ctr', 'clickPotential', 'position', 'opportunity', 'aiCitations'].includes(col)) return;
           try {
             handleMoneyPagesSort(col);
           } catch (err) {
