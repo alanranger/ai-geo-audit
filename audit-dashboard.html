@@ -31728,6 +31728,69 @@ Final Score: ${score}/100`;
         // Get current data from stored source
         const allRows = window.moneyPagesData || [];
         if (allRows.length > 0) {
+          // CRITICAL: For AI citations sorting, read from existing cells BEFORE re-rendering
+          if (column === 'aiCitations') {
+            const tableContainer = document.getElementById('money-pages-table-container');
+            if (tableContainer) {
+              const cells = tableContainer.querySelectorAll('.ai-citation-cell-opportunity');
+              const normalizeUrl = (url) => {
+                if (!url) return '';
+                let normalized = String(url).toLowerCase().trim();
+                normalized = normalized.replace(/^https?:\/\//, '');
+                normalized = normalized.replace(/^www\./, '');
+                normalized = normalized.split('?')[0].split('#')[0];
+                const parts = normalized.split('/');
+                if (parts.length > 1) {
+                  normalized = parts.slice(1).join('/');
+                }
+                normalized = normalized.replace(/^\/+/, '').replace(/\/+$/, '');
+                return normalized;
+              };
+              
+              cells.forEach(cell => {
+                const cellUrl = cell.getAttribute('data-page-url');
+                if (cellUrl) {
+                  const cellText = cell.textContent.trim();
+                  let count = 0;
+                  if (cellText !== '⏳' && cellText !== '' && cellText !== '—') {
+                    const parsed = parseInt(cellText.replace(/,/g, ''), 10);
+                    if (!isNaN(parsed)) {
+                      count = parsed;
+                    }
+                  }
+                  
+                  // Find matching row and update _aiCitations
+                  const cellUrlNormalized = normalizeUrl(cellUrl);
+                  const matchingRow = allRows.find(r => {
+                    const rowUrl = r.url || '';
+                    const rowUrlNormalized = normalizeUrl(rowUrl);
+                    return rowUrl === cellUrl || 
+                           rowUrlNormalized === cellUrlNormalized ||
+                           rowUrlNormalized.includes(cellUrlNormalized) ||
+                           cellUrlNormalized.includes(rowUrlNormalized);
+                  });
+                  
+                  if (matchingRow) {
+                    matchingRow._aiCitations = count;
+                    // Also update cache
+                    if (!window.moneyPagesCitationCache) {
+                      window.moneyPagesCitationCache = {};
+                    }
+                    window.moneyPagesCitationCache[matchingRow.url] = count;
+                  }
+                }
+              });
+              
+              // Ensure all rows have _aiCitations set
+              allRows.forEach(row => {
+                if (typeof row._aiCitations !== 'number') {
+                  const cached = window.moneyPagesCitationCache && window.moneyPagesCitationCache[row.url];
+                  row._aiCitations = typeof cached === 'number' ? cached : 0;
+                }
+              });
+            }
+          }
+          
           const tableContainer = document.getElementById('money-pages-table-container');
           if (tableContainer) {
             const rowsPerPage = window.moneyPagesRowsPerPage || 10;
