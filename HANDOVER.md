@@ -1,7 +1,7 @@
 # AI GEO Audit - Comprehensive Handover Document
 
-**Last Updated**: 2026-01-XX  
-**Current Commit**: `7307bab` (fixes applied on baseline `8951fcf`)  
+**Last Updated**: 2026-01-07  
+**Current Commit**: `30ed589` (fixes applied on baseline `8951fcf`)  
 **Purpose**: Single source of truth for all projects, phases, tasks, fixes, and key information for any new chat thread.
 
 ---
@@ -90,7 +90,7 @@ This document consolidates ALL critical information about the AI GEO Audit proje
   - ✅ No syntax errors
   - ✅ Clean, synchronized codebase
 
-### Recent Fixes (v1.7.8 - Commit 7307bab)
+### Previous Fixes (v1.7.8 - Commit 7307bab)
 1. **Unified Data Source**: Table now uses same API endpoint as cards
    - Removed buggy client-side `computeAiMetricsForPageUrl` from API fallback
    - Table and cards now use same source of truth (`/api/supabase/query-keywords-citing-url`)
@@ -119,8 +119,28 @@ This document consolidates ALL critical information about the AI GEO Audit proje
    - Cache from localStorage (latest audit data) is now trusted over API responses
    - API is only used as fallback when cache is missing/0
 
+### Recent Fixes (v1.7.9 - Commit 30ed589)
+1. **AI Citations Sorting Fix**: Fixed sorting to preserve cache values and prevent blank cells
+   - Enhanced cache lookup with normalized URL matching
+   - Preserves valid displayed values when table re-renders after sorting
+   - Improved row matching in API result processing
+   - Fixed issue where citation counts went to zero when sorting
+2. **Card 3 Readability Improvements**: Made body text larger and black
+   - "Next steps:" text increased from 0.8rem to 0.95rem
+   - Estimated impact text increased from 0.75rem to 0.9rem
+   - Reason text increased from 0.7rem to 0.85rem
+   - All body text changed from grey to black (#0f172a) for better readability
+3. **Default Sort**: Set Money Pages table to sort by clicks (descending) on page load
+   - Changed default sort from null to 'clicks' with direction 'desc'
+   - Shows highest-clicking pages first by default
+4. **Schema Types Column Alignment**: Right-aligned header and cells to prevent overlap with Opportunity column
+   - Changed header from `text-align: left` to `text-align: right`
+   - Added `text-align: right` to cell styling
+
 ### Current Issues
-1. **AI Citations Column**: Sorting functionality still present, needs to be disabled
+1. **AI Citations Initial Load**: Landscape URL still shows 2 then changes to 5 on initial load (sorting fixes it)
+   - This is a cache timing issue - initial render may show cached value, sorting triggers proper cache lookup
+   - Expected behavior but could be improved with better cache initialization
 2. **Excessive API Calls**: Needs debouncing and execution guards (was attempted but reverted)
 3. **URL Task AI Data**: Matching logic not working (was attempted but reverted)
 

@@ -2,6 +2,34 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-01-07] - v1.7.9 - Money Pages UI Improvements and Sorting Fix
+
+### Fixed
+- **AI Citations Sorting**: Fixed sorting to preserve cache values and prevent blank cells
+  - Enhanced cache lookup with normalized URL matching to find cache entries even if key format differs
+  - Preserves valid displayed values when table re-renders after sorting
+  - Improved row matching in API result processing with fallback matching by cell's data-page-url
+  - Fixed issue where citation counts went to zero when sorting the AI Citations column
+- **Schema Types Column Alignment**: Right-aligned header and cells to prevent overlap with Opportunity column
+  - Changed header from `text-align: left` to `text-align: right`
+  - Added `text-align: right` to cell styling
+
+### Changed
+- **Card 3 Readability**: Made body text larger and black for better readability
+  - "Next steps:" text increased from 0.8rem to 0.95rem (+19%)
+  - Estimated impact text increased from 0.75rem to 0.9rem (+20%)
+  - Reason text increased from 0.7rem to 0.85rem (+21%)
+  - All body text changed from grey (#475569, #64748b, #94a3b8) to black (#0f172a)
+- **Default Sort**: Set Money Pages table to sort by clicks (descending) on page load
+  - Changed default sort from null to 'clicks' with direction 'desc'
+  - Shows highest-clicking pages first by default for better prioritization
+
+### Technical Details
+- Sorting now preserves existing cell values that are valid numbers
+- Cache lookup uses normalized URL matching to handle different key formats
+- API result processing includes fallback row matching strategies
+- Initial cell rendering checks global cache with normalized URL matching
+
 ## [2026-01-XX] - v1.7.8 - Fix AI Citations: Unify Table and Cards Data Source
 
 ### Fixed
