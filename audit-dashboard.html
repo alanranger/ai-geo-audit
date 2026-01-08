@@ -3096,6 +3096,20 @@
       opacity: 1;
     }
 
+    /* PERMANENTLY DISABLED: AI Citations column sorting - hide all sort indicators */
+    #money-sort-ai-citations .sort-indicator,
+    #money-sort-ai-citations .sort-indicator::after,
+    #money-sort-ai-citations .sort-indicator::before,
+    #money-sort-ai-citations span[style*="↕"],
+    #money-sort-ai-citations span[style*="↑"],
+    #money-sort-ai-citations span[style*="↓"],
+    #money-sort-ai-citations[class*="sort"] {
+      display: none !important;
+      visibility: hidden !important;
+      opacity: 0 !important;
+      content: none !important;
+    }
+
     .ranking-table tr:nth-child(even) td {
       background: #f9fafb;
     }
@@ -30114,8 +30128,20 @@ Final Score: ${score}/100`;
                   <th id="money-sort-position" style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; transition: background 0.2s; line-height: 1.2;" onmouseover="this.style.background='#e2e8f0';" onmouseout="this.style.background='transparent';" title="Click to sort by Avg Position" onclick="window.moneyPagesSetSort('position')">
                     <div>Avg</div><div>Position</div>${getSortIcon('position')}
                   </th>
-                  <th id="money-sort-ai-citations" data-ai-citations-header="true" style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; white-space: normal; line-height: 1.15; cursor: default !important; user-select: none !important; opacity: 0.6 !important; pointer-events: none !important;" title="AI citations (total citations from your domain in AI Overview). Latest audit only; fetched on demand. Sorting disabled." onclick="return false;" onmousedown="return false;" onmouseup="return false;">
+                  <th id="money-sort-ai-citations" data-ai-citations-header="true" data-no-sort="true" style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; white-space: normal; line-height: 1.15; cursor: default !important; user-select: none !important; opacity: 0.6 !important; pointer-events: none !important;" title="AI citations (total citations from your domain in AI Overview). Latest audit only; fetched on demand. Sorting disabled." onclick="return false;" onmousedown="return false;" onmouseup="return false;">
                     <div>AI citations</div>
+                    <style>
+                      #money-sort-ai-citations .sort-indicator,
+                      #money-sort-ai-citations::after,
+                      #money-sort-ai-citations::before,
+                      #money-sort-ai-citations span[style*="↕"],
+                      #money-sort-ai-citations span[style*="↑"],
+                      #money-sort-ai-citations span[style*="↓"] {
+                        display: none !important;
+                        visibility: hidden !important;
+                        opacity: 0 !important;
+                      }
+                    </style>
                   </th>
                   <th id="money-sort-opportunity" style="text-align: center; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; transition: background 0.2s; white-space: nowrap;" onmouseover="this.style.background='#e2e8f0';" onmouseout="this.style.background='transparent';" title="Click to sort by Opportunity">
                     Opportunity${getSortIcon('opportunity')}
@@ -30731,6 +30757,7 @@ Final Score: ${score}/100`;
       // Debounce mechanism to prevent multiple rapid calls
       let populateMoneyPagesAiCitationsTimeout = null;
       let populateMoneyPagesAiCitationsCallCount = 0;
+      let populateMoneyPagesAiCitationsExecuting = false; // Global flag to prevent simultaneous executions
       
       // Function to populate AI citations for Money Pages table
       async function populateMoneyPagesAiCitations(rows, immediate = false) {
@@ -30741,9 +30768,15 @@ Final Score: ${score}/100`;
         
         // Clear any pending calls
         if (populateMoneyPagesAiCitationsTimeout) {
-          console.log(`${debugPrefix} Clearing pending call (debounce)`);
+          debugLog(`${debugPrefix} Clearing pending call (debounce)`, 'info');
           clearTimeout(populateMoneyPagesAiCitationsTimeout);
           populateMoneyPagesAiCitationsTimeout = null;
+        }
+        
+        // If already executing, skip this call (prevent simultaneous executions)
+        if (populateMoneyPagesAiCitationsExecuting) {
+          debugLog(`${debugPrefix} Already executing, skipping call #${callNumber}`, 'warn');
+          return Promise.resolve();
         }
         
         // If not immediate, debounce the call
@@ -30752,14 +30785,24 @@ Final Score: ${score}/100`;
           return new Promise((resolve) => {
             populateMoneyPagesAiCitationsTimeout = setTimeout(async () => {
               debugLog(`${debugPrefix} Executing debounced call #${callNumber}`, 'info');
-              await populateMoneyPagesAiCitationsImpl(rows, callNumber);
+              populateMoneyPagesAiCitationsExecuting = true;
+              try {
+                await populateMoneyPagesAiCitationsImpl(rows, callNumber);
+              } finally {
+                populateMoneyPagesAiCitationsExecuting = false;
+              }
               resolve();
             }, 300);
           });
         }
         
         // Immediate execution
-        return populateMoneyPagesAiCitationsImpl(rows, callNumber);
+        populateMoneyPagesAiCitationsExecuting = true;
+        try {
+          return await populateMoneyPagesAiCitationsImpl(rows, callNumber);
+        } finally {
+          populateMoneyPagesAiCitationsExecuting = false;
+        }
       }
       
       // Implementation function
@@ -30770,27 +30813,27 @@ Final Score: ${score}/100`;
           // If no rows provided, try to get from window.moneyPagesData
           if (!rows || rows.length === 0) {
             rows = window.moneyPagesData || [];
-            console.log(`${debugPrefix} Using window.moneyPagesData: ${rows?.length || 0} rows`);
+            debugLog(`${debugPrefix} Using window.moneyPagesData: ${rows?.length || 0} rows`, 'info');
           }
           
           if (!rows || rows.length === 0) {
-            console.log(`${debugPrefix} No rows available, exiting`);
+            debugLog(`${debugPrefix} No rows available, exiting`, 'warn');
             return;
           }
           
-          // Wait a bit for DOM to be ready
-          await new Promise(resolve => setTimeout(resolve, 300));
+          // Wait a bit for DOM to be ready (reduced from 300ms to 100ms to reduce flickering)
+          await new Promise(resolve => setTimeout(resolve, 100));
           
           // Check if table container exists
           let tableContainer = document.getElementById('money-pages-table-container');
           if (!tableContainer) {
-            console.log(`${debugPrefix} Table container not found, exiting`);
+            debugLog(`${debugPrefix} Table container not found, exiting`, 'warn');
             return;
           }
           
           // Verify tableContainer is a valid DOM element
           if (typeof tableContainer.querySelectorAll !== 'function') {
-            console.error(`${debugPrefix} tableContainer is not a valid DOM element`);
+            debugLog(`${debugPrefix} tableContainer is not a valid DOM element`, 'error');
             return;
           }
         
@@ -30798,9 +30841,11 @@ Final Score: ${score}/100`;
         const cells = tableContainer.querySelectorAll('.ai-citation-cell-opportunity');
         
         if (!cells || cells.length === 0) {
-          console.warn(`${debugPrefix} No cells found in table`);
+          debugLog(`${debugPrefix} No cells found in table`, 'warn');
           return;
         }
+        
+        debugLog(`${debugPrefix} Found ${cells.length} AI citation cells in table`, 'info');
         
         console.log(`${debugPrefix} Found ${cells.length} cells to populate`);
         
