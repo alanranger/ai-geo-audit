@@ -104,19 +104,50 @@ export default async function handler(req, res) {
 
     // Query gsc_page_metrics_28d for historical snapshots within the date range
     // We'll aggregate multiple 28-day periods to get 90-day average
-    const { data: pageMetrics, error: metricsError } = await supabase
-      .from('gsc_page_metrics_28d')
-      .select('clicks, impressions, ctr, avg_position, page_url, date_start, date_end, captured_at')
-      .eq('site_url', property_url)
-      .eq('page_url', normalizedPageUrl)
-      .gte('captured_at', cutoffDate.toISOString().split('T')[0])
-      .order('captured_at', { ascending: false });
+    // Note: If table doesn't exist yet, return null data gracefully
+    let pageMetrics = [];
+    let metricsError = null;
+    
+    try {
+      const { data, error } = await supabase
+        .from('gsc_page_metrics_28d')
+        .select('clicks, impressions, ctr, avg_position, page_url, date_start, date_end, captured_at')
+        .eq('site_url', property_url)
+        .eq('page_url', normalizedPageUrl)
+        .gte('captured_at', cutoffDate.toISOString().split('T')[0])
+        .order('captured_at', { ascending: false });
+      
+      if (error) {
+        // Check if it's a "relation does not exist" error
+        if (error.message && error.message.includes('does not exist')) {
+          console.warn('[Money Pages Historical] Table gsc_page_metrics_28d does not exist yet. Historical data will be available once the table is created.');
+          // Return null data instead of error - this is expected until table exists
+          return sendJSON(res, 200, {
+            status: 'ok',
+            data: {
+              clicks_90d: null,
+              impressions_90d: null,
+              ctr_90d: null,
+              avg_position_90d: null
+            },
+            message: 'Historical data table not yet available. 90-day trends will appear once historical audit data is stored in Supabase.'
+          });
+        }
+        metricsError = error;
+      } else {
+        pageMetrics = data || [];
+      }
+    } catch (err) {
+      // Handle any other errors (network, etc.)
+      console.error('[Money Pages Historical] Query exception:', err);
+      metricsError = err;
+    }
 
     if (metricsError) {
       console.error('[Money Pages Historical] Query error:', metricsError);
       return sendJSON(res, 500, { 
         status: 'error',
-        error: metricsError.message 
+        error: metricsError.message || 'Database query failed'
       });
     }
 
