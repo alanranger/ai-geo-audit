@@ -18705,19 +18705,40 @@
                   : null;
                 
                 // For current partial month, suppress month-over-month delta (comparison is misleading until month-end snapshot exists)
-                if (prevSnapshot && !isPartialMonth) {
-                  const prevValue = kpiField === 'ctr_28d' ? parseFloat(prevSnapshot.ctr_28d || 0) :
-                                  kpiField === 'clicks_28d' ? parseFloat(prevSnapshot.clicks_28d || 0) :
-                                  kpiField === 'impressions_28d' ? parseFloat(prevSnapshot.impressions_28d || 0) :
-                                  kpiField === 'position_28d' ? (prevSnapshot.position_28d !== null && prevSnapshot.position_28d !== undefined && !isNaN(parseFloat(prevSnapshot.position_28d)) ? parseFloat(prevSnapshot.position_28d) : null) :
-                                  kpiField === 'ai_citations_28d' ? (prevSnapshot.ai_citations_28d ? parseInt(prevSnapshot.ai_citations_28d) : 0) :
-                                  kpiField === 'ai_overview_present_count' ? (prevSnapshot.ai_overview_present_count ? parseInt(prevSnapshot.ai_overview_present_count) : 0) : null;
+                if (!isPartialMonth) {
+                  // Get previous month value - if no previous snapshot, treat as 0 (no data = baseline of 0)
+                  let prevValue = null;
+                  if (prevSnapshot) {
+                    prevValue = kpiField === 'ctr_28d' ? parseFloat(prevSnapshot.ctr_28d || 0) :
+                                kpiField === 'clicks_28d' ? parseFloat(prevSnapshot.clicks_28d || 0) :
+                                kpiField === 'impressions_28d' ? parseFloat(prevSnapshot.impressions_28d || 0) :
+                                kpiField === 'position_28d' ? (prevSnapshot.position_28d !== null && prevSnapshot.position_28d !== undefined && !isNaN(parseFloat(prevSnapshot.position_28d)) ? parseFloat(prevSnapshot.position_28d) : null) :
+                                kpiField === 'ai_citations_28d' ? (prevSnapshot.ai_citations_28d ? parseInt(prevSnapshot.ai_citations_28d) : 0) :
+                                kpiField === 'ai_overview_present_count' ? (prevSnapshot.ai_overview_present_count ? parseInt(prevSnapshot.ai_overview_present_count) : 0) : null;
+                  }
                   
-                  if (prevValue !== null && prevValue !== undefined) {
-                    const delta = value - prevValue;
-                    const indicator = delta >= 0 ? '▲' : '▼';
-                    // Use colors that work well on dark background
-                    const color = delta >= 0 ? '#10b981' : '#ef4444';
+                  // If previous month had no data (null), treat it as 0 for delta calculation
+                  // This means going from no data to having data is always a positive change
+                  const prevValueForDelta = prevValue !== null && prevValue !== undefined ? prevValue : 0;
+                  const delta = value - prevValueForDelta;
+                  
+                  // Determine indicator and color
+                  // For position: lower is better, so delta < 0 is good (green ▲)
+                  // For all others: higher is better, so delta >= 0 is good (green ▲)
+                  let indicator, color;
+                  if (kpi === 'avg_position') {
+                    indicator = delta < 0 ? '▲' : (delta > 0 ? '▼' : '—');
+                    color = delta < 0 ? '#10b981' : (delta > 0 ? '#ef4444' : '#94a3b8');
+                  } else {
+                    // For AI citations and AI overview: if prevValue was null (no previous data), always show ▲
+                    if ((kpi === 'ai_citations' || kpi === 'ai_overview') && (prevValue === null || prevValue === undefined)) {
+                      indicator = '▲';
+                      color = '#10b981';
+                    } else {
+                      indicator = delta >= 0 ? '▲' : '▼';
+                      color = delta >= 0 ? '#10b981' : '#ef4444';
+                    }
+                  }
                     
                     // Format delta based on KPI
                     let deltaFormatted;
@@ -18725,25 +18746,39 @@
                       // CTR stored as ratio (0-1). Render as percentage points delta.
                       deltaFormatted = Math.abs(delta * 100).toFixed(1) + 'pp';
                       cell.innerHTML = `${formatted} <span style="color: ${color};">${indicator} ${deltaFormatted}</span>`;
-                      tooltipText += ` | Change from previous month: ${indicator} ${deltaFormatted}`;
+                      const changeText = (prevValue === null || prevValue === undefined) 
+                        ? `New data (no previous month data)` 
+                        : `Change from previous month: ${indicator} ${deltaFormatted}`;
+                      tooltipText += ` | ${changeText}`;
                     } else if (kpi === 'avg_position') {
                       // For position: LOWER is better. So delta<0 => improvement (green ▲), delta>0 => worse (red ▼).
                       deltaFormatted = Math.abs(delta).toFixed(1);
-                      const posIndicator = delta < 0 ? '▲' : (delta > 0 ? '▼' : '→');
-                      const posColor = delta < 0 ? '#10b981' : (delta > 0 ? '#ef4444' : '#94a3b8');
-                      cell.innerHTML = `${formatted} <span style="color: ${posColor};">${posIndicator} ${deltaFormatted}</span>`;
-                      tooltipText += ` | Change from previous month: ${posIndicator} ${deltaFormatted}`;
+                      // Use indicator and color already set above
+                      // const posIndicator = delta < 0 ? '▲' : (delta > 0 ? '▼' : '→');
+                      // const posColor = delta < 0 ? '#10b981' : (delta > 0 ? '#ef4444' : '#94a3b8');
+                      cell.innerHTML = `${formatted} <span style="color: ${color};">${indicator} ${deltaFormatted}</span>`;
+                      const changeText = (prevValue === null || prevValue === undefined) 
+                        ? `New data (no previous month data)` 
+                        : `Change from previous month: ${indicator} ${deltaFormatted}`;
+                      tooltipText += ` | ${changeText}`;
                     } else if (kpi === 'ai_citations' || kpi === 'ai_overview') {
                       // AI metrics are integers, show absolute change
                       deltaFormatted = formatCountCompact(Math.abs(delta));
-                      const actualIndicator = delta < 0 ? '▲' : '▼';
-                      const actualColor = delta < 0 ? '#10b981' : '#ef4444';
-                      cell.innerHTML = `${formatted} <span style="color: ${actualColor};">${actualIndicator} ${deltaFormatted}</span>`;
-                      tooltipText += ` | Change from previous month: ${actualIndicator} ${deltaFormatted}`;
+                      // Use indicator and color already set above
+                      // const actualIndicator = delta < 0 ? '▲' : '▼';
+                      // const actualColor = delta < 0 ? '#10b981' : '#ef4444';
+                      cell.innerHTML = `${formatted} <span style="color: ${color};">${indicator} ${deltaFormatted}</span>`;
+                      const changeText = (prevValue === null || prevValue === undefined) 
+                        ? `New data (no previous month data)` 
+                        : `Change from previous month: ${indicator} ${deltaFormatted}`;
+                      tooltipText += ` | ${changeText}`;
                     } else {
                       deltaFormatted = formatCountCompact(Math.abs(delta));
                       cell.innerHTML = `${formatted} <span style="color: ${color};">${indicator} ${deltaFormatted}</span>`;
-                      tooltipText += ` | Change from previous month: ${indicator} ${deltaFormatted}`;
+                      const changeText = (prevValue === null || prevValue === undefined) 
+                        ? `New data (no previous month data)` 
+                        : `Change from previous month: ${indicator} ${deltaFormatted}`;
+                      tooltipText += ` | ${changeText}`;
                     }
                     
                     // Note: avg_position and AI metrics are already rendered above. All other KPIs use the default branch.
