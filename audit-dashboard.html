@@ -30909,20 +30909,39 @@ Final Score: ${score}/100`;
             results.forEach(({ url, count }) => {
               citationCache[url] = count;
               
-              // Try to find cell: exact match first, then normalized
+              // Try to find cell: exact match first, then normalized, then flexible matching
               const urlNormalized = normalizeUrl(url);
               let cell = cellMap.get(url) || cellMap.get(urlNormalized);
               
               // If still not found, try iterating through cells with flexible matching
               if (!cell) {
+                // Try multiple matching strategies
                 cell = Array.from(allCells).find(c => {
                   const cellUrl = c.getAttribute('data-page-url');
                   if (!cellUrl) return false;
-                  // Try exact match
+                  
+                  // Strategy 1: Exact match
                   if (cellUrl === url) return true;
-                  // Try normalized match
+                  
+                  // Strategy 2: Normalized match
                   const cellUrlNormalized = normalizeUrl(cellUrl);
-                  return cellUrlNormalized === urlNormalized;
+                  if (cellUrlNormalized === urlNormalized) return true;
+                  
+                  // Strategy 3: Partial match (either contains the other)
+                  if (cellUrlNormalized && urlNormalized) {
+                    if (cellUrlNormalized.includes(urlNormalized) || urlNormalized.includes(cellUrlNormalized)) {
+                      return true;
+                    }
+                  }
+                  
+                  // Strategy 4: Match by path segment (last meaningful part of URL)
+                  const urlPath = urlNormalized.split('/').filter(p => p).pop() || '';
+                  const cellPath = cellUrlNormalized.split('/').filter(p => p).pop() || '';
+                  if (urlPath && cellPath && urlPath === cellPath && urlPath.length > 5) {
+                    return true;
+                  }
+                  
+                  return false;
                 });
               }
               
@@ -30932,16 +30951,20 @@ Final Score: ${score}/100`;
                 cell.style.fontWeight = '600';
                 const row = rows.find(r => {
                   const rowUrl = r.url || '';
-                  return rowUrl === url || normalizeUrl(rowUrl) === urlNormalized;
+                  const rowUrlNormalized = normalizeUrl(rowUrl);
+                  return rowUrl === url || 
+                         rowUrlNormalized === urlNormalized ||
+                         rowUrlNormalized.includes(urlNormalized) ||
+                         urlNormalized.includes(rowUrlNormalized);
                 });
                 if (row) {
                   row._aiCitations = count;
                 }
               } else {
                 cellNotFoundCount++;
-                // Debug: log first few failures to understand the mismatch
-                if (cellNotFoundCount <= 5) {
-                  const sampleCells = Array.from(allCells).slice(0, 5).map(c => ({
+                // Only log first few failures to reduce console noise
+                if (cellNotFoundCount <= 3) {
+                  const sampleCells = Array.from(allCells).slice(0, 3).map(c => ({
                     raw: c.getAttribute('data-page-url'),
                     normalized: normalizeUrl(c.getAttribute('data-page-url') || '')
                   }));

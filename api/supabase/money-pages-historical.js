@@ -103,30 +103,21 @@ export default async function handler(req, res) {
     const normalizedPageUrl = normalizeUrlForQuery(target_url, property_url);
     const targetUrlNormalizedForMatch = normalizeUrl(target_url);
 
-    // Get latest audit with timeseries data (contains daily GSC data for last 90 days)
+    // Get latest audit with query_pages data (has page-level metrics)
     const { data: latestAuditWithData, error: auditError } = await supabase
       .from('audit_results')
-      .select('audit_date, gsc_timeseries, money_pages_metrics')
+      .select('audit_date, query_pages, money_pages_metrics')
       .eq('property_url', property_url)
       .order('audit_date', { ascending: false })
       .limit(1)
       .single();
 
     if (auditError || !latestAuditWithData) {
+      console.error('[Money Pages Historical] Audit query error:', auditError);
       return sendJSON(res, 404, { 
         status: 'error',
         error: 'No audit found for property URL' 
       });
-    }
-
-    // Try to use timeseries data first (most accurate - daily data)
-    let timeseries = latestAuditWithData.gsc_timeseries;
-    if (typeof timeseries === 'string') {
-      try {
-        timeseries = JSON.parse(timeseries);
-      } catch (e) {
-        timeseries = null;
-      }
     }
 
     let totalClicks = 0;
@@ -135,46 +126,48 @@ export default async function handler(req, res) {
     let positionWeight = 0;
     let dataPoints = 0;
 
-    if (Array.isArray(timeseries) && timeseries.length > 0) {
-      // Use timeseries data - filter for last 90 days and find matching page
-      const cutoffTimestamp = cutoffDate.getTime();
-      
-      timeseries.forEach(day => {
-        if (!day || !day.date) return;
+    // Try to use query_pages data (has page-level metrics aggregated)
+    let queryPages = latestAuditWithData.query_pages;
+    if (typeof queryPages === 'string') {
+      try {
+        queryPages = JSON.parse(queryPages);
+      } catch (e) {
+        console.warn('[Money Pages Historical] Failed to parse query_pages JSON:', e.message);
+        queryPages = null;
+      }
+    }
+
+    if (Array.isArray(queryPages) && queryPages.length > 0) {
+      // Aggregate all query-page pairs for the target URL
+      queryPages.forEach(qp => {
+        const pageUrl = qp.page || qp.url || '';
+        if (!pageUrl) return;
         
-        const dayDate = new Date(day.date);
-        if (dayDate.getTime() < cutoffTimestamp) return; // Skip if before cutoff
+        const pageUrlNormalized = normalizeUrl(pageUrl);
+        const matches = pageUrlNormalized === targetUrlNormalizedForMatch || 
+                       pageUrl === target_url ||
+                       pageUrl.includes(targetUrlNormalizedForMatch) ||
+                       targetUrlNormalizedForMatch.includes(pageUrlNormalized);
         
-        // Check if this day's data includes our target page
-        if (day.pages && Array.isArray(day.pages)) {
-          const matchingPage = day.pages.find(page => {
-            const pageUrl = page.url || page.page || '';
-            const pageUrlNormalized = normalizeUrl(pageUrl);
-            return pageUrlNormalized === targetUrlNormalizedForMatch || 
-                   pageUrl === target_url ||
-                   pageUrl.includes(targetUrlNormalizedForMatch);
-          });
+        if (matches) {
+          const clicks = qp.clicks || 0;
+          const impressions = qp.impressions || 0;
+          const position = qp.position || qp.avg_position || null;
           
-          if (matchingPage) {
-            const clicks = matchingPage.clicks || 0;
-            const impressions = matchingPage.impressions || 0;
-            const position = matchingPage.position || matchingPage.avg_position || null;
-            
-            totalClicks += clicks;
-            totalImpressions += impressions;
-            
-            if (position != null && impressions > 0) {
-              positionSum += position * impressions;
-              positionWeight += impressions;
-            }
-            
-            dataPoints++;
+          totalClicks += clicks;
+          totalImpressions += impressions;
+          
+          if (position != null && impressions > 0) {
+            positionSum += position * impressions;
+            positionWeight += impressions;
           }
+          
+          dataPoints++;
         }
       });
     }
 
-    // Fallback: If no timeseries data or no matches, use money_pages_metrics from oldest audit in range
+    // Fallback: If no query_pages data or no matches, use money_pages_metrics from oldest audit in range
     if (dataPoints === 0) {
       const { data: audits, error: auditsError } = await supabase
         .from('audit_results')
@@ -192,6 +185,7 @@ export default async function handler(req, res) {
           try {
             moneyPagesMetrics = JSON.parse(moneyPagesMetrics);
           } catch (e) {
+            console.warn('[Money Pages Historical] Failed to parse money_pages_metrics JSON:', e.message);
             moneyPagesMetrics = null;
           }
         }
@@ -202,7 +196,8 @@ export default async function handler(req, res) {
             const rowUrlNormalized = normalizeUrl(rowUrl);
             return rowUrlNormalized === targetUrlNormalizedForMatch || 
                    rowUrl === target_url ||
-                   rowUrl.includes(targetUrlNormalizedForMatch);
+                   rowUrl.includes(targetUrlNormalizedForMatch) ||
+                   targetUrlNormalizedForMatch.includes(rowUrlNormalized);
           });
 
           if (matchingRow) {
@@ -221,6 +216,16 @@ export default async function handler(req, res) {
           }
         }
       }
+    }
+
+    // Add comprehensive error logging
+    if (dataPoints === 0) {
+      console.warn('[Money Pages Historical] No data found:', {
+        target_url,
+        targetUrlNormalizedForMatch,
+        hasQueryPages: !!queryPages,
+        queryPagesLength: Array.isArray(queryPages) ? queryPages.length : 0
+      });
     }
 
     if (dataPoints === 0) {
@@ -253,10 +258,12 @@ export default async function handler(req, res) {
     });
 
   } catch (err) {
-    console.error('[Money Pages Historical] Error:', err);
+    console.error('[Money Pages Historical] Unhandled error:', err);
+    console.error('[Money Pages Historical] Error stack:', err.stack);
     return sendJSON(res, 500, { 
       status: 'error',
-      error: err.message 
+      error: err.message || 'Internal server error',
+      details: process.env.NODE_ENV === 'development' ? err.stack : undefined
     });
   }
 }
