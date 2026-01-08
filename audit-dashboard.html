@@ -6521,8 +6521,21 @@
       let planText = '';
       const source = modal.dataset.source || '';
       
+      // Check if this is a Money Pages task (URL-based, no keyword)
+      const isMoneyPagesTask = source === 'money_pages' || !row.keyword;
+      
+      debugLog('[Optimisation] Modal opened - source: "' + source + '", has keyword: ' + !!row.keyword + ', isMoneyPagesTask: ' + isMoneyPagesTask);
+      debugLog('[Optimisation] Row data: ' + JSON.stringify({
+        clicks: row.clicks,
+        impressions: row.impressions,
+        ctr: row.ctr,
+        avgPosition: row.avgPosition || row.position,
+        aiCitations: row._aiCitations || row.aiCitations,
+        url: row.url || row.targetUrl
+      }));
+      
       // For Money Pages tasks, build recommendations from row data
-      if (source === 'money_pages' || !row.keyword) {
+      if (isMoneyPagesTask) {
         try {
           // Use row data directly (row is already available as a parameter)
           // Build recommendations similar to how they're built for performance cards
@@ -6547,6 +6560,7 @@
               estimatedImpact: `Could gain ~${additionalClicks} additional clicks/month with better CTR`,
               reason: `Current CTR ${ctrPercent.toFixed(2)}% is below 2% benchmark`
             });
+            debugLog('[Optimisation] Added High priority: Low Click-Through Rate');
           }
           
           // Medium Priority: Ranking Below Top 10
@@ -6560,6 +6574,7 @@
               estimatedImpact: `Moving to top 10 could increase clicks by ${potentialClicksLow} - ${potentialClicksHigh}`,
               reason: `Current position ${avgPosition.toFixed(1)} is outside top 10`
             });
+            debugLog('[Optimisation] Added Medium priority: Ranking Below Top 10');
           }
           
           // Low Priority: Focus on Higher Volume Keywords (if AI citations exist but are low volume)
@@ -6573,6 +6588,7 @@
               estimatedImpact: 'Could increase potential traffic by targeting higher-volume opportunities',
               reason: 'Most citations are for low-volume keywords (<100 searches/month)'
             });
+            debugLog('[Optimisation] Added Low priority: Focus on Higher Volume Keywords');
           }
           
           // Sort by priority: High first, then Medium, then Low
@@ -6601,18 +6617,19 @@
             });
             
             planText = planLines.join('\n');
-            debugLog('[Optimisation] Plan text generated: ' + planText.substring(0, 100) + '...');
+            debugLog('[Optimisation] Plan text generated (length: ' + planText.length + '): ' + planText.substring(0, 200) + '...');
           } else {
             planText = 'CTR target: ≥ 2.5%';
-            debugLog('[Optimisation] No recommendations, using default plan text');
+            debugLog('[Optimisation] No recommendations generated, using default plan text');
           }
         } catch (e) {
           console.warn('[Optimisation] Error generating plan from money pages recommendations:', e);
-          debugLog('[Optimisation] Error generating plan: ' + e.message);
+          debugLog('[Optimisation] Error generating plan: ' + e.message + ' - ' + e.stack);
           planText = 'CTR target: ≥ 2.5%';
         }
       } else {
         // For keyword tasks, use existing logic
+        debugLog('[Optimisation] Not a Money Pages task, using keyword task logic');
         try {
           const scorecardData = buildKeywordScorecardData(row);
           if (scorecardData) {
@@ -6625,7 +6642,15 @@
           console.warn('[Optimisation] Error generating plan from scorecard:', e);
         }
       }
-      document.getElementById('track-plan').value = planText;
+      
+      debugLog('[Optimisation] Final plan text to set: ' + planText.substring(0, 200));
+      const planField = document.getElementById('track-plan');
+      if (planField) {
+        planField.value = planText;
+        debugLog('[Optimisation] Plan field updated successfully');
+      } else {
+        debugLog('[Optimisation] ERROR: track-plan field not found!');
+      }
 
       // Store cleaned URL and row data for submit (row data needed for baseline metrics)
       modal.dataset.rowKeyword = row.keyword;
