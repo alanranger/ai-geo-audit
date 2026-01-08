@@ -3444,7 +3444,7 @@
     <h1>GAIO (Generative AI Optimization) Audit Dashboard</h1>
     <p>Automated GAIO Performance Tracking & Optimisation</p>
     <p style="font-size: 0.9rem; margin-top: 0.5rem; opacity: 1; background: rgba(0,0,0,0.3); padding: 0.25rem 0.5rem; border-radius: 4px; display: inline-block;">
-      <strong>Version: <span id="gitVersion">7a3d804</span></strong> | Built: <span id="buildDate"></span> |
+      <strong>Version: <span id="gitVersion">1192640</span></strong> | Built: <span id="buildDate"></span> |
       <span id="loadTime" style="color: #4f4;">Loaded: <span id="loadTimeValue"></span></span>
     </p>
     <script>
@@ -6821,6 +6821,11 @@
             // If we have a current moneyPagesMetrics row, use it (this matches measurement logic).
             if (!baselineMetrics) {
               const src = row || rowData;
+              // Debug: Log all available position-related fields
+              const positionValue = src.avgPosition != null ? src.avgPosition : (src.position != null ? src.position : (src.position_28d != null ? src.position_28d : (src.avg_position != null ? src.avg_position : null)));
+              debugLog(`[Optimisation] Building baseline from row data - Position fields: avgPosition=${src.avgPosition}, position=${src.position}, position_28d=${src.position_28d}, avg_position=${src.avg_position}, final=${positionValue}`, 'info');
+              debugLog(`[Optimisation] Building baseline from row data - AI Citations: _aiCitations=${src._aiCitations}, aiCitations=${src.aiCitations}`, 'info');
+              
               baselineMetrics = {
                 gsc_clicks_28d: src.clicks != null ? src.clicks : (src.clicks_28d || 0),
                 gsc_impressions_28d: src.impressions != null ? src.impressions : (src.impressions_28d || 0),
@@ -6831,11 +6836,24 @@
                   if (n > 1 && n <= 100) return n / 100;
                   return n;
                 })(),
-                gsc_position_28d: src.avgPosition != null ? src.avgPosition : (src.position != null ? src.position : (src.position_28d || null)),
+                gsc_position_28d: positionValue,
                 classic_ranking_url: taskUrlAbs || taskUrl || null,
                 segment: src.segment || 'money_pages',
                 captured_at: new Date().toISOString()
               };
+              
+              debugLog(`[Optimisation] Baseline metrics created - gsc_position_28d: ${baselineMetrics.gsc_position_28d}`, 'info');
+              
+              // Use AI citations directly from row if available (already computed during table rendering)
+              if (typeof src._aiCitations === 'number' && src._aiCitations >= 0) {
+                baselineMetrics.ai_citations = src._aiCitations;
+                debugLog(`[Optimisation] Using AI citations from row (_aiCitations): ${src._aiCitations}`, 'success');
+              } else if (typeof src.aiCitations === 'number' && src.aiCitations >= 0) {
+                baselineMetrics.ai_citations = src.aiCitations;
+                debugLog(`[Optimisation] Using AI citations from row (aiCitations): ${src.aiCitations}`, 'success');
+              } else {
+                debugLog(`[Optimisation] No AI citations found in row data`, 'warn');
+              }
             }
 
             // FIX: For URL tasks, fetch AI Overview/Citations using same logic as "Add Measurement"
@@ -6916,10 +6934,17 @@
                         }
                         
                         // Add AI data to baselineMetrics (same format as Add Measurement)
-                        if (aiForUrl.ai_overview !== null && aiForUrl.ai_citations !== null) {
+                        // Only set AI overview if we got a valid result
+                        if (aiForUrl.ai_overview !== null) {
                           baselineMetrics.ai_overview = aiForUrl.ai_overview === true ? true : (aiForUrl.ai_overview === false ? false : null);
+                          debugLog(`[Optimisation] URL task creation: Added AI overview to baseline - Overview: ${baselineMetrics.ai_overview}`, 'info');
+                        }
+                        // Only set AI citations if we got a valid result AND it's not already set from row data
+                        if (aiForUrl.ai_citations !== null && baselineMetrics.ai_citations == null) {
                           baselineMetrics.ai_citations = aiForUrl.ai_citations != null ? Number(aiForUrl.ai_citations) : null;
-                          debugLog(`[Optimisation] URL task creation: Added AI data to baseline - Overview: ${baselineMetrics.ai_overview}, Citations: ${baselineMetrics.ai_citations}`, 'success');
+                          debugLog(`[Optimisation] URL task creation: Added AI citations to baseline - Citations: ${baselineMetrics.ai_citations}`, 'info');
+                        } else if (baselineMetrics.ai_citations != null) {
+                          debugLog(`[Optimisation] URL task creation: Keeping AI citations from row data - Citations: ${baselineMetrics.ai_citations}`, 'info');
                         }
                       }
                     } catch (rankingErr) {
