@@ -127,10 +127,17 @@ export default async function handler(req, res) {
     let dataPoints = 0;
 
     // Try to use query_pages data (has page-level metrics aggregated)
+    // Note: query_pages can be very large, so we need to handle it carefully
     let queryPages = latestAuditWithData.query_pages;
     if (typeof queryPages === 'string') {
       try {
-        queryPages = JSON.parse(queryPages);
+        // Check size before parsing to avoid timeout
+        if (queryPages.length > 5 * 1024 * 1024) { // 5MB limit
+          console.warn('[Money Pages Historical] query_pages too large, skipping');
+          queryPages = null;
+        } else {
+          queryPages = JSON.parse(queryPages);
+        }
       } catch (e) {
         console.warn('[Money Pages Historical] Failed to parse query_pages JSON:', e.message);
         queryPages = null;
@@ -138,10 +145,17 @@ export default async function handler(req, res) {
     }
 
     if (Array.isArray(queryPages) && queryPages.length > 0) {
+      // Limit processing to prevent timeout (process max 5000 items)
+      const maxItems = Math.min(queryPages.length, 5000);
+      let processed = 0;
+      
       // Aggregate all query-page pairs for the target URL
-      queryPages.forEach(qp => {
+      for (const qp of queryPages) {
+        if (processed >= maxItems) break;
+        processed++;
+        
         const pageUrl = qp.page || qp.url || '';
-        if (!pageUrl) return;
+        if (!pageUrl) continue;
         
         const pageUrlNormalized = normalizeUrl(pageUrl);
         const matches = pageUrlNormalized === targetUrlNormalizedForMatch || 
@@ -164,7 +178,11 @@ export default async function handler(req, res) {
           
           dataPoints++;
         }
-      });
+      }
+      
+      if (queryPages.length > maxItems) {
+        console.warn(`[Money Pages Historical] Processed ${maxItems} of ${queryPages.length} query_pages items`);
+      }
     }
 
     // Fallback: If no query_pages data or no matches, use money_pages_metrics from oldest audit in range
