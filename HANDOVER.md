@@ -1,206 +1,512 @@
-# AI GEO Audit - Handover Document
+# AI GEO Audit - Comprehensive Handover Document
 
-**Date Created**: 2026-01-07  
-**Purpose**: Comprehensive handover document for starting a fresh chat thread with all critical context, issues, fixes, and next steps.
+**Last Updated**: 2026-01-XX  
+**Current Commit**: `577c64e` (fixes applied on baseline `8951fcf`)  
+**Purpose**: Single source of truth for all projects, phases, tasks, fixes, and key information for any new chat thread.
 
 ---
 
 ## Executive Summary
 
-This document consolidates all critical information about the AI GEO Audit project, focusing on:
-1. **Current Critical Issue**: URL tasks not displaying AI Overview/Citations data
-2. **Debug Log System**: Implementation, issues, and current status
-3. **Key Fixes Implemented**: What has been fixed and what remains
-4. **Technical Architecture**: Data flow, processes, and key functions
-5. **Next Steps**: What needs to be done
-
-### Latest Updates (2026-01-07)
-- **Money Pages Opportunity Table** now shows an **AI citations** column (latest audit only). Uses localStorage cache first, then Supabase `/api/supabase/query-keywords-citing-url` fallback; writes counts back into rows for sorting.
-- **Money Pages row interactions**: clicking the URL/Title/Meta cell or the **View** button opens a lightweight performance modal (click/imp/CTR/position + AI citations). Track/Manage buttons still stop propagation.
-- **Data reality check**: latest audits (2026-01-01 onward) have **0 citations** for `photography-courses-coventry`; older Dec 2025 audits contained citations. Add Measurement is correct for the latest audit but will surface 0 until upstream data is regenerated.
+This document consolidates ALL critical information about the AI GEO Audit project:
+1. **Current State**: Rolled back to stable baseline (`8951fcf`)
+2. **All Project Plans**: Money Pages, Optimisation Tracking, Fix Plans, Architecture Roadmap
+3. **All Phases**: Implementation status across all projects
+4. **All Update Buttons**: Complete reference of all data update/refresh processes
+5. **All Fixes**: Status of all fixes and known issues
+6. **Technical Architecture**: Data flow, key functions, dependencies
 
 ---
 
-## Current Critical Issue: URL Task AI Data Not Displaying
+## Project Structure & File Organization
 
-### Problem Statement
-URL task for `www.alanranger.com/photography-courses-coventry` is not displaying AI Overview or AI Citation data when "Add Measurement" is clicked, despite:
-- ✅ Data EXISTS in Supabase `keyword_rankings` table
-- ✅ AI Overview is `true` for related keywords
-- ✅ Citations count is available (e.g., `ai_alan_citations_count=3`)
-- ✅ The URL appears in `best_url` fields (with query parameters)
+**⚠️ CRITICAL**: When creating new files, ALWAYS place them in the appropriate folders. Only put files in root if absolutely necessary for the application to function.
 
-### Evidence
+### Folder Conventions
 
-**From Supabase Query** (confirmed via MCP tools):
-- Database: `supabase-main` (project_ref=igzvwbvgvmzvvzoclufx)
-- Table: `keyword_rankings` (NOT `ranking_ai_data`)
-- Query: Found multiple rows with `best_url` containing `photography-courses-coventry`
-- Example data:
-  - Keyword: "photography courses coventry"
-  - `has_ai_overview=true`, `ai_overview_present_any=true`, `ai_alan_citations_count=3`
-  - `best_url`: `https://www.alanranger.com/photography-courses-coventry?srsltid=AfmBOor95__fTIUJ_GMlKkAQoUjSIIal0CjjtW6Dp0QUuWyhvI3t5PAX`
+| Folder | Purpose | Can Move? | Notes |
+|--------|---------|-----------|-------|
+| **`Docs/`** | All markdown documentation | ✅ Yes | All MD files except README.md and HANDOVER.md |
+| **`scripts/`** | Test, check, debug, utility JS files | ✅ Yes | All root-level test/check/debug scripts |
+| **`sql/`** | Query and test SQL files | ✅ Yes | NOT migrations (those stay in `migrations/`) |
+| **`migrations/`** | Database migration files | ❌ **NO** | Referenced by scripts via path |
+| **`api/`** | Vercel serverless functions | ❌ **NO** | Vercel routing depends on file paths |
+| **`lib/`** | Library and shared utilities | ⚠️ **Check first** | May be imported by API files |
+| **`config/`** | Configuration files | ⚠️ **Check first** | May be referenced by code |
+| **`test/`** | Test files | ✅ Yes | Test suite files |
+| **Root** | Application files only | ❌ **NO** | See "Root Folder Rules" below |
 
-**From UI Debug Log**:
-```
-[WARN] [Optimisation] URL task: Inconsistent result from computeAiMetricsForPageUrl for https://www.alanranger.com/photography-courses-coventry - Overview: false, Citations: null
-[WARN] [Optimisation] URL task: No AI data found for https://www.alanranger.com/photography-courses-coventry or www.alanranger.com/photography-courses-coventry in 80 rows
-```
+### Root Folder Rules
 
-### Root Cause Hypothesis
+**Only these files should be in root:**
+- `config.js` - **MUST stay** (referenced by `audit-dashboard.html`)
+- `config.example.js` - Template file (can stay)
+- `audit-dashboard.html` - Main application file
+- `README.md` - Project overview
+- `HANDOVER.md` - This document
+- `vercel.json` - Vercel configuration
+- `package.json` - Node.js dependencies
+- Temporary files generated by scripts (e.g., `temp_*.sql`, `temp_*.json`)
 
-The `computeAiMetricsForPageUrl` function in `audit-dashboard.html` is failing to match the target URL (`www.alanranger.com/photography-courses-coventry`) to the `best_url` values in `combinedRows`, despite:
-- `normalizeUrl()` function should strip query parameters (line ~12753: `normalized.split('?')[0]`)
-- Both URLs should normalize to: `alanranger.com/photography-courses-coventry`
-- The matching logic has been made "ultra-permissive" with multiple fallback strategies
+### Critical Rules
 
-### Matching Logic Evolution
+1. **Never move files from `api/`** - Vercel uses file paths to create API routes
+   - Example: `api/supabase/get-latest-audit.js` → `/api/supabase/get-latest-audit`
+   - Moving breaks all API endpoints
 
-The matching logic has been iteratively enhanced:
+2. **Never move `config.js`** - Referenced directly by HTML:
+   ```javascript
+   fetch('config.js')
+   configScript.src = 'config.js'
+   ```
 
-1. **Initial**: Required exact URL match
-2. **Fix 1**: Added `strictPathMatch` and `domainOnlyMatch`
-3. **Fix 2**: Added `pathSegmentMatch` and `pathContainsMatch`
-4. **Fix 3 (Current)**: Made "ultra-permissive" with:
-   - `lastSegmentMatch`: Matches if last path segment matches
-   - `segmentContainsMatch`: Matches if any segment contains the target segment
-   - `pathOverlapMatch`: Matches if paths have any overlap
-   - `keywordMatch`: Matches if both URLs contain the same keyword string (e.g., "photography-courses-coventry")
+3. **Never move migration files** - Scripts reference them by path:
+   ```javascript
+   const migrationPath = path.join(__dirname, 'migrations', '20251217_add_gbp_reviews_columns.sql');
+   ```
 
-**Current Matching Logic** (in `computeAiMetricsForPageUrl`):
-```javascript
-const exactMatch = rowBestUrlCanon === canonTarget;
-const lastSegmentMatch = lastSegTarget && lastSegRow && lastSegTarget === lastSegRow;
-const segmentContainsMatch = lastSegTarget && lastSegRow && lastSegRow.includes(lastSegTarget);
-const domainPathMatch = domainTarget === domainRow && pathTarget && pathRow && (pathTarget.includes(pathRow) || pathRow.includes(pathTarget));
-const keywordMatch = canonTarget.includes('photography-courses-coventry') && rowBestUrlCanon.includes('photography-courses-coventry');
+4. **Always use appropriate folders** - Keep root folder clean for housekeeping
 
-const urlMatches = exactMatch || lastSegmentMatch || segmentContainsMatch || domainPathMatch || keywordMatch;
-```
+### When Creating New Files
 
-### Debug Logs Added (Not Appearing)
-
-Critical debug logs were added at `error` level to bypass suppression:
-1. **Function Start**: Logs normalized target URL
-2. **First 3 Row Comparisons**: Logs each row's URL and exactMatch result
-3. **Match Summary**: Logs final decision with all match flags
-
-**Problem**: These logs are NOT appearing in the UI debug log, suggesting:
-- Browser caching issue (latest code not loaded)
-- Function not being called
-- Logs being suppressed despite `error` level
-
-### Files Involved
-
-1. **`audit-dashboard.html`** (line ~12700-12900):
-   - `computeAiMetricsForPageUrl()` function
-   - `normalizeUrl()` function
-   - `addMeasurementBtn` handler (calls `computeAiMetricsForPageUrl`)
-   - `rebaselineBtn` handler (calls `computeAiMetricsForPageUrl`)
-
-2. **`api/supabase/save-debug-log-entry.js`**:
-   - Handles saving debug logs to Supabase
-   - Has retry logic for schema cache issues
+- **Documentation** → `Docs/`
+- **Test/Check/Debug scripts** → `scripts/`
+- **Query/test SQL** → `sql/`
+- **Database migrations** → `migrations/` (with date prefix)
+- **API endpoints** → `api/` (with proper subfolder structure)
+- **Library code** → `lib/` (check if imported first)
 
 ---
 
-## Debug Log System
+## Current State (Post-Rollback)
 
-### Implementation Status
+### Rollback Status
+- **Baseline Commit**: `8951fcf` (2025-12-XX) - Stable baseline established
+- **Current Commit**: `577c64e` - Fixes applied for URL matching and flickering
+- **Rollback Reason**: Subsequent fixes introduced flickering counts and syntax errors
+- **Baseline Characteristics**:
+  - ✅ Stable AI citation counts (no flickering)
+  - ⚠️ AI Citations column sorting still present (not yet disabled)
+  - ✅ No syntax errors
+  - ✅ Clean, synchronized codebase
 
-**✅ Completed**:
-- Created `debug_logs` table in Supabase (migration: `20250117_create_debug_logs_table.sql`)
-- Created API endpoint `/api/supabase/save-debug-log-entry.js`
-- Modified `debugLog()` function in `audit-dashboard.html` to save logs asynchronously
+### Recent Fixes (v1.7.6 - Commit 577c64e)
+1. **AI Citations URL Matching**: Fixed strict path segment matching
+   - Replaced substring matching (`.includes()`) with strict path segment matching
+   - Prevents `landscape-photography-workshops` from incorrectly matching `photography-workshops`
+   - Matches API endpoint logic for consistency
+2. **AI Citations Flickering**: Prevented API responses from overwriting valid cached values
+   - Cache from localStorage (latest audit data) is now trusted over API responses
+   - API is only used as fallback when cache is missing/0
+   - Fixes issue where correct value (2) was overwritten by incorrect API response (5)
+   - Fixes sorting issue where URL appeared out of order due to incorrect count
 
-**❌ Current Issues**:
-1. **Logs Not Saving**: Debug logs are not appearing in Supabase `debug_logs` table
-   - Schema cache issues with `property_url` column (PGRST204 errors)
-   - Retry logic implemented but may not be working
-   - Currently DISABLED in code (commented out) due to schema cache issues
+### Current Issues
+1. **AI Citations Column**: Sorting functionality still present, needs to be disabled
+2. **Excessive API Calls**: Needs debouncing and execution guards (was attempted but reverted)
+3. **URL Task AI Data**: Matching logic not working (was attempted but reverted)
 
-2. **Log Verbosity**: UI debug log is still "huge" despite cleanup attempts
-   - Suppressed patterns added for `[Traffic Lights]`, `[getBaselineLatest]`, `Money Pages`
-   - `info` level logs matching suppressed patterns are completely hidden
-   - Still too verbose for effective diagnosis
-
-### Debug Log Cleanup
-
-**Suppressed Patterns** (in `audit-dashboard.html`):
-- `✓ ... rendered successfully`
-- `✓ ... loaded successfully`
-- `[Traffic Lights]`
-- `[getBaselineLatest]`
-- `Money Pages: ...`
-- `🎯 ... renderMoneyPages`
-
-**Current State**: Supabase saving is DISABLED due to schema cache issues. Re-enable once schema cache is stable.
-
-### Debug Log API
-
-**Endpoint**: `/api/supabase/save-debug-log-entry.js`
-- Method: POST
-- Body: `{ timestamp, message, type, propertyUrl?, sessionId?, userAgent? }`
-- Retry Logic: If `property_url` column error, retries without optional fields
-
-**Query Endpoint**: `/api/supabase/query-debug-logs.js` (exists but may need verification)
+### What Was Lost in Rollback
+- Fix 1: URL matching optional for keyword tasks (was completed)
+- Fix 5: Always fetch latest from Supabase (was completed)
+- Fix 2: Partial unification of logic (was partially complete)
+- All AI Citations column fixes (sort icon removal, debouncing, etc.)
 
 ---
 
-## Key Fixes Implemented
+## Project Plans & Status
 
-### Fix 1: Keyword Task URL Matching (✅ COMPLETED)
+### Project 1: Money Pages Performance & Actions
+**Status**: ✅ **100% COMPLETE** (All 4 phases)
+
+| Phase | Status | Date Completed | Deliverables |
+|-------|--------|----------------|--------------|
+| Phase 1: Data Model + Calculations | ✅ COMPLETE | 2025-12-XX | Money-segment aggregates, opportunity flags |
+| Phase 2: UI Block | ✅ COMPLETE | 2025-12-XX | Summary strip, charts, KPIs, opportunity table |
+| Phase 3: Recommendation Text Engine | ✅ COMPLETE | 2025-12-XX | Dynamic action suggestions |
+| Phase 4: Priority Matrix & Actions | ✅ COMPLETE | 2025-12-22 | Impact/difficulty scoring, Suggested Top 10 panel |
+
+**Features Implemented**:
+- Performance Trends charts (split Volume/Rate charts)
+- KPI Tracker (28 days, 8 weekly points from GSC timeseries)
+- Priority & Actions section with impact/difficulty matrix
+- Suggested Top 10 Priority Pages panel
+- Filter dropdowns with persistent counts
+- Accurate CTR plotting and trend calculations
+
+**Documentation**: `Docs/MONEY_PAGES_PERFORMANCE.md`
+
+---
+
+### Project 2: Optimisation Tracking Module
+**Status**: ✅ **89% COMPLETE** (Phases 1-8 complete, Phase 9 in progress)
+
+| Phase | Status | Date Completed | Deliverables |
+|-------|--------|----------------|--------------|
+| Phase 1: Database Layer | ✅ COMPLETE | 2025-12-18 | Schema, tables, views, RLS policies |
+| Phase 2: UI Entry Point | ✅ COMPLETE | 2025-12-18 | Optimisation column in Ranking & AI table |
+| Phase 3: Core Management UI | ✅ COMPLETE | 2025-12-19 | Full Optimisation Tracking panel |
+| Phase 4: Tracking Metrics | ✅ COMPLETE | 2025-12-19 | Performance snapshots, measurement history |
+| Phase 5: Objective Integrity | ✅ COMPLETE | 2025-12-19 | Auto-status calculation (on_track/overdue/met) |
+| Phase 5.6: Share Mode | ✅ COMPLETE | 2025-12-19 | Read-only share links with token auth |
+| Phase 6: Cycle Management | ✅ COMPLETE | 2025-12-19 | Per-task cycle numbering, history |
+| Phase 7: Cycle Completion | ✅ COMPLETE | 2025-12-19 | Complete/archive cycles, timeline events |
+| Phase 8: KPI Formatting | ✅ COMPLETE | 2025-12-19 | CTR as pp, rank lower better, no double % |
+| Phase 9: Enhanced Analytics | 🚧 IN PROGRESS | Planning | KPI tiles, progress columns, sparklines, impact estimates |
+| Phase 10: Advanced Reporting | ⏸️ PLANNED | Not started | Monthly rollups, export, regression detection |
+| Phase 11: Automation | ⏸️ PLANNED | Not started | Automated reminders, stale monitoring alerts |
+
+**Phase 9 Deliverables (In Progress)**:
+- [ ] KPI Tiles (RAG) reflecting objectives
+- [ ] Objective progress columns in table
+- [ ] Mini sparklines (per-task or per-KPI)
+- [ ] Estimated impact tiles
+- [ ] Time-based charts
+
+**Documentation**: `Docs/OPTIMISATION_TRACKING_MODULE_PLAN.md`, `Docs/OPTIMISATION_TRACKING_PHASES_COMPLETE.md`
+
+---
+
+### Project 3: Fix Plan - Data Consistency & AI Citations
+**Status**: ❌ **0% COMPLETE** (All fixes reverted in rollback)
+
+**5-Phase Implementation Plan**:
+
+#### Phase 1: AI Citations Column Fixes (Current Priority)
+**Status**: ⏸️ **NOT STARTED** (reverted to baseline)
+
+**Tasks**:
+- [ ] Remove sort icon from AI Citations column header
+- [ ] Disable sorting functionality completely
+- [ ] Add CSS to hide all sort indicators
+- [ ] Prevent header interaction (pointer-events, cursor, onclick handlers)
+- [ ] Ensure `getSortIcon` never returns icon for 'aiCitations' column
+- [ ] Test that column is completely non-interactive
+
+**Files to Modify**:
+- `audit-dashboard.html`: AI Citations header (`#money-sort-ai-citations`)
+- `audit-dashboard.html`: `getSortIcon()` function
+- `audit-dashboard.html`: CSS stylesheet section
+
+---
+
+#### Phase 2: Prevent Flickering & Reduce API Calls
+**Status**: ⏸️ **NOT STARTED** (reverted to baseline)
+
+**Tasks**:
+- [ ] Implement debounce mechanism for `populateMoneyPagesAiCitations` (300ms delay)
+- [ ] Add global execution flag to prevent simultaneous calls
+- [ ] Replace `console.log` with `debugLog` for UI visibility
+- [ ] Enhance cell update logic:
+  - Skip API calls for cells with valid numeric values (>0)
+  - Only update if new value is higher than existing
+  - Preserve cached values even if API returns 0 or null
+- [ ] Reduce DOM wait time (100ms instead of 300ms)
+- [ ] Wrap logic in try...finally to ensure flag reset
+
+**Files to Modify**:
+- `audit-dashboard.html`: `populateMoneyPagesAiCitations()` function (~line 30768)
+
+---
+
+#### Phase 3: Check & Fix All Update Buttons
+**Status**: ⏸️ **NOT STARTED**
+
+**Tasks**:
+- [ ] Audit all update/refresh buttons (see "All Update Buttons Reference" below)
+- [ ] Verify all use consistent data source priority
+- [ ] Ensure all fetch latest from Supabase before using localStorage
+- [ ] Standardize URL matching logic (optional for keyword tasks)
+- [ ] Test each button individually
+- [ ] Document any inconsistencies found
+
+**Critical Buttons to Check**:
+1. **Add Measurement** (Optimisation Tracking) - Line ~13715
+2. **Rebaseline** (Optimisation Tracking) - Line ~15230
+3. **Update Task Latest** (Optimisation Tracking) - Line ~15478
+4. **Bulk Update All Tasks** (Optimisation Tracking) - Line ~14498
+5. **Run Audit Scan** (Configuration/Overview) - Line ~24438
+6. **Run Ranking & AI Scan** (Ranking & AI tab)
+7. **Run Money Pages Scan** (Dashboard/Money Pages)
+8. **Run All Audits & Updates** (Dashboard) - Line ~51610
+
+**Files to Modify**:
+- `audit-dashboard.html`: All update button handlers
+- Create unified `getTaskMetricsFromDataSources()` function (Fix 4)
+
+---
+
+#### Phase 4: Align All Audit Processes
+**Status**: ⏸️ **NOT STARTED**
+
+**Tasks**:
+- [ ] Document all audit/scan processes (see "All Audit Processes" below)
+- [ ] Ensure consistent data source priority across all processes
+- [ ] Verify all processes use latest data from Supabase
+- [ ] Standardize error handling and logging
+- [ ] Create unified data fetching function
+- [ ] Test end-to-end audit flow
+
+**Processes to Align**:
+1. Run Audit Scan (`runAudit()`) - Creates `queryTotals`
+2. Run Ranking & AI Scan (`loadRankingAiData()`) - Creates `combinedRows`
+3. Run Money Pages Scan (`dashboardRunMoneyPagesScan()`) - Refreshes from audit
+4. Run Domain Strength Snapshot (`runDomainStrengthSnapshot()`)
+5. Sync CSV (`syncCsv()`)
+6. Run All Audits & Updates (`runDashboardGlobalRun()`) - Global execution
+
+**Files to Modify**:
+- `audit-dashboard.html`: All audit/scan functions
+- Create unified data fetching utilities
+
+---
+
+#### Phase 5: URL Task AI Citations Logic Fix (Critical)
+**Status**: ⏸️ **AWAITING APPROVAL** (supersedes Fix 3)
+
+**Problem**: URL tasks look for keywords where `best_url` matches target URL, then aggregates citations. This is WRONG because AI citations are keyword-driven, not URL-driven.
+
+**Correct Logic**: Find keywords where `ai_alan_citations` array contains the target URL, count unique keywords citing the URL.
+
+**Tasks**:
+- [ ] Reverse matching logic in `computeAiMetricsForPageUrl()`
+- [ ] Find keywords where `ai_alan_citations` array contains target URL
+- [ ] Count unique keywords (or total citations - TBD)
+- [ ] Set AI Overview = true only if at least one citing keyword has overview
+- [ ] Test with "photography-courses-coventry" URL
+- [ ] Update all functions using this logic
+
+**Files to Modify**:
+- `audit-dashboard.html`: `computeAiMetricsForPageUrl()` function (~line 12700)
+- `audit-dashboard.html`: `addMeasurementBtn` handler (uses above function)
+- `audit-dashboard.html`: `rebaselineBtn` handler (uses above function)
+- `audit-dashboard.html`: `bulkUpdateAllTasks()` (uses above function)
+
+**Documentation**: `Docs/URL-TASK-AI-CITATIONS-FIX-ANALYSIS.md`
+
+---
+
+### Project 4: Architecture Roadmap (Remaining Steps)
+**Status**: Various completion levels
+
+#### Phase 1: Complete Data Integration
+- **1.1 Local Signals API**: ⚠️ PARTIAL (GBP API integrated, some features remain)
+- **1.2 Backlink Metrics API**: ✅ COMPLETE (CSV upload working)
+- **1.3 Entity Extraction**: ❌ NOT STARTED (still stub)
+
+#### Phase 2: Automation & Scheduling
+- **2.1 Automated Scheduling**: ❌ NOT STARTED (manual trigger only)
+- **2.2 Data Persistence**: ✅ COMPLETE (Supabase integration done)
+- **2.3 Multi-Property Support**: ❌ NOT STARTED
+
+#### Phase 3: Enhanced Features
+- **3.1 Advanced Analytics**: ❌ NOT STARTED
+- **3.2 Reporting**: ❌ NOT STARTED
+- **3.3 Alerts & Notifications**: ❌ NOT STARTED
+
+#### Phase 4: UI/UX Improvements
+- **4.1 Dashboard Enhancements**: ⚠️ PARTIAL (some done, more planned)
+- **4.2 Performance Optimization**: ⚠️ PARTIAL (some optimizations done)
+
+**Documentation**: `Docs/ARCHITECTURE.md`
+
+---
+
+## All Update Buttons Reference
+
+### Module: Configuration & Reporting
+| Button | Element ID | Function | Data Fetched |
+|--------|------------|----------|--------------|
+| Run Audit Scan | `runAudit` | `window.runAudit()` | GSC, Local Signals, Reviews, Backlinks, Schema |
+| Sync CSV | `syncCsvBtn` | `window.syncCsv()` | CSV from GitHub/remote |
+| Share Audit | `shareAudit` | `window.shareAudit()` | Generates share token |
+| Save Configuration | `saveConfig` | `saveConfig()` | Saves to localStorage |
+| Save Admin Key | `saveAdminKey` | `setAdminKey()` | Saves to sessionStorage/localStorage |
+
+### Module: Dashboard
+| Button | Element ID | Function | Data Fetched |
+|--------|------------|----------|--------------|
+| Run All Audits & Updates | `dashboard-run-all-btn` | `window.runDashboardGlobalRun()` | All scans in sequence |
+| Run scan (Ranking & AI) | N/A | `window.dashboardRunRankingAiScan()` | DataForSEO SERP data |
+| Run scan (Money Pages) | N/A | `window.dashboardRunMoneyPagesScan()` | Latest audit from Supabase |
+| Run snapshot (Domain Strength) | N/A | `window.runDomainStrengthSnapshot()` | DataForSEO Labs data |
+
+### Module: Keyword Ranking and AI
+| Button | Element ID | Function | Data Fetched |
+|--------|------------|----------|--------------|
+| Run ranking & AI check | `ranking-ai-refresh` | `window.loadRankingAiData(true)` | DataForSEO SERP API |
+| Refresh GSC Data | `ranking-gsc-refresh` | `window.refreshRankingAiGscData()` | GSC API (query-level) |
+| Edit Keywords | `edit-keywords-btn` | Opens modal | Loads/saves via API |
+| Run Domain Strength Snapshot | `domain-strength-run-btn` | `window.runDomainStrengthSnapshot()` | DataForSEO Labs API |
+| Backfill Domain Ranks | `backfill-domain-ranks-btn` | `backfillMissingDomainRanks()` | Calls backfill API |
+
+### Module: Optimisation Tracking
+| Button | Element ID | Function | Data Fetched |
+|--------|------------|----------|--------------|
+| Update All Tasks with Latest Data | `optimisation-bulk-update-btn` | `window.bulkUpdateAllTasks()` | Latest audit + combinedRows |
+| Update (per row) | `optimisation-update-btn-{taskId}` | `window.updateTaskLatest()` | Latest audit + combinedRows |
+| Add Measurement | `optimisation-add-measurement-btn` | Add Measurement handler | Latest audit + combinedRows |
+| Rebaseline | `optimisation-rebaseline-btn` | Rebaseline handler | Latest audit + combinedRows |
+| Complete Cycle | `optimisation-complete-cycle-btn` | `window.completeCycle()` | Updates task status |
+| Archive Cycle | `optimisation-archive-cycle-btn` | `window.archiveCycle()` | Updates task status |
+| Start New Cycle | `optimisation-start-cycle-btn` | `window.startNewCycle()` | Creates new cycle |
+
+**Critical Note**: Add Measurement, Rebaseline, and Bulk Update all use `computeAiMetricsForPageUrl()` for URL tasks. They should use identical logic.
+
+**Documentation**: `Docs/UPDATE-TASKS-REFERENCE.md` (comprehensive reference)
+
+---
+
+## All Audit/Scan Processes
+
+### Primary Data Collection Processes
+
+1. **Run Audit Scan** (`runAudit()`)
+   - **Location**: Line ~24438
+   - **Creates**: `queryTotals` (GSC data only, NO ranking/AI)
+   - **Stores**: `localStorage.last_audit_results`, Supabase `audit_results`
+   - **Does NOT**: Fetch Ranking & AI data (separate process)
+
+2. **Run Ranking & AI Scan** (`loadRankingAiData()`)
+   - **Location**: Ranking & AI tab
+   - **Creates**: `combinedRows` (ranking + AI data)
+   - **Stores**: `localStorage.rankingAiData`, Supabase `keyword_rankings`, `audit_results.ranking_ai_data`
+   - **Critical**: This is the data source for `computeAiMetricsForPageUrl()`
+
+3. **Run Money Pages Scan** (`dashboardRunMoneyPagesScan()`)
+   - **Location**: Dashboard/Money Pages tab
+   - **Refreshes**: From latest audit (doesn't run new audit)
+   - **Stores**: `window.moneyPagesMetrics`, localStorage
+
+4. **Run Domain Strength Snapshot** (`runDomainStrengthSnapshot()`)
+   - **Location**: Ranking & AI tab / Dashboard
+   - **Calculates**: Domain strength score
+   - **Stores**: Supabase and localStorage
+
+5. **Sync CSV** (`syncCsv()`)
+   - **Location**: Configuration tab
+   - **Syncs**: CSV from remote source
+   - **Stores**: localStorage
+
+6. **Run All Audits & Updates** (`runDashboardGlobalRun()`)
+   - **Location**: Dashboard tab
+   - **Executes**: All processes in sequence
+   - **Order**: Sync CSV → Audit Scan → Ranking & AI Scan → Money Pages Scan → Domain Strength → Update All Tasks
+
+### Data Update Processes
+
+1. **Add Measurement** (`addMeasurementBtn` handler)
+   - **Location**: Line ~13715
+   - **Data Sources** (priority):
+     1. GSC Page Totals API (URL-only tasks)
+     2. `computeAiMetricsForPageUrl()` (URL tasks with AI data)
+     3. Money Pages data
+     4. `queryTotals` from localStorage/Supabase
+   - **Stores**: Supabase `optimisation_measurements`
+
+2. **Rebaseline** (`rebaselineBtn` handler)
+   - **Location**: Task Details drawer
+   - **Uses**: Same logic as Add Measurement
+   - **Stores**: Supabase `optimisation_measurements` (baseline)
+
+3. **Bulk Update All Tasks** (`bulkUpdateAllTasks()`)
+   - **Location**: Line ~14498
+   - **Uses**: Same logic as Add Measurement for each task
+   - **Stores**: Supabase `optimisation_measurements` (multiple rows)
+
+4. **Update Task Latest** (`updateTaskLatest()`)
+   - **Location**: Line ~15478
+   - **Uses**: Same logic as Add Measurement
+   - **Stores**: Supabase `optimisation_measurements` (updates latest)
+
+**Documentation**: `Docs/ALL-AUDIT-SCAN-PROCESSES.md` (detailed process documentation)
+
+---
+
+## All Fixes Status
+
+### Fix 0: URL Task AI Citations Logic (CRITICAL)
+**Status**: ⏸️ **AWAITING APPROVAL**  
+**Priority**: 🔴 **CRITICAL**  
+**Phase**: Phase 5 of Fix Plan
+
+**Problem**: Current logic finds keywords where `best_url` matches target URL, then aggregates citations. This is WRONG.
+
+**Solution**: Reverse logic - find keywords where `ai_alan_citations` array contains target URL.
+
+**Affected Functions**:
+- `computeAiMetricsForPageUrl()` - Core function
+- Add Measurement button
+- Rebaseline button
+- Bulk Update All Tasks
+
+**Documentation**: `Docs/URL-TASK-AI-CITATIONS-FIX-ANALYSIS.md`
+
+---
+
+### Fix 1: Make URL Matching Optional for Keyword Tasks
+**Status**: ❌ **REVERTED** (was completed, lost in rollback)
 
 **Problem**: Keyword tasks required URL match, causing failures when URL didn't match.
 
 **Solution**: Made URL matching optional for keyword-based tasks.
 
-**Status**: ✅ Implemented in:
+**Was Implemented In**:
 - `addMeasurementBtn` handler (line ~13797, ~13847)
 - `updateTaskLatest()` function (line ~15509)
-- `bulkUpdateAllTasks()` function (already had this logic)
+- `bulkUpdateAllTasks()` function
 
-**Files Modified**: `audit-dashboard.html`
+**Needs Re-implementation**: Yes, from clean baseline
 
-### Fix 2: Data Freshness (✅ COMPLETED)
+---
 
-**Problem**: Processes used stale localStorage data instead of latest from Supabase.
+### Fix 2: Unify "Add Measurement" and "Update Task Latest" Logic
+**Status**: ❌ **REVERTED** (was partially complete, lost in rollback)
 
-**Solution**: Always fetch latest audit from Supabase before using cached data.
+**Problem**: Different update processes use different logic.
 
-**Status**: ✅ Implemented in `addMeasurementBtn` and `rebaselineBtn` handlers.
+**Solution**: Make all processes use same improved logic as "Bulk Update".
 
-**Files Modified**: `audit-dashboard.html`
+**Needs Re-implementation**: Yes, from clean baseline
 
-### Fix 3: URL Task AI Data Matching (❌ IN PROGRESS)
+---
+
+### Fix 3: URL Task AI Data Matching
+**Status**: ❌ **NOT WORKING** (superseded by Fix 0)
 
 **Problem**: URL tasks not finding AI Overview/Citations even when data exists.
 
 **Solution**: Enhanced `computeAiMetricsForPageUrl` with ultra-permissive matching.
 
-**Status**: ❌ **NOT WORKING** - Matching logic still failing despite multiple iterations.
+**Status**: Multiple attempts made, still not working. Superseded by Fix 0 (correct logic).
 
-**Files Modified**: `audit-dashboard.html` (line ~12700-12900)
+---
 
-### Fix 4: Debug Log Consistency (❌ PARTIAL)
+### Fix 4: Standardize Data Source Priority
+**Status**: ⏸️ **NOT STARTED**
 
-**Problem**: `computeAiMetricsForPageUrl` returned inconsistent results (`Overview: false, Citations: null`).
+**Problem**: Different processes check data sources in different order.
 
-**Solution**: Ensured `rowCitations` and `finalCitations` are always valid numbers (0 or higher) when match found.
+**Solution**: Create unified `getTaskMetricsFromDataSources()` function.
 
-**Status**: ✅ Fixed return consistency, but matching still failing.
+**Scope**: Major refactoring - create unified function, update all processes to use it.
 
-**Files Modified**: `audit-dashboard.html`
+**Deferred Until**: Fix 0 is resolved
 
-### Fix 5: Debug Log Cleanup (✅ COMPLETED)
+---
 
-**Problem**: UI debug log was too verbose and cluttered.
+### Fix 5: Ensure Data Freshness (Always Fetch Latest from Supabase)
+**Status**: ❌ **REVERTED** (was completed, lost in rollback)
 
-**Solution**: Added suppression patterns and verbosity control.
+**Problem**: Processes used stale localStorage data instead of latest from Supabase.
 
-**Status**: ✅ Implemented, but user reports it's still "huge".
+**Solution**: Always fetch latest audit from Supabase before using cached data.
 
-**Files Modified**: `audit-dashboard.html`
+**Was Implemented In**:
+- `addMeasurementBtn` handler
+- `rebaselineBtn` handler
+
+**Needs Re-implementation**: Yes, from clean baseline
 
 ---
 
@@ -213,7 +519,7 @@ Critical debug logs were added at `error` level to bypass suppression:
    ↓
 2. addMeasurementBtn handler executes
    ↓
-3. Fetches latest audit from Supabase (Fix 2)
+3. Fetches latest audit from Supabase (Fix 5 - needs re-implementation)
    ↓
 4. Loads combinedRows from:
    - RankingAiModule.state().combinedRows
@@ -223,15 +529,13 @@ Critical debug logs were added at `error` level to bypass suppression:
    ↓
 5. Calls computeAiMetricsForPageUrl(pageUrl, combinedRows)
    ↓
-6. computeAiMetricsForPageUrl:
-   - Normalizes target URL (removes protocol, www, query params, trailing slash)
-   - Loops through combinedRows
-   - For each row, normalizes row.best_url
-   - Attempts multiple matching strategies (exactMatch, lastSegmentMatch, etc.)
-   - If match found, extracts ai_overview and ai_citations
+6. computeAiMetricsForPageUrl (Fix 0 - needs implementation):
+   - CURRENT (WRONG): Finds keywords where best_url matches target URL
+   - CORRECT: Finds keywords where ai_alan_citations array contains target URL
+   - Counts unique keywords citing the URL
    - Returns { ai_overview: boolean, ai_citations: number }
    ↓
-7. If result is consistent (both non-null), saves measurement
+7. If result is consistent, saves measurement
    ↓
 8. Updates UI with new measurement
 ```
@@ -242,34 +546,30 @@ Critical debug logs were added at `error` level to bypass suppression:
 - **Purpose**: Find AI Overview and Citations for a given page URL
 - **Input**: `pageUrl` (string), `rows` (array of combinedRows)
 - **Output**: `{ ai_overview: boolean|null, ai_citations: number|null }`
-- **Logic**: Normalizes URLs, loops through rows, attempts multiple matching strategies
-- **Current Issue**: Matching logic not finding matches despite data existing
+- **Current Issue**: Using wrong logic (best_url matching instead of citations array)
+- **Fix Needed**: Reverse logic to find keywords citing the URL (Fix 0)
 
 **`normalizeUrl(url)`** (line ~12753):
 - **Purpose**: Normalize URLs for comparison
 - **Removes**: Protocol (http/https), www, query parameters, hash, trailing slash
 - **Example**: `https://www.alanranger.com/photography-courses-coventry?srsltid=...` → `alanranger.com/photography-courses-coventry`
 
-**`addMeasurementBtn` handler** (line ~13715):
-- **Purpose**: Add a new measurement for an optimization task
-- **Data Sources** (priority order):
-  1. GSC Page Totals API (for URL-only tasks)
-  2. `computeAiMetricsForPageUrl` (for URL tasks with AI data)
-  3. Money Pages data
-  4. `queryTotals` from localStorage/Supabase
-- **Current Issue**: Step 2 failing for URL tasks
+**`populateMoneyPagesAiCitations(rows)`** (line ~30768):
+- **Purpose**: Populate AI Citations column in Money Pages table
+- **Current Issue**: Needs debouncing and execution guards (Phase 2)
+- **Data Source**: localStorage cache → Supabase API fallback
 
 ### Data Sources
 
 **Supabase Tables**:
-- `keyword_rankings`: Individual keyword rows with `best_url`, `has_ai_overview`, `ai_alan_citations_count`
+- `keyword_rankings`: Individual keyword rows with `best_url`, `has_ai_overview`, `ai_alan_citations_count`, `ai_alan_citations` (array)
 - `audit_results`: Full audit snapshots with `ranking_ai_data` (JSONB containing `combinedRows`)
 - `optimisation_tasks`: Task definitions
 - `optimisation_measurements`: Task measurements over time
 - `debug_logs`: Debug log entries (if saving enabled)
 
 **Frontend Data Structures**:
-- `combinedRows`: Array of `{ keyword, best_url, best_rank_group, has_ai_overview, ai_alan_citations_count, ... }`
+- `combinedRows`: Array of `{ keyword, best_url, best_rank_group, has_ai_overview, ai_alan_citations_count, ai_alan_citations, ... }`
 - `window.rankingAiData`: Same as `combinedRows`
 - `RankingAiModule.state().combinedRows`: Same as `combinedRows`
 - `localStorage.rankingAiData`: Cached `combinedRows` with timestamp
@@ -289,18 +589,50 @@ Critical debug logs were added at `error` level to bypass suppression:
 - Project Ref: `dqrtcsvqsfgbqmnonkpt`
 - **Do not use for queries** - may not have all tables
 
-### MCP Tools
+### MCP Tools (Model Context Protocol)
 
-Use `mcp_supabase-main_*` tools (not `mcp_supabase_*`) for:
-- `mcp_supabase-main_execute_sql`: Query database
-- `mcp_supabase-main_list_tables`: List tables
-- `mcp_supabase-main_apply_migration`: Run migrations
+**⚠️ CRITICAL**: Always use `mcp_supabase-main_*` tools (NOT `mcp_supabase_*`)
+
+**Correct Tools** (use these):
+- `mcp_supabase-main_execute_sql`: Query database (read-only or read-write)
+- `mcp_supabase-main_list_tables`: List all tables in database
+- `mcp_supabase-main_apply_migration`: Apply database migrations
+- `mcp_supabase-main_list_migrations`: List all migrations
+- `mcp_supabase-main_list_extensions`: List database extensions
+- `mcp_supabase-main_get_logs`: Get service logs (api, postgres, edge-function, auth, storage, realtime)
+- `mcp_supabase-main_get_advisors`: Get security/performance advisories
+- `mcp_supabase-main_generate_typescript_types`: Generate TypeScript types
+
+**Wrong Tools** (do NOT use):
+- `mcp_supabase_execute_sql` - Points to wrong project (dqrtcsvqsfgbqmnonkpt)
+- `mcp_supabase_list_tables` - Points to wrong project
+
+**How to Use**:
+1. Always check which Supabase project you're querying
+2. Use `mcp_supabase-main_*` prefix for all operations
+3. Project ref `igzvwbvgvmzvvzoclufx` is the correct one
+4. If you see `dqrtcsvqsfgbqmnonkpt` in results, you're using the wrong tools
+
+**Example Queries**:
+```javascript
+// ✅ CORRECT - Query keyword_rankings table
+mcp_supabase-main_execute_sql({
+  query: "SELECT keyword, best_url, ai_alan_citations_count FROM keyword_rankings WHERE property_url = 'https://www.alanranger.com' LIMIT 10"
+})
+
+// ✅ CORRECT - List all tables
+mcp_supabase-main_list_tables({ schemas: ["public"] })
+
+// ❌ WRONG - Don't use this (wrong project)
+mcp_supabase_execute_sql({ ... })
+```
 
 ### Key Tables
 
 **`keyword_rankings`**:
-- Columns: `keyword`, `best_url`, `has_ai_overview`, `ai_alan_citations_count`, `best_rank_group`, `property_url`, `audit_date`
+- Columns: `keyword`, `best_url`, `has_ai_overview`, `ai_alan_citations_count`, `ai_alan_citations` (array), `best_rank_group`, `property_url`, `audit_date`
 - **Note**: `best_url` includes query parameters (e.g., `?srsltid=...`)
+- **Note**: `ai_alan_citations` is an array of citation objects with `url`, `title`, `domain`
 
 **`audit_results`**:
 - Columns: `property_url`, `audit_date`, `ranking_ai_data` (JSONB)
@@ -308,122 +640,117 @@ Use `mcp_supabase-main_*` tools (not `mcp_supabase_*`) for:
 
 ---
 
-## Next Steps & Recommendations
+## Implementation Priorities
 
-### Immediate Priority
+### Immediate (Post-Rollback)
+1. **Phase 1**: Fix AI Citations column (remove sort icon, disable sorting)
+2. **Phase 2**: Prevent flickering & reduce API calls (debounce, execution guards)
+3. **Re-implement Fix 1**: Make URL matching optional for keyword tasks
+4. **Re-implement Fix 5**: Always fetch latest from Supabase
 
-1. **Diagnose URL Matching Failure**:
-   - Verify `computeAiMetricsForPageUrl` is actually being called
-   - Check if `combinedRows` are loaded correctly
-   - Add console.log (temporarily) to see actual URL values being compared
-   - Verify `normalizeUrl` is working correctly on both URLs
-   - Check if browser caching is preventing latest code from running
+### Short-term
+5. **Phase 3**: Check & fix all update buttons (standardize logic)
+6. **Phase 4**: Align all audit processes (consistent data source priority)
+7. **Phase 5**: URL Task AI Citations Logic Fix (Fix 0 - critical)
 
-2. **Verify Data Structure**:
-   - Query Supabase to confirm `combinedRows` structure matches expectations
-   - Verify field names (`best_url` vs `targetUrl` vs `ranking_url`)
-   - Check if `combinedRows` are being loaded from correct source
-
-3. **Fix Debug Log Visibility**:
-   - Ensure new critical debug logs are actually being executed
-   - Check browser cache (hard refresh: Ctrl+Shift+R)
-   - Verify logs aren't being suppressed despite `error` level
-   - Consider adding a unique marker string to verify latest code is running
-
-### Medium Priority
-
-4. **Re-enable Debug Log Saving**:
-   - Wait for Supabase schema cache to stabilize
-   - Test `property_url` column availability
-   - Re-enable async saving in `debugLog()` function
-   - Verify logs are actually saving to Supabase
-
-5. **Further Debug Log Cleanup**:
-   - Review all `debugLog` calls in `audit-dashboard.html`
-   - Remove or downgrade non-critical logs
-   - Ensure only truly important information is logged
+### Medium-term
+8. **Fix 4**: Standardize Data Source Priority (create unified function)
+9. **Optimisation Tracking Phase 9**: Enhanced Analytics
 
 ### Long-term
-
-6. **Refactor `computeAiMetricsForPageUrl`**:
-   - Consider extracting matching logic into separate function
-   - Add comprehensive unit tests
-   - Document expected input/output formats
-   - Consider using a URL matching library for more robust comparison
-
-7. **Standardize Data Source Priority**:
-   - Create unified `getTaskMetricsFromDataSources()` function (as outlined in FIX-PLAN-COMPREHENSIVE.md)
-   - Use same logic for "Add Measurement", "Update Task Latest", and "Bulk Update"
-   - Ensure consistent behavior across all update processes
+10. Architecture roadmap items (Entity Extraction, Automation, Multi-Property)
+11. README planned features (SERP monitoring, competitive analysis, etc.)
 
 ---
 
-## Related Documentation
+## Testing Checklist
 
-### Key MD Files
+### After Each Fix
+- [ ] Test "Add Measurement" with URL tasks
+- [ ] Test "Rebaseline" with URL tasks
+- [ ] Test "Bulk Update All Tasks" with URL tasks
+- [ ] Test "Update Task Latest" with URL tasks
+- [ ] Verify AI Citations column displays correctly
+- [ ] Verify no flickering in citation counts
+- [ ] Verify all update buttons work correctly
+- [ ] Verify end-to-end audit flow works
 
-1. **`URL-TASK-AI-DATA-SUMMARY.md`**: Detailed diagnosis and evidence for URL task AI data issue
-2. **`DEBUG-LOG-CLEANUP.md`**: Debug log cleanup process and results
-3. **`FIX-PLAN-COMPREHENSIVE.md`**: Comprehensive fix plan with all fixes outlined
-4. **`ALL-AUDIT-SCAN-PROCESSES.md`**: All audit/scan/update processes documented
-5. **`ARCHITECTURE.md`**: System architecture and data flow
-6. **`README.md`**: Project overview and features
-
-### Other Relevant Files
-
-- `audit-dashboard.html`: Main frontend file (contains all UI logic)
-- `api/supabase/save-debug-log-entry.js`: Debug log API endpoint
-- `migrations/20250117_create_debug_logs_table.sql`: Debug logs table migration
+### Critical Test Cases
+- [ ] URL task: `www.alanranger.com/photography-courses-coventry`
+- [ ] Keyword task with matching URL
+- [ ] Keyword task with non-matching URL
+- [ ] Keyword task with no URL
+- [ ] Money Pages table AI Citations column
+- [ ] All update buttons in Optimisation Tracking
 
 ---
 
 ## Important Notes
 
 ### User Preferences
-
 - **DO NOT use console.log**: User explicitly prefers UI debug log
 - **DO NOT ask for console logs**: Use UI debug log or Supabase queries
 - **DO NOT make assumptions**: Always verify with actual data/queries
 - **DO NOT make changes without approval**: User wants diagnosis first, then fix plan, then approval
 
 ### Code Complexity
-
 - **User Rule**: Never create code that goes beyond the 15 limit of complexity
 - Keep functions simple and focused
 - Break down complex logic into smaller functions
 
 ### Testing
-
 - Always test with actual URL: `www.alanranger.com/photography-courses-coventry`
 - Verify data exists in Supabase before assuming it's a matching issue
 - Use MCP Supabase tools to query actual data
 - Check UI debug log for diagnostic information
+
+### Version Number
+- **CRITICAL**: Update version number in `audit-dashboard.html` after each deployment
+- Version number should reflect latest commit hash
+- Prevents troubleshooting outdated versions
+
+---
+
+## Related Documentation Files
+
+### Key MD Files (Reference Only - All Info Consolidated Above)
+1. `Docs/UPDATE-TASKS-REFERENCE.md` - Complete update buttons reference (consolidated above)
+2. `Docs/ALL-AUDIT-SCAN-PROCESSES.md` - All audit processes (consolidated above)
+3. `Docs/FIX-PLAN-COMPREHENSIVE.md` - Comprehensive fix plan (consolidated above)
+4. `Docs/URL-TASK-AI-CITATIONS-FIX-ANALYSIS.md` - Fix 0 detailed analysis
+5. `Docs/MONEY_PAGES_PERFORMANCE.md` - Money Pages project plan (consolidated above)
+6. `Docs/OPTIMISATION_TRACKING_MODULE_PLAN.md` - Optimisation Tracking project plan (consolidated above)
+7. `Docs/OPTIMISATION_TRACKING_PHASES_COMPLETE.md` - Optimisation Tracking status (consolidated above)
+8. `Docs/ARCHITECTURE.md` - System architecture and roadmap (consolidated above)
+9. `README.md` - Project overview and features (stays in root)
+10. `Docs/CHANGELOG.md` - Version history
+
+**Note**: This HANDOVER.md is now the single source of truth. Other MD files are for reference only.
 
 ---
 
 ## Current State Summary
 
 ### What's Working ✅
-
-- Keyword tasks can find ranking/AI data (Fix 1)
-- Data freshness improvements (Fix 2)
-- Debug log cleanup (partial)
-- Debug log API endpoint created
-- Supabase queries confirmed data exists
+- Money Pages Performance & Actions (100% complete)
+- Optimisation Tracking Module (89% complete, Phases 1-8 done)
+- Data Persistence (Supabase integration)
+- Shareable Audit Links
+- Stable AI citation counts in baseline (no flickering)
+- AI Citations URL matching (fixed - strict path segment matching)
+- AI Citations value preservation (fixed - cache trusted over API)
 
 ### What's Not Working ❌
+- AI Citations column sorting (still present, needs removal)
+- URL Task AI Citations Logic (Fix 0 - wrong logic, needs reversal)
 
-- URL tasks not displaying AI Overview/Citations (Fix 3)
-- Debug logs not saving to Supabase (disabled due to schema cache)
-- Debug logs still too verbose
-- Critical debug logs not appearing in UI (possible browser cache issue)
-
-### What Needs Investigation 🔍
-
-- Why `computeAiMetricsForPageUrl` matching is failing
-- Why new debug logs aren't appearing
-- Whether browser caching is preventing latest code from running
-- Actual structure of `combinedRows` vs expected structure
+### What Needs Implementation ⏸️
+- Phase 1: AI Citations column fixes
+- Phase 2: Prevent flickering & reduce API calls
+- Phase 3: Check & fix all update buttons
+- Phase 4: Align all audit processes
+- Phase 5: URL Task AI Citations Logic Fix (Fix 0)
+- Re-implement Fix 1 and Fix 5 (proven fixes)
 
 ---
 
@@ -434,8 +761,9 @@ Use `mcp_supabase-main_*` tools (not `mcp_supabase_*`) for:
 **Deployment**: Vercel (https://ai-geo-audit.vercel.app/)  
 **Database**: Supabase (`supabase-main`, project_ref=igzvwbvgvmzvvzoclufx)
 
-**Last Updated**: 2026-01-07  
-**Status**: Critical issue unresolved, multiple fixes attempted, needs fresh diagnosis approach
+**Current Commit**: `833d4ff`  
+**Baseline Commit**: `8951fcf`  
+**Status**: Rolled back to stable baseline. Ready for targeted fixes from clean foundation.
 
 ---
 
