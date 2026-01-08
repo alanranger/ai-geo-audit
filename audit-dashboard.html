@@ -29934,51 +29934,20 @@ Final Score: ${score}/100`;
         // Sort data if needed (sort ALL rows, not just current page)
         let sortedRows = [...moneyRows];
         if (window.moneyPagesSortColumn) {
-          // For AI citations, ensure we have the latest data from cells or cache
+          // For AI citations, use cache (trusted source) - don't read from cells which may have wrong values
           if (window.moneyPagesSortColumn === 'aiCitations') {
-            // Try to read from existing table cells first (most accurate)
-            const tableContainer = document.getElementById('money-pages-table-container');
-            if (tableContainer) {
-              const cells = tableContainer.querySelectorAll('.ai-citation-cell-opportunity');
-              cells.forEach(cell => {
-                const cellUrl = cell.getAttribute('data-page-url');
-                if (cellUrl) {
-                  const cellText = cell.textContent.trim();
-                  // Parse count from cell text (handles "⏳", "0", "1,234", etc.)
-                  let count = 0;
-                  if (cellText !== '⏳' && cellText !== '' && cellText !== '—') {
-                    const parsed = parseInt(cellText.replace(/,/g, ''), 10);
-                    if (!isNaN(parsed)) {
-                      count = parsed;
-                    }
-                  }
-                  // Find matching row and update _aiCitations
-                  const matchingRow = sortedRows.find(r => {
-                    const rowUrl = r.url || '';
-                    const rowUrlNormalized = normalizeUrl(rowUrl);
-                    const cellUrlNormalized = normalizeUrl(cellUrl);
-                    return rowUrl === cellUrl || 
-                           rowUrlNormalized === cellUrlNormalized ||
-                           rowUrlNormalized.includes(cellUrlNormalized) ||
-                           cellUrlNormalized.includes(rowUrlNormalized);
-                  });
-                  if (matchingRow) {
-                    matchingRow._aiCitations = count;
-                  }
-                }
-              });
-            }
-            
-            // Also ensure all rows have _aiCitations set from cache if not already set
+            // Use cache as source of truth (same as cards use API which populates cache)
+            // Don't read from cells - they may have stale or incorrect values from API overwrites
             sortedRows.forEach(row => {
-              if (typeof row._aiCitations !== 'number') {
-                const cached = window.moneyPagesCitationCache && window.moneyPagesCitationCache[row.url];
-                if (typeof cached === 'number') {
-                  row._aiCitations = cached;
-                } else {
-                  row._aiCitations = 0; // Default to 0, not -1, so they sort correctly
-                }
+              // First check global cache (populated by populateMoneyPagesAiCitations or cards)
+              const cached = window.moneyPagesCitationCache && window.moneyPagesCitationCache[row.url];
+              if (typeof cached === 'number' && cached >= 0) {
+                row._aiCitations = cached;
+              } else if (typeof row._aiCitations !== 'number') {
+                // If no cache and no existing value, default to 0 for sorting
+                row._aiCitations = 0;
               }
+              // Don't overwrite existing _aiCitations if it's already a valid number
             });
           }
           
@@ -30272,7 +30241,20 @@ Final Score: ${score}/100`;
                 })()}
               </td>
               <td style="padding: 0.75rem; text-align: right; color: ${posColor}; font-weight: 600; vertical-align: top; white-space: nowrap;">${row.avgPosition ? row.avgPosition.toFixed(1) : '—'}</td>
-              <td style="padding: 0.75rem; text-align: right; font-weight: 600; vertical-align: top; white-space: nowrap;" class="ai-citation-cell-opportunity" data-page-url="${row.url || ''}">⏳</td>
+              <td style="padding: 0.75rem; text-align: right; font-weight: 600; vertical-align: top; white-space: nowrap;" class="ai-citation-cell-opportunity" data-page-url="${row.url || ''}">${(() => {
+                // Use cache if available (same source as cards) - prevents flickering
+                const cached = window.moneyPagesCitationCache && window.moneyPagesCitationCache[row.url];
+                if (typeof cached === 'number' && cached >= 0) {
+                  row._aiCitations = cached; // Set on row for sorting
+                  return cached.toLocaleString();
+                }
+                // Also check row._aiCitations if already set
+                if (typeof row._aiCitations === 'number' && row._aiCitations >= 0) {
+                  return row._aiCitations.toLocaleString();
+                }
+                // Placeholder if no cache yet
+                return '⏳';
+              })()}</td>
               <td style="padding: 0.75rem; text-align: center; vertical-align: top;">
                 ${(() => {
                   // Split categoryLabel into main part and bracketed part
@@ -31048,39 +31030,9 @@ Final Score: ${score}/100`;
             
             const promises = batch.map(async (url) => {
               try {
-                // First try to compute client-side using computeAiMetricsForPageUrl (faster, no API call)
-                if (typeof window.computeAiMetricsForPageUrl === 'function') {
-                  try {
-                    // Get combinedRows from localStorage or window
-                    let combinedRows = [];
-                    const lastAuditResults = localStorage.getItem('last_audit_results');
-                    if (lastAuditResults) {
-                      const auditData = JSON.parse(lastAuditResults);
-                      if (auditData?.ranking_ai_data?.combinedRows) {
-                        combinedRows = auditData.ranking_ai_data.combinedRows;
-                      } else if (auditData?.searchData?.ranking_ai_data?.combinedRows) {
-                        combinedRows = auditData.searchData.ranking_ai_data.combinedRows;
-                      } else if (Array.isArray(auditData?.ranking_ai_data)) {
-                        combinedRows = auditData.ranking_ai_data;
-                      }
-                    }
-                    if (combinedRows.length === 0 && typeof window.getRankingAiCombinedRows === 'function') {
-                      combinedRows = window.getRankingAiCombinedRows();
-                    }
-                    
-                    if (combinedRows.length > 0) {
-                      const result = window.computeAiMetricsForPageUrl(url, combinedRows);
-                      const count = result?.ai_citations != null ? Number(result.ai_citations) : null;
-                      if (count !== null) {
-                        return { url, count };
-                      }
-                    }
-                  } catch (computeErr) {
-                    console.warn('[Money Pages AI Citations] Error computing client-side:', computeErr);
-                  }
-                }
-                
-                // Fallback to API if client-side computation fails
+                // Use the same API endpoint as the cards (which are working correctly)
+                // Skip client-side computation which has URL matching bugs
+                // This ensures table and cards use the same source of truth
                 const apiUrlFull = apiUrl(`/api/supabase/query-keywords-citing-url?property_url=${encodeURIComponent(propertyUrl)}&target_url=${encodeURIComponent(url)}`);
                 const response = await fetch(apiUrlFull);
                 if (response.ok) {
