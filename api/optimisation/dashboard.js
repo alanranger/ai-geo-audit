@@ -381,11 +381,13 @@ export default async function handler(req, res) {
       const sparklinePoints = [];
       if (objectiveKpiKey && cycleEvents.length > 0) {
         const extractor = KPI_EXTRACTORS[objectiveKpiKey];
-        const points = cycleEvents
-          .slice(-10) // Last 10
-          .map(e => extractor(e.metrics))
-          .filter(v => v != null);
-        sparklinePoints.push(...points);
+        if (extractor) {
+          const points = cycleEvents
+            .slice(-10) // Last 10
+            .map(e => extractor(e.metrics))
+            .filter(v => v != null);
+          sparklinePoints.push(...points);
+        }
       }
 
       // Update tile counts
