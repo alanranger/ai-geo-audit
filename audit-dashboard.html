@@ -30712,8 +30712,11 @@ Final Score: ${score}/100`;
         const cells = tableContainer.querySelectorAll('.ai-citation-cell-opportunity');
         
         if (!cells || cells.length === 0) {
+          console.warn('[Money Pages AI Citations] No cells found in table');
           return;
         }
+        
+        console.log(`[Money Pages AI Citations] Found ${cells.length} cells to populate`);
         
         // Get property URL for API calls
         const propertyUrl = document.getElementById('propertyUrl')?.value || localStorage.getItem('property_url') || '';
@@ -30784,6 +30787,13 @@ Final Score: ${score}/100`;
                           citationCount++;
                         } else if (citedNormalized.includes(targetNormalized) || targetNormalized.includes(citedNormalized)) {
                           citationCount++;
+                        } else {
+                          // Also try matching by last path segment
+                          const targetPath = targetNormalized.split('/').filter(p => p).pop() || '';
+                          const citedPath = citedNormalized.split('/').filter(p => p).pop() || '';
+                          if (targetPath && citedPath && targetPath === citedPath && targetPath.length > 5) {
+                            citationCount++;
+                          }
                         }
                       }
                     });
@@ -30793,6 +30803,8 @@ Final Score: ${score}/100`;
                 // Always cache the result (even if 0) for this URL
                 citationCache[targetUrl] = citationCount;
               });
+              
+              console.log(`[Money Pages AI Citations] Built cache from localStorage for ${Object.keys(citationCache).length} URLs`);
             }
           }
         } catch (err) {
