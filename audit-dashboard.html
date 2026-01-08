@@ -30899,11 +30899,11 @@ Final Score: ${score}/100`;
             cachedCount = normalizedCache[pageUrlNormalized];
           }
           
+          // If cached value exists, render it and store on the row for sorting
           if (typeof cachedCount === 'number') {
             cell.textContent = cachedCount.toLocaleString();
             cell.style.color = '#0f172a';
             cell.style.fontWeight = '600';
-            // Also store in row data for sorting
             const pageUrlNormalized = normalizeUrl(pageUrl);
             const row = rows.find(r => {
               const rowUrl = r.url || '';
@@ -30912,12 +30912,28 @@ Final Score: ${score}/100`;
             if (row) {
               row._aiCitations = cachedCount;
             }
-          } else {
-            // If not in cache, show 0 as placeholder (will be updated by API if available)
-            cell.textContent = '0';
-            cell.style.color = '#94a3b8';
-            cell.style.fontWeight = '500';
+            return;
           }
+          
+          // No cache: if the cell already has a numeric value (e.g., from initial render), keep it
+          const existingNumeric = parseInt(String(cell.textContent || '').replace(/,/g, ''), 10);
+          if (!Number.isNaN(existingNumeric)) {
+            // Preserve the displayed value and set it on the row for sorting
+            const pageUrlNormalized = normalizeUrl(pageUrl);
+            const row = rows.find(r => {
+              const rowUrl = r.url || '';
+              return rowUrl === pageUrl || normalizeUrl(rowUrl) === pageUrlNormalized;
+            });
+            if (row && typeof row._aiCitations !== 'number') {
+              row._aiCitations = existingNumeric;
+            }
+            return;
+          }
+          
+          // Otherwise, leave placeholder and allow API fetch to update
+          cell.textContent = '—';
+          cell.style.color = '#94a3b8';
+          cell.style.fontWeight = '500';
         });
         
         // For URLs not in cache (or showing 0), fetch from API to get accurate counts
