@@ -18683,8 +18683,9 @@
                 }
               }
               
-              // If still no valid data, check early next month snapshots (GSC is 2 days behind)
-              // For December, snapshots created on Jan 2-3 with date_end = Jan 1-2 actually represent Dec 31 data
+              // If still no valid data, check early next month snapshots (GSC is always 2-3 days behind)
+              // For ANY closed month, snapshots created in first 3 days of next month with date_end in next month
+              // actually represent the previous month's end-of-month data
               if (!snapshot || !hasValidData(snapshot)) {
                 const monthDate = monthStartDateFromKey(month);
                 const nextMonth = new Date(monthDate);
@@ -18692,7 +18693,7 @@
                 const nextMonthStr = monthKeyFromDate(nextMonth);
                 
                 // Look for snapshots in the first 3 days of next month with date_end in next month
-                // These represent the previous month's data due to GSC 2-day delay
+                // These represent the previous month's data due to GSC 2-3 day delay
                 const nextMonthSnapshots = allData[segment]?.filter(s => {
                   if (!s.created_at || !s.date_end) return false;
                   
@@ -18700,7 +18701,8 @@
                   const dateEnd = new Date(s.date_end);
                   const dateEndMonth = monthKeyFromDate(dateEnd);
                   
-                  // Must be created in first 3 days of next month
+                  // Must be created in first 3 days of next month AND have date_end in next month
+                  // This ensures we get the snapshot that represents the previous month's end data
                   const isEarlyNextMonth = dateEndMonth === nextMonthStr && 
                                           createdDate.getDate() <= 3 &&
                                           createdDate.getMonth() === nextMonth.getMonth() &&
@@ -18713,10 +18715,11 @@
                   const validNextMonthSnapshots = nextMonthSnapshots.filter(hasValidData);
                   if (validNextMonthSnapshots.length > 0) {
                     // Use the earliest date_end in next month (closest to previous month end)
+                    // This represents the most recent data from the previous month
                     const sorted = validNextMonthSnapshots.sort((a, b) => {
                       const aDate = a.date_end ? new Date(a.date_end) : new Date(a.created_at);
                       const bDate = b.date_end ? new Date(b.date_end) : new Date(b.created_at);
-                      return aDate - bDate; // Earliest first
+                      return aDate - bDate; // Earliest first (closest to previous month end)
                     });
                     snapshot = sorted[0];
                   }
