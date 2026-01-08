@@ -6519,16 +6519,105 @@
       
       // Populate Plan / Hypothesis from Priority & Next Actions
       let planText = '';
-      try {
-        const scorecardData = buildKeywordScorecardData(row);
-        if (scorecardData) {
-          const actions = generateActionBullets(scorecardData);
-          if (actions && actions.length > 0) {
-            planText = actions.join('\n');
+      const source = modal.dataset.source || '';
+      
+      // For Money Pages tasks, build recommendations from row data
+      if (source === 'money_pages' || !row.keyword) {
+        try {
+          // Get row data to build recommendations
+          const rowDataStr = modal.dataset.rowData;
+          if (rowDataStr) {
+            const rowData = JSON.parse(rowDataStr);
+            
+            // Build recommendations similar to how they're built for performance cards
+            const recommendations = [];
+            const clicks = rowData.clicks || 0;
+            const impressions = rowData.impressions || 0;
+            const ctr = rowData.ctr || 0;
+            const avgPosition = rowData.avgPosition || rowData.position || null;
+            const aiCitations = rowData._aiCitations || 0;
+            
+            // High Priority: Ranking Below Top 10
+            if (avgPosition != null && avgPosition > 10) {
+              recommendations.push({
+                priority: 'High',
+                title: 'Ranking Below Top 10',
+                nextSteps: 'Improve on-page SEO, build authority, or optimize for target keywords',
+                estimatedImpact: `Moving to top 10 could increase clicks by 50-100%`,
+                reason: `Current position ${avgPosition.toFixed(1)} is outside top 10`
+              });
+            }
+            
+            // High Priority: Low Click-Through Rate
+            const ctrPercent = (ctr > 1 ? ctr : ctr * 100);
+            if (ctrPercent < 2.5 && impressions > 0) {
+              const potentialClicks = Math.round(impressions * 0.025);
+              const additionalClicks = Math.max(0, potentialClicks - clicks);
+              recommendations.push({
+                priority: 'High',
+                title: 'Low Click-Through Rate',
+                nextSteps: 'Optimize title tags and meta descriptions to improve CTR',
+                estimatedImpact: `Could gain ~${additionalClicks} additional clicks/month with better CTR`,
+                reason: `Current CTR ${ctrPercent.toFixed(2)}% is below 2.5% benchmark`
+              });
+            }
+            
+            // Medium Priority: No AI Citations
+            if (aiCitations === 0 || aiCitations == null) {
+              recommendations.push({
+                priority: 'Medium',
+                title: 'No AI Citations',
+                nextSteps: 'Add structured data (Schema.org) and optimize content for AI overview eligibility',
+                estimatedImpact: 'Could capture AI overview features for high-value keywords',
+                reason: 'This URL has no AI citations in search results'
+              });
+            }
+            
+            // Sort by priority: High first, then Medium, then Low
+            recommendations.sort((a, b) => {
+              const priorityOrder = { 'High': 3, 'Medium': 2, 'Low': 1 };
+              return (priorityOrder[b.priority] || 0) - (priorityOrder[a.priority] || 0);
+            });
+            
+            // Build plan text from recommendations
+            if (recommendations.length > 0) {
+              const planLines = [];
+              planLines.push('CTR target: ≥ 2.5%');
+              planLines.push('');
+              
+              // Limit to top 3 recommendations
+              const topRecs = recommendations.slice(0, 3);
+              
+              topRecs.forEach((rec, idx) => {
+                planLines.push(`${rec.priority.toUpperCase()} PRIORITY: ${rec.title}`);
+                planLines.push(`Next steps: ${rec.nextSteps}`);
+                planLines.push(`Estimated impact: ${rec.estimatedImpact}`);
+                planLines.push(`Reason: ${rec.reason}`);
+                if (idx < topRecs.length - 1) planLines.push('');
+              });
+              
+              planText = planLines.join('\n');
+            } else {
+              planText = 'CTR target: ≥ 2.5%';
+            }
           }
+        } catch (e) {
+          console.warn('[Optimisation] Error generating plan from money pages recommendations:', e);
+          planText = 'CTR target: ≥ 2.5%';
         }
-      } catch (e) {
-        console.warn('[Optimisation] Error generating plan from scorecard:', e);
+      } else {
+        // For keyword tasks, use existing logic
+        try {
+          const scorecardData = buildKeywordScorecardData(row);
+          if (scorecardData) {
+            const actions = generateActionBullets(scorecardData);
+            if (actions && actions.length > 0) {
+              planText = actions.join('\n');
+            }
+          }
+        } catch (e) {
+          console.warn('[Optimisation] Error generating plan from scorecard:', e);
+        }
       }
       document.getElementById('track-plan').value = planText;
 
@@ -34419,14 +34508,14 @@ Final Score: ${score}/100`;
               const statusColors = {
                 'planned': '#64748b',
                 'in_progress': '#2563eb',
-                'monitoring': '#10b981',
+                'monitoring': '#2563eb',
                 'done': '#10b981',
                 'cancelled': '#ef4444'
               };
               const statusBg = {
                 'planned': '#f1f5f9',
                 'in_progress': '#dbeafe',
-                'monitoring': '#ecfdf5',
+                'monitoring': '#dbeafe',
                 'done': '#ecfdf5',
                 'cancelled': '#fee2e2'
               };
