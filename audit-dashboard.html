@@ -30868,29 +30868,50 @@ Final Score: ${score}/100`;
             });
             
             const results = await Promise.all(promises);
+            
+            // Build a normalized lookup map of all cells for efficient matching
+            const currentTableContainer = document.getElementById('money-pages-table-container');
+            if (!currentTableContainer || typeof currentTableContainer.querySelectorAll !== 'function') {
+              console.warn('[Money Pages AI Citations] Table container not found when updating cells');
+              return;
+            }
+            const allCells = currentTableContainer.querySelectorAll('.ai-citation-cell-opportunity');
+            
+            // Create a map: normalized URL -> cell element
+            const cellMap = new Map();
+            Array.from(allCells).forEach(cell => {
+              const cellUrl = cell.getAttribute('data-page-url');
+              if (cellUrl) {
+                // Store both exact and normalized versions
+                cellMap.set(cellUrl, cell);
+                const cellUrlNormalized = normalizeUrl(cellUrl);
+                if (cellUrlNormalized !== cellUrl) {
+                  cellMap.set(cellUrlNormalized, cell);
+                }
+              }
+            });
+            
             results.forEach(({ url, count }) => {
               citationCache[url] = count;
               
-              // Re-query tableContainer and cells to ensure they still exist
-              const currentTableContainer = document.getElementById('money-pages-table-container');
-              if (!currentTableContainer || typeof currentTableContainer.querySelectorAll !== 'function') {
-                return;
-              }
-              const allCells = currentTableContainer.querySelectorAll('.ai-citation-cell-opportunity');
-              
-              // Normalize the URL we're looking for
+              // Try to find cell: exact match first, then normalized
               const urlNormalized = normalizeUrl(url);
+              let cell = cellMap.get(url) || cellMap.get(urlNormalized);
               
-              // Try to find cell by exact match first, then by normalized match
-              let cell = Array.from(allCells).find(c => {
-                const cellUrl = c.getAttribute('data-page-url');
-                if (!cellUrl) return false;
-                // Try exact match first
-                if (cellUrl === url) return true;
-                // Try normalized match
-                const cellUrlNormalized = normalizeUrl(cellUrl);
-                return cellUrlNormalized === urlNormalized;
-              });
+              // If still not found, try iterating through cells with flexible matching
+              if (!cell) {
+                cell = Array.from(allCells).find(c => {
+                  const cellUrl = c.getAttribute('data-page-url');
+                  if (!cellUrl) return false;
+                  // Try exact match
+                  if (cellUrl === url) return true;
+                  // Try normalized match
+                  const cellUrlNormalized = normalizeUrl(cellUrl);
+                  if (cellUrlNormalized === urlNormalized) return true;
+                  // Try reverse: normalize the cell URL and compare with normalized search URL
+                  return normalizeUrl(cellUrl) === urlNormalized;
+                });
+              }
               
               if (cell) {
                 cell.textContent = count.toLocaleString();
@@ -30907,7 +30928,10 @@ Final Score: ${score}/100`;
                 cellNotFoundCount++;
                 // Debug: log first few failures to understand the mismatch
                 if (cellNotFoundCount <= 3) {
-                  const sampleCells = Array.from(allCells).slice(0, 3).map(c => c.getAttribute('data-page-url'));
+                  const sampleCells = Array.from(allCells).slice(0, 5).map(c => ({
+                    raw: c.getAttribute('data-page-url'),
+                    normalized: normalizeUrl(c.getAttribute('data-page-url') || '')
+                  }));
                   console.warn(`[Money Pages AI Citations] Cell not found for URL: "${url}" (normalized: "${urlNormalized}"). Sample cell URLs:`, sampleCells);
                 }
               }
