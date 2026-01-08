@@ -101,59 +101,26 @@ export default async function handler(req, res) {
     };
 
     const normalizedPageUrl = normalizeUrlForQuery(target_url, property_url);
+    const targetUrlNormalizedForMatch = normalizeUrl(target_url);
 
-    // Query gsc_page_metrics_28d for historical snapshots within the date range
-    // We'll aggregate multiple 28-day periods to get 90-day average
-    // Note: If table doesn't exist yet, return null data gracefully
-    let pageMetrics = [];
-    let metricsError = null;
-    
-    try {
-      const { data, error } = await supabase
-        .from('gsc_page_metrics_28d')
-        .select('clicks, impressions, ctr, avg_position, page_url, date_start, date_end, captured_at')
-        .eq('site_url', property_url)
-        .eq('page_url', normalizedPageUrl)
-        .gte('captured_at', cutoffDate.toISOString().split('T')[0])
-        .order('captured_at', { ascending: false });
-      
-      if (error) {
-        // Check if it's a "relation does not exist" error
-        if (error.message && error.message.includes('does not exist')) {
-          console.warn('[Money Pages Historical] Table gsc_page_metrics_28d does not exist yet. Historical data will be available once the table is created.');
-          // Return null data instead of error - this is expected until table exists
-          return sendJSON(res, 200, {
-            status: 'ok',
-            data: {
-              clicks_90d: null,
-              impressions_90d: null,
-              ctr_90d: null,
-              avg_position_90d: null
-            },
-            message: 'Historical data table not yet available. 90-day trends will appear once historical audit data is stored in Supabase.'
-          });
-        }
-        metricsError = error;
-      } else {
-        pageMetrics = data || [];
-      }
-    } catch (err) {
-      // Handle any other errors (network, etc.)
-      console.error('[Money Pages Historical] Query exception:', err);
-      metricsError = err;
-    }
+    // Query audit_results for historical audits within the date range
+    // Each audit contains money_pages_metrics with rows array - we'll aggregate across audits
+    const { data: audits, error: auditsError } = await supabase
+      .from('audit_results')
+      .select('audit_date, money_pages_metrics, updated_at')
+      .eq('property_url', property_url)
+      .gte('audit_date', cutoffDate.toISOString().split('T')[0])
+      .order('audit_date', { ascending: false });
 
-    if (metricsError) {
-      console.error('[Money Pages Historical] Query error:', metricsError);
+    if (auditsError) {
+      console.error('[Money Pages Historical] Query error:', auditsError);
       return sendJSON(res, 500, { 
         status: 'error',
-        error: metricsError.message || 'Database query failed'
+        error: auditsError.message || 'Database query failed'
       });
     }
 
-    const matchingMetrics = pageMetrics || [];
-
-    if (matchingMetrics.length === 0) {
+    if (!audits || audits.length === 0) {
       return sendJSON(res, 200, {
         status: 'ok',
         data: {
@@ -162,24 +129,72 @@ export default async function handler(req, res) {
           ctr_90d: null,
           avg_position_90d: null
         },
-        message: 'No historical data found for this URL'
+        message: 'No historical audit data found for this property URL'
       });
     }
 
-    // Aggregate metrics (weighted average for position, sum for clicks/impressions)
+    // Aggregate metrics from money_pages_metrics across all audits
     let totalClicks = 0;
     let totalImpressions = 0;
     let positionSum = 0;
     let positionWeight = 0;
+    let auditCount = 0;
 
-    matchingMetrics.forEach(metric => {
-      totalClicks += metric.clicks || 0;
-      totalImpressions += metric.impressions || 0;
-      if (metric.avg_position != null && metric.impressions > 0) {
-        positionSum += metric.avg_position * metric.impressions;
-        positionWeight += metric.impressions;
+    audits.forEach(audit => {
+      let moneyPagesMetrics = audit.money_pages_metrics;
+      
+      // Parse JSON if stored as string
+      if (typeof moneyPagesMetrics === 'string') {
+        try {
+          moneyPagesMetrics = JSON.parse(moneyPagesMetrics);
+        } catch (e) {
+          console.warn('[Money Pages Historical] Failed to parse money_pages_metrics JSON:', e.message);
+          return; // Skip this audit
+        }
+      }
+
+      if (!moneyPagesMetrics || !moneyPagesMetrics.rows || !Array.isArray(moneyPagesMetrics.rows)) {
+        return; // Skip if no rows
+      }
+
+      // Find matching row for this URL
+      const matchingRow = moneyPagesMetrics.rows.find(row => {
+        const rowUrl = row.url || row.page_url || '';
+        const rowUrlNormalized = normalizeUrl(rowUrl);
+        return rowUrlNormalized === targetUrlNormalizedForMatch || 
+               rowUrl === target_url ||
+               rowUrl.includes(targetUrlNormalizedForMatch);
+      });
+
+      if (matchingRow) {
+        const clicks = matchingRow.clicks || matchingRow.clicks_28d || 0;
+        const impressions = matchingRow.impressions || matchingRow.impressions_28d || 0;
+        const position = matchingRow.avg_position || matchingRow.position || matchingRow.avgPosition || null;
+
+        totalClicks += clicks;
+        totalImpressions += impressions;
+        
+        if (position != null && impressions > 0) {
+          positionSum += position * impressions;
+          positionWeight += impressions;
+        }
+        
+        auditCount++;
       }
     });
+
+    if (auditCount === 0) {
+      return sendJSON(res, 200, {
+        status: 'ok',
+        data: {
+          clicks_90d: null,
+          impressions_90d: null,
+          ctr_90d: null,
+          avg_position_90d: null
+        },
+        message: 'No historical data found for this URL in any audits'
+      });
+    }
 
     const avgCtr = totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : null;
     const avgPosition = positionWeight > 0 ? positionSum / positionWeight : null;
@@ -191,7 +206,8 @@ export default async function handler(req, res) {
         impressions_90d: totalImpressions,
         ctr_90d: avgCtr,
         avg_position_90d: avgPosition,
-        periods_count: matchingMetrics.length
+        periods_count: auditCount,
+        audits_aggregated: auditCount
       },
       audit_date: latestAudit.audit_date
     });
