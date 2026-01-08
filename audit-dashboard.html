@@ -3444,7 +3444,7 @@
     <h1>GAIO (Generative AI Optimization) Audit Dashboard</h1>
     <p>Automated GAIO Performance Tracking & Optimisation</p>
     <p style="font-size: 0.9rem; margin-top: 0.5rem; opacity: 1; background: rgba(0,0,0,0.3); padding: 0.25rem 0.5rem; border-radius: 4px; display: inline-block;">
-      <strong>Version: <span id="gitVersion">cca536d</span></strong> | Built: <span id="buildDate"></span> |
+      <strong>Version: <span id="gitVersion">1ac87de</span></strong> | Built: <span id="buildDate"></span> |
       <span id="loadTime" style="color: #4f4;">Loaded: <span id="loadTimeValue"></span></span>
     </p>
     <script>
@@ -6757,12 +6757,14 @@
                   const totalsJson = await totalsRes.json().catch(() => null);
                   const totals = totalsRes.ok && totalsJson && totalsJson.status === 'ok' ? totalsJson.data : null;
                   if (totals) {
+                    const positionFromTotals = totals.position != null ? Number(totals.position) : null;
                     baselineMetrics = {
                       gsc_clicks_28d: Number(totals.clicks || 0),
                       gsc_impressions_28d: Number(totals.impressions || 0),
                       // gsc-page-totals returns CTR as percentage (0-100) — convert to ratio for storage
                       gsc_ctr_28d: Number(totals.ctr || 0) / 100,
-                      gsc_position_28d: totals.position != null ? Number(totals.position) : null,
+                      gsc_position_28d: positionFromTotals,
+                      current_rank: positionFromTotals, // Also set current_rank for display logic
                       classic_ranking_url: pageUrlForGsc,
                       segment: 'money_pages',
                       captured_at: new Date().toISOString()
@@ -6837,12 +6839,13 @@
                   return n;
                 })(),
                 gsc_position_28d: positionValue,
+                current_rank: positionValue, // Also set current_rank for display logic
                 classic_ranking_url: taskUrlAbs || taskUrl || null,
                 segment: src.segment || 'money_pages',
                 captured_at: new Date().toISOString()
               };
               
-              debugLog(`[Optimisation] Baseline metrics created - gsc_position_28d: ${baselineMetrics.gsc_position_28d}`, 'info');
+              debugLog(`[Optimisation] Baseline metrics created - gsc_position_28d: ${baselineMetrics.gsc_position_28d}, current_rank: ${baselineMetrics.current_rank}`, 'info');
               
               // Use AI citations directly from row if available (already computed during table rendering)
               if (typeof src._aiCitations === 'number' && src._aiCitations >= 0) {
