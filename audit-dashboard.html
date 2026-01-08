@@ -30989,9 +30989,18 @@ Final Score: ${score}/100`;
         });
         
         // For URLs not in cache (or showing 0), fetch from API to get accurate counts
+        // Check both local citationCache and global window.moneyPagesCitationCache
         const urlsToFetch = rows
           .map(row => row.url)
-          .filter(url => url && (citationCache[url] === undefined || citationCache[url] === 0));
+          .filter(url => {
+            if (!url) return false;
+            const localCache = citationCache[url];
+            const globalCache = window.moneyPagesCitationCache?.[url];
+            // Only fetch if both caches are missing or 0
+            const hasValidCache = (typeof localCache === 'number' && localCache > 0) || 
+                                  (typeof globalCache === 'number' && globalCache > 0);
+            return !hasValidCache;
+          });
         
         if (urlsToFetch.length > 0) {
           // Build cell map ONCE before processing batches (more efficient)
@@ -31149,6 +31158,20 @@ Final Score: ${score}/100`;
               }
               
               if (cell) {
+                // Check if we have a valid cached value first (trust cache over API)
+                const cachedValue = citationCache[url] || window.moneyPagesCitationCache?.[url];
+                if (typeof cachedValue === 'number' && cachedValue > 0) {
+                  // We have a valid cached value - don't overwrite with API response
+                  console.log(`[Money Pages AI Citations] Preserving cached count ${cachedValue} for ${url} (API returned ${count}, but cache is trusted)`);
+                  // Ensure cell displays cached value
+                  if (parseInt(String(cell.textContent || '').replace(/,/g, ''), 10) !== cachedValue) {
+                    cell.textContent = cachedValue.toLocaleString();
+                    cell.style.color = '#0f172a';
+                    cell.style.fontWeight = '600';
+                  }
+                  return;
+                }
+                
                 // Don't overwrite a valid displayed value with 0
                 const existingDisplay = parseInt(String(cell.textContent || '').replace(/,/g, ''), 10);
                 if (!Number.isNaN(existingDisplay) && existingDisplay > 0 && count === 0) {
@@ -31162,10 +31185,8 @@ Final Score: ${score}/100`;
                 const row = rows.find(r => {
                   const rowUrl = r.url || '';
                   const rowUrlNormalized = normalizeUrl(rowUrl);
-                  return rowUrl === url || 
-                         rowUrlNormalized === urlNormalized ||
-                         rowUrlNormalized.includes(urlNormalized) ||
-                         urlNormalized.includes(rowUrlNormalized);
+                  // Strict matching: exact match or normalized match only (no substring)
+                  return rowUrl === url || rowUrlNormalized === urlNormalized;
                 });
                 if (row) {
                   row._aiCitations = count;
