@@ -2,6 +2,17 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-01-XX] - v1.7.7 - Fix AI Citations Cell Update Protection
+
+### Fixed
+- **AI Citations Cell Update**: Added protection to prevent cell display update when valid cached value exists
+  - Cache is now checked before updating cell from API response
+  - Prevents flickering from correct value (2) to incorrect API response (5)
+  - Cell display now respects cached values over API responses
+- **Row Matching**: Fixed to use strict matching (no substring) when finding rows for API updates
+- **API Call Filter**: Enhanced to check both local and global cache before making API calls
+  - Prevents unnecessary API calls when valid cache exists
+
 ## [2026-01-XX] - v1.7.6 - Fix AI Citations URL Matching and Flickering
 
 ### Fixed

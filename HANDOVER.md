@@ -1,7 +1,7 @@
 # AI GEO Audit - Comprehensive Handover Document
 
 **Last Updated**: 2026-01-XX  
-**Current Commit**: `577c64e` (fixes applied on baseline `8951fcf`)  
+**Current Commit**: `e40c912` (fixes applied on baseline `8951fcf`)  
 **Purpose**: Single source of truth for all projects, phases, tasks, fixes, and key information for any new chat thread.
 
 ---
@@ -90,16 +90,22 @@ This document consolidates ALL critical information about the AI GEO Audit proje
   - ✅ No syntax errors
   - ✅ Clean, synchronized codebase
 
-### Recent Fixes (v1.7.6 - Commit 577c64e)
+### Recent Fixes (v1.7.7 - Commit e40c912)
+1. **AI Citations Cell Update Protection**: Added protection to prevent cell display update when valid cached value exists
+   - Cache is now checked before updating cell from API response
+   - Prevents flickering from correct value (2) to incorrect API response (5)
+   - Cell display now respects cached values over API responses
+2. **Row Matching**: Fixed to use strict matching (no substring) when finding rows for API updates
+3. **API Call Filter**: Enhanced to check both local and global cache before making API calls
+
+### Previous Fixes (v1.7.6 - Commit 577c64e)
 1. **AI Citations URL Matching**: Fixed strict path segment matching
    - Replaced substring matching (`.includes()`) with strict path segment matching
    - Prevents `landscape-photography-workshops` from incorrectly matching `photography-workshops`
    - Matches API endpoint logic for consistency
-2. **AI Citations Flickering**: Prevented API responses from overwriting valid cached values
+2. **AI Citations Cache Protection**: Prevented API responses from overwriting valid cached values in cache object
    - Cache from localStorage (latest audit data) is now trusted over API responses
    - API is only used as fallback when cache is missing/0
-   - Fixes issue where correct value (2) was overwritten by incorrect API response (5)
-   - Fixes sorting issue where URL appeared out of order due to incorrect count
 
 ### Current Issues
 1. **AI Citations Column**: Sorting functionality still present, needs to be disabled
