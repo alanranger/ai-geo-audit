@@ -29915,6 +29915,54 @@ Final Score: ${score}/100`;
         // Sort data if needed (sort ALL rows, not just current page)
         let sortedRows = [...moneyRows];
         if (window.moneyPagesSortColumn) {
+          // For AI citations, ensure we have the latest data from cells or cache
+          if (window.moneyPagesSortColumn === 'aiCitations') {
+            // Try to read from existing table cells first (most accurate)
+            const tableContainer = document.getElementById('money-pages-table-container');
+            if (tableContainer) {
+              const cells = tableContainer.querySelectorAll('.ai-citation-cell-opportunity');
+              cells.forEach(cell => {
+                const cellUrl = cell.getAttribute('data-page-url');
+                if (cellUrl) {
+                  const cellText = cell.textContent.trim();
+                  // Parse count from cell text (handles "⏳", "0", "1,234", etc.)
+                  let count = 0;
+                  if (cellText !== '⏳' && cellText !== '' && cellText !== '—') {
+                    const parsed = parseInt(cellText.replace(/,/g, ''), 10);
+                    if (!isNaN(parsed)) {
+                      count = parsed;
+                    }
+                  }
+                  // Find matching row and update _aiCitations
+                  const matchingRow = sortedRows.find(r => {
+                    const rowUrl = r.url || '';
+                    const rowUrlNormalized = normalizeUrl(rowUrl);
+                    const cellUrlNormalized = normalizeUrl(cellUrl);
+                    return rowUrl === cellUrl || 
+                           rowUrlNormalized === cellUrlNormalized ||
+                           rowUrlNormalized.includes(cellUrlNormalized) ||
+                           cellUrlNormalized.includes(rowUrlNormalized);
+                  });
+                  if (matchingRow) {
+                    matchingRow._aiCitations = count;
+                  }
+                }
+              });
+            }
+            
+            // Also ensure all rows have _aiCitations set from cache if not already set
+            sortedRows.forEach(row => {
+              if (typeof row._aiCitations !== 'number') {
+                const cached = window.moneyPagesCitationCache && window.moneyPagesCitationCache[row.url];
+                if (typeof cached === 'number') {
+                  row._aiCitations = cached;
+                } else {
+                  row._aiCitations = 0; // Default to 0, not -1, so they sort correctly
+                }
+              }
+            });
+          }
+          
           sortedRows.sort((a, b) => {
             let aVal, bVal;
             switch(window.moneyPagesSortColumn) {
@@ -29952,12 +30000,9 @@ Final Score: ${score}/100`;
                 bVal = b.avgPosition || 99;
                 break;
               case 'aiCitations':
-                // Use _aiCitations if available, otherwise try to get from global citationCache
-                // Fallback to -1 if not found (so rows without citations sort to bottom)
-                aVal = typeof a._aiCitations === 'number' ? a._aiCitations : 
-                       (window.moneyPagesCitationCache && typeof window.moneyPagesCitationCache[a.url] === 'number' ? window.moneyPagesCitationCache[a.url] : -1);
-                bVal = typeof b._aiCitations === 'number' ? b._aiCitations : 
-                       (window.moneyPagesCitationCache && typeof window.moneyPagesCitationCache[b.url] === 'number' ? window.moneyPagesCitationCache[b.url] : -1);
+                // Use _aiCitations which should now be set from cells or cache
+                aVal = typeof a._aiCitations === 'number' ? a._aiCitations : 0;
+                bVal = typeof b._aiCitations === 'number' ? b._aiCitations : 0;
                 break;
               case 'opportunity':
                 // Sort by category priority: HIGH_OPPORTUNITY=0, VISIBILITY_FIX=1, MAINTAIN=2
