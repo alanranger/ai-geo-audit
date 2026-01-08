@@ -30150,8 +30150,8 @@ Final Score: ${score}/100`;
                   <th id="money-sort-position" style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; transition: background 0.2s; line-height: 1.2;" onmouseover="this.style.background='#e2e8f0';" onmouseout="this.style.background='transparent';" title="Click to sort by Avg Position" onclick="window.moneyPagesSetSort('position')">
                     <div>Avg</div><div>Position</div>${getSortIcon('position')}
                   </th>
-                  <th id="money-sort-ai-citations" style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; white-space: normal; line-height: 1.15; cursor: pointer; user-select: none;" title="AI citations (unique keywords that cite this URL in AI Overview). Latest audit only; fetched on demand." onclick="window.moneyPagesSetSort('aiCitations')">
-                    <div>AI citations</div>${getSortIcon('aiCitations')}
+                  <th id="money-sort-ai-citations" style="text-align: right; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; white-space: normal; line-height: 1.15; cursor: default; user-select: none; opacity: 0.6;" title="AI citations (sorting temporarily disabled for debugging)">
+                    <div>AI citations</div>
                   </th>
                   <th id="money-sort-opportunity" style="text-align: center; padding: 0.75rem; font-weight: 700; color: #1e293b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; transition: background 0.2s; white-space: nowrap;" onmouseover="this.style.background='#e2e8f0';" onmouseout="this.style.background='transparent';" title="Click to sort by Opportunity">
                     Opportunity${getSortIcon('opportunity')}
@@ -31811,7 +31811,12 @@ Final Score: ${score}/100`;
         document.addEventListener('click', (e) => {
           const th = e?.target?.closest ? e.target.closest('th[id^="money-sort-"]') : null;
           if (!th || !th.id) return;
-          const col = String(th.id).replace('money-sort-', '');
+          const col = String(th.id).replace('money-sort-', '').replace('-', '');
+          // TEMPORARILY DISABLED: Disable sorting to debug citation count flickering issue
+          if (col === 'aiCitations' || col === 'aicitations') {
+            console.log('[Money Pages] AI Citations sorting disabled temporarily for debugging');
+            return;
+          }
           if (!['type', 'clicks', 'impressions', 'ctr', 'clickPotential', 'position', 'opportunity', 'aiCitations'].includes(col)) return;
           try {
             handleMoneyPagesSort(col);
@@ -31823,6 +31828,10 @@ Final Score: ${score}/100`;
       
       // Handle sorting for Money Pages table
       async function handleMoneyPagesSort(column) {
+        // TEMPORARILY DISABLED: Disable sorting to debug citation count flickering issue
+        console.log('[Money Pages] Sorting disabled temporarily for debugging');
+        return;
+        
         if (window.moneyPagesSortColumn === column) {
           window.moneyPagesSortDirection = window.moneyPagesSortDirection === 'asc' ? 'desc' : 'asc';
         } else {
