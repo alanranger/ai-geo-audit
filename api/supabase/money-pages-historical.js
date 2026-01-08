@@ -103,87 +103,127 @@ export default async function handler(req, res) {
     const normalizedPageUrl = normalizeUrlForQuery(target_url, property_url);
     const targetUrlNormalizedForMatch = normalizeUrl(target_url);
 
-    // Query audit_results for historical audits within the date range
-    // Each audit contains money_pages_metrics with rows array - we'll aggregate across audits
-    const { data: audits, error: auditsError } = await supabase
+    // Get latest audit with timeseries data (contains daily GSC data for last 90 days)
+    const { data: latestAuditWithData, error: auditError } = await supabase
       .from('audit_results')
-      .select('audit_date, money_pages_metrics, updated_at')
+      .select('audit_date, gsc_timeseries, money_pages_metrics')
       .eq('property_url', property_url)
-      .gte('audit_date', cutoffDate.toISOString().split('T')[0])
-      .order('audit_date', { ascending: false });
+      .order('audit_date', { ascending: false })
+      .limit(1)
+      .single();
 
-    if (auditsError) {
-      console.error('[Money Pages Historical] Query error:', auditsError);
-      return sendJSON(res, 500, { 
+    if (auditError || !latestAuditWithData) {
+      return sendJSON(res, 404, { 
         status: 'error',
-        error: auditsError.message || 'Database query failed'
+        error: 'No audit found for property URL' 
       });
     }
 
-    if (!audits || audits.length === 0) {
-      return sendJSON(res, 200, {
-        status: 'ok',
-        data: {
-          clicks_90d: null,
-          impressions_90d: null,
-          ctr_90d: null,
-          avg_position_90d: null
-        },
-        message: 'No historical audit data found for this property URL'
-      });
+    // Try to use timeseries data first (most accurate - daily data)
+    let timeseries = latestAuditWithData.gsc_timeseries;
+    if (typeof timeseries === 'string') {
+      try {
+        timeseries = JSON.parse(timeseries);
+      } catch (e) {
+        timeseries = null;
+      }
     }
 
-    // Aggregate metrics from money_pages_metrics across all audits
     let totalClicks = 0;
     let totalImpressions = 0;
     let positionSum = 0;
     let positionWeight = 0;
-    let auditCount = 0;
+    let dataPoints = 0;
 
-    audits.forEach(audit => {
-      let moneyPagesMetrics = audit.money_pages_metrics;
+    if (Array.isArray(timeseries) && timeseries.length > 0) {
+      // Use timeseries data - filter for last 90 days and find matching page
+      const cutoffTimestamp = cutoffDate.getTime();
       
-      // Parse JSON if stored as string
-      if (typeof moneyPagesMetrics === 'string') {
-        try {
-          moneyPagesMetrics = JSON.parse(moneyPagesMetrics);
-        } catch (e) {
-          console.warn('[Money Pages Historical] Failed to parse money_pages_metrics JSON:', e.message);
-          return; // Skip this audit
+      timeseries.forEach(day => {
+        if (!day || !day.date) return;
+        
+        const dayDate = new Date(day.date);
+        if (dayDate.getTime() < cutoffTimestamp) return; // Skip if before cutoff
+        
+        // Check if this day's data includes our target page
+        if (day.pages && Array.isArray(day.pages)) {
+          const matchingPage = day.pages.find(page => {
+            const pageUrl = page.url || page.page || '';
+            const pageUrlNormalized = normalizeUrl(pageUrl);
+            return pageUrlNormalized === targetUrlNormalizedForMatch || 
+                   pageUrl === target_url ||
+                   pageUrl.includes(targetUrlNormalizedForMatch);
+          });
+          
+          if (matchingPage) {
+            const clicks = matchingPage.clicks || 0;
+            const impressions = matchingPage.impressions || 0;
+            const position = matchingPage.position || matchingPage.avg_position || null;
+            
+            totalClicks += clicks;
+            totalImpressions += impressions;
+            
+            if (position != null && impressions > 0) {
+              positionSum += position * impressions;
+              positionWeight += impressions;
+            }
+            
+            dataPoints++;
+          }
         }
-      }
-
-      if (!moneyPagesMetrics || !moneyPagesMetrics.rows || !Array.isArray(moneyPagesMetrics.rows)) {
-        return; // Skip if no rows
-      }
-
-      // Find matching row for this URL
-      const matchingRow = moneyPagesMetrics.rows.find(row => {
-        const rowUrl = row.url || row.page_url || '';
-        const rowUrlNormalized = normalizeUrl(rowUrl);
-        return rowUrlNormalized === targetUrlNormalizedForMatch || 
-               rowUrl === target_url ||
-               rowUrl.includes(targetUrlNormalizedForMatch);
       });
+    }
 
-      if (matchingRow) {
-        const clicks = matchingRow.clicks || matchingRow.clicks_28d || 0;
-        const impressions = matchingRow.impressions || matchingRow.impressions_28d || 0;
-        const position = matchingRow.avg_position || matchingRow.position || matchingRow.avgPosition || null;
+    // Fallback: If no timeseries data or no matches, use money_pages_metrics from oldest audit in range
+    if (dataPoints === 0) {
+      const { data: audits, error: auditsError } = await supabase
+        .from('audit_results')
+        .select('audit_date, money_pages_metrics')
+        .eq('property_url', property_url)
+        .gte('audit_date', cutoffDate.toISOString().split('T')[0])
+        .order('audit_date', { ascending: true }) // Get oldest first
+        .limit(1);
 
-        totalClicks += clicks;
-        totalImpressions += impressions;
+      if (!auditsError && audits && audits.length > 0) {
+        const oldestAudit = audits[0];
+        let moneyPagesMetrics = oldestAudit.money_pages_metrics;
         
-        if (position != null && impressions > 0) {
-          positionSum += position * impressions;
-          positionWeight += impressions;
+        if (typeof moneyPagesMetrics === 'string') {
+          try {
+            moneyPagesMetrics = JSON.parse(moneyPagesMetrics);
+          } catch (e) {
+            moneyPagesMetrics = null;
+          }
         }
-        
-        auditCount++;
-      }
-    });
 
-    if (auditCount === 0) {
+        if (moneyPagesMetrics && moneyPagesMetrics.rows && Array.isArray(moneyPagesMetrics.rows)) {
+          const matchingRow = moneyPagesMetrics.rows.find(row => {
+            const rowUrl = row.url || row.page_url || '';
+            const rowUrlNormalized = normalizeUrl(rowUrl);
+            return rowUrlNormalized === targetUrlNormalizedForMatch || 
+                   rowUrl === target_url ||
+                   rowUrl.includes(targetUrlNormalizedForMatch);
+          });
+
+          if (matchingRow) {
+            // Use the oldest audit's data as a proxy for 90-day average
+            // This is less accurate but better than summing overlapping periods
+            totalClicks = matchingRow.clicks || matchingRow.clicks_28d || 0;
+            totalImpressions = matchingRow.impressions || matchingRow.impressions_28d || 0;
+            const position = matchingRow.avg_position || matchingRow.position || matchingRow.avgPosition || null;
+            
+            if (position != null && totalImpressions > 0) {
+              positionSum = position * totalImpressions;
+              positionWeight = totalImpressions;
+            }
+            
+            dataPoints = 1;
+          }
+        }
+      }
+    }
+
+    if (dataPoints === 0) {
       return sendJSON(res, 200, {
         status: 'ok',
         data: {
@@ -192,7 +232,7 @@ export default async function handler(req, res) {
           ctr_90d: null,
           avg_position_90d: null
         },
-        message: 'No historical data found for this URL in any audits'
+        message: 'No historical data found for this URL'
       });
     }
 
@@ -206,10 +246,10 @@ export default async function handler(req, res) {
         impressions_90d: totalImpressions,
         ctr_90d: avgCtr,
         avg_position_90d: avgPosition,
-        periods_count: auditCount,
-        audits_aggregated: auditCount
+        data_points: dataPoints,
+        data_source: dataPoints > 1 ? 'timeseries' : 'single_audit'
       },
-      audit_date: latestAudit.audit_date
+      audit_date: latestAuditWithData.audit_date
     });
 
   } catch (err) {
