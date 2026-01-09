@@ -54529,9 +54529,19 @@ Final Score: ${score}/100`;
 
       function renderDashboardAiSummaryRadar(aiSummaryComponents) {
         const canvas = document.getElementById('dashboard-ai-summary-radar');
-        if (!canvas || typeof Chart === 'undefined') return;
+        if (!canvas) {
+          console.warn('[Dashboard] AI Summary radar canvas not found');
+          return;
+        }
+        if (typeof Chart === 'undefined') {
+          console.warn('[Dashboard] Chart.js not loaded');
+          return;
+        }
         const ctx = canvas.getContext('2d');
-        if (!ctx) return;
+        if (!ctx) {
+          console.warn('[Dashboard] Could not get 2d context for AI Summary radar');
+          return;
+        }
 
         const c = aiSummaryComponents || {};
         const labels = ['Snippet Readiness', 'Visibility', 'Brand'];
@@ -54601,16 +54611,26 @@ Final Score: ${score}/100`;
               }
             }
           });
-        } catch {
-          // ignore
+        } catch (err) {
+          console.error('[Dashboard] Error rendering AI Summary radar:', err);
         }
       }
 
       function renderDashboardUpliftChart(moneyPagesRows, targetCtr) {
         const canvas = document.getElementById('dashboard-uplift-chart');
-        if (!canvas || typeof Chart === 'undefined') return;
+        if (!canvas) {
+          console.warn('[Dashboard] Uplift chart canvas not found');
+          return;
+        }
+        if (typeof Chart === 'undefined') {
+          console.warn('[Dashboard] Chart.js not loaded');
+          return;
+        }
         const ctx = canvas.getContext('2d');
-        if (!ctx) return;
+        if (!ctx) {
+          console.warn('[Dashboard] Could not get 2d context for Uplift chart');
+          return;
+        }
 
         if (!Array.isArray(moneyPagesRows) || moneyPagesRows.length === 0) {
           // Clear chart if no data
@@ -54753,16 +54773,26 @@ Final Score: ${score}/100`;
               }
             }
           });
-        } catch {
-          // ignore
+        } catch (err) {
+          console.error('[Dashboard] Error rendering Uplift chart:', err);
         }
       }
 
       function renderDashboardMoneyShareRadar(moneyShareSplit) {
         const canvas = document.getElementById('dashboard-money-share-radar');
-        if (!canvas || typeof Chart === 'undefined') return;
+        if (!canvas) {
+          console.warn('[Dashboard] Money Share radar canvas not found');
+          return;
+        }
+        if (typeof Chart === 'undefined') {
+          console.warn('[Dashboard] Chart.js not loaded');
+          return;
+        }
         const ctx = canvas.getContext('2d');
-        if (!ctx) return;
+        if (!ctx) {
+          console.warn('[Dashboard] Could not get 2d context for Money Share radar');
+          return;
+        }
 
         const s = moneyShareSplit || null;
         const labels = ['Landing', 'Event', 'Service'];
@@ -54831,8 +54861,8 @@ Final Score: ${score}/100`;
               }
             }
           });
-        } catch {
-          // ignore
+        } catch (err) {
+          console.error('[Dashboard] Error rendering Money Share radar:', err);
         }
       }
 
@@ -55133,7 +55163,13 @@ Final Score: ${score}/100`;
               <div class="dashboard-mini-note">Higher = more likely AI systems summarise your brand pages confidently.</div>
             `;
           }
-          renderDashboardAiSummaryRadar(metrics?.aiSummaryComponents || null);
+          // Render chart - ensure Chart.js is loaded first
+          if (typeof Chart !== 'undefined') {
+            renderDashboardAiSummaryRadar(metrics?.aiSummaryComponents || null);
+          } else {
+            console.warn('[Dashboard] Chart.js not loaded, deferring AI Summary radar');
+            setTimeout(() => renderDashboardAiSummaryRadar(metrics?.aiSummaryComponents || null), 500);
+          }
         }
 
         // Dial: Money share
@@ -55166,7 +55202,13 @@ Final Score: ${score}/100`;
               <div class="dashboard-mini-note">Goal: move citations toward Money Pages (commercial intent).</div>
             `;
           }
-          renderDashboardMoneyShareRadar(metrics?.moneyShareSplit || null);
+          // Render chart - ensure Chart.js is loaded first
+          if (typeof Chart !== 'undefined') {
+            renderDashboardMoneyShareRadar(metrics?.moneyShareSplit || null);
+          } else {
+            console.warn('[Dashboard] Chart.js not loaded, deferring Money Share radar');
+            setTimeout(() => renderDashboardMoneyShareRadar(metrics?.moneyShareSplit || null), 500);
+          }
         }
 
         // Dial: Uplift remaining (Money Pages CTR target)
@@ -55201,7 +55243,13 @@ Final Score: ${score}/100`;
               <div class="dashboard-mini-note">Based on CTR gap: current ${typeof currCtr === 'number' ? formatPct(currCtr, 1) : '—'} vs target ${targetCtr}%.</div>
             `;
           }
-          renderDashboardUpliftChart(metrics?.moneyPagesRows || null, targetCtr);
+          // Render chart - ensure Chart.js is loaded first
+          if (typeof Chart !== 'undefined') {
+            renderDashboardUpliftChart(metrics?.moneyPagesRows || null, targetCtr);
+          } else {
+            console.warn('[Dashboard] Chart.js not loaded, deferring Uplift chart');
+            setTimeout(() => renderDashboardUpliftChart(metrics?.moneyPagesRows || null, targetCtr), 500);
+          }
         }
 
         // Dial: EEAT (placeholder)
