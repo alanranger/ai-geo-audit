@@ -53578,8 +53578,14 @@ Final Score: ${score}/100`;
         if (c == null || p == null) return 'flat';
         if (c === p) return 'flat';
         // If lower is better (e.g., avg position), then a decrease is "up" (good).
-        if (betterLower) return (c < p) ? 'up' : 'down';
-        return (c > p) ? 'up' : 'down';
+        // Example: position 12.4 < 14.3 means improvement, so return 'up' (green)
+        if (betterLower) {
+          const dir = (c < p) ? 'up' : 'down';
+          debugLog(`[Dashboard] deltaDir betterLower: current=${c}, previous=${p}, dir=${dir}`, 'info');
+          return dir;
+        }
+        const dir = (c > p) ? 'up' : 'down';
+        return dir;
       }
 
       function formatDeltaNumber(curr, prev, { decimals = 0, betterLower = false, pp = false } = {}) {
@@ -55522,7 +55528,13 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           dirs: {
             clicks: deltaDir(metrics?.auditKpis?.clicks, prevMetrics?.auditKpis?.clicks, { betterLower: false }),
             impressions: deltaDir(metrics?.auditKpis?.impressions, prevMetrics?.auditKpis?.impressions, { betterLower: false }),
-            avgPosition: deltaDir(metrics?.auditKpis?.avgPosition, prevMetrics?.auditKpis?.avgPosition, { betterLower: true }),
+            avgPosition: (() => {
+              const curr = metrics?.auditKpis?.avgPosition;
+              const prev = prevMetrics?.auditKpis?.avgPosition;
+              const dir = deltaDir(curr, prev, { betterLower: true });
+              debugLog(`[Dashboard] Avg Position delta dir: current=${curr}, previous=${prev}, dir=${dir}`, 'info');
+              return dir;
+            })(),
             ctr: deltaDir(metrics?.auditKpis?.ctrPct, prevMetrics?.auditKpis?.ctrPct, { betterLower: false })
           }
         } : null;
