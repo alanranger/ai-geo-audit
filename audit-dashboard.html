@@ -13308,6 +13308,38 @@
       };
 
       // Build metrics table
+      // Get objective KPI and map to metric key
+      let objectiveKpiKey = task.objectiveKpiKey || 
+                            (task.objective && task.objective.kpi) || 
+                            task.objective_metric || 
+                            task.objective_kpi || 
+                            null;
+      
+      // Map common objective KPI values to metric keys
+      const objectiveKpiMap = {
+        'Rank': 'current_rank',
+        'rank': 'current_rank',
+        'current_rank': 'current_rank',
+        'CTR': 'gsc_ctr_28d',
+        'ctr': 'gsc_ctr_28d',
+        'ctr_28d': 'gsc_ctr_28d',
+        'gsc_ctr_28d': 'gsc_ctr_28d',
+        'Clicks': 'gsc_clicks_28d',
+        'clicks': 'gsc_clicks_28d',
+        'clicks_28d': 'gsc_clicks_28d',
+        'gsc_clicks_28d': 'gsc_clicks_28d',
+        'Impressions': 'gsc_impressions_28d',
+        'impressions': 'gsc_impressions_28d',
+        'impressions_28d': 'gsc_impressions_28d',
+        'gsc_impressions_28d': 'gsc_impressions_28d',
+        'AI Citations': 'ai_citations',
+        'ai_citations': 'ai_citations',
+        'AI Overview': 'ai_overview',
+        'ai_overview': 'ai_overview'
+      };
+      
+      const targetMetricKey = objectiveKpiKey ? (objectiveKpiMap[objectiveKpiKey] || objectiveKpiKey) : null;
+
       const metrics = [
         { label: 'Clicks (28d)', baselineKey: 'gsc_clicks_28d', latestKey: 'gsc_clicks_28d', higherIsBetter: true },
         { label: 'Impressions (28d)', baselineKey: 'gsc_impressions_28d', latestKey: 'gsc_impressions_28d', higherIsBetter: true },
@@ -13334,10 +13366,24 @@
           return formatNum(val);
         };
 
+        // Check if this metric matches the objective KPI
+        const isTargetMetric = targetMetricKey && (
+          metric.baselineKey === targetMetricKey || 
+          metric.latestKey === targetMetricKey
+        );
+        
+        // Highlighting styles for target metric row
+        const highlightStyle = isTargetMetric 
+          ? 'background: #fef3c7; border-left: 4px solid #f59e0b; padding-left: calc(0.5rem - 4px);' 
+          : '';
+        const highlightBorder = isTargetMetric 
+          ? 'border-bottom: 2px solid #f59e0b;' 
+          : 'border-bottom: 1px solid #e5e7eb;';
+
         html += `
-          <div style="padding: 0.5rem; border-bottom: 1px solid #e5e7eb; font-weight: 600; font-size: 0.9rem; color: #1e293b;">${metric.label}</div>
-          <div style="padding: 0.5rem; border-bottom: 1px solid #e5e7eb; font-weight: 700; font-size: 1rem; color: #1e293b;">${formatValue(baselineVal)}</div>
-          <div style="padding: 0.5rem; border-bottom: 1px solid #e5e7eb; font-weight: 700; font-size: 1rem; color: #1e293b;">
+          <div style="padding: 0.5rem; ${highlightBorder} ${highlightStyle} font-weight: 600; font-size: 0.9rem; color: #1e293b;">${metric.label}${isTargetMetric ? ' <span style="color: #f59e0b; font-size: 0.75rem;">(Target)</span>' : ''}</div>
+          <div style="padding: 0.5rem; ${highlightBorder} ${highlightStyle} font-weight: 700; font-size: 1rem; color: #1e293b;">${formatValue(baselineVal)}</div>
+          <div style="padding: 0.5rem; ${highlightBorder} ${highlightStyle} font-weight: 700; font-size: 1rem; color: #1e293b;">
             ${formatValue(latestVal)}
             ${delta != null ? `<span style="margin-left: 0.5rem; color: ${deltaFormatted.color} !important; font-weight: 700;">(${deltaFormatted.text})</span>` : ''}
           </div>
