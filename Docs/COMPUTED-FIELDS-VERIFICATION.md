@@ -8,6 +8,8 @@ This document verifies that all update buttons and routines that **create or upd
 - `eeat_subscores` (JSONB)
 - `domain_strength` (JSONB)
 
+**📋 For a complete audit of ALL buttons in the application (module-by-module), see `Docs/COMPLETE-BUTTON-AUDIT.md`.**
+
 **Note**: Optimisation Tracking buttons (Update All Tasks, Update per row, Add Measurement, Rebaseline) are documented here for completeness but don't need to store computed fields because they only update `optimisation_measurements` table, not `audit_results`.
 
 ---
