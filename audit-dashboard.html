@@ -45990,6 +45990,30 @@ Final Score: ${score}/100`;
         }
         debugLog(`✓ Ranking & AI data loaded: ${totalKeywords} keywords, ${withRank} with ranks, ${withAiOverview} with AI Overview`, 'success');
         
+        // Prompt to update all optimisation tasks with the new data
+        // Only prompt if admin key is set and we're not in share mode
+        if (typeof window.hasAdminKey === 'function' && window.hasAdminKey() && !window.isShareMode) {
+          // Small delay to let the modal render first
+          setTimeout(async () => {
+            const shouldUpdate = confirm(
+              'Ranking & AI scan completed successfully!\n\n' +
+              'Would you like to update all optimisation tasks with the latest data?\n\n' +
+              'This will create a new measurement for each active task using the ranking and AI data you just collected.'
+            );
+            
+            if (shouldUpdate && typeof window.bulkUpdateAllTasks === 'function') {
+              try {
+                debugLog('[Ranking & AI] User requested task update after scan completion', 'info');
+                await window.bulkUpdateAllTasks(true); // Skip confirmation since user already confirmed
+                debugLog('[Ranking & AI] Task update completed successfully', 'success');
+              } catch (updateErr) {
+                debugLog(`[Ranking & AI] Task update failed: ${updateErr.message}`, 'error');
+                alert(`Failed to update tasks: ${updateErr.message}`);
+              }
+            }
+          }, 1000); // 1 second delay to let modal render
+        }
+        
         // Don't hide modal - keep it visible with summary
       } catch (err) {
         console.error("Ranking & AI load error", err);
