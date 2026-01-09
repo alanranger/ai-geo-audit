@@ -10605,7 +10605,7 @@
       }
 
       // Fetch baseline and latest metrics for selected cycle
-      await renderOptimisationMetricsSnapshotForCycle(taskId, cycleId, cycleNo);
+      await renderOptimisationMetricsSnapshotForCycle(taskId, cycleId, cycleNo, task);
 
       // Load measurement history (for selected cycle)
       await loadOptimisationMeasurementHistory(taskId, cycleId, cycleNo);
@@ -10615,7 +10615,7 @@
     }
 
     // Phase 6: Render metrics snapshot for a specific cycle
-    async function renderOptimisationMetricsSnapshotForCycle(taskId, cycleId, cycleNo) {
+    async function renderOptimisationMetricsSnapshotForCycle(taskId, cycleId, cycleNo, task = null) {
       // Fetch events for this cycle to get baseline and latest
       const headers = window.getOptimisationHeaders();
       const response = await fetch(apiUrl(`/api/optimisation/task/${taskId}/events?cycle_id=${cycleId || ''}&cycle_number=${cycleNo || ''}&event_type=measurement`), {
@@ -10661,8 +10661,16 @@
         }
       }
 
-      // Render with cycle-specific metrics
+      // If task not provided, try to get it from state
+      if (!task) {
+        if (window.optimisationModuleState && window.optimisationModuleState.allTasks) {
+          task = window.optimisationModuleState.allTasks.find(t => t.id === taskId);
+        }
+      }
+      
+      // Render with cycle-specific metrics, including task objective fields
       const cycleTask = {
+        ...(task || {}),
         baseline_metrics: baselineMetrics,
         latest_metrics: latestMetrics
       };
