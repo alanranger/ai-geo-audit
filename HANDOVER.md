@@ -1,7 +1,7 @@
 # AI GEO Audit - Comprehensive Handover Document
 
 **Last Updated**: 2026-01-08  
-**Current Commit**: `88473b0` (Phase 3 fixes + UI enhancements + global run auto-update fix)  
+**Current Commit**: `2cb0a2a` (Phase 3 fixes + UI enhancements + dashboard visualizations + chart fixes)  
 **Purpose**: Single source of truth for all projects, phases, tasks, fixes, and key information for any new chat thread.
 
 ---
@@ -278,8 +278,12 @@ This document consolidates ALL critical information about the AI GEO Audit proje
 6. ✅ **Money Pages AI Citations**: Fixed Suggested Top 10 cards to show actual citation counts (not timer placeholder)
 7. ✅ **Monitoring Pill Color**: Changed Money Pages Opportunity Table monitoring status to blue (was green)
 8. ✅ **Objective KPI Display**: Fixed tasks table to show correct Objective KPI label (e.g., "Rank" instead of "-")
-9. ✅ **Performance Snapshot Highlighting**: Added visual highlight to target metric row in Performance Snapshot table
+9. ✅ **Performance Snapshot Highlighting**: Added visual highlight to target metric row in Performance Snapshot table (orange border only, no background)
 10. ✅ **Global Run Auto-Update**: Fixed "Run All Audits & Updates" to automatically create measurements without confirmation dialog
+11. ✅ **Dashboard Visualizations**: Added radar chart to AI Summary Likelihood tile and bar chart to Uplift Remaining tile
+12. ✅ **Uplift Chart Labels**: Removed domain from chart labels (shows only URL paths)
+13. ✅ **Money Share Terminology**: Changed "Product" to "Service" in Money Share radar chart label
+14. ✅ **Median Delta Chart**: Fixed width to fill container and updated to 28 days (was 30 days)
 
 **Files Modified**:
 - `audit-dashboard.html`: `updateTaskLatest()` function (~line 16748)
@@ -290,10 +294,15 @@ This document consolidates ALL critical information about the AI GEO Audit proje
 - `audit-dashboard.html`: Money Pages Suggested Top 10 cards (~line 35599) - AI citations
 - `audit-dashboard.html`: `renderMoneyPagesTable()` - monitoring pill color
 - `audit-dashboard.html`: `renderOptimisationTasksTable()` (~line 9406) - Objective KPI display
-- `audit-dashboard.html`: `renderOptimisationMetricsSnapshot()` (~line 12849) - target metric highlighting
+- `audit-dashboard.html`: `renderOptimisationMetricsSnapshot()` (~line 12849) - target metric highlighting (border only)
 - `audit-dashboard.html`: `renderOptimisationMetricsSnapshotForCycle()` (~line 10618) - pass task object
 - `audit-dashboard.html`: `bulkUpdateAllTasks()` (~line 15834) - skip confirmation in global run
 - `audit-dashboard.html`: `runDashboardGlobalRun()` (~line 55073) - pass skipConfirmation parameter
+- `audit-dashboard.html`: `renderDashboardAiSummaryRadar()` (~line 54279) - AI Summary Likelihood radar chart
+- `audit-dashboard.html`: `renderDashboardUpliftChart()` (~line 54330) - Uplift Remaining bar chart
+- `audit-dashboard.html`: `renderDashboardMoneyShareRadar()` (~line 54479) - changed "Product" to "Service"
+- `audit-dashboard.html`: `computeDashboardSnapshot()` (~line 53705) - fixed pillars initialization, added AI Summary components
+- `audit-dashboard.html`: Median Delta chart rendering (~line 12432) - fixed width and 28-day filter
 - `api/domain-strength/overview.js`: Delta calculation logic (~line 205)
 - `Docs/PHASE3-AUDIT-FINDINGS.md`: Complete audit documentation
 
@@ -824,9 +833,9 @@ mcp_supabase_execute_sql({ ... })
 **Deployment**: Vercel (https://ai-geo-audit.vercel.app/)  
 **Database**: Supabase (`supabase-main`, project_ref=igzvwbvgvmzvvzoclufx)
 
-**Current Commit**: `88473b0`  
+**Current Commit**: `2cb0a2a`  
 **Baseline Commit**: `8951fcf`  
-**Status**: Phase 3 fixes complete. Additional UI enhancements and bug fixes applied. Global run now automatically updates all tasks. Ready for Phase 4 (align all audit processes).
+**Status**: Phase 3 fixes complete. Dashboard visualizations added. UI enhancements and bug fixes applied. Global run now automatically updates all tasks. Ready for Phase 4 (align all audit processes).
 
 ---
 
