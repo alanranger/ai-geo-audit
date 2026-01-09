@@ -279,6 +279,7 @@ This document consolidates ALL critical information about the AI GEO Audit proje
 7. ✅ **Monitoring Pill Color**: Changed Money Pages Opportunity Table monitoring status to blue (was green)
 8. ✅ **Objective KPI Display**: Fixed tasks table to show correct Objective KPI label (e.g., "Rank" instead of "-")
 9. ✅ **Performance Snapshot Highlighting**: Added visual highlight to target metric row in Performance Snapshot table
+10. ✅ **Global Run Auto-Update**: Fixed "Run All Audits & Updates" to automatically create measurements without confirmation dialog
 
 **Files Modified**:
 - `audit-dashboard.html`: `updateTaskLatest()` function (~line 16748)
