@@ -9070,8 +9070,16 @@
         if (!task.baseline_metrics) return true; // No baseline = incomplete
         const missingFields = criticalFields.filter(field => {
           const val = task.baseline_metrics[field];
-          // Check for null, undefined, empty string, or false (for boolean fields)
-          return val == null || val === '' || val === false;
+          // For current_rank, also treat 0 as missing (should be a positive number)
+          if (field === 'current_rank') {
+            return val == null || val === '' || val === 0 || val === '0';
+          }
+          // For boolean fields (ai_overview), false is valid, only null/undefined/empty is missing
+          if (field === 'ai_overview') {
+            return val == null || val === '';
+          }
+          // For other fields, null or empty string is missing
+          return val == null || val === '';
         });
         return missingFields.length > 0;
       }).length;
@@ -16136,6 +16144,15 @@
         if (!task.baseline_metrics) return true; // No baseline = incomplete
         const missingFields = criticalFields.filter(field => {
           const val = task.baseline_metrics[field];
+          // For current_rank, also treat 0 as missing (should be a positive number)
+          if (field === 'current_rank') {
+            return val == null || val === '' || val === 0 || val === '0';
+          }
+          // For boolean fields (ai_overview), false is valid, only null/undefined/empty is missing
+          if (field === 'ai_overview') {
+            return val == null || val === '';
+          }
+          // For other fields, null or empty string is missing
           return val == null || val === '';
         });
         return missingFields.length > 0;
