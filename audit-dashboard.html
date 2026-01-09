@@ -11135,8 +11135,38 @@
       
       for (const task of tasks) {
         const objectiveRag = task.objectiveRag || task.objective_status || 'no_data';
-        const objectiveKpiKey = task.objectiveKpiKey || (task.objective && task.objective.kpi);
-        const delta = task.delta != null ? task.delta : 0;
+        let objectiveKpiKey = task.objectiveKpiKey || (task.objective && task.objective.kpi) || task.objective_metric || task.objective_kpi || null;
+        
+        // Map "Rank" to "current_rank" if needed
+        if (objectiveKpiKey === 'Rank' || objectiveKpiKey === 'rank') {
+          objectiveKpiKey = 'current_rank';
+        }
+        
+        // Compute delta for rank tasks if not already set
+        let delta = task.delta;
+        if (objectiveKpiKey === 'current_rank' && delta == null) {
+          // Get baseline and latest values for rank
+          let baselineValue = task.baselineValue;
+          let latestValue = task.latestValue;
+          
+          // Fallback to extracting from metrics if not directly available
+          if (baselineValue == null || latestValue == null) {
+            const kpiMeta = KPI_DISPLAY_METADATA['current_rank'];
+            if (kpiMeta && kpiMeta.get) {
+              if (baselineValue == null && task.baseline_metrics) {
+                baselineValue = kpiMeta.get(task.baseline_metrics);
+              }
+              if (latestValue == null && task.latest_metrics) {
+                latestValue = kpiMeta.get(task.latest_metrics);
+              }
+            }
+          }
+          
+          // Compute delta: for rank, positive delta = improvement (baseline - latest)
+          if (baselineValue != null && latestValue != null) {
+            delta = baselineValue - latestValue;
+          }
+        }
         
         // CTR tiles
         if (objectiveKpiKey === 'ctr_28d' && objectiveRag !== 'no_data') {
