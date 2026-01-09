@@ -16752,31 +16752,207 @@
         return;
       }
 
-      // Ensure Ranking & AI data is loaded
+      // CRITICAL: Fetch latest audit from Supabase first (for both keyword and URL tasks)
+      let latestAuditFromSupabase = null;
+      try {
+        const propertyUrl = document.getElementById('propertyUrl')?.value || 
+                            localStorage.getItem('gsc_property_url') || 
+                            localStorage.getItem('last_property_url') || 
+                            'https://www.alanranger.com';
+        if (typeof fetchLatestAuditFromSupabase === 'function') {
+          debugLog(`[Optimisation] Update Task Latest: Fetching latest audit from Supabase...`, 'info');
+          latestAuditFromSupabase = await fetchLatestAuditFromSupabase(propertyUrl, false);
+          if (latestAuditFromSupabase && latestAuditFromSupabase.ranking_ai_data) {
+            try {
+              const rankingAiData = latestAuditFromSupabase.ranking_ai_data;
+              if (rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
+                // Store in localStorage for RankingAiModule to use
+                localStorage.setItem('rankingAiData', JSON.stringify(rankingAiData));
+                debugLog(`[Optimisation] Update Task Latest: Loaded ${rankingAiData.combinedRows.length} keywords from latest audit's ranking_ai_data`, 'success');
+                // Also set window.rankingAiData
+                window.rankingAiData = rankingAiData.combinedRows;
+              }
+            } catch (rankingErr) {
+              debugLog(`[Optimisation] Update Task Latest: Error loading ranking_ai_data from latest audit: ${rankingErr.message}`, 'warn');
+            }
+          }
+        }
+      } catch (fetchErr) {
+        debugLog(`[Optimisation] Update Task Latest: Error fetching latest audit from Supabase: ${fetchErr.message}`, 'warn');
+      }
+
+      // Also try renderRankingAiTab to refresh data (fallback)
       if (typeof window.renderRankingAiTab === 'function') {
         try {
           await window.renderRankingAiTab();
           await new Promise(resolve => setTimeout(resolve, 500));
         } catch (e) {
-          console.warn('[Optimisation] Could not refresh Ranking & AI data:', e);
+          console.warn('[Optimisation] Update Task Latest: Could not refresh Ranking & AI data:', e);
         }
       }
 
-      // Get ranking data sources
+      const taskUrlForPage = task.target_url_clean || task.target_url || '';
+      const hasKeyword = !!(task.keyword_text && String(task.keyword_text).trim());
+
+      // Get ranking data sources (prioritize Supabase data)
       let combinedRows = [];
+      // First try RankingAiModule state (may have been updated by renderRankingAiTab)
       if (typeof RankingAiModule !== 'undefined' && RankingAiModule.state) {
         const state = RankingAiModule.state();
         combinedRows = state.combinedRows || [];
       }
+      // Fallback to window.rankingAiData (set from Supabase fetch above)
       if (combinedRows.length === 0 && typeof window.rankingAiData !== 'undefined' && Array.isArray(window.rankingAiData)) {
         combinedRows = window.rankingAiData;
+        debugLog(`[Optimisation] Update Task Latest: Using window.rankingAiData (${combinedRows.length} rows)`, 'info');
+      }
+      // Fallback to localStorage (if Supabase fetch failed)
+      if (combinedRows.length === 0) {
+        try {
+          const local = localStorage.getItem('rankingAiData');
+          if (local) {
+            const parsed = JSON.parse(local);
+            if (parsed && Array.isArray(parsed.combinedRows) && parsed.combinedRows.length > 0) {
+              combinedRows = parsed.combinedRows;
+              debugLog(`[Optimisation] Update Task Latest: Using localStorage rankingAiData (${combinedRows.length} rows)`, 'info');
+            }
+          }
+        } catch (e) {
+          debugLog(`[Optimisation] Update Task Latest: Error reading localStorage rankingAiData: ${e.message}`, 'warn');
+        }
+      }
+      // Final fallback to latest audit from Supabase
+      if (combinedRows.length === 0 && latestAuditFromSupabase && latestAuditFromSupabase.ranking_ai_data) {
+        const rankingAiData = latestAuditFromSupabase.ranking_ai_data;
+        if (rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
+          combinedRows = rankingAiData.combinedRows;
+          debugLog(`[Optimisation] Update Task Latest: Using latest audit ranking_ai_data (${combinedRows.length} rows)`, 'info');
+        }
       }
 
-      // Find matching row
-      const taskUrlClean = (task.target_url_clean || task.target_url || '').replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
-      const taskUrlPath = taskUrlClean.includes('/') ? taskUrlClean.split('/').slice(1).join('/') : '';
-      
-      const matchingRow = combinedRows.find(r => {
+      let currentMetrics = null;
+      let matchingRow = null;
+
+      // For URL-only tasks (e.g. Money Pages), prefer an exact GSC page totals fetch
+      if (!hasKeyword && taskUrlForPage) {
+        try {
+          const property = document.getElementById('propertyUrl')?.value ||
+            localStorage.getItem('gsc_property_url') ||
+            localStorage.getItem('last_property_url') || '';
+          if (property) {
+            const range = (typeof getGscDateRange === 'function') ? getGscDateRange(28, 2) : null;
+            const startDate = range?.startDate ? `&startDate=${encodeURIComponent(range.startDate)}` : '';
+            const endDate = range?.endDate ? `&endDate=${encodeURIComponent(range.endDate)}` : '';
+            const pageUrlForGsc = toAbsoluteUrlForGsc(taskUrlForPage, property);
+            const totalsUrl = apiUrl(`/api/aigeo/gsc-page-totals?property=${encodeURIComponent(property)}&pageUrl=${encodeURIComponent(pageUrlForGsc)}${startDate}${endDate}`);
+            const totalsRes = await fetch(totalsUrl);
+            const totalsJson = await totalsRes.json().catch(() => null);
+            const totals = totalsRes.ok && totalsJson && totalsJson.status === 'ok' ? totalsJson.data : null;
+            if (totals) {
+              // Get combinedRows from multiple sources (prioritize fresh data from Supabase)
+              let aiRows = [];
+              if (typeof window.getRankingAiCombinedRows === 'function') {
+                aiRows = window.getRankingAiCombinedRows();
+              }
+              if (aiRows.length === 0 && typeof window.rankingAiData !== 'undefined' && Array.isArray(window.rankingAiData)) {
+                aiRows = window.rankingAiData;
+              }
+              if (aiRows.length === 0) {
+                try {
+                  const local = localStorage.getItem('rankingAiData');
+                  if (local) {
+                    const parsed = JSON.parse(local);
+                    if (parsed && Array.isArray(parsed.combinedRows)) {
+                      aiRows = parsed.combinedRows;
+                    }
+                  }
+                } catch (e) {
+                  // ignore
+                }
+              }
+              
+              // If still no data, try latest audit from Supabase
+              if (aiRows.length === 0 && latestAuditFromSupabase && latestAuditFromSupabase.ranking_ai_data) {
+                const rankingAiData = latestAuditFromSupabase.ranking_ai_data;
+                if (rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
+                  aiRows = rankingAiData.combinedRows;
+                }
+              }
+              
+              // Get AI metrics for URL
+              let aiForUrl = { ai_overview: null, ai_citations: null };
+              if (aiRows.length > 0) {
+                const hasCitationsArrays = aiRows.some(r => 
+                  Array.isArray(r.ai_alan_citations) && r.ai_alan_citations.length > 0
+                );
+                
+                if (hasCitationsArrays) {
+                  const urlsToTry = [pageUrlForGsc, taskUrlForPage];
+                  for (const urlToCheck of urlsToTry) {
+                    if (urlToCheck) {
+                      const result = (typeof window.computeAiMetricsForPageUrl === 'function')
+                        ? window.computeAiMetricsForPageUrl(urlToCheck, aiRows)
+                        : { ai_overview: null, ai_citations: null };
+                      if (result.ai_overview !== null && result.ai_citations !== null) {
+                        aiForUrl = result;
+                        break;
+                      }
+                    }
+                  }
+                }
+                
+                // Fallback to Supabase API if local lookup failed
+                if (aiForUrl.ai_overview === null && aiForUrl.ai_citations === null) {
+                  try {
+                    const propertyUrl = document.getElementById('propertyUrl')?.value || 
+                                      localStorage.getItem('gsc_property_url') || 
+                                      'https://www.alanranger.com';
+                    const queryUrl = apiUrl(`/api/supabase/query-keywords-citing-url?` +
+                      `property_url=${encodeURIComponent(propertyUrl)}&` +
+                      `target_url=${encodeURIComponent(pageUrlForGsc || taskUrlForPage)}`
+                    );
+                    const citationResponse = await fetch(queryUrl);
+                    if (citationResponse.ok) {
+                      const citationData = await citationResponse.json();
+                      if (citationData.status === 'ok' && citationData.data && citationData.data.length > 0) {
+                        const citingKeywords = citationData.data;
+                        const totalCitationCount = typeof citationData.count === 'number' ? citationData.count : citingKeywords.reduce((sum, k) => sum + (k.citation_count || 1), 0);
+                        const hasOverview = citingKeywords.some(k => k.has_ai_overview === true);
+                        aiForUrl = {
+                          ai_overview: hasOverview,
+                          ai_citations: totalCitationCount
+                        };
+                      }
+                    }
+                  } catch (supabaseErr) {
+                    debugLog(`[Optimisation] Update Task Latest: Error querying Supabase for citations: ${supabaseErr.message}`, 'warn');
+                  }
+                }
+              }
+              
+              currentMetrics = {
+                gsc_clicks_28d: totals.clicks || null,
+                gsc_impressions_28d: totals.impressions || null,
+                gsc_ctr_28d: totals.ctr != null ? (totals.ctr / 100) : null,
+                current_rank: totals.position || null,
+                ai_overview: aiForUrl.ai_overview,
+                ai_citations: aiForUrl.ai_citations || 0,
+                captured_at: new Date().toISOString()
+              };
+            }
+          }
+        } catch (urlTaskErr) {
+          debugLog(`[Optimisation] Update Task Latest: Error handling URL task: ${urlTaskErr.message}`, 'error');
+        }
+      }
+
+      // For keyword tasks, find matching row from combinedRows
+      if (!currentMetrics && hasKeyword) {
+        // Find matching row
+        const taskUrlClean = (task.target_url_clean || task.target_url || '').replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
+        const taskUrlPath = taskUrlClean.includes('/') ? taskUrlClean.split('/').slice(1).join('/') : '';
+        
+        matchingRow = combinedRows.find(r => {
         const keywordMatch = (r.keyword || '').toLowerCase() === (task.keyword_text || '').toLowerCase();
         if (!keywordMatch) return false;
         
@@ -16800,11 +16976,11 @@
         // For keyword-based tasks: accept if URL matches OR if keyword matches (URL is optional)
         // This ensures keyword tasks can find ranking/AI data even if URLs differ slightly
         return urlMatch || true; // Always accept keyword match for keyword tasks
-      });
-
-      let currentMetrics = null;
-
-      if (matchingRow) {
+        });
+        
+        debugLog(`[Optimisation] Update Task Latest: Found matching row: ${matchingRow ? 'YES' : 'NO'} (taskKeyword: ${task.keyword_text}, rowsSearched: ${combinedRows?.length || 0})`, matchingRow ? 'info' : 'warn');
+        
+        if (matchingRow) {
         // Get queryTotal data for clicks, impressions, and CTR
         let queryTotal = null;
         if (typeof getQueryTotalForKeyword === 'function') {
@@ -16825,7 +17001,11 @@
           segment: matchingRow.segment || null,
           captured_at: new Date().toISOString()
         };
-      } else if (task.baseline_metrics) {
+        }
+      }
+
+      // Final fallback to baseline if no current data found
+      if (!currentMetrics && task.baseline_metrics) {
         // Fallback to baseline if no current data found
         currentMetrics = { ...task.baseline_metrics, captured_at: new Date().toISOString() };
         if (currentMetrics.gsc_clicks_28d === null) delete currentMetrics.gsc_clicks_28d;
@@ -16870,7 +17050,7 @@
         // Show success message
         if (result.skipped) {
           if (typeof debugLog === 'function') {
-            debugLog(`[Optimisation] Measurement skipped (recent): ${task.keyword_text}`, 'info');
+            debugLog(`[Optimisation] Update Task Latest: Measurement skipped (recent): ${task.keyword_text || taskUrlForPage}`, 'info');
           }
           // Show brief feedback
           if (updateBtn) {
@@ -16884,7 +17064,7 @@
           }
         } else {
           if (typeof debugLog === 'function') {
-            debugLog(`[Optimisation] Measurement updated: ${task.keyword_text}`, 'success');
+            debugLog(`[Optimisation] Update Task Latest: Measurement updated: ${task.keyword_text || taskUrlForPage}`, 'success');
           }
           // Show brief success feedback
           if (updateBtn) {
@@ -16898,7 +17078,7 @@
           }
         }
       } catch (error) {
-        console.error(`[Optimisation] Error updating task ${taskId}:`, error);
+        console.error(`[Optimisation] Update Task Latest: Error updating task ${taskId}:`, error);
         alert(`Failed to update task: ${error.message}`);
         if (updateBtn) {
           updateBtn.disabled = false;
@@ -26277,11 +26457,26 @@
         updateProgress(100, 'Audit completed successfully!');
         debugLog('=== AUDIT COMPLETE: Success ===', 'success');
         
-        // Save audit results to localStorage
+        // CRITICAL: Save audit results to Supabase FIRST (before localStorage)
+        // This ensures Supabase is the source of truth
+        try {
+          const propertyUrl = document.getElementById('propertyUrl')?.value || 
+                              searchData?.propertyUrl || 
+                              searchData?.property_url ||
+                              localStorage.getItem('gsc_property_url') ||
+                              'https://www.alanranger.com';
+          
+          await saveAuditToSupabase(propertyUrl, scores, searchData, snippetReadiness, schemaAudit, localSignals, new Date().toISOString().split('T')[0]);
+          debugLog('✓ Audit saved to Supabase successfully', 'success');
+        } catch (supabaseErr) {
+          debugLog(`⚠ Failed to save audit to Supabase: ${supabaseErr.message}`, 'warn');
+          // Continue anyway - will save to localStorage as fallback
+        }
+        
+        // Save audit results to localStorage AFTER Supabase save (for performance/caching)
         saveAuditResults(scores, searchData, snippetReadiness, schemaAudit, localSignals, siteReviews, backlinkMetrics);
         
-        // Save audit results to Supabase for historical tracking
-        // Note: saveAuditToSupabase is async, so we can await it or use .then()
+        // Save GSC timeseries data to database (for last 28 days, updated each audit)
         (async () => {
           try {
             // Save GSC timeseries data to database (for last 28 days, updated each audit)
@@ -26312,7 +26507,7 @@
               debugLog('⚠ No timeseries data to save (searchData.timeseries is missing or empty)', 'warn');
             }
             
-            await saveAuditToSupabase(propertyUrl, scores, searchData, snippetReadiness, schemaAudit, localSignals, new Date().toISOString().split('T')[0]);
+            // Note: saveAuditToSupabase was already called before localStorage save (line ~26467)
             // After saving to Supabase, refresh the trend chart to show the latest audit
             debugLog('Refreshing Score Trends chart after saving audit...', 'info');
             // Re-render the dashboard to update the trend chart with new data
@@ -49747,25 +49942,46 @@ Final Score: ${score}/100`;
         try {
           debugLog('🔄 Refreshing GSC data only (CTR & Impressions)...', 'info');
           
-          // Get existing audit data
-          const savedAudit = loadAuditResultsSync();
-          if (!savedAudit || !savedAudit.searchData) {
-            debugLog('⚠ No audit data found. Please run a full audit first.', 'warn');
-            alert('No audit data found. Please run a full audit first.');
-            return;
-          }
-          
-          // Get keywords from existing ranking data
+          // CRITICAL: Fetch keywords from Supabase FIRST (source of truth)
           let rankingData = [];
+          const propertyUrl = localStorage.getItem('gsc_property_url') || 
+                              localStorage.getItem('last_property_url') || 
+                              document.getElementById('propertyUrl')?.value || '';
           
-          // Try to get from RankingAiModule state first
-          if (window.RankingAiModule && typeof window.RankingAiModule.state === 'function') {
-            const state = window.RankingAiModule.state();
-            rankingData = state.combinedRows || [];
-            debugLog(`📊 Found ${rankingData.length} keywords from RankingAiModule state`, 'info');
+          if (propertyUrl) {
+            try {
+              debugLog('📊 Fetching keywords from Supabase (source of truth)...', 'info');
+              const supabaseResponse = await fetch(apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}`));
+              if (supabaseResponse.ok) {
+                const supabaseData = await supabaseResponse.json();
+                if (supabaseData.status === 'ok' && supabaseData.data?.rankingAiData?.combinedRows) {
+                  rankingData = supabaseData.data.rankingAiData.combinedRows;
+                  debugLog(`✓ Fetched ${rankingData.length} keywords from Supabase`, 'success');
+                  // Update localStorage with fresh data
+                  try {
+                    localStorage.setItem('rankingAiData', JSON.stringify({ combinedRows: rankingData }));
+                  } catch (e) {
+                    debugLog(`⚠ Failed to update localStorage: ${e.message}`, 'warn');
+                  }
+                }
+              }
+            } catch (supabaseErr) {
+              debugLog(`⚠ Failed to fetch keywords from Supabase: ${supabaseErr.message}`, 'warn');
+            }
           }
           
-          // Fallback: try to get from localStorage (check both possible keys)
+          // Fallback 1: Try to get from RankingAiModule state (may have been updated)
+          if (!rankingData || rankingData.length === 0) {
+            if (window.RankingAiModule && typeof window.RankingAiModule.state === 'function') {
+              const state = window.RankingAiModule.state();
+              rankingData = state.combinedRows || [];
+              if (rankingData.length > 0) {
+                debugLog(`📊 Found ${rankingData.length} keywords from RankingAiModule state`, 'info');
+              }
+            }
+          }
+          
+          // Fallback 2: Try to get from localStorage (check both possible keys)
           if (!rankingData || rankingData.length === 0) {
             try {
               let storedData = localStorage.getItem('rankingAiData'); // Primary key
@@ -49784,31 +50000,16 @@ Final Score: ${score}/100`;
             }
           }
           
-          // Fallback: try to get from saved audit's keyword_rankings
+          // Fallback 3: Try to get from saved audit's keyword_rankings (localStorage)
           if (!rankingData || rankingData.length === 0) {
-            if (savedAudit.keywordRankings && Array.isArray(savedAudit.keywordRankings)) {
-              rankingData = savedAudit.keywordRankings;
-              debugLog(`📊 Found ${rankingData.length} keywords from saved audit`, 'info');
-            }
-          }
-          
-          // Final fallback: fetch keywords directly from Supabase
-          if (!rankingData || rankingData.length === 0) {
-            debugLog('⚠ No ranking keywords in UI state, fetching from Supabase...', 'info');
             try {
-              const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
-              if (propertyUrl) {
-                const supabaseResponse = await fetch(apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}`));
-                if (supabaseResponse.ok) {
-                  const supabaseData = await supabaseResponse.json();
-                  if (supabaseData.status === 'ok' && supabaseData.data?.rankingAiData?.combinedRows) {
-                    rankingData = supabaseData.data.rankingAiData.combinedRows;
-                    debugLog(`✓ Fetched ${rankingData.length} keywords directly from Supabase`, 'success');
-                  }
-                }
+              const savedAudit = loadAuditResultsSync();
+              if (savedAudit && savedAudit.keywordRankings && Array.isArray(savedAudit.keywordRankings)) {
+                rankingData = savedAudit.keywordRankings;
+                debugLog(`📊 Found ${rankingData.length} keywords from saved audit (localStorage)`, 'info');
               }
-            } catch (supabaseErr) {
-              debugLog(`⚠ Failed to fetch keywords from Supabase: ${supabaseErr.message}`, 'warn');
+            } catch (e) {
+              debugLog(`⚠ Failed to read saved audit from localStorage: ${e.message}`, 'warn');
             }
           }
           
