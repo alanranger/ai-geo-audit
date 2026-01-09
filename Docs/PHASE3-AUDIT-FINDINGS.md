@@ -664,6 +664,40 @@ For each button, we check:
 
 ---
 
+## Additional UI Enhancements (Post-Audit)
+
+### Enhancement 1: Dashboard Visualizations
+**Status**: ✅ **COMPLETE** (2026-01-08)  
+**Location**: `audit-dashboard.html`  
+**Changes**:
+- Added radar chart to AI Summary Likelihood tile showing 3 components (Snippet Readiness, Visibility, Brand)
+- Added horizontal bar chart to Uplift Remaining tile showing top 8 pages by potential extra clicks
+- Both charts use Chart.js and match existing chart styling
+
+### Enhancement 2: Chart Label Improvements
+**Status**: ✅ **COMPLETE** (2026-01-08)  
+**Location**: `audit-dashboard.html`  
+**Changes**:
+- Removed domain from Uplift Remaining chart labels (shows only URL paths)
+- Changed "Product" to "Service" in Money Share radar chart label
+
+### Enhancement 3: Median Delta Chart Fixes
+**Status**: ✅ **COMPLETE** (2026-01-08)  
+**Location**: `audit-dashboard.html` line ~12432  
+**Changes**:
+- Fixed chart width to use container width (was squished)
+- Updated title and data filter from "Last 30d" to "Last 28d" for consistency
+
+### Enhancement 4: Target KPI Highlighting Fix
+**Status**: ✅ **COMPLETE** (2026-01-08)  
+**Location**: `audit-dashboard.html` line ~13392  
+**Changes**:
+- Removed yellow background color from target metric row highlighting
+- Kept orange left border (4px) and thicker bottom border (2px) only
+- Matches intended border-only highlighting style
+
+---
+
 ## Next Steps
 
 1. ✅ Complete audit of all buttons - **DONE**
