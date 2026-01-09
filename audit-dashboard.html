@@ -5366,9 +5366,9 @@
             <div style="font-size: 2rem; font-weight: bold;" id="optimisation-summary-cancelled">–</div>
             <div style="margin-top: 0.5rem;">Cancelled</div>
           </div>
-          <div class="card" title="Tasks that have had a measurement event created in the last 30 days.">
+          <div class="card" title="Tasks that have had a measurement event created in the last 28 days.">
             <div style="font-size: 2rem; font-weight: bold;" id="optimisation-summary-recent">–</div>
-            <div style="margin-top: 0.5rem;">Updated (30d)</div>
+            <div style="margin-top: 0.5rem;">Updated (28d)</div>
           </div>
         </div>
 
@@ -9057,17 +9057,17 @@
       const paused = tasks.filter(t => t.status === 'paused');
       const cancelled = tasks.filter(t => t.status === 'cancelled');
       
-      // Updated (30d): Count distinct tasks with latest measurement in last 30 days
+      // Updated (28d): Count distinct tasks with latest measurement in last 28 days
       // Must use the same task set and scope as other status tiles
       const scope = window.optimisationModuleState.scope || 'active_cycle';
-      const thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      const twentyEightDaysAgo = new Date();
+      twentyEightDaysAgo.setDate(twentyEightDaysAgo.getDate() - 28);
       const updatedTaskIds = new Set();
       for (const task of tasks) {
         const latestMeasurement = getLatestMeasurementInScope(task, scope);
         if (latestMeasurement && latestMeasurement.captured_at) {
           const latestDate = new Date(latestMeasurement.captured_at);
-          if (latestDate >= thirtyDaysAgo) {
+          if (latestDate >= twentyEightDaysAgo) {
             updatedTaskIds.add(task.id);
           }
         }
@@ -53743,7 +53743,7 @@ Final Score: ${score}/100`;
 
       function computeExecutionFromTasks(tasks, isLoaded) {
         if (!isLoaded) {
-          return { active: null, updated30d: null, pct: null };
+          return { active: null, updated28d: null, pct: null };
         }
         const activeStatuses = ['planned', 'in_progress', 'monitoring'];
         const activeTasks = (tasks || []).filter(t => activeStatuses.includes(t.status));
@@ -53754,27 +53754,27 @@ Final Score: ${score}/100`;
           : null;
 
         if (!getLatest) {
-          return { active: activeTasks.length, updated30d: null, pct: null };
+          return { active: activeTasks.length, updated28d: null, pct: null };
         }
 
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        const twentyEightDaysAgo = new Date();
+        twentyEightDaysAgo.setDate(twentyEightDaysAgo.getDate() - 28);
 
         let updated = 0;
         for (const task of activeTasks) {
           const latest = getLatest(task, scope);
           if (!latest || !latest.captured_at) continue;
           const d = new Date(latest.captured_at);
-          if (!Number.isNaN(d.getTime()) && d >= thirtyDaysAgo) updated += 1;
+          if (!Number.isNaN(d.getTime()) && d >= twentyEightDaysAgo) updated += 1;
         }
 
         // If there are no active tasks, don't pretend it's "100% updated" — show neutral.
         if (activeTasks.length === 0) {
-          return { active: 0, updated30d: 0, pct: null };
+          return { active: 0, updated28d: 0, pct: null };
         }
 
         const pct = Math.round((updated / activeTasks.length) * 100);
-        return { active: activeTasks.length, updated30d: updated, pct };
+        return { active: activeTasks.length, updated28d: updated, pct };
       }
 
       function computeEeatConfidence({ hasBacklinks, hasDomainStrength, hasAiCitations, hasLocalSignals }) {
@@ -54045,7 +54045,7 @@ Final Score: ${score}/100`;
           moneyShareSplit,
           moneyAgg,
           execActive: exec.active,
-          execUpdated30d: exec.updated30d,
+          execUpdated28d: exec.updated28d,
           execPct: exec.pct,
           optimisationPotentialClicks,
           domainStrength: domainCache,
@@ -55406,7 +55406,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const optCard = {
           note: optLoaded ? 'Uses optimisation tasks loaded in this browser session (admin key required)' : 'Not loaded (set admin key + open Optimisation tab or run global run)',
           rag: optLoaded ? scoreToRag((toNum(metrics?.execPct) ?? null), { greenAt: 70, amberAt: 50 }) : 'neutral',
-          ragLabel: optLoaded ? (typeof metrics?.execPct === 'number' ? `Updated (30d): ${metrics.execPct}%` : 'Loaded') : 'Not loaded',
+          ragLabel: optLoaded ? (typeof metrics?.execPct === 'number' ? `Updated (28d): ${metrics.execPct}%` : 'Loaded') : 'Not loaded',
           kpis: {
             potential: (typeof optPotential === 'number') ? `+${formatInt(optPotential)}` : '—',
             trafficAll: trafficCounts?.all_metrics || null,
