@@ -5628,7 +5628,7 @@
             </div>
           </div>
           <div class="card" style="padding: 1.5rem;">
-            <h3 style="margin: 0 0 0.25rem 0; font-size: 1.1rem; font-weight: 600; color: var(--dark-text);">Median Delta by KPI (Last 30d)</h3>
+            <h3 style="margin: 0 0 0.25rem 0; font-size: 1.1rem; font-weight: 600; color: var(--dark-text);">Median Delta by KPI (Last 28d)</h3>
             <p style="margin: 0 0 1rem 0; font-size: 0.75rem; color: rgba(255, 255, 255, 0.7); line-height: 1.3;">Median baseline → latest change per KPI across filtered tasks. (Median ≠ net change.) CTR shown in pp. Negative for Rank can be good (lower rank).</p>
             <div style="position: relative; height: 280px;">
               <canvas id="chart-median-delta" style="width: 100%; height: 280px;"></canvas>
@@ -12082,9 +12082,9 @@
       const selectedKpiForTrend = (window.optimisationModuleState && window.optimisationModuleState.selectedKpiForTrend) || 'ctr_28d';
       const medianDeltaTrend = buildMedianDeltaTrend(filteredTasks, selectedKpiForTrend, scope, 12);
       
-      // PART 2: Median Delta by KPI (Last 30d) - only tasks with latest measurement in last 30 days
-      const thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      // PART 2: Median Delta by KPI (Last 28d) - only tasks with latest measurement in last 28 days
+      const twentyEightDaysAgo = new Date();
+      twentyEightDaysAgo.setDate(twentyEightDaysAgo.getDate() - 28);
       
       const eligibleTasks = filteredTasks.filter(task => {
         const latestMeasurement = getLatestMeasurementInScope(task, scope);
@@ -12092,7 +12092,7 @@
           return false;
         }
         const latestDate = new Date(latestMeasurement.captured_at);
-        return latestDate >= thirtyDaysAgo;
+        return latestDate >= twentyEightDaysAgo;
       });
       
       // Compute deltas for each KPI
@@ -12434,7 +12434,9 @@
       if (deltaCanvas && timeseries.medianDeltaByKpi) {
         const ctx = deltaCanvas.getContext('2d');
         const dpr = window.devicePixelRatio || 1;
-        const displayWidth = deltaCanvas.offsetWidth || 400;
+        // Get width from container to ensure it fills properly
+        const container = deltaCanvas.parentElement;
+        const displayWidth = (container ? container.offsetWidth : deltaCanvas.offsetWidth) || 400;
         const displayHeight = 280;
         
         // Set canvas internal size accounting for device pixel ratio for crisp rendering
