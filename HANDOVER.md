@@ -266,7 +266,7 @@ This document consolidates ALL critical information about the AI GEO Audit proje
 5. ✅ **Run Audit Scan** (Configuration/Overview) - Line ~25894 - **FIXED** (2026-01-07)
 6. ✅ **Run Ranking & AI Scan** (Ranking & AI tab) - **CORRECT**
 7. ✅ **Run Money Pages Scan** (Dashboard/Money Pages) - **CORRECT**
-8. ✅ **Run All Audits & Updates** (Dashboard) - Line ~54654 - **MINOR ISSUE** (low priority)
+8. ✅ **Run All Audits & Updates** (Dashboard) - Line ~55313 - **FIXED** (2026-01-08)
 9. ✅ **Refresh GSC Data** (Ranking & AI) - Line ~49941 - **FIXED** (2026-01-07)
 
 **Fixes Applied**:
@@ -274,6 +274,7 @@ This document consolidates ALL critical information about the AI GEO Audit proje
 2. ✅ **Run Audit Scan**: Moved Supabase save before localStorage update
 3. ✅ **Refresh GSC Data**: Reversed data source priority (Supabase first, then fallbacks)
 4. ✅ **Run All Audits & Updates**: Fixed domain strength batch processing (processes all batches, not just one)
+5. ✅ **Run All Audits & Updates (Data Source)**: Now fetches from Supabase first instead of localStorage (removed 2-second wait)
 5. ✅ **Domain Strength Delta**: Fixed delta calculation to compare against last different score (not just previous snapshot)
 6. ✅ **Money Pages AI Citations**: Fixed Suggested Top 10 cards to show actual citation counts (not timer placeholder)
 7. ✅ **Monitoring Pill Color**: Changed Money Pages Opportunity Table monitoring status to blue (was green)
@@ -289,7 +290,7 @@ This document consolidates ALL critical information about the AI GEO Audit proje
 - `audit-dashboard.html`: `updateTaskLatest()` function (~line 16748)
 - `audit-dashboard.html`: `runAudit()` function (~line 26460)
 - `audit-dashboard.html`: `refreshGSCDataOnly()` function (~line 49941)
-- `audit-dashboard.html`: `runDashboardGlobalRun()` function (~line 54895) - domain strength batch processing
+- `audit-dashboard.html`: `runDashboardGlobalRun()` function (~line 55313) - domain strength batch processing + Supabase fetch
 - `audit-dashboard.html`: `computeDomainStrengthDelta()` function (~line 50363) - delta calculation
 - `audit-dashboard.html`: Money Pages Suggested Top 10 cards (~line 35599) - AI citations
 - `audit-dashboard.html`: `renderMoneyPagesTable()` - monitoring pill color

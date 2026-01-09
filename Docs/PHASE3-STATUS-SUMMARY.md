@@ -12,9 +12,8 @@
 
 | Status | Count | Buttons |
 |--------|-------|---------|
-| ✅ **FIXED** | **3** | Update Task Latest, Run Audit Scan, Refresh GSC Data |
+| ✅ **FIXED** | **4** | Update Task Latest, Run Audit Scan, Refresh GSC Data, Run All Audits & Updates |
 | ✅ **CORRECT** (No Issues) | **7** | Add Measurement, Rebaseline, Bulk Update All Tasks, Run Ranking & AI Check, Run Money Pages Scan, Portfolio Segment Selector, Share Audit, Sync CSV, Domain Strength |
-| ⚠️ **MINOR ISSUE** (Low Priority) | **1** | Run All Audits & Updates (reads localStorage, but has 2-second wait) |
 | ⏸️ **NOT DATA UPDATE** | **2** | Share Audit, Sync CSV, Domain Strength (correctly implemented - don't need fixes) |
 
 ---
