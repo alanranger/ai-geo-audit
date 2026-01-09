@@ -55311,15 +55311,35 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             }
           } },
           { key: 'update_tasks', label: 'Update All Tasks with Latest Data', runner: async () => {
-            // Wait a moment to ensure audit data is fully saved from previous steps
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            // Fetch audit data from Supabase first (source of truth), then fallback to localStorage
+            let auditData = null;
+            const propertyUrl = typeof window.getPropertyUrl === 'function' ? window.getPropertyUrl() : 
+                               (localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '');
             
-            // Verify audit data is available (needed for URL-based tasks)
-            const auditData = dashboardSafeJsonParse(localStorage.getItem('last_audit_results'), null);
-            if (!auditData || !auditData.searchData) {
-              debugLog('[Global Run] Audit data not yet available, but continuing with task update...', 'warn');
-            } else {
-              debugLog(`[Global Run] Audit data found: hasSearchData=${!!auditData.searchData}, hasMoneyPagesMetrics=${!!(auditData.scores?.moneyPagesMetrics)}, queryTotalsCount=${auditData.searchData?.queryTotals?.length || 0}`, 'info');
+            if (propertyUrl && typeof window.fetchLatestAuditFromSupabase === 'function') {
+              try {
+                debugLog('[Global Run] Fetching latest audit from Supabase...', 'info');
+                auditData = await window.fetchLatestAuditFromSupabase(propertyUrl, false);
+                if (auditData) {
+                  // Update localStorage with fresh Supabase data for consistency
+                  localStorage.setItem('last_audit_results', JSON.stringify(auditData));
+                  debugLog(`[Global Run] Fetched audit from Supabase: hasSearchData=${!!auditData.searchData}, hasMoneyPagesMetrics=${!!(auditData.scores?.moneyPagesMetrics)}, queryTotalsCount=${auditData.searchData?.queryTotals?.length || 0}`, 'success');
+                } else {
+                  debugLog('[Global Run] No audit data returned from Supabase, falling back to localStorage...', 'warn');
+                }
+              } catch (supabaseError) {
+                debugLog(`[Global Run] Failed to fetch from Supabase: ${supabaseError?.message || supabaseError}, falling back to localStorage...`, 'warn');
+              }
+            }
+            
+            // Fallback to localStorage if Supabase fetch failed or propertyUrl not available
+            if (!auditData) {
+              auditData = dashboardSafeJsonParse(localStorage.getItem('last_audit_results'), null);
+              if (!auditData || !auditData.searchData) {
+                debugLog('[Global Run] Audit data not available from Supabase or localStorage, but continuing with task update...', 'warn');
+              } else {
+                debugLog(`[Global Run] Using audit data from localStorage: hasSearchData=${!!auditData.searchData}, hasMoneyPagesMetrics=${!!(auditData.scores?.moneyPagesMetrics)}, queryTotalsCount=${auditData.searchData?.queryTotals?.length || 0}`, 'info');
+              }
             }
             
             // Ensure tasks are actually loaded before/after bulk update so the dashboard reflects real outcomes.
