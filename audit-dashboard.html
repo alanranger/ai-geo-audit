@@ -55023,9 +55023,14 @@ Final Score: ${score}/100`;
       // Helper function to fetch audit from ~27 days ago for rolling 28-day delta calculations
       // This ensures consistent time-period comparisons across all dashboard tiles
       async function fetchPreviousAuditForDeltas(propertyUrl, currentAuditDate) {
-        if (!propertyUrl || !currentAuditDate) return null;
+        if (!propertyUrl || !currentAuditDate) {
+          debugLog(`[Dashboard] fetchPreviousAuditForDeltas: Missing params - propertyUrl=${!!propertyUrl}, currentAuditDate=${currentAuditDate}`, 'warn');
+          return null;
+        }
         
         try {
+          debugLog(`[Dashboard] fetchPreviousAuditForDeltas: Starting - propertyUrl=${propertyUrl}, currentAuditDate=${currentAuditDate}`, 'info');
+          
           const urlHelper = window.apiUrl || ((path) => {
             const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
             const baseUrl = isLocal ? 'https://ai-geo-audit.vercel.app' : '';
@@ -55039,19 +55044,27 @@ Final Score: ${score}/100`;
           targetDate.setUTCDate(targetDate.getUTCDate() - 27);
           const targetDateStr = targetDate.toISOString().slice(0, 10);
           
+          debugLog(`[Dashboard] fetchPreviousAuditForDeltas: Target date (27 days ago) = ${targetDateStr}`, 'info');
+          
           // Fetch audit history to find the audit closest to 27 days ago
-          const historyResponse = await fetch(urlHelper(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}`));
+          const historyUrl = urlHelper(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}`);
+          debugLog(`[Dashboard] fetchPreviousAuditForDeltas: Fetching history from ${historyUrl}`, 'info');
+          
+          const historyResponse = await fetch(historyUrl);
           if (!historyResponse.ok) {
-            debugLog(`[Dashboard] Audit history fetch failed: ${historyResponse.status}`, 'warn');
+            const errorText = await historyResponse.text().catch(() => 'Unable to read error');
+            debugLog(`[Dashboard] Audit history fetch failed: ${historyResponse.status} - ${errorText}`, 'warn');
             return null;
           }
           
           const historyResult = await historyResponse.json();
+          debugLog(`[Dashboard] fetchPreviousAuditForDeltas: History response status=${historyResult.status}, data length=${historyResult.data?.length || 0}`, 'info');
+          
           if (historyResult.status === 'ok' && Array.isArray(historyResult.data) && historyResult.data.length >= 1) {
             // Sort audits by date descending (most recent first)
             const sortedAudits = historyResult.data
               .map(a => ({
-                audit_date: a.audit_date || a.auditDate,
+                audit_date: a.audit_date || a.auditDate || a.date,
                 data: a
               }))
               .filter(a => a.audit_date) // Filter out any without dates
@@ -55061,8 +55074,11 @@ Final Score: ${score}/100`;
                 return dateB - dateA; // Descending order (newest first)
               });
             
+            debugLog(`[Dashboard] fetchPreviousAuditForDeltas: Found ${sortedAudits.length} audits. Dates: ${sortedAudits.map(a => a.audit_date).join(', ')}`, 'info');
+            
             // Find current audit index
             const currentIndex = sortedAudits.findIndex(a => a.audit_date === currentAuditDate);
+            debugLog(`[Dashboard] fetchPreviousAuditForDeltas: Current audit index=${currentIndex}, currentAuditDate=${currentAuditDate}`, 'info');
             
             // Find audit closest to target date (27 days ago)
             // Prefer audits before target date, but accept closest if none exist before
@@ -55101,6 +55117,7 @@ Final Score: ${score}/100`;
             
             // If no audit found close to target date, use oldest available audit as fallback
             if (!bestMatch && sortedAudits.length > 0) {
+              debugLog(`[Dashboard] fetchPreviousAuditForDeltas: No audit found close to target date ${targetDateStr}, trying fallback to oldest audit`, 'info');
               // Find oldest audit (last in descending sorted list)
               for (let i = sortedAudits.length - 1; i >= 0; i--) {
                 if (sortedAudits[i].audit_date !== currentAuditDate) {
@@ -55121,47 +55138,59 @@ Final Score: ${score}/100`;
               
               // CRITICAL: Fetch FULL audit data for this date to get all fields needed for delta calculations
               // This includes: rankingAiData, aiSummaryComponents, domainStrength, eeatScore, etc.
+              const fullAuditUrl = urlHelper(`/api/supabase/get-audit-by-date?propertyUrl=${encodeURIComponent(propertyUrl)}&auditDate=${prevAuditDate}`);
+              debugLog(`[Dashboard] fetchPreviousAuditForDeltas: Fetching full audit from ${fullAuditUrl}`, 'info');
+              
               try {
-                const fullAuditResponse = await fetch(urlHelper(`/api/supabase/get-audit-by-date?propertyUrl=${encodeURIComponent(propertyUrl)}&auditDate=${prevAuditDate}`));
+                const fullAuditResponse = await fetch(fullAuditUrl);
+                debugLog(`[Dashboard] fetchPreviousAuditForDeltas: Full audit response status=${fullAuditResponse.status}`, 'info');
+                
                 if (fullAuditResponse.ok) {
                   const fullAuditResult = await fullAuditResponse.json();
+                  debugLog(`[Dashboard] fetchPreviousAuditForDeltas: Full audit result status=${fullAuditResult.status}, hasData=${!!fullAuditResult.data}`, 'info');
+                  
                   if (fullAuditResult.status === 'ok' && fullAuditResult.data) {
                     debugLog(`[Dashboard] ✓ Fetched full audit data for ${prevAuditDate}`, 'success');
                     return fullAuditResult.data; // Return full audit data structure
+                  } else {
+                    debugLog(`[Dashboard] Full audit result missing data: status=${fullAuditResult.status}, message=${fullAuditResult.message || 'none'}`, 'warn');
                   }
+                } else {
+                  const errorText = await fullAuditResponse.text().catch(() => 'Unable to read error');
+                  debugLog(`[Dashboard] Failed to fetch full audit for ${prevAuditDate}: ${fullAuditResponse.status} - ${errorText}`, 'warn');
                 }
-                debugLog(`[Dashboard] Failed to fetch full audit for ${prevAuditDate}: ${fullAuditResponse.status}`, 'warn');
               } catch (fetchErr) {
                 debugLog(`[Dashboard] Error fetching full audit for ${prevAuditDate}: ${fetchErr?.message || fetchErr}`, 'warn');
               }
               
               // Fallback: Reconstruct minimal audit data structure from history record
               // This is less complete but better than nothing
+              // NOTE: History API returns camelCase fields (visibilityScore, not visibility_score)
               const prevAuditFromHistory = bestMatch.data;
               const prevAuditData = {
                 auditDate: prevAuditDate,
                 scores: {
-                  visibility: prevAuditFromHistory.visibility_score,
-                  authority: prevAuditFromHistory.authority_score,
-                  contentSchema: prevAuditFromHistory.content_schema_score,
-                  localEntity: prevAuditFromHistory.local_entity_score,
-                  serviceArea: prevAuditFromHistory.service_area_score,
-                  aiSummaryScore: prevAuditFromHistory.ai_summary_score
+                  visibility: prevAuditFromHistory.visibilityScore || prevAuditFromHistory.visibility_score || null,
+                  authority: prevAuditFromHistory.authorityScore || prevAuditFromHistory.authority_score || null,
+                  contentSchema: prevAuditFromHistory.contentSchemaScore || prevAuditFromHistory.content_schema_score || null,
+                  localEntity: prevAuditFromHistory.localEntityScore || prevAuditFromHistory.local_entity_score || null,
+                  serviceArea: prevAuditFromHistory.serviceAreaScore || prevAuditFromHistory.service_area_score || null,
+                  aiSummaryScore: prevAuditFromHistory.aiSummaryScore || prevAuditFromHistory.ai_summary_score || null
                 },
                 searchData: {
                   overview: {
-                    clicks: prevAuditFromHistory.gsc_clicks || 0,
-                    impressions: prevAuditFromHistory.gsc_impressions || 0,
-                    position: prevAuditFromHistory.gsc_avg_position || null,
-                    ctr: prevAuditFromHistory.gsc_ctr || 0
+                    clicks: prevAuditFromHistory.gsc_clicks || prevAuditFromHistory.gscClicks || 0,
+                    impressions: prevAuditFromHistory.gsc_impressions || prevAuditFromHistory.gscImpressions || 0,
+                    position: prevAuditFromHistory.gsc_avg_position || prevAuditFromHistory.gscAvgPosition || null,
+                    ctr: prevAuditFromHistory.gsc_ctr || prevAuditFromHistory.gscCtr || 0
                   }
                 },
-                moneyPagesMetrics: prevAuditFromHistory.money_pages_metrics || (prevAuditFromHistory.money_pages_summary ? {
-                  overview: prevAuditFromHistory.money_pages_summary
+                moneyPagesMetrics: prevAuditFromHistory.moneySegmentMetrics || prevAuditFromHistory.money_pages_metrics || (prevAuditFromHistory.moneyPagesSummary || prevAuditFromHistory.money_pages_summary ? {
+                  overview: prevAuditFromHistory.moneyPagesSummary || prevAuditFromHistory.money_pages_summary
                 } : null)
               };
               
-              debugLog(`[Dashboard] Using fallback minimal audit data for ${prevAuditDate} - visibility: ${prevAuditFromHistory.visibility_score}, authority: ${prevAuditFromHistory.authority_score}, clicks: ${prevAuditFromHistory.gsc_clicks}, impressions: ${prevAuditFromHistory.gsc_impressions}`, 'info');
+              debugLog(`[Dashboard] Using fallback minimal audit data for ${prevAuditDate} - visibility: ${prevAuditData.scores.visibility}, authority: ${prevAuditData.scores.authority}, clicks: ${prevAuditData.searchData.overview.clicks}, impressions: ${prevAuditData.searchData.overview.impressions}`, 'info');
               return prevAuditData;
             } else if (currentIndex === -1 && sortedAudits.length > 0) {
               // Current audit not found in history, use the most recent one as fallback
@@ -55195,12 +55224,14 @@ Final Score: ${score}/100`;
               }
             }
           } else {
-            debugLog(`[Dashboard] Not enough audit history (found ${historyResult.data?.length || 0} audits)`, 'warn');
+            debugLog(`[Dashboard] fetchPreviousAuditForDeltas: Not enough audit history (found ${historyResult.data?.length || 0} audits, status=${historyResult.status})`, 'warn');
           }
           
+          debugLog(`[Dashboard] fetchPreviousAuditForDeltas: Returning null - no suitable previous audit found`, 'warn');
           return null;
         } catch (err) {
-          debugLog(`[Dashboard] Failed to fetch rolling 28-day audit for deltas: ${err?.message || err}`, 'warn');
+          debugLog(`[Dashboard] fetchPreviousAuditForDeltas: Exception - ${err?.message || err}`, 'error');
+          console.error('[Dashboard] fetchPreviousAuditForDeltas error:', err);
           return null;
         }
       }
