@@ -98,6 +98,8 @@ git push
 
 Vercel will automatically rebuild and deploy (usually takes 1-2 minutes).
 
+**Note**: After each deployment, ensure the version number in `audit-dashboard.html` is updated to reflect the latest commit hash. This helps track which version is currently deployed and prevents troubleshooting outdated versions.
+
 ## Troubleshooting
 
 - **404 Error**: Check that `vercel.json` exists and routes are configured correctly

@@ -933,6 +933,8 @@ AI GEO Audit/
 
 ## Summary
 
+**Latest Update (2026-01-XX)**: Codebase rolled back to commit `8951fcf` to establish stable baseline. AI Citations column has stable counts (no flickering) but sorting functionality still present. Ready for targeted fixes from clean baseline.
+
 **Current State**: 
 - ✅ **Fully Implemented**: All core features production-ready
 - ✅ **5 Core Pillars** with real data sources:

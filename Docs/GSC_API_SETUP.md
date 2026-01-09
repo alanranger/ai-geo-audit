@@ -51,7 +51,7 @@ You can also use a Node.js script to generate the refresh token. Let me know if 
 
 ## Step 4: Deploy to Vercel (if not already done)
 
-If you haven't deployed to Vercel yet, see `DEPLOY.md` for full deployment instructions.
+If you haven't deployed to Vercel yet, see `Docs/DEPLOY.md` for full deployment instructions.
 
 The project must be deployed to Vercel before you can add environment variables.
 

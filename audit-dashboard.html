@@ -54940,7 +54940,10 @@ Final Score: ${score}/100`;
 
       // Helper function to compute dashboard snapshot from audit data
       function computeDashboardSnapshotFromAuditData(auditData) {
-        if (!auditData) return null;
+        if (!auditData) {
+          debugLog(`[Dashboard] computeDashboardSnapshotFromAuditData: auditData is null/undefined`, 'warn');
+          return null;
+        }
         
         const scores = auditData.scores || {};
         const searchData = auditData.searchData || {};
@@ -54972,9 +54975,32 @@ Final Score: ${score}/100`;
           ? computeMoneyPagesAggregateFromMetrics(moneyMetricsFromAudit)
           : null;
         
+        // Compute ranking KPIs from ranking AI data (needed for Ranking tile deltas)
+        const rankingRows = rankingAiData.combinedRows || [];
+        const rankingKpis = (typeof computeRankingKpisFromRows === 'function' && rankingRows.length > 0)
+          ? computeRankingKpisFromRows(rankingRows)
+          : null;
+        
+        // Extract AI Summary components (needed for AI Summary radar chart deltas)
+        const aiSummaryComponents = auditData.aiSummaryComponents || null;
+        
+        // Extract domain strength (needed for Domain Strength tile deltas)
+        const domainStrength = auditData.domainStrength || null;
+        
+        // Extract EEAT data (needed for EEAT tile deltas)
+        const eeatScore = auditData.eeatScore ?? null;
+        const eeatConfidence = auditData.eeatConfidence ?? null;
+        const eeatSubscores = auditData.eeatSubscores || null;
+        
+        // Extract optimisation potential clicks (needed for Optimisation tile deltas)
+        const optimisationPotentialClicks = auditData.optimisationPotentialClicks ?? null;
+        
+        debugLog(`[Dashboard] computeDashboardSnapshotFromAuditData: GAIO=${gaioScore}, AI Summary=${scores.aiSummaryScore || auditData.ai_summary_score || 'null'}, rankingKpis=${rankingKpis ? 'present' : 'null'}, aiSummaryComponents=${aiSummaryComponents ? 'present' : 'null'}, domainStrength=${domainStrength ? 'present' : 'null'}, eeatScore=${eeatScore ?? 'null'}`, 'info');
+        
         return {
           gaioScore,
           aiSummaryScore: scores.aiSummaryScore || (typeof auditData.ai_summary_score === 'number' ? auditData.ai_summary_score : null),
+          aiSummaryComponents, // Added for AI Summary radar chart deltas
           pillars,
           auditKpis: searchData.overview ? {
             clicks: searchData.overview.clicks || searchData.totalClicks || 0,
@@ -54984,7 +55010,13 @@ Final Score: ${score}/100`;
           } : null,
           moneySharePct: scores.moneyPagesMetrics?.overview ? 
             (scores.moneyPagesMetrics.overview.shareOfImpressions || 0) * 100 : null,
-          moneyAgg: moneyAgg // Add moneyAgg for Money Pages tile deltas
+          moneyAgg: moneyAgg, // Add moneyAgg for Money Pages tile deltas
+          rankingKpis, // Added for Ranking tile deltas
+          domainStrength, // Added for Domain Strength tile deltas
+          eeatScore, // Added for EEAT tile deltas
+          eeatConfidence, // Added for EEAT tile deltas
+          eeatSubscores, // Added for EEAT tile deltas
+          optimisationPotentialClicks // Added for Optimisation tile deltas
         };
       }
 
@@ -55081,12 +55113,31 @@ Final Score: ${score}/100`;
             
             if (bestMatch && bestMatch.audit_date !== currentAuditDate) {
               const prevAuditDate = bestMatch.audit_date;
-              const prevAuditFromHistory = bestMatch.data;
               
               // Calculate days difference for logging
               const daysDiff = Math.round((currentDate - new Date(prevAuditDate)) / (1000 * 60 * 60 * 24));
               
-              // Reconstruct audit data structure from history record
+              debugLog(`[Dashboard] ✓ Found rolling 28-day audit date: ${prevAuditDate} (${daysDiff} days ago, target: ${targetDateStr})`, 'success');
+              
+              // CRITICAL: Fetch FULL audit data for this date to get all fields needed for delta calculations
+              // This includes: rankingAiData, aiSummaryComponents, domainStrength, eeatScore, etc.
+              try {
+                const fullAuditResponse = await fetch(urlHelper(`/api/supabase/get-audit-by-date?propertyUrl=${encodeURIComponent(propertyUrl)}&auditDate=${prevAuditDate}`));
+                if (fullAuditResponse.ok) {
+                  const fullAuditResult = await fullAuditResponse.json();
+                  if (fullAuditResult.status === 'ok' && fullAuditResult.data) {
+                    debugLog(`[Dashboard] ✓ Fetched full audit data for ${prevAuditDate}`, 'success');
+                    return fullAuditResult.data; // Return full audit data structure
+                  }
+                }
+                debugLog(`[Dashboard] Failed to fetch full audit for ${prevAuditDate}: ${fullAuditResponse.status}`, 'warn');
+              } catch (fetchErr) {
+                debugLog(`[Dashboard] Error fetching full audit for ${prevAuditDate}: ${fetchErr?.message || fetchErr}`, 'warn');
+              }
+              
+              // Fallback: Reconstruct minimal audit data structure from history record
+              // This is less complete but better than nothing
+              const prevAuditFromHistory = bestMatch.data;
               const prevAuditData = {
                 auditDate: prevAuditDate,
                 scores: {
@@ -55110,8 +55161,7 @@ Final Score: ${score}/100`;
                 } : null)
               };
               
-              debugLog(`[Dashboard] ✓ Found rolling 28-day audit: ${prevAuditDate} (${daysDiff} days ago, target: ${targetDateStr})`, 'success');
-              debugLog(`[Dashboard] Previous audit raw data - visibility: ${prevAuditFromHistory.visibility_score}, authority: ${prevAuditFromHistory.authority_score}, clicks: ${prevAuditFromHistory.gsc_clicks}, impressions: ${prevAuditFromHistory.gsc_impressions}, position: ${prevAuditFromHistory.gsc_avg_position}, ctr: ${prevAuditFromHistory.gsc_ctr}`, 'info');
+              debugLog(`[Dashboard] Using fallback minimal audit data for ${prevAuditDate} - visibility: ${prevAuditFromHistory.visibility_score}, authority: ${prevAuditFromHistory.authority_score}, clicks: ${prevAuditFromHistory.gsc_clicks}, impressions: ${prevAuditFromHistory.gsc_impressions}`, 'info');
               return prevAuditData;
             } else if (currentIndex === -1 && sortedAudits.length > 0) {
               // Current audit not found in history, use the most recent one as fallback
