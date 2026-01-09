@@ -13496,11 +13496,22 @@
         <div style="font-weight: 700; padding: 0.5rem; background: var(--dark-panel); border: 1px solid var(--dark-border); border-radius: 4px; font-size: 0.9rem; color: var(--dark-text);">Latest</div>
       `;
 
+      // Check if baseline is incomplete (missing critical fields)
+      const criticalFields = ['ai_overview', 'ai_citations', 'current_rank'];
+      const missingFields = criticalFields.filter(field => {
+        const val = baseline?.[field];
+        return val == null || val === '';
+      });
+      const isBaselineIncomplete = missingFields.length > 0;
+
       metrics.forEach(metric => {
         const baselineVal = baseline?.[metric.baselineKey];
         const latestVal = latest?.[metric.latestKey];
         const delta = calcDelta(latestVal, baselineVal);
         const deltaFormatted = formatDelta(delta, metric.latestKey);
+        
+        // Check if this specific metric has missing baseline
+        const isBaselineMissing = (baselineVal == null || baselineVal === '') && (latestVal != null && latestVal !== '');
 
         const formatValue = (val) => {
           if (metric.format) return metric.format(val);
@@ -13520,16 +13531,31 @@
         const highlightBorder = isTargetMetric 
           ? 'border-bottom: 2px solid #f59e0b;' 
           : 'border-bottom: 1px solid #e5e7eb;';
+        
+        // Add warning indicator for missing baseline
+        const baselineWarning = isBaselineMissing 
+          ? '<span style="margin-left: 0.25rem; color: #f59e0b; font-size: 0.7rem;" title="Baseline value missing - delta cannot be calculated">⚠</span>'
+          : '';
 
         html += `
           <div style="padding: 0.5rem; ${highlightBorder} ${highlightStyle} font-weight: 600; font-size: 0.9rem; color: #1e293b;">${metric.label}${isTargetMetric ? ' <span style="color: #f59e0b; font-size: 0.75rem;">(Target)</span>' : ''}</div>
-          <div style="padding: 0.5rem; ${highlightBorder} ${highlightStyle} font-weight: 700; font-size: 1rem; color: #1e293b;">${formatValue(baselineVal)}</div>
+          <div style="padding: 0.5rem; ${highlightBorder} ${highlightStyle} font-weight: 700; font-size: 1rem; color: #1e293b;">${formatValue(baselineVal)}${baselineWarning}</div>
           <div style="padding: 0.5rem; ${highlightBorder} ${highlightStyle} font-weight: 700; font-size: 1rem; color: #1e293b;">
             ${formatValue(latestVal)}
-            ${delta != null ? `<span style="margin-left: 0.5rem; color: ${deltaFormatted.color} !important; font-weight: 700;">(${deltaFormatted.text})</span>` : ''}
+            ${delta != null ? `<span style="margin-left: 0.5rem; color: ${deltaFormatted.color} !important; font-weight: 700;">(${deltaFormatted.text})</span>` : (isBaselineMissing ? '<span style="margin-left: 0.5rem; color: #f59e0b; font-size: 0.85rem; font-weight: 600;" title="Baseline missing - cannot calculate delta">—</span>' : '')}
           </div>
         `;
       });
+      
+      // Add warning banner if baseline is incomplete
+      if (isBaselineIncomplete) {
+        html = `
+          <div style="padding: 0.75rem; margin-bottom: 0.5rem; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 4px; font-size: 0.875rem; color: #92400e;">
+            <strong>⚠ Baseline Incomplete:</strong> This baseline is missing ${missingFields.length} critical field(s): ${missingFields.join(', ')}. 
+            Delta calculations may be inaccurate. Consider using "Rebaseline" to create a complete baseline with all fields.
+          </div>
+        ` + html;
+      }
 
       // Add captured_at timestamps (use created_at from event if captured_at not in metrics)
       const baselineDate = baseline?.captured_at || baseline?.created_at;
