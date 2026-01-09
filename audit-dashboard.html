@@ -10761,9 +10761,14 @@
           });
 
           // Baseline: prefer the most recent baseline marker; fallback to first measurement.
+          // CRITICAL: Sort baseline candidates by created_at DESC to get the LATEST baseline (after rebaselining)
           const baselineCandidates = sorted.filter(m => m && m.is_baseline === true && m.metrics);
           const baselineEvent = baselineCandidates.length > 0
-            ? baselineCandidates[baselineCandidates.length - 1]
+            ? baselineCandidates.sort((a, b) => {
+                const dateA = new Date(a.created_at || a.event_at || 0);
+                const dateB = new Date(b.created_at || b.event_at || 0);
+                return dateB - dateA; // DESC - most recent first
+              })[0] // Get the most recent baseline
             : sorted[0];
 
           if (baselineEvent && baselineEvent.metrics) {
@@ -13014,6 +13019,7 @@
       const container = document.getElementById('optimisation-metrics-snapshot');
       if (!container) return;
 
+      // Use baseline_metrics and latest_metrics from task (may be cycle-specific from renderOptimisationMetricsSnapshotForCycle)
       const baseline = task.baseline_metrics || null;
       const latest = task.latest_metrics || null;
 
@@ -16020,14 +16026,31 @@
             }
 
             await window.loadAllOptimisationTasks();
-            // Reload task data to get fresh baseline_metrics
-            const updatedTask = window.optimisationModuleState.allTasks.find(t => t.id === taskId);
-            if (updatedTask) {
-              // Update task in state
-              const taskIndex = window.optimisationModuleState.allTasks.findIndex(t => t.id === taskId);
-              if (taskIndex >= 0) {
-                window.optimisationModuleState.allTasks[taskIndex] = updatedTask;
+            // Force reload task data from API to get fresh baseline_metrics
+            try {
+              const headers = window.getOptimisationHeaders();
+              const cacheBuster = `_t=${Date.now()}`;
+              const taskResponse = await fetch(apiUrl(`/api/optimisation/task/${taskId}?${cacheBuster}`), {
+                method: 'GET',
+                headers: {
+                  ...headers,
+                  'Cache-Control': 'no-cache, no-store, must-revalidate',
+                  'Pragma': 'no-cache'
+                }
+              });
+              if (taskResponse.ok) {
+                const taskData = await taskResponse.json();
+                // Update task in state with fresh data
+                const taskIndex = window.optimisationModuleState.allTasks.findIndex(t => t.id === taskId);
+                if (taskIndex >= 0) {
+                  window.optimisationModuleState.allTasks[taskIndex] = {
+                    ...window.optimisationModuleState.allTasks[taskIndex],
+                    ...taskData.task
+                  };
+                }
               }
+            } catch (e) {
+              debugLog(`[Optimisation] Error refreshing task data after rebaseline: ${e.message}`, 'warn');
             }
             // Re-open drawer to refresh with new baseline
             await openOptimisationTaskDrawer(taskId);
