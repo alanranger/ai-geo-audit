@@ -9190,6 +9190,48 @@
             aVal = (a.title || '').toLowerCase();
             bVal = (b.title || '').toLowerCase();
             break;
+          case 'objectiveKpi':
+            // Sort by objective KPI key (e.g., 'ctr_28d', 'current_rank', 'ai_citations')
+            const aKpi = a.objectiveKpiKey || (a.objective && a.objective.kpi) || a.objective_metric || a.objective_kpi || '';
+            const bKpi = b.objectiveKpiKey || (b.objective && b.objective.kpi) || b.objective_metric || b.objective_kpi || '';
+            aVal = String(aKpi).toLowerCase();
+            bVal = String(bKpi).toLowerCase();
+            break;
+          case 'delta':
+            // Sort by delta value (numeric)
+            aVal = a.delta != null ? a.delta : (a.objective_progress && a.objective_progress.delta != null ? a.objective_progress.delta : null);
+            bVal = b.delta != null ? b.delta : (b.objective_progress && b.objective_progress.delta != null ? b.objective_progress.delta : null);
+            // Handle null values - put them at the end
+            if (aVal == null && bVal == null) return 0;
+            if (aVal == null) return 1;
+            if (bVal == null) return -1;
+            break;
+          case 'baselineLatest':
+            // Sort by latest value (or baseline if latest not available)
+            aVal = a.latestValue != null ? a.latestValue : (a.baselineValue != null ? a.baselineValue : null);
+            bVal = b.latestValue != null ? b.latestValue : (b.baselineValue != null ? b.baselineValue : null);
+            // Handle null values - put them at the end
+            if (aVal == null && bVal == null) return 0;
+            if (aVal == null) return 1;
+            if (bVal == null) return -1;
+            break;
+          case 'dueIn':
+            // Sort by due date (earliest first)
+            let aDueAt = a.dueAt || (a.objective && a.objective.due_at) || (a.cycle && a.cycle.due_at) || null;
+            let bDueAt = b.dueAt || (b.objective && b.objective.due_at) || (b.cycle && b.cycle.due_at) || null;
+            aVal = aDueAt ? new Date(aDueAt).getTime() : null;
+            bVal = bDueAt ? new Date(bDueAt).getTime() : null;
+            // Handle null values - put them at the end
+            if (aVal == null && bVal == null) return 0;
+            if (aVal == null) return 1;
+            if (bVal == null) return -1;
+            break;
+          case 'goal':
+            // Sort by goal status (on_track, at_risk, overdue, no_data)
+            const goalStatusOrder = { 'on_track': 1, 'at_risk': 2, 'overdue': 3, 'no_data': 4 };
+            aVal = goalStatusOrder[a.objectiveRag] || 5;
+            bVal = goalStatusOrder[b.objectiveRag] || 5;
+            break;
           default:
             return 0;
         }
