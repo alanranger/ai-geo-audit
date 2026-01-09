@@ -55408,26 +55408,30 @@ Final Score: ${score}/100`;
         let prevMetricsFromRolling28d = null;
         try {
           const currentAudit = dashboardSafeJsonParse(localStorage.getItem('last_audit_results'), null);
-          if (currentAudit && currentAudit.auditDate) {
+          // Try both auditDate and audit_date (different APIs use different field names)
+          const currentAuditDate = currentAudit?.auditDate || currentAudit?.audit_date || null;
+          if (currentAudit && currentAuditDate) {
             const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
             if (propertyUrl) {
-              const prevAuditData = await fetchPreviousAuditForDeltas(propertyUrl, currentAudit.auditDate);
+              debugLog(`[Dashboard] Fetching previous audit for deltas - currentAuditDate=${currentAuditDate}, propertyUrl=${propertyUrl}`, 'info');
+              const prevAuditData = await fetchPreviousAuditForDeltas(propertyUrl, currentAuditDate);
               if (prevAuditData) {
                 // Compute snapshot from rolling 28-day audit data
                 const prevSnapshot = computeDashboardSnapshotFromAuditData(prevAuditData);
                 prevMetricsFromRolling28d = prevSnapshot;
-                debugLog(`[Dashboard] ✓ Computed prevMetrics from audit ${prevAuditData.auditDate}: GAIO=${prevSnapshot?.gaioScore ?? 'null'}, AI Summary=${prevSnapshot?.aiSummaryScore ?? 'null'}, Clicks=${prevSnapshot?.auditKpis?.clicks ?? 'null'}, Impressions=${prevSnapshot?.auditKpis?.impressions ?? 'null'}`, 'success');
+                debugLog(`[Dashboard] ✓ Computed prevMetrics from audit ${prevAuditData.auditDate || prevAuditData.audit_date || 'unknown'}: GAIO=${prevSnapshot?.gaioScore ?? 'null'}, AI Summary=${prevSnapshot?.aiSummaryScore ?? 'null'}, Clicks=${prevSnapshot?.auditKpis?.clicks ?? 'null'}, Impressions=${prevSnapshot?.auditKpis?.impressions ?? 'null'}, RankingKpis=${prevSnapshot?.rankingKpis ? 'present' : 'null'}, DomainStrength=${prevSnapshot?.domainStrength ? 'present' : 'null'}`, 'success');
               } else {
-                debugLog(`[Dashboard] No previous audit found for rolling 28-day delta calculation`, 'warn');
+                debugLog(`[Dashboard] ⚠ No previous audit found for rolling 28-day delta calculation (fetchPreviousAuditForDeltas returned null)`, 'warn');
               }
             } else {
-              debugLog(`[Dashboard] No property URL found for rolling 28-day delta calculation`, 'warn');
+              debugLog(`[Dashboard] ⚠ No property URL found for rolling 28-day delta calculation`, 'warn');
             }
           } else {
-            debugLog(`[Dashboard] No current audit found in localStorage for rolling 28-day delta calculation`, 'warn');
+            debugLog(`[Dashboard] ⚠ No current audit or auditDate found in localStorage for rolling 28-day delta calculation - currentAudit=${!!currentAudit}, currentAuditDate=${currentAuditDate}`, 'warn');
           }
         } catch (err) {
-          debugLog(`[Dashboard] Error fetching rolling 28-day audit for deltas: ${err?.message || err}`, 'warn');
+          debugLog(`[Dashboard] ⚠ Error fetching rolling 28-day audit for deltas: ${err?.message || err}`, 'error');
+          console.error('[Dashboard] Error fetching rolling 28-day audit:', err);
         }
 
         // Use rolling 28-day deltas if available, otherwise fall back to global run snapshots
