@@ -53895,102 +53895,120 @@ Final Score: ${score}/100`;
         
         // If cache doesn't have deltas, fetch from overview API (non-blocking - don't await)
         // This ensures dashboard still renders even if API call fails or is slow
-        if (!domainCache || !domainCache.deltas || domainCache.deltas.selfScore === undefined) {
-          // Start async fetch but don't block - dashboard will render with cached data
-          (async () => {
-            try {
-              const selfDomain = (typeof window.getSelfDomainForDomainStrength === 'function' 
-                ? window.getSelfDomainForDomainStrength() 
-                : null) || localStorage.getItem('gsc_property_url') || 'https://www.alanranger.com';
-              const normalizedDomain = String(selfDomain).replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
-              
-              const urlHelper = typeof window.apiUrl === 'function' ? window.apiUrl : ((path) => {
-                const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-                const baseUrl = isLocal ? 'https://ai-geo-audit.vercel.app' : '';
-                const cleanPath = path.startsWith('/') ? path : `/${path}`;
-                return baseUrl ? `${baseUrl}${cleanPath}` : cleanPath;
-              });
-              
-              const overviewResp = await fetch(urlHelper(`/api/domain-strength/overview`));
-              if (overviewResp.ok) {
-                const overviewJson = await overviewResp.json();
-                if (overviewJson?.status === 'ok' && Array.isArray(overviewJson.items)) {
-                  // Find our domain in the response
-                  const ourItem = overviewJson.items.find(item => {
-                    const itemDomain = String(item?.domain || '').replace(/^www\./, '').toLowerCase();
-                    return itemDomain === normalizedDomain.toLowerCase();
-                  });
-                  
-                  if (ourItem && ourItem.latest && ourItem.trend) {
-                    const latest = ourItem.latest;
-                    const deltaLatest = typeof ourItem.trend.deltaLatest === 'number' ? ourItem.trend.deltaLatest : null;
+        // Use a flag to prevent infinite loops
+        // Also check if delta is null/undefined (not just missing) - if it's "0" that's valid
+        const hasValidDelta = domainCache && domainCache.deltas && domainCache.deltas.selfScore !== undefined && domainCache.deltas.selfScore !== null;
+        if (!hasValidDelta) {
+          // Check if we're already fetching to prevent multiple simultaneous calls
+          if (!window.__domainStrengthFetching) {
+            window.__domainStrengthFetching = true;
+            // Start async fetch but don't block - dashboard will render with cached data
+            (async () => {
+              try {
+                const selfDomain = (typeof window.getSelfDomainForDomainStrength === 'function' 
+                  ? window.getSelfDomainForDomainStrength() 
+                  : null) || localStorage.getItem('gsc_property_url') || 'https://www.alanranger.com';
+                const normalizedDomain = String(selfDomain).replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+                
+                const urlHelper = typeof window.apiUrl === 'function' ? window.apiUrl : ((path) => {
+                  const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+                  const baseUrl = isLocal ? 'https://ai-geo-audit.vercel.app' : '';
+                  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+                  return baseUrl ? `${baseUrl}${cleanPath}` : cleanPath;
+                });
+                
+                const overviewResp = await fetch(urlHelper(`/api/domain-strength/overview`));
+                if (overviewResp.ok) {
+                  const overviewJson = await overviewResp.json();
+                  if (overviewJson?.status === 'ok' && Array.isArray(overviewJson.items)) {
+                    // Find our domain in the response
+                    const ourItem = overviewJson.items.find(item => {
+                      const itemDomain = String(item?.domain || '').replace(/^www\./, '').toLowerCase();
+                      return itemDomain === normalizedDomain.toLowerCase();
+                    });
                     
-                    // Calculate gap to top and stronger domains count
-                    const allScores = overviewJson.items
-                      .map(item => typeof item.latest?.score === 'number' ? item.latest.score : null)
-                      .filter(score => score !== null)
-                      .sort((a, b) => b - a);
-                    
-                    const topScore = allScores.length > 0 ? allScores[0] : null;
-                    const ourScore = typeof latest.score === 'number' ? latest.score : null;
-                    const gapTop = (topScore !== null && ourScore !== null) ? (topScore - ourScore) : null;
-                    const strongerCount = ourScore !== null ? allScores.filter(s => s > ourScore).length : null;
-                    
-                    // Calculate rank vs set
-                    const ourRank = ourScore !== null ? allScores.filter(s => s > ourScore).length + 1 : null;
-                    const totalDomains = allScores.length;
-                    const rankVs = (ourRank !== null && totalDomains > 0) ? `${ourRank}/${totalDomains}` : null;
-                    
-                    // Format delta (deltaLatest is already the difference, so format it directly)
-                    let deltaText = null;
-                    if (deltaLatest !== null && isFinite(deltaLatest)) {
-                      const sign = deltaLatest > 0 ? '+' : '';
-                      deltaText = `${sign}${deltaLatest.toFixed(1)}`;
-                    }
-                    
-                    // Build cache object with deltas
-                    const newCache = {
-                      selfScore: ourScore,
-                      gapTop: gapTop,
-                      stronger: strongerCount,
-                      rankVs: rankVs,
-                      snapshotDate: latest.snapshotDate || null,
-                      kpis: {
-                        selfScore: ourScore !== null ? ourScore.toFixed(1) : null,
-                        gapTop: gapTop !== null ? `+${gapTop.toFixed(1)}` : null,
-                        stronger: strongerCount !== null ? String(strongerCount) : null,
-                        rankVs: rankVs
-                      },
-                      deltas: {
-                        selfScore: deltaText,
-                        gapTop: null, // Gap to top delta would need previous gap calculation
-                        stronger: null // Stronger count delta would need previous count
-                      },
-                      dirs: {
-                        selfScore: deltaLatest !== null ? (deltaLatest > 0 ? 'up' : deltaLatest < 0 ? 'down' : 'flat') : 'flat',
-                        gapTop: 'flat',
-                        stronger: 'flat'
+                    if (ourItem && ourItem.latest && ourItem.trend) {
+                      const latest = ourItem.latest;
+                      const deltaLatest = typeof ourItem.trend.deltaLatest === 'number' ? ourItem.trend.deltaLatest : null;
+                      
+                      // Calculate gap to top and stronger domains count
+                      const allScores = overviewJson.items
+                        .map(item => typeof item.latest?.score === 'number' ? item.latest.score : null)
+                        .filter(score => score !== null)
+                        .sort((a, b) => b - a);
+                      
+                      const topScore = allScores.length > 0 ? allScores[0] : null;
+                      const ourScore = typeof latest.score === 'number' ? latest.score : null;
+                      const gapTop = (topScore !== null && ourScore !== null) ? (topScore - ourScore) : null;
+                      const strongerCount = ourScore !== null ? allScores.filter(s => s > ourScore).length : null;
+                      
+                      // Calculate rank vs set
+                      const ourRank = ourScore !== null ? allScores.filter(s => s > ourScore).length + 1 : null;
+                      const totalDomains = allScores.length;
+                      const rankVs = (ourRank !== null && totalDomains > 0) ? `${ourRank}/${totalDomains}` : null;
+                      
+                      // Format delta (deltaLatest is already the difference, so format it directly)
+                      let deltaText = null;
+                      if (deltaLatest !== null && isFinite(deltaLatest)) {
+                        const sign = deltaLatest > 0 ? '+' : '';
+                        deltaText = `${sign}${deltaLatest.toFixed(1)}`;
                       }
-                    };
-                    
-                    // Save to cache
-                    localStorage.setItem('dashboard_domain_strength_cache_v4', JSON.stringify(newCache));
-                    
-                    // Refresh dashboard if it's currently visible
-                    if (typeof window.renderDashboardTab === 'function') {
-                      try {
-                        window.renderDashboardTab();
-                      } catch (e) {
-                        // Ignore refresh errors
+                      
+                      // Build cache object with deltas
+                      const newCache = {
+                        selfScore: ourScore,
+                        gapTop: gapTop,
+                        stronger: strongerCount,
+                        rankVs: rankVs,
+                        snapshotDate: latest.snapshotDate || null,
+                        kpis: {
+                          selfScore: ourScore !== null ? ourScore.toFixed(1) : null,
+                          gapTop: gapTop !== null ? `+${gapTop.toFixed(1)}` : null,
+                          stronger: strongerCount !== null ? String(strongerCount) : null,
+                          rankVs: rankVs
+                        },
+                        deltas: {
+                          selfScore: deltaText,
+                          gapTop: null, // Gap to top delta would need previous gap calculation
+                          stronger: null // Stronger count delta would need previous count
+                        },
+                        dirs: {
+                          selfScore: deltaLatest !== null ? (deltaLatest > 0 ? 'up' : deltaLatest < 0 ? 'down' : 'flat') : 'flat',
+                          gapTop: 'flat',
+                          stronger: 'flat'
+                        }
+                      };
+                      
+                      // Save to cache
+                      localStorage.setItem('dashboard_domain_strength_cache_v4', JSON.stringify(newCache));
+                      
+                      // Only refresh dashboard ONCE after cache is updated, and only if dashboard tab is active
+                      // Use a flag to prevent refresh loops
+                      if (!window.__domainStrengthRefreshed && typeof window.renderDashboardTab === 'function') {
+                        window.__domainStrengthRefreshed = true;
+                        // Use setTimeout to debounce and prevent immediate re-render
+                        setTimeout(() => {
+                          try {
+                            window.renderDashboardTab();
+                            // Reset flag after a delay to allow future refreshes if needed
+                            setTimeout(() => {
+                              window.__domainStrengthRefreshed = false;
+                            }, 5000);
+                          } catch (e) {
+                            window.__domainStrengthRefreshed = false;
+                          }
+                        }, 1000);
                       }
                     }
                   }
                 }
+              } catch (err) {
+                debugLog(`[Dashboard] Failed to fetch domain strength overview: ${err.message}`, 'warn');
+              } finally {
+                window.__domainStrengthFetching = false;
               }
-            } catch (err) {
-              debugLog(`[Dashboard] Failed to fetch domain strength overview: ${err.message}`, 'warn');
-            }
-          })();
+            })();
+          }
         }
 
         const eeat = computeEeatScore({
