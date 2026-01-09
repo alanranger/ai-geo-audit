@@ -15992,11 +15992,41 @@
                     debugLog(`[Optimisation] Rebaseline URL task: Cannot lookup AI data - no combinedRows available (${aiRows.length} rows)`, 'warn');
                   }
                   
+                  // Try to get ranking from Ranking & AI data if GSC position is null
+                  let rankingFromAi = null;
+                  if ((totals.position == null || totals.position === 0) && aiRows.length > 0) {
+                    // Find rows matching this URL and get average rank
+                    const matchingRows = aiRows.filter(r => {
+                      const rowUrl = (r.best_url || r.bestUrl || r.targetUrl || r.ranking_url || '').toLowerCase();
+                      const rowUrlClean = rowUrl.replace(/^https?:\/\//, '').replace(/^www\./, '');
+                      const taskUrlClean = pageUrlForGsc.replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
+                      return rowUrlClean === taskUrlClean || 
+                             rowUrl.includes(taskUrlClean) || 
+                             taskUrlClean.includes(rowUrlClean);
+                    });
+                    
+                    if (matchingRows.length > 0) {
+                      // Calculate average rank from all matching rows
+                      const ranks = matchingRows
+                        .map(r => r.best_rank_group || r.current_rank || null)
+                        .filter(r => r != null && r > 0);
+                      
+                      if (ranks.length > 0) {
+                        const avgRank = ranks.reduce((sum, r) => sum + r, 0) / ranks.length;
+                        rankingFromAi = avgRank;
+                        debugLog(`[Optimisation] Rebaseline: Found ranking from Ranking & AI data: ${avgRank.toFixed(2)} (from ${ranks.length} keywords)`, 'info');
+                      }
+                    }
+                  }
+                  
                   currentMetrics = {
                     gsc_clicks_28d: Number(totals.clicks || 0),
                     gsc_impressions_28d: Number(totals.impressions || 0),
                     gsc_ctr_28d: Number(totals.ctr || 0) / 100,
-                    current_rank: totals.position != null ? Number(totals.position) : null,
+                    // Prefer GSC position, fallback to Ranking & AI average rank
+                    current_rank: totals.position != null && totals.position > 0 
+                      ? Number(totals.position) 
+                      : (rankingFromAi != null ? Number(rankingFromAi) : null),
                     classic_ranking_url: pageUrlForGsc,
                     ai_overview: aiForUrl.ai_overview === true ? true : (aiForUrl.ai_overview === false ? false : null),
                     ai_citations: aiForUrl.ai_citations != null ? Number(aiForUrl.ai_citations) : null,
