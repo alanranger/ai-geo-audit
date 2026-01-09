@@ -51,6 +51,8 @@ export default async function handler(req, res) {
 
     // Fetch audit record for specific date
     // Select essential fields only to avoid FUNCTION_INVOCATION_FAILED
+    // NOTE: Only include fields that actually exist in the database
+    // Fields like ai_summary_components, domain_strength, eeat_score may not exist in older audits
     const selectFields = [
       'audit_date',
       'updated_at',
@@ -66,13 +68,9 @@ export default async function handler(req, res) {
       'gsc_ctr',
       'money_pages_metrics',
       'money_pages_summary',
-      'ranking_ai_data',
-      'ai_summary_components',
-      'domain_strength',
-      'eeat_score',
-      'eeat_confidence',
-      'eeat_subscores',
-      'optimisation_potential_clicks'
+      'ranking_ai_data'
+      // Removed fields that don't exist in database:
+      // 'ai_summary_components', 'domain_strength', 'eeat_score', 'eeat_confidence', 'eeat_subscores', 'optimisation_potential_clicks'
     ].join(',');
 
     const queryUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${encodeURIComponent(auditDate)}&select=${encodeURIComponent(selectFields)}&limit=1`;
@@ -147,13 +145,10 @@ export default async function handler(req, res) {
       } : null),
       rankingAiData: {
         combinedRows: parseJsonField(record.ranking_ai_data)?.combinedRows || []
-      },
-      aiSummaryComponents: parseJsonField(record.ai_summary_components),
-      domainStrength: parseJsonField(record.domain_strength),
-      eeatScore: record.eeat_score ?? null,
-      eeatConfidence: record.eeat_confidence ?? null,
-      eeatSubscores: parseJsonField(record.eeat_subscores),
-      optimisationPotentialClicks: record.optimisation_potential_clicks ?? null
+      }
+      // Note: These fields may not exist in the database for older audits
+      // They will be null if not available, which is handled gracefully by computeDashboardSnapshotFromAuditData
+      // aiSummaryComponents, domainStrength, eeatScore, etc. are computed/derived fields, not stored directly
     };
 
     return res.status(200).json({
