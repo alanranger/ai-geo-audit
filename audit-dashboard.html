@@ -53907,13 +53907,13 @@ Final Score: ${score}/100`;
           optimisationPotentialClicks = Math.round(sum);
         }
 
-        // Fetch domain strength data with deltas from overview API
+        // Fetch domain strength data with rolling 28-day deltas
         let domainCache = dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v4'), null)
           || dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v3'), null)
           || dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v2'), null)
           || dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v1'), null);
         
-        // If cache doesn't have deltas, fetch from overview API (non-blocking - don't await)
+        // If cache doesn't have deltas, fetch from overview + history APIs to calculate rolling 28-day delta (non-blocking - don't await)
         // This ensures dashboard still renders even if API call fails or is slow
         // Use a flag to prevent infinite loops
         // Also check if delta is null/undefined (not just missing) - if it's "0" that's valid
@@ -53941,19 +53941,82 @@ Final Score: ${score}/100`;
                   return baseUrl ? `${baseUrl}${cleanPath}` : cleanPath;
                 });
                 
-                const overviewResp = await fetch(urlHelper(`/api/domain-strength/overview`));
-                if (overviewResp.ok) {
+                // Fetch both overview (for latest score) and history (for rolling 28-day delta)
+                const [overviewResp, historyResp] = await Promise.all([
+                  fetch(urlHelper(`/api/domain-strength/overview`)),
+                  fetch(urlHelper(`/api/domain-strength/history?domains=${encodeURIComponent(normalizedDomain)}`))
+                ]);
+                
+                if (overviewResp.ok && historyResp.ok) {
                   const overviewJson = await overviewResp.json();
+                  const historyJson = await historyResp.json();
+                  
                   if (overviewJson?.status === 'ok' && Array.isArray(overviewJson.items)) {
-                    // Find our domain in the response
+                    // Find our domain in the overview response
                     const ourItem = overviewJson.items.find(item => {
                       const itemDomain = String(item?.domain || '').replace(/^www\./, '').toLowerCase();
                       return itemDomain === normalizedDomain.toLowerCase();
                     });
                     
-                    if (ourItem && ourItem.latest && ourItem.trend) {
+                    if (ourItem && ourItem.latest) {
                       const latest = ourItem.latest;
-                      const deltaLatest = typeof ourItem.trend.deltaLatest === 'number' ? ourItem.trend.deltaLatest : null;
+                      const ourScore = typeof latest.score === 'number' ? latest.score : null;
+                      const latestSnapshotDate = latest.snapshotDate || null;
+                      
+                      // Calculate rolling 28-day delta from history
+                      let rolling28DayDelta = null;
+                      if (historyJson?.status === 'ok' && Array.isArray(historyJson.data) && latestSnapshotDate && ourScore !== null) {
+                        // Calculate target date: 27 days before latest snapshot date
+                        const latestDate = new Date(latestSnapshotDate);
+                        const targetDate = new Date(latestDate);
+                        targetDate.setUTCDate(targetDate.getUTCDate() - 27);
+                        const targetDateStr = targetDate.toISOString().slice(0, 10);
+                        
+                        // Find snapshot closest to target date (27 days ago)
+                        const snapshots = historyJson.data
+                          .filter(s => s.domain === normalizedDomain && s.engine === 'google')
+                          .map(s => ({
+                            snapshot_date: s.snapshot_date,
+                            score: typeof s.score === 'number' ? s.score : null
+                          }))
+                          .filter(s => s.score !== null)
+                          .sort((a, b) => {
+                            const dateA = new Date(a.snapshot_date);
+                            const dateB = new Date(b.snapshot_date);
+                            return dateB - dateA; // Descending (newest first)
+                          });
+                        
+                        // Find snapshot closest to target date (prefer on or before target)
+                        let bestMatch = null;
+                        let bestDiff = Infinity;
+                        for (const snap of snapshots) {
+                          const snapDate = new Date(snap.snapshot_date);
+                          const diff = Math.abs(snapDate - targetDate);
+                          if (diff < bestDiff) {
+                            bestDiff = diff;
+                            bestMatch = snap;
+                          }
+                          // Prefer snapshots on or before target date
+                          if (snapDate <= targetDate) {
+                            bestMatch = snap;
+                            break;
+                          }
+                        }
+                        
+                        if (bestMatch && bestMatch.score !== null) {
+                          rolling28DayDelta = ourScore - bestMatch.score;
+                          const daysDiff = Math.round((latestDate - new Date(bestMatch.snapshot_date)) / (1000 * 60 * 60 * 24));
+                          debugLog(`[Dashboard] Domain strength rolling 28-day delta: ${rolling28DayDelta.toFixed(1)} (from ${bestMatch.snapshot_date}, ${daysDiff} days ago)`, 'info');
+                        }
+                      }
+                      
+                      // Fallback to API's deltaLatest if rolling 28-day calculation failed
+                      if (rolling28DayDelta === null && ourItem.trend) {
+                        rolling28DayDelta = typeof ourItem.trend.deltaLatest === 'number' ? ourItem.trend.deltaLatest : null;
+                        if (rolling28DayDelta !== null) {
+                          debugLog('[Dashboard] Domain strength using API deltaLatest as fallback', 'info');
+                        }
+                      }
                       
                       // Calculate gap to top and stronger domains count
                       const allScores = overviewJson.items
@@ -53962,7 +54025,6 @@ Final Score: ${score}/100`;
                         .sort((a, b) => b - a);
                       
                       const topScore = allScores.length > 0 ? allScores[0] : null;
-                      const ourScore = typeof latest.score === 'number' ? latest.score : null;
                       const gapTop = (topScore !== null && ourScore !== null) ? (topScore - ourScore) : null;
                       const strongerCount = ourScore !== null ? allScores.filter(s => s > ourScore).length : null;
                       
@@ -53971,20 +54033,20 @@ Final Score: ${score}/100`;
                       const totalDomains = allScores.length;
                       const rankVs = (ourRank !== null && totalDomains > 0) ? `${ourRank}/${totalDomains}` : null;
                       
-                      // Format delta (deltaLatest is already the difference, so format it directly)
+                      // Format rolling 28-day delta
                       let deltaText = null;
-                      if (deltaLatest !== null && isFinite(deltaLatest)) {
-                        const sign = deltaLatest > 0 ? '+' : '';
-                        deltaText = `${sign}${deltaLatest.toFixed(1)}`;
+                      if (rolling28DayDelta !== null && isFinite(rolling28DayDelta)) {
+                        const sign = rolling28DayDelta > 0 ? '+' : '';
+                        deltaText = `${sign}${rolling28DayDelta.toFixed(1)}`;
                       }
                       
-                      // Build cache object with deltas
+                      // Build cache object with rolling 28-day deltas
                       const newCache = {
                         selfScore: ourScore,
                         gapTop: gapTop,
                         stronger: strongerCount,
                         rankVs: rankVs,
-                        snapshotDate: latest.snapshotDate || null,
+                        snapshotDate: latestSnapshotDate,
                         kpis: {
                           selfScore: ourScore !== null ? ourScore.toFixed(1) : null,
                           gapTop: gapTop !== null ? `+${gapTop.toFixed(1)}` : null,
@@ -53997,7 +54059,7 @@ Final Score: ${score}/100`;
                           stronger: null // Stronger count delta would need previous count
                         },
                         dirs: {
-                          selfScore: deltaLatest !== null ? (deltaLatest > 0 ? 'up' : deltaLatest < 0 ? 'down' : 'flat') : 'flat',
+                          selfScore: rolling28DayDelta !== null ? (rolling28DayDelta > 0 ? 'up' : rolling28DayDelta < 0 ? 'down' : 'flat') : 'flat',
                           gapTop: 'flat',
                           stronger: 'flat'
                         }
@@ -54009,12 +54071,12 @@ Final Score: ${score}/100`;
                       // Update domain strength tile directly without re-rendering entire dashboard
                       // This prevents infinite loops while still showing updated delta
                       // The tile will update on next manual refresh or when dashboard is re-rendered for other reasons
-                      debugLog('[Dashboard] Domain strength cache updated with deltas', 'success');
+                      debugLog('[Dashboard] Domain strength cache updated with rolling 28-day deltas', 'success');
                     }
                   }
                 }
               } catch (err) {
-                debugLog(`[Dashboard] Failed to fetch domain strength overview: ${err.message}`, 'warn');
+                debugLog(`[Dashboard] Failed to fetch domain strength for rolling 28-day delta: ${err.message}`, 'warn');
               } finally {
                 window.__domainStrengthFetching = false;
               }
@@ -54926,7 +54988,8 @@ Final Score: ${score}/100`;
         };
       }
 
-      // Helper function to fetch previous audit by audit_date for delta calculations
+      // Helper function to fetch audit from ~27 days ago for rolling 28-day delta calculations
+      // This ensures consistent time-period comparisons across all dashboard tiles
       async function fetchPreviousAuditForDeltas(propertyUrl, currentAuditDate) {
         if (!propertyUrl || !currentAuditDate) return null;
         
@@ -54938,8 +55001,13 @@ Final Score: ${score}/100`;
             return baseUrl ? `${baseUrl}${cleanPath}` : cleanPath;
           });
           
-          // Fetch audit history to find the previous audit_date
-          // The endpoint returns audits sorted by audit_date ascending
+          // Calculate target date: 27 days before current audit date (rolling 28-day window)
+          const currentDate = new Date(currentAuditDate);
+          const targetDate = new Date(currentDate);
+          targetDate.setUTCDate(targetDate.getUTCDate() - 27);
+          const targetDateStr = targetDate.toISOString().slice(0, 10);
+          
+          // Fetch audit history to find the audit closest to 27 days ago
           const historyResponse = await fetch(urlHelper(`/api/supabase/get-audit-history?propertyUrl=${encodeURIComponent(propertyUrl)}`));
           if (!historyResponse.ok) {
             debugLog(`[Dashboard] Audit history fetch failed: ${historyResponse.status}`, 'warn');
@@ -54947,7 +55015,7 @@ Final Score: ${score}/100`;
           }
           
           const historyResult = await historyResponse.json();
-          if (historyResult.status === 'ok' && Array.isArray(historyResult.data) && historyResult.data.length >= 2) {
+          if (historyResult.status === 'ok' && Array.isArray(historyResult.data) && historyResult.data.length >= 1) {
             // Sort audits by date descending (most recent first)
             const sortedAudits = historyResult.data
               .map(a => ({
@@ -54964,15 +55032,59 @@ Final Score: ${score}/100`;
             // Find current audit index
             const currentIndex = sortedAudits.findIndex(a => a.audit_date === currentAuditDate);
             
-            // Get previous audit (the one before current)
-            if (currentIndex > 0) {
-              const prevAuditDate = sortedAudits[currentIndex - 1].audit_date;
+            // Find audit closest to target date (27 days ago)
+            // Prefer audits before target date, but accept closest if none exist before
+            // Also filter out anomalous audits (e.g., 2025-12-13 with double impressions)
+            let bestMatch = null;
+            let bestDiff = Infinity;
+            
+            // Known anomalous audit dates to skip (data collection errors)
+            const anomalousAuditDates = new Set(['2025-12-13']); // 2025-12-13 has double impressions/clicks
+            
+            for (let i = 0; i < sortedAudits.length; i++) {
+              // Skip current audit
+              if (sortedAudits[i].audit_date === currentAuditDate) continue;
               
-              // Fetch full data for previous audit
-              // Note: get-latest-audit doesn't support auditDate param, so we'll use the history data
-              // and compute snapshot from it, or fetch via a different method
-              // For now, we'll compute snapshot from the history data which has the scores
-              const prevAuditFromHistory = sortedAudits[currentIndex - 1].data;
+              // Skip known anomalous audits
+              if (anomalousAuditDates.has(sortedAudits[i].audit_date)) {
+                debugLog(`[Dashboard] Skipping anomalous audit: ${sortedAudits[i].audit_date}`, 'info');
+                continue;
+              }
+              
+              const auditDate = new Date(sortedAudits[i].audit_date);
+              const diff = Math.abs(auditDate - targetDate);
+              
+              // Prefer audits on or before target date (but accept closest if needed)
+              if (diff < bestDiff) {
+                bestDiff = diff;
+                bestMatch = sortedAudits[i];
+              }
+              
+              // If we find an audit exactly on or before target date, prefer it
+              if (auditDate <= targetDate) {
+                bestMatch = sortedAudits[i];
+                break;
+              }
+            }
+            
+            // If no audit found close to target date, use oldest available audit as fallback
+            if (!bestMatch && sortedAudits.length > 0) {
+              // Find oldest audit (last in descending sorted list)
+              for (let i = sortedAudits.length - 1; i >= 0; i--) {
+                if (sortedAudits[i].audit_date !== currentAuditDate) {
+                  bestMatch = sortedAudits[i];
+                  debugLog(`[Dashboard] No audit near 27 days ago, using oldest available: ${bestMatch.audit_date}`, 'info');
+                  break;
+                }
+              }
+            }
+            
+            if (bestMatch && bestMatch.audit_date !== currentAuditDate) {
+              const prevAuditDate = bestMatch.audit_date;
+              const prevAuditFromHistory = bestMatch.data;
+              
+              // Calculate days difference for logging
+              const daysDiff = Math.round((currentDate - new Date(prevAuditDate)) / (1000 * 60 * 60 * 24));
               
               // Reconstruct audit data structure from history record
               const prevAuditData = {
@@ -54998,10 +55110,10 @@ Final Score: ${score}/100`;
                 } : null)
               };
               
-              debugLog(`[Dashboard] Found previous audit_date: ${prevAuditDate} (current: ${currentAuditDate})`, 'info');
+              debugLog(`[Dashboard] Found rolling 28-day audit: ${prevAuditDate} (${daysDiff} days ago, target: ${targetDateStr})`, 'info');
               return prevAuditData;
             } else if (currentIndex === -1 && sortedAudits.length > 0) {
-              // Current audit not found in history, use the most recent one as previous
+              // Current audit not found in history, use the most recent one as fallback
               const mostRecentDate = sortedAudits[0].audit_date;
               if (mostRecentDate !== currentAuditDate) {
                 const mostRecentData = sortedAudits[0].data;
@@ -55027,17 +55139,17 @@ Final Score: ${score}/100`;
                     overview: mostRecentData.money_pages_summary
                   } : null)
                 };
-                debugLog(`[Dashboard] Using most recent audit as previous: ${mostRecentDate}`, 'info');
+                debugLog(`[Dashboard] Using most recent audit as fallback: ${mostRecentDate}`, 'info');
                 return prevAuditData;
               }
             }
           } else {
-            debugLog(`[Dashboard] Not enough audit history (found ${historyResult.data?.length || 0} audits, need at least 2)`, 'warn');
+            debugLog(`[Dashboard] Not enough audit history (found ${historyResult.data?.length || 0} audits)`, 'warn');
           }
           
           return null;
         } catch (err) {
-          debugLog(`[Dashboard] Failed to fetch previous audit for deltas: ${err?.message || err}`, 'warn');
+          debugLog(`[Dashboard] Failed to fetch rolling 28-day audit for deltas: ${err?.message || err}`, 'warn');
           return null;
         }
       }
@@ -55081,7 +55193,7 @@ Final Score: ${score}/100`;
         }
         
         // Always show LIVE latest-available metrics (from the latest independent audits).
-        // Deltas are computed against the previous audit_date (not global run snapshots).
+        // Deltas are computed using rolling 28-day window (audit ~27 days ago vs current) for consistency.
         const liveSnapshot = computeDashboardSnapshot();
 
         // If admin key exists, auto-load optimisation tasks so the dashboard isn't blank.
@@ -55111,8 +55223,9 @@ Final Score: ${score}/100`;
         if (lastRunEl) lastRunEl.textContent = lastGlobal ? formatUtcTimestamp(lastGlobal.timestamp) : '—';
         if (lastStatusEl) lastStatusEl.textContent = lastGlobal ? (lastGlobal.status || 'ok') : '—';
 
-        // CRITICAL: Fetch previous audit by audit_date for proper delta calculations
-        let prevMetricsFromAuditDate = null;
+        // CRITICAL: Fetch audit from ~27 days ago for rolling 28-day delta calculations
+        // This ensures consistent time-period comparisons across all dashboard tiles
+        let prevMetricsFromRolling28d = null;
         try {
           const currentAudit = dashboardSafeJsonParse(localStorage.getItem('last_audit_results'), null);
           if (currentAudit && currentAudit.auditDate) {
@@ -55120,19 +55233,28 @@ Final Score: ${score}/100`;
             if (propertyUrl) {
               const prevAuditData = await fetchPreviousAuditForDeltas(propertyUrl, currentAudit.auditDate);
               if (prevAuditData) {
-                // Compute snapshot from previous audit data
+                // Compute snapshot from rolling 28-day audit data
                 const prevSnapshot = computeDashboardSnapshotFromAuditData(prevAuditData);
-                prevMetricsFromAuditDate = prevSnapshot;
-                debugLog(`[Dashboard] Using previous audit_date (${prevAuditData.auditDate}) for delta calculations`, 'info');
+                prevMetricsFromRolling28d = prevSnapshot;
+                debugLog(`[Dashboard] Using rolling 28-day audit (${prevAuditData.auditDate}) for delta calculations. GAIO: ${prevSnapshot?.gaioScore ?? 'null'}, AI Summary: ${prevSnapshot?.aiSummaryScore ?? 'null'}`, 'info');
+              } else {
+                debugLog(`[Dashboard] No previous audit found for rolling 28-day delta calculation`, 'warn');
               }
+            } else {
+              debugLog(`[Dashboard] No property URL found for rolling 28-day delta calculation`, 'warn');
             }
+          } else {
+            debugLog(`[Dashboard] No current audit found in localStorage for rolling 28-day delta calculation`, 'warn');
           }
         } catch (err) {
-          debugLog(`[Dashboard] Error fetching previous audit for deltas: ${err?.message || err}`, 'warn');
+          debugLog(`[Dashboard] Error fetching rolling 28-day audit for deltas: ${err?.message || err}`, 'warn');
         }
 
-        // Use audit_date-based deltas if available, otherwise fall back to global run snapshots
-        const prevMetrics = prevMetricsFromAuditDate || prevGlobal?.metrics || null;
+        // Use rolling 28-day deltas if available, otherwise fall back to global run snapshots
+        const prevMetrics = prevMetricsFromRolling28d || prevGlobal?.metrics || null;
+        if (!prevMetrics) {
+          debugLog(`[Dashboard] No previous metrics available for delta calculations (prevMetricsFromRolling28d: ${!!prevMetricsFromRolling28d}, prevGlobal: ${!!prevGlobal})`, 'warn');
+        }
         const metrics = liveSnapshot;
 
         // Dial: GAIO
