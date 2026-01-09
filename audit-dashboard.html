@@ -55030,6 +55030,13 @@ Final Score: ${score}/100`;
           ? computeRankingKpisFromRows(rankingRows)
           : null;
         
+        // Compute money share from ranking data (same calculation as computeDashboardSnapshot)
+        // This calculates the percentage of AI citations that are on money pages
+        const moneyShare = (typeof computeMoneyCitationsShareFromRankingRows === 'function' && rankingRows.length > 0)
+          ? computeMoneyCitationsShareFromRankingRows(rankingRows)
+          : { money: null, total: null, pct: null };
+        const moneySharePct = moneyShare.pct; // This is the percentage (0-100)
+        
         // Extract AI Summary components (needed for AI Summary radar chart deltas)
         const aiSummaryComponents = auditData.aiSummaryComponents || null;
         
@@ -55044,7 +55051,7 @@ Final Score: ${score}/100`;
         // Extract optimisation potential clicks (needed for Optimisation tile deltas)
         const optimisationPotentialClicks = auditData.optimisationPotentialClicks ?? null;
         
-        debugLog(`[Dashboard] computeDashboardSnapshotFromAuditData: GAIO=${gaioScore}, AI Summary=${scores.aiSummaryScore || auditData.ai_summary_score || 'null'}, rankingKpis=${rankingKpis ? 'present' : 'null'}, aiSummaryComponents=${aiSummaryComponents ? 'present' : 'null'}, domainStrength=${domainStrength ? 'present' : 'null'}, eeatScore=${eeatScore ?? 'null'}`, 'info');
+        debugLog(`[Dashboard] computeDashboardSnapshotFromAuditData: GAIO=${gaioScore}, AI Summary=${scores.aiSummaryScore || auditData.ai_summary_score || 'null'}, rankingKpis=${rankingKpis ? 'present' : 'null'}, moneySharePct=${moneySharePct ?? 'null'}, aiSummaryComponents=${aiSummaryComponents ? 'present' : 'null'}, domainStrength=${domainStrength ? 'present' : 'null'}, eeatScore=${eeatScore ?? 'null'}`, 'info');
         
         return {
           gaioScore,
@@ -55057,8 +55064,7 @@ Final Score: ${score}/100`;
             avgPosition: searchData.overview.position || searchData.averagePosition || null,
             ctrPct: searchData.overview.ctr || searchData.ctr || 0
           } : null,
-          moneySharePct: scores.moneyPagesMetrics?.overview ? 
-            (scores.moneyPagesMetrics.overview.shareOfImpressions || 0) * 100 : null,
+          moneySharePct: moneySharePct, // Calculated from ranking data (money citations / total citations)
           moneyAgg: moneyAgg, // Add moneyAgg for Money Pages tile deltas
           rankingKpis, // Added for Ranking tile deltas
           domainStrength, // Added for Domain Strength tile deltas
