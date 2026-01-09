@@ -114,6 +114,94 @@ export default async function handler(req, res) {
       });
     }
 
+    // CRITICAL: Handle partial updates (e.g., only rankingAiData sent from Ranking & AI scan)
+    // Fetch latest audit data to recompute computed fields with complete data
+    let mergedScores = scores;
+    let mergedSnippetReadiness = snippetReadiness;
+    let mergedSchemaAudit = schemaAudit;
+    let mergedLocalSignals = localSignals;
+    let mergedDomainStrength = domainStrength;
+    
+    // If only rankingAiData is sent (partial update), fetch latest audit to get other fields
+    const isPartialUpdate = rankingAiData && !scores && !schemaAudit && !searchData;
+    if (isPartialUpdate) {
+      console.log('[Save Audit] Partial update detected (only rankingAiData). Fetching latest audit to recompute computed fields...');
+      try {
+        // Fetch latest audit from Supabase
+        const latestAuditUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.desc&limit=1`;
+        const latestAuditResp = await fetch(latestAuditUrl, {
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+            Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
+          }
+        });
+        
+        if (latestAuditResp.ok) {
+          const latestAuditData = await latestAuditResp.json();
+          if (Array.isArray(latestAuditData) && latestAuditData.length > 0) {
+            const latest = latestAuditData[0];
+            console.log(`[Save Audit] ✓ Fetched latest audit (${latest.audit_date}) for partial update`);
+            
+            // Parse JSON fields
+            const parseJsonField = (field) => {
+              if (!field) return null;
+              if (typeof field === 'object') return field;
+              try {
+                return JSON.parse(field);
+              } catch {
+                return null;
+              }
+            };
+            
+            // Merge with latest audit data
+            mergedScores = {
+              visibility: latest.visibility_score ?? null,
+              authority: latest.authority_score ?? null,
+              contentSchema: latest.content_schema_score ?? null,
+              localEntity: latest.local_entity_score ?? null,
+              serviceArea: latest.service_area_score ?? null,
+              aiSummaryScore: latest.ai_summary_score ?? null,
+              moneyPagesMetrics: parseJsonField(latest.money_pages_metrics),
+              authorityComponents: parseJsonField(latest.authority_by_segment) ? {
+                // Reconstruct from available data if needed
+                behaviour: null,
+                ranking: null,
+                backlinks: latest.authority_backlink_score ?? null,
+                reviews: latest.authority_review_score ?? null
+              } : null
+            };
+            mergedSnippetReadiness = null; // Not stored in audit_results, will use default
+            mergedSchemaAudit = parseJsonField(latest.schema_pages_detail) ? { data: parseJsonField(latest.schema_pages_detail) } : null;
+            mergedLocalSignals = {
+              data: {
+                napConsistencyScore: latest.nap_consistency_score ?? null,
+                knowledgePanelDetected: latest.knowledge_panel_detected ?? null,
+                serviceAreas: parseJsonField(latest.service_areas),
+                locations: parseJsonField(latest.locations)
+              }
+            };
+            mergedDomainStrength = parseJsonField(latest.domain_strength);
+            
+            console.log('[Save Audit] ✓ Merged latest audit data for computed fields calculation');
+          } else {
+            console.warn('[Save Audit] ⚠ No latest audit found for partial update. Computed fields will use defaults.');
+          }
+        } else {
+          console.warn(`[Save Audit] ⚠ Failed to fetch latest audit for partial update: ${latestAuditResp.status}`);
+        }
+      } catch (fetchErr) {
+        console.warn(`[Save Audit] ⚠ Error fetching latest audit for partial update: ${fetchErr.message}`);
+      }
+    }
+    
+    // Use merged data for computed fields calculation
+    const finalScores = mergedScores || scores;
+    const finalSnippetReadiness = mergedSnippetReadiness || snippetReadiness;
+    const finalSchemaAudit = mergedSchemaAudit || schemaAudit;
+    const finalLocalSignals = mergedLocalSignals || localSignals;
+    const finalDomainStrength = mergedDomainStrength || domainStrength;
+
     // Get Supabase credentials from environment
     const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -126,8 +214,15 @@ export default async function handler(req, res) {
       });
     }
 
+    // Use merged data for all calculations
+    const schemaAuditToUse = finalSchemaAudit;
+    const scoresToUse = finalScores;
+    const snippetReadinessToUse = finalSnippetReadiness;
+    const localSignalsToUse = finalLocalSignals;
+    const domainStrengthToUse = finalDomainStrength;
+    
     // Extract schema audit data
-    const schemaData = schemaAudit?.data || {};
+    const schemaData = schemaAuditToUse?.data || {};
     const schemaTypes = schemaData.schemaTypes || [];
     
     // Debug: Log schema data structure to understand what's available
@@ -283,28 +378,28 @@ export default async function handler(req, res) {
       })(),
       
       // Pillar Scores
-      visibility_score: ensureNumber(scores?.visibility),
+      visibility_score: ensureNumber(scoresToUse?.visibility),
       // Authority score: extract numeric score from object structure if needed
       authority_score: ensureNumber(
-        (typeof scores?.authority === 'object' && scores?.authority !== null) 
-          ? scores.authority.score 
-          : scores?.authority
+        (typeof scoresToUse?.authority === 'object' && scoresToUse?.authority !== null) 
+          ? scoresToUse.authority.score 
+          : scoresToUse?.authority
       ),
-      local_entity_score: ensureNumber(scores?.localEntity),
-      service_area_score: ensureNumber(scores?.serviceArea),
-      content_schema_score: ensureNumber(scores?.contentSchema),
+      local_entity_score: ensureNumber(scoresToUse?.localEntity),
+      service_area_score: ensureNumber(scoresToUse?.serviceArea),
+      content_schema_score: ensureNumber(scoresToUse?.contentSchema),
       snippet_readiness: ensureNumber(
-        typeof snippetReadiness === 'number' 
-          ? snippetReadiness 
-          : (snippetReadiness?.overallScore || null)
+        typeof snippetReadinessToUse === 'number' 
+          ? snippetReadinessToUse 
+          : (snippetReadinessToUse?.overallScore || null)
       ),
       
       // Phase 1: Brand Overlay and AI Summary (stored as JSON)
-      brand_overlay: ensureJson(scores?.brandOverlay), // JSON object with score, label, metrics, notes
-      brand_score: ensureNumber(scores?.brandOverlay?.score), // For trend charting
+      brand_overlay: ensureJson(scoresToUse?.brandOverlay), // JSON object with score, label, metrics, notes
+      brand_score: ensureNumber(scoresToUse?.brandOverlay?.score), // For trend charting
       
       // Money Pages Performance (Phase 1 - stored as JSON)
-      money_pages_metrics: ensureJson(scores?.moneyPagesMetrics), // JSON object: {overview: {...}, rows: [...]}
+      money_pages_metrics: ensureJson(scoresToUse?.moneyPagesMetrics), // JSON object: {overview: {...}, rows: [...]}
       
       // Phase 3: Money Pages Summary (compact summary for trend tracking)
       money_pages_summary: ensureJson(moneyPagesSummary), // JSON object: {count, impressions, clicks, ctr, avgPosition, shareOfImpressions, shareOfClicks, behaviourScore}
@@ -358,25 +453,25 @@ export default async function handler(req, res) {
         };
       })(),
       ai_summary_score: (() => {
-        if (!snippetReadiness || !scores) return null;
+        if (!snippetReadinessToUse || !scoresToUse) return null;
         // Handle both number and object formats for snippetReadiness
-        const snippetReadinessScore = typeof snippetReadiness === 'number' 
-          ? snippetReadiness 
-          : (snippetReadiness.overallScore || 0);
-        const visibilityScore = scores.visibility || 0;
-        const brandScore = scores.brandOverlay?.score || 0;
+        const snippetReadinessScore = typeof snippetReadinessToUse === 'number' 
+          ? snippetReadinessToUse 
+          : (snippetReadinessToUse?.overallScore || 0);
+        const visibilityScore = scoresToUse.visibility || 0;
+        const brandScore = scoresToUse.brandOverlay?.score || 0;
         if (snippetReadinessScore === 0 && brandScore === 0) return null;
         return Math.round(0.5 * snippetReadinessScore + 0.3 * visibilityScore + 0.2 * brandScore);
       })(),
       
       // AI Summary Components (for AI Citations tile delta calculations)
       ai_summary_components: (() => {
-        if (!snippetReadiness || !scores) return null;
-        const snippetReadinessScore = typeof snippetReadiness === 'number' 
-          ? snippetReadiness 
-          : (snippetReadiness.overallScore || 0);
-        const visibilityScore = scores.visibility || 0;
-        const brandScore = scores.brandOverlay?.score || 0;
+        if (!snippetReadinessToUse || !scoresToUse) return null;
+        const snippetReadinessScore = typeof snippetReadinessToUse === 'number' 
+          ? snippetReadinessToUse 
+          : (snippetReadinessToUse?.overallScore || 0);
+        const visibilityScore = scoresToUse.visibility || 0;
+        const brandScore = scoresToUse.brandOverlay?.score || 0;
         if (snippetReadinessScore === 0 && visibilityScore === 0 && brandScore === 0) return null;
         return {
           snippetReadiness: Math.round(snippetReadinessScore),
@@ -386,13 +481,13 @@ export default async function handler(req, res) {
       })(),
       
       // Authority Component Scores (for historical tracking and debugging)
-      authority_behaviour_score: ensureNumber(scores?.authorityComponents?.behaviour),
-      authority_ranking_score: ensureNumber(scores?.authorityComponents?.ranking),
-      authority_backlink_score: ensureNumber(scores?.authorityComponents?.backlinks),
-      authority_review_score: ensureNumber(scores?.authorityComponents?.reviews),
+      authority_behaviour_score: ensureNumber(scoresToUse?.authorityComponents?.behaviour),
+      authority_ranking_score: ensureNumber(scoresToUse?.authorityComponents?.ranking),
+      authority_backlink_score: ensureNumber(scoresToUse?.authorityComponents?.backlinks),
+      authority_review_score: ensureNumber(scoresToUse?.authorityComponents?.reviews),
       
       // Segmented Authority Scores (for building historical segmented data)
-      authority_by_segment: ensureJson(scores?.authority?.bySegment), // JSON object with {all, nonEducation, money}
+      authority_by_segment: ensureJson(scoresToUse?.authority?.bySegment), // JSON object with {all, nonEducation, money}
       
       // Debug: Log authority_by_segment structure for verification
       // (This will be stored as JSON in Supabase)
@@ -419,7 +514,7 @@ export default async function handler(req, res) {
           const safe50 = (v) => (typeof v === 'number' && isFinite(v)) ? v : 50;
           
           // Authority components
-          const ac = scores?.authorityComponents || {};
+          const ac = scoresToUse?.authorityComponents || {};
           const behaviour = toNum(ac.behaviour);
           const reviews = toNum(ac.reviews);
           const backlinksRaw = toNum(ac.backlinks);
@@ -428,21 +523,21 @@ export default async function handler(req, res) {
           const backlinks = hasBacklinks ? backlinksRaw : 50;
           
           // Local signals / NAP
-          const localData = localSignals?.data || localSignals || null;
+          const localData = localSignalsToUse?.data || localSignalsToUse || null;
           const nap = toNum(localData?.napConsistencyScore);
           const hasLocalSignals = nap != null || localData?.knowledgePanelDetected === true || 
             (Array.isArray(localData?.locations) && localData.locations.length > 0);
           
           // Core pillar scores
-          const localEntity = toNum(scores?.localEntity);
-          const contentSchema = toNum(scores?.contentSchema);
-          const snippetReadinessScore = typeof snippetReadiness === 'number' 
-            ? snippetReadiness 
-            : (snippetReadiness?.overallScore || 0);
+          const localEntity = toNum(scoresToUse?.localEntity);
+          const contentSchema = toNum(scoresToUse?.contentSchema);
+          const snippetReadinessScore = typeof snippetReadinessToUse === 'number' 
+            ? snippetReadinessToUse 
+            : (snippetReadinessToUse?.overallScore || 0);
           const snippet = toNum(snippetReadinessScore);
           
           // Domain Strength (use actual score if provided, default to 50 if not available)
-          const domainScoreRaw = domainStrength?.selfScore != null ? domainStrength.selfScore : null;
+          const domainScoreRaw = domainStrengthToUse?.selfScore != null ? domainStrengthToUse.selfScore : null;
           const hasDomainStrength = domainScoreRaw !== null && typeof domainScoreRaw === 'number';
           const domainScore = hasDomainStrength ? clampScore(domainScoreRaw) : 50; // Default to 50 if not available
           
@@ -480,16 +575,16 @@ export default async function handler(req, res) {
       
       eeat_confidence: (() => {
         try {
-          const ac = scores?.authorityComponents || {};
+          const ac = scoresToUse?.authorityComponents || {};
           const hasBacklinks = (ac.backlinks !== null && ac.backlinks !== undefined && ac.backlinks > 0);
-          const localData = localSignals?.data || localSignals || null;
+          const localData = localSignalsToUse?.data || localSignalsToUse || null;
           const hasLocalSignals = localData?.napConsistencyScore != null || 
             localData?.knowledgePanelDetected === true || 
             (Array.isArray(localData?.locations) && localData.locations.length > 0);
           const hasAiCitations = rankingAiData && rankingAiData.combinedRows && 
             Array.isArray(rankingAiData.combinedRows) &&
             rankingAiData.combinedRows.some(row => (row.ai_alan_citations_count || 0) > 0);
-          const hasDomainStrength = domainStrength?.selfScore != null && typeof domainStrength.selfScore === 'number';
+          const hasDomainStrength = domainStrengthToUse?.selfScore != null && typeof domainStrengthToUse.selfScore === 'number';
           
           const signalCount = [hasBacklinks, hasDomainStrength, hasAiCitations, hasLocalSignals].filter(Boolean).length;
           if (signalCount >= 3) return 'High';
@@ -510,22 +605,22 @@ export default async function handler(req, res) {
           const toNum = (v) => (typeof v === 'number' && isFinite(v)) ? v : null;
           const safe50 = (v) => (typeof v === 'number' && isFinite(v)) ? v : 50;
           
-          const ac = scores?.authorityComponents || {};
+          const ac = scoresToUse?.authorityComponents || {};
           const behaviour = toNum(ac.behaviour);
           const reviews = toNum(ac.reviews);
           const backlinksRaw = toNum(ac.backlinks);
           const backlinks = (backlinksRaw !== null && backlinksRaw > 0) ? backlinksRaw : 50;
           
-          const localData = localSignals?.data || localSignals || null;
+          const localData = localSignalsToUse?.data || localSignalsToUse || null;
           const nap = toNum(localData?.napConsistencyScore);
-          const localEntity = toNum(scores?.localEntity);
-          const contentSchema = toNum(scores?.contentSchema);
-          const snippetReadinessScore = typeof snippetReadiness === 'number' 
-            ? snippetReadiness 
-            : (snippetReadiness?.overallScore || 0);
+          const localEntity = toNum(scoresToUse?.localEntity);
+          const contentSchema = toNum(scoresToUse?.contentSchema);
+          const snippetReadinessScore = typeof snippetReadinessToUse === 'number' 
+            ? snippetReadinessToUse 
+            : (snippetReadinessToUse?.overallScore || 0);
           const snippet = toNum(snippetReadinessScore);
           
-          const domainScoreRaw = domainStrength?.selfScore != null ? domainStrength.selfScore : null;
+          const domainScoreRaw = domainStrengthToUse?.selfScore != null ? domainStrengthToUse.selfScore : null;
           const domainScore = (domainScoreRaw !== null && typeof domainScoreRaw === 'number') ? clampScore(domainScoreRaw) : 50; // Default to 50 if not available
           let citationsTotal = 0;
           if (rankingAiData && rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
@@ -553,17 +648,17 @@ export default async function handler(req, res) {
         }
       })(),
       
-      // Domain Strength (passed from client, fetched automatically in saveAuditToSupabase)
-      domain_strength: ensureJson(domainStrength), // {selfScore, topCompetitorScore, strongerCount, competitorsCount, snapshotDate}
+      // Domain Strength (passed from client, fetched automatically in saveAuditToSupabase, or from latest audit in partial updates)
+      domain_strength: ensureJson(domainStrengthToUse), // {selfScore, topCompetitorScore, strongerCount, competitorsCount, snapshotDate}
       
       // Business Profile Data (for historical tracking)
-      local_business_schema_pages: ensureNumber(localSignals?.data?.localBusinessSchemaPages),
-      nap_consistency_score: ensureNumber(localSignals?.data?.napConsistencyScore),
-      knowledge_panel_detected: localSignals?.data?.knowledgePanelDetected === true ? true : (localSignals?.data?.knowledgePanelDetected === false ? false : null),
-      service_areas: Array.isArray(localSignals?.data?.serviceAreas) ? localSignals.data.serviceAreas : null, // Array of service area objects
-      locations: Array.isArray(localSignals?.data?.locations) ? localSignals.data.locations : null, // Array of location objects
-      gbp_rating: localSignals?.data?.gbpRating !== null && localSignals?.data?.gbpRating !== undefined ? parseFloat(localSignals.data.gbpRating) : null,
-      gbp_review_count: localSignals?.data?.gbpReviewCount !== null && localSignals?.data?.gbpReviewCount !== undefined ? parseInt(localSignals.data.gbpReviewCount) : null,
+      local_business_schema_pages: ensureNumber(localSignalsToUse?.data?.localBusinessSchemaPages),
+      nap_consistency_score: ensureNumber(localSignalsToUse?.data?.napConsistencyScore),
+      knowledge_panel_detected: localSignalsToUse?.data?.knowledgePanelDetected === true ? true : (localSignalsToUse?.data?.knowledgePanelDetected === false ? false : null),
+      service_areas: Array.isArray(localSignalsToUse?.data?.serviceAreas) ? localSignalsToUse.data.serviceAreas : null, // Array of service area objects
+      locations: Array.isArray(localSignalsToUse?.data?.locations) ? localSignalsToUse.data.locations : null, // Array of location objects
+      gbp_rating: localSignalsToUse?.data?.gbpRating !== null && localSignalsToUse?.data?.gbpRating !== undefined ? parseFloat(localSignalsToUse.data.gbpRating) : null,
+      gbp_review_count: localSignalsToUse?.data?.gbpReviewCount !== null && localSignalsToUse?.data?.gbpReviewCount !== undefined ? parseInt(localSignalsToUse.data.gbpReviewCount) : null,
       
       // Partial write flags (set below after validation)
       is_partial: false,
@@ -582,7 +677,9 @@ export default async function handler(req, res) {
 
     // ---- Guardrails: prevent writing "null audits" and mark partials ----
     // We consider a write "invalid" (reject) if it contains no meaningful audit payload.
-    // EXCEPTION: Allow partial updates that only contain query_totals (for updating existing audits)
+    // EXCEPTIONS: 
+    // 1. Allow partial updates that only contain query_totals (for updating existing audits)
+    // 2. Allow partial updates that only contain rankingAiData (for Ranking & AI scan)
     const hasAnyPillarScore = [
       auditRecord.visibility_score,
       auditRecord.authority_score,
@@ -598,8 +695,13 @@ export default async function handler(req, res) {
       auditRecord.top_queries !== null ||
       (auditRecord.query_totals !== null && Array.isArray(auditRecord.query_totals) && auditRecord.query_totals.length > 0);
 
-    // Allow partial updates with query_totals only (for updating existing audits)
-    if (!hasAnyPillarScore && !hasAnyHeavyPayload && !hasQueryTotalsOnly) {
+    const hasRankingAiData = auditRecord.ranking_ai_data !== null && 
+      typeof auditRecord.ranking_ai_data === 'object' &&
+      Array.isArray(auditRecord.ranking_ai_data?.combinedRows) &&
+      auditRecord.ranking_ai_data.combinedRows.length > 0;
+
+    // Allow partial updates with query_totals only OR rankingAiData only (for updating existing audits)
+    if (!hasAnyPillarScore && !hasAnyHeavyPayload && !hasQueryTotalsOnly && !hasRankingAiData) {
       console.warn('[Supabase Save] ✗ Rejecting audit write: no scores and no payload (would create null audit row)');
       return res.status(400).json({
         status: 'error',

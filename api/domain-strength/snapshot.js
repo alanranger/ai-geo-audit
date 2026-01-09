@@ -263,6 +263,9 @@ export default async function handler(req, res) {
   }
 
   try {
+  // Get Supabase credentials
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   const body = req.body && typeof req.body === "string" ? JSON.parse(req.body) : (req.body || {});
   const mode = (body.mode || "run") === "test" ? "test" : "run";
@@ -586,6 +589,71 @@ export default async function handler(req, res) {
       if (includePending && insertPayload.length > 0) {
         const processedDomains = insertPayload.map(r => r.domain).filter(Boolean);
         await clearPending(processedDomains, engine);
+      }
+      
+      // CRITICAL: Update latest audit record's domain_strength field for primary domain
+      // This ensures domain strength is stored in audit_results for delta calculations
+      if (primaryDomain && insertPayload.length > 0) {
+        const primaryDomainSnapshot = insertPayload.find(r => r.domain === primaryDomain);
+        if (primaryDomainSnapshot) {
+          try {
+            // Get property URL from environment or use default
+            const propertyUrl = process.env.AI_GEO_DOMAIN 
+              ? `https://${process.env.AI_GEO_DOMAIN}` 
+              : (process.env.SITE_DOMAIN ? `https://${process.env.SITE_DOMAIN}` : 'https://www.alanranger.com');
+            
+            // Fetch latest audit date for this property
+            const latestAuditUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.desc&limit=1&select=audit_date`;
+            const latestAuditResp = await fetch(latestAuditUrl, {
+              headers: {
+                'Content-Type': 'application/json',
+                apikey: supabaseKey,
+                Authorization: `Bearer ${supabaseKey}`
+              }
+            });
+            
+            if (latestAuditResp.ok) {
+              const latestAuditData = await latestAuditResp.json();
+              if (Array.isArray(latestAuditData) && latestAuditData.length > 0) {
+                const latestAuditDate = latestAuditData[0].audit_date;
+                
+                // Build domain strength object
+                const domainStrengthData = {
+                  selfScore: primaryDomainSnapshot.score,
+                  topCompetitorScore: null, // Will be populated by overview API
+                  strongerCount: null, // Will be populated by overview API
+                  competitorsCount: null, // Will be populated by overview API
+                  snapshotDate: snapshot_date
+                };
+                
+                // Update latest audit record's domain_strength field
+                const updateUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${encodeURIComponent(latestAuditDate)}`;
+                const updateResp = await fetch(updateUrl, {
+                  method: 'PATCH',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    apikey: supabaseKey,
+                    Authorization: `Bearer ${supabaseKey}`,
+                    Prefer: 'return=minimal'
+                  },
+                  body: JSON.stringify({
+                    domain_strength: domainStrengthData
+                  })
+                });
+                
+                if (updateResp.ok) {
+                  console.log(`[Domain Strength Snapshot] ✓ Updated audit_results.domain_strength for ${latestAuditDate}`);
+                } else {
+                  const errorText = await updateResp.text();
+                  console.warn(`[Domain Strength Snapshot] ⚠ Failed to update audit_results.domain_strength: ${updateResp.status} - ${errorText}`);
+                }
+              }
+            }
+          } catch (updateErr) {
+            console.warn(`[Domain Strength Snapshot] ⚠ Error updating audit_results.domain_strength: ${updateErr.message}`);
+            // Don't fail the snapshot if this update fails
+          }
+        }
       }
     } catch (e) {
       return res.status(500).json({
