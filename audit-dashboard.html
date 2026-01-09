@@ -7878,7 +7878,7 @@
 
       // Get form values (Phase 5 format)
       const title = document.getElementById('optimisation-edit-objective-title').value.trim();
-      const kpi = document.getElementById('optimisation-edit-objective-metric').value || null;
+      const kpi = document.getElementById('optimisation-edit-objective-metric').value || '';
       const targetValue = document.getElementById('optimisation-edit-objective-target-value').value;
       let target = targetValue ? (kpi === 'ai_overview' ? targetValue === 'true' : parseFloat(targetValue)) : null;
       // For CTR, convert from percentage to ratio (0-1) for storage
@@ -7913,10 +7913,24 @@
         due_at = new Date(startDate.getTime() + parseInt(timeframeDays) * 24 * 60 * 60 * 1000).toISOString();
       }
 
-      // Phase 5: Send new format
+      // Client-side validation before sending
+      if (!title || title.trim().length === 0) {
+        alert('Please enter an objective title');
+        return;
+      }
+      if (!kpi || kpi.trim().length === 0) {
+        alert('Please select a metric');
+        return;
+      }
+      if (target === null || target === undefined || isNaN(target)) {
+        alert('Please enter a valid target value');
+        return;
+      }
+
+      // Phase 5: Send new format (send empty strings instead of null for title/kpi to match API expectations)
       const objectiveData = {
-        title: title || null,
-        kpi: kpi || null,
+        title: title,
+        kpi: kpi,
         target: target,
         target_type: target_type,
         due_at: due_at,
@@ -9485,17 +9499,31 @@
           }
         }
         
-        // Due In
-        const dueIn = task.dueIn || (task.dueAt ? (() => {
-          const dueDate = new Date(task.dueAt);
-          const now = new Date();
-          const daysUntilDue = Math.ceil((dueDate - now) / (1000 * 60 * 60 * 24));
-          if (daysUntilDue < 0) {
-            return `Overdue ${Math.abs(daysUntilDue)}d`;
-          } else {
-            return `${daysUntilDue}d`;
+        // Due In - check multiple sources: task.dueIn, task.dueAt, or objective.due_at
+        let dueIn = task.dueIn;
+        if (!dueIn) {
+          // Try task.dueAt first
+          let dueAt = task.dueAt;
+          // If not found, try objective.due_at
+          if (!dueAt && task.objective && task.objective.due_at) {
+            dueAt = task.objective.due_at;
           }
-        })() : null);
+          // If still not found, try cycle.due_at
+          if (!dueAt && task.cycle && task.cycle.due_at) {
+            dueAt = task.cycle.due_at;
+          }
+          // Calculate from dueAt if we have it
+          if (dueAt) {
+            const dueDate = new Date(dueAt);
+            const now = new Date();
+            const daysUntilDue = Math.ceil((dueDate - now) / (1000 * 60 * 60 * 24));
+            if (daysUntilDue < 0) {
+              dueIn = `Overdue ${Math.abs(daysUntilDue)}d`;
+            } else {
+              dueIn = `${daysUntilDue}d`;
+            }
+          }
+        }
         const dueInHtml = dueIn ? (dueIn.startsWith('Overdue') ? `<span style="color: #dc2626; font-weight: 600;">${dueIn}</span>` : dueIn) : '–';
 
         tr.innerHTML = `
