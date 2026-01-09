@@ -489,7 +489,7 @@ export default async function handler(req, res) {
           const hasAiCitations = rankingAiData && rankingAiData.combinedRows && 
             Array.isArray(rankingAiData.combinedRows) &&
             rankingAiData.combinedRows.some(row => (row.ai_alan_citations_count || 0) > 0);
-          const hasDomainStrength = false; // Should be true if domainStrength is passed from client
+          const hasDomainStrength = domainStrength?.selfScore != null && typeof domainStrength.selfScore === 'number';
           
           const signalCount = [hasBacklinks, hasDomainStrength, hasAiCitations, hasLocalSignals].filter(Boolean).length;
           if (signalCount >= 3) return 'High';
