@@ -16401,6 +16401,57 @@
                 throw new Error(errorText || 'Failed to rebaseline');
               }
 
+              // After creating baseline, check if latest measurement is also missing critical fields
+              // If so, create a new measurement (not baseline) to update the latest metrics
+              try {
+                const taskResponse = await fetch(apiUrl(`/api/optimisation/task/${task.id}?_t=${Date.now()}`), {
+                  method: 'GET',
+                  headers: headers,
+                  'Cache-Control': 'no-cache, no-store, must-revalidate',
+                  'Pragma': 'no-cache'
+                });
+                
+                if (taskResponse.ok) {
+                  const taskData = await taskResponse.json();
+                  const latestMetrics = taskData.task?.latest_metrics;
+                  
+                  // Check if latest measurement is missing critical fields
+                  const latestMissingFields = criticalFields.filter(field => {
+                    const val = latestMetrics?.[field];
+                    if (field === 'current_rank') {
+                      return val == null || val === '' || val === 0 || val === '0';
+                    }
+                    if (field === 'ai_overview') {
+                      return val == null || val === '';
+                    }
+                    return val == null || val === '';
+                  });
+                  
+                  // If latest measurement is missing fields, create a new measurement with complete data
+                  if (latestMissingFields.length > 0 && currentMetrics) {
+                    debugLog(`[Optimisation] Bulk Rebaseline: Latest measurement missing ${latestMissingFields.length} field(s), creating new measurement`, 'info');
+                    const measurementResponse = await fetch(apiUrl(`/api/optimisation/task/${task.id}/measurement`), {
+                      method: 'POST',
+                      headers: headers,
+                      body: JSON.stringify({
+                        metrics: currentMetrics,
+                        note: 'Bulk rebaseline - updated latest measurement with complete data',
+                        is_baseline: false
+                      })
+                    });
+                    
+                    if (measurementResponse.ok) {
+                      debugLog(`[Optimisation] Bulk Rebaseline: Updated latest measurement for task ${task.id}`, 'success');
+                    } else {
+                      debugLog(`[Optimisation] Bulk Rebaseline: Failed to update latest measurement for task ${task.id}`, 'warn');
+                    }
+                  }
+                }
+              } catch (latestUpdateErr) {
+                // Non-fatal - log but don't fail the rebaseline
+                debugLog(`[Optimisation] Bulk Rebaseline: Could not check/update latest measurement: ${latestUpdateErr.message}`, 'warn');
+              }
+
               successCount++;
               debugLog(`[Optimisation] Bulk Rebaseline: Successfully rebaselined task ${task.id}`, 'success');
             } catch (error) {
