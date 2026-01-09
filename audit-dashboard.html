@@ -31240,10 +31240,11 @@ Final Score: ${score}/100`;
                         <button 
                           onclick="event.stopPropagation(); window.trackMoneyPage('${row.url.replace(/'/g, "\\'")}', '${(row.title || row.url).replace(/'/g, "\\'")}')"
                           data-row-url="${row.url.replace(/"/g, '&quot;')}"
-                          style="font-size: 0.75rem; padding: 0.375rem 0.75rem; border-radius: 4px; border: 1px solid #10b981; background: #10b981; cursor: pointer; color: white; font-weight: 600; transition: all 0.2s; white-space: nowrap;"
-                          onmouseover="this.style.background='#059669'; this.style.borderColor='#059669';"
-                          onmouseout="this.style.background='#10b981'; this.style.borderColor='#10b981';"
-                          title="Create optimisation task for ${row.url} (CTR ≥ 2.5%)">
+                          style="font-size: 0.75rem; padding: 0.375rem 0.75rem; border-radius: 4px; border: 1px solid #10b981; background: #10b981; cursor: ${window.isShareMode ? 'not-allowed' : 'pointer'}; color: white; font-weight: 600; transition: all 0.2s; white-space: nowrap; opacity: ${window.isShareMode ? '0.5' : '1'};"
+                          ${window.isShareMode ? 'disabled' : ''}
+                          onmouseover="${window.isShareMode ? '' : "this.style.background='#059669'; this.style.borderColor='#059669';"}"
+                          onmouseout="${window.isShareMode ? '' : "this.style.background='#10b981'; this.style.borderColor='#10b981';"}"
+                          title="${window.isShareMode ? 'Not available in share mode (read-only)' : `Create optimisation task for ${row.url} (CTR ≥ 2.5%)`}">
                           Track
                         </button>
                       </div>
@@ -33424,6 +33425,18 @@ Final Score: ${score}/100`;
       // Track Money Page - per-row function (opens modal instead of auto-creating)
       window.trackMoneyPage = function(pageUrl, pageTitle) {
         try {
+          // Check share mode first
+          if (window.isShareMode) {
+            alert('Write operations are not available in share mode (read-only).');
+            return;
+          }
+          
+          // Check admin key
+          if (!window.hasAdminKey || !window.hasAdminKey()) {
+            alert('Admin key required. Please set your admin key in the "Optimisation Tracking Security" section.');
+            return;
+          }
+          
           console.log('[Money Pages] trackMoneyPage called', { pageUrl, pageTitle });
           debugLog(`📊 Opening Track modal for Money Page: ${pageUrl}`, 'info');
           
