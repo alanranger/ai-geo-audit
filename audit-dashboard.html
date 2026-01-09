@@ -21626,7 +21626,7 @@
           const mergedSnippetReadiness = calculateSnippetReadiness(mergedScores, savedAudit.searchData);
           
           // Save merged results (preserve localSignals, siteReviews, and backlinkMetrics)
-          saveAuditResults(mergedScores, savedAudit.searchData, mergedSnippetReadiness, mergedSchemaAudit, savedAudit.localSignals || null, normalizedSiteReviews, savedAudit.backlinkMetrics || null);
+          await saveAuditResults(mergedScores, savedAudit.searchData, mergedSnippetReadiness, mergedSchemaAudit, savedAudit.localSignals || null, normalizedSiteReviews, savedAudit.backlinkMetrics || null);
           
           // Update retry button visibility
           updateRetryButtonVisibility(mergedSchemaAudit);
@@ -21661,7 +21661,7 @@
     }
 
     // Save audit results to localStorage
-    function saveAuditResults(scores, searchData, snippetReadiness, schemaAudit, localSignals = null, siteReviews = null, backlinkMetrics = null, preserveTimestamp = false) {
+    async function saveAuditResults(scores, searchData, snippetReadiness, schemaAudit, localSignals = null, siteReviews = null, backlinkMetrics = null, preserveTimestamp = false) {
       try {
         const dateRange = parseInt(document.getElementById('dateRange')?.value) || 30;
         // Get property URL from input field or from searchData
@@ -21720,7 +21720,7 @@
         // Save dashboard snapshot for delta comparisons (only if not preserving timestamp - i.e., this is a new audit)
         if (!preserveTimestamp && typeof computeDashboardSnapshot === 'function' && typeof saveDashboardRun === 'function') {
           try {
-            const snapshot = computeDashboardSnapshot();
+            const snapshot = await computeDashboardSnapshot();
             const runRecord = {
               timestamp: auditData.timestamp,
               status: 'ok',
@@ -53831,7 +53831,7 @@ Final Score: ${score}/100`;
         };
       }
 
-      function computeDashboardSnapshot() {
+      async function computeDashboardSnapshot() {
         const audit = dashboardSafeJsonParse(localStorage.getItem('last_audit_results'), null);
         const hasAudit = audit && audit.scores;
 
@@ -53887,10 +53887,98 @@ Final Score: ${score}/100`;
           optimisationPotentialClicks = Math.round(sum);
         }
 
-        const domainCache = dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v4'), null)
+        // Fetch domain strength data with deltas from overview API
+        let domainCache = dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v4'), null)
           || dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v3'), null)
           || dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v2'), null)
           || dashboardSafeJsonParse(localStorage.getItem('dashboard_domain_strength_cache_v1'), null);
+        
+        // If cache doesn't have deltas, fetch from overview API
+        if (!domainCache || !domainCache.deltas || domainCache.deltas.selfScore === undefined) {
+          try {
+            const selfDomain = (typeof window.getSelfDomainForDomainStrength === 'function' 
+              ? window.getSelfDomainForDomainStrength() 
+              : null) || localStorage.getItem('gsc_property_url') || 'https://www.alanranger.com';
+            const normalizedDomain = String(selfDomain).replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+            
+            const urlHelper = typeof window.apiUrl === 'function' ? window.apiUrl : ((path) => {
+              const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+              const baseUrl = isLocal ? 'https://ai-geo-audit.vercel.app' : '';
+              const cleanPath = path.startsWith('/') ? path : `/${path}`;
+              return baseUrl ? `${baseUrl}${cleanPath}` : cleanPath;
+            });
+            
+            const overviewResp = await fetch(urlHelper(`/api/domain-strength/overview`));
+            if (overviewResp.ok) {
+              const overviewJson = await overviewResp.json();
+              if (overviewJson?.status === 'ok' && Array.isArray(overviewJson.items)) {
+                // Find our domain in the response
+                const ourItem = overviewJson.items.find(item => {
+                  const itemDomain = String(item?.domain || '').replace(/^www\./, '').toLowerCase();
+                  return itemDomain === normalizedDomain.toLowerCase();
+                });
+                
+                if (ourItem && ourItem.latest && ourItem.trend) {
+                  const latest = ourItem.latest;
+                  const deltaLatest = typeof ourItem.trend.deltaLatest === 'number' ? ourItem.trend.deltaLatest : null;
+                  
+                  // Calculate gap to top and stronger domains count
+                  const allScores = overviewJson.items
+                    .map(item => typeof item.latest?.score === 'number' ? item.latest.score : null)
+                    .filter(score => score !== null)
+                    .sort((a, b) => b - a);
+                  
+                  const topScore = allScores.length > 0 ? allScores[0] : null;
+                  const ourScore = typeof latest.score === 'number' ? latest.score : null;
+                  const gapTop = (topScore !== null && ourScore !== null) ? (topScore - ourScore) : null;
+                  const strongerCount = ourScore !== null ? allScores.filter(s => s > ourScore).length : null;
+                  
+                  // Calculate rank vs set
+                  const ourRank = ourScore !== null ? allScores.filter(s => s > ourScore).length + 1 : null;
+                  const totalDomains = allScores.length;
+                  const rankVs = (ourRank !== null && totalDomains > 0) ? `${ourRank}/${totalDomains}` : null;
+                  
+                  // Format delta (deltaLatest is already the difference, so format it directly)
+                  let deltaText = null;
+                  if (deltaLatest !== null && isFinite(deltaLatest)) {
+                    const sign = deltaLatest > 0 ? '+' : '';
+                    deltaText = `${sign}${deltaLatest.toFixed(1)}`;
+                  }
+                  
+                  // Build cache object with deltas
+                  domainCache = {
+                    selfScore: ourScore,
+                    gapTop: gapTop,
+                    stronger: strongerCount,
+                    rankVs: rankVs,
+                    snapshotDate: latest.snapshotDate || null,
+                    kpis: {
+                      selfScore: ourScore !== null ? ourScore.toFixed(1) : null,
+                      gapTop: gapTop !== null ? `+${gapTop.toFixed(1)}` : null,
+                      stronger: strongerCount !== null ? String(strongerCount) : null,
+                      rankVs: rankVs
+                    },
+                    deltas: {
+                      selfScore: deltaText,
+                      gapTop: null, // Gap to top delta would need previous gap calculation
+                      stronger: null // Stronger count delta would need previous count
+                    },
+                    dirs: {
+                      selfScore: deltaLatest !== null ? (deltaLatest > 0 ? 'up' : deltaLatest < 0 ? 'down' : 'flat') : 'flat',
+                      gapTop: 'flat',
+                      stronger: 'flat'
+                    }
+                  };
+                  
+                  // Save to cache
+                  localStorage.setItem('dashboard_domain_strength_cache_v4', JSON.stringify(domainCache));
+                }
+              }
+            }
+          } catch (err) {
+            debugLog(`[Dashboard] Failed to fetch domain strength overview: ${err.message}`, 'warn');
+          }
+        }
 
         const eeat = computeEeatScore({
           audit,
