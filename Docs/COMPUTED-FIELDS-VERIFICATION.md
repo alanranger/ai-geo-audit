@@ -112,15 +112,62 @@ This document verifies that all update buttons and routines correctly store the 
 
 ---
 
-### 6. Add Measurement / Rebaseline / Bulk Update / Update Task Latest
-**Status**: ✅ **NO ISSUE** - Don't create audits
+### 6. Optimisation Tracking Update Buttons
+**Status**: ✅ **NO ISSUE** - Don't create audits (but should be documented)
+
+**Buttons**:
+1. **Update All Tasks with Latest Data** (`bulkUpdateAllTasks()`)
+   - **Location**: Top of Optimisation Tracking tab
+   - **Element ID**: `optimisation-bulk-update-btn`
+   - **Function**: `window.bulkUpdateAllTasks()`
+   - **What it does**: Updates all active tasks with latest metrics from audit data
+
+2. **Update (per row)** (`updateTaskLatest()`)
+   - **Location**: Each row in Optimisation Tracking table
+   - **Element ID**: `optimisation-update-btn-{taskId}`
+   - **Function**: `window.updateTaskLatest(taskId)`
+   - **What it does**: Updates single task with latest metrics
+
+3. **Add Measurement** (`addMeasurementBtn` handler)
+   - **Location**: Inside task details drawer
+   - **Element ID**: `optimisation-add-measurement-btn`
+   - **Function**: Add Measurement handler
+   - **What it does**: Creates new measurement entry for task
+
+4. **Rebaseline** (`rebaselineBtn` handler)
+   - **Location**: Inside task details drawer
+   - **Element ID**: `optimisation-rebaseline-btn`
+   - **Function**: Rebaseline handler
+   - **What it does**: Creates new baseline measurement for task
 
 **What they do**:
-- Update `optimisation_measurements` table
+- Update `optimisation_measurements` table (NOT `audit_results`)
+- Fetch latest audit data from Supabase to get current metrics
+- Use `computeAiMetricsForPageUrl()` for URL tasks
 - Do NOT create new audit records
-- Do NOT affect computed fields in `audit_results`
+- Do NOT directly affect computed fields in `audit_results`
 
 **Computed Fields Storage**: N/A - These routines don't save to `audit_results`
+
+**Note**: These buttons are documented in `HANDOVER.md` but were missing from this verification document. They don't need to store computed fields because they only update task measurements, not audit records.
+
+---
+
+## Optimisation Tracking Buttons (Clarification)
+
+**Important**: The Optimisation Tracking module has 4 update buttons that were initially missing from this document:
+
+1. **Update All Tasks with Latest Data** - Main button at top of Optimisation tab
+2. **Update (per row)** - Button on each task row in the table
+3. **Add Measurement** - Button inside task details drawer
+4. **Rebaseline** - Button inside task details drawer
+
+These buttons **do NOT** need to store computed fields because they:
+- Only update `optimisation_measurements` table (not `audit_results`)
+- Fetch latest audit data to get current metrics (read-only)
+- Don't create new audit records
+
+However, they **should be documented** in update button reference lists for completeness.
 
 ---
 
@@ -196,14 +243,18 @@ After fixes are applied:
 
 ---
 
-## Current Status
+## Current Status (After Fixes)
 
 | Routine | ai_summary_components | eeat_score | eeat_confidence | eeat_subscores | domain_strength |
 |---------|----------------------|-----------|----------------|----------------|-----------------|
 | Run Audit Scan | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Run Ranking & AI Scan | ❌ | ⚠️ | ⚠️ | ⚠️ | ❌ |
+| Run Ranking & AI Scan | ✅ | ✅ | ✅ | ✅ | ✅* |
 | Run Money Pages Scan | N/A | N/A | N/A | N/A | N/A |
-| Run Domain Strength | ❓ | ❓ | ❓ | ❓ | ❓ |
-| Run All Audits & Updates | ✅* | ✅* | ✅* | ✅* | ✅* |
+| Run Domain Strength | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Run All Audits & Updates | ✅ | ✅ | ✅ | ✅ | ✅ |
 
-*✅ = Works via Audit Scan step, but Ranking & AI step has issues
+**Fixes Applied**:
+- ✅ **Run Ranking & AI Scan**: Now fetches latest audit when only `rankingAiData` is sent, recomputes all fields
+- ✅ **Run Domain Strength**: Now updates `audit_results.domain_strength` after snapshot
+
+*Domain strength may use default (50) if not in latest audit, but will be updated when domain strength snapshot runs
