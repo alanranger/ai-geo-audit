@@ -35673,6 +35673,83 @@ Final Score: ${score}/100`;
             </div>
           `;
         }).join('');
+        
+        // Populate AI citations in cards after rendering (similar to table)
+        setTimeout(() => {
+          const citationElements = container.querySelectorAll('.ai-citation-value');
+          if (citationElements.length === 0) return;
+          
+          // Use the same cache and API logic as populateMoneyPagesAiCitations
+          const normalizeUrl = (url) => {
+            if (!url) return '';
+            let normalized = String(url).toLowerCase().trim();
+            normalized = normalized.replace(/^https?:\/\//, '');
+            normalized = normalized.replace(/^www\./, '');
+            normalized = normalized.split('?')[0].split('#')[0];
+            const parts = normalized.split('/');
+            if (parts.length > 1) {
+              normalized = parts.slice(1).join('/');
+            }
+            normalized = normalized.replace(/^\/+/, '').replace(/\/+$/, '');
+            return normalized;
+          };
+          
+          citationElements.forEach((el) => {
+            const url = el.getAttribute('data-citation-url');
+            if (!url) return;
+            
+            // Check cache first (same as table)
+            const cached = window.moneyPagesCitationCache && window.moneyPagesCitationCache[url];
+            if (typeof cached === 'number' && cached > 0) {
+              el.textContent = cached;
+              return;
+            }
+            
+            // Check normalized cache
+            const normalizedUrl = normalizeUrl(url);
+            let cachedValue = null;
+            if (window.moneyPagesCitationCache) {
+              for (const [key, value] of Object.entries(window.moneyPagesCitationCache)) {
+                if (normalizeUrl(key) === normalizedUrl) {
+                  cachedValue = value;
+                  break;
+                }
+              }
+            }
+            
+            if (typeof cachedValue === 'number' && cachedValue > 0) {
+              el.textContent = cachedValue;
+              if (!window.moneyPagesCitationCache) window.moneyPagesCitationCache = {};
+              window.moneyPagesCitationCache[url] = cachedValue;
+              return;
+            }
+            
+            // Fetch from API (same endpoint as table)
+            const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+            if (!propertyUrl) return;
+            
+            const endpoint = apiUrl(`/api/supabase/query-keywords-citing-url?property_url=${encodeURIComponent(propertyUrl)}&target_url=${encodeURIComponent(url)}`);
+            
+            fetch(endpoint)
+              .then(async res => {
+                if (!res.ok) {
+                  const txt = await res.text().catch(() => 'error');
+                  throw new Error(`HTTP ${res.status}: ${txt}`);
+                }
+                return res.json();
+              })
+              .then(data => {
+                const count = typeof data?.count === 'number' ? data.count : (Array.isArray(data?.data) ? data.data.length : 0);
+                if (!window.moneyPagesCitationCache) window.moneyPagesCitationCache = {};
+                window.moneyPagesCitationCache[url] = count;
+                el.textContent = count;
+              })
+              .catch(err => {
+                debugLog(`[Money Pages Cards] AI citations fetch failed for ${url}: ${err.message}`, 'warn');
+                el.textContent = '—';
+              });
+          });
+        }, 100);
       };
       
       // Wire up Priority & Actions filters
