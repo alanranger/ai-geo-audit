@@ -5333,6 +5333,9 @@
           <button id="optimisation-bulk-update-btn" class="btn" style="padding: 0.75rem 1.5rem; font-size: 0.95rem; white-space: nowrap;" title="Captures the latest metrics for every active task (creates a measurement entry).">
             📊 Update All Tasks with Latest Data
           </button>
+          <button id="optimisation-bulk-rebaseline-btn" class="btn" style="padding: 0.75rem 1.5rem; font-size: 0.95rem; white-space: nowrap; background: #f59e0b; color: #000000; border: 1px solid #f59e0b;" title="Rebaseline all tasks with incomplete baselines (missing AI Overview, AI Citations, or Current Rank).">
+            ⚠ Rebaseline Incomplete Baselines (<span id="optimisation-incomplete-baseline-count">0</span>)
+          </button>
         </div>
 
         <!-- Summary Cards (B6) -->
@@ -9058,6 +9061,19 @@
     };
 
     // Update summary cards (B6)
+    // Count tasks with incomplete baselines (missing critical fields)
+    function countTasksWithIncompleteBaselines(tasks) {
+      const criticalFields = ['ai_overview', 'ai_citations', 'current_rank'];
+      return tasks.filter(task => {
+        if (!task.baseline_metrics) return true; // No baseline = incomplete
+        const missingFields = criticalFields.filter(field => {
+          const val = task.baseline_metrics[field];
+          return val == null || val === '';
+        });
+        return missingFields.length > 0;
+      }).length;
+    }
+
     function updateOptimisationSummaryCards() {
       let tasks = window.optimisationModuleState.allTasks;
       
@@ -9100,6 +9116,13 @@
       document.getElementById('optimisation-summary-paused').textContent = paused.length;
       document.getElementById('optimisation-summary-cancelled').textContent = cancelled.length;
       document.getElementById('optimisation-summary-recent').textContent = recent.length;
+      
+      // Count tasks with incomplete baselines
+      const incompleteBaselineCount = countTasksWithIncompleteBaselines(tasks);
+      const incompleteBaselineCountEl = document.getElementById('optimisation-incomplete-baseline-count');
+      if (incompleteBaselineCountEl) {
+        incompleteBaselineCountEl.textContent = incompleteBaselineCount;
+      }
 
       // Update tab counts
       const pausedCancelled = paused.length + cancelled.length;
@@ -13862,6 +13885,24 @@
         });
       }
 
+      // Bulk rebaseline button
+      const bulkRebaselineBtn = document.getElementById('optimisation-bulk-rebaseline-btn');
+      if (bulkRebaselineBtn) {
+        bulkRebaselineBtn.addEventListener('click', async () => {
+          if (window.isShareMode) {
+            alert('Write operations are not available in share mode (read-only).');
+            return;
+          }
+          if (!window.hasAdminKey()) {
+            alert('Admin key required. Please set your admin key in the "Optimisation Tracking Security" section.');
+            return;
+          }
+          if (typeof window.bulkRebaselineIncompleteBaselines === 'function') {
+            await window.bulkRebaselineIncompleteBaselines();
+          }
+        });
+      }
+
       // Timeline toggle (collapsed by default)
       const timelineHeader = document.getElementById('optimisation-timeline-header');
       const timelineToggle = document.getElementById('optimisation-timeline-toggle');
@@ -15979,6 +16020,16 @@
             }
 
             await window.loadAllOptimisationTasks();
+            // Reload task data to get fresh baseline_metrics
+            const updatedTask = window.optimisationModuleState.allTasks.find(t => t.id === taskId);
+            if (updatedTask) {
+              // Update task in state
+              const taskIndex = window.optimisationModuleState.allTasks.findIndex(t => t.id === taskId);
+              if (taskIndex >= 0) {
+                window.optimisationModuleState.allTasks[taskIndex] = updatedTask;
+              }
+            }
+            // Re-open drawer to refresh with new baseline
             await openOptimisationTaskDrawer(taskId);
             alert('Baseline updated successfully!');
           } catch (error) {
@@ -15988,6 +16039,280 @@
         });
       }
     }
+
+    // Bulk rebaseline tasks with incomplete baselines
+    window.bulkRebaselineIncompleteBaselines = async function bulkRebaselineIncompleteBaselines() {
+      if (!window.optimisationModuleState || !window.optimisationModuleState.allTasks) {
+        alert('No tasks loaded. Please wait for tasks to load first.');
+        return;
+      }
+
+      const criticalFields = ['ai_overview', 'ai_citations', 'current_rank'];
+      let tasks = window.optimisationModuleState.allTasks.filter(
+        t => !['done', 'cancelled', 'deleted'].includes(t.status)
+      );
+
+      // Filter out test tasks if checkbox is unchecked
+      const includeTestCheckbox = document.getElementById('optimisation-filter-include-test');
+      if (!includeTestCheckbox || !includeTestCheckbox.checked) {
+        tasks = tasks.filter(t => !t.is_test_task);
+      }
+
+      // Find tasks with incomplete baselines
+      const incompleteTasks = tasks.filter(task => {
+        if (!task.baseline_metrics) return true; // No baseline = incomplete
+        const missingFields = criticalFields.filter(field => {
+          const val = task.baseline_metrics[field];
+          return val == null || val === '';
+        });
+        return missingFields.length > 0;
+      });
+
+      if (incompleteTasks.length === 0) {
+        alert('No tasks with incomplete baselines found. All baselines are complete!');
+        return;
+      }
+
+      const confirmMsg = `Found ${incompleteTasks.length} task(s) with incomplete baselines.\n\n` +
+        `This will create a new baseline measurement for each task with all fields properly captured.\n\n` +
+        `Continue?`;
+      if (!confirm(confirmMsg)) {
+        return;
+      }
+
+      const bulkRebaselineBtn = document.getElementById('optimisation-bulk-rebaseline-btn');
+      const originalText = bulkRebaselineBtn ? bulkRebaselineBtn.textContent : '';
+      if (bulkRebaselineBtn) {
+        bulkRebaselineBtn.disabled = true;
+        bulkRebaselineBtn.textContent = 'Rebaselining...';
+      }
+
+      let successCount = 0;
+      let failCount = 0;
+      const errors = [];
+
+      try {
+        // Process sequentially to avoid rate limits (max 2 concurrent)
+        const maxConcurrent = 2;
+        for (let i = 0; i < incompleteTasks.length; i += maxConcurrent) {
+          const batch = incompleteTasks.slice(i, i + maxConcurrent);
+          
+          await Promise.all(batch.map(async (task) => {
+            const taskNum = i + batch.indexOf(task) + 1;
+            if (bulkRebaselineBtn) {
+              bulkRebaselineBtn.textContent = `Rebaselining ${taskNum}/${incompleteTasks.length}...`;
+            }
+
+            try {
+              // Use the same logic as individual rebaseline
+              const taskUrlForPage = task.target_url_clean || task.target_url || '';
+              const hasKeyword = !!(task.keyword_text && String(task.keyword_text).trim());
+              let currentMetrics = null;
+
+              // Fetch latest audit for Ranking & AI data
+              let latestAuditFromSupabase = null;
+              try {
+                const propertyUrl = document.getElementById('propertyUrl')?.value || 
+                                    localStorage.getItem('gsc_property_url') || 
+                                    'https://www.alanranger.com';
+                if (typeof fetchLatestAuditFromSupabase === 'function') {
+                  latestAuditFromSupabase = await fetchLatestAuditFromSupabase(propertyUrl, false);
+                  if (latestAuditFromSupabase && latestAuditFromSupabase.ranking_ai_data) {
+                    const rankingAiData = latestAuditFromSupabase.ranking_ai_data;
+                    if (rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
+                      localStorage.setItem('rankingAiData', JSON.stringify(rankingAiData));
+                      window.rankingAiData = rankingAiData.combinedRows;
+                    }
+                  }
+                }
+              } catch (fetchErr) {
+                debugLog(`[Optimisation] Bulk Rebaseline: Error fetching latest audit: ${fetchErr.message}`, 'warn');
+              }
+
+              // Get ranking data sources
+              let combinedRows = [];
+              if (typeof RankingAiModule !== 'undefined' && RankingAiModule.state) {
+                const state = RankingAiModule.state();
+                combinedRows = state.combinedRows || [];
+              }
+              if (combinedRows.length === 0 && typeof window.rankingAiData !== 'undefined' && Array.isArray(window.rankingAiData)) {
+                combinedRows = window.rankingAiData;
+              }
+              if (combinedRows.length === 0) {
+                try {
+                  const local = localStorage.getItem('rankingAiData');
+                  if (local) {
+                    const parsed = JSON.parse(local);
+                    if (parsed && Array.isArray(parsed.combinedRows)) {
+                      combinedRows = parsed.combinedRows;
+                    }
+                  }
+                } catch {}
+              }
+
+              // Build metrics (same logic as individual rebaseline)
+              if (hasKeyword && combinedRows.length > 0) {
+                const taskUrlClean = (task.target_url_clean || task.target_url || '').replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
+                const matchingRow = combinedRows.find(r => {
+                  const keywordMatch = (r.keyword || '').toLowerCase() === (task.keyword_text || '').toLowerCase();
+                  if (!keywordMatch) return false;
+                  if (!taskUrlClean || taskUrlClean.length === 0) return true;
+                  const rowUrl = (r.best_url || r.targetUrl || r.ranking_url || '').toLowerCase();
+                  const rowUrlClean = rowUrl.replace(/^https?:\/\//, '').replace(/^www\./, '');
+                  return rowUrl === taskUrlClean || rowUrlClean === taskUrlClean || 
+                         rowUrl.includes(taskUrlClean) || taskUrlClean.includes(rowUrlClean);
+                });
+
+                if (matchingRow) {
+                  let queryTotal = null;
+                  if (typeof getQueryTotalForKeyword === 'function') {
+                    queryTotal = getQueryTotalForKeyword(task.keyword_text);
+                  }
+                  
+                  currentMetrics = {
+                    gsc_clicks_28d: queryTotal?.clicks || matchingRow.gsc_clicks_28d || matchingRow.clicks_28d || null,
+                    gsc_impressions_28d: queryTotal?.impressions || matchingRow.gsc_impressions_28d || matchingRow.impressions_28d || null,
+                    gsc_ctr_28d: queryTotal?.ctr != null ? (queryTotal.ctr / 100) : (matchingRow.gsc_ctr_28d || matchingRow.ctr_28d || null),
+                    current_rank: matchingRow.best_rank_group || matchingRow.current_rank || null,
+                    opportunity_score: matchingRow.opportunityScore || null,
+                    ai_overview: matchingRow.has_ai_overview === true || matchingRow.ai_overview_present_any === true,
+                    ai_citations: matchingRow.ai_alan_citations_count != null ? Number(matchingRow.ai_alan_citations_count) : 0,
+                    ai_citations_total: matchingRow.ai_total_citations != null ? Number(matchingRow.ai_total_citations) : 0,
+                    classic_ranking_url: matchingRow.best_url || matchingRow.targetUrl || matchingRow.ranking_url || taskUrlForPage,
+                    page_type: matchingRow.pageType || null,
+                    segment: matchingRow.segment || null,
+                    captured_at: new Date().toISOString()
+                  };
+                }
+              } else if (!hasKeyword && taskUrlForPage) {
+                // URL-only task - fetch GSC page totals and AI data
+                try {
+                  const property = document.getElementById('propertyUrl')?.value ||
+                    localStorage.getItem('gsc_property_url') ||
+                    localStorage.getItem('last_property_url') || '';
+                  if (property) {
+                    const range = (typeof getGscDateRange === 'function') ? getGscDateRange(28, 2) : null;
+                    const startDate = range?.startDate ? `&startDate=${encodeURIComponent(range.startDate)}` : '';
+                    const endDate = range?.endDate ? `&endDate=${encodeURIComponent(range.endDate)}` : '';
+                    const pageUrlForGsc = toAbsoluteUrlForGsc(taskUrlForPage, property);
+                    const totalsUrl = apiUrl(`/api/aigeo/gsc-page-totals?property=${encodeURIComponent(property)}&pageUrl=${encodeURIComponent(pageUrlForGsc)}${startDate}${endDate}`);
+                    const totalsRes = await fetch(totalsUrl);
+                    const totalsJson = await totalsRes.json().catch(() => null);
+                    const totals = totalsRes.ok && totalsJson && totalsJson.status === 'ok' ? totalsJson.data : null;
+                    
+                    if (totals) {
+                      let aiRows = [];
+                      if (typeof window.getRankingAiCombinedRows === 'function') {
+                        aiRows = window.getRankingAiCombinedRows();
+                      }
+                      if (aiRows.length === 0 && typeof window.rankingAiData !== 'undefined' && Array.isArray(window.rankingAiData)) {
+                        aiRows = window.rankingAiData;
+                      }
+                      if (aiRows.length === 0) {
+                        try {
+                          const local = localStorage.getItem('rankingAiData');
+                          if (local) {
+                            const parsed = JSON.parse(local);
+                            if (parsed && Array.isArray(parsed.combinedRows)) {
+                              aiRows = parsed.combinedRows;
+                            }
+                          }
+                        } catch (e) {}
+                      }
+                      
+                      let aiForUrl = { ai_overview: null, ai_citations: null };
+                      if (aiRows.length > 0 && typeof window.computeAiMetricsForPageUrl === 'function') {
+                        const urlsToTry = [pageUrlForGsc, taskUrlForPage];
+                        for (const urlToCheck of urlsToTry) {
+                          if (urlToCheck) {
+                            const result = window.computeAiMetricsForPageUrl(urlToCheck, aiRows);
+                            if (result.ai_overview !== null && result.ai_citations !== null) {
+                              aiForUrl = result;
+                              break;
+                            }
+                          }
+                        }
+                      }
+                      
+                      let ctrValue = totals.ctr || null;
+                      if (ctrValue != null && ctrValue > 1 && ctrValue <= 100) {
+                        ctrValue = ctrValue / 100;
+                      }
+                      
+                      currentMetrics = {
+                        gsc_clicks_28d: Number(totals.clicks || 0),
+                        gsc_impressions_28d: Number(totals.impressions || 0),
+                        gsc_ctr_28d: ctrValue,
+                        current_rank: totals.position != null ? Number(totals.position) : null,
+                        opportunity_score: null,
+                        ai_overview: aiForUrl.ai_overview === true ? true : (aiForUrl.ai_overview === false ? false : null),
+                        ai_citations: aiForUrl.ai_citations != null ? Number(aiForUrl.ai_citations) : null,
+                        ai_citations_total: null,
+                        classic_ranking_url: pageUrlForGsc,
+                        page_type: task.page_type || null,
+                        segment: task.segment || 'money_pages',
+                        captured_at: new Date().toISOString()
+                      };
+                    }
+                  }
+                } catch (e) {
+                  debugLog(`[Optimisation] Bulk Rebaseline: Error fetching GSC data for task ${task.id}: ${e.message}`, 'warn');
+                }
+              }
+
+              if (!currentMetrics) {
+                throw new Error('Could not fetch metrics for rebaseline');
+              }
+
+              // Create baseline measurement
+              const headers = window.getOptimisationHeaders();
+              const response = await fetch(apiUrl(`/api/optimisation/task/${task.id}/measurement`), {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify({
+                  metrics: currentMetrics,
+                  note: 'Bulk rebaseline - complete baseline with all fields',
+                  is_baseline: true
+                })
+              });
+
+              if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(errorText || 'Failed to rebaseline');
+              }
+
+              successCount++;
+              debugLog(`[Optimisation] Bulk Rebaseline: Successfully rebaselined task ${task.id}`, 'success');
+            } catch (error) {
+              failCount++;
+              const errorMsg = `Task "${task.title || task.id}": ${error.message}`;
+              errors.push(errorMsg);
+              debugLog(`[Optimisation] Bulk Rebaseline: ${errorMsg}`, 'error');
+            }
+          }));
+        }
+
+        // Reload tasks to refresh counts
+        await window.loadAllOptimisationTasks();
+        
+        // Update summary cards
+        updateOptimisationSummaryCards();
+
+        const resultMsg = `Rebaseline complete!\n\n` +
+          `Success: ${successCount}\n` +
+          `Failed: ${failCount}` +
+          (errors.length > 0 ? `\n\nErrors:\n${errors.slice(0, 5).join('\n')}${errors.length > 5 ? `\n... and ${errors.length - 5} more` : ''}` : '');
+        alert(resultMsg);
+      } catch (error) {
+        debugLog(`[Optimisation] Bulk Rebaseline: Fatal error: ${error.message}`, 'error');
+        alert('Bulk rebaseline failed: ' + error.message);
+      } finally {
+        if (bulkRebaselineBtn) {
+          bulkRebaselineBtn.disabled = false;
+          bulkRebaselineBtn.textContent = originalText;
+        }
+      }
+    };
 
     // Bulk update all tasks with latest data
     window.bulkUpdateAllTasks = async function bulkUpdateAllTasks(skipConfirmation = false) {
