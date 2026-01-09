@@ -80,6 +80,14 @@
 - ✅ Modified to pass full task object to include objective fields
 - ✅ Works with dark theme
 
+### 9. ✅ Global Run Auto-Update (Bulk Update Confirmation) - **FIXED**
+**Location**: `audit-dashboard.html` line ~15834, ~55073  
+**Issues Fixed**:
+- ✅ Added `skipConfirmation` parameter to `bulkUpdateAllTasks()` function
+- ✅ Global run now automatically creates measurements without confirmation dialog
+- ✅ Manual "Update All Tasks" button still shows confirmation (backward compatible)
+- ✅ Fixes issue where users had to manually click "Add Measurement" after global run
+
 ## Remaining Issues
 
 ### ⚠️ Run All Audits & Updates - Data Source (LOW Priority) - **MINOR ISSUE**
@@ -192,7 +200,7 @@ git push origin main
 - **Total Buttons**: 13
 - **Audited**: 13 (100%)
 - **Fixed**: 3 (HIGH/MEDIUM priority issues from audit)
-- **Additional Fixes**: 6 (UI enhancements and bug fixes)
+- **Additional Fixes**: 7 (UI enhancements and bug fixes)
 - **Correct**: 7 (no issues found)
 - **Minor Issue**: 1 (LOW priority, not fixed)
 - **Deployment**: ✅ **COMPLETE** (all commits pushed, Vercel auto-deployed)
@@ -207,6 +215,7 @@ git push origin main
 7. `4ecf793` - Feature: Highlight target metric row in Performance Snapshot table
 8. `011ba5a` - Fix: Pass task object to renderOptimisationMetricsSnapshotForCycle
 9. `2db5b45` - Fix: Update target metric highlighting for dark theme
+10. `88473b0` - Fix: Skip confirmation dialog in bulkUpdateAllTasks when called from global run
 
 **Next Steps**:
 1. ✅ Phase 3 audit and fixes - **COMPLETE**

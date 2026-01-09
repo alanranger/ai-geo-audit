@@ -1,7 +1,7 @@
 # AI GEO Audit - Comprehensive Handover Document
 
 **Last Updated**: 2026-01-08  
-**Current Commit**: `2db5b45` (Phase 3 fixes + UI enhancements - target metric highlighting, objective KPI display, domain strength batch processing, AI citations in cards)  
+**Current Commit**: `88473b0` (Phase 3 fixes + UI enhancements + global run auto-update fix)  
 **Purpose**: Single source of truth for all projects, phases, tasks, fixes, and key information for any new chat thread.
 
 ---
@@ -291,6 +291,8 @@ This document consolidates ALL critical information about the AI GEO Audit proje
 - `audit-dashboard.html`: `renderOptimisationTasksTable()` (~line 9406) - Objective KPI display
 - `audit-dashboard.html`: `renderOptimisationMetricsSnapshot()` (~line 12849) - target metric highlighting
 - `audit-dashboard.html`: `renderOptimisationMetricsSnapshotForCycle()` (~line 10618) - pass task object
+- `audit-dashboard.html`: `bulkUpdateAllTasks()` (~line 15834) - skip confirmation in global run
+- `audit-dashboard.html`: `runDashboardGlobalRun()` (~line 55073) - pass skipConfirmation parameter
 - `api/domain-strength/overview.js`: Delta calculation logic (~line 205)
 - `Docs/PHASE3-AUDIT-FINDINGS.md`: Complete audit documentation
 
@@ -821,9 +823,9 @@ mcp_supabase_execute_sql({ ... })
 **Deployment**: Vercel (https://ai-geo-audit.vercel.app/)  
 **Database**: Supabase (`supabase-main`, project_ref=igzvwbvgvmzvvzoclufx)
 
-**Current Commit**: `2db5b45`  
+**Current Commit**: `88473b0`  
 **Baseline Commit**: `8951fcf`  
-**Status**: Phase 3 fixes complete. Additional UI enhancements and bug fixes applied. Ready for Phase 4 (align all audit processes).
+**Status**: Phase 3 fixes complete. Additional UI enhancements and bug fixes applied. Global run now automatically updates all tasks. Ready for Phase 4 (align all audit processes).
 
 ---
 

@@ -652,6 +652,16 @@ For each button, we check:
 - Modified `renderOptimisationMetricsSnapshotForCycle` to accept and pass full task object (includes objective fields)
 - Updated highlighting to work with dark theme
 
+### Fix 10: Global Run Auto-Update (Bulk Update Confirmation)
+**Status**: ✅ **FIXED** (2026-01-08)  
+**Location**: `audit-dashboard.html` line ~15834, ~55073  
+**Issue**: "Run All Audits & Updates" button calls `bulkUpdateAllTasks()` but confirmation dialog blocks automatic execution, requiring manual "Add Measurement" clicks  
+**Fix**: 
+- Added `skipConfirmation` parameter to `bulkUpdateAllTasks()` function (defaults to `false` for backward compatibility)
+- Modified `runDashboardGlobalRun()` to pass `skipConfirmation=true` when calling `bulkUpdateAllTasks()`
+- Added debug logging to indicate when confirmation is skipped
+- Ensures measurements are created automatically during global run without user confirmation
+
 ---
 
 ## Next Steps
