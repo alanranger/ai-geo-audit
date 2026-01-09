@@ -368,6 +368,22 @@ export default async function handler(req, res) {
         return Math.round(0.5 * snippetReadinessScore + 0.3 * visibilityScore + 0.2 * brandScore);
       })(),
       
+      // AI Summary Components (for AI Citations tile delta calculations)
+      ai_summary_components: (() => {
+        if (!snippetReadiness || !scores) return null;
+        const snippetReadinessScore = typeof snippetReadiness === 'number' 
+          ? snippetReadiness 
+          : (snippetReadiness.overallScore || 0);
+        const visibilityScore = scores.visibility || 0;
+        const brandScore = scores.brandOverlay?.score || 0;
+        if (snippetReadinessScore === 0 && visibilityScore === 0 && brandScore === 0) return null;
+        return {
+          snippetReadiness: Math.round(snippetReadinessScore),
+          visibility: Math.round(visibilityScore),
+          brand: Math.round(brandScore)
+        };
+      })(),
+      
       // Authority Component Scores (for historical tracking and debugging)
       authority_behaviour_score: ensureNumber(scores?.authorityComponents?.behaviour),
       authority_ranking_score: ensureNumber(scores?.authorityComponents?.ranking),
@@ -385,6 +401,158 @@ export default async function handler(req, res) {
       gsc_impressions: ensureNumber(searchData?.totalImpressions),
       gsc_avg_position: ensureNumber(searchData?.averagePosition),
       gsc_ctr: ensureNumber(searchData?.ctr),
+      
+      // EEAT Score and Components (for EEAT tile delta calculations)
+      // Note: Domain strength is fetched separately and should be passed from client or stored separately
+      // For now, we compute EEAT with available data (domainStrength will be null/50 default)
+      eeat_score: (() => {
+        try {
+          // Helper function to clamp score to 0-100
+          const clampScore = (v) => {
+            if (typeof v !== 'number' || !isFinite(v)) return 50; // Default to 50 if missing
+            return Math.max(0, Math.min(100, Math.round(v)));
+          };
+          
+          // Helper to safely get number or default
+          const toNum = (v) => (typeof v === 'number' && isFinite(v)) ? v : null;
+          const safe50 = (v) => (typeof v === 'number' && isFinite(v)) ? v : 50;
+          
+          // Authority components
+          const ac = scores?.authorityComponents || {};
+          const behaviour = toNum(ac.behaviour);
+          const reviews = toNum(ac.reviews);
+          const backlinksRaw = toNum(ac.backlinks);
+          // Assume backlinks are measured if backlinksRaw exists and > 0
+          const hasBacklinks = backlinksRaw !== null && backlinksRaw > 0;
+          const backlinks = hasBacklinks ? backlinksRaw : 50;
+          
+          // Local signals / NAP
+          const localData = localSignals?.data || localSignals || null;
+          const nap = toNum(localData?.napConsistencyScore);
+          const hasLocalSignals = nap != null || localData?.knowledgePanelDetected === true || 
+            (Array.isArray(localData?.locations) && localData.locations.length > 0);
+          
+          // Core pillar scores
+          const localEntity = toNum(scores?.localEntity);
+          const contentSchema = toNum(scores?.contentSchema);
+          const snippetReadinessScore = typeof snippetReadiness === 'number' 
+            ? snippetReadiness 
+            : (snippetReadiness?.overallScore || 0);
+          const snippet = toNum(snippetReadinessScore);
+          
+          // Domain Strength (default to 50 if not available - should be passed from client)
+          const domainScore = 50; // Default - domainStrength should be passed from client
+          const hasDomainStrength = false; // Will be true if domainStrength is passed
+          
+          // AI citations signal (from rankingAiData)
+          let citationsTotal = 0;
+          let hasAiCitations = false;
+          if (rankingAiData && rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
+            citationsTotal = rankingAiData.combinedRows.reduce((sum, row) => {
+              return sum + (row.ai_alan_citations_count || 0);
+            }, 0);
+            hasAiCitations = citationsTotal > 0;
+          }
+          const citationsSignal = hasAiCitations ? Math.max(0, Math.min(100, citationsTotal)) : 50;
+          
+          // Sub-scores (EEAT v1)
+          const trustNap = (typeof nap === 'number') ? clampScore(nap) : safe50(localEntity);
+          const experience = clampScore(0.5 * safe50(reviews) + 0.3 * safe50(behaviour) + 0.2 * safe50(localEntity));
+          const expertise = clampScore(0.6 * safe50(contentSchema) + 0.4 * safe50(snippet));
+          const authoritativeness = clampScore(0.5 * safe50(backlinks) + 0.3 * safe50(domainScore) + 0.2 * safe50(citationsSignal));
+          const trustworthiness = clampScore(0.6 * trustNap + 0.4 * safe50(reviews));
+          
+          const eeat = clampScore(
+            0.2 * experience +
+            0.25 * expertise +
+            0.3 * authoritativeness +
+            0.25 * trustworthiness
+          );
+          
+          return eeat;
+        } catch (err) {
+          console.warn('[Supabase Save] Error computing EEAT score:', err.message);
+          return null;
+        }
+      })(),
+      
+      eeat_confidence: (() => {
+        try {
+          const ac = scores?.authorityComponents || {};
+          const hasBacklinks = (ac.backlinks !== null && ac.backlinks !== undefined && ac.backlinks > 0);
+          const localData = localSignals?.data || localSignals || null;
+          const hasLocalSignals = localData?.napConsistencyScore != null || 
+            localData?.knowledgePanelDetected === true || 
+            (Array.isArray(localData?.locations) && localData.locations.length > 0);
+          const hasAiCitations = rankingAiData && rankingAiData.combinedRows && 
+            Array.isArray(rankingAiData.combinedRows) &&
+            rankingAiData.combinedRows.some(row => (row.ai_alan_citations_count || 0) > 0);
+          const hasDomainStrength = false; // Should be true if domainStrength is passed from client
+          
+          const signalCount = [hasBacklinks, hasDomainStrength, hasAiCitations, hasLocalSignals].filter(Boolean).length;
+          if (signalCount >= 3) return 'High';
+          if (signalCount >= 2) return 'Medium';
+          return 'Low';
+        } catch (err) {
+          console.warn('[Supabase Save] Error computing EEAT confidence:', err.message);
+          return null;
+        }
+      })(),
+      
+      eeat_subscores: (() => {
+        try {
+          const clampScore = (v) => {
+            if (typeof v !== 'number' || !isFinite(v)) return 50;
+            return Math.max(0, Math.min(100, Math.round(v)));
+          };
+          const toNum = (v) => (typeof v === 'number' && isFinite(v)) ? v : null;
+          const safe50 = (v) => (typeof v === 'number' && isFinite(v)) ? v : 50;
+          
+          const ac = scores?.authorityComponents || {};
+          const behaviour = toNum(ac.behaviour);
+          const reviews = toNum(ac.reviews);
+          const backlinksRaw = toNum(ac.backlinks);
+          const backlinks = (backlinksRaw !== null && backlinksRaw > 0) ? backlinksRaw : 50;
+          
+          const localData = localSignals?.data || localSignals || null;
+          const nap = toNum(localData?.napConsistencyScore);
+          const localEntity = toNum(scores?.localEntity);
+          const contentSchema = toNum(scores?.contentSchema);
+          const snippetReadinessScore = typeof snippetReadiness === 'number' 
+            ? snippetReadiness 
+            : (snippetReadiness?.overallScore || 0);
+          const snippet = toNum(snippetReadinessScore);
+          
+          const domainScore = 50; // Default
+          let citationsTotal = 0;
+          if (rankingAiData && rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
+            citationsTotal = rankingAiData.combinedRows.reduce((sum, row) => {
+              return sum + (row.ai_alan_citations_count || 0);
+            }, 0);
+          }
+          const citationsSignal = citationsTotal > 0 ? Math.max(0, Math.min(100, citationsTotal)) : 50;
+          
+          const trustNap = (typeof nap === 'number') ? clampScore(nap) : safe50(localEntity);
+          const experience = clampScore(0.5 * safe50(reviews) + 0.3 * safe50(behaviour) + 0.2 * safe50(localEntity));
+          const expertise = clampScore(0.6 * safe50(contentSchema) + 0.4 * safe50(snippet));
+          const authoritativeness = clampScore(0.5 * safe50(backlinks) + 0.3 * safe50(domainScore) + 0.2 * safe50(citationsSignal));
+          const trustworthiness = clampScore(0.6 * trustNap + 0.4 * safe50(reviews));
+          
+          return {
+            experience: Math.round(experience),
+            expertise: Math.round(expertise),
+            authoritativeness: Math.round(authoritativeness),
+            trustworthiness: Math.round(trustworthiness)
+          };
+        } catch (err) {
+          console.warn('[Supabase Save] Error computing EEAT subscores:', err.message);
+          return null;
+        }
+      })(),
+      
+      // Domain Strength (should be passed from client or fetched separately)
+      // For now, we'll store null and it can be updated later or passed from client
+      domain_strength: null, // TODO: Pass from client or fetch from domain strength API
       
       // Business Profile Data (for historical tracking)
       local_business_schema_pages: ensureNumber(localSignals?.data?.localBusinessSchemaPages),

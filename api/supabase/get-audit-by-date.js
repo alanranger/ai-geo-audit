@@ -68,9 +68,12 @@ export default async function handler(req, res) {
       'gsc_ctr',
       'money_pages_metrics',
       'money_pages_summary',
-      'ranking_ai_data'
-      // Removed fields that don't exist in database:
-      // 'ai_summary_components', 'domain_strength', 'eeat_score', 'eeat_confidence', 'eeat_subscores', 'optimisation_potential_clicks'
+      'ranking_ai_data',
+      'ai_summary_components', // New: computed field for AI Citations tile
+      'eeat_score', // New: computed field for EEAT tile
+      'eeat_confidence', // New: computed field for EEAT tile
+      'eeat_subscores', // New: computed field for EEAT tile
+      'domain_strength' // New: computed field for Domain Strength tile (may be null if not passed from client)
     ].join(',');
 
     const queryUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${encodeURIComponent(auditDate)}&select=${encodeURIComponent(selectFields)}&limit=1`;
@@ -145,10 +148,13 @@ export default async function handler(req, res) {
       } : null),
       rankingAiData: {
         combinedRows: parseJsonField(record.ranking_ai_data)?.combinedRows || []
-      }
-      // Note: These fields may not exist in the database for older audits
-      // They will be null if not available, which is handled gracefully by computeDashboardSnapshotFromAuditData
-      // aiSummaryComponents, domainStrength, eeatScore, etc. are computed/derived fields, not stored directly
+      },
+      // New computed fields (may be null for older audits)
+      aiSummaryComponents: parseJsonField(record.ai_summary_components) || null,
+      eeatScore: record.eeat_score ?? null,
+      eeatConfidence: record.eeat_confidence || null,
+      eeatSubscores: parseJsonField(record.eeat_subscores) || null,
+      domainStrength: parseJsonField(record.domain_strength) || null
     };
 
     return res.status(200).json({

@@ -55157,8 +55157,57 @@ Final Score: ${score}/100`;
                   debugLog(`[Dashboard] fetchPreviousAuditForDeltas: Full audit result status=${fullAuditResult.status}, hasData=${!!fullAuditResult.data}`, 'info');
                   
                   if (fullAuditResult.status === 'ok' && fullAuditResult.data) {
+                    const auditData = fullAuditResult.data;
+                    
+                    // Check if critical fields are missing and try fallback to nearby dates
+                    const hasRankingData = auditData.rankingAiData && auditData.rankingAiData.combinedRows && Array.isArray(auditData.rankingAiData.combinedRows) && auditData.rankingAiData.combinedRows.length > 0;
+                    const hasGscData = auditData.searchData && auditData.searchData.overview && (auditData.searchData.overview.clicks > 0 || auditData.searchData.overview.impressions > 0);
+                    
+                    // If missing critical data, try nearby dates (±1, ±2 days)
+                    if (!hasRankingData || !hasGscData) {
+                      debugLog(`[Dashboard] Audit ${prevAuditDate} missing critical data (rankingData=${hasRankingData}, gscData=${hasGscData}), trying nearby dates`, 'info');
+                      
+                      // Try ±1 day, then ±2 days
+                      for (const dayOffset of [1, -1, 2, -2]) {
+                        const tryDate = new Date(prevAuditDate);
+                        tryDate.setDate(tryDate.getDate() + dayOffset);
+                        const tryDateStr = tryDate.toISOString().split('T')[0];
+                        
+                        // Check if this date exists in sortedAudits and is not current
+                        const tryMatch = sortedAudits.find(a => a.audit_date === tryDateStr && a.audit_date !== currentAuditDate);
+                        if (!tryMatch) continue;
+                        
+                        // Skip if anomalous
+                        if (anomalousAuditDates.has(tryDateStr)) continue;
+                        
+                        debugLog(`[Dashboard] Trying fallback date ${tryDateStr} (${dayOffset > 0 ? '+' : ''}${dayOffset} days)`, 'info');
+                        
+                        try {
+                          const tryAuditUrl = urlHelper(`/api/supabase/get-audit-by-date?propertyUrl=${encodeURIComponent(propertyUrl)}&auditDate=${tryDateStr}`);
+                          const tryResponse = await fetch(tryAuditUrl);
+                          if (tryResponse.ok) {
+                            const tryResult = await tryResponse.json();
+                            if (tryResult.status === 'ok' && tryResult.data) {
+                              const tryData = tryResult.data;
+                              const tryHasRanking = tryData.rankingAiData && tryData.rankingAiData.combinedRows && Array.isArray(tryData.rankingAiData.combinedRows) && tryData.rankingAiData.combinedRows.length > 0;
+                              const tryHasGsc = tryData.searchData && tryData.searchData.overview && (tryData.searchData.overview.clicks > 0 || tryData.searchData.overview.impressions > 0);
+                              
+                              // Use this date if it has the missing data
+                              if ((!hasRankingData && tryHasRanking) || (!hasGscData && tryHasGsc)) {
+                                debugLog(`[Dashboard] ✓ Using fallback date ${tryDateStr} (has ranking=${tryHasRanking}, has gsc=${tryHasGsc})`, 'success');
+                                return tryData;
+                              }
+                            }
+                          }
+                        } catch (tryErr) {
+                          // Continue to next date
+                          debugLog(`[Dashboard] Error trying fallback date ${tryDateStr}: ${tryErr?.message || tryErr}`, 'info');
+                        }
+                      }
+                    }
+                    
                     debugLog(`[Dashboard] ✓ Fetched full audit data for ${prevAuditDate}`, 'success');
-                    return fullAuditResult.data; // Return full audit data structure
+                    return auditData; // Return full audit data structure
                   } else {
                     debugLog(`[Dashboard] Full audit result missing data: status=${fullAuditResult.status}, message=${fullAuditResult.message || 'none'}`, 'warn');
                   }
