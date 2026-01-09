@@ -6214,7 +6214,12 @@
         });
 
         if (!response.ok) {
-          console.warn('[Optimisation] Failed to fetch statuses:', response.status);
+          // 401 is expected in share mode (no auth) - don't log as error
+          if (response.status === 401) {
+            debugLog('[Optimisation] Status fetch requires authentication (expected in share mode)', 'info');
+          } else {
+            console.warn('[Optimisation] Failed to fetch statuses:', response.status);
+          }
           window.optimisationStatusCache.clear();
           return;
         }
@@ -8995,8 +9000,23 @@
         renderOptimisationTasksTable();
 
         // Dashboard: refresh live dials/cards after tasks load
-        if (typeof window.renderDashboardTab === 'function') {
-          try { window.renderDashboardTab(); } catch {}
+        // Only refresh if dashboard tab is currently active to prevent unnecessary re-renders
+        // Use a flag to prevent loops
+        if (!window.__dashboardRefreshInProgress && typeof window.renderDashboardTab === 'function') {
+          const activePanel = document.querySelector('.panel.active[data-panel="dashboard"]');
+          if (activePanel) {
+            window.__dashboardRefreshInProgress = true;
+            try { 
+              window.renderDashboardTab(); 
+            } catch (e) {
+              console.warn('[Dashboard] Error refreshing dashboard:', e);
+            } finally {
+              // Reset flag after a short delay
+              setTimeout(() => {
+                window.__dashboardRefreshInProgress = false;
+              }, 2000);
+            }
+          }
         }
         
         return window.optimisationModuleState.allTasks;
@@ -53900,8 +53920,12 @@ Final Score: ${score}/100`;
         const hasValidDelta = domainCache && domainCache.deltas && domainCache.deltas.selfScore !== undefined && domainCache.deltas.selfScore !== null;
         if (!hasValidDelta) {
           // Check if we're already fetching to prevent multiple simultaneous calls
-          if (!window.__domainStrengthFetching) {
+          // Also check if we've already fetched recently (within last 10 seconds) to prevent loops
+          const lastFetchTime = window.__domainStrengthLastFetchTime || 0;
+          const timeSinceLastFetch = Date.now() - lastFetchTime;
+          if (!window.__domainStrengthFetching && timeSinceLastFetch > 10000) {
             window.__domainStrengthFetching = true;
+            window.__domainStrengthLastFetchTime = Date.now();
             // Start async fetch but don't block - dashboard will render with cached data
             (async () => {
               try {
@@ -53982,23 +54006,10 @@ Final Score: ${score}/100`;
                       // Save to cache
                       localStorage.setItem('dashboard_domain_strength_cache_v4', JSON.stringify(newCache));
                       
-                      // Only refresh dashboard ONCE after cache is updated, and only if dashboard tab is active
-                      // Use a flag to prevent refresh loops
-                      if (!window.__domainStrengthRefreshed && typeof window.renderDashboardTab === 'function') {
-                        window.__domainStrengthRefreshed = true;
-                        // Use setTimeout to debounce and prevent immediate re-render
-                        setTimeout(() => {
-                          try {
-                            window.renderDashboardTab();
-                            // Reset flag after a delay to allow future refreshes if needed
-                            setTimeout(() => {
-                              window.__domainStrengthRefreshed = false;
-                            }, 5000);
-                          } catch (e) {
-                            window.__domainStrengthRefreshed = false;
-                          }
-                        }, 1000);
-                      }
+                      // Update domain strength tile directly without re-rendering entire dashboard
+                      // This prevents infinite loops while still showing updated delta
+                      // The tile will update on next manual refresh or when dashboard is re-rendered for other reasons
+                      debugLog('[Dashboard] Domain strength cache updated with deltas', 'success');
                     }
                   }
                 }
@@ -54530,6 +54541,15 @@ Final Score: ${score}/100`;
           toNum(c.brand) ?? 0
         ];
 
+        // Only recreate chart if data actually changed or chart doesn't exist
+        const chartExists = window.__dashboardAiSummaryRadarChart !== null && window.__dashboardAiSummaryRadarChart !== undefined;
+        const dataChanged = !chartExists || 
+          (window.__lastAiSummaryData && JSON.stringify(window.__lastAiSummaryData) !== JSON.stringify(values));
+        
+        if (!dataChanged && chartExists) {
+          return; // Don't redraw if data hasn't changed
+        }
+        
         try {
           if (window.__dashboardAiSummaryRadarChart) {
             window.__dashboardAiSummaryRadarChart.destroy();
@@ -54538,6 +54558,8 @@ Final Score: ${score}/100`;
         } catch {
           // ignore
         }
+        
+        window.__lastAiSummaryData = values;
 
         const title = c
           ? `AI Summary components: Snippet Readiness ${Math.round(values[0])}, Visibility ${Math.round(values[1])}, Brand ${Math.round(values[2])}`
@@ -54655,6 +54677,16 @@ Final Score: ${score}/100`;
         });
         const data = pagesWithUplift.map(p => p.potentialClicks);
 
+        // Only recreate chart if data actually changed or chart doesn't exist
+        const chartExists = window.__dashboardUpliftChart !== null && window.__dashboardUpliftChart !== undefined;
+        const dataHash = JSON.stringify(pagesWithUplift.map(p => ({ url: p.url, clicks: p.potentialClicks })));
+        const dataChanged = !chartExists || 
+          (window.__lastUpliftDataHash && window.__lastUpliftDataHash !== dataHash);
+        
+        if (!dataChanged && chartExists) {
+          return; // Don't redraw if data hasn't changed
+        }
+        
         try {
           if (window.__dashboardUpliftChart) {
             window.__dashboardUpliftChart.destroy();
@@ -54663,6 +54695,8 @@ Final Score: ${score}/100`;
         } catch {
           // ignore
         }
+        
+        window.__lastUpliftDataHash = dataHash;
 
         const totalUplift = pagesWithUplift.reduce((sum, p) => sum + p.potentialClicks, 0);
         canvas.title = `Top pages by potential uplift (target CTR: ${targetCtrPct}%). Total potential: +${totalUplift} clicks.`;
@@ -54738,6 +54772,16 @@ Final Score: ${score}/100`;
           toNum(s?.productPct) ?? 0
         ];
 
+        // Only recreate chart if data actually changed or chart doesn't exist
+        const chartExists = window.__dashboardMoneyShareRadarChart !== null && window.__dashboardMoneyShareRadarChart !== undefined;
+        const dataHash = JSON.stringify(values);
+        const dataChanged = !chartExists || 
+          (window.__lastMoneyShareDataHash && window.__lastMoneyShareDataHash !== dataHash);
+        
+        if (!dataChanged && chartExists) {
+          return; // Don't redraw if data hasn't changed
+        }
+        
         try {
           if (window.__dashboardMoneyShareRadarChart) {
             window.__dashboardMoneyShareRadarChart.destroy();
@@ -54746,6 +54790,8 @@ Final Score: ${score}/100`;
         } catch {
           // ignore
         }
+        
+        window.__lastMoneyShareDataHash = dataHash;
 
         const title = s
           ? `Money citations split (of ${s.moneyTotal || 0}): Landing ${s.landing || 0}, Event ${s.event || 0}, Service ${s.product || 0}`
