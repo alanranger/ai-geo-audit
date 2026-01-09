@@ -55111,6 +55111,7 @@ Final Score: ${score}/100`;
               };
               
               debugLog(`[Dashboard] Found rolling 28-day audit: ${prevAuditDate} (${daysDiff} days ago, target: ${targetDateStr})`, 'info');
+              debugLog(`[Dashboard] Previous audit data - visibility: ${prevAuditFromHistory.visibility_score}, authority: ${prevAuditFromHistory.authority_score}, clicks: ${prevAuditFromHistory.gsc_clicks}, impressions: ${prevAuditFromHistory.gsc_impressions}`, 'info');
               return prevAuditData;
             } else if (currentIndex === -1 && sortedAudits.length > 0) {
               // Current audit not found in history, use the most recent one as fallback
@@ -55254,21 +55255,27 @@ Final Score: ${score}/100`;
         const prevMetrics = prevMetricsFromRolling28d || prevGlobal?.metrics || null;
         if (!prevMetrics) {
           debugLog(`[Dashboard] No previous metrics available for delta calculations (prevMetricsFromRolling28d: ${!!prevMetricsFromRolling28d}, prevGlobal: ${!!prevGlobal})`, 'warn');
+        } else {
+          debugLog(`[Dashboard] prevMetrics available - GAIO: ${prevMetrics?.gaioScore ?? 'null'}, AI Summary: ${prevMetrics?.aiSummaryScore ?? 'null'}, Audit KPIs: ${prevMetrics?.auditKpis ? 'present' : 'null'}`, 'info');
         }
         const metrics = liveSnapshot;
+        debugLog(`[Dashboard] Current metrics - GAIO: ${metrics?.gaioScore ?? 'null'}, AI Summary: ${metrics?.aiSummaryScore ?? 'null'}, Audit KPIs: ${metrics?.auditKpis ? 'present' : 'null'}`, 'info');
 
         // Dial: GAIO
         {
           const v = metrics?.gaioScore ?? null;
           const p = typeof v === 'number' ? v : null;
           const rag = scoreToRag(p, { greenAt: 70, amberAt: 50 });
+          const prevGaio = prevMetrics?.gaioScore ?? null;
+          const deltaText = formatDelta(v, prevGaio);
+          debugLog(`[Dashboard] GAIO delta: current=${v}, previous=${prevGaio}, deltaText=${deltaText}`, 'info');
           setDial(document.getElementById('dashboard-dial-gaio'), {
             valueText: typeof v === 'number' ? `${v}/100` : '—',
             pct: p,
             rag,
-            deltaText: formatDelta(metrics?.gaioScore, prevMetrics?.gaioScore)
+            deltaText: deltaText
           });
-          updateDeltaIndicator('dashboard-delta-gaio', v, prevMetrics?.gaioScore ?? null, { betterLower: false, decimals: 0 });
+          updateDeltaIndicator('dashboard-delta-gaio', v, prevGaio, { betterLower: false, decimals: 0 });
           renderDashboardGaioPillarsAndRadar(metrics?.pillars || null, prevMetrics?.pillars || null);
         }
 
