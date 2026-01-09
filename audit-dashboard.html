@@ -54388,9 +54388,21 @@ Final Score: ${score}/100`;
           return;
         }
 
-        // Truncate URLs for display
+        // Truncate URLs for display - remove domain, show only path
         const labels = pagesWithUplift.map(p => {
-          const url = p.url.replace(/^https?:\/\//, '').replace(/^www\./, '');
+          let url = p.url.replace(/^https?:\/\//, '').replace(/^www\./, '');
+          // Remove domain (everything before first slash)
+          const pathMatch = url.match(/\/(.+)$/);
+          if (pathMatch) {
+            url = '/' + pathMatch[1];
+          } else if (url.includes('/')) {
+            // If there's a slash but no leading slash, extract path
+            url = '/' + url.split('/').slice(1).join('/');
+          } else {
+            // If no path, show as root
+            url = '/';
+          }
+          // Truncate if too long
           return url.length > 30 ? url.substring(0, 27) + '...' : url;
         });
         const data = pagesWithUplift.map(p => p.potentialClicks);
