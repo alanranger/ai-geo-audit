@@ -97,7 +97,8 @@ function computeRAGStatus(objective, baselineValue, latestValue, dueAt, now) {
     return 'on_track'; // Met is also "on track" for display
   }
 
-  return 'on_track';
+  // Target not met - return 'off_track' instead of always 'on_track'
+  return 'off_track';
 }
 
 export default async function handler(req, res) {
@@ -454,6 +455,7 @@ export default async function handler(req, res) {
         latestValue,
         delta,
         objectiveRag,
+        objective_status: objectiveRag, // Also set objective_status for UI compatibility
         dueAt,
         dueIn,
         needsMeasurement,
