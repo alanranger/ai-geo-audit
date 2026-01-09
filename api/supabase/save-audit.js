@@ -102,7 +102,8 @@ export default async function handler(req, res) {
       moneyPagesSummary, // Phase 3: Money Pages summary for trend tracking
       moneySegmentMetrics, // Phase: Money Pages Priority Matrix - segment metrics for KPI tracker
       moneyPagePriorityData, // CRITICAL: Money Pages Priority Matrix data for Priority & Actions table
-      rankingAiData // Ranking & AI data (SERP rankings + AI Overview citations)
+      rankingAiData, // Ranking & AI data (SERP rankings + AI Overview citations)
+      domainStrength // Domain strength snapshot for historical delta calculations
     } = bodyData;
 
     if (!propertyUrl || !auditDate) {
@@ -440,9 +441,10 @@ export default async function handler(req, res) {
             : (snippetReadiness?.overallScore || 0);
           const snippet = toNum(snippetReadinessScore);
           
-          // Domain Strength (default to 50 if not available - should be passed from client)
-          const domainScore = 50; // Default - domainStrength should be passed from client
-          const hasDomainStrength = false; // Will be true if domainStrength is passed
+          // Domain Strength (use actual score if provided, default to 50 if not available)
+          const domainScoreRaw = domainStrength?.selfScore != null ? domainStrength.selfScore : null;
+          const hasDomainStrength = domainScoreRaw !== null && typeof domainScoreRaw === 'number';
+          const domainScore = hasDomainStrength ? clampScore(domainScoreRaw) : 50; // Default to 50 if not available
           
           // AI citations signal (from rankingAiData)
           let citationsTotal = 0;
@@ -523,7 +525,8 @@ export default async function handler(req, res) {
             : (snippetReadiness?.overallScore || 0);
           const snippet = toNum(snippetReadinessScore);
           
-          const domainScore = 50; // Default
+          const domainScoreRaw = domainStrength?.selfScore != null ? domainStrength.selfScore : null;
+          const domainScore = (domainScoreRaw !== null && typeof domainScoreRaw === 'number') ? clampScore(domainScoreRaw) : 50; // Default to 50 if not available
           let citationsTotal = 0;
           if (rankingAiData && rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
             citationsTotal = rankingAiData.combinedRows.reduce((sum, row) => {
@@ -550,9 +553,8 @@ export default async function handler(req, res) {
         }
       })(),
       
-      // Domain Strength (should be passed from client or fetched separately)
-      // For now, we'll store null and it can be updated later or passed from client
-      domain_strength: null, // TODO: Pass from client or fetch from domain strength API
+      // Domain Strength (passed from client, fetched automatically in saveAuditToSupabase)
+      domain_strength: ensureJson(domainStrength), // {selfScore, topCompetitorScore, strongerCount, competitorsCount, snapshotDate}
       
       // Business Profile Data (for historical tracking)
       local_business_schema_pages: ensureNumber(localSignals?.data?.localBusinessSchemaPages),

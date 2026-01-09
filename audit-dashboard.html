@@ -22416,6 +22416,47 @@
           }
         }
         
+        // Fetch domain strength snapshot for storage (if not already available)
+        let domainStrength = null;
+        try {
+          // Normalize domain for domain strength API
+          const normalizedDomain = propertyUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+          debugLog(`saveAuditToSupabase: Fetching domain strength for ${normalizedDomain}`, 'info');
+          
+          const domainStrengthResp = await fetch(urlHelper(`/api/domain-strength/overview`));
+          if (domainStrengthResp.ok) {
+            const domainStrengthJson = await domainStrengthResp.json();
+            if (domainStrengthJson?.status === 'ok' && Array.isArray(domainStrengthJson.items)) {
+              // Find our domain in the overview response
+              const ourItem = domainStrengthJson.items.find(item => {
+                const itemDomain = String(item?.domain || '').replace(/^www\./, '').toLowerCase();
+                return itemDomain === normalizedDomain.toLowerCase();
+              });
+              
+              if (ourItem && ourItem.latest) {
+                const latest = ourItem.latest;
+                domainStrength = {
+                  selfScore: typeof latest.score === 'number' ? latest.score : null,
+                  topCompetitorScore: typeof ourItem.topCompetitor?.score === 'number' ? ourItem.topCompetitor.score : null,
+                  strongerCount: typeof ourItem.strongerCount === 'number' ? ourItem.strongerCount : null,
+                  competitorsCount: typeof ourItem.competitorsCount === 'number' ? ourItem.competitorsCount : null,
+                  snapshotDate: latest.snapshotDate || null
+                };
+                debugLog(`✓ saveAuditToSupabase: Fetched domain strength - selfScore=${domainStrength.selfScore}, snapshotDate=${domainStrength.snapshotDate}`, 'success');
+              } else {
+                debugLog(`⚠ saveAuditToSupabase: Domain ${normalizedDomain} not found in domain strength overview`, 'warn');
+              }
+            } else {
+              debugLog(`⚠ saveAuditToSupabase: Domain strength overview response invalid: status=${domainStrengthJson?.status}`, 'warn');
+            }
+          } else {
+            debugLog(`⚠ saveAuditToSupabase: Failed to fetch domain strength: ${domainStrengthResp.status}`, 'warn');
+          }
+        } catch (domainStrengthErr) {
+          debugLog(`⚠ saveAuditToSupabase: Error fetching domain strength: ${domainStrengthErr.message}`, 'warn');
+          // Continue without domain strength - it's not critical for saving the audit
+        }
+        
         // Prepare payload
         const payload = {
           propertyUrl,
@@ -22428,7 +22469,8 @@
           moneyPagesSummary, // Phase 3: Money Pages summary for trend tracking
           moneySegmentMetrics, // Phase: Money Pages Priority Matrix - segment metrics for KPI tracker
           moneyPagePriorityData: window.moneyPagePriorityData || null, // CRITICAL: Save Priority Matrix data to Supabase
-          rankingAiData // Ranking & AI data (SERP rankings + AI Overview citations)
+          rankingAiData, // Ranking & AI data (SERP rankings + AI Overview citations)
+          domainStrength // Domain strength snapshot for historical delta calculations
         };
         
         // Check payload size before sending (Vercel limit is ~4.5MB)
