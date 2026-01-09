@@ -1,7 +1,7 @@
 # AI GEO Audit - Comprehensive Handover Document
 
-**Last Updated**: 2026-01-09  
-**Current Commit**: `422f43c` (Phase 4: Unified data fetching utility)  
+**Last Updated**: 2026-01-10  
+**Current Commit**: `51d50a4` (Computed fields storage verification complete)  
 **Purpose**: Single source of truth for all projects, phases, tasks, fixes, and key information for any new chat thread.
 
 ---
@@ -285,6 +285,14 @@ This document consolidates ALL critical information about the AI GEO Audit proje
 12. ✅ **Uplift Chart Labels**: Removed domain from chart labels (shows only URL paths)
 13. ✅ **Money Share Terminology**: Changed "Product" to "Service" in Money Share radar chart label
 14. ✅ **Median Delta Chart**: Fixed width to fill container and updated to 28 days (was 30 days)
+15. ✅ **Computed Fields Storage**: Enhanced save-audit.js to handle partial updates (fetch latest audit when only rankingAiData sent) - **COMPLETE** (2026-01-10)
+16. ✅ **Domain Strength Snapshot**: Updated to store domain_strength in audit_results after snapshot - **COMPLETE** (2026-01-10)
+17. ✅ **Complete Button Audit**: Comprehensive audit of all buttons across all modules - **COMPLETE** (2026-01-10)
+18. ✅ **Rolling 28-Day Deltas**: All dashboard tiles now use consistent rolling 28-day delta calculations - **COMPLETE** (2026-01-09)
+19. ✅ **Money Share Deltas**: Fixed moneySharePct calculation to use ranking data consistently - **COMPLETE** (2026-01-10)
+15. ✅ **Computed Fields Storage**: Enhanced save-audit.js to handle partial updates (fetch latest audit when only rankingAiData sent) - **COMPLETE** (2026-01-10)
+16. ✅ **Domain Strength Snapshot**: Updated to store domain_strength in audit_results after snapshot - **COMPLETE** (2026-01-10)
+17. ✅ **Complete Button Audit**: Comprehensive audit of all buttons across all modules - **COMPLETE** (2026-01-10)
 
 **Files Modified**:
 - `audit-dashboard.html`: `updateTaskLatest()` function (~line 16748)
@@ -831,12 +839,8 @@ mcp_supabase_execute_sql({ ... })
 - URL Task AI Citations Logic (Fix 0 - wrong logic, needs reversal)
 
 ### What Needs Implementation ⏸️
-- Phase 1: AI Citations column fixes
-- Phase 2: Prevent flickering & reduce API calls
-- Phase 3: Check & fix all update buttons
-- Phase 4: Align all audit processes
-- Phase 5: URL Task AI Citations Logic Fix (Fix 0)
-- Re-implement Fix 1 and Fix 5 (proven fixes)
+- Phase 5: URL Task AI Citations Logic Fix (Fix 0) - **AWAITING APPROVAL**
+- Test end-to-end audit flow (manual testing required)
 
 ---
 

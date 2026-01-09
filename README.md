@@ -124,9 +124,14 @@ Vercel will automatically rebuild and deploy (usually takes 1-2 minutes).
 
 ## Current Status
 
-**⚠️ NOTE**: For current known issues and fix status (as of 2026-01-XX), see **`HANDOVER.md`**.
+**⚠️ NOTE**: For current known issues and fix status (as of 2026-01-10), see **`HANDOVER.md`**.
 
-**Latest Update (2026-01-XX)**: Codebase rolled back to commit `8951fcf` to establish stable baseline. AI Citations column has stable counts (no flickering) but sorting functionality still present. Ready for targeted fixes from clean baseline.
+**Latest Update (2026-01-10)**: 
+- ✅ Computed fields storage complete: All update buttons now correctly store `ai_summary_components`, `eeat_score`, `eeat_confidence`, `eeat_subscores`, and `domain_strength` to Supabase
+- ✅ Enhanced partial update handling: Ranking & AI scans now fetch latest audit and recompute all computed fields
+- ✅ Domain strength automatic storage: Domain strength snapshots now update `audit_results.domain_strength`
+- ✅ Rolling 28-day deltas: All dashboard tiles use consistent rolling 28-day delta calculations
+- ✅ Complete button audit: Comprehensive documentation of all update/refresh/scan buttons across all modules
 
 - ✅ **Fully Implemented**: All core features are production-ready
 - ✅ **Site AI Health Dashboard**: Speedometer with multiple score indicators, RAG pills with breakdown boxes

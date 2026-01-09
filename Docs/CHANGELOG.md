@@ -2,6 +2,41 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-01-10] - v1.8.0 - Computed Fields Storage & Complete Button Audit
+
+### Added
+- **Computed Fields Storage**: All update buttons now correctly store computed fields to Supabase:
+  - `ai_summary_components` (JSONB) - AI Summary radar chart components
+  - `eeat_score` (NUMERIC) - EEAT score (0-100)
+  - `eeat_confidence` (TEXT) - EEAT confidence level (High/Medium/Low)
+  - `eeat_subscores` (JSONB) - EEAT sub-scores (Experience, Expertise, Authoritativeness, Trustworthiness)
+  - `domain_strength` (JSONB) - Domain strength snapshot data
+- **Partial Update Handling**: Enhanced `save-audit.js` to handle partial updates (e.g., when only `rankingAiData` is sent)
+  - Automatically fetches latest audit from Supabase
+  - Merges data and recomputes all computed fields
+  - Ensures computed fields are always stored correctly
+- **Domain Strength Auto-Storage**: Domain strength snapshots now automatically update `audit_results.domain_strength`
+- **Complete Button Audit**: Comprehensive documentation of all update/refresh/scan buttons across all modules
+  - `Docs/COMPLETE-BUTTON-AUDIT.md` - Module-by-module button audit
+  - `Docs/COMPUTED-FIELDS-VERIFICATION.md` - Computed fields storage verification
+  - `Docs/COMPUTED-FIELDS-CODE-VERIFICATION.md` - Code path verification
+
+### Fixed
+- **Money Share Deltas**: Fixed `moneySharePct` calculation in `computeDashboardSnapshotFromAuditData` to use ranking data consistently
+- **Rolling 28-Day Deltas**: All dashboard tiles now use consistent rolling 28-day delta calculations
+- **Domain Strength Storage**: Domain strength snapshots now update `audit_results.domain_strength` for latest audit
+
+### Changed
+- **Database Schema**: Added computed fields columns to `audit_results` table via migration
+- **Save-Audit API**: Enhanced to detect partial updates and fetch latest audit data for complete field computation
+- **Domain Strength Snapshot API**: Now updates `audit_results.domain_strength` after snapshot creation
+
+### Technical Details
+- Partial update detection: `rankingAiData && !scores && !schemaAudit && !searchData`
+- Merged data used for all computed field calculations
+- Domain strength fetched automatically in `saveAuditToSupabase()` before saving
+- All computed fields verified via code path tracing
+
 ## [2026-01-07] - v1.7.9 - Money Pages UI Improvements and Sorting Fix
 
 ### Fixed
