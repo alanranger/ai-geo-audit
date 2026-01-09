@@ -1,8 +1,8 @@
 # Phase 3: Update Buttons Audit - Status Summary
 
-**Date**: 2026-01-07  
-**Status**: ✅ **AUDIT COMPLETE, FIXES APPLIED**  
-**Deployment Status**: ⏸️ **NOT DEPLOYED** (changes committed locally, need to push to GitHub)
+**Date**: 2026-01-08  
+**Status**: ✅ **AUDIT COMPLETE, ALL FIXES APPLIED**  
+**Deployment Status**: ✅ **DEPLOYED** (commits pushed to GitHub, Vercel auto-deployed)
 
 ---
 
@@ -42,12 +42,47 @@
 - ✅ Reversed data source priority: Supabase first, then fallbacks
 - ✅ Fetches keywords from Supabase before checking localStorage
 - ✅ Updates localStorage with fresh Supabase data
+- ✅ Fixed duplicate `propertyUrl` declaration (syntax error at line 50031)
 
 ---
 
+## Additional Fixes Applied (Post-Audit)
+
+### 4. ✅ Run All Audits & Updates - Domain Strength Batch Processing - **FIXED**
+**Location**: `audit-dashboard.html` line ~54895  
+**Issues Fixed**:
+- ✅ Now processes all batches of domain strength snapshots (not just one)
+- ✅ Repeatedly calls `runDomainStrengthSnapshot()` until pending queue is empty (max 20 batches)
+- ✅ Fixed delta calculation to compare against last different score
+
+### 5. ✅ Money Pages AI Citations in Suggested Top 10 Cards - **FIXED**
+**Location**: `audit-dashboard.html` line ~35599  
+**Issues Fixed**:
+- ✅ Cards now show actual citation counts (not `⏳` placeholder)
+- ✅ Uses `window.moneyPagesAiCitationCache` and fetches from Supabase API if needed
+
+### 6. ✅ Monitoring Pill Color in Money Pages Opportunity Table - **FIXED**
+**Location**: `audit-dashboard.html` `renderMoneyPagesTable()`  
+**Issues Fixed**:
+- ✅ Monitoring status now shows blue (was green)
+- ✅ Updated `statusColors` mapping
+
+### 7. ✅ Objective KPI Display in Optimisation Tasks Table - **FIXED**
+**Location**: `audit-dashboard.html` line ~9406  
+**Issues Fixed**:
+- ✅ "Objective KPI" column now shows correct KPI label (e.g., "Rank" instead of "-")
+- ✅ Correctly retrieves from `task.objective_metric` or `task.objective_kpi`
+
+### 8. ✅ Performance Snapshot Target Metric Highlighting - **FIXED**
+**Location**: `audit-dashboard.html` line ~12849, ~10618  
+**Issues Fixed**:
+- ✅ Target metric row now highlighted with yellow background and orange border
+- ✅ Modified to pass full task object to include objective fields
+- ✅ Works with dark theme
+
 ## Remaining Issues
 
-### ⚠️ Run All Audits & Updates (LOW Priority) - **MINOR ISSUE**
+### ⚠️ Run All Audits & Updates - Data Source (LOW Priority) - **MINOR ISSUE**
 **Location**: `audit-dashboard.html` line ~54654  
 **Issue**: Reads audit data from localStorage instead of Supabase  
 **Impact**: Minimal - has 2-second wait after audit scan, so data should be fresh  
@@ -156,14 +191,24 @@ git push origin main
 
 - **Total Buttons**: 13
 - **Audited**: 13 (100%)
-- **Fixed**: 3 (HIGH/MEDIUM priority issues)
+- **Fixed**: 3 (HIGH/MEDIUM priority issues from audit)
+- **Additional Fixes**: 6 (UI enhancements and bug fixes)
 - **Correct**: 7 (no issues found)
 - **Minor Issue**: 1 (LOW priority, not fixed)
-- **Deployment**: ⏸️ **PENDING** (need to commit and push)
+- **Deployment**: ✅ **COMPLETE** (all commits pushed, Vercel auto-deployed)
+
+**Commits Applied**:
+1. `7988cd9` - Fix Phase 3: Update buttons - prioritize Supabase over localStorage
+2. `a8fa536` - Fix: Remove duplicate propertyUrl declaration in refreshGSCDataOnly
+3. `ba88f82` - Fix: Populate AI citations in Suggested Top 10 cards
+4. `1b0569e` - Fix: Domain Strength - Run All processes all batches + delta compares against last different score
+5. `90e7303` - Fix: Change monitoring pill color to blue in Money Pages Opportunity Table
+6. `5ce1537` - Fix: Display Objective KPI in tasks table
+7. `4ecf793` - Feature: Highlight target metric row in Performance Snapshot table
+8. `011ba5a` - Fix: Pass task object to renderOptimisationMetricsSnapshotForCycle
+9. `2db5b45` - Fix: Update target metric highlighting for dark theme
 
 **Next Steps**:
-1. ✅ Test locally (optional but recommended)
-2. ⏸️ Commit changes to Git
-3. ⏸️ Push to GitHub
-4. ⏸️ Verify Vercel deployment
-5. ⏸️ Test in production
+1. ✅ Phase 3 audit and fixes - **COMPLETE**
+2. ⏸️ Phase 4: Align all audit processes (create unified functions)
+3. ⏸️ Phase 5: URL Task AI Citations Logic Fix (Fix 0 - critical)

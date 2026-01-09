@@ -1,7 +1,7 @@
 # Phase 3: Update Buttons Audit - Findings
 
-**Status**: 🔄 **IN PROGRESS**  
-**Started**: 2026-01-08  
+**Status**: ✅ **AUDIT COMPLETE, FIXES APPLIED**  
+**Started**: 2026-01-07  
 **Last Updated**: 2026-01-08  
 **Purpose**: Document findings from systematic audit of each update button
 
@@ -611,13 +611,56 @@ For each button, we check:
 
 ---
 
+## Additional Fixes Applied (Post-Audit)
+
+### Fix 4: Run All Audits & Updates - Domain Strength Batch Processing
+**Status**: ✅ **FIXED** (2026-01-08)  
+**Location**: `audit-dashboard.html` line ~54895  
+**Issue**: Only processed one batch of domain strength snapshots, leaving many domains unprocessed  
+**Fix**: Modified `domain_strength` runner to repeatedly call `runDomainStrengthSnapshot()` until pending queue is empty (max 20 batches)
+
+### Fix 5: Domain Strength Delta Calculation
+**Status**: ✅ **FIXED** (2026-01-08)  
+**Location**: `audit-dashboard.html` line ~50363, `api/domain-strength/overview.js` line ~205  
+**Issue**: Delta showed `0.0` even when score changed, because it only compared last two snapshots  
+**Fix**: Modified to find last snapshot with *different* score (not just immediately preceding one)
+
+### Fix 6: Money Pages AI Citations in Suggested Top 10 Cards
+**Status**: ✅ **FIXED** (2026-01-08)  
+**Location**: `audit-dashboard.html` line ~35599  
+**Issue**: Cards showed `⏳` (timer) instead of actual citation counts  
+**Fix**: Added client-side JavaScript to populate cards after render, using `window.moneyPagesAiCitationCache` and fetching from `/api/supabase/query-keywords-citing-url` if not cached
+
+### Fix 7: Monitoring Pill Color in Money Pages Opportunity Table
+**Status**: ✅ **FIXED** (2026-01-08)  
+**Location**: `audit-dashboard.html` `renderMoneyPagesTable()`  
+**Issue**: Monitoring status showed green instead of blue  
+**Fix**: Updated `statusColors` mapping to use blue (`#dbeafe` background, `#1e40af` text) for 'monitoring' status
+
+### Fix 8: Objective KPI Display in Optimisation Tasks Table
+**Status**: ✅ **FIXED** (2026-01-08)  
+**Location**: `audit-dashboard.html` line ~9406  
+**Issue**: "Objective KPI" column showed "-" instead of actual KPI (e.g., "Rank")  
+**Fix**: Modified logic to correctly retrieve objective KPI from `task.objective_metric` or `task.objective_kpi` and map to appropriate label using `KPI_DISPLAY_METADATA`
+
+### Fix 9: Performance Snapshot Target Metric Highlighting
+**Status**: ✅ **FIXED** (2026-01-08)  
+**Location**: `audit-dashboard.html` line ~12849, ~10618  
+**Issue**: No visual indication of which metric row corresponds to task's objective KPI  
+**Fix**: 
+- Added logic to highlight target metric row with yellow background, orange left border, and thicker bottom border
+- Modified `renderOptimisationMetricsSnapshotForCycle` to accept and pass full task object (includes objective fields)
+- Updated highlighting to work with dark theme
+
+---
+
 ## Next Steps
 
-1. Complete audit of Button 1 (Add Measurement)
-2. Document all findings
-3. Move to next button
-4. Create unified functions based on findings
-5. Update all buttons to use unified functions
+1. ✅ Complete audit of all buttons - **DONE**
+2. ✅ Document all findings - **DONE**
+3. ✅ Apply all high/medium priority fixes - **DONE**
+4. ⏸️ Create unified functions based on findings - **PENDING** (Phase 4)
+5. ⏸️ Align all audit processes - **PENDING** (Phase 4)
 
 ---
 

@@ -1,7 +1,7 @@
 # AI GEO Audit - Comprehensive Handover Document
 
-**Last Updated**: 2026-01-07  
-**Current Commit**: `[pending]` (Phase 3 fixes applied - Update Task Latest, Run Audit Scan, Refresh GSC Data)  
+**Last Updated**: 2026-01-08  
+**Current Commit**: `2db5b45` (Phase 3 fixes + UI enhancements - target metric highlighting, objective KPI display, domain strength batch processing, AI citations in cards)  
 **Purpose**: Single source of truth for all projects, phases, tasks, fixes, and key information for any new chat thread.
 
 ---
@@ -206,7 +206,7 @@ This document consolidates ALL critical information about the AI GEO Audit proje
 ---
 
 ### Project 3: Fix Plan - Data Consistency & AI Citations
-**Status**: ✅ **60% COMPLETE** (Phases 1-3 complete, Phases 4-5 pending)
+**Status**: ✅ **75% COMPLETE** (Phases 1-3 complete, additional fixes applied, Phases 4-5 pending)
 
 **5-Phase Implementation Plan**:
 
@@ -273,11 +273,25 @@ This document consolidates ALL critical information about the AI GEO Audit proje
 1. ✅ **Update Task Latest**: Added Supabase fetch first, URL task handling, localStorage fallback
 2. ✅ **Run Audit Scan**: Moved Supabase save before localStorage update
 3. ✅ **Refresh GSC Data**: Reversed data source priority (Supabase first, then fallbacks)
+4. ✅ **Run All Audits & Updates**: Fixed domain strength batch processing (processes all batches, not just one)
+5. ✅ **Domain Strength Delta**: Fixed delta calculation to compare against last different score (not just previous snapshot)
+6. ✅ **Money Pages AI Citations**: Fixed Suggested Top 10 cards to show actual citation counts (not timer placeholder)
+7. ✅ **Monitoring Pill Color**: Changed Money Pages Opportunity Table monitoring status to blue (was green)
+8. ✅ **Objective KPI Display**: Fixed tasks table to show correct Objective KPI label (e.g., "Rank" instead of "-")
+9. ✅ **Performance Snapshot Highlighting**: Added visual highlight to target metric row in Performance Snapshot table
 
 **Files Modified**:
 - `audit-dashboard.html`: `updateTaskLatest()` function (~line 16748)
 - `audit-dashboard.html`: `runAudit()` function (~line 26460)
 - `audit-dashboard.html`: `refreshGSCDataOnly()` function (~line 49941)
+- `audit-dashboard.html`: `runDashboardGlobalRun()` function (~line 54895) - domain strength batch processing
+- `audit-dashboard.html`: `computeDomainStrengthDelta()` function (~line 50363) - delta calculation
+- `audit-dashboard.html`: Money Pages Suggested Top 10 cards (~line 35599) - AI citations
+- `audit-dashboard.html`: `renderMoneyPagesTable()` - monitoring pill color
+- `audit-dashboard.html`: `renderOptimisationTasksTable()` (~line 9406) - Objective KPI display
+- `audit-dashboard.html`: `renderOptimisationMetricsSnapshot()` (~line 12849) - target metric highlighting
+- `audit-dashboard.html`: `renderOptimisationMetricsSnapshotForCycle()` (~line 10618) - pass task object
+- `api/domain-strength/overview.js`: Delta calculation logic (~line 205)
 - `Docs/PHASE3-AUDIT-FINDINGS.md`: Complete audit documentation
 
 ---
@@ -807,9 +821,9 @@ mcp_supabase_execute_sql({ ... })
 **Deployment**: Vercel (https://ai-geo-audit.vercel.app/)  
 **Database**: Supabase (`supabase-main`, project_ref=igzvwbvgvmzvvzoclufx)
 
-**Current Commit**: `833d4ff`  
+**Current Commit**: `2db5b45`  
 **Baseline Commit**: `8951fcf`  
-**Status**: Rolled back to stable baseline. Ready for targeted fixes from clean foundation.
+**Status**: Phase 3 fixes complete. Additional UI enhancements and bug fixes applied. Ready for Phase 4 (align all audit processes).
 
 ---
 
