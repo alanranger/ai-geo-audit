@@ -1,12 +1,14 @@
 # Computed Fields Storage Verification
 
 ## Overview
-This document verifies that all update buttons and routines correctly store the new computed fields to Supabase:
+This document verifies that all update buttons and routines that **create or update audit records** correctly store the new computed fields to Supabase:
 - `ai_summary_components` (JSONB)
 - `eeat_score` (NUMERIC)
 - `eeat_confidence` (TEXT)
 - `eeat_subscores` (JSONB)
 - `domain_strength` (JSONB)
+
+**Note**: Optimisation Tracking buttons (Update All Tasks, Update per row, Add Measurement, Rebaseline) are documented here for completeness but don't need to store computed fields because they only update `optimisation_measurements` table, not `audit_results`.
 
 ---
 
