@@ -22858,6 +22858,103 @@
       }
     }
     
+    /**
+     * Unified Data Fetching Utility (Phase 4)
+     * Standardized function for fetching audit data with Supabase-first pattern and localStorage fallback
+     * 
+     * @param {string} propertyUrl - Property URL to fetch audit for
+     * @param {Object} options - Configuration options
+     * @param {boolean} options.minimalOnly - If true, fetch minimal data only (timestamp + scores)
+     * @param {string} options.localStorageKey - localStorage key to use for fallback (default: 'last_audit_results')
+     * @param {string} options.context - Context for logging (e.g., 'Global Run', 'Money Pages Scan')
+     * @param {boolean} options.updateLocalStorage - If true, update localStorage with fresh Supabase data (default: true)
+     * @returns {Promise<Object|null>} Audit data object or null if not found
+     */
+    async function fetchAuditDataUnified(propertyUrl, options = {}) {
+      const {
+        minimalOnly = false,
+        localStorageKey = 'last_audit_results',
+        context = 'Audit Data Fetch',
+        updateLocalStorage = true
+      } = options;
+      
+      // Get property URL if not provided
+      if (!propertyUrl) {
+        propertyUrl = typeof window.getPropertyUrl === 'function' 
+          ? window.getPropertyUrl() 
+          : (localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '');
+      }
+      
+      if (!propertyUrl) {
+        debugLog(`[${context}] ⚠ Cannot fetch audit data: property URL not set`, 'warn');
+        return null;
+      }
+      
+      // Step 1: Try Supabase first (source of truth)
+      let auditData = null;
+      let dataSource = null;
+      
+      if (typeof window.fetchLatestAuditFromSupabase === 'function') {
+        try {
+          debugLog(`[${context}] Fetching latest audit from Supabase (source of truth)...`, 'info');
+          auditData = await window.fetchLatestAuditFromSupabase(propertyUrl, minimalOnly);
+          
+          if (auditData) {
+            dataSource = 'supabase';
+            debugLog(`[${context}] ✓ Fetched audit from Supabase: hasSearchData=${!!auditData.searchData}, hasMoneyPagesMetrics=${!!(auditData.scores?.moneyPagesMetrics || auditData.moneyPagesMetrics)}`, 'success');
+            
+            // Update localStorage with fresh Supabase data for consistency
+            if (updateLocalStorage) {
+              try {
+                localStorage.setItem(localStorageKey, JSON.stringify(auditData));
+                debugLog(`[${context}] ✓ Updated localStorage with fresh Supabase data`, 'success');
+              } catch (localStorageErr) {
+                debugLog(`[${context}] ⚠ Failed to update localStorage: ${localStorageErr.message}`, 'warn');
+              }
+            }
+          } else {
+            debugLog(`[${context}] ⚠ No audit data returned from Supabase, falling back to localStorage...`, 'warn');
+          }
+        } catch (supabaseError) {
+          debugLog(`[${context}] ⚠ Failed to fetch from Supabase: ${supabaseError?.message || supabaseError}, falling back to localStorage...`, 'warn');
+        }
+      } else {
+        debugLog(`[${context}] ⚠ fetchLatestAuditFromSupabase function not available, falling back to localStorage...`, 'warn');
+      }
+      
+      // Step 2: Fallback to localStorage if Supabase fetch failed or returned no data
+      if (!auditData) {
+        try {
+          const localData = localStorage.getItem(localStorageKey);
+          if (localData) {
+            auditData = dashboardSafeJsonParse(localData, null);
+            if (auditData) {
+              dataSource = 'localStorage';
+              debugLog(`[${context}] ✓ Using audit data from localStorage (fallback)`, 'info');
+            } else {
+              debugLog(`[${context}] ⚠ Invalid data in localStorage`, 'warn');
+            }
+          } else {
+            debugLog(`[${context}] ⚠ No audit data in localStorage`, 'warn');
+          }
+        } catch (localStorageError) {
+          debugLog(`[${context}] ⚠ Error reading from localStorage: ${localStorageError.message}`, 'warn');
+        }
+      }
+      
+      // Log final result
+      if (auditData) {
+        debugLog(`[${context}] ✓ Audit data loaded from ${dataSource}`, 'success');
+      } else {
+        debugLog(`[${context}] ✗ No audit data available from Supabase or localStorage`, 'error');
+      }
+      
+      return auditData;
+    }
+    
+    // Expose to window for global access
+    window.fetchAuditDataUnified = fetchAuditDataUnified;
+    
     // Update retry button visibility based on failed URLs
     function updateRetryButtonVisibility(schemaAudit) {
       const retryBtn = document.getElementById('retryFailedUrlsBtn');
@@ -55311,35 +55408,16 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             }
           } },
           { key: 'update_tasks', label: 'Update All Tasks with Latest Data', runner: async () => {
-            // Fetch audit data from Supabase first (source of truth), then fallback to localStorage
-            let auditData = null;
-            const propertyUrl = typeof window.getPropertyUrl === 'function' ? window.getPropertyUrl() : 
-                               (localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '');
+            // Use unified data fetching utility (Phase 4)
+            const auditData = await fetchAuditDataUnified(null, {
+              minimalOnly: false,
+              localStorageKey: 'last_audit_results',
+              context: 'Global Run',
+              updateLocalStorage: true
+            });
             
-            if (propertyUrl && typeof window.fetchLatestAuditFromSupabase === 'function') {
-              try {
-                debugLog('[Global Run] Fetching latest audit from Supabase...', 'info');
-                auditData = await window.fetchLatestAuditFromSupabase(propertyUrl, false);
-                if (auditData) {
-                  // Update localStorage with fresh Supabase data for consistency
-                  localStorage.setItem('last_audit_results', JSON.stringify(auditData));
-                  debugLog(`[Global Run] Fetched audit from Supabase: hasSearchData=${!!auditData.searchData}, hasMoneyPagesMetrics=${!!(auditData.scores?.moneyPagesMetrics)}, queryTotalsCount=${auditData.searchData?.queryTotals?.length || 0}`, 'success');
-                } else {
-                  debugLog('[Global Run] No audit data returned from Supabase, falling back to localStorage...', 'warn');
-                }
-              } catch (supabaseError) {
-                debugLog(`[Global Run] Failed to fetch from Supabase: ${supabaseError?.message || supabaseError}, falling back to localStorage...`, 'warn');
-              }
-            }
-            
-            // Fallback to localStorage if Supabase fetch failed or propertyUrl not available
-            if (!auditData) {
-              auditData = dashboardSafeJsonParse(localStorage.getItem('last_audit_results'), null);
-              if (!auditData || !auditData.searchData) {
-                debugLog('[Global Run] Audit data not available from Supabase or localStorage, but continuing with task update...', 'warn');
-              } else {
-                debugLog(`[Global Run] Using audit data from localStorage: hasSearchData=${!!auditData.searchData}, hasMoneyPagesMetrics=${!!(auditData.scores?.moneyPagesMetrics)}, queryTotalsCount=${auditData.searchData?.queryTotals?.length || 0}`, 'info');
-              }
+            if (!auditData || !auditData.searchData) {
+              debugLog('[Global Run] Audit data not available from Supabase or localStorage, but continuing with task update...', 'warn');
             }
             
             // Ensure tasks are actually loaded before/after bulk update so the dashboard reflects real outcomes.
