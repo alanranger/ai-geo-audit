@@ -50364,11 +50364,23 @@ Final Score: ${score}/100`;
         const list = Array.isArray(sortedAscRows) ? sortedAscRows : [];
         if (list.length < 2) return null;
         const last = list[list.length - 1];
-        const prev = list[list.length - 2];
-        const a = typeof last?.score === 'number' ? last.score : parseFloat(last?.score);
-        const b = typeof prev?.score === 'number' ? prev.score : parseFloat(prev?.score);
-        if (!isFinite(a) || !isFinite(b)) return null;
-        return a - b;
+        const lastScore = typeof last?.score === 'number' ? last.score : parseFloat(last?.score);
+        if (!isFinite(lastScore)) return null;
+        
+        // Find the last snapshot with a different score (not just the previous one)
+        // This handles cases where multiple snapshots have the same score
+        let prevScore = null;
+        for (let i = list.length - 2; i >= 0; i--) {
+          const prev = list[i];
+          const score = typeof prev?.score === 'number' ? prev.score : parseFloat(prev?.score);
+          if (isFinite(score) && score !== lastScore) {
+            prevScore = score;
+            break;
+          }
+        }
+        
+        if (prevScore === null) return null;
+        return lastScore - prevScore;
       }
 
       function getDomainStrengthDomainList(maxCompetitors = 20) {
@@ -54923,7 +54935,45 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
               await window.dashboardRunMoneyPagesScan();
             }
           } },
-          { key: 'domain_strength', label: 'Run Domain Strength Snapshot', runner: async () => { if (typeof window.runDomainStrengthSnapshot === 'function') await window.runDomainStrengthSnapshot(); } },
+          { key: 'domain_strength', label: 'Run Domain Strength Snapshot (All Batches)', runner: async () => {
+            // Loop through all batches until queue is empty
+            let remainingPending = 1; // Start with 1 to enter loop
+            let batchCount = 0;
+            const maxBatches = 20; // Safety limit to prevent infinite loops
+            
+            while (remainingPending > 0 && batchCount < maxBatches) {
+              batchCount++;
+              debugLog(`[Global Run] Domain Strength batch ${batchCount}...`, 'info');
+              
+              if (typeof window.runDomainStrengthSnapshot === 'function') {
+                await window.runDomainStrengthSnapshot();
+              }
+              
+              // Check remaining pending count
+              try {
+                const pendingResp = await fetch(apiUrl('/api/domain-strength/pending-count'));
+                if (pendingResp.ok) {
+                  const pendingData = await pendingResp.json();
+                  remainingPending = pendingData.count || 0;
+                  debugLog(`[Global Run] Domain Strength: ${remainingPending} domains remaining in queue`, 'info');
+                } else {
+                  remainingPending = 0; // Stop if API fails
+                }
+              } catch (e) {
+                debugLog(`[Global Run] Failed to check pending count: ${e?.message || e}`, 'warn');
+                remainingPending = 0; // Stop on error
+              }
+              
+              // Small delay between batches
+              if (remainingPending > 0) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+              }
+            }
+            
+            if (batchCount >= maxBatches) {
+              debugLog(`[Global Run] Domain Strength: Reached max batches limit (${maxBatches})`, 'warn');
+            }
+          } },
           { key: 'update_tasks', label: 'Update All Tasks with Latest Data', runner: async () => {
             // Wait a moment to ensure audit data is fully saved from previous steps
             await new Promise(resolve => setTimeout(resolve, 2000));

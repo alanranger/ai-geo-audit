@@ -199,9 +199,20 @@ export default async function handler(req, res) {
       .filter(Boolean);
 
     const last = sorted[sorted.length - 1] || null;
-    const prev = sorted.length >= 2 ? sorted[sorted.length - 2] : null;
     const lastScore = num(last?.score);
-    const prevScore = num(prev?.score);
+    
+    // Find the last snapshot with a different score (not just the previous one)
+    // This handles cases where multiple snapshots have the same score
+    let prevScore = null;
+    for (let i = sorted.length - 2; i >= 0; i--) {
+      const prev = sorted[i];
+      const score = num(prev?.score);
+      if (score !== null && score !== lastScore) {
+        prevScore = score;
+        break;
+      }
+    }
+    
     const deltaLatest =
       lastScore !== null && prevScore !== null ? lastScore - prevScore : null;
 
