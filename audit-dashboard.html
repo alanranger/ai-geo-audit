@@ -55110,8 +55110,8 @@ Final Score: ${score}/100`;
                 } : null)
               };
               
-              debugLog(`[Dashboard] Found rolling 28-day audit: ${prevAuditDate} (${daysDiff} days ago, target: ${targetDateStr})`, 'info');
-              debugLog(`[Dashboard] Previous audit data - visibility: ${prevAuditFromHistory.visibility_score}, authority: ${prevAuditFromHistory.authority_score}, clicks: ${prevAuditFromHistory.gsc_clicks}, impressions: ${prevAuditFromHistory.gsc_impressions}`, 'info');
+              debugLog(`[Dashboard] ✓ Found rolling 28-day audit: ${prevAuditDate} (${daysDiff} days ago, target: ${targetDateStr})`, 'success');
+              debugLog(`[Dashboard] Previous audit raw data - visibility: ${prevAuditFromHistory.visibility_score}, authority: ${prevAuditFromHistory.authority_score}, clicks: ${prevAuditFromHistory.gsc_clicks}, impressions: ${prevAuditFromHistory.gsc_impressions}, position: ${prevAuditFromHistory.gsc_avg_position}, ctr: ${prevAuditFromHistory.gsc_ctr}`, 'info');
               return prevAuditData;
             } else if (currentIndex === -1 && sortedAudits.length > 0) {
               // Current audit not found in history, use the most recent one as fallback
@@ -55237,7 +55237,7 @@ Final Score: ${score}/100`;
                 // Compute snapshot from rolling 28-day audit data
                 const prevSnapshot = computeDashboardSnapshotFromAuditData(prevAuditData);
                 prevMetricsFromRolling28d = prevSnapshot;
-                debugLog(`[Dashboard] Using rolling 28-day audit (${prevAuditData.auditDate}) for delta calculations. GAIO: ${prevSnapshot?.gaioScore ?? 'null'}, AI Summary: ${prevSnapshot?.aiSummaryScore ?? 'null'}`, 'info');
+                debugLog(`[Dashboard] ✓ Computed prevMetrics from audit ${prevAuditData.auditDate}: GAIO=${prevSnapshot?.gaioScore ?? 'null'}, AI Summary=${prevSnapshot?.aiSummaryScore ?? 'null'}, Clicks=${prevSnapshot?.auditKpis?.clicks ?? 'null'}, Impressions=${prevSnapshot?.auditKpis?.impressions ?? 'null'}`, 'success');
               } else {
                 debugLog(`[Dashboard] No previous audit found for rolling 28-day delta calculation`, 'warn');
               }
@@ -55254,12 +55254,12 @@ Final Score: ${score}/100`;
         // Use rolling 28-day deltas if available, otherwise fall back to global run snapshots
         const prevMetrics = prevMetricsFromRolling28d || prevGlobal?.metrics || null;
         if (!prevMetrics) {
-          debugLog(`[Dashboard] No previous metrics available for delta calculations (prevMetricsFromRolling28d: ${!!prevMetricsFromRolling28d}, prevGlobal: ${!!prevGlobal})`, 'warn');
+          debugLog(`[Dashboard] ⚠ No previous metrics available for delta calculations (prevMetricsFromRolling28d: ${!!prevMetricsFromRolling28d}, prevGlobal: ${!!prevGlobal})`, 'warn');
         } else {
-          debugLog(`[Dashboard] prevMetrics available - GAIO: ${prevMetrics?.gaioScore ?? 'null'}, AI Summary: ${prevMetrics?.aiSummaryScore ?? 'null'}, Audit KPIs: ${prevMetrics?.auditKpis ? 'present' : 'null'}`, 'info');
+          debugLog(`[Dashboard] ✓ prevMetrics ready - GAIO: ${prevMetrics?.gaioScore ?? 'null'}, AI Summary: ${prevMetrics?.aiSummaryScore ?? 'null'}, Audit KPIs: ${prevMetrics?.auditKpis ? `Clicks=${prevMetrics.auditKpis.clicks}, Impressions=${prevMetrics.auditKpis.impressions}` : 'null'}`, 'success');
         }
         const metrics = liveSnapshot;
-        debugLog(`[Dashboard] Current metrics - GAIO: ${metrics?.gaioScore ?? 'null'}, AI Summary: ${metrics?.aiSummaryScore ?? 'null'}, Audit KPIs: ${metrics?.auditKpis ? 'present' : 'null'}`, 'info');
+        debugLog(`[Dashboard] Current metrics - GAIO: ${metrics?.gaioScore ?? 'null'}, AI Summary: ${metrics?.aiSummaryScore ?? 'null'}, Audit KPIs: ${metrics?.auditKpis ? `Clicks=${metrics.auditKpis.clicks}, Impressions=${metrics.auditKpis.impressions}` : 'null'}`, 'info');
 
         // Dial: GAIO
         {
@@ -55268,7 +55268,7 @@ Final Score: ${score}/100`;
           const rag = scoreToRag(p, { greenAt: 70, amberAt: 50 });
           const prevGaio = prevMetrics?.gaioScore ?? null;
           const deltaText = formatDelta(v, prevGaio);
-          debugLog(`[Dashboard] GAIO delta: current=${v}, previous=${prevGaio}, deltaText=${deltaText}`, 'info');
+          debugLog(`[Dashboard] GAIO delta calculation: current=${v}, previous=${prevGaio}, deltaText="${deltaText}"`, 'info');
           setDial(document.getElementById('dashboard-dial-gaio'), {
             valueText: typeof v === 'number' ? `${v}/100` : '—',
             pct: p,
