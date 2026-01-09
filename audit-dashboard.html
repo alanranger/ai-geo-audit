@@ -54225,18 +54225,19 @@ Final Score: ${score}/100`;
         `;
 
         const tile = (label, value, deltaText, dir = 'flat', title = '') => {
-          // Create indicator badge for top-right corner
+          // Only show top-right corner indicator if delta is NOT shown in tile content (i.e., when deltaText is empty/N/A)
+          // This prevents duplicate delta displays
           let indicatorHtml = '';
-          // Always show indicator - show delta if available, otherwise N/A
-          if (deltaText && deltaText !== '—' && deltaText !== '' && deltaText !== '0') {
-            const arrow = dir === 'up' ? '↑' : dir === 'down' ? '↓' : '—';
-            indicatorHtml = `<div class="dashboard-kpi-tile-indicator" data-dir="${dir}"><span class="delta-arrow">${arrow}</span> ${deltaText}</div>`;
-          } else if (deltaText === '0') {
-            // Show 0 with flat styling
-            indicatorHtml = `<div class="dashboard-kpi-tile-indicator" data-dir="flat"><span class="delta-arrow">—</span> 0</div>`;
-          } else {
-            // Show N/A when no delta data available
-            indicatorHtml = `<div class="dashboard-kpi-tile-indicator" data-dir="flat"><span class="delta-arrow">—</span> N/A</div>`;
+          const hasDeltaInTile = deltaText && deltaText !== '—' && deltaText !== '' && deltaText !== '0';
+          
+          // Only show corner indicator when there's no delta in the tile content
+          if (!hasDeltaInTile) {
+            if (deltaText === '0') {
+              indicatorHtml = `<div class="dashboard-kpi-tile-indicator" data-dir="flat"><span class="delta-arrow">—</span> 0</div>`;
+            } else {
+              // Show N/A when no delta data available
+              indicatorHtml = `<div class="dashboard-kpi-tile-indicator" data-dir="flat"><span class="delta-arrow">—</span> N/A</div>`;
+            }
           }
           
           return `
@@ -54244,7 +54245,7 @@ Final Score: ${score}/100`;
               ${indicatorHtml}
               <div class="dashboard-kpi-label">${label}</div>
               <div class="dashboard-kpi-value">${value}</div>
-              ${deltaText ? `<div class="dashboard-kpi-delta" data-dir="${dir}">${deltaText}</div>` : ''}
+              ${hasDeltaInTile ? `<div class="dashboard-kpi-delta" data-dir="${dir}">${deltaText}</div>` : ''}
             </div>
           `;
         };
