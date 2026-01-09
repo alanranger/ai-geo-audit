@@ -10170,8 +10170,22 @@
             // Extract from metrics objects using KPI extractor
             const kpiKey = objectiveKpi || task.objective_kpi || task.primary_kpi;
             if (kpiKey) {
-              latestValue = task.latest_metrics[kpiKey] ?? task.latest_metrics[`gsc_${kpiKey}`] ?? null;
-              baselineValue = task.baseline_metrics[kpiKey] ?? task.baseline_metrics[`gsc_${kpiKey}`] ?? null;
+              // Try both the KPI key and the gsc_ prefixed version
+              latestValue = task.latest_metrics[`gsc_${kpiKey}`] ?? task.latest_metrics[kpiKey] ?? null;
+              baselineValue = task.baseline_metrics[`gsc_${kpiKey}`] ?? task.baseline_metrics[kpiKey] ?? null;
+              
+              if (typeof debugLog === 'function') {
+                debugLog(`[Optimisation Badge] Extracted from metrics: kpiKey="${kpiKey}", latestValue=${latestValue}, baselineValue=${baselineValue}`, 'info');
+              }
+            }
+          }
+          
+          // If still no values, try from objective_progress
+          if (latestValue == null && task.objective_progress) {
+            latestValue = task.objective_progress.latest_value ?? null;
+            baselineValue = task.objective_progress.baseline_value ?? null;
+            if (typeof debugLog === 'function') {
+              debugLog(`[Optimisation Badge] Extracted from objective_progress: latestValue=${latestValue}, baselineValue=${baselineValue}`, 'info');
             }
           }
           
@@ -10197,21 +10211,21 @@
               meetsTarget = latestValue <= target;
             }
             
-            // Override state based on actual comparison
+            // ALWAYS override state based on actual comparison - don't trust database state
+            if (typeof debugLog === 'function') {
+              debugLog(`[Optimisation Badge] Validating absolute target: latestValue=${latestValue}, target=${target}, direction=${direction}, meetsTarget=${meetsTarget}`, 'info');
+            }
+            
             if (meetsTarget) {
-              if (state !== 'met' && state !== 'achieved' && state !== 'on_track') {
-                if (typeof debugLog === 'function') {
-                  debugLog(`[Optimisation Badge] Overriding state "${state}" to 'met': latestValue=${latestValue} meets absolute target=${target}`, 'info');
-                }
-                state = 'met';
+              state = 'met';
+              if (typeof debugLog === 'function') {
+                debugLog(`[Optimisation Badge] Setting state to 'met': latestValue=${latestValue} meets absolute target=${target}`, 'info');
               }
             } else {
-              // Latest value doesn't meet target - can't be 'met' or 'achieved'
-              if (state === 'met' || state === 'achieved' || state === 'on_track') {
-                if (typeof debugLog === 'function') {
-                  debugLog(`[Optimisation Badge] Overriding '${state}' to 'off_track': latestValue=${latestValue} does NOT meet absolute target=${target}`, 'warn');
-                }
-                state = 'off_track';
+              // Latest value doesn't meet target - set to 'off_track'
+              state = 'off_track';
+              if (typeof debugLog === 'function') {
+                debugLog(`[Optimisation Badge] Setting state to 'off_track': latestValue=${latestValue} does NOT meet absolute target=${target}`, 'warn');
               }
             }
           } else if (targetType === 'delta' && latestValue != null && baselineValue != null) {
