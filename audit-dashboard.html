@@ -9065,10 +9065,13 @@
     function countTasksWithIncompleteBaselines(tasks) {
       const criticalFields = ['ai_overview', 'ai_citations', 'current_rank'];
       return tasks.filter(task => {
+        // Only check active tasks (not done/cancelled/deleted)
+        if (['done', 'cancelled', 'deleted'].includes(task.status)) return false;
         if (!task.baseline_metrics) return true; // No baseline = incomplete
         const missingFields = criticalFields.filter(field => {
           const val = task.baseline_metrics[field];
-          return val == null || val === '';
+          // Check for null, undefined, empty string, or false (for boolean fields)
+          return val == null || val === '' || val === false;
         });
         return missingFields.length > 0;
       }).length;
@@ -13525,13 +13528,8 @@
         <div style="font-weight: 700; padding: 0.5rem; background: var(--dark-panel); border: 1px solid var(--dark-border); border-radius: 4px; font-size: 0.9rem; color: var(--dark-text);">Latest</div>
       `;
 
-      // Check if baseline is incomplete (missing critical fields)
-      const criticalFields = ['ai_overview', 'ai_citations', 'current_rank'];
-      const missingFields = criticalFields.filter(field => {
-        const val = baseline?.[field];
-        return val == null || val === '';
-      });
-      const isBaselineIncomplete = missingFields.length > 0;
+      // REMOVED: Warning banner check - user requested removal
+      // Baseline completeness is now handled by the bulk rebaseline feature
 
       metrics.forEach(metric => {
         const baselineVal = baseline?.[metric.baselineKey];
@@ -13576,15 +13574,7 @@
         `;
       });
       
-      // Add warning banner if baseline is incomplete
-      if (isBaselineIncomplete) {
-        html = `
-          <div style="padding: 0.75rem; margin-bottom: 0.5rem; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 4px; font-size: 0.875rem; color: #000000 !important; font-weight: 600;">
-            <strong style="color: #000000 !important;">⚠ Baseline Incomplete:</strong> <span style="color: #000000 !important;">This baseline is missing ${missingFields.length} critical field(s): ${missingFields.join(', ')}. 
-            Delta calculations may be inaccurate. Consider using "Rebaseline" to create a complete baseline with all fields.</span>
-          </div>
-        ` + html;
-      }
+      // REMOVED: Warning banner - user requested removal
 
       // Add captured_at timestamps (use created_at from event if captured_at not in metrics)
       const baselineDate = baseline?.captured_at || baseline?.created_at;
@@ -16315,7 +16305,13 @@
           }));
         }
 
-        // Reload tasks to refresh counts
+        // Reload tasks to refresh counts - force fresh data from API
+        await window.loadAllOptimisationTasks();
+        
+        // Wait a moment for view to update
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Reload again to ensure view has updated baseline_metrics
         await window.loadAllOptimisationTasks();
         
         // Update summary cards

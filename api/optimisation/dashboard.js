@@ -294,9 +294,10 @@ export default async function handler(req, res) {
       let baselineEvent = null;
       if (cycleEvents.length > 0) {
         // Baseline: prefer the most recent baseline marker (supports rebaselining); fallback to first measurement.
+        // CRITICAL: Sort by date DESC to get the MOST RECENT baseline (after rebaselining)
         const baselineCandidates = cycleEvents.filter(e => e && e.is_baseline === true && e.metrics);
         baselineEvent = baselineCandidates.length > 0
-          ? baselineCandidates[baselineCandidates.length - 1]
+          ? baselineCandidates.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] // Most recent first
           : cycleEvents[0];
 
         if (baselineEvent && baselineEvent.metrics) {
