@@ -123,8 +123,8 @@ export default async function handler(req, res) {
     let mergedDomainStrength = domainStrength;
     
     // If only rankingAiData is sent (partial update), fetch latest audit to get other fields
-    const isPartialUpdate = rankingAiData && !scores && !schemaAudit && !searchData;
-    if (isPartialUpdate) {
+    const isRankingAiDataOnlyUpdate = rankingAiData && !scores && !schemaAudit && !searchData;
+    if (isRankingAiDataOnlyUpdate) {
       console.log('[Save Audit] Partial update detected (only rankingAiData). Fetching latest audit to recompute computed fields...');
       try {
         // Fetch latest audit from Supabase
@@ -686,7 +686,9 @@ export default async function handler(req, res) {
       (!searchData.queryTotals || searchData.queryTotals.length === 0) &&
       (!searchData.queryPages || searchData.queryPages.length === 0);
     
-    const isPartialUpdate = hasQueryTotalsOnly || hasQueryPagesOnly || hasTopQueriesOnly;
+    const hasRankingAiDataOnly = rankingAiData && !scores && !schemaAudit && !searchData;
+    
+    const isPartialUpdate = hasQueryTotalsOnly || hasQueryPagesOnly || hasTopQueriesOnly || hasRankingAiDataOnly;
 
     // ---- Guardrails: prevent writing "null audits" and mark partials ----
     // We consider a write "invalid" (reject) if it contains no meaningful audit payload.
