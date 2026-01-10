@@ -16485,7 +16485,20 @@
 
     /**
      * Fetches latest audit from Supabase and loads combinedRows from Ranking & AI data
-     * Unified data fetching for all task update functions
+     * 
+     * This is a unified data fetching function used by all task update functions to ensure consistency.
+     * It provides the data sources needed by fetchMetricsForUrlTask() and fetchMetricsForKeywordTask().
+     * 
+     * Returns:
+     * - latestAudit: Latest audit from Supabase (contains ranking_ai_data with combinedRows)
+     * - combinedRows: Array of keyword ranking data from Ranking & AI scan
+     * 
+     * Fallback order for combinedRows:
+     * 1. Latest audit from Supabase (ranking_ai_data.combinedRows)
+     * 2. RankingAiModule state (if available)
+     * 3. window.rankingAiData (if set)
+     * 4. localStorage rankingAiData (if available)
+     * 
      * @returns {Promise<Object>} Object with { latestAudit, combinedRows }
      */
     window.fetchLatestAuditAndCombinedRows = async function fetchLatestAuditAndCombinedRows() {
@@ -16549,11 +16562,26 @@
 
     /**
      * Fetches metrics for URL-only tasks (no keyword)
-     * Uses GSC page totals API + Ranking & AI data for AI metrics
-     * @param {Object} task - Task object
-     * @param {Object} latestAudit - Latest audit from Supabase (optional)
-     * @param {Array} combinedRows - Combined rows from Ranking & AI scan (optional)
-     * @returns {Promise<Object|null>} Metrics object or null if failed
+     * 
+     * IMPORTANT: This function fetches ALL fields from BOTH data sources:
+     * - GSC (Google Search Console) data: clicks, impressions, CTR, position/rank
+     * - Ranking & AI data: AI overview, AI citations, ranking fallback
+     * 
+     * Data sources:
+     * 1. GSC page totals API: Provides clicks, impressions, CTR, and position for the URL
+     * 2. Ranking & AI data (combinedRows): Provides AI overview, AI citations, and ranking fallback
+     * 3. Supabase API fallback: If local Ranking & AI lookup fails, queries Supabase directly
+     * 
+     * Returns a complete metrics object with ALL fields populated from BOTH sources:
+     * - gsc_clicks_28d, gsc_impressions_28d, gsc_ctr_28d (from GSC)
+     * - current_rank (from GSC, with fallback to Ranking & AI average rank)
+     * - ai_overview, ai_citations (from Ranking & AI data or Supabase)
+     * - classic_ranking_url, page_type, segment, captured_at
+     * 
+     * @param {Object} task - Task object with target_url or target_url_clean
+     * @param {Object} latestAudit - Latest audit from Supabase (optional, used for combinedRows fallback)
+     * @param {Array} combinedRows - Combined rows from Ranking & AI scan (optional, will be fetched if not provided)
+     * @returns {Promise<Object|null>} Complete metrics object with ALL fields from BOTH sources, or null if failed
      */
     window.fetchMetricsForUrlTask = async function fetchMetricsForUrlTask(task, latestAudit = null, combinedRows = []) {
       const taskUrlForPage = task.target_url_clean || task.target_url || '';
@@ -16728,12 +16756,28 @@
 
     /**
      * Fetches metrics for keyword-based tasks
-     * Uses combinedRows (keyword-specific data) + queryTotals (GSC keyword data)
-     * NEVER uses Money Pages data (which is page-level aggregated)
-     * @param {Object} task - Task object
-     * @param {Object} latestAudit - Latest audit from Supabase (optional)
-     * @param {Array} combinedRows - Combined rows from Ranking & AI scan
-     * @returns {Promise<Object|null>} Metrics object or null if failed
+     * 
+     * IMPORTANT: This function fetches ALL fields from BOTH data sources:
+     * - GSC (Google Search Console) data: clicks, impressions, CTR (via queryTotals)
+     * - Ranking & AI data: current rank, AI overview, AI citations, opportunity score
+     * 
+     * CRITICAL: NEVER uses Money Pages data (which is page-level aggregated).
+     * Keyword tasks MUST use keyword-specific data from combinedRows.
+     * 
+     * Data sources:
+     * 1. combinedRows (Ranking & AI): Provides keyword-specific rank, AI overview, AI citations
+     * 2. queryTotals (GSC): Provides keyword-specific clicks, impressions, CTR via getQueryTotalForKeyword()
+     * 
+     * Returns a complete metrics object with ALL fields populated from BOTH sources:
+     * - gsc_clicks_28d, gsc_impressions_28d, gsc_ctr_28d (from GSC queryTotals)
+     * - current_rank (from Ranking & AI combinedRows)
+     * - ai_overview, ai_citations (from Ranking & AI combinedRows)
+     * - opportunity_score, classic_ranking_url, page_type, segment, captured_at
+     * 
+     * @param {Object} task - Task object with keyword_text
+     * @param {Object} latestAudit - Latest audit from Supabase (optional, not used for keyword tasks)
+     * @param {Array} combinedRows - Combined rows from Ranking & AI scan (REQUIRED for keyword tasks)
+     * @returns {Promise<Object|null>} Complete metrics object with ALL fields from BOTH sources, or null if failed
      */
     window.fetchMetricsForKeywordTask = async function fetchMetricsForKeywordTask(task, latestAudit = null, combinedRows = []) {
       const taskKeyword = task.keyword_text || '';
