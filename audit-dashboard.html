@@ -9401,55 +9401,8 @@
         // Build goal status display (Phase 5: use objective_status from cycle)
         // BUT validate with actual values to ensure consistency with drawer
         let goalHtml = '–';
-        let objectiveStatus = task.objective_status || task.goal_state || 'not_set';
-        
-        // Validate status using actual values (same logic as drawer)
-        const objective = task.objective || task.cycle?.objective || null;
-        const targetType = objective?.target_type || (task.objective_target_delta != null ? 'delta' : 'absolute');
-        const target = objective?.target != null ? objective.target : 
-          (task.objective_target_delta != null ? task.objective_target_delta : 
-          (task.objective_target_value != null ? task.objective_target_value : null));
-        const objectiveKpi = objective?.kpi || task.objective_kpi || task.primary_kpi || task.objective_metric || null;
-        
-        if (target != null && objectiveKpi) {
-          // Get latest and baseline values
-          let latestValue = null;
-          let baselineValue = null;
-          
-          if (task.objective_progress) {
-            latestValue = task.objective_progress.latest_value ?? null;
-            baselineValue = task.objective_progress.baseline_value ?? null;
-          } else if (task.latest_metrics && task.baseline_metrics) {
-            const kpiKey = objectiveKpi;
-            latestValue = task.latest_metrics[`gsc_${kpiKey}`] ?? task.latest_metrics[kpiKey] ?? null;
-            baselineValue = task.baseline_metrics[`gsc_${kpiKey}`] ?? task.baseline_metrics[kpiKey] ?? null;
-          }
-          
-          // Validate status based on values
-          if (latestValue == null) {
-            objectiveStatus = 'no_measurement';
-          } else if (targetType === 'absolute') {
-            let direction = 'higher_better';
-            if (objective?.kpi === 'current_rank' || objective?.kpi === 'rank') {
-              direction = 'lower_better';
-            }
-            const meetsTarget = direction === 'higher_better' 
-              ? latestValue >= target 
-              : latestValue <= target;
-            objectiveStatus = meetsTarget ? 'met' : 'off_track';
-          } else if (targetType === 'delta') {
-            if (baselineValue == null) {
-              objectiveStatus = 'no_measurement';
-            } else {
-              const delta = latestValue - baselineValue;
-              const direction = task.objective_direction || 'increase';
-              const meetsTarget = direction === 'decrease' 
-                ? delta <= (target * -1)
-                : delta >= target;
-              objectiveStatus = meetsTarget ? 'met' : 'off_track';
-            }
-          }
-        }
+        // Use the same validation function as drawer to ensure consistency
+        const objectiveStatus = validateObjectiveStatus(task, task.objective_progress);
         
         if (objectiveStatus && objectiveStatus !== 'not_set') {
           const goalConfig = {
@@ -10171,11 +10124,69 @@
         objectiveCycleEl.textContent = `(Cycle ${cycleNo})`;
       }
 
+      // Shared function to validate objective status using actual values
+      function validateObjectiveStatus(taskData, progressData) {
+        const objective = taskData.objective || taskData.cycle?.objective || null;
+        const targetType = objective?.target_type || (taskData.objective_target_delta != null ? 'delta' : 'absolute');
+        const target = objective?.target != null ? objective.target : 
+          (taskData.objective_target_delta != null ? taskData.objective_target_delta : 
+          (taskData.objective_target_value != null ? taskData.objective_target_value : null));
+        const objectiveKpi = objective?.kpi || taskData.objective_kpi || taskData.primary_kpi || taskData.objective_metric || null;
+        
+        // If no target or KPI, can't validate
+        if (!target || !objectiveKpi) {
+          return taskData.objective_status || taskData.goal_state || 'not_set';
+        }
+        
+        // Get latest and baseline values
+        let latestValue = null;
+        let baselineValue = null;
+        
+        if (progressData && progressData.latest_value != null && progressData.baseline_value != null) {
+          latestValue = progressData.latest_value;
+          baselineValue = progressData.baseline_value;
+        } else if (taskData.objective_progress) {
+          latestValue = taskData.objective_progress.latest_value ?? null;
+          baselineValue = taskData.objective_progress.baseline_value ?? null;
+        } else if (taskData.latest_metrics && taskData.baseline_metrics) {
+          const kpiKey = objectiveKpi;
+          latestValue = taskData.latest_metrics[`gsc_${kpiKey}`] ?? taskData.latest_metrics[kpiKey] ?? null;
+          baselineValue = taskData.baseline_metrics[`gsc_${kpiKey}`] ?? taskData.baseline_metrics[kpiKey] ?? null;
+        }
+        
+        // Validate status based on values
+        if (latestValue == null) {
+          return 'no_measurement';
+        } else if (targetType === 'absolute') {
+          let direction = 'higher_better';
+          if (objective?.kpi === 'current_rank' || objective?.kpi === 'rank') {
+            direction = 'lower_better';
+          }
+          const meetsTarget = direction === 'higher_better' 
+            ? latestValue >= target 
+            : latestValue <= target;
+          return meetsTarget ? 'met' : 'off_track';
+        } else if (targetType === 'delta') {
+          if (baselineValue == null) {
+            return 'no_measurement';
+          } else {
+            const delta = latestValue - baselineValue;
+            const direction = taskData.objective_direction || 'increase';
+            const meetsTarget = direction === 'decrease' 
+              ? delta <= (target * -1)
+              : delta >= target;
+            return meetsTarget ? 'met' : 'off_track';
+          }
+        }
+        
+        return taskData.objective_status || taskData.goal_state || 'not_set';
+      }
+
       // Update progress badge - Use objective_status from cycle (Phase 5) or fallback to goal_state
       const objectiveBadgeEl = document.getElementById('optimisation-drawer-objective-badge');
       if (objectiveBadgeEl) {
-        // Phase 5: Use objective_status from cycle (server-computed), fallback to goal_state
-        let state = task.objective_status || task.goal_state;
+        // Validate status using actual values - don't trust database state
+        let state = validateObjectiveStatus(task, progress);
         
         // Debug logging to understand what's happening
         if (typeof debugLog === 'function') {
@@ -10200,125 +10211,9 @@
           debugLog(`[Optimisation Badge] WARNING: progress.objective_state="${progress.objective_state}" differs from goal_state="${state}". Using goal_state.`, 'warn');
         }
         
-        // ALWAYS validate state using actual values vs target - don't trust database views
-        // This ensures badge matches reality regardless of which view is used
-        const objective = task.objective || task.cycle?.objective || null;
-        const targetType = objective?.target_type || (task.objective_target_delta != null ? 'delta' : 'absolute');
-        const target = objective?.target != null ? objective.target : 
-          (task.objective_target_delta != null ? task.objective_target_delta : 
-          (task.objective_target_value != null ? task.objective_target_value : null));
-        const objectiveKpi = objective?.kpi || task.objective_kpi || task.primary_kpi || task.objective_metric || null;
-        
-        if (target != null && (task.objective_metric || task.objective_kpi || objectiveKpi)) {
-          // Get latest and baseline values from progress or task
-          let latestValue = null;
-          let baselineValue = null;
-          
-          if (progress && progress.latest_value != null && progress.baseline_value != null) {
-            latestValue = progress.latest_value;
-            baselineValue = progress.baseline_value;
-          } else if (task.latest_metrics && task.baseline_metrics) {
-            // Extract from metrics objects using KPI extractor
-            const kpiKey = objectiveKpi || task.objective_kpi || task.primary_kpi;
-            if (kpiKey) {
-              // Try both the KPI key and the gsc_ prefixed version
-              latestValue = task.latest_metrics[`gsc_${kpiKey}`] ?? task.latest_metrics[kpiKey] ?? null;
-              baselineValue = task.baseline_metrics[`gsc_${kpiKey}`] ?? task.baseline_metrics[kpiKey] ?? null;
-              
-              if (typeof debugLog === 'function') {
-                debugLog(`[Optimisation Badge] Extracted from metrics: kpiKey="${kpiKey}", latestValue=${latestValue}, baselineValue=${baselineValue}`, 'info');
-              }
-            }
-          }
-          
-          // If still no values, try from objective_progress
-          if (latestValue == null && task.objective_progress) {
-            latestValue = task.objective_progress.latest_value ?? null;
-            baselineValue = task.objective_progress.baseline_value ?? null;
-            if (typeof debugLog === 'function') {
-              debugLog(`[Optimisation Badge] Extracted from objective_progress: latestValue=${latestValue}, baselineValue=${baselineValue}`, 'info');
-            }
-          }
-          
-          // Check if we have values to validate
-          if (latestValue == null) {
-            // No latest value - can't validate, show "No measurement"
-            state = 'no_measurement';
-            if (typeof debugLog === 'function') {
-              debugLog(`[Optimisation Badge] Setting state to 'no_measurement': latestValue is null, cannot validate target`, 'warn');
-            }
-          } else if (targetType === 'absolute') {
-            // For absolute targets, compare latest value directly to target
-            // Determine direction based on KPI type
-            let direction = 'higher_better';
-            if (objective?.kpi) {
-              // CTR, clicks, impressions, AI citations are higher_better
-              // Rank is lower_better
-              if (objective.kpi === 'current_rank' || objective.kpi === 'rank') {
-                direction = 'lower_better';
-              } else {
-                direction = 'higher_better';
-              }
-            }
-            let meetsTarget = false;
-            
-            if (direction === 'higher_better') {
-              meetsTarget = latestValue >= target;
-            } else if (direction === 'lower_better') {
-              meetsTarget = latestValue <= target;
-            }
-            
-            // ALWAYS override state based on actual comparison - don't trust database state
-            if (typeof debugLog === 'function') {
-              debugLog(`[Optimisation Badge] Validating absolute target: latestValue=${latestValue}, target=${target}, direction=${direction}, meetsTarget=${meetsTarget}`, 'info');
-            }
-            
-            if (meetsTarget) {
-              state = 'met';
-              if (typeof debugLog === 'function') {
-                debugLog(`[Optimisation Badge] Setting state to 'met': latestValue=${latestValue} meets absolute target=${target}`, 'info');
-              }
-            } else {
-              // Latest value doesn't meet target - set to 'off_track'
-              state = 'off_track';
-              if (typeof debugLog === 'function') {
-                debugLog(`[Optimisation Badge] Setting state to 'off_track': latestValue=${latestValue} does NOT meet absolute target=${target}`, 'warn');
-              }
-            }
-          } else if (targetType === 'delta') {
-            // For delta targets, need both baseline and latest
-            if (baselineValue == null) {
-              state = 'no_measurement';
-              if (typeof debugLog === 'function') {
-                debugLog(`[Optimisation Badge] Setting state to 'no_measurement': baselineValue is null, cannot validate delta target`, 'warn');
-              }
-            } else {
-              // Compare delta to target
-              const delta = latestValue - baselineValue;
-              const direction = task.objective_direction || 'increase';
-              const meetsTarget = direction === 'decrease' 
-                ? delta <= (target * -1)
-                : delta >= target;
-              
-              // ALWAYS override state based on actual delta - don't trust database state
-              if (typeof debugLog === 'function') {
-                debugLog(`[Optimisation Badge] Validating delta target: delta=${delta}, target=${target}, direction=${direction}, meetsTarget=${meetsTarget}`, 'info');
-              }
-              
-              if (meetsTarget) {
-                state = 'met';
-                if (typeof debugLog === 'function') {
-                  debugLog(`[Optimisation Badge] Setting state to 'met': delta=${delta} meets target=${target}`, 'info');
-                }
-              } else {
-                // Delta doesn't meet target - set to 'off_track'
-                state = 'off_track';
-                if (typeof debugLog === 'function') {
-                  debugLog(`[Optimisation Badge] Setting state to 'off_track': delta=${delta} does NOT meet target=${target} (direction=${direction})`, 'warn');
-                }
-              }
-            }
-          }
+        // State is already validated by validateObjectiveStatus function above
+        if (typeof debugLog === 'function') {
+          debugLog(`[Optimisation Badge] Validated state: "${state}"`, 'info');
         }
         
         const badgeConfig = {
@@ -10704,16 +10599,23 @@
         };
         
         // Re-render objective badge and content for selected cycle
+        // Use the same validation function to ensure consistency
         const objectiveBadgeEl = document.getElementById('optimisation-drawer-objective-badge');
         if (objectiveBadgeEl) {
-          const status = cycleTask.objective_status || 'not_set';
+          // Validate status using actual values - don't trust database state
+          const validatedStatus = validateObjectiveStatus(cycleTask, cycleTask.objective_progress);
           const badgeConfig = {
+            'achieved': { text: 'Achieved', bg: '#10b981', color: '#ffffff' },
             'met': { text: 'Met', bg: '#10b981', color: '#ffffff' },
-            'on_track': { text: 'On track', bg: '#3b82f6', color: '#ffffff' },
+            'on_track': { text: 'Met', bg: '#10b981', color: '#ffffff' }, // on_track means met
+            'off_track': { text: 'Off track', bg: '#ef4444', color: '#ffffff' }, // off_track means not met
+            'at_risk': { text: 'At risk', bg: '#f59e0b', color: '#ffffff' },
             'overdue': { text: 'Overdue', bg: '#ef4444', color: '#ffffff' },
-            'not_set': { text: 'Not set', bg: '#9ca3af', color: '#ffffff' }
+            'not_set': { text: 'Not set', bg: '#9ca3af', color: '#ffffff' },
+            'no_measurement': { text: 'No measurement', bg: '#9ca3af', color: '#ffffff' },
+            'no_data': { text: 'No measurement', bg: '#9ca3af', color: '#ffffff' } // API returns 'no_data' when values missing
           };
-          const config = badgeConfig[status] || badgeConfig['not_set'];
+          const config = badgeConfig[validatedStatus] || badgeConfig['not_set'];
           objectiveBadgeEl.textContent = config.text;
           objectiveBadgeEl.style.background = config.bg;
           objectiveBadgeEl.style.color = config.color;
