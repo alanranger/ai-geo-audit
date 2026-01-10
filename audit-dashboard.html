@@ -18145,89 +18145,26 @@
         return;
       }
 
-      // CRITICAL: Fetch latest audit from Supabase first (for both keyword and URL tasks)
-      let latestAuditFromSupabase = null;
-      try {
-        const propertyUrl = document.getElementById('propertyUrl')?.value || 
-                            localStorage.getItem('gsc_property_url') || 
-                            localStorage.getItem('last_property_url') || 
-                            'https://www.alanranger.com';
-        if (typeof fetchLatestAuditFromSupabase === 'function') {
-          debugLog(`[Optimisation] Update Task Latest: Fetching latest audit from Supabase...`, 'info');
-          latestAuditFromSupabase = await fetchLatestAuditFromSupabase(propertyUrl, false);
-          if (latestAuditFromSupabase && latestAuditFromSupabase.ranking_ai_data) {
-            try {
-              const rankingAiData = latestAuditFromSupabase.ranking_ai_data;
-              if (rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
-                // Store in localStorage for RankingAiModule to use
-                localStorage.setItem('rankingAiData', JSON.stringify(rankingAiData));
-                debugLog(`[Optimisation] Update Task Latest: Loaded ${rankingAiData.combinedRows.length} keywords from latest audit's ranking_ai_data`, 'success');
-                // Also set window.rankingAiData
-                window.rankingAiData = rankingAiData.combinedRows;
-              }
-            } catch (rankingErr) {
-              debugLog(`[Optimisation] Update Task Latest: Error loading ranking_ai_data from latest audit: ${rankingErr.message}`, 'warn');
-            }
-          }
-        }
-      } catch (fetchErr) {
-        debugLog(`[Optimisation] Update Task Latest: Error fetching latest audit from Supabase: ${fetchErr.message}`, 'warn');
-      }
-
-      // Also try renderRankingAiTab to refresh data (fallback)
-      if (typeof window.renderRankingAiTab === 'function') {
-        try {
-          await window.renderRankingAiTab();
-          await new Promise(resolve => setTimeout(resolve, 500));
-        } catch (e) {
-          console.warn('[Optimisation] Update Task Latest: Could not refresh Ranking & AI data:', e);
-        }
-      }
-
       const taskUrlForPage = task.target_url_clean || task.target_url || '';
       const hasKeyword = !!(task.keyword_text && String(task.keyword_text).trim());
 
-      // Get ranking data sources (prioritize Supabase data)
-      let combinedRows = [];
-      // First try RankingAiModule state (may have been updated by renderRankingAiTab)
-      if (typeof RankingAiModule !== 'undefined' && RankingAiModule.state) {
-        const state = RankingAiModule.state();
-        combinedRows = state.combinedRows || [];
-      }
-      // Fallback to window.rankingAiData (set from Supabase fetch above)
-      if (combinedRows.length === 0 && typeof window.rankingAiData !== 'undefined' && Array.isArray(window.rankingAiData)) {
-        combinedRows = window.rankingAiData;
-        debugLog(`[Optimisation] Update Task Latest: Using window.rankingAiData (${combinedRows.length} rows)`, 'info');
-      }
-      // Fallback to localStorage (if Supabase fetch failed)
-      if (combinedRows.length === 0) {
-        try {
-          const local = localStorage.getItem('rankingAiData');
-          if (local) {
-            const parsed = JSON.parse(local);
-            if (parsed && Array.isArray(parsed.combinedRows) && parsed.combinedRows.length > 0) {
-              combinedRows = parsed.combinedRows;
-              debugLog(`[Optimisation] Update Task Latest: Using localStorage rankingAiData (${combinedRows.length} rows)`, 'info');
-            }
-          }
-        } catch (e) {
-          debugLog(`[Optimisation] Update Task Latest: Error reading localStorage rankingAiData: ${e.message}`, 'warn');
-        }
-      }
-      // Final fallback to latest audit from Supabase
-      if (combinedRows.length === 0 && latestAuditFromSupabase && latestAuditFromSupabase.ranking_ai_data) {
-        const rankingAiData = latestAuditFromSupabase.ranking_ai_data;
-        if (rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
-          combinedRows = rankingAiData.combinedRows;
-          debugLog(`[Optimisation] Update Task Latest: Using latest audit ranking_ai_data (${combinedRows.length} rows)`, 'info');
-        }
-      }
-
+      // Use shared helper functions to ensure consistency
+      const { latestAudit, combinedRows } = await window.fetchLatestAuditAndCombinedRows();
+      
       let currentMetrics = null;
-      let matchingRow = null;
+      
+      // Use shared helper functions based on task type
+      if (hasKeyword) {
+        // Keyword-based task: Use keyword-specific data
+        currentMetrics = await window.fetchMetricsForKeywordTask(task, latestAudit, combinedRows);
+      } else if (taskUrlForPage) {
+        // URL-only task: Use GSC page totals API + Ranking & AI data
+        currentMetrics = await window.fetchMetricsForUrlTask(task, latestAudit, combinedRows);
+      }
 
+      // Legacy code below - keeping for now but should be removed
       // For URL-only tasks (e.g. Money Pages), prefer an exact GSC page totals fetch
-      if (!hasKeyword && taskUrlForPage) {
+      if (!currentMetrics && !hasKeyword && taskUrlForPage) {
         try {
           const property = document.getElementById('propertyUrl')?.value ||
             localStorage.getItem('gsc_property_url') ||
@@ -18339,6 +18276,7 @@
         }
       }
 
+      // Legacy code below - keeping for now but should be removed
       // For keyword tasks, find matching row from combinedRows
       if (!currentMetrics && hasKeyword) {
         // Find matching row
