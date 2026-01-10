@@ -42007,16 +42007,28 @@ Final Score: ${score}/100`;
       const gaugeStatus = document.getElementById('gaugeStatus');
       const legendElement = document.getElementById('snippetReadinessLegend');
       
+      // Normalize snippetReadiness: handle both number and object formats
+      let overallSnippetReadiness = 0;
+      if (typeof snippetReadiness === 'number') {
+        overallSnippetReadiness = snippetReadiness;
+      } else if (snippetReadiness && typeof snippetReadiness === 'object' && snippetReadiness.overallScore != null) {
+        overallSnippetReadiness = snippetReadiness.overallScore;
+      } else if (scores) {
+        // Recalculate if snippetReadiness is invalid but we have scores
+        overallSnippetReadiness = calculateSnippetReadiness(scores, data);
+        debugLog(`[Snippet Readiness] Recalculated from scores: ${overallSnippetReadiness}`, 'info');
+      }
+      
       if (snippetScoreElement) {
-        snippetScoreElement.textContent = snippetReadiness;
+        snippetScoreElement.textContent = Math.round(overallSnippetReadiness);
         
         // Color code overall score based on value
         let colorClass = '#ef4444'; // red
         let statusText = 'Critical';
-        if (snippetReadiness >= 70) {
+        if (overallSnippetReadiness >= 70) {
           colorClass = '#10b981'; // green
           statusText = 'Strong';
-        } else if (snippetReadiness >= 40) {
+        } else if (overallSnippetReadiness >= 40) {
           colorClass = '#f59e0b'; // amber
           statusText = 'Needs Improvement';
         }
