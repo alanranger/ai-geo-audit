@@ -23682,12 +23682,30 @@
         };
         
         try {
-          const propertyUrl = document.getElementById('propertyUrl')?.value || 
-                              localStorage.getItem('gsc_property_url') || 
-                              'https://www.alanranger.com';
+          // Get property URL from multiple possible sources
+          const propertyUrlInput = document.getElementById('propertyUrl');
+          const propertyUrlFromInput = propertyUrlInput?.value?.trim();
+          const propertyUrlFromStorage = localStorage.getItem('gsc_property_url')?.trim();
+          const propertyUrlDefault = 'https://www.alanranger.com';
+          
+          const propertyUrl = propertyUrlFromInput || propertyUrlFromStorage || propertyUrlDefault;
           
           debugLog(`[updateAuditTimestamp] Using property URL: ${propertyUrl}`, 'info');
-          console.log('[updateAuditTimestamp] Property URL:', propertyUrl);
+          console.log('[updateAuditTimestamp] Property URL sources:', {
+            fromInput: propertyUrlFromInput,
+            fromStorage: propertyUrlFromStorage,
+            default: propertyUrlDefault,
+            final: propertyUrl,
+            hasInput: !!propertyUrlInput,
+            inputValue: propertyUrlInput?.value
+          });
+          
+          // Validate propertyUrl is not empty
+          if (!propertyUrl || propertyUrl.trim() === '') {
+            debugLog('[updateAuditTimestamp] Property URL is empty, cannot fetch audit data', 'error');
+            console.error('[updateAuditTimestamp] Property URL is empty!');
+            return;
+          }
           
           // Fetch latest GSC audit (has query_pages) - query Supabase directly
           let gscAuditDate = null;
@@ -23698,7 +23716,10 @@
           
           try {
             // Query Supabase directly for latest audit with query_pages
-            const gscResponse = await fetch(apiUrl(`/api/supabase/get-latest-audit?property=${encodeURIComponent(propertyUrl)}&minimal=true`));
+            // Use propertyUrl query parameter (API expects 'propertyUrl', not 'property')
+            const gscUrl = apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}&minimal=true`);
+            console.log('[updateAuditTimestamp] GSC minimal URL:', gscUrl);
+            const gscResponse = await fetch(gscUrl);
             console.log('[updateAuditTimestamp] GSC minimal response status:', gscResponse.status);
             
             if (gscResponse.ok) {
@@ -23713,7 +23734,9 @@
               
               if (gscData.status === 'ok' && gscData.data && gscData.data.auditDate) {
                 // Now fetch full record to get date_range and timestamp
-                const fullResponse = await fetch(apiUrl(`/api/supabase/get-latest-audit?property=${encodeURIComponent(propertyUrl)}`));
+                const fullUrl = apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}`);
+                console.log('[updateAuditTimestamp] GSC full URL:', fullUrl);
+                const fullResponse = await fetch(fullUrl);
                 console.log('[updateAuditTimestamp] GSC full response status:', fullResponse.status);
                 
                 if (fullResponse.ok) {
@@ -23791,7 +23814,9 @@
           let rankingAiTimestamp = null;
           
           try {
-            const rankingAiResponse = await fetch(apiUrl(`/api/supabase/get-latest-audit?property=${encodeURIComponent(propertyUrl)}`));
+            const rankingAiUrl = apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}`);
+            console.log('[updateAuditTimestamp] Ranking & AI URL:', rankingAiUrl);
+            const rankingAiResponse = await fetch(rankingAiUrl);
             if (rankingAiResponse.ok) {
               const rankingAiData = await rankingAiResponse.json();
               if (rankingAiData.status === 'ok' && rankingAiData.data) {
