@@ -56693,6 +56693,11 @@ Final Score: ${score}/100`;
         if (lastRunEl) lastRunEl.textContent = lastGlobal ? formatUtcTimestamp(lastGlobal.timestamp) : '—';
         if (lastStatusEl) lastStatusEl.textContent = lastGlobal ? (lastGlobal.status || 'ok') : '—';
 
+        // Update "Last Audit" pills at the top of each module page to use consistent timestamp
+        if (lastGlobal && lastGlobal.timestamp) {
+          updateAuditTimestamp(lastGlobal.timestamp);
+        }
+
         // CRITICAL: Fetch audit from ~27 days ago for rolling 28-day delta calculations
         // This ensures consistent time-period comparisons across all dashboard tiles
         let prevMetricsFromRolling28d = null;
@@ -56895,7 +56900,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const moneyShareRag = scoreToRag(metrics?.moneySharePct ?? null, { greenAt: 70, amberAt: 50 });
 
         const auditCard = audit ? {
-          timestamp: audit.timestamp || null,
+          timestamp: lastGlobal?.timestamp || audit.timestamp || null,
           rag: gaioRag,
           ragLabel: (typeof metrics?.gaioScore === 'number') ? `${gaioRag.toUpperCase()} (${metrics.gaioScore}/100)` : 'Unknown',
           kpis: audit.searchData ? {
@@ -56930,7 +56935,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const hasRanking = !!(rankingStore && rankingStore.timestamp);
         const rankingRag = hasRanking ? scoreToRag(rankingK?.top3SharePct ?? null, { greenAt: 70, amberAt: 50 }) : 'neutral';
         const rankingCard = {
-          timestamp: rankingStore?.timestamp || null,
+          timestamp: lastGlobal?.timestamp || rankingStore?.timestamp || null,
           rag: rankingRag,
           ragLabel: hasRanking
             ? (rankingK?.top3SharePct != null ? `Top 3 share: ${rankingK.top3SharePct}%` : 'Rankings loaded')
@@ -56969,9 +56974,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const moneyCtrProgressPct = (moneyAgg?.ctrPct != null && moneyCtrTarget > 0) ? Math.round((moneyAgg.ctrPct / moneyCtrTarget) * 100) : null;
         const moneyRag = scoreToRag((typeof moneyCtrProgressPct === 'number') ? Math.min(100, moneyCtrProgressPct) : null, { greenAt: 70, amberAt: 50 });
         const moneyPagesCard = {
-          note: hasMoneyPages && audit?.timestamp
-            ? `Last audit: ${formatUtcTimestamp(audit.timestamp)} · CTR target: ≥ ${moneyCtrTarget}% (alt: +0.3pp) · Position targets: ≤10 (alt: -2)`
-            : (audit?.timestamp ? `No Money Pages metrics in latest audit (last: ${formatUtcTimestamp(audit.timestamp)})` : 'No Money Pages metrics yet'),
+          note: hasMoneyPages && lastGlobal?.timestamp
+            ? `Last audit: ${formatUtcTimestamp(lastGlobal.timestamp)} · CTR target: ≥ ${moneyCtrTarget}% (alt: +0.3pp) · Position targets: ≤10 (alt: -2)`
+            : (lastGlobal?.timestamp ? `No Money Pages metrics in latest audit (last: ${formatUtcTimestamp(lastGlobal.timestamp)})` : 'No Money Pages metrics yet'),
+          timestamp: lastGlobal?.timestamp || audit?.timestamp || null,
           rag: hasMoneyPages ? moneyRag : 'neutral',
           ragLabel: hasMoneyPages ? `CTR: ${formatPct(moneyAgg?.ctrPct, 1)} (target ${moneyCtrTarget}%)` : 'Not run',
           run: {
@@ -57044,6 +57050,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const domainRag = scoreToRag(selfScore, { greenAt: 70, amberAt: 50 });
         const domainCard = {
           note: ds?.snapshotDate ? `Snapshot date: ${ds.snapshotDate}` : 'Run snapshot to populate (Ranking & AI tab)',
+          timestamp: lastGlobal?.timestamp || null,
           rag: (typeof selfScore === 'number') ? domainRag : 'neutral',
           ragLabel: (typeof selfScore === 'number') ? `Score: ${formatFixed(selfScore, 1)}` : 'Not run',
           run: {
