@@ -16610,7 +16610,6 @@
 
         // CRITICAL: Use Supabase stored data (same as Money Pages table) for consistency
         // This ensures task drawer shows the same clicks/impressions as Money Pages table
-        const pageUrlForGsc = toAbsoluteUrlForGsc(taskUrlForPage, property);
         
         // PRIORITY 1: Use window.moneyPagesMetrics if available (set directly after audit completes)
         // This is the most up-to-date source and matches what Money Pages table uses
@@ -16643,11 +16642,22 @@
         }
         
         // Use same normalization logic as Money Pages table
+        // IMPORTANT: Normalize the task URL directly (don't use toAbsoluteUrlForGsc for matching)
+        // Money Pages rows have URLs like "https://www.alanranger.com/photography-workshops"
+        // Task URLs are like "www.alanranger.com/photography-workshops"
+        // We need to normalize both to the same format for matching
         const normalizeUrlForDedupe = window.normalizeUrlForDedupe;
-        const norm = (u) => normalizeUrlForDedupe
-          ? normalizeUrlForDedupe(u)
-          : String(u || '').toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+        const norm = (u) => {
+          if (normalizeUrlForDedupe) {
+            return normalizeUrlForDedupe(u);
+          }
+          // Standard normalization: remove protocol, www, trailing slash, lowercase
+          return String(u || '').toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+        };
         const normalizedTaskUrl = norm(taskUrlForPage);
+        
+        // pageUrlForGsc is only needed for GSC API fallback (not for Money Pages matching)
+        const pageUrlForGsc = toAbsoluteUrlForGsc(taskUrlForPage, property);
         
         // Try to find matching row in stored Money Pages data first
         let totals = null;
