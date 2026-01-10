@@ -16612,29 +16612,33 @@
         // This ensures task drawer shows the same clicks/impressions as Money Pages table
         const pageUrlForGsc = toAbsoluteUrlForGsc(taskUrlForPage, property);
         
-        // Load Money Pages data from latest audit if not already in window
-        if (!window.moneyPagesMetrics && latestAudit) {
-          if (latestAudit.scores?.moneyPagesMetrics) {
-            window.moneyPagesMetrics = latestAudit.scores.moneyPagesMetrics;
-          } else if (latestAudit.moneyPagesMetrics) {
-            window.moneyPagesMetrics = latestAudit.moneyPagesMetrics;
-          }
-        }
-        
-        // Also try to load from localStorage if available
-        if (!window.moneyPagesMetrics) {
-          try {
-            const stored = localStorage.getItem('last_audit_results');
-            if (stored) {
-              const parsed = JSON.parse(stored);
-              if (parsed.scores?.moneyPagesMetrics) {
-                window.moneyPagesMetrics = parsed.scores.moneyPagesMetrics;
-              } else if (parsed.moneyPagesMetrics) {
-                window.moneyPagesMetrics = parsed.moneyPagesMetrics;
-              }
+        // PRIORITY 1: Use window.moneyPagesMetrics if available (set directly after audit completes)
+        // This is the most up-to-date source and matches what Money Pages table uses
+        if (!window.moneyPagesMetrics || !window.moneyPagesMetrics.rows || window.moneyPagesMetrics.rows.length === 0) {
+          // PRIORITY 2: Load from latest audit if provided
+          if (latestAudit) {
+            if (latestAudit.scores?.moneyPagesMetrics) {
+              window.moneyPagesMetrics = latestAudit.scores.moneyPagesMetrics;
+            } else if (latestAudit.moneyPagesMetrics) {
+              window.moneyPagesMetrics = latestAudit.moneyPagesMetrics;
             }
-          } catch (e) {
-            // ignore
+          }
+          
+          // PRIORITY 3: Load from localStorage if still not available
+          if (!window.moneyPagesMetrics || !window.moneyPagesMetrics.rows || window.moneyPagesMetrics.rows.length === 0) {
+            try {
+              const stored = localStorage.getItem('last_audit_results');
+              if (stored) {
+                const parsed = JSON.parse(stored);
+                if (parsed.scores?.moneyPagesMetrics) {
+                  window.moneyPagesMetrics = parsed.scores.moneyPagesMetrics;
+                } else if (parsed.moneyPagesMetrics) {
+                  window.moneyPagesMetrics = parsed.moneyPagesMetrics;
+                }
+              }
+            } catch (e) {
+              // ignore
+            }
           }
         }
         
@@ -16648,14 +16652,21 @@
         // Try to find matching row in stored Money Pages data first
         let totals = null;
         const rows = window.moneyPagesMetrics?.rows || [];
+        debugLog(`[Optimisation] URL task ${task.id}: Searching for URL "${taskUrlForPage}" (normalized: "${normalizedTaskUrl}") in ${rows.length} Money Pages rows`, 'info');
+        
         if (Array.isArray(rows) && rows.length > 0 && normalizedTaskUrl) {
           const matchingRow = rows.find(r => {
             const rowUrl = r.url || r.page_url || r.keys?.[0] || '';
-            return norm(rowUrl) === normalizedTaskUrl;
+            const normalizedRowUrl = norm(rowUrl);
+            const matches = normalizedRowUrl === normalizedTaskUrl;
+            if (taskUrlForPage.includes('photography-workshops')) {
+              debugLog(`[Optimisation] URL task ${task.id}: Comparing "${normalizedRowUrl}" === "${normalizedTaskUrl}" = ${matches}`, 'info');
+            }
+            return matches;
           });
           
           if (matchingRow) {
-            debugLog(`[Optimisation] URL task ${task.id}: Found matching row in stored Money Pages data`, 'success');
+            debugLog(`[Optimisation] URL task ${task.id}: Found matching row in stored Money Pages data - clicks=${matchingRow.clicks}, impressions=${matchingRow.impressions}`, 'success');
             totals = {
               clicks: matchingRow.clicks != null ? matchingRow.clicks : (matchingRow.clicks_28d || 0),
               impressions: matchingRow.impressions != null ? matchingRow.impressions : (matchingRow.impressions_28d || 0),
@@ -16668,7 +16679,11 @@
               })(),
               position: matchingRow.avgPosition != null ? matchingRow.avgPosition : (matchingRow.position != null ? matchingRow.position : (matchingRow.position_28d != null ? matchingRow.position_28d : (matchingRow.avg_position != null ? matchingRow.avg_position : null)))
             };
+          } else {
+            debugLog(`[Optimisation] URL task ${task.id}: No matching row found in Money Pages data. Task URL: "${taskUrlForPage}", Normalized: "${normalizedTaskUrl}". Sample row URLs: ${rows.slice(0, 3).map(r => r.url || r.page_url || r.keys?.[0] || 'N/A').join(', ')}`, 'warn');
           }
+        } else {
+          debugLog(`[Optimisation] URL task ${task.id}: No Money Pages rows available (rows.length=${rows.length}, normalizedTaskUrl="${normalizedTaskUrl}")`, 'warn');
         }
         
         // Fallback to GSC API only if no match found in stored data
