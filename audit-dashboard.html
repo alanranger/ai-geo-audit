@@ -23136,19 +23136,35 @@
         debugLog(`✓ Audit results saved to localStorage (propertyUrl: ${propertyUrl})`, 'success');
         
         // Save dashboard snapshot for delta comparisons (only if not preserving timestamp - i.e., this is a new audit)
-        if (!preserveTimestamp && typeof computeDashboardSnapshot === 'function' && typeof saveDashboardRun === 'function') {
-          try {
-            const snapshot = computeDashboardSnapshot();
-            const runRecord = {
-              timestamp: auditData.timestamp,
-              status: 'ok',
-              steps: [{ label: 'Audit completed', status: 'ok' }],
-              metrics: snapshot
-            };
-            saveDashboardRun(runRecord);
-            debugLog(`✓ Dashboard snapshot saved for delta comparisons`, 'success');
-          } catch (snapshotError) {
-            debugLog(`⚠ Failed to save dashboard snapshot: ${snapshotError.message}`, 'warn');
+        if (!preserveTimestamp) {
+          if (typeof computeDashboardSnapshot === 'function' && typeof saveDashboardRun === 'function') {
+            try {
+              const snapshot = computeDashboardSnapshot();
+              const runRecord = {
+                timestamp: auditData.timestamp,
+                status: 'ok',
+                steps: [{ label: 'Audit completed', status: 'ok' }],
+                metrics: snapshot
+              };
+              saveDashboardRun(runRecord);
+              debugLog(`✓ Dashboard snapshot saved for delta comparisons`, 'success');
+            } catch (snapshotError) {
+              debugLog(`⚠ Failed to save dashboard snapshot: ${snapshotError.message}`, 'warn');
+            }
+          } else if (typeof saveDashboardRun === 'function') {
+            // Fallback: Save minimal run record with just timestamp if computeDashboardSnapshot isn't available
+            try {
+              const runRecord = {
+                timestamp: auditData.timestamp,
+                status: 'ok',
+                steps: [{ label: 'Audit completed', status: 'ok' }],
+                metrics: {}
+              };
+              saveDashboardRun(runRecord);
+              debugLog(`✓ Dashboard run record saved (minimal - snapshot function not available)`, 'success');
+            } catch (runError) {
+              debugLog(`⚠ Failed to save dashboard run record: ${runError.message}`, 'warn');
+            }
           }
         }
         
@@ -23574,7 +23590,7 @@
         // IGNORE passed parameter - always read directly from localStorage as single source of truth
         let timestampToUse = null;
         try {
-          // Read directly from localStorage using the same key as getDashboardRuns()
+          // First, try to read from dashboard_global_runs_v1 (preferred source)
           const DASHBOARD_RUNS_KEY = 'dashboard_global_runs_v1';
           const stored = localStorage.getItem(DASHBOARD_RUNS_KEY);
           if (stored) {
@@ -23587,6 +23603,25 @@
                 if (ts && !isNaN(ts.getTime()) && ts.getTime() > 0) {
                   timestampToUse = lastGlobal.timestamp;
                 }
+              }
+            }
+          }
+          
+          // Fallback: If dashboard_global_runs_v1 doesn't have a valid timestamp, read from last_audit_results
+          if (!timestampToUse) {
+            const lastAuditResults = localStorage.getItem('last_audit_results');
+            if (lastAuditResults) {
+              try {
+                const auditData = JSON.parse(lastAuditResults);
+                if (auditData && auditData.timestamp) {
+                  const ts = new Date(auditData.timestamp);
+                  if (ts && !isNaN(ts.getTime()) && ts.getTime() > 0) {
+                    timestampToUse = auditData.timestamp;
+                    debugLog(`[updateAuditTimestamp] Using timestamp from last_audit_results as fallback`, 'info');
+                  }
+                }
+              } catch (e) {
+                console.warn('[updateAuditTimestamp] Error reading last_audit_results:', e);
               }
             }
           }
