@@ -16980,6 +16980,51 @@
                       }
                     }
                   }
+                  
+                  // FALLBACK: For URL-only tasks, if AI citations still missing, query Supabase directly (same as addMeasurement)
+                  if ((aiForUrl.ai_overview === false || aiForUrl.ai_overview === null) && aiForUrl.ai_citations === null && !taskKeyword) {
+                    debugLog(`[Optimisation] Task ${task.id}: URL-only task - AI citations missing, querying Supabase directly...`, 'info');
+                    try {
+                      const propertyUrl = document.getElementById('propertyUrl')?.value || 
+                                        localStorage.getItem('gsc_property_url') || 
+                                        'https://www.alanranger.com';
+                      const taskUrlForQuery = moneyPageRow.url || moneyPageRow.page_url || taskUrl;
+                      const queryUrl = apiUrl(`/api/supabase/query-keywords-citing-url?` +
+                        `property_url=${encodeURIComponent(propertyUrl)}&` +
+                        `target_url=${encodeURIComponent(taskUrlForQuery)}`
+                      );
+                      
+                      const citationResponse = await fetch(queryUrl);
+                      if (citationResponse.ok) {
+                        const citationData = await citationResponse.json();
+                        if (citationData.status === 'ok' && citationData.data && citationData.data.length > 0) {
+                          const citingKeywords = citationData.data;
+                          // Use total citation count from API (not unique keywords count)
+                          const totalCitationCount = typeof citationData.count === 'number' ? citationData.count : citingKeywords.reduce((sum, k) => sum + (k.citation_count || 1), 0);
+                          const hasOverview = citingKeywords.some(k => k.has_ai_overview === true);
+                          
+                          aiForUrl = {
+                            ai_overview: hasOverview,
+                            ai_citations: totalCitationCount
+                          };
+                          
+                          debugLog(
+                            `[Optimisation] Task ${task.id}: Supabase query found ${citingKeywords.length} keywords with ${totalCitationCount} total citations: ` +
+                            `${citingKeywords.map(k => k.keyword).join(', ')}`,
+                            'success'
+                          );
+                        } else {
+                          debugLog(`[Optimisation] Task ${task.id}: Supabase query found no citations (status: ${citationData.status})`, 'warn');
+                        }
+                      } else {
+                        const errorText = await citationResponse.text().catch(() => 'Unable to read error');
+                        debugLog(`[Optimisation] Task ${task.id}: Supabase query failed: ${citationResponse.status} - ${errorText}`, 'warn');
+                      }
+                    } catch (supabaseErr) {
+                      debugLog(`[Optimisation] Task ${task.id}: Error querying Supabase for citations: ${supabaseErr.message}`, 'warn');
+                    }
+                  }
+                  
                   debugLog(`[Optimisation] Task ${task.id}: Final AI metrics result: overview=${aiForUrl.ai_overview}, citations=${aiForUrl.ai_citations}`, 'info');
                 } else {
                   debugLog(`[Optimisation] Task ${task.id}: computeAiMetricsForPageUrl function not available`, 'warn');
@@ -17116,6 +17161,51 @@
                             }
                           }
                         }
+                        
+                        // FALLBACK: For URL-only tasks, if AI citations still missing, query Supabase directly (same as addMeasurement)
+                        if ((aiForUrl.ai_overview === false || aiForUrl.ai_overview === null) && aiForUrl.ai_citations === null && !taskKeyword) {
+                          debugLog(`[Optimisation] Task ${task.id}: URL-only task - AI citations missing, querying Supabase directly...`, 'info');
+                          try {
+                            const propertyUrl = document.getElementById('propertyUrl')?.value || 
+                                              localStorage.getItem('gsc_property_url') || 
+                                              'https://www.alanranger.com';
+                            const taskUrlForQuery = moneyPageRow.url || moneyPageRow.page_url || taskUrl;
+                            const queryUrl = apiUrl(`/api/supabase/query-keywords-citing-url?` +
+                              `property_url=${encodeURIComponent(propertyUrl)}&` +
+                              `target_url=${encodeURIComponent(taskUrlForQuery)}`
+                            );
+                            
+                            const citationResponse = await fetch(queryUrl);
+                            if (citationResponse.ok) {
+                              const citationData = await citationResponse.json();
+                              if (citationData.status === 'ok' && citationData.data && citationData.data.length > 0) {
+                                const citingKeywords = citationData.data;
+                                // Use total citation count from API (not unique keywords count)
+                                const totalCitationCount = typeof citationData.count === 'number' ? citationData.count : citingKeywords.reduce((sum, k) => sum + (k.citation_count || 1), 0);
+                                const hasOverview = citingKeywords.some(k => k.has_ai_overview === true);
+                                
+                                aiForUrl = {
+                                  ai_overview: hasOverview,
+                                  ai_citations: totalCitationCount
+                                };
+                                
+                                debugLog(
+                                  `[Optimisation] Task ${task.id}: Supabase query found ${citingKeywords.length} keywords with ${totalCitationCount} total citations: ` +
+                                  `${citingKeywords.map(k => k.keyword).join(', ')}`,
+                                  'success'
+                                );
+                              } else {
+                                debugLog(`[Optimisation] Task ${task.id}: Supabase query found no citations (status: ${citationData.status})`, 'warn');
+                              }
+                            } else {
+                              const errorText = await citationResponse.text().catch(() => 'Unable to read error');
+                              debugLog(`[Optimisation] Task ${task.id}: Supabase query failed: ${citationResponse.status} - ${errorText}`, 'warn');
+                            }
+                          } catch (supabaseErr) {
+                            debugLog(`[Optimisation] Task ${task.id}: Error querying Supabase for citations: ${supabaseErr.message}`, 'warn');
+                          }
+                        }
+                        
                         debugLog(`[Optimisation] Task ${task.id}: Final AI metrics result from ${dataSource}: overview=${aiForUrl.ai_overview}, citations=${aiForUrl.ai_citations}`, 'info');
                       } else {
                         debugLog(`[Optimisation] Task ${task.id}: computeAiMetricsForPageUrl function not available`, 'warn');
