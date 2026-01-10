@@ -3575,6 +3575,9 @@
         <div id="dashboardRunSummary" style="display: none; border-top: 2px solid #10b981; padding-top: 1rem; margin-top: 1rem;">
           <div style="font-weight: 800; color: #10b981; margin-bottom: 0.5rem;">✓ Global run complete</div>
           <div id="dashboardRunSummaryContent" style="color: var(--dark-text); font-size: 0.95rem;"></div>
+          <div style="margin-top: 1rem; text-align: right;">
+            <button id="dashboardRunCloseBottom" class="btn" style="background: var(--brand-orange); color: white; border-color: var(--brand-orange); padding: 0.5rem 1.5rem; font-size: 0.9rem; font-weight: 600; cursor: pointer;" title="Close the global audit modal">Close</button>
+          </div>
         </div>
       </div>
     </div>
@@ -57639,6 +57642,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
       function finishDashboardRunModal({ ok, summaryHtml }) {
         const closeBtn = document.getElementById('dashboardRunClose');
+        const closeBtnBottom = document.getElementById('dashboardRunCloseBottom');
         const summary = document.getElementById('dashboardRunSummary');
         const content = document.getElementById('dashboardRunSummaryContent');
         if (content) content.innerHTML = summaryHtml || '';
@@ -57646,7 +57650,20 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (closeBtn) {
           closeBtn.disabled = false;
           closeBtn.style.opacity = '1';
+          closeBtn.style.cursor = 'pointer';
           closeBtn.title = 'Close';
+          // Re-attach click handler in case it was lost
+          closeBtn.onclick = () => {
+            const modal = document.getElementById('dashboardRunModal');
+            if (modal) modal.style.display = 'none';
+          };
+        }
+        // Set up bottom close button handler
+        if (closeBtnBottom) {
+          closeBtnBottom.onclick = () => {
+            const modal = document.getElementById('dashboardRunModal');
+            if (modal) modal.style.display = 'none';
+          };
         }
       }
 
@@ -57782,12 +57799,18 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         showDashboardRunModal();
         dashboardRunModalRenderSteps(steps);
 
+        // Set up close button handlers - ensure they work even after completion
         const closeBtn = document.getElementById('dashboardRunClose');
+        const closeBtnBottom = document.getElementById('dashboardRunCloseBottom');
+        const closeHandler = () => {
+          const modal = document.getElementById('dashboardRunModal');
+          if (modal) modal.style.display = 'none';
+        };
         if (closeBtn) {
-          closeBtn.onclick = () => {
-            const modal = document.getElementById('dashboardRunModal');
-            if (modal) modal.style.display = 'none';
-          };
+          closeBtn.onclick = closeHandler;
+        }
+        if (closeBtnBottom) {
+          closeBtnBottom.onclick = closeHandler;
         }
 
         for (let i = 0; i < stepDefs.length; i++) {
