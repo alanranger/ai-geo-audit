@@ -14762,15 +14762,27 @@
             return;
           }
 
-          let currentMetrics = null;
-          let matchingRow = null;
-
           const taskUrlForPage = task.target_url_clean || task.target_url || '';
           const hasKeyword = !!(task.keyword_text && String(task.keyword_text).trim());
 
+          // Use shared helper functions to ensure consistency
+          const { latestAudit, combinedRows } = await window.fetchLatestAuditAndCombinedRows();
+          
+          let currentMetrics = null;
+          
+          // Use shared helper functions based on task type
+          if (hasKeyword) {
+            // Keyword-based task: Use keyword-specific data
+            currentMetrics = await window.fetchMetricsForKeywordTask(task, latestAudit, combinedRows);
+          } else if (taskUrlForPage) {
+            // URL-only task: Use GSC page totals API + Ranking & AI data
+            currentMetrics = await window.fetchMetricsForUrlTask(task, latestAudit, combinedRows);
+          }
+
+          // Legacy code below - keeping for now but should be removed
           // For URL-only tasks (e.g. Money Pages), prefer an exact GSC page totals fetch.
           // FIX: Also fetch Ranking & AI data so we can look up AI Overview/Citations for this URL
-          if (!hasKeyword && taskUrlForPage) {
+          if (!currentMetrics && !hasKeyword && taskUrlForPage) {
             // CRITICAL: Fetch latest audit from Supabase to get fresh ranking_ai_data for URL lookup
             let latestAuditFromSupabase = null;
             try {
