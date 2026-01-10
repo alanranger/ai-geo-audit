@@ -16608,19 +16608,85 @@
           return null;
         }
 
-        const range = (typeof getGscDateRange === 'function') ? getGscDateRange(28, 2) : null;
-        const startDate = range?.startDate ? `&startDate=${encodeURIComponent(range.startDate)}` : '';
-        const endDate = range?.endDate ? `&endDate=${encodeURIComponent(range.endDate)}` : '';
+        // CRITICAL: Use Supabase stored data (same as Money Pages table) for consistency
+        // This ensures task drawer shows the same clicks/impressions as Money Pages table
         const pageUrlForGsc = toAbsoluteUrlForGsc(taskUrlForPage, property);
-        const totalsUrl = apiUrl(`/api/aigeo/gsc-page-totals?property=${encodeURIComponent(property)}&pageUrl=${encodeURIComponent(pageUrlForGsc)}${startDate}${endDate}`);
         
-        const totalsRes = await fetch(totalsUrl);
-        const totalsJson = await totalsRes.json().catch(() => null);
-        const totals = totalsRes.ok && totalsJson && totalsJson.status === 'ok' ? totalsJson.data : null;
+        // Load Money Pages data from latest audit if not already in window
+        if (!window.moneyPagesMetrics && latestAudit) {
+          if (latestAudit.scores?.moneyPagesMetrics) {
+            window.moneyPagesMetrics = latestAudit.scores.moneyPagesMetrics;
+          } else if (latestAudit.moneyPagesMetrics) {
+            window.moneyPagesMetrics = latestAudit.moneyPagesMetrics;
+          }
+        }
         
+        // Also try to load from localStorage if available
+        if (!window.moneyPagesMetrics) {
+          try {
+            const stored = localStorage.getItem('last_audit_results');
+            if (stored) {
+              const parsed = JSON.parse(stored);
+              if (parsed.scores?.moneyPagesMetrics) {
+                window.moneyPagesMetrics = parsed.scores.moneyPagesMetrics;
+              } else if (parsed.moneyPagesMetrics) {
+                window.moneyPagesMetrics = parsed.moneyPagesMetrics;
+              }
+            }
+          } catch (e) {
+            // ignore
+          }
+        }
+        
+        // Use same normalization logic as Money Pages table
+        const normalizeUrlForDedupe = window.normalizeUrlForDedupe;
+        const norm = (u) => normalizeUrlForDedupe
+          ? normalizeUrlForDedupe(u)
+          : String(u || '').toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+        const normalizedTaskUrl = norm(taskUrlForPage);
+        
+        // Try to find matching row in stored Money Pages data first
+        let totals = null;
+        const rows = window.moneyPagesMetrics?.rows || [];
+        if (Array.isArray(rows) && rows.length > 0 && normalizedTaskUrl) {
+          const matchingRow = rows.find(r => {
+            const rowUrl = r.url || r.page_url || r.keys?.[0] || '';
+            return norm(rowUrl) === normalizedTaskUrl;
+          });
+          
+          if (matchingRow) {
+            debugLog(`[Optimisation] URL task ${task.id}: Found matching row in stored Money Pages data`, 'success');
+            totals = {
+              clicks: matchingRow.clicks != null ? matchingRow.clicks : (matchingRow.clicks_28d || 0),
+              impressions: matchingRow.impressions != null ? matchingRow.impressions : (matchingRow.impressions_28d || 0),
+              ctr: (() => {
+                const v = matchingRow.ctr != null ? matchingRow.ctr : (matchingRow.ctr_28d != null ? matchingRow.ctr_28d : 0);
+                const n = Number(v || 0);
+                // If stored as percentage (0-100), convert to ratio (0-1)
+                if (n > 1 && n <= 100) return n / 100;
+                return n;
+              })(),
+              position: matchingRow.avgPosition != null ? matchingRow.avgPosition : (matchingRow.position != null ? matchingRow.position : (matchingRow.position_28d != null ? matchingRow.position_28d : (matchingRow.avg_position != null ? matchingRow.avg_position : null)))
+            };
+          }
+        }
+        
+        // Fallback to GSC API only if no match found in stored data
         if (!totals) {
-          debugLog(`[Optimisation] URL task ${task.id}: GSC page totals API returned no data`, 'warn');
-          return null;
+          debugLog(`[Optimisation] URL task ${task.id}: No match in stored data, falling back to GSC API`, 'warn');
+          const range = (typeof getGscDateRange === 'function') ? getGscDateRange(28, 2) : null;
+          const startDate = range?.startDate ? `&startDate=${encodeURIComponent(range.startDate)}` : '';
+          const endDate = range?.endDate ? `&endDate=${encodeURIComponent(range.endDate)}` : '';
+          const totalsUrl = apiUrl(`/api/aigeo/gsc-page-totals?property=${encodeURIComponent(property)}&pageUrl=${encodeURIComponent(pageUrlForGsc)}${startDate}${endDate}`);
+          
+          const totalsRes = await fetch(totalsUrl);
+          const totalsJson = await totalsRes.json().catch(() => null);
+          totals = totalsRes.ok && totalsJson && totalsJson.status === 'ok' ? totalsJson.data : null;
+          
+          if (!totals) {
+            debugLog(`[Optimisation] URL task ${task.id}: GSC page totals API returned no data`, 'warn');
+            return null;
+          }
         }
 
         // Get combinedRows if not provided
