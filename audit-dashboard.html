@@ -9852,6 +9852,7 @@
       }
       
       // Get latest and baseline values
+      // Use same extraction logic as API (KPI_EXTRACTORS)
       let latestValue = null;
       let baselineValue = null;
       
@@ -9862,9 +9863,33 @@
         latestValue = taskData.objective_progress.latest_value ?? null;
         baselineValue = taskData.objective_progress.baseline_value ?? null;
       } else if (taskData.latest_metrics && taskData.baseline_metrics) {
-        const kpiKey = objectiveKpi;
-        latestValue = taskData.latest_metrics[`gsc_${kpiKey}`] ?? taskData.latest_metrics[kpiKey] ?? null;
-        baselineValue = taskData.baseline_metrics[`gsc_${kpiKey}`] ?? taskData.baseline_metrics[kpiKey] ?? null;
+        // Use same extraction logic as API KPI_EXTRACTORS
+        const extractValue = (metrics, kpi) => {
+          if (!metrics) return null;
+          // Handle different KPI field names (same as API KPI_EXTRACTORS)
+          switch (kpi) {
+            case 'clicks_28d':
+              return metrics.gsc_clicks_28d ?? metrics.clicks_28d ?? null;
+            case 'impressions_28d':
+              return metrics.gsc_impressions_28d ?? metrics.impressions_28d ?? null;
+            case 'ctr_28d':
+              return metrics.gsc_ctr_28d ?? metrics.ctr_28d ?? null;
+            case 'current_rank':
+            case 'rank':
+              return metrics.gsc_position_28d ?? metrics.current_rank ?? metrics.rank ?? null;
+            case 'opportunity_score':
+              return metrics.opportunity_score ?? null;
+            case 'ai_overview':
+              return metrics.ai_overview ?? null;
+            case 'ai_citations':
+              return metrics.ai_citations ?? null; // No gsc_ prefix for AI citations
+            default:
+              // Fallback: try gsc_ prefix first, then direct key
+              return metrics[`gsc_${kpi}`] ?? metrics[kpi] ?? null;
+          }
+        };
+        latestValue = extractValue(taskData.latest_metrics, objectiveKpi);
+        baselineValue = extractValue(taskData.baseline_metrics, objectiveKpi);
       }
       
       // Validate status based on values
