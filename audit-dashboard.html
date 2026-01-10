@@ -17198,68 +17198,107 @@
               bulkUpdateBtn.textContent = `Updating ${taskNum}/${activeTasks.length}...`;
             }
 
-          // Find matching row - search by both keyword AND URL
-          const taskUrl = task.target_url_clean || task.target_url || '';
+          // Use shared helper functions to ensure consistency across all update paths
           const taskKeyword = task.keyword_text || '';
-          // Normalize URL: remove protocol, www, trailing slash, and convert to lowercase
-          // Handle both formats: "www.alanranger.com/path" and "https://www.alanranger.com/path"
-          // CRITICAL: Do NOT use normalizeUrlForDedupe here as it may add domain back
-          // Simple normalization: lowercase, remove protocol, remove www, remove trailing slash
-          let normalizedTaskUrl = taskUrl.toLowerCase()
-            .replace(/^https?:\/\//, '')  // Remove http:// or https://
-            .replace(/^www\./, '')        // Remove www.
-            .replace(/\/$/, '');          // Remove trailing slash
+          const hasKeyword = !!(taskKeyword && taskKeyword.trim());
           
-          // Safety check: detect and fix malformed URLs (duplicate domain)
-          if (normalizedTaskUrl.includes('/www.') || normalizedTaskUrl.match(/^[^\/]+\/[^\/]+\//)) {
-            debugLog(`[Optimisation] Task ${task.id}: Detected malformed normalized URL: "${normalizedTaskUrl}", fixing...`, 'warn');
-            // Extract just the path part after the domain
-            const pathMatch = normalizedTaskUrl.match(/\/[^\/]+(\/.*)$/);
-            if (pathMatch) {
-              normalizedTaskUrl = normalizedTaskUrl.replace(/^[^\/]+\/[^\/]+/, '').replace(/^\/+/, '');
-              debugLog(`[Optimisation] Task ${task.id}: Fixed normalized URL: "${normalizedTaskUrl}"`, 'info');
-            }
-          }
-          
-          debugLog(`[Optimisation] Task ${task.id}: URL normalization - original: "${taskUrl}" -> normalized: "${normalizedTaskUrl}"`, 'info');
-          
-          let matchingRow = null;
           let currentMetrics = null;
           
-          // First try Ranking & AI data (keyword-based matching)
-          // CRITICAL: For keyword-based tasks, prioritize keyword match over URL match
-          // This ensures we get keyword-specific data (from latest audit) not page-level aggregated data
-          if (taskKeyword && taskKeyword.length > 0) {
-            matchingRow = combinedRows.find(r => {
-              const keywordMatch = (r.keyword || '').toLowerCase() === taskKeyword.toLowerCase();
-              if (!keywordMatch) return false;
-              
-              // For keyword-based tasks, URL match is optional (preferred but not required)
-              // This allows keyword tasks to work even if URL format differs slightly
-              if (normalizedTaskUrl && normalizedTaskUrl.length > 0) {
-                const rowUrl = (r.best_url || r.targetUrl || r.ranking_url || '').toLowerCase();
-                const normalizedRowUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(rowUrl) : rowUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
-                // Prefer exact URL match, but keyword match alone is sufficient
-                return normalizedRowUrl === normalizedTaskUrl;
-              }
-              return true; // Keyword match is enough if no URL
-            });
+          // CRITICAL: For keyword-based tasks, use keyword-specific data (NEVER Money Pages)
+          // For URL-only tasks, use GSC page totals API + Ranking & AI data
+          if (hasKeyword) {
+            // Keyword-based task: Use keyword-specific data from combinedRows
+            debugLog(`[Optimisation] Task ${task.id}: Fetching metrics for keyword task "${taskKeyword}"`, 'info');
+            currentMetrics = await window.fetchMetricsForKeywordTask(task, latestAuditFromSupabase, combinedRows);
+          } else {
+            // URL-only task: Use GSC page totals API + Ranking & AI data
+            debugLog(`[Optimisation] Task ${task.id}: Fetching metrics for URL-only task`, 'info');
+            currentMetrics = await window.fetchMetricsForUrlTask(task, latestAuditFromSupabase, combinedRows);
             
-            if (matchingRow) {
-              debugLog(`[Optimisation] Task ${task.id}: Found keyword match in combinedRows: "${taskKeyword}" -> using keyword-specific data (not Money Pages)`, 'success');
-            } else {
-              debugLog(`[Optimisation] Task ${task.id}: No keyword match found in combinedRows for "${taskKeyword}"`, 'warn');
+            // Fallback: If GSC API failed, try Money Pages data (from latest audit)
+            if (!currentMetrics) {
+              debugLog(`[Optimisation] Task ${task.id}: GSC API failed, trying Money Pages data fallback...`, 'warn');
+              const taskUrl = task.target_url_clean || task.target_url || '';
+              let normalizedTaskUrl = taskUrl.toLowerCase()
+                .replace(/^https?:\/\//, '')
+                .replace(/^www\./, '')
+                .replace(/\/$/, '');
+              
+              if (normalizedTaskUrl && normalizedTaskUrl.length > 0 && window.moneyPagesMetrics && window.moneyPagesMetrics.rows) {
+                const moneyPageRow = window.moneyPagesMetrics.rows.find(row => {
+                  const rowUrl = row.url || row.page_url || '';
+                  let normalizedRowUrl = rowUrl.toLowerCase()
+                    .replace(/^https?:\/\//, '')
+                    .replace(/^www\./, '')
+                    .replace(/\/$/, '');
+                  return normalizedRowUrl === normalizedTaskUrl;
+                });
+                
+                if (moneyPageRow) {
+                  // Simple Money Pages fallback - build metrics from Money Pages data
+                  let ctrValue = moneyPageRow.ctr || moneyPageRow.ctr_28d || null;
+                  if (ctrValue != null && ctrValue > 1 && ctrValue <= 100) {
+                    ctrValue = ctrValue / 100;
+                  }
+                  
+                  // Get AI metrics from combinedRows
+                  let aiForUrl = { ai_overview: false, ai_citations: null };
+                  if (typeof window.computeAiMetricsForPageUrl === 'function' && combinedRows.length > 0) {
+                    aiForUrl = window.computeAiMetricsForPageUrl(moneyPageRow.url || moneyPageRow.page_url || taskUrl, combinedRows);
+                  }
+                  
+                  // Get rank - try Money Pages first, then Ranking & AI fallback
+                  let currentRank = moneyPageRow.avg_position != null ? moneyPageRow.avg_position : 
+                                     (moneyPageRow.position != null ? moneyPageRow.position : null);
+                  if ((currentRank == null || currentRank === 0) && combinedRows.length > 0) {
+                    const matchingRows = combinedRows.filter(r => {
+                      const rowUrl = (r.best_url || r.bestUrl || r.targetUrl || r.ranking_url || '').toLowerCase();
+                      const rowUrlClean = rowUrl.replace(/^https?:\/\//, '').replace(/^www\./, '');
+                      const taskUrlClean = (moneyPageRow.url || moneyPageRow.page_url || taskUrl).replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
+                      return rowUrlClean === taskUrlClean || 
+                             rowUrl.includes(taskUrlClean) || 
+                             taskUrlClean.includes(rowUrlClean);
+                    });
+                    
+                    if (matchingRows.length > 0) {
+                      const ranks = matchingRows
+                        .map(r => r.best_rank_group || r.current_rank || null)
+                        .filter(r => r != null && r > 0);
+                      
+                      if (ranks.length > 0) {
+                        currentRank = ranks.reduce((sum, r) => sum + r, 0) / ranks.length;
+                      }
+                    }
+                  }
+                  
+                  currentMetrics = {
+                    gsc_clicks_28d: moneyPageRow.clicks || moneyPageRow.clicks_28d || null,
+                    gsc_impressions_28d: moneyPageRow.impressions || moneyPageRow.impressions_28d || null,
+                    gsc_ctr_28d: ctrValue,
+                    current_rank: currentRank,
+                    opportunity_score: null,
+                    ai_overview: aiForUrl.ai_overview === true ? true : (aiForUrl.ai_overview === false ? false : null),
+                    ai_citations: aiForUrl.ai_citations != null ? Number(aiForUrl.ai_citations) : null,
+                    ai_citations_total: null,
+                    classic_ranking_url: moneyPageRow.url || moneyPageRow.page_url || taskUrl,
+                    page_type: moneyPageRow.page_type || moneyPageRow.type || null,
+                    segment: 'money_pages',
+                    captured_at: new Date().toISOString()
+                  };
+                }
+              }
             }
           }
           
-          // If no keyword match, try URL-based matching in Money Pages data
-          // NOTE: This is ONLY for URL-only tasks (no keyword) - keyword tasks should use combinedRows data above
-          if (!matchingRow && normalizedTaskUrl && normalizedTaskUrl.length > 0) {
+          // Fallback to baseline if no current data found
+          if (!currentMetrics && task.baseline_metrics) {
+            const taskUrl = task.target_url_clean || task.target_url || '';
+            debugLog(`[Optimisation] Task ${task.id} (${task.keyword_text || taskUrl}): No current data found, using baseline metrics as fallback`, 'warn');
             debugLog(`[Optimisation] Task ${task.id}: Searching for URL "${normalizedTaskUrl}" in Money Pages data`, 'info');
             
             // Check window.moneyPagesMetrics first
             if (window.moneyPagesMetrics && window.moneyPagesMetrics.rows) {
-              debugLog(`[Optimisation] Task ${task.id}: Checking window.moneyPagesMetrics (${window.moneyPagesMetrics.rows.length} rows) for normalized URL: "${normalizedTaskUrl}"`, 'info');
+              // Old code removed - using helper functions instead
               const moneyPageRow = window.moneyPagesMetrics.rows.find(row => {
                 const rowUrl = row.url || row.page_url || '';
                 // Normalize row URL the same way as task URL (simple normalization, no normalizeUrlForDedupe)
@@ -17702,10 +17741,10 @@
             debugLog(`[Optimisation] Task ${task.id}: Keyword-specific metrics: clicks=${currentMetrics.gsc_clicks_28d}, impressions=${currentMetrics.gsc_impressions_28d}, rank=${currentMetrics.current_rank}, ai_citations=${currentMetrics.ai_citations}`, 'info');
           }
           
-            // Fallback to baseline if no current data found
+          // Fallback to baseline if no current data found
           if (!currentMetrics && task.baseline_metrics) {
+            const taskUrl = task.target_url_clean || task.target_url || '';
             debugLog(`[Optimisation] Task ${task.id} (${task.keyword_text || taskUrl}): No current data found, using baseline metrics as fallback`, 'warn');
-            debugLog(`[Optimisation] Task ${task.id} search details: keyword="${task.keyword_text || 'none'}", url="${taskUrl || 'none'}", normalizedUrl="${normalizedTaskUrl}", hasRankingData=${!!matchingRow}, hasWindowMoneyPages=${!!(window.moneyPagesMetrics && window.moneyPagesMetrics.rows)}, hasLastAuditResults=${!!localStorage.getItem('last_audit_results')}`, 'warn');
             // Log sample URLs from available data sources for debugging
             if (window.moneyPagesMetrics && window.moneyPagesMetrics.rows && window.moneyPagesMetrics.rows.length > 0) {
                   const sampleUrls = window.moneyPagesMetrics.rows.slice(0, 5).map(r => {
@@ -17762,10 +17801,10 @@
 
           if (!currentMetrics) {
             failCount++;
-            const errorMsg = `${task.keyword_text || taskUrl}: No data found in Ranking & AI, Money Pages, or audit results`;
+            const taskUrl = task.target_url_clean || task.target_url || '';
+            const errorMsg = `${task.keyword_text || taskUrl}: No data found`;
             errors.push(errorMsg);
             debugLog(`[Optimisation] Task ${task.id} (${task.keyword_text || taskUrl}): FAILED - ${errorMsg}`, 'error');
-            debugLog(`[Optimisation] Task ${task.id} search details: keyword="${task.keyword_text || 'none'}", url="${taskUrl || 'none'}", normalizedUrl="${normalizedTaskUrl}", hasRankingData=${!!matchingRow}, hasMoneyPagesData=${!!(window.moneyPagesMetrics && window.moneyPagesMetrics.rows)}, hasLastAuditResults=${!!localStorage.getItem('last_audit_results')}`, 'error');
             return;
           }
 
@@ -17793,11 +17832,12 @@
                 debugLog(`[Optimisation] Task ${task.id} (${task.keyword_text || taskUrl}) skipped: measurement too recent (within 5-minute window)`, 'info');
               } else {
                 successCount++;
+                const taskUrl = task.target_url_clean || task.target_url || '';
                 debugLog(`[Optimisation] Task ${task.id} (${task.keyword_text || taskUrl}) updated successfully: clicks=${currentMetrics.gsc_clicks_28d}, impressions=${currentMetrics.gsc_impressions_28d}, ctr=${currentMetrics.gsc_ctr_28d}, rank=${currentMetrics.current_rank}`, 'success');
               }
             } catch (error) {
               failCount++;
-              errors.push(`${task.keyword_text}: ${error.message}`);
+              errors.push(`${task.keyword_text || task.target_url || 'unknown'}: ${error.message}`);
               debugLog(`[Optimisation] Error updating task ${task.id}: ${error.message || error}`, 'error');
             }
           }));
