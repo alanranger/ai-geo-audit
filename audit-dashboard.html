@@ -24034,27 +24034,27 @@
         // Verify the save by checking Supabase (works for both single and batch saves)
         try {
           debugLog('Verifying audit save in Supabase...', 'info');
-            const verifyResponse = await fetch(apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}&minimal=true`));
-            if (verifyResponse.ok) {
+          const verifyResponse = await fetch(apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}&minimal=true`));
+          if (verifyResponse.ok) {
               const verifyResult = await verifyResponse.json();
               if (verifyResult.status === 'ok' && verifyResult.data && verifyResult.data.auditDate === auditDate) {
                 debugLog(`✓ Verified: Audit ${auditDate} exists in Supabase with schema_total_pages=${verifyResult.data.scores?.contentSchema !== null ? 'present' : 'null'}`, 'success');
                 showStatus(`✓ Audit saved and verified in Supabase (${auditDate})`, 'success');
-              } else {
-                debugLog(`⚠ Verification failed: Audit ${auditDate} not found in Supabase yet`, 'warn');
-                showStatus(`⚠ Audit save reported success but verification pending (${auditDate})`, 'warn');
-              }
-            } else {
-              debugLog(`⚠ Could not verify audit save: ${verifyResponse.status}`, 'warn');
-              showStatus(`✓ Audit saved to Supabase (${auditDate}) - verification skipped`, 'success');
-            }
-          } catch (verifyError) {
-            debugLog(`⚠ Verification error (non-critical): ${verifyError.message}`, 'warn');
-            showStatus(`✓ Audit saved to Supabase (${auditDate})`, 'success');
+          } else {
+            debugLog(`⚠ Verification failed: Audit ${auditDate} not found in Supabase yet`, 'warn');
+            showStatus(`⚠ Audit save reported success but verification pending (${auditDate})`, 'warn');
           }
-          
-          // Save GSC page-level 28d metrics to Supabase
-          try {
+        } else {
+          debugLog(`⚠ Could not verify audit save: ${verifyResponse.status}`, 'warn');
+          showStatus(`✓ Audit saved to Supabase (${auditDate}) - verification skipped`, 'success');
+        }
+      } catch (verifyError) {
+        debugLog(`⚠ Verification error (non-critical): ${verifyError.message}`, 'warn');
+        showStatus(`✓ Audit saved to Supabase (${auditDate})`, 'success');
+      }
+      
+      // Save GSC page-level 28d metrics to Supabase
+      try {
             if (window._pendingPageMetrics && window._pendingPageMetrics.pages && window._pendingPageMetrics.pages.length > 0) {
               debugLog(`📊 Saving ${window._pendingPageMetrics.pages.length} page metrics to Supabase (run_id: ${auditDate})...`, 'info');
               
@@ -24089,69 +24089,38 @@
                 
                 // Clear pending metrics
                 window._pendingPageMetrics = null;
-              } else {
-                const errorText = await saveResponse.text();
-                debugLog(`⚠ Failed to save page metrics to Supabase: ${saveResponse.status} - ${errorText}`, 'warn');
-              }
-            }
-          } catch (pageMetricsError) {
-            debugLog(`⚠ Error saving page metrics to Supabase (non-critical): ${pageMetricsError.message}`, 'warn');
-          }
-          
-          // Calculate and save portfolio snapshots (Phase 3)
-          try {
-            await calculateAndSavePortfolioSnapshots(auditDate);
-          } catch (portfolioError) {
-            debugLog(`⚠ Error saving portfolio snapshots (non-critical): ${portfolioError.message}`, 'warn');
-          }
-          
-          // After saving, refresh Money Pages charts with updated history
-          // This ensures the trend chart and KPI tracker show the new audit data
-          try {
-            debugLog('Refreshing Money Pages charts with updated history...', 'info');
-            
-            // Refresh KPI tracker (which now also refreshes Performance Trends from portfolio metrics).
-            if (typeof window.loadAuditHistoryAndRenderKpis === 'function') {
-              setTimeout(() => {
-                window.loadAuditHistoryAndRenderKpis(propertyUrl);
-                debugLog('✓ Money Pages KPI tracker + trends refreshed', 'success');
-              }, 500);
-            }
-          } catch (refreshError) {
-            debugLog(`⚠ Error refreshing Money Pages charts: ${refreshError.message}`, 'warn');
-            // Don't fail the save operation if refresh fails
-          }
         } else {
-          // Read response body once as text, then try to parse as JSON to avoid "body stream already read" error
-          let errorMessage = 'Unknown error';
-          let errorDetails = null;
-          try {
-            const responseText = await response.text();
-            // Try to parse as JSON
-            try {
-              const error = JSON.parse(responseText);
-              errorMessage = error.message || error.details || responseText;
-              errorDetails = error;
-            } catch (parseError) {
-              // Not JSON, use text as-is
-              errorMessage = responseText || `HTTP ${response.status}: ${response.statusText}`;
-            }
-          } catch (textError) {
-            errorMessage = `HTTP ${response.status}: ${response.statusText}`;
-          }
-          // Log detailed error for debugging
-          console.error('[Supabase Save] Failed to save audit results to Supabase');
-          console.error('[Supabase Save] Status:', response.status, response.statusText);
-          console.error('[Supabase Save] Error message:', errorMessage);
-          if (errorDetails) {
-            console.error('[Supabase Save] Full error details:', JSON.stringify(errorDetails, null, 2));
-          }
-          // Show error to user - this is critical for data persistence
-          debugLog(`✗ FAILED to save audit to Supabase: ${errorMessage}`, 'error');
-          showStatus(`⚠ Audit completed but failed to save to Supabase: ${errorMessage}. Check console for details.`, 'error');
-          // CRITICAL: Throw error so calling code knows the save failed
-          throw new Error(`Failed to save audit to Supabase: ${errorMessage}`);
+          const errorText = await saveResponse.text();
+          debugLog(`⚠ Failed to save page metrics to Supabase: ${saveResponse.status} - ${errorText}`, 'warn');
         }
+      }
+    } catch (pageMetricsError) {
+      debugLog(`⚠ Error saving page metrics to Supabase (non-critical): ${pageMetricsError.message}`, 'warn');
+    }
+    
+    // Calculate and save portfolio snapshots (Phase 3)
+    try {
+      await calculateAndSavePortfolioSnapshots(auditDate);
+    } catch (portfolioError) {
+      debugLog(`⚠ Error saving portfolio snapshots (non-critical): ${portfolioError.message}`, 'warn');
+    }
+    
+    // After saving, refresh Money Pages charts with updated history
+    // This ensures the trend chart and KPI tracker show the new audit data
+    try {
+      debugLog('Refreshing Money Pages charts with updated history...', 'info');
+      
+      // Refresh KPI tracker (which now also refreshes Performance Trends from portfolio metrics).
+      if (typeof window.loadAuditHistoryAndRenderKpis === 'function') {
+        setTimeout(() => {
+          window.loadAuditHistoryAndRenderKpis(propertyUrl);
+          debugLog('✓ Money Pages KPI tracker + trends refreshed', 'success');
+        }, 500);
+      }
+    } catch (refreshError) {
+      debugLog(`⚠ Error refreshing Money Pages charts: ${refreshError.message}`, 'warn');
+      // Don't fail the save operation if refresh fails
+    }
       } catch (error) {
         // Show error to user - this is critical for data persistence
         debugLog(`✗ Supabase save exception: ${error.message}`, 'error');
