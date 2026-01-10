@@ -16696,15 +16696,26 @@
           
           if (matchingRow) {
             debugLog(`[Optimisation] URL task ${task.id}: Found matching row in stored Money Pages data - clicks=${matchingRow.clicks}, impressions=${matchingRow.impressions}`, 'success');
+            const clicks = matchingRow.clicks != null ? matchingRow.clicks : (matchingRow.clicks_28d || 0);
+            const impressions = matchingRow.impressions != null ? matchingRow.impressions : (matchingRow.impressions_28d || 0);
+            
             totals = {
-              clicks: matchingRow.clicks != null ? matchingRow.clicks : (matchingRow.clicks_28d || 0),
-              impressions: matchingRow.impressions != null ? matchingRow.impressions : (matchingRow.impressions_28d || 0),
+              clicks: clicks,
+              impressions: impressions,
               ctr: (() => {
-                const v = matchingRow.ctr != null ? matchingRow.ctr : (matchingRow.ctr_28d != null ? matchingRow.ctr_28d : 0);
-                const n = Number(v || 0);
-                // If stored as percentage (0-100), convert to ratio (0-1)
-                if (n > 1 && n <= 100) return n / 100;
-                return n;
+                // First try to get stored CTR value
+                const v = matchingRow.ctr != null ? matchingRow.ctr : (matchingRow.ctr_28d != null ? matchingRow.ctr_28d : null);
+                if (v != null && v !== 0) {
+                  const n = Number(v);
+                  // If stored as percentage (0-100), convert to ratio (0-1)
+                  if (n > 1 && n <= 100) return n / 100;
+                  return n;
+                }
+                // If CTR is missing or 0 but we have clicks and impressions, calculate it
+                if (impressions > 0 && clicks > 0) {
+                  return clicks / impressions;
+                }
+                return 0;
               })(),
               position: matchingRow.avgPosition != null ? matchingRow.avgPosition : (matchingRow.position != null ? matchingRow.position : (matchingRow.position_28d != null ? matchingRow.position_28d : (matchingRow.avg_position != null ? matchingRow.avg_position : null)))
             };
@@ -28330,6 +28341,11 @@
         
         // Save audit results to localStorage AFTER Supabase save (for performance/caching)
         saveAuditResults(scores, searchData, snippetReadiness, schemaAudit, localSignals, siteReviews, backlinkMetrics);
+        
+        // Update audit timestamp display after saving
+        if (typeof updateAuditTimestamp === 'function') {
+          updateAuditTimestamp();
+        }
         
         // Save GSC timeseries data to database (for last 28 days, updated each audit)
         (async () => {
