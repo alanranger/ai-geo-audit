@@ -28077,6 +28077,39 @@
         })();
         
         showStatus('Audit completed successfully!', 'success');
+        
+        // Show prompt clarifying what was updated and what wasn't
+        setTimeout(() => {
+          const message = 'Audit Scan completed!\n\n' +
+            '✅ Updated: GSC metrics (clicks, impressions, CTR, GSC-based rank)\n' +
+            '❌ NOT updated: AI metrics (AI Overview, AI Citations, Ranking & AI rank)\n\n' +
+            'To update AI metrics, run "Run Ranking & AI Scan" from the Dashboard or Ranking & AI tab.\n\n' +
+            'Would you like to update optimisation tasks now with the GSC data?';
+          
+          const updateTasks = confirm(message);
+          if (updateTasks) {
+            // Navigate to Optimisation tab and trigger task update
+            const optimisationTab = document.querySelector('[data-panel="optimisation"]');
+            if (optimisationTab) {
+              // Switch to Optimisation tab
+              const tabBtn = document.querySelector('[data-tab="optimisation"]');
+              if (tabBtn) {
+                tabBtn.click();
+              }
+              
+              // Wait a moment for tab to switch, then trigger bulk update
+              setTimeout(() => {
+                if (typeof window.bulkUpdateAllTasks === 'function') {
+                  window.bulkUpdateAllTasks(true); // Skip confirmation since user already confirmed
+                } else {
+                  alert('Task update function not available. Please use "Update All Tasks" button in the Optimisation tab.');
+                }
+              }, 500);
+            } else {
+              alert('Please navigate to the Optimisation tab and click "Update All Tasks" to update tasks with the new GSC data.');
+            }
+          }
+        }, 1000); // Wait 1 second after success message
       } catch (error) {
         debugLog(`✗ AUDIT ERROR: ${error.message}`, 'error');
         debugLog(`Stack trace: ${error.stack}`, 'error');
