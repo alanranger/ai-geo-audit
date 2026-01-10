@@ -23000,8 +23000,8 @@
           }
         }
         
-        // Update timestamp display
-        updateAuditTimestamp(auditData.timestamp);
+        // Update timestamp display - REMOVED: Now only updated from renderDashboardTab() to prevent flickering
+        // updateAuditTimestamp(auditData.timestamp);
 
         // Dashboard: refresh live dials/cards immediately when any audit saves
         if (typeof window.renderDashboardTab === 'function') {
@@ -23316,7 +23316,8 @@
             const minimalJson = await minimalResponse.json();
             const minimalData = minimalJson?.data;
             if (minimalJson?.status === 'ok' && minimalData?.timestamp) {
-              updateAuditTimestamp(minimalData.timestamp);
+              // REMOVED: Now only updated from renderDashboardTab() to prevent flickering
+              // updateAuditTimestamp(minimalData.timestamp);
               // IMPORTANT: also update cached local data, otherwise displayDashboard() will
               // overwrite the UI with stale localStorageData.timestamp.
               const normalizedTs = typeof minimalData.timestamp === 'number'
@@ -23363,10 +23364,10 @@
           try {
             safeSetLocalStorage('last_audit_results', supabaseData);
             debugLog('✓ Stored Supabase data in localStorage for caching', 'success');
-            // Update timestamp display
-            if (supabaseData.timestamp) {
-              updateAuditTimestamp(supabaseData.timestamp);
-            }
+            // Update timestamp display - REMOVED: Now only updated from renderDashboardTab() to prevent flickering
+            // if (supabaseData.timestamp) {
+            //   updateAuditTimestamp(supabaseData.timestamp);
+            // }
               // Dashboard: ensure the new Dashboard tab reflects freshly-loaded audit data.
               if (typeof window.renderDashboardTab === 'function') {
                 try { window.renderDashboardTab(); } catch {}
@@ -23407,72 +23408,86 @@
     }
     
     // Update audit timestamp display
-    // CRITICAL: Always use lastGlobal.timestamp from getDashboardRuns() for consistency
-    // This prevents flickering between different timestamp sources
-    function updateAuditTimestamp(timestamp) {
-      // Always prefer lastGlobal.timestamp from getDashboardRuns() for consistency
-      let timestampToUse = timestamp;
-      try {
-        if (typeof getDashboardRuns === 'function') {
-          const runs = getDashboardRuns();
-          const lastGlobal = runs.length ? runs[runs.length - 1] : null;
-          if (lastGlobal && lastGlobal.timestamp) {
-            timestampToUse = lastGlobal.timestamp;
+    // CRITICAL: ONLY use lastGlobal.timestamp from dashboard runs - ignore passed parameter
+    // This prevents flickering by ensuring a single source of truth
+    // Debounced to prevent rapid updates from multiple callers
+    let updateAuditTimestampDebounceTimer = null;
+    function updateAuditTimestamp(ignoreParam) {
+      // Debounce: Clear any pending update and schedule a new one
+      if (updateAuditTimestampDebounceTimer) {
+        clearTimeout(updateAuditTimestampDebounceTimer);
+      }
+      
+      updateAuditTimestampDebounceTimer = setTimeout(() => {
+        // IGNORE passed parameter - always read directly from localStorage as single source of truth
+        let timestampToUse = null;
+        try {
+          // Read directly from localStorage using the same key as getDashboardRuns()
+          const DASHBOARD_RUNS_KEY = 'dashboard_global_runs_v1';
+          const stored = localStorage.getItem(DASHBOARD_RUNS_KEY);
+          if (stored) {
+            const runs = JSON.parse(stored);
+            if (Array.isArray(runs) && runs.length > 0) {
+              const lastGlobal = runs[runs.length - 1];
+              if (lastGlobal && lastGlobal.timestamp) {
+                timestampToUse = lastGlobal.timestamp;
+              }
+            }
+          }
+        } catch (e) {
+          // If reading fails, show "Not yet run"
+          console.warn('[updateAuditTimestamp] Error reading dashboard runs from localStorage:', e);
+        }
+        
+        const timestampElement = document.getElementById('lastAuditTime');
+        const snippetTimestampElement = document.getElementById('snippetReadinessAuditTime');
+        const snippetTimestampContainer = document.getElementById('snippetReadinessTimestamp');
+        const radarTimestampElement = document.getElementById('radarChartAuditTime');
+        const radarTimestampContainer = document.getElementById('radarChartTimestamp');
+        
+        if (timestampToUse) {
+          const date = new Date(timestampToUse);
+          // Format in GMT/UTC: "DD MMM YYYY, HH:MM:SS GMT"
+          const day = String(date.getUTCDate()).padStart(2, '0');
+          const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+          const month = monthNames[date.getUTCMonth()];
+          const year = date.getUTCFullYear();
+          const hours = String(date.getUTCHours()).padStart(2, '0');
+          const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+          const seconds = String(date.getUTCSeconds()).padStart(2, '0');
+          const formatted = `${day} ${month} ${year}, ${hours}:${minutes}:${seconds} GMT`;
+          
+          if (timestampElement) {
+            timestampElement.textContent = formatted;
+          }
+          
+          // Update snippet readiness timestamp
+          if (snippetTimestampElement) {
+            snippetTimestampElement.textContent = formatted;
+          }
+          if (snippetTimestampContainer) {
+            snippetTimestampContainer.style.display = 'block';
+          }
+          
+          // Update radar chart timestamp
+          if (radarTimestampElement) {
+            radarTimestampElement.textContent = formatted;
+          }
+          if (radarTimestampContainer) {
+            radarTimestampContainer.style.display = 'block';
+          }
+        } else {
+          if (timestampElement) {
+            timestampElement.textContent = 'Not yet run';
+          }
+          if (snippetTimestampContainer) {
+            snippetTimestampContainer.style.display = 'none';
+          }
+          if (radarTimestampContainer) {
+            radarTimestampContainer.style.display = 'none';
           }
         }
-      } catch (e) {
-        // If getDashboardRuns fails, fall back to passed timestamp
-        console.warn('[updateAuditTimestamp] Error getting dashboard runs:', e);
-      }
-      
-      const timestampElement = document.getElementById('lastAuditTime');
-      const snippetTimestampElement = document.getElementById('snippetReadinessAuditTime');
-      const snippetTimestampContainer = document.getElementById('snippetReadinessTimestamp');
-      const radarTimestampElement = document.getElementById('radarChartAuditTime');
-      const radarTimestampContainer = document.getElementById('radarChartTimestamp');
-      
-      if (timestampToUse) {
-        const date = new Date(timestamp);
-        // Format in GMT/UTC: "DD MMM YYYY, HH:MM:SS GMT"
-        const day = String(date.getUTCDate()).padStart(2, '0');
-        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        const month = monthNames[date.getUTCMonth()];
-        const year = date.getUTCFullYear();
-        const hours = String(date.getUTCHours()).padStart(2, '0');
-        const minutes = String(date.getUTCMinutes()).padStart(2, '0');
-        const seconds = String(date.getUTCSeconds()).padStart(2, '0');
-        const formatted = `${day} ${month} ${year}, ${hours}:${minutes}:${seconds} GMT`;
-        
-        if (timestampElement) {
-          timestampElement.textContent = formatted;
-        }
-        
-        // Update snippet readiness timestamp
-        if (snippetTimestampElement) {
-          snippetTimestampElement.textContent = formatted;
-        }
-        if (snippetTimestampContainer) {
-          snippetTimestampContainer.style.display = 'block';
-        }
-        
-        // Update radar chart timestamp
-        if (radarTimestampElement) {
-          radarTimestampElement.textContent = formatted;
-        }
-        if (radarTimestampContainer) {
-          radarTimestampContainer.style.display = 'block';
-        }
-      } else {
-        if (timestampElement) {
-          timestampElement.textContent = 'Not yet run';
-        }
-        if (snippetTimestampContainer) {
-          snippetTimestampContainer.style.display = 'none';
-        }
-        if (radarTimestampContainer) {
-          radarTimestampContainer.style.display = 'none';
-        }
-      }
+      }, 100); // Debounce: Wait 100ms before updating, cancels previous pending updates
     }
     
     // Save audit results to Supabase for historical tracking
