@@ -23768,21 +23768,33 @@
         debugLog(`saveAuditToSupabase: moneySegmentMetrics ready with ${Object.keys(moneySegmentMetrics).length} segments`, 'info');
         debugLog(`saveAuditToSupabase: moneySegmentMetrics.allMoney clicks=${moneySegmentMetrics.allMoney?.clicks || 0}, impressions=${moneySegmentMetrics.allMoney?.impressions || 0}`, 'info');
         
-        // Get rankingAiData from localStorage or window if available
+        // Get rankingAiData - but ONLY if this is a Ranking & AI scan, not a GSC audit
+        // GSC audits don't fetch rankingAiData, so don't include old data from localStorage
+        // The API will fetch it from Supabase if needed for computed fields
         let rankingAiData = null;
-        try {
-          const localRankingData = localStorage.getItem('rankingAiData');
-          if (localRankingData) {
-            rankingAiData = JSON.parse(localRankingData);
-            debugLog(`✓ saveAuditToSupabase: Loaded rankingAiData from localStorage (${rankingAiData.combinedRows?.length || 0} keywords)`, 'info');
-          } else if (window.rankingAiData) {
-            rankingAiData = window.rankingAiData;
-            debugLog(`✓ saveAuditToSupabase: Using rankingAiData from window (${rankingAiData.combinedRows?.length || 0} keywords)`, 'info');
-          } else {
-            debugLog(`⚠ saveAuditToSupabase: No rankingAiData available`, 'warn');
+        
+        // Only include rankingAiData if this is NOT a fresh GSC audit run
+        // (GSC audits set window._isFreshAuditRun = true, but Ranking & AI scans don't)
+        const isGscAudit = window._isFreshAuditRun === true;
+        
+        if (!isGscAudit) {
+          // This is likely a Ranking & AI scan or a combined audit - include rankingAiData if available
+          try {
+            const localRankingData = localStorage.getItem('rankingAiData');
+            if (localRankingData) {
+              rankingAiData = JSON.parse(localRankingData);
+              debugLog(`✓ saveAuditToSupabase: Loaded rankingAiData from localStorage (${rankingAiData.combinedRows?.length || 0} keywords)`, 'info');
+            } else if (window.rankingAiData) {
+              rankingAiData = window.rankingAiData;
+              debugLog(`✓ saveAuditToSupabase: Using rankingAiData from window (${rankingAiData.combinedRows?.length || 0} keywords)`, 'info');
+            } else {
+              debugLog(`⚠ saveAuditToSupabase: No rankingAiData available`, 'warn');
+            }
+          } catch (rankingErr) {
+            debugLog(`⚠ saveAuditToSupabase: Error loading rankingAiData: ${rankingErr.message}`, 'warn');
           }
-        } catch (rankingErr) {
-          debugLog(`⚠ saveAuditToSupabase: Error loading rankingAiData: ${rankingErr.message}`, 'warn');
+        } else {
+          debugLog(`ℹ saveAuditToSupabase: GSC audit detected - skipping rankingAiData (will be fetched from Supabase by API if needed)`, 'info');
         }
         
         // Ensure scores.moneyPages namespace exists and includes GSC page totals
@@ -28129,6 +28141,9 @@
           debugLog(`✗ Error stack: ${supabaseErr.stack}`, 'error');
           showStatus(`✗ CRITICAL: Audit completed but FAILED to save to Supabase. Error: ${supabaseErr.message}`, 'error');
           // Continue anyway - will save to localStorage as fallback
+        } finally {
+          // Reset the flag after audit completes
+          window._isFreshAuditRun = false;
         }
         
         // Save audit results to localStorage AFTER Supabase save (for performance/caching)
