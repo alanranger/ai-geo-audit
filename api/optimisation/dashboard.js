@@ -380,8 +380,31 @@ export default async function handler(req, res) {
       }
 
       // Generate sparkline points (last 10 measurements for objective KPI)
+      // CRITICAL: Only include measurements from the baseline event onwards
+      // This ensures the sparkline reflects the current baseline, not historical variations
       const sparklinePoints = [];
-      if (objectiveKpiKey && cycleEvents.length > 0) {
+      if (objectiveKpiKey && cycleEvents.length > 0 && baselineEvent) {
+        const extractor = KPI_EXTRACTORS[objectiveKpiKey];
+        if (extractor) {
+          // Find the index of the baseline event
+          const baselineIndex = cycleEvents.findIndex(e => 
+            e.id === baselineEvent.id || 
+            (e.is_baseline === true && e.created_at === baselineEvent.created_at)
+          );
+          
+          // Only include events from baseline onwards
+          const eventsFromBaseline = baselineIndex >= 0 
+            ? cycleEvents.slice(baselineIndex)
+            : cycleEvents;
+          
+          const points = eventsFromBaseline
+            .slice(-10) // Last 10 from baseline onwards
+            .map(e => extractor(e.metrics))
+            .filter(v => v != null);
+          sparklinePoints.push(...points);
+        }
+      } else if (objectiveKpiKey && cycleEvents.length > 0) {
+        // Fallback: if no baseline event found, use all events (shouldn't happen, but safety)
         const extractor = KPI_EXTRACTORS[objectiveKpiKey];
         if (extractor) {
           const points = cycleEvents

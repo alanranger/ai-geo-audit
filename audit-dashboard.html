@@ -9438,11 +9438,19 @@
           }
           
           // Sparkline - use delta direction for color, not first vs last point
+          // CRITICAL: If baseline and latest are the same, show a flat line
           const sparklinePoints = task.sparklinePoints || [];
           if (sparklinePoints.length > 1) {
-            // Pass delta to determine color correctly
-            const sparklineDelta = delta != null ? delta : null;
-            sparklineHtml = renderSparkline(sparklinePoints, 80, 24, sparklineDelta);
+            // If baseline equals latest, create a flat line (all points at same value)
+            if (baselineValue != null && latestValue != null && baselineValue === latestValue) {
+              // Create flat line with all points at the same value
+              const flatPoints = new Array(Math.min(sparklinePoints.length, 10)).fill(baselineValue);
+              sparklineHtml = renderSparkline(flatPoints, 80, 24, 0); // delta = 0 for flat line
+            } else {
+              // Pass delta to determine color correctly
+              const sparklineDelta = delta != null ? delta : null;
+              sparklineHtml = renderSparkline(sparklinePoints, 80, 24, sparklineDelta);
+            }
           }
         }
         
