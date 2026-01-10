@@ -17924,11 +17924,10 @@
               const result = await response.json();
               if (result.skipped) {
                 skippedCount++;
-                debugLog(`[Optimisation] Task ${task.id} (${task.keyword_text || taskUrl}) skipped: measurement too recent (within 5-minute window)`, 'info');
+                debugLog(`[Optimisation] Task ${task.id} (${task.keyword_text || taskUrl || 'Unknown task'}) skipped: measurement too recent (within 5-minute window)`, 'info');
               } else {
                 successCount++;
-                const taskUrl = task.target_url_clean || task.target_url || '';
-                debugLog(`[Optimisation] Task ${task.id} (${task.keyword_text || taskUrl}) updated successfully: clicks=${currentMetrics.gsc_clicks_28d}, impressions=${currentMetrics.gsc_impressions_28d}, ctr=${currentMetrics.gsc_ctr_28d}, rank=${currentMetrics.current_rank}`, 'success');
+                debugLog(`[Optimisation] Task ${task.id} (${task.keyword_text || taskUrl || 'Unknown task'}) updated successfully: clicks=${currentMetrics.gsc_clicks_28d}, impressions=${currentMetrics.gsc_impressions_28d}, ctr=${currentMetrics.gsc_ctr_28d}, rank=${currentMetrics.current_rank}`, 'success');
               }
             } catch (error) {
               failCount++;
@@ -23968,6 +23967,10 @@
           const normalizedDomain = propertyUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
           debugLog(`saveAuditToSupabase: Fetching domain strength for ${normalizedDomain}`, 'info');
           
+          const urlHelper = window.apiUrl || ((path) => {
+            const base = window.location.origin.includes('localhost') ? 'http://localhost:3000' : 'https://ai-geo-audit.vercel.app';
+            return `${base}${path}`;
+          });
           const domainStrengthResp = await fetch(urlHelper(`/api/domain-strength/overview`));
           if (domainStrengthResp.ok) {
             const domainStrengthJson = await domainStrengthResp.json();
