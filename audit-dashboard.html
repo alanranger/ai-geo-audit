@@ -23850,8 +23850,8 @@
           // Continue without domain strength - it's not critical for saving the audit
         }
         
-        // Prepare payload
-        const payload = {
+        // Prepare full payload to check size
+        const fullPayload = {
           propertyUrl,
           auditDate,
           schemaAudit,
@@ -23867,49 +23867,173 @@
         };
         
         // Check payload size before sending (Vercel limit is ~4.5MB)
-        const payloadJson = JSON.stringify(payload);
+        const payloadJson = JSON.stringify(fullPayload);
         const payloadSizeKB = Math.round(payloadJson.length / 1024);
-        debugLog(`saveAuditToSupabase: Payload size: ${payloadSizeKB}KB`, 'info');
+        debugLog(`saveAuditToSupabase: Full payload size: ${payloadSizeKB}KB`, 'info');
         
-        if (payloadSizeKB > 4000) {
-          debugLog(`⚠ Payload size (${payloadSizeKB}KB) exceeds 4MB - truncating large fields...`, 'warn');
-          // Truncate queryPages if too large
-          if (searchData?.queryPages && Array.isArray(searchData.queryPages) && searchData.queryPages.length > 2000) {
-            debugLog(`⚠ Truncating queryPages from ${searchData.queryPages.length} to 2000 items`, 'warn');
-            searchData.queryPages = searchData.queryPages.slice(0, 2000);
-          }
-          // Truncate topQueries if too large
-          if (searchData?.topQueries && Array.isArray(searchData.topQueries) && searchData.topQueries.length > 500) {
-            debugLog(`⚠ Truncating topQueries from ${searchData.topQueries.length} to 500 items`, 'warn');
-            searchData.topQueries = searchData.topQueries.slice(0, 500);
-          }
-          // Recalculate payload size after truncation
-          const truncatedPayload = {
-            ...payload,
-            searchData: { ...searchData }
+        // Extract large fields that might need to be saved separately
+        const queryPages = searchData?.queryPages || null;
+        const topQueries = searchData?.topQueries || null;
+        const queryPagesSizeKB = queryPages ? Math.round(JSON.stringify(queryPages).length / 1024) : 0;
+        const topQueriesSizeKB = topQueries ? Math.round(JSON.stringify(topQueries).length / 1024) : 0;
+        
+        // OPTION 3: Split into batches if payload exceeds 3.5MB (safety margin)
+        const USE_BATCH_SAVE = payloadSizeKB > 3500;
+        
+        if (USE_BATCH_SAVE) {
+          debugLog(`📦 Payload size (${payloadSizeKB}KB) exceeds 3.5MB - splitting into batches...`, 'info');
+          debugLog(`📦 Large fields: queryPages=${queryPagesSizeKB}KB, topQueries=${topQueriesSizeKB}KB`, 'info');
+          
+          // BATCH 1: Core audit data (without large fields)
+          const coreSearchData = { ...searchData };
+          delete coreSearchData.queryPages;
+          delete coreSearchData.topQueries;
+          
+          const batch1Payload = {
+            ...fullPayload,
+            searchData: coreSearchData
           };
-          const truncatedJson = JSON.stringify(truncatedPayload);
-          const truncatedSizeKB = Math.round(truncatedJson.length / 1024);
-          debugLog(`saveAuditToSupabase: Payload size after truncation: ${truncatedSizeKB}KB`, 'info');
-          payload.searchData = truncatedPayload.searchData;
-        }
-        
-        const response = await fetch(apiUrl('/api/supabase/save-audit'), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(payload)
-        });
-        
-        if (response.ok) {
+          
+          const batch1SizeKB = Math.round(JSON.stringify(batch1Payload).length / 1024);
+          debugLog(`📦 Batch 1 (Core data): ${batch1SizeKB}KB`, 'info');
+          
+          // Save Batch 1: Core audit data
+          debugLog(`📦 Saving batch 1/3: Core audit data (scores, dates, summaries)...`, 'info');
+          const batch1Response = await fetch(apiUrl('/api/supabase/save-audit'), {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(batch1Payload)
+          });
+          
+          if (!batch1Response.ok) {
+            const errorText = await batch1Response.text();
+            let errorMessage = 'Unknown error';
+            try {
+              const error = JSON.parse(errorText);
+              errorMessage = error.message || error.details || errorText;
+            } catch {
+              errorMessage = errorText || `HTTP ${batch1Response.status}: ${batch1Response.statusText}`;
+            }
+            throw new Error(`Failed to save batch 1 (core data): ${errorMessage}`);
+          }
+          
+          const batch1Result = await batch1Response.json();
+          debugLog(`✓ Batch 1/3 saved successfully`, 'success');
+          
+          // BATCH 2: queryPages (if exists and is large)
+          if (queryPages && Array.isArray(queryPages) && queryPages.length > 0) {
+            debugLog(`📦 Saving batch 2/3: Query pages data (${queryPages.length} items, ${queryPagesSizeKB}KB)...`, 'info');
+            const batch2Payload = {
+              propertyUrl,
+              auditDate,
+              searchData: {
+                queryPages: queryPages
+              }
+            };
+            
+            const batch2Response = await fetch(apiUrl('/api/supabase/save-audit'), {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(batch2Payload)
+            });
+            
+            if (!batch2Response.ok) {
+              const errorText = await batch2Response.text();
+              let errorMessage = 'Unknown error';
+              try {
+                const error = JSON.parse(errorText);
+                errorMessage = error.message || error.details || errorText;
+              } catch {
+                errorMessage = errorText || `HTTP ${batch2Response.status}: ${batch2Response.statusText}`;
+              }
+              debugLog(`⚠ Batch 2/3 failed (non-critical): ${errorMessage}`, 'warn');
+              // Continue - core data is saved
+            } else {
+              const batch2Result = await batch2Response.json();
+              debugLog(`✓ Batch 2/3 saved successfully`, 'success');
+            }
+          } else {
+            debugLog(`ℹ Batch 2/3 skipped: No queryPages data to save`, 'info');
+          }
+          
+          // BATCH 3: topQueries (if exists and is large)
+          if (topQueries && Array.isArray(topQueries) && topQueries.length > 0) {
+            debugLog(`📦 Saving batch 3/3: Top queries data (${topQueries.length} items, ${topQueriesSizeKB}KB)...`, 'info');
+            const batch3Payload = {
+              propertyUrl,
+              auditDate,
+              searchData: {
+                topQueries: topQueries
+              }
+            };
+            
+            const batch3Response = await fetch(apiUrl('/api/supabase/save-audit'), {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(batch3Payload)
+            });
+            
+            if (!batch3Response.ok) {
+              const errorText = await batch3Response.text();
+              let errorMessage = 'Unknown error';
+              try {
+                const error = JSON.parse(errorText);
+                errorMessage = error.message || error.details || errorText;
+              } catch {
+                errorMessage = errorText || `HTTP ${batch3Response.status}: ${batch3Response.statusText}`;
+              }
+              debugLog(`⚠ Batch 3/3 failed (non-critical): ${errorMessage}`, 'warn');
+              // Continue - core data is saved
+            } else {
+              const batch3Result = await batch3Response.json();
+              debugLog(`✓ Batch 3/3 saved successfully`, 'success');
+            }
+          } else {
+            debugLog(`ℹ Batch 3/3 skipped: No topQueries data to save`, 'info');
+          }
+          
+          debugLog(`✓ All batches saved successfully (audit_date: ${auditDate})`, 'success');
+          const result = batch1Result; // Use batch 1 result for verification
+          debugLog(`✓ Saved data: schema_total_pages=${schemaAudit?.data?.totalPages || 'N/A'}, scores=${JSON.stringify(Object.keys(scores || {}))}`, 'info');
+          
+        } else {
+          // Single request (payload is small enough)
+          debugLog(`📦 Payload size (${payloadSizeKB}KB) is under 3.5MB - saving in single request...`, 'info');
+          
+          const response = await fetch(apiUrl('/api/supabase/save-audit'), {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(fullPayload)
+          });
+          
+          if (!response.ok) {
+            const errorText = await response.text();
+            let errorMessage = 'Unknown error';
+            try {
+              const error = JSON.parse(errorText);
+              errorMessage = error.message || error.details || errorText;
+            } catch {
+              errorMessage = errorText || `HTTP ${response.status}: ${response.statusText}`;
+            }
+            throw new Error(`Failed to save audit to Supabase: ${errorMessage}`);
+          }
+          
           const result = await response.json();
           debugLog(`✓ Audit results saved to Supabase successfully (audit_date: ${auditDate})`, 'success');
           debugLog(`✓ Saved data: schema_total_pages=${schemaAudit?.data?.totalPages || 'N/A'}, scores=${JSON.stringify(Object.keys(scores || {}))}`, 'info');
-          
-          // Verify the save by checking Supabase
-          try {
-            debugLog('Verifying audit save in Supabase...', 'info');
+        }
+        
+        // Verify the save by checking Supabase (works for both single and batch saves)
+        try {
+          debugLog('Verifying audit save in Supabase...', 'info');
             const verifyResponse = await fetch(apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}&minimal=true`));
             if (verifyResponse.ok) {
               const verifyResult = await verifyResponse.json();

@@ -220,7 +220,7 @@ export default async function handler(req, res) {
     const snippetReadinessToUse = finalSnippetReadiness;
     const localSignalsToUse = finalLocalSignals;
     const domainStrengthToUse = finalDomainStrength;
-    
+
     // Extract schema audit data
     const schemaData = schemaAuditToUse?.data || {};
     const schemaTypes = schemaData.schemaTypes || [];
@@ -668,18 +668,33 @@ export default async function handler(req, res) {
     };
 
     // CRITICAL: Check for partial updates BEFORE guardrail check
-    // Partial updates (e.g., only queryTotals) should be allowed even without other data
-    const isPartialUpdate = !scores && !schemaAudit && searchData && searchData.queryTotals;
-    const hasQueryTotalsOnly = isPartialUpdate && 
-      auditRecord.query_totals !== null && 
-      Array.isArray(auditRecord.query_totals) && 
-      auditRecord.query_totals.length > 0;
+    // Partial updates (e.g., only queryTotals, only queryPages, only topQueries) should be allowed even without other data
+    const hasQueryTotalsOnly = searchData && searchData.queryTotals && 
+      !scores && !schemaAudit && 
+      (!searchData.queryPages || searchData.queryPages.length === 0) &&
+      (!searchData.topQueries || searchData.topQueries.length === 0);
+    
+    const hasQueryPagesOnly = searchData && searchData.queryPages && 
+      Array.isArray(searchData.queryPages) && searchData.queryPages.length > 0 &&
+      !scores && !schemaAudit && 
+      (!searchData.queryTotals || searchData.queryTotals.length === 0) &&
+      (!searchData.topQueries || searchData.topQueries.length === 0);
+    
+    const hasTopQueriesOnly = searchData && searchData.topQueries && 
+      Array.isArray(searchData.topQueries) && searchData.topQueries.length > 0 &&
+      !scores && !schemaAudit && 
+      (!searchData.queryTotals || searchData.queryTotals.length === 0) &&
+      (!searchData.queryPages || searchData.queryPages.length === 0);
+    
+    const isPartialUpdate = hasQueryTotalsOnly || hasQueryPagesOnly || hasTopQueriesOnly;
 
     // ---- Guardrails: prevent writing "null audits" and mark partials ----
     // We consider a write "invalid" (reject) if it contains no meaningful audit payload.
     // EXCEPTIONS: 
     // 1. Allow partial updates that only contain query_totals (for updating existing audits)
-    // 2. Allow partial updates that only contain rankingAiData (for Ranking & AI scan)
+    // 2. Allow partial updates that only contain query_pages (for batch saves)
+    // 3. Allow partial updates that only contain top_queries (for batch saves)
+    // 4. Allow partial updates that only contain rankingAiData (for Ranking & AI scan)
     const hasAnyPillarScore = [
       auditRecord.visibility_score,
       auditRecord.authority_score,
@@ -700,8 +715,18 @@ export default async function handler(req, res) {
       Array.isArray(auditRecord.ranking_ai_data?.combinedRows) &&
       auditRecord.ranking_ai_data.combinedRows.length > 0;
 
-    // Allow partial updates with query_totals only OR rankingAiData only (for updating existing audits)
-    if (!hasAnyPillarScore && !hasAnyHeavyPayload && !hasQueryTotalsOnly && !hasRankingAiData) {
+    // Allow partial updates with query_totals only, query_pages only, top_queries only, OR rankingAiData only (for updating existing audits)
+    const hasQueryPagesOnlyData = hasQueryPagesOnly && 
+      auditRecord.query_pages !== null && 
+      Array.isArray(auditRecord.query_pages) && 
+      auditRecord.query_pages.length > 0;
+    
+    const hasTopQueriesOnlyData = hasTopQueriesOnly && 
+      auditRecord.top_queries !== null && 
+      Array.isArray(auditRecord.top_queries) && 
+      auditRecord.top_queries.length > 0;
+    
+    if (!hasAnyPillarScore && !hasAnyHeavyPayload && !hasQueryTotalsOnly && !hasQueryPagesOnlyData && !hasTopQueriesOnlyData && !hasRankingAiData) {
       console.warn('[Supabase Save] ✗ Rejecting audit write: no scores and no payload (would create null audit row)');
       return res.status(400).json({
         status: 'error',
@@ -768,8 +793,8 @@ export default async function handler(req, res) {
     // This ensures only ONE record per (property_url, audit_date) combination
     // The UNIQUE constraint on (property_url, audit_date) prevents duplicates
     
-    // CRITICAL: When doing a partial update (e.g., only queryTotals), only send non-null fields
-    // to prevent overwriting existing data with null values
+    // CRITICAL: When doing a partial update (e.g., only queryTotals, only queryPages, only topQueries), 
+    // only send non-null fields to prevent overwriting existing data with null values
     // (isPartialUpdate was already determined above)
     let updatePayload = auditRecord;
     
@@ -779,11 +804,18 @@ export default async function handler(req, res) {
         property_url: auditRecord.property_url,
         audit_date: auditRecord.audit_date
       };
-      // Only add query_totals if it's actually an array with data
-      if (auditRecord.query_totals && Array.isArray(auditRecord.query_totals) && auditRecord.query_totals.length > 0) {
+      
+      // Add the specific field being updated
+      if (hasQueryTotalsOnly && auditRecord.query_totals && Array.isArray(auditRecord.query_totals) && auditRecord.query_totals.length > 0) {
         updatePayload.query_totals = auditRecord.query_totals;
+        console.log('[Supabase Save] ⚠ Partial update detected - only updating query_totals to prevent data loss');
+      } else if (hasQueryPagesOnly && auditRecord.query_pages && Array.isArray(auditRecord.query_pages) && auditRecord.query_pages.length > 0) {
+        updatePayload.query_pages = auditRecord.query_pages;
+        console.log('[Supabase Save] ⚠ Partial update detected - only updating query_pages to prevent data loss');
+      } else if (hasTopQueriesOnly && auditRecord.top_queries && Array.isArray(auditRecord.top_queries) && auditRecord.top_queries.length > 0) {
+        updatePayload.top_queries = auditRecord.top_queries;
+        console.log('[Supabase Save] ⚠ Partial update detected - only updating top_queries to prevent data loss');
       }
-      console.log('[Supabase Save] ⚠ Partial update detected - only updating query_totals to prevent data loss');
     }
     
     // SAFETY: Prevent partial audits from overwriting existing full audit data with nulls.
@@ -903,10 +935,11 @@ export default async function handler(req, res) {
         // No existing record found
         if (isPartialUpdate) {
           // For partial updates, don't create a new record if it doesn't exist
-          console.log('[Supabase Save] ⚠ Partial update: No existing record found, skipping INSERT (queryTotals can only be added to existing audits)');
+          const partialType = hasQueryTotalsOnly ? 'queryTotals' : (hasQueryPagesOnly ? 'queryPages' : 'topQueries');
+          console.log(`[Supabase Save] ⚠ Partial update: No existing record found, skipping INSERT (${partialType} can only be added to existing audits)`);
           return res.status(404).json({
             status: 'error',
-            message: 'Cannot save queryTotals: No existing audit record found. Please run a full audit first.',
+            message: `Cannot save ${partialType}: No existing audit record found. Please run a full audit first.`,
             meta: { generatedAt: new Date().toISOString() }
           });
         }
