@@ -19373,6 +19373,16 @@
       if (filterBtn) {
         filterBtn.textContent = `Filter: ${debugLogFilter === 'all' ? 'All' : 'Warnings/Errors'}`;
       }
+      
+      // Call updateAuditTimestamp on page load after a short delay to ensure DOM is ready
+      setTimeout(() => {
+        if (typeof window.updateAuditTimestamp === 'function') {
+          debugLog('[Page Load] Calling updateAuditTimestamp on page load', 'info');
+          window.updateAuditTimestamp();
+        } else {
+          debugLog('[Page Load] updateAuditTimestamp function not found on window', 'error');
+        }
+      }, 1000);
     });
 
     function copyDebugLog() {
@@ -23605,6 +23615,20 @@
     let updateAuditTimestampDebounceTimer = null;
     async function updateAuditTimestamp(ignoreParam) {
       debugLog('[updateAuditTimestamp] Function called', 'info');
+      console.log('[updateAuditTimestamp] Function called');
+      
+      // Check if DOM elements exist
+      const gscAuditElement = document.getElementById('gscAuditDate');
+      const gscDateRangeElement = document.getElementById('gscDateRange');
+      const rankingAiAuditElement = document.getElementById('rankingAiAuditDate');
+      
+      debugLog(`[updateAuditTimestamp] DOM elements check: gscAuditElement=${!!gscAuditElement}, gscDateRangeElement=${!!gscDateRangeElement}, rankingAiAuditElement=${!!rankingAiAuditElement}`, 'info');
+      console.log('[updateAuditTimestamp] DOM elements:', {
+        gscAuditElement: !!gscAuditElement,
+        gscDateRangeElement: !!gscDateRangeElement,
+        rankingAiAuditElement: !!rankingAiAuditElement
+      });
+      
       // Debounce: Clear any pending update and schedule a new one
       if (updateAuditTimestampDebounceTimer) {
         clearTimeout(updateAuditTimestampDebounceTimer);
@@ -23661,6 +23685,9 @@
           const propertyUrl = document.getElementById('propertyUrl')?.value || 
                               localStorage.getItem('gsc_property_url') || 
                               'https://www.alanranger.com';
+          
+          debugLog(`[updateAuditTimestamp] Using property URL: ${propertyUrl}`, 'info');
+          console.log('[updateAuditTimestamp] Property URL:', propertyUrl);
           
           // Fetch latest GSC audit (has query_pages) - query Supabase directly
           let gscAuditDate = null;
