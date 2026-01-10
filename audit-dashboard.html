@@ -9399,8 +9399,57 @@
         }
 
         // Build goal status display (Phase 5: use objective_status from cycle)
+        // BUT validate with actual values to ensure consistency with drawer
         let goalHtml = '–';
-        const objectiveStatus = task.objective_status || task.goal_state || 'not_set';
+        let objectiveStatus = task.objective_status || task.goal_state || 'not_set';
+        
+        // Validate status using actual values (same logic as drawer)
+        const objective = task.objective || task.cycle?.objective || null;
+        const targetType = objective?.target_type || (task.objective_target_delta != null ? 'delta' : 'absolute');
+        const target = objective?.target != null ? objective.target : 
+          (task.objective_target_delta != null ? task.objective_target_delta : 
+          (task.objective_target_value != null ? task.objective_target_value : null));
+        const objectiveKpi = objective?.kpi || task.objective_kpi || task.primary_kpi || task.objective_metric || null;
+        
+        if (target != null && objectiveKpi) {
+          // Get latest and baseline values
+          let latestValue = null;
+          let baselineValue = null;
+          
+          if (task.objective_progress) {
+            latestValue = task.objective_progress.latest_value ?? null;
+            baselineValue = task.objective_progress.baseline_value ?? null;
+          } else if (task.latest_metrics && task.baseline_metrics) {
+            const kpiKey = objectiveKpi;
+            latestValue = task.latest_metrics[`gsc_${kpiKey}`] ?? task.latest_metrics[kpiKey] ?? null;
+            baselineValue = task.baseline_metrics[`gsc_${kpiKey}`] ?? task.baseline_metrics[kpiKey] ?? null;
+          }
+          
+          // Validate status based on values
+          if (latestValue == null) {
+            objectiveStatus = 'no_measurement';
+          } else if (targetType === 'absolute') {
+            let direction = 'higher_better';
+            if (objective?.kpi === 'current_rank' || objective?.kpi === 'rank') {
+              direction = 'lower_better';
+            }
+            const meetsTarget = direction === 'higher_better' 
+              ? latestValue >= target 
+              : latestValue <= target;
+            objectiveStatus = meetsTarget ? 'met' : 'off_track';
+          } else if (targetType === 'delta') {
+            if (baselineValue == null) {
+              objectiveStatus = 'no_measurement';
+            } else {
+              const delta = latestValue - baselineValue;
+              const direction = task.objective_direction || 'increase';
+              const meetsTarget = direction === 'decrease' 
+                ? delta <= (target * -1)
+                : delta >= target;
+              objectiveStatus = meetsTarget ? 'met' : 'off_track';
+            }
+          }
+        }
         
         if (objectiveStatus && objectiveStatus !== 'not_set') {
           const goalConfig = {
@@ -9408,7 +9457,9 @@
             'off_track': { text: 'Off track', bg: 'rgba(239, 68, 68, 0.3)', color: '#f87171' }, // Red for off track
             'overdue': { text: 'Overdue', bg: 'rgba(239, 68, 68, 0.3)', color: '#f87171' }, // Brighter red
             'met': { text: 'Met', bg: 'rgba(16, 185, 129, 0.3)', color: '#34d399' }, // Brighter green
-            'at_risk': { text: 'At risk', bg: 'rgba(245, 158, 11, 0.3)', color: '#fbbf24' } // Brighter amber
+            'at_risk': { text: 'At risk', bg: 'rgba(245, 158, 11, 0.3)', color: '#fbbf24' }, // Brighter amber
+            'no_measurement': { text: 'No measurement', bg: 'rgba(156, 163, 175, 0.3)', color: '#9ca3af' }, // Grey for no measurement
+            'no_data': { text: 'No measurement', bg: 'rgba(156, 163, 175, 0.3)', color: '#9ca3af' } // Grey for no data
           };
           const config = goalConfig[objectiveStatus] || goalConfig['on_track'];
           let goalText = `<span style="padding: 0.25rem 0.5rem; border-radius: 4px; background: ${config.bg}; color: ${config.color}; font-size: 0.75rem; font-weight: 700; display: inline-block; margin-bottom: 0.25rem;">${config.text}</span>`;
@@ -10189,8 +10240,14 @@
             }
           }
           
-          // Validate based on target type
-          if (targetType === 'absolute' && latestValue != null) {
+          // Check if we have values to validate
+          if (latestValue == null) {
+            // No latest value - can't validate, show "No measurement"
+            state = 'no_measurement';
+            if (typeof debugLog === 'function') {
+              debugLog(`[Optimisation Badge] Setting state to 'no_measurement': latestValue is null, cannot validate target`, 'warn');
+            }
+          } else if (targetType === 'absolute') {
             // For absolute targets, compare latest value directly to target
             // Determine direction based on KPI type
             let direction = 'higher_better';
@@ -10228,29 +10285,37 @@
                 debugLog(`[Optimisation Badge] Setting state to 'off_track': latestValue=${latestValue} does NOT meet absolute target=${target}`, 'warn');
               }
             }
-          } else if (targetType === 'delta' && latestValue != null && baselineValue != null) {
-            // For delta targets, compare delta to target
-            const delta = latestValue - baselineValue;
-            const direction = task.objective_direction || 'increase';
-            const meetsTarget = direction === 'decrease' 
-              ? delta <= (target * -1)
-              : delta >= target;
-            
-            // Override state based on actual delta, not database view
-            if (meetsTarget) {
-              if (state !== 'met' && state !== 'achieved' && state !== 'on_track') {
-                if (typeof debugLog === 'function') {
-                  debugLog(`[Optimisation Badge] Overriding state "${state}" to 'met': delta=${delta} meets target=${target}`, 'info');
-                }
-                state = 'met';
+          } else if (targetType === 'delta') {
+            // For delta targets, need both baseline and latest
+            if (baselineValue == null) {
+              state = 'no_measurement';
+              if (typeof debugLog === 'function') {
+                debugLog(`[Optimisation Badge] Setting state to 'no_measurement': baselineValue is null, cannot validate delta target`, 'warn');
               }
             } else {
-              // Delta doesn't meet target - can't be 'met' or 'achieved'
-              if (state === 'met' || state === 'achieved' || state === 'on_track') {
+              // Compare delta to target
+              const delta = latestValue - baselineValue;
+              const direction = task.objective_direction || 'increase';
+              const meetsTarget = direction === 'decrease' 
+                ? delta <= (target * -1)
+                : delta >= target;
+              
+              // ALWAYS override state based on actual delta - don't trust database state
+              if (typeof debugLog === 'function') {
+                debugLog(`[Optimisation Badge] Validating delta target: delta=${delta}, target=${target}, direction=${direction}, meetsTarget=${meetsTarget}`, 'info');
+              }
+              
+              if (meetsTarget) {
+                state = 'met';
                 if (typeof debugLog === 'function') {
-                  debugLog(`[Optimisation Badge] Overriding '${state}' to 'off_track': delta=${delta} does NOT meet target=${target} (direction=${direction})`, 'warn');
+                  debugLog(`[Optimisation Badge] Setting state to 'met': delta=${delta} meets target=${target}`, 'info');
                 }
+              } else {
+                // Delta doesn't meet target - set to 'off_track'
                 state = 'off_track';
+                if (typeof debugLog === 'function') {
+                  debugLog(`[Optimisation Badge] Setting state to 'off_track': delta=${delta} does NOT meet target=${target} (direction=${direction})`, 'warn');
+                }
               }
             }
           }
@@ -10264,7 +10329,8 @@
           'at_risk': { text: 'At risk', bg: '#f59e0b', color: '#ffffff' },
           'overdue': { text: 'Overdue', bg: '#ef4444', color: '#ffffff' },
           'not_set': { text: 'Not set', bg: '#9ca3af', color: '#ffffff' },
-          'no_measurement': { text: 'No measurement', bg: '#9ca3af', color: '#ffffff' }
+          'no_measurement': { text: 'No measurement', bg: '#9ca3af', color: '#ffffff' },
+          'no_data': { text: 'No measurement', bg: '#9ca3af', color: '#ffffff' } // API returns 'no_data' when values missing
         };
         const config = badgeConfig[state] || badgeConfig['not_set'];
         
