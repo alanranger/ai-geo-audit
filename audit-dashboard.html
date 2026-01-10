@@ -23658,7 +23658,7 @@
             if (gscResponse.ok) {
               const gscData = await gscResponse.json();
               if (gscData.status === 'ok' && gscData.data && gscData.data.auditDate) {
-                // Now fetch full record to get date_range and created_at
+                // Now fetch full record to get date_range and timestamp
                 const fullResponse = await fetch(apiUrl(`/api/supabase/get-latest-audit?property=${encodeURIComponent(propertyUrl)}`));
                 if (fullResponse.ok) {
                   const fullData = await fullResponse.json();
@@ -23671,17 +23671,30 @@
                     gscStartDate = new Date(gscEndDate);
                     gscStartDate.setUTCDate(gscStartDate.getUTCDate() - (dateRange - 1)); // (date_range - 1) days before end date
                     
-                    // Get timestamp - try to get from audit data, fallback to audit_date
+                    // Get timestamp - timestamp is returned as milliseconds (number), convert to ISO string
                     if (fullData.data.timestamp) {
+                      // timestamp is a number (milliseconds since epoch)
                       gscTimestamp = new Date(fullData.data.timestamp).toISOString();
-                    } else {
+                    } else if (fullData.data.auditDate) {
+                      // Fallback to audit_date if timestamp not available
                       gscTimestamp = auditDate.toISOString();
                     }
+                    
+                    debugLog(`[updateAuditTimestamp] GSC audit found: date=${gscAuditDate}, timestamp=${gscTimestamp}, dateRange=${dateRange}`, 'info');
+                  } else {
+                    debugLog(`[updateAuditTimestamp] GSC audit response missing searchData: ${JSON.stringify(fullData?.data ? Object.keys(fullData.data) : 'no data')}`, 'warn');
                   }
+                } else {
+                  debugLog(`[updateAuditTimestamp] GSC full audit fetch failed: ${fullResponse.status}`, 'warn');
                 }
+              } else {
+                debugLog(`[updateAuditTimestamp] GSC minimal audit check failed: status=${gscData?.status}, hasData=${!!gscData?.data}, hasAuditDate=${!!gscData?.data?.auditDate}`, 'warn');
               }
+            } else {
+              debugLog(`[updateAuditTimestamp] GSC minimal audit fetch failed: ${gscResponse.status}`, 'warn');
             }
           } catch (e) {
+            debugLog(`[updateAuditTimestamp] Error fetching GSC audit: ${e?.message || e}`, 'error');
             console.warn('[updateAuditTimestamp] Error fetching GSC audit:', e);
           }
           
@@ -23693,34 +23706,73 @@
             const rankingAiResponse = await fetch(apiUrl(`/api/supabase/get-latest-audit?property=${encodeURIComponent(propertyUrl)}`));
             if (rankingAiResponse.ok) {
               const rankingAiData = await rankingAiResponse.json();
-              if (rankingAiData.status === 'ok' && rankingAiData.data && rankingAiData.data.rankingAiData) {
-                rankingAiAuditDate = rankingAiData.data.auditDate;
-                // Get timestamp - try to get from audit data, fallback to audit_date
-                if (rankingAiData.data.timestamp) {
-                  rankingAiTimestamp = new Date(rankingAiData.data.timestamp).toISOString();
+              if (rankingAiData.status === 'ok' && rankingAiData.data) {
+                // Check if rankingAiData exists (can be null if no ranking data)
+                if (rankingAiData.data.rankingAiData && rankingAiData.data.rankingAiData.combinedRows && rankingAiData.data.rankingAiData.combinedRows.length > 0) {
+                  rankingAiAuditDate = rankingAiData.data.auditDate;
+                  // Get timestamp - timestamp is returned as milliseconds (number), convert to ISO string
+                  if (rankingAiData.data.timestamp) {
+                    // timestamp is a number (milliseconds since epoch)
+                    rankingAiTimestamp = new Date(rankingAiData.data.timestamp).toISOString();
+                  } else if (rankingAiAuditDate) {
+                    // Fallback to audit_date if timestamp not available
+                    const auditDate = new Date(rankingAiAuditDate + 'T00:00:00Z');
+                    rankingAiTimestamp = auditDate.toISOString();
+                  }
+                  
+                  debugLog(`[updateAuditTimestamp] Ranking & AI audit found: date=${rankingAiAuditDate}, timestamp=${rankingAiTimestamp}, rows=${rankingAiData.data.rankingAiData.combinedRows.length}`, 'info');
                 } else {
-                  const auditDate = new Date(rankingAiAuditDate + 'T00:00:00Z');
-                  rankingAiTimestamp = auditDate.toISOString();
+                  debugLog(`[updateAuditTimestamp] Ranking & AI audit has no ranking data: hasRankingAiData=${!!rankingAiData.data.rankingAiData}, hasCombinedRows=${!!rankingAiData.data.rankingAiData?.combinedRows}, rowCount=${rankingAiData.data.rankingAiData?.combinedRows?.length || 0}`, 'warn');
                 }
+              } else {
+                debugLog(`[updateAuditTimestamp] Ranking & AI audit response invalid: status=${rankingAiData?.status}, hasData=${!!rankingAiData?.data}`, 'warn');
               }
+            } else {
+              debugLog(`[updateAuditTimestamp] Ranking & AI audit fetch failed: ${rankingAiResponse.status}`, 'warn');
             }
           } catch (e) {
+            debugLog(`[updateAuditTimestamp] Error fetching Ranking & AI audit: ${e?.message || e}`, 'error');
             console.warn('[updateAuditTimestamp] Error fetching Ranking & AI audit:', e);
           }
           
           // Update GSC audit date
           if (gscAuditElement) {
-            gscAuditElement.textContent = formatDateShort(gscTimestamp);
+            if (gscTimestamp) {
+              gscAuditElement.textContent = formatDateShort(gscTimestamp);
+              debugLog(`[updateAuditTimestamp] Updated GSC audit date element: ${formatDateShort(gscTimestamp)}`, 'info');
+            } else {
+              gscAuditElement.textContent = 'Not yet run';
+              debugLog('[updateAuditTimestamp] GSC timestamp is null, showing "Not yet run"', 'warn');
+            }
+          } else {
+            debugLog('[updateAuditTimestamp] GSC audit date element not found in DOM', 'warn');
           }
           
           // Update GSC date range
           if (gscDateRangeElement) {
-            gscDateRangeElement.textContent = formatDateRange(gscStartDate?.toISOString(), gscEndDate?.toISOString());
+            if (gscStartDate && gscEndDate) {
+              const rangeText = formatDateRange(gscStartDate.toISOString(), gscEndDate.toISOString());
+              gscDateRangeElement.textContent = rangeText;
+              debugLog(`[updateAuditTimestamp] Updated GSC date range element: ${rangeText}`, 'info');
+            } else {
+              gscDateRangeElement.textContent = '-';
+              debugLog('[updateAuditTimestamp] GSC date range is null, showing "-"', 'warn');
+            }
+          } else {
+            debugLog('[updateAuditTimestamp] GSC date range element not found in DOM', 'warn');
           }
           
           // Update Ranking & AI audit date
           if (rankingAiAuditElement) {
-            rankingAiAuditElement.textContent = formatDateShort(rankingAiTimestamp);
+            if (rankingAiTimestamp) {
+              rankingAiAuditElement.textContent = formatDateShort(rankingAiTimestamp);
+              debugLog(`[updateAuditTimestamp] Updated Ranking & AI audit date element: ${formatDateShort(rankingAiTimestamp)}`, 'info');
+            } else {
+              rankingAiAuditElement.textContent = 'Not yet run';
+              debugLog('[updateAuditTimestamp] Ranking & AI timestamp is null, showing "Not yet run"', 'warn');
+            }
+          } else {
+            debugLog('[updateAuditTimestamp] Ranking & AI audit date element not found in DOM', 'warn');
           }
           
           // Update snippet readiness timestamp (use GSC timestamp if available)
@@ -57901,13 +57953,20 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         
         // Explicitly update audit timestamp badge after global audit completes
         // This ensures the badge shows the latest GSC and Ranking & AI audit dates
+        // Wait an additional moment to ensure Supabase has fully committed the data
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
         if (typeof window.updateAuditTimestamp === 'function') {
           try {
+            debugLog('[Global Run] Calling updateAuditTimestamp to refresh badge...', 'info');
             await window.updateAuditTimestamp();
-            debugLog('[Global Run] Updated audit timestamp badge', 'info');
+            debugLog('[Global Run] ✓ Updated audit timestamp badge', 'info');
           } catch (e) {
-            debugLog(`[Global Run] Failed to update audit timestamp: ${e?.message || e}`, 'warn');
+            debugLog(`[Global Run] ✗ Failed to update audit timestamp: ${e?.message || e}`, 'error');
+            console.error('[Global Run] Failed to update audit timestamp:', e);
           }
+        } else {
+          debugLog('[Global Run] ✗ updateAuditTimestamp function not found', 'error');
         }
         
         // Explicitly refresh other module tabs to ensure they're updated
