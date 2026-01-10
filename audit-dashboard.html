@@ -6736,6 +6736,20 @@
       const rowDataStr = modal.dataset.rowData;
       // source is already declared above (line 5556)
       let baselineMetrics = null;
+      
+      // Use shared helper functions to ensure consistency
+      // Create a temporary task-like object for the helper functions
+      const tempTask = {
+        keyword_text: keyword || '',
+        target_url: targetUrl || '',
+        target_url_clean: targetUrl || '',
+        page_type: null,
+        segment: source === 'money_pages' ? 'money_pages' : null
+      };
+      
+      // Fetch latest audit and combinedRows once
+      const { latestAudit, combinedRows } = await window.fetchLatestAuditAndCombinedRows();
+      
       if (rowDataStr) {
         try {
           const rowData = JSON.parse(rowDataStr);
@@ -6758,84 +6772,9 @@
               row = rows.find(r => norm(r.url || r.page_url || '') === normalizedTaskUrl) || null;
             }
 
-            // Fallback: if we still don't have a row, attempt a direct page totals fetch from GSC.
-            // This is slower, but avoids creating a "baseline" with missing/incorrect numbers.
-            if (!row && taskUrl) {
-              try {
-                const property = document.getElementById('propertyUrl')?.value ||
-                  localStorage.getItem('gsc_property_url') ||
-                  localStorage.getItem('last_property_url') || '';
-                if (property) {
-                  const pageUrlForGsc = toAbsoluteUrlForGsc(taskUrl, property);
-                  const totalsRes = await fetch(apiUrl(`/api/aigeo/gsc-page-totals?property=${encodeURIComponent(property)}&pageUrl=${encodeURIComponent(pageUrlForGsc)}`));
-                  const totalsJson = await totalsRes.json().catch(() => null);
-                  const totals = totalsRes.ok && totalsJson && totalsJson.status === 'ok' ? totalsJson.data : null;
-                  if (totals) {
-                    const positionFromTotals = totals.position != null ? Number(totals.position) : null;
-                    baselineMetrics = {
-                      gsc_clicks_28d: Number(totals.clicks || 0),
-                      gsc_impressions_28d: Number(totals.impressions || 0),
-                      // gsc-page-totals returns CTR as percentage (0-100) — convert to ratio for storage
-                      gsc_ctr_28d: Number(totals.ctr || 0) / 100,
-                      gsc_position_28d: positionFromTotals,
-                      current_rank: positionFromTotals, // Also set current_rank for display logic
-                      classic_ranking_url: pageUrlForGsc,
-                      segment: 'money_pages',
-                      captured_at: new Date().toISOString()
-                    };
-                    
-                    // FIX: Also fetch AI data for this URL (same logic as Add Measurement)
-                    try {
-                      const propertyUrl = document.getElementById('propertyUrl')?.value || 
-                                          localStorage.getItem('gsc_property_url') || 
-                                          localStorage.getItem('last_property_url') || 
-                                          'https://www.alanranger.com';
-                      if (typeof fetchLatestAuditFromSupabase === 'function') {
-                        const latestAuditFromSupabase = await fetchLatestAuditFromSupabase(propertyUrl, false);
-                        if (latestAuditFromSupabase && latestAuditFromSupabase.ranking_ai_data) {
-                          try {
-                            const rankingAiData = latestAuditFromSupabase.ranking_ai_data;
-                            if (rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
-                              let aiRows = rankingAiData.combinedRows;
-                              // Try both URL formats
-                              const urlsToTry = [pageUrlForGsc, taskUrl];
-                              let aiForUrl = { ai_overview: null, ai_citations: null };
-                              
-                              for (const urlToCheck of urlsToTry) {
-                                if (urlToCheck) {
-                                  const result = (typeof window.computeAiMetricsForPageUrl === 'function')
-                                    ? window.computeAiMetricsForPageUrl(urlToCheck, aiRows)
-                                    : { ai_overview: null, ai_citations: null };
-                                  
-                                  if (result.ai_overview !== null && result.ai_citations !== null) {
-                                    aiForUrl = result;
-                                    break;
-                                  }
-                                }
-                              }
-                              
-                              if (aiForUrl.ai_overview !== null && aiForUrl.ai_citations !== null) {
-                                baselineMetrics.ai_overview = aiForUrl.ai_overview === true ? true : (aiForUrl.ai_overview === false ? false : null);
-                                baselineMetrics.ai_citations = aiForUrl.ai_citations != null ? Number(aiForUrl.ai_citations) : null;
-                              }
-                            }
-                          } catch (rankingErr) {
-                            // ignore - continue without AI data
-                          }
-                        }
-                      }
-                    } catch (aiErr) {
-                      // ignore - continue without AI data
-                    }
-                  }
-                }
-              } catch (e) {
-                // ignore; will fall back to rowData below
-              }
-            }
-
             // If we have a current moneyPagesMetrics row, use it (this matches measurement logic).
-            if (!baselineMetrics) {
+            // This is faster than calling the helper function, so we try it first.
+            if (!baselineMetrics && row) {
               const src = row || rowData;
               // Debug: Log all available position-related fields
               const positionValue = src.avgPosition != null ? src.avgPosition : (src.position != null ? src.position : (src.position_28d != null ? src.position_28d : (src.avg_position != null ? src.avg_position : null)));
@@ -6873,105 +6812,19 @@
               }
             }
 
-            // FIX: For URL tasks, fetch AI Overview/Citations using same logic as "Add Measurement"
-            // This ensures consistency between task creation and subsequent measurements
-            if (baselineMetrics && taskUrl) {
+            // Use helper function to fetch metrics if we don't have baselineMetrics yet
+            // This ensures consistency with other update paths
+            if (!baselineMetrics && taskUrl) {
               try {
-                // Fetch latest audit from Supabase to get ranking_ai_data (same as Add Measurement)
-                const propertyUrl = document.getElementById('propertyUrl')?.value || 
-                                    localStorage.getItem('gsc_property_url') || 
-                                    localStorage.getItem('last_property_url') || 
-                                    'https://www.alanranger.com';
-                if (typeof fetchLatestAuditFromSupabase === 'function') {
-                  const latestAuditFromSupabase = await fetchLatestAuditFromSupabase(propertyUrl, false);
-                  if (latestAuditFromSupabase && latestAuditFromSupabase.ranking_ai_data) {
-                    try {
-                      const rankingAiData = latestAuditFromSupabase.ranking_ai_data;
-                      if (rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
-                        // Get combinedRows from multiple sources (same priority as Add Measurement)
-                        let aiRows = [];
-                        if (typeof window.getRankingAiCombinedRows === 'function') {
-                          aiRows = window.getRankingAiCombinedRows();
-                        }
-                        if (aiRows.length === 0 && typeof window.rankingAiData !== 'undefined' && Array.isArray(window.rankingAiData)) {
-                          aiRows = window.rankingAiData;
-                        }
-                        if (aiRows.length === 0 && rankingAiData.combinedRows) {
-                          aiRows = rankingAiData.combinedRows;
-                        }
-                        if (aiRows.length === 0) {
-                          try {
-                            const local = localStorage.getItem('rankingAiData');
-                            if (local) {
-                              const parsed = JSON.parse(local);
-                              if (parsed && Array.isArray(parsed.combinedRows)) {
-                                aiRows = parsed.combinedRows;
-                              }
-                            }
-                          } catch (e) {
-                            // ignore
-                          }
-                        }
-                        
-                        // Fix 1: Ensure combinedRows is loaded before calling computeAiMetricsForPageUrl
-                        if (aiRows.length === 0) {
-                          debugLog(`[Optimisation] URL task creation: No combinedRows loaded, attempting to reload from latest audit...`, 'warn');
-                          // Try to reload from latest audit if we just fetched it
-                          if (latestAuditFromSupabase && latestAuditFromSupabase.ranking_ai_data) {
-                            const rankingAiData = latestAuditFromSupabase.ranking_ai_data;
-                            if (rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
-                              aiRows = rankingAiData.combinedRows;
-                              debugLog(`[Optimisation] URL task creation: Reloaded ${aiRows.length} combinedRows from latest audit`, 'info');
-                            }
-                          }
-                        }
-                        
-                        // Try both the full GSC URL and the original task URL (same as Add Measurement)
-                        const urlsToTry = [taskUrlAbs || taskUrl, taskUrl];
-                        let aiForUrl = { ai_overview: null, ai_citations: null };
-                        
-                        // Only call computeAiMetricsForPageUrl if we have data
-                        if (aiRows.length > 0) {
-                          for (const urlToCheck of urlsToTry) {
-                            if (urlToCheck) {
-                              const result = (typeof window.computeAiMetricsForPageUrl === 'function')
-                                ? window.computeAiMetricsForPageUrl(urlToCheck, aiRows)
-                                : { ai_overview: null, ai_citations: null };
-                              
-                              // Use first result where BOTH values are non-null (consistent match found)
-                              if (result.ai_overview !== null && result.ai_citations !== null) {
-                                aiForUrl = result;
-                                debugLog(`[Optimisation] URL task creation: AI lookup for ${urlToCheck} - Overview: ${aiForUrl.ai_overview}, Citations: ${aiForUrl.ai_citations}`, 'info');
-                                break;
-                              }
-                            }
-                          }
-                        } else {
-                          debugLog(`[Optimisation] URL task creation: Cannot lookup AI data - no combinedRows available (${aiRows.length} rows)`, 'warn');
-                        }
-                        
-                        // Add AI data to baselineMetrics (same format as Add Measurement)
-                        // Only set AI overview if we got a valid result
-                        if (aiForUrl.ai_overview !== null) {
-                          baselineMetrics.ai_overview = aiForUrl.ai_overview === true ? true : (aiForUrl.ai_overview === false ? false : null);
-                          debugLog(`[Optimisation] URL task creation: Added AI overview to baseline - Overview: ${baselineMetrics.ai_overview}`, 'info');
-                        }
-                        // Only set AI citations if we got a valid result AND it's not already set from row data
-                        if (aiForUrl.ai_citations !== null && baselineMetrics.ai_citations == null) {
-                          baselineMetrics.ai_citations = aiForUrl.ai_citations != null ? Number(aiForUrl.ai_citations) : null;
-                          debugLog(`[Optimisation] URL task creation: Added AI citations to baseline - Citations: ${baselineMetrics.ai_citations}`, 'info');
-                        } else if (baselineMetrics.ai_citations != null) {
-                          debugLog(`[Optimisation] URL task creation: Keeping AI citations from row data - Citations: ${baselineMetrics.ai_citations}`, 'info');
-                        }
-                      }
-                    } catch (rankingErr) {
-                      debugLog(`[Optimisation] URL task creation: Error loading ranking_ai_data: ${rankingErr.message}`, 'warn');
-                    }
-                  }
+                tempTask.target_url = taskUrl;
+                tempTask.target_url_clean = taskUrl;
+                baselineMetrics = await window.fetchMetricsForUrlTask(tempTask, latestAudit, combinedRows);
+                if (baselineMetrics) {
+                  debugLog(`[Optimisation] URL task creation: Fetched metrics using helper function`, 'success');
                 }
-              } catch (fetchErr) {
-                debugLog(`[Optimisation] URL task creation: Error fetching AI data: ${fetchErr.message}`, 'warn');
-                // Don't fail task creation if AI data fetch fails - continue without it
+              } catch (helperErr) {
+                debugLog(`[Optimisation] URL task creation: Helper function failed: ${helperErr.message}`, 'warn');
+                // Fall back to rowData below
               }
             }
 
@@ -6981,27 +6834,39 @@
             }
           } else {
             // Ranking & AI: use keyword-based metrics
-          // Get queryTotal data for clicks, impressions, and CTR
-          let queryTotal = null;
-          if (typeof getQueryTotalForKeyword === 'function') {
-            queryTotal = getQueryTotalForKeyword(keyword);
-          }
-          
-          baselineMetrics = {
-            gsc_clicks_28d: (queryTotal && queryTotal.clicks) || rowData.gsc_clicks_28d || rowData.clicks_28d || null,
-            gsc_impressions_28d: (queryTotal && queryTotal.impressions) || rowData.gsc_impressions_28d || rowData.impressions_28d || null,
-            // queryTotal.ctr is a percentage (0-100), convert to decimal for storage
-            gsc_ctr_28d: (queryTotal && queryTotal.ctr != null) ? (queryTotal.ctr / 100) : (rowData.gsc_ctr_28d || rowData.ctr_28d || null),
-            current_rank: rowData.best_rank_group || rowData.current_rank || null,
-            opportunity_score: rowData.opportunityScore || null,
-            ai_overview: rowData.has_ai_overview || false,
-            ai_citations: rowData.ai_alan_citations_count || 0,
-            ai_citations_total: rowData.ai_total_citations || 0,
-            classic_ranking_url: rowData.best_url || rowData.targetUrl || rowData.ranking_url || null,
-            page_type: rowData.pageType || null,
-            segment: rowData.segment || null,
-            captured_at: new Date().toISOString()
-          };
+            // Use helper function to ensure consistency with other update paths
+            try {
+              tempTask.keyword_text = keyword;
+              tempTask.target_url = targetUrl || rowData.best_url || rowData.targetUrl || rowData.ranking_url || '';
+              tempTask.target_url_clean = targetUrl || '';
+              baselineMetrics = await window.fetchMetricsForKeywordTask(tempTask, latestAudit, combinedRows);
+              if (baselineMetrics) {
+                debugLog(`[Optimisation] Keyword task creation: Fetched metrics using helper function`, 'success');
+              }
+            } catch (helperErr) {
+              debugLog(`[Optimisation] Keyword task creation: Helper function failed, falling back to rowData: ${helperErr.message}`, 'warn');
+              // Fallback to rowData if helper function fails
+              let queryTotal = null;
+              if (typeof getQueryTotalForKeyword === 'function') {
+                queryTotal = getQueryTotalForKeyword(keyword);
+              }
+              
+              baselineMetrics = {
+                gsc_clicks_28d: (queryTotal && queryTotal.clicks) || rowData.gsc_clicks_28d || rowData.clicks_28d || null,
+                gsc_impressions_28d: (queryTotal && queryTotal.impressions) || rowData.gsc_impressions_28d || rowData.impressions_28d || null,
+                // queryTotal.ctr is a percentage (0-100), convert to decimal for storage
+                gsc_ctr_28d: (queryTotal && queryTotal.ctr != null) ? (queryTotal.ctr / 100) : (rowData.gsc_ctr_28d || rowData.ctr_28d || null),
+                current_rank: rowData.best_rank_group || rowData.current_rank || null,
+                opportunity_score: rowData.opportunityScore || null,
+                ai_overview: rowData.has_ai_overview || false,
+                ai_citations: rowData.ai_alan_citations_count || 0,
+                ai_citations_total: rowData.ai_total_citations || 0,
+                classic_ranking_url: rowData.best_url || rowData.targetUrl || rowData.ranking_url || null,
+                page_type: rowData.pageType || null,
+                segment: rowData.segment || null,
+                captured_at: new Date().toISOString()
+              };
+            }
           }
         } catch (e) {
           console.error('[Optimisation] Failed to parse row data for baseline metrics:', e);
