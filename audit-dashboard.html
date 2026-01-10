@@ -18137,6 +18137,140 @@
       }
     };
 
+    // Bulk rebaseline all tasks with incomplete baselines
+    window.bulkRebaselineIncompleteBaselines = async function bulkRebaselineIncompleteBaselines() {
+      if (!window.optimisationModuleState || !window.optimisationModuleState.allTasks) {
+        alert('No tasks loaded. Please wait for tasks to load first.');
+        return;
+      }
+
+      const criticalFields = ['ai_overview', 'ai_citations', 'current_rank'];
+      let tasks = window.optimisationModuleState.allTasks.filter(
+        t => !['done', 'cancelled', 'deleted'].includes(t.status)
+      );
+
+      // Filter out test tasks if checkbox is unchecked
+      const includeTestCheckbox = document.getElementById('optimisation-filter-include-test');
+      if (!includeTestCheckbox || !includeTestCheckbox.checked) {
+        tasks = tasks.filter(t => !t.is_test_task);
+      }
+
+      // Find tasks with incomplete baselines
+      const incompleteTasks = tasks.filter(task => {
+        if (!task.baseline_metrics) return true; // No baseline = incomplete
+        const missingFields = criticalFields.filter(field => {
+          const val = task.baseline_metrics[field];
+          return val == null || val === '';
+        });
+        return missingFields.length > 0;
+      });
+
+      if (incompleteTasks.length === 0) {
+        alert('No tasks with incomplete baselines found. All baselines are complete!');
+        return;
+      }
+
+      const confirmMsg = `Found ${incompleteTasks.length} task(s) with incomplete baselines.\n\n` +
+        `This will create a new baseline measurement for each task with all fields properly captured.\n\n` +
+        `Continue?`;
+      if (!confirm(confirmMsg)) {
+        return;
+      }
+
+      const bulkRebaselineBtn = document.getElementById('optimisation-bulk-rebaseline-btn');
+      const originalText = bulkRebaselineBtn ? bulkRebaselineBtn.textContent : '';
+      if (bulkRebaselineBtn) {
+        bulkRebaselineBtn.disabled = true;
+        bulkRebaselineBtn.textContent = 'Rebaselining...';
+      }
+
+      let successCount = 0;
+      let failCount = 0;
+      const errors = [];
+
+      try {
+        // Use shared helper functions to ensure consistency
+        const { latestAudit, combinedRows } = await window.fetchLatestAuditAndCombinedRows();
+
+        // Process sequentially to avoid rate limits (max 2 concurrent)
+        const maxConcurrent = 2;
+        for (let i = 0; i < incompleteTasks.length; i += maxConcurrent) {
+          const batch = incompleteTasks.slice(i, i + maxConcurrent);
+          
+          await Promise.all(batch.map(async (task) => {
+            const taskNum = i + batch.indexOf(task) + 1;
+            if (bulkRebaselineBtn) {
+              bulkRebaselineBtn.textContent = `Rebaselining ${taskNum}/${incompleteTasks.length}...`;
+            }
+
+            try {
+              const taskUrlForPage = task.target_url_clean || task.target_url || '';
+              const hasKeyword = !!(task.keyword_text && String(task.keyword_text).trim());
+
+              // Use shared helper functions based on task type
+              let currentMetrics = null;
+              if (hasKeyword) {
+                // Keyword-based task: Use keyword-specific data
+                currentMetrics = await window.fetchMetricsForKeywordTask(task, latestAudit, combinedRows);
+              } else if (taskUrlForPage) {
+                // URL-only task: Use GSC page totals API + Ranking & AI data
+                currentMetrics = await window.fetchMetricsForUrlTask(task, latestAudit, combinedRows);
+              }
+
+              if (!currentMetrics) {
+                throw new Error('Could not fetch metrics for rebaseline');
+              }
+
+              // Create baseline measurement
+              const headers = window.getOptimisationHeaders();
+              const response = await fetch(apiUrl(`/api/optimisation/task/${task.id}/measurement`), {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify({
+                  metrics: currentMetrics,
+                  note: 'Bulk rebaseline - complete baseline with all fields',
+                  is_baseline: true
+                })
+              });
+
+              if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(errorText || 'Failed to rebaseline');
+              }
+
+              successCount++;
+              debugLog(`[Optimisation] Bulk Rebaseline: Successfully rebaselined task ${task.id}`, 'success');
+            } catch (error) {
+              failCount++;
+              const errorMsg = `Task "${task.title || task.id}": ${error.message}`;
+              errors.push(errorMsg);
+              debugLog(`[Optimisation] Bulk Rebaseline: ${errorMsg}`, 'error');
+            }
+          }));
+        }
+
+        // Reload tasks to refresh counts
+        await window.loadAllOptimisationTasks();
+        
+        // Update summary cards
+        updateOptimisationSummaryCards();
+
+        const resultMsg = `Rebaseline complete!\n\n` +
+          `Success: ${successCount}\n` +
+          `Failed: ${failCount}` +
+          (errors.length > 0 ? `\n\nErrors:\n${errors.slice(0, 5).join('\n')}${errors.length > 5 ? `\n... and ${errors.length - 5} more` : ''}` : '');
+        alert(resultMsg);
+      } catch (error) {
+        debugLog(`[Optimisation] Bulk Rebaseline: Fatal error: ${error.message}`, 'error');
+        alert('Bulk rebaseline failed: ' + error.message);
+      } finally {
+        if (bulkRebaselineBtn) {
+          bulkRebaselineBtn.disabled = false;
+          bulkRebaselineBtn.textContent = originalText;
+        }
+      }
+    };
+
     // Update latest metrics for a single task
     window.updateTaskLatest = async function updateTaskLatest(taskId) {
       const task = window.optimisationModuleState.allTasks.find(t => t.id === taskId);
