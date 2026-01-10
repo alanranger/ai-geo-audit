@@ -23407,14 +23407,31 @@
     }
     
     // Update audit timestamp display
+    // CRITICAL: Always use lastGlobal.timestamp from getDashboardRuns() for consistency
+    // This prevents flickering between different timestamp sources
     function updateAuditTimestamp(timestamp) {
+      // Always prefer lastGlobal.timestamp from getDashboardRuns() for consistency
+      let timestampToUse = timestamp;
+      try {
+        if (typeof getDashboardRuns === 'function') {
+          const runs = getDashboardRuns();
+          const lastGlobal = runs.length ? runs[runs.length - 1] : null;
+          if (lastGlobal && lastGlobal.timestamp) {
+            timestampToUse = lastGlobal.timestamp;
+          }
+        }
+      } catch (e) {
+        // If getDashboardRuns fails, fall back to passed timestamp
+        console.warn('[updateAuditTimestamp] Error getting dashboard runs:', e);
+      }
+      
       const timestampElement = document.getElementById('lastAuditTime');
       const snippetTimestampElement = document.getElementById('snippetReadinessAuditTime');
       const snippetTimestampContainer = document.getElementById('snippetReadinessTimestamp');
       const radarTimestampElement = document.getElementById('radarChartAuditTime');
       const radarTimestampContainer = document.getElementById('radarChartTimestamp');
       
-      if (timestamp) {
+      if (timestampToUse) {
         const date = new Date(timestamp);
         // Format in GMT/UTC: "DD MMM YYYY, HH:MM:SS GMT"
         const day = String(date.getUTCDate()).padStart(2, '0');
@@ -56694,9 +56711,8 @@ Final Score: ${score}/100`;
         if (lastStatusEl) lastStatusEl.textContent = lastGlobal ? (lastGlobal.status || 'ok') : '—';
 
         // Update "Last Audit" pills at the top of each module page to use consistent timestamp
-        if (lastGlobal && lastGlobal.timestamp) {
-          updateAuditTimestamp(lastGlobal.timestamp);
-        }
+        // updateAuditTimestamp() now automatically uses lastGlobal.timestamp internally, so we just need to call it
+        updateAuditTimestamp(null); // Pass null - function will fetch lastGlobal.timestamp internally
 
         // CRITICAL: Fetch audit from ~27 days ago for rolling 28-day delta calculations
         // This ensures consistent time-period comparisons across all dashboard tiles
