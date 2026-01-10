@@ -16646,13 +16646,12 @@
         // Money Pages rows have URLs like "https://www.alanranger.com/photography-workshops"
         // Task URLs are like "www.alanranger.com/photography-workshops"
         // We need to normalize both to the same format for matching
-        const normalizeUrlForDedupe = window.normalizeUrlForDedupe;
+        // CRITICAL: Don't use window.normalizeUrlForDedupe here as it may call toAbsoluteUrlForGsc
+        // Use our own simple normalization that matches Money Pages table logic
         const norm = (u) => {
-          if (normalizeUrlForDedupe) {
-            return normalizeUrlForDedupe(u);
-          }
+          if (!u) return '';
           // Standard normalization: remove protocol, www, trailing slash, lowercase
-          return String(u || '').toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+          return String(u).toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
         };
         const normalizedTaskUrl = norm(taskUrlForPage);
         
