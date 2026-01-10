@@ -3638,7 +3638,9 @@
 
     <div id="dashboard" style="display: none;">
       <div id="auditTimestamp" style="background: #e8f5e9; padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 1rem; border-left: 4px solid #10b981; font-size: 0.9rem; color: #555;">
-        <strong>Last Audit:</strong> <span id="lastAuditTime">Not yet run</span>
+        <div style="margin-bottom: 0.5rem;"><strong>GSC Audit Date:</strong> <span id="gscAuditDate">Not yet run</span></div>
+        <div style="margin-bottom: 0.5rem; font-size: 0.85rem; color: #666;"><strong>GSC 28 Day Date Range:</strong> <span id="gscDateRange">-</span></div>
+        <div><strong>Ranking & AI Date:</strong> <span id="rankingAiAuditDate">Not yet run</span></div>
       </div>
 
       <!-- Configuration & Reporting Panel -->
@@ -23575,108 +23577,165 @@
       return null;
     }
     
-    // Update audit timestamp display
-    // CRITICAL: ONLY use lastGlobal.timestamp from dashboard runs - ignore passed parameter
-    // This prevents flickering by ensuring a single source of truth
+    // Update audit timestamp display - shows GSC and Ranking & AI audit dates separately
     // Debounced to prevent rapid updates from multiple callers
     let updateAuditTimestampDebounceTimer = null;
-    function updateAuditTimestamp(ignoreParam) {
+    async function updateAuditTimestamp(ignoreParam) {
       // Debounce: Clear any pending update and schedule a new one
       if (updateAuditTimestampDebounceTimer) {
         clearTimeout(updateAuditTimestampDebounceTimer);
       }
       
-      updateAuditTimestampDebounceTimer = setTimeout(() => {
-        // IGNORE passed parameter - always read directly from localStorage as single source of truth
-        let timestampToUse = null;
-        try {
-          // First, try to read from dashboard_global_runs_v1 (preferred source)
-          const DASHBOARD_RUNS_KEY = 'dashboard_global_runs_v1';
-          const stored = localStorage.getItem(DASHBOARD_RUNS_KEY);
-          if (stored) {
-            const runs = JSON.parse(stored);
-            if (Array.isArray(runs) && runs.length > 0) {
-              const lastGlobal = runs[runs.length - 1];
-              if (lastGlobal && lastGlobal.timestamp) {
-                // Validate timestamp is not epoch (01 Jan 1970) or invalid
-                const ts = new Date(lastGlobal.timestamp);
-                if (ts && !isNaN(ts.getTime()) && ts.getTime() > 0) {
-                  timestampToUse = lastGlobal.timestamp;
-                }
-              }
-            }
-          }
-          
-          // Fallback: If dashboard_global_runs_v1 doesn't have a valid timestamp, read from last_audit_results
-          if (!timestampToUse) {
-            const lastAuditResults = localStorage.getItem('last_audit_results');
-            if (lastAuditResults) {
-              try {
-                const auditData = JSON.parse(lastAuditResults);
-                if (auditData && auditData.timestamp) {
-                  const ts = new Date(auditData.timestamp);
-                  if (ts && !isNaN(ts.getTime()) && ts.getTime() > 0) {
-                    timestampToUse = auditData.timestamp;
-                    debugLog(`[updateAuditTimestamp] Using timestamp from last_audit_results as fallback`, 'info');
-                  }
-                }
-              } catch (e) {
-                console.warn('[updateAuditTimestamp] Error reading last_audit_results:', e);
-              }
-            }
-          }
-        } catch (e) {
-          // If reading fails, show "Not yet run"
-          console.warn('[updateAuditTimestamp] Error reading dashboard runs from localStorage:', e);
-        }
-        
-        const timestampElement = document.getElementById('lastAuditTime');
+      updateAuditTimestampDebounceTimer = setTimeout(async () => {
+        const gscAuditElement = document.getElementById('gscAuditDate');
+        const gscDateRangeElement = document.getElementById('gscDateRange');
+        const rankingAiAuditElement = document.getElementById('rankingAiAuditDate');
         const snippetTimestampElement = document.getElementById('snippetReadinessAuditTime');
         const snippetTimestampContainer = document.getElementById('snippetReadinessTimestamp');
         const radarTimestampElement = document.getElementById('radarChartAuditTime');
         const radarTimestampContainer = document.getElementById('radarChartTimestamp');
         
-        if (timestampToUse) {
-          const date = new Date(timestampToUse);
-          // Format in GMT/UTC: "DD MMM YYYY, HH:MM:SS GMT"
-          const day = String(date.getUTCDate()).padStart(2, '0');
-          const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-          const month = monthNames[date.getUTCMonth()];
-          const year = date.getUTCFullYear();
-          const hours = String(date.getUTCHours()).padStart(2, '0');
-          const minutes = String(date.getUTCMinutes()).padStart(2, '0');
-          const seconds = String(date.getUTCSeconds()).padStart(2, '0');
-          const formatted = `${day} ${month} ${year}, ${hours}:${minutes}:${seconds} GMT`;
+        // Helper function to format date as dd-mmm-yy, HH:MM
+        const formatDateShort = (dateStr) => {
+          if (!dateStr) return 'Not yet run';
+          try {
+            const date = new Date(dateStr);
+            if (isNaN(date.getTime())) return 'Not yet run';
+            const day = String(date.getUTCDate()).padStart(2, '0');
+            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const month = monthNames[date.getUTCMonth()];
+            const year = String(date.getUTCFullYear()).slice(-2);
+            const hours = String(date.getUTCHours()).padStart(2, '0');
+            const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+            return `${day}-${month}-${year}, ${hours}:${minutes}`;
+          } catch (e) {
+            return 'Not yet run';
+          }
+        };
+        
+        // Helper function to format date range as dd-mmm-yy -> dd-mmm-yy
+        const formatDateRange = (startDateStr, endDateStr) => {
+          if (!startDateStr || !endDateStr) return '-';
+          try {
+            const start = new Date(startDateStr);
+            const end = new Date(endDateStr);
+            if (isNaN(start.getTime()) || isNaN(end.getTime())) return '-';
+            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const formatDate = (d) => {
+              const day = String(d.getUTCDate()).padStart(2, '0');
+              const month = monthNames[d.getUTCMonth()];
+              const year = String(d.getUTCFullYear()).slice(-2);
+              return `${day}-${month}-${year}`;
+            };
+            return `${formatDate(start)} -> ${formatDate(end)}`;
+          } catch (e) {
+            return '-';
+          }
+        };
+        
+        try {
+          const propertyUrl = document.getElementById('propertyUrl')?.value || 
+                              localStorage.getItem('gsc_property_url') || 
+                              'https://www.alanranger.com';
           
-          if (timestampElement) {
-            timestampElement.textContent = formatted;
+          // Fetch latest GSC audit (has query_pages) - query Supabase directly
+          let gscAuditDate = null;
+          let gscTimestamp = null;
+          let gscDateRange = null;
+          let gscStartDate = null;
+          let gscEndDate = null;
+          
+          try {
+            // Query Supabase directly for latest audit with query_pages
+            const gscResponse = await fetch(apiUrl(`/api/supabase/get-latest-audit?property=${encodeURIComponent(propertyUrl)}&minimal=true`));
+            if (gscResponse.ok) {
+              const gscData = await gscResponse.json();
+              if (gscData.status === 'ok' && gscData.data && gscData.data.auditDate) {
+                // Now fetch full record to get date_range and created_at
+                const fullResponse = await fetch(apiUrl(`/api/supabase/get-latest-audit?property=${encodeURIComponent(propertyUrl)}`));
+                if (fullResponse.ok) {
+                  const fullData = await fullResponse.json();
+                  if (fullData.status === 'ok' && fullData.data && fullData.data.searchData) {
+                    gscAuditDate = fullData.data.auditDate;
+                    const dateRange = fullData.data.searchData.dateRange || 28;
+                    const auditDate = new Date(gscAuditDate + 'T00:00:00Z');
+                    gscEndDate = new Date(auditDate);
+                    gscEndDate.setUTCDate(gscEndDate.getUTCDate() - 2); // 2 days before audit date
+                    gscStartDate = new Date(gscEndDate);
+                    gscStartDate.setUTCDate(gscStartDate.getUTCDate() - (dateRange - 1)); // (date_range - 1) days before end date
+                    
+                    // Get timestamp - try to get from audit data, fallback to audit_date
+                    if (fullData.data.timestamp) {
+                      gscTimestamp = new Date(fullData.data.timestamp).toISOString();
+                    } else {
+                      gscTimestamp = auditDate.toISOString();
+                    }
+                  }
+                }
+              }
+            }
+          } catch (e) {
+            console.warn('[updateAuditTimestamp] Error fetching GSC audit:', e);
           }
           
-          // Update snippet readiness timestamp
-          if (snippetTimestampElement) {
-            snippetTimestampElement.textContent = formatted;
+          // Fetch latest Ranking & AI audit - check if latest audit has ranking_ai_data
+          let rankingAiAuditDate = null;
+          let rankingAiTimestamp = null;
+          
+          try {
+            const rankingAiResponse = await fetch(apiUrl(`/api/supabase/get-latest-audit?property=${encodeURIComponent(propertyUrl)}`));
+            if (rankingAiResponse.ok) {
+              const rankingAiData = await rankingAiResponse.json();
+              if (rankingAiData.status === 'ok' && rankingAiData.data && rankingAiData.data.rankingAiData) {
+                rankingAiAuditDate = rankingAiData.data.auditDate;
+                // Get timestamp - try to get from audit data, fallback to audit_date
+                if (rankingAiData.data.timestamp) {
+                  rankingAiTimestamp = new Date(rankingAiData.data.timestamp).toISOString();
+                } else {
+                  const auditDate = new Date(rankingAiAuditDate + 'T00:00:00Z');
+                  rankingAiTimestamp = auditDate.toISOString();
+                }
+              }
+            }
+          } catch (e) {
+            console.warn('[updateAuditTimestamp] Error fetching Ranking & AI audit:', e);
+          }
+          
+          // Update GSC audit date
+          if (gscAuditElement) {
+            gscAuditElement.textContent = formatDateShort(gscTimestamp);
+          }
+          
+          // Update GSC date range
+          if (gscDateRangeElement) {
+            gscDateRangeElement.textContent = formatDateRange(gscStartDate?.toISOString(), gscEndDate?.toISOString());
+          }
+          
+          // Update Ranking & AI audit date
+          if (rankingAiAuditElement) {
+            rankingAiAuditElement.textContent = formatDateShort(rankingAiTimestamp);
+          }
+          
+          // Update snippet readiness timestamp (use GSC timestamp if available)
+          if (snippetTimestampElement && gscTimestamp) {
+            snippetTimestampElement.textContent = formatDateShort(gscTimestamp);
           }
           if (snippetTimestampContainer) {
-            snippetTimestampContainer.style.display = 'block';
+            snippetTimestampContainer.style.display = gscTimestamp ? 'block' : 'none';
           }
           
-          // Update radar chart timestamp
-          if (radarTimestampElement) {
-            radarTimestampElement.textContent = formatted;
+          // Update radar chart timestamp (use GSC timestamp if available)
+          if (radarTimestampElement && gscTimestamp) {
+            radarTimestampElement.textContent = formatDateShort(gscTimestamp);
           }
           if (radarTimestampContainer) {
-            radarTimestampContainer.style.display = 'block';
+            radarTimestampContainer.style.display = gscTimestamp ? 'block' : 'none';
           }
-        } else {
-          if (timestampElement) {
-            timestampElement.textContent = 'Not yet run';
-          }
-          if (snippetTimestampContainer) {
-            snippetTimestampContainer.style.display = 'none';
-          }
-          if (radarTimestampContainer) {
-            radarTimestampContainer.style.display = 'none';
-          }
+        } catch (e) {
+          console.warn('[updateAuditTimestamp] Error updating audit timestamps:', e);
+          if (gscAuditElement) gscAuditElement.textContent = 'Not yet run';
+          if (gscDateRangeElement) gscDateRangeElement.textContent = '-';
+          if (rankingAiAuditElement) rankingAiAuditElement.textContent = 'Not yet run';
         }
       }, 100); // Debounce: Wait 100ms before updating, cancels previous pending updates
     }
