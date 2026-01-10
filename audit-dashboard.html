@@ -16895,22 +16895,33 @@
           let currentMetrics = null;
           
           // First try Ranking & AI data (keyword-based matching)
+          // CRITICAL: For keyword-based tasks, prioritize keyword match over URL match
+          // This ensures we get keyword-specific data (from latest audit) not page-level aggregated data
           if (taskKeyword && taskKeyword.length > 0) {
             matchingRow = combinedRows.find(r => {
               const keywordMatch = (r.keyword || '').toLowerCase() === taskKeyword.toLowerCase();
-            if (!keywordMatch) return false;
-            
-              // Also check URL match if URL is provided
+              if (!keywordMatch) return false;
+              
+              // For keyword-based tasks, URL match is optional (preferred but not required)
+              // This allows keyword tasks to work even if URL format differs slightly
               if (normalizedTaskUrl && normalizedTaskUrl.length > 0) {
-            const rowUrl = (r.best_url || r.targetUrl || r.ranking_url || '').toLowerCase();
+                const rowUrl = (r.best_url || r.targetUrl || r.ranking_url || '').toLowerCase();
                 const normalizedRowUrl = normalizeUrlForDedupe ? normalizeUrlForDedupe(rowUrl) : rowUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+                // Prefer exact URL match, but keyword match alone is sufficient
                 return normalizedRowUrl === normalizedTaskUrl;
               }
               return true; // Keyword match is enough if no URL
             });
+            
+            if (matchingRow) {
+              debugLog(`[Optimisation] Task ${task.id}: Found keyword match in combinedRows: "${taskKeyword}" -> using keyword-specific data (not Money Pages)`, 'success');
+            } else {
+              debugLog(`[Optimisation] Task ${task.id}: No keyword match found in combinedRows for "${taskKeyword}"`, 'warn');
+            }
           }
           
           // If no keyword match, try URL-based matching in Money Pages data
+          // NOTE: This is ONLY for URL-only tasks (no keyword) - keyword tasks should use combinedRows data above
           if (!matchingRow && normalizedTaskUrl && normalizedTaskUrl.length > 0) {
             debugLog(`[Optimisation] Task ${task.id}: Searching for URL "${normalizedTaskUrl}" in Money Pages data`, 'info');
             
@@ -17326,27 +17337,37 @@
           }
 
           // If found matching row in Ranking & AI, use that data
+          // CRITICAL: This must run BEFORE Money Pages lookup to prioritize keyword-specific data
           if (matchingRow && !currentMetrics) {
-            // Get queryTotal data for clicks, impressions, and CTR
+            debugLog(`[Optimisation] Task ${task.id}: Using keyword-specific data from combinedRows for "${taskKeyword}"`, 'success');
+            // Get queryTotal data for clicks, impressions, and CTR (from latest audit)
             let queryTotal = null;
             if (typeof getQueryTotalForKeyword === 'function') {
               queryTotal = getQueryTotalForKeyword(task.keyword_text);
             }
             
+            // Also try to get from latest audit's queryTotals if available
+            if (!queryTotal && latestAuditFromSupabase && latestAuditFromSupabase.ranking_ai_data && latestAuditFromSupabase.ranking_ai_data.queryTotals) {
+              queryTotal = latestAuditFromSupabase.ranking_ai_data.queryTotals.find(qt => 
+                (qt.query || qt.keyword || '').toLowerCase() === taskKeyword.toLowerCase()
+              );
+            }
+            
             currentMetrics = {
               gsc_clicks_28d: queryTotal?.clicks || matchingRow.gsc_clicks_28d || matchingRow.clicks_28d || null,
               gsc_impressions_28d: queryTotal?.impressions || matchingRow.gsc_impressions_28d || matchingRow.impressions_28d || null,
-              gsc_ctr_28d: queryTotal?.ctr != null ? (queryTotal.ctr / 100) : (matchingRow.gsc_ctr_28d || matchingRow.ctr_28d || null),
-              current_rank: matchingRow.best_rank_group || matchingRow.current_rank || null,
-              opportunity_score: matchingRow.opportunityScore || null,
-              ai_overview: matchingRow.has_ai_overview || false,
-              ai_citations: matchingRow.ai_alan_citations_count || 0,
-              ai_citations_total: matchingRow.ai_total_citations || 0,
+              gsc_ctr_28d: queryTotal?.ctr != null ? (queryTotal.ctr / 100) : (matchingRow.gsc_ctr_28d != null ? matchingRow.gsc_ctr_28d : (matchingRow.ctr_28d != null ? matchingRow.ctr_28d : null)),
+              current_rank: matchingRow.best_rank_group || matchingRow.current_rank || matchingRow.rank || null,
+              opportunity_score: matchingRow.opportunityScore || matchingRow.opportunity_score || null,
+              ai_overview: matchingRow.has_ai_overview === true || matchingRow.ai_overview_present_any === true || false,
+              ai_citations: matchingRow.ai_alan_citations_count != null ? matchingRow.ai_alan_citations_count : (matchingRow.ai_total_citations != null ? matchingRow.ai_total_citations : 0),
+              ai_citations_total: matchingRow.ai_total_citations || null,
               classic_ranking_url: matchingRow.best_url || matchingRow.targetUrl || matchingRow.ranking_url || null,
-              page_type: matchingRow.pageType || null,
+              page_type: matchingRow.pageType || matchingRow.page_type || null,
               segment: matchingRow.segment || null,
               captured_at: new Date().toISOString()
             };
+            debugLog(`[Optimisation] Task ${task.id}: Keyword-specific metrics: clicks=${currentMetrics.gsc_clicks_28d}, impressions=${currentMetrics.gsc_impressions_28d}, rank=${currentMetrics.current_rank}, ai_citations=${currentMetrics.ai_citations}`, 'info');
           }
           
             // Fallback to baseline if no current data found
