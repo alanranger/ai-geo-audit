@@ -16986,9 +16986,35 @@
                 }
                 
                 // Get current rank - ensure we use the correct field name
-                const currentRank = moneyPageRow.avg_position != null ? moneyPageRow.avg_position : 
+                let currentRank = moneyPageRow.avg_position != null ? moneyPageRow.avg_position : 
                                    (moneyPageRow.position != null ? moneyPageRow.position : null);
                 debugLog(`[Optimisation] Task ${task.id}: Current rank from Money Pages: avg_position=${moneyPageRow.avg_position}, position=${moneyPageRow.position}, final=${currentRank}`, 'info');
+                
+                // FALLBACK: If rank is missing from Money Pages, try to get from Ranking & AI data (same as addMeasurement)
+                if ((currentRank == null || currentRank === 0) && combinedRows.length > 0) {
+                  debugLog(`[Optimisation] Task ${task.id}: Rank missing from Money Pages, trying Ranking & AI fallback...`, 'info');
+                  const taskUrlForLookup = moneyPageRow.url || moneyPageRow.page_url || taskUrl;
+                  const matchingRows = combinedRows.filter(r => {
+                    const rowUrl = (r.best_url || r.bestUrl || r.targetUrl || r.ranking_url || '').toLowerCase();
+                    const rowUrlClean = rowUrl.replace(/^https?:\/\//, '').replace(/^www\./, '');
+                    const taskUrlClean = taskUrlForLookup.replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
+                    return rowUrlClean === taskUrlClean || 
+                           rowUrl.includes(taskUrlClean) || 
+                           taskUrlClean.includes(rowUrlClean);
+                  });
+                  
+                  if (matchingRows.length > 0) {
+                    const ranks = matchingRows
+                      .map(r => r.best_rank_group || r.current_rank || null)
+                      .filter(r => r != null && r > 0);
+                    
+                    if (ranks.length > 0) {
+                      const avgRank = ranks.reduce((sum, r) => sum + r, 0) / ranks.length;
+                      currentRank = avgRank;
+                      debugLog(`[Optimisation] Task ${task.id}: Found ranking from Ranking & AI data: ${avgRank.toFixed(2)} (from ${ranks.length} keywords)`, 'success');
+                    }
+                  }
+                }
                 
                 currentMetrics = {
                   gsc_clicks_28d: moneyPageRow.clicks || moneyPageRow.clicks_28d || null,
@@ -17096,9 +17122,35 @@
                       }
                       
                       // Get current rank - ensure we use the correct field name
-                      const currentRank = moneyPageRow.avg_position != null ? moneyPageRow.avg_position : 
+                      let currentRank = moneyPageRow.avg_position != null ? moneyPageRow.avg_position : 
                                          (moneyPageRow.position != null ? moneyPageRow.position : null);
                       debugLog(`[Optimisation] Task ${task.id}: Current rank from ${dataSource}: avg_position=${moneyPageRow.avg_position}, position=${moneyPageRow.position}, final=${currentRank}`, 'info');
+                      
+                      // FALLBACK: If rank is missing from Money Pages, try to get from Ranking & AI data (same as addMeasurement)
+                      if ((currentRank == null || currentRank === 0) && combinedRows.length > 0) {
+                        debugLog(`[Optimisation] Task ${task.id}: Rank missing from ${dataSource}, trying Ranking & AI fallback...`, 'info');
+                        const taskUrlForLookup = moneyPageRow.url || moneyPageRow.page_url || taskUrl;
+                        const matchingRows = combinedRows.filter(r => {
+                          const rowUrl = (r.best_url || r.bestUrl || r.targetUrl || r.ranking_url || '').toLowerCase();
+                          const rowUrlClean = rowUrl.replace(/^https?:\/\//, '').replace(/^www\./, '');
+                          const taskUrlClean = taskUrlForLookup.replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
+                          return rowUrlClean === taskUrlClean || 
+                                 rowUrl.includes(taskUrlClean) || 
+                                 taskUrlClean.includes(rowUrlClean);
+                        });
+                        
+                        if (matchingRows.length > 0) {
+                          const ranks = matchingRows
+                            .map(r => r.best_rank_group || r.current_rank || null)
+                            .filter(r => r != null && r > 0);
+                          
+                          if (ranks.length > 0) {
+                            const avgRank = ranks.reduce((sum, r) => sum + r, 0) / ranks.length;
+                            currentRank = avgRank;
+                            debugLog(`[Optimisation] Task ${task.id}: Found ranking from Ranking & AI data: ${avgRank.toFixed(2)} (from ${ranks.length} keywords)`, 'success');
+                          }
+                        }
+                      }
                       
                       currentMetrics = {
                         gsc_clicks_28d: moneyPageRow.clicks || moneyPageRow.clicks_28d || null,
