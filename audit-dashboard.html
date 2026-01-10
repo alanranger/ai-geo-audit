@@ -16655,6 +16655,185 @@
       return { latestAudit, combinedRows };
     };
 
+    /**
+     * Fetches metrics for URL-only tasks (no keyword)
+     * Uses GSC page totals API + Ranking & AI data for AI metrics
+     * @param {Object} task - Task object
+     * @param {Object} latestAudit - Latest audit from Supabase (optional)
+     * @param {Array} combinedRows - Combined rows from Ranking & AI scan (optional)
+     * @returns {Promise<Object|null>} Metrics object or null if failed
+     */
+    window.fetchMetricsForUrlTask = async function fetchMetricsForUrlTask(task, latestAudit = null, combinedRows = []) {
+      const taskUrlForPage = task.target_url_clean || task.target_url || '';
+      if (!taskUrlForPage) {
+        debugLog(`[Optimisation] URL task ${task.id}: No URL provided`, 'warn');
+        return null;
+      }
+
+      try {
+        const property = document.getElementById('propertyUrl')?.value ||
+          localStorage.getItem('gsc_property_url') ||
+          localStorage.getItem('last_property_url') || '';
+        
+        if (!property) {
+          debugLog(`[Optimisation] URL task ${task.id}: No property URL found`, 'warn');
+          return null;
+        }
+
+        const range = (typeof getGscDateRange === 'function') ? getGscDateRange(28, 2) : null;
+        const startDate = range?.startDate ? `&startDate=${encodeURIComponent(range.startDate)}` : '';
+        const endDate = range?.endDate ? `&endDate=${encodeURIComponent(range.endDate)}` : '';
+        const pageUrlForGsc = toAbsoluteUrlForGsc(taskUrlForPage, property);
+        const totalsUrl = apiUrl(`/api/aigeo/gsc-page-totals?property=${encodeURIComponent(property)}&pageUrl=${encodeURIComponent(pageUrlForGsc)}${startDate}${endDate}`);
+        
+        const totalsRes = await fetch(totalsUrl);
+        const totalsJson = await totalsRes.json().catch(() => null);
+        const totals = totalsRes.ok && totalsJson && totalsJson.status === 'ok' ? totalsJson.data : null;
+        
+        if (!totals) {
+          debugLog(`[Optimisation] URL task ${task.id}: GSC page totals API returned no data`, 'warn');
+          return null;
+        }
+
+        // Get combinedRows if not provided
+        let aiRows = combinedRows;
+        if (aiRows.length === 0) {
+          if (typeof window.getRankingAiCombinedRows === 'function') {
+            aiRows = window.getRankingAiCombinedRows();
+          }
+          if (aiRows.length === 0 && typeof window.rankingAiData !== 'undefined' && Array.isArray(window.rankingAiData)) {
+            aiRows = window.rankingAiData;
+          }
+          if (aiRows.length === 0 && latestAudit && latestAudit.ranking_ai_data) {
+            const rankingAiData = latestAudit.ranking_ai_data;
+            if (rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
+              aiRows = rankingAiData.combinedRows;
+            }
+          }
+          if (aiRows.length === 0) {
+            try {
+              const local = localStorage.getItem('rankingAiData');
+              if (local) {
+                const parsed = JSON.parse(local);
+                if (parsed && Array.isArray(parsed.combinedRows)) {
+                  aiRows = parsed.combinedRows;
+                }
+              }
+            } catch (e) {
+              // ignore
+            }
+          }
+        }
+
+        // Get AI metrics for URL
+        let aiForUrl = { ai_overview: null, ai_citations: null };
+        if (aiRows.length > 0) {
+          // Check if combinedRows has citations arrays
+          const hasCitationsArrays = aiRows.some(r => 
+            Array.isArray(r.ai_alan_citations) && r.ai_alan_citations.length > 0
+          );
+          
+          if (hasCitationsArrays) {
+            // Use computeAiMetricsForPageUrl
+            const urlsToTry = [pageUrlForGsc, taskUrlForPage];
+            for (const urlToCheck of urlsToTry) {
+              if (urlToCheck) {
+                const result = (typeof window.computeAiMetricsForPageUrl === 'function')
+                  ? window.computeAiMetricsForPageUrl(urlToCheck, aiRows)
+                  : { ai_overview: null, ai_citations: null };
+                
+                if (result.ai_overview !== null && result.ai_citations !== null) {
+                  aiForUrl = result;
+                  break;
+                }
+              }
+            }
+          }
+          
+          // Fallback to Supabase API if local lookup failed
+          if (aiForUrl.ai_overview === null && aiForUrl.ai_citations === null) {
+            try {
+              const propertyUrl = document.getElementById('propertyUrl')?.value || 
+                                localStorage.getItem('gsc_property_url') || 
+                                'https://www.alanranger.com';
+              const queryUrl = apiUrl(`/api/supabase/query-keywords-citing-url?` +
+                `property_url=${encodeURIComponent(propertyUrl)}&` +
+                `target_url=${encodeURIComponent(pageUrlForGsc || taskUrlForPage)}`
+              );
+              
+              const citationResponse = await fetch(queryUrl);
+              if (citationResponse.ok) {
+                const citationData = await citationResponse.json();
+                if (citationData.status === 'ok' && citationData.data && citationData.data.length > 0) {
+                  const citingKeywords = citationData.data;
+                  const totalCitationCount = typeof citationData.count === 'number' ? citationData.count : citingKeywords.reduce((sum, k) => sum + (k.citation_count || 1), 0);
+                  const hasOverview = citingKeywords.some(k => k.has_ai_overview === true);
+                  
+                  aiForUrl = {
+                    ai_overview: hasOverview,
+                    ai_citations: totalCitationCount
+                  };
+                  
+                  debugLog(`[Optimisation] URL task ${task.id}: Found ${citingKeywords.length} keywords with ${totalCitationCount} total citations from Supabase`, 'success');
+                }
+              }
+            } catch (supabaseErr) {
+              debugLog(`[Optimisation] URL task ${task.id}: Error querying Supabase for citations: ${supabaseErr.message}`, 'warn');
+            }
+          }
+        }
+
+        // Try to get ranking from Ranking & AI data if GSC position is null
+        let rankingFromAi = null;
+        if ((totals.position == null || totals.position === 0) && aiRows.length > 0) {
+          const matchingRows = aiRows.filter(r => {
+            const rowUrl = (r.best_url || r.bestUrl || r.targetUrl || r.ranking_url || '').toLowerCase();
+            const rowUrlClean = rowUrl.replace(/^https?:\/\//, '').replace(/^www\./, '');
+            const taskUrlClean = pageUrlForGsc.replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
+            return rowUrlClean === taskUrlClean || 
+                   rowUrl.includes(taskUrlClean) || 
+                   taskUrlClean.includes(rowUrlClean);
+          });
+          
+          if (matchingRows.length > 0) {
+            const ranks = matchingRows
+              .map(r => r.best_rank_group || r.current_rank || null)
+              .filter(r => r != null && r > 0);
+            
+            if (ranks.length > 0) {
+              const avgRank = ranks.reduce((sum, r) => sum + r, 0) / ranks.length;
+              rankingFromAi = avgRank;
+              debugLog(`[Optimisation] URL task ${task.id}: Found ranking from Ranking & AI data: ${avgRank.toFixed(2)} (from ${ranks.length} keywords)`, 'info');
+            }
+          }
+        }
+
+        // Build metrics object
+        const metrics = {
+          gsc_clicks_28d: Number(totals.clicks || 0),
+          gsc_impressions_28d: Number(totals.impressions || 0),
+          gsc_ctr_28d: Number(totals.ctr || 0) / 100, // GSC API returns percentage, convert to ratio
+          current_rank: totals.position != null && totals.position > 0 
+            ? Number(totals.position) 
+            : (rankingFromAi != null ? Number(rankingFromAi) : null),
+          opportunity_score: null,
+          ai_overview: aiForUrl.ai_overview === true ? true : (aiForUrl.ai_overview === false ? false : null),
+          ai_citations: aiForUrl.ai_citations != null ? Number(aiForUrl.ai_citations) : null,
+          ai_citations_total: null,
+          classic_ranking_url: pageUrlForGsc,
+          page_type: task.page_type || null,
+          segment: task.segment || 'money_pages',
+          captured_at: new Date().toISOString()
+        };
+
+        debugLog(`[Optimisation] URL task ${task.id}: Built metrics - clicks=${metrics.gsc_clicks_28d}, impressions=${metrics.gsc_impressions_28d}, rank=${metrics.current_rank}, ai_citations=${metrics.ai_citations}`, 'info');
+        return metrics;
+      } catch (e) {
+        debugLog(`[Optimisation] URL task ${task.id}: Error fetching metrics: ${e.message}`, 'error');
+        return null;
+      }
+    };
+
     // Bulk update all tasks with latest data
     window.bulkUpdateAllTasks = async function bulkUpdateAllTasks(skipConfirmation = false) {
       debugLog('[Optimisation] ===== bulkUpdateAllTasks START =====', 'info');
