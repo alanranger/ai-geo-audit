@@ -16834,6 +16834,95 @@
       }
     };
 
+    /**
+     * Fetches metrics for keyword-based tasks
+     * Uses combinedRows (keyword-specific data) + queryTotals (GSC keyword data)
+     * NEVER uses Money Pages data (which is page-level aggregated)
+     * @param {Object} task - Task object
+     * @param {Object} latestAudit - Latest audit from Supabase (optional)
+     * @param {Array} combinedRows - Combined rows from Ranking & AI scan
+     * @returns {Promise<Object|null>} Metrics object or null if failed
+     */
+    window.fetchMetricsForKeywordTask = async function fetchMetricsForKeywordTask(task, latestAudit = null, combinedRows = []) {
+      const taskKeyword = task.keyword_text || '';
+      if (!taskKeyword || !taskKeyword.trim()) {
+        debugLog(`[Optimisation] Keyword task ${task.id}: No keyword provided`, 'warn');
+        return null;
+      }
+
+      if (!combinedRows || combinedRows.length === 0) {
+        debugLog(`[Optimisation] Keyword task ${task.id}: No combinedRows available`, 'warn');
+        return null;
+      }
+
+      // Find matching row by keyword (URL match is optional for keyword tasks)
+      const taskUrlClean = (task.target_url_clean || task.target_url || '').replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
+      const taskUrlPath = taskUrlClean.includes('/') ? taskUrlClean.split('/').slice(1).join('/') : '';
+      
+      const matchingRow = combinedRows.find(r => {
+        const keywordMatch = (r.keyword || '').toLowerCase() === taskKeyword.toLowerCase();
+        if (!keywordMatch) return false;
+        
+        // For keyword-based tasks, URL matching is optional
+        if (!taskUrlClean || taskUrlClean.length === 0) {
+          return true; // Keyword match only - no URL required
+        }
+        
+        // If task has URL, try to match it (preferred but not required)
+        const rowUrl = (r.best_url || r.bestUrl || r.targetUrl || r.ranking_url || '').toLowerCase();
+        const rowUrlClean = rowUrl.replace(/^https?:\/\//, '').replace(/^www\./, '');
+        const rowUrlPath = rowUrlClean.includes('/') ? rowUrlClean.split('/').slice(1).join('/') : '';
+        
+        const urlMatch = rowUrl === taskUrlClean || 
+                        rowUrlClean === taskUrlClean ||
+                        rowUrlPath === taskUrlPath ||
+                        rowUrl.includes(taskUrlClean) ||
+                        taskUrlClean.includes(rowUrlClean);
+        
+        // Always accept keyword match for keyword tasks (URL is optional)
+        return urlMatch || true;
+      });
+
+      if (!matchingRow) {
+        debugLog(`[Optimisation] Keyword task ${task.id}: No matching row found for keyword "${taskKeyword}" in ${combinedRows.length} rows`, 'warn');
+        return null;
+      }
+
+      debugLog(`[Optimisation] Keyword task ${task.id}: Found matching row for keyword "${taskKeyword}"`, 'success');
+
+      // Get queryTotal data for clicks, impressions, and CTR (keyword-specific GSC data)
+      let queryTotal = null;
+      if (typeof getQueryTotalForKeyword === 'function') {
+        queryTotal = getQueryTotalForKeyword(taskKeyword);
+      }
+      
+      // Also try to get from latest audit's queryTotals if available
+      if (!queryTotal && latestAudit && latestAudit.ranking_ai_data && latestAudit.ranking_ai_data.queryTotals) {
+        queryTotal = latestAudit.ranking_ai_data.queryTotals.find(qt => 
+          (qt.query || qt.keyword || '').toLowerCase() === taskKeyword.toLowerCase()
+        );
+      }
+
+      // Build metrics object from keyword-specific data
+      const metrics = {
+        gsc_clicks_28d: queryTotal?.clicks || matchingRow.gsc_clicks_28d || matchingRow.clicks_28d || null,
+        gsc_impressions_28d: queryTotal?.impressions || matchingRow.gsc_impressions_28d || matchingRow.impressions_28d || null,
+        gsc_ctr_28d: queryTotal?.ctr != null ? (queryTotal.ctr / 100) : (matchingRow.gsc_ctr_28d != null ? matchingRow.gsc_ctr_28d : (matchingRow.ctr_28d != null ? matchingRow.ctr_28d : null)),
+        current_rank: matchingRow.best_rank_group || matchingRow.current_rank || matchingRow.rank || null,
+        opportunity_score: matchingRow.opportunityScore || matchingRow.opportunity_score || null,
+        ai_overview: matchingRow.has_ai_overview === true || matchingRow.ai_overview_present_any === true || false,
+        ai_citations: matchingRow.ai_alan_citations_count != null ? matchingRow.ai_alan_citations_count : (matchingRow.ai_total_citations != null ? matchingRow.ai_total_citations : 0),
+        ai_citations_total: matchingRow.ai_total_citations || null,
+        classic_ranking_url: matchingRow.best_url || matchingRow.targetUrl || matchingRow.ranking_url || null,
+        page_type: matchingRow.pageType || matchingRow.page_type || null,
+        segment: matchingRow.segment || null,
+        captured_at: new Date().toISOString()
+      };
+
+      debugLog(`[Optimisation] Keyword task ${task.id}: Built metrics - clicks=${metrics.gsc_clicks_28d}, impressions=${metrics.gsc_impressions_28d}, rank=${metrics.current_rank}, ai_citations=${metrics.ai_citations}`, 'info');
+      return metrics;
+    };
+
     // Bulk update all tasks with latest data
     window.bulkUpdateAllTasks = async function bulkUpdateAllTasks(skipConfirmation = false) {
       debugLog('[Optimisation] ===== bulkUpdateAllTasks START =====', 'info');
