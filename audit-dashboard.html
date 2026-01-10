@@ -17931,8 +17931,11 @@
               }
             } catch (error) {
               failCount++;
-              errors.push(`${task.keyword_text || task.target_url || 'unknown'}: ${error.message}`);
-              debugLog(`[Optimisation] Error updating task ${task.id}: ${error.message || error}`, 'error');
+              // Safely extract error message without referencing potentially undefined variables
+              const errorMsg = error?.message || String(error || 'Unknown error');
+              const taskIdentifier = task.keyword_text || task.target_url_clean || task.target_url || 'unknown';
+              errors.push(`${taskIdentifier}: ${errorMsg}`);
+              debugLog(`[Optimisation] Error updating task ${task.id}: ${errorMsg}`, 'error');
             }
           }));
         }
@@ -55315,9 +55318,32 @@ Final Score: ${score}/100`;
       }
 
       function saveDashboardRun(run) {
-        const existing = getDashboardRuns();
-        const next = [...existing, run].slice(-50);
-        localStorage.setItem(DASHBOARD_RUNS_KEY, JSON.stringify(next));
+        try {
+          const existing = getDashboardRuns();
+          const next = [...existing, run].slice(-50);
+          // Try to save, but reduce history if quota exceeded
+          try {
+            localStorage.setItem(DASHBOARD_RUNS_KEY, JSON.stringify(next));
+          } catch (quotaError) {
+            // If quota exceeded, try saving with fewer runs
+            console.warn('[Dashboard] localStorage quota exceeded, reducing run history...');
+            const reduced = next.slice(-10); // Keep only last 10 runs
+            try {
+              localStorage.setItem(DASHBOARD_RUNS_KEY, JSON.stringify(reduced));
+            } catch (retryError) {
+              // If still failing, try saving just the current run
+              try {
+                localStorage.setItem(DASHBOARD_RUNS_KEY, JSON.stringify([run]));
+              } catch (finalError) {
+                console.error('[Dashboard] Failed to save dashboard run to localStorage:', finalError);
+                // Non-critical: continue without saving
+              }
+            }
+          }
+        } catch (error) {
+          console.error('[Dashboard] Error in saveDashboardRun:', error);
+          // Non-critical: continue without saving
+        }
       }
 
       function getRankingAiRowsFromStorage() {
