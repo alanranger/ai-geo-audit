@@ -19444,6 +19444,10 @@
             if (typeof window.renderDashboardTab === 'function') {
               window.renderDashboardTab();
             }
+            // Also update audit timestamp badge when dashboard tab is activated
+            if (typeof window.updateAuditTimestamp === 'function') {
+              setTimeout(() => window.updateAuditTimestamp(), 200);
+            }
           }, 50);
         }
         
@@ -23182,7 +23186,13 @@
 
         // Dashboard: refresh live dials/cards immediately when any audit saves
         if (typeof window.renderDashboardTab === 'function') {
-          try { window.renderDashboardTab(); } catch {}
+          try { 
+            window.renderDashboardTab();
+            // Also update audit timestamp badge after saving audit
+            if (typeof window.updateAuditTimestamp === 'function') {
+              setTimeout(() => window.updateAuditTimestamp(), 500);
+            }
+          } catch {}
         }
       } catch (error) {
         debugLog(`✗ Error saving audit results: ${error.message}`, 'error');
@@ -23547,7 +23557,13 @@
             // }
               // Dashboard: ensure the new Dashboard tab reflects freshly-loaded audit data.
               if (typeof window.renderDashboardTab === 'function') {
-                try { window.renderDashboardTab(); } catch {}
+                try { 
+                  window.renderDashboardTab();
+                  // Also update audit timestamp badge after loading audit data
+                  if (typeof window.updateAuditTimestamp === 'function') {
+                    setTimeout(() => window.updateAuditTimestamp(), 500);
+                  }
+                } catch {}
               }
           } catch (storageError) {
             debugLog(`⚠ Could not store Supabase data in localStorage: ${storageError.message}`, 'warn');
@@ -23588,6 +23604,7 @@
     // Debounced to prevent rapid updates from multiple callers
     let updateAuditTimestampDebounceTimer = null;
     async function updateAuditTimestamp(ignoreParam) {
+      debugLog('[updateAuditTimestamp] Function called', 'info');
       // Debounce: Clear any pending update and schedule a new one
       if (updateAuditTimestampDebounceTimer) {
         clearTimeout(updateAuditTimestampDebounceTimer);
@@ -23791,6 +23808,7 @@
             radarTimestampContainer.style.display = gscTimestamp ? 'block' : 'none';
           }
         } catch (e) {
+          debugLog(`[updateAuditTimestamp] Error updating audit timestamps: ${e?.message || e}`, 'error');
           console.warn('[updateAuditTimestamp] Error updating audit timestamps:', e);
           if (gscAuditElement) gscAuditElement.textContent = 'Not yet run';
           if (gscDateRangeElement) gscDateRangeElement.textContent = '-';
@@ -23798,6 +23816,9 @@
         }
       }, 100); // Debounce: Wait 100ms before updating, cancels previous pending updates
     }
+    
+    // Expose to window for global audit to call
+    window.updateAuditTimestamp = updateAuditTimestamp;
     
     // Save audit results to Supabase for historical tracking
     async function saveAuditToSupabase(propertyUrl, scores, searchData, snippetReadiness, schemaAudit, localSignals = null, auditDateOverride = null) {
