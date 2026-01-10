@@ -42009,14 +42009,21 @@ Final Score: ${score}/100`;
       
       // Normalize snippetReadiness: handle both number and object formats
       let overallSnippetReadiness = 0;
-      if (typeof snippetReadiness === 'number') {
+      
+      debugLog(`[Snippet Readiness] Input: snippetReadiness=${snippetReadiness} (type: ${typeof snippetReadiness}), scores=${scores ? 'present' : 'missing'}, contentSchema=${scores?.contentSchema}, visibility=${scores?.visibility}, authority=${scores?.authority}`, 'info');
+      
+      if (typeof snippetReadiness === 'number' && snippetReadiness > 0) {
         overallSnippetReadiness = snippetReadiness;
+        debugLog(`[Snippet Readiness] Using provided number: ${overallSnippetReadiness}`, 'info');
       } else if (snippetReadiness && typeof snippetReadiness === 'object' && snippetReadiness.overallScore != null) {
         overallSnippetReadiness = snippetReadiness.overallScore;
-      } else if (scores) {
-        // Recalculate if snippetReadiness is invalid but we have scores
+        debugLog(`[Snippet Readiness] Using object.overallScore: ${overallSnippetReadiness}`, 'info');
+      } else if (scores && (scores.contentSchema != null || scores.visibility != null || scores.authority != null)) {
+        // Recalculate if snippetReadiness is invalid/zero but we have scores
         overallSnippetReadiness = calculateSnippetReadiness(scores, data);
-        debugLog(`[Snippet Readiness] Recalculated from scores: ${overallSnippetReadiness}`, 'info');
+        debugLog(`[Snippet Readiness] Recalculated from scores: ${overallSnippetReadiness} (contentSchema=${scores.contentSchema}, visibility=${scores.visibility}, authority=${typeof scores.authority === 'object' ? scores.authority.score : scores.authority})`, 'info');
+      } else {
+        debugLog(`[Snippet Readiness] ⚠️ Cannot calculate: snippetReadiness=${snippetReadiness}, scores=${scores ? 'present' : 'missing'}`, 'warn');
       }
       
       if (snippetScoreElement) {
