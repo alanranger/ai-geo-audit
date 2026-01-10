@@ -11289,10 +11289,20 @@
         }
         
         // Rank tiles
+        // For rank: delta = baseline - latest
+        // Positive delta = rank improved (went down, e.g., 10 -> 5)
+        // Negative delta = rank worsened (went up, e.g., 5 -> 10)
         if (objectiveKpiKey === 'current_rank' && delta != null) {
-          if (delta > 0) tiles.rank.improved++;
-          else if (delta < 0) tiles.rank.worse++;
-          else tiles.rank.flat++;
+          // Only count tasks that have a rank objective set
+          if (delta > 0) {
+            tiles.rank.improved++;
+            debugLog(`[Rank Tiles] Task "${task.keyword_text || task.target_url || 'unknown'}" improved: baseline=${baselineValue}, latest=${latestValue}, delta=${delta}`, 'info');
+          } else if (delta < 0) {
+            tiles.rank.worse++;
+            debugLog(`[Rank Tiles] Task "${task.keyword_text || task.target_url || 'unknown'}" worsened: baseline=${baselineValue}, latest=${latestValue}, delta=${delta}`, 'info');
+          } else {
+            tiles.rank.flat++;
+          }
         }
         
         // AI Gap
@@ -12261,6 +12271,10 @@
               deltasByKpi[kpi] = [];
             }
             deltasByKpi[kpi].push(delta);
+            // Log rank deltas for debugging
+            if (kpi === 'current_rank') {
+              debugLog(`[Rank Chart] Task "${task.keyword_text || task.target_url || 'unknown'}" delta: baseline=${baselineLatest.baseline?.current_rank}, latest=${baselineLatest.latest?.current_rank}, delta=${delta}`, 'info');
+            }
           }
         }
       }
