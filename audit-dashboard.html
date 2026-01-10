@@ -9836,6 +9836,65 @@
       originalLeft: '50%'
     };
 
+    // Shared function to validate objective status using actual values
+    // Used by drawer, loadCycleData, and table to ensure consistency
+    function validateObjectiveStatus(taskData, progressData) {
+      const objective = taskData.objective || taskData.cycle?.objective || null;
+      const targetType = objective?.target_type || (taskData.objective_target_delta != null ? 'delta' : 'absolute');
+      const target = objective?.target != null ? objective.target : 
+        (taskData.objective_target_delta != null ? taskData.objective_target_delta : 
+        (taskData.objective_target_value != null ? taskData.objective_target_value : null));
+      const objectiveKpi = objective?.kpi || taskData.objective_kpi || taskData.primary_kpi || taskData.objective_metric || null;
+      
+      // If no target or KPI, can't validate
+      if (!target || !objectiveKpi) {
+        return taskData.objective_status || taskData.goal_state || 'not_set';
+      }
+      
+      // Get latest and baseline values
+      let latestValue = null;
+      let baselineValue = null;
+      
+      if (progressData && progressData.latest_value != null && progressData.baseline_value != null) {
+        latestValue = progressData.latest_value;
+        baselineValue = progressData.baseline_value;
+      } else if (taskData.objective_progress) {
+        latestValue = taskData.objective_progress.latest_value ?? null;
+        baselineValue = taskData.objective_progress.baseline_value ?? null;
+      } else if (taskData.latest_metrics && taskData.baseline_metrics) {
+        const kpiKey = objectiveKpi;
+        latestValue = taskData.latest_metrics[`gsc_${kpiKey}`] ?? taskData.latest_metrics[kpiKey] ?? null;
+        baselineValue = taskData.baseline_metrics[`gsc_${kpiKey}`] ?? taskData.baseline_metrics[kpiKey] ?? null;
+      }
+      
+      // Validate status based on values
+      if (latestValue == null) {
+        return 'no_measurement';
+      } else if (targetType === 'absolute') {
+        let direction = 'higher_better';
+        if (objective?.kpi === 'current_rank' || objective?.kpi === 'rank') {
+          direction = 'lower_better';
+        }
+        const meetsTarget = direction === 'higher_better' 
+          ? latestValue >= target 
+          : latestValue <= target;
+        return meetsTarget ? 'met' : 'off_track';
+      } else if (targetType === 'delta') {
+        if (baselineValue == null) {
+          return 'no_measurement';
+        } else {
+          const delta = latestValue - baselineValue;
+          const direction = taskData.objective_direction || 'increase';
+          const meetsTarget = direction === 'decrease' 
+            ? delta <= (target * -1)
+            : delta >= target;
+          return meetsTarget ? 'met' : 'off_track';
+        }
+      }
+      
+      return taskData.objective_status || taskData.goal_state || 'not_set';
+    }
+
     // Helper to disable write buttons in share mode
     function disableWriteButtonsInShareMode() {
       if (!window.isShareMode) return;
@@ -10122,64 +10181,6 @@
       const objectiveCycleEl = document.getElementById('optimisation-drawer-objective-cycle');
       if (objectiveCycleEl) {
         objectiveCycleEl.textContent = `(Cycle ${cycleNo})`;
-      }
-
-      // Shared function to validate objective status using actual values
-      function validateObjectiveStatus(taskData, progressData) {
-        const objective = taskData.objective || taskData.cycle?.objective || null;
-        const targetType = objective?.target_type || (taskData.objective_target_delta != null ? 'delta' : 'absolute');
-        const target = objective?.target != null ? objective.target : 
-          (taskData.objective_target_delta != null ? taskData.objective_target_delta : 
-          (taskData.objective_target_value != null ? taskData.objective_target_value : null));
-        const objectiveKpi = objective?.kpi || taskData.objective_kpi || taskData.primary_kpi || taskData.objective_metric || null;
-        
-        // If no target or KPI, can't validate
-        if (!target || !objectiveKpi) {
-          return taskData.objective_status || taskData.goal_state || 'not_set';
-        }
-        
-        // Get latest and baseline values
-        let latestValue = null;
-        let baselineValue = null;
-        
-        if (progressData && progressData.latest_value != null && progressData.baseline_value != null) {
-          latestValue = progressData.latest_value;
-          baselineValue = progressData.baseline_value;
-        } else if (taskData.objective_progress) {
-          latestValue = taskData.objective_progress.latest_value ?? null;
-          baselineValue = taskData.objective_progress.baseline_value ?? null;
-        } else if (taskData.latest_metrics && taskData.baseline_metrics) {
-          const kpiKey = objectiveKpi;
-          latestValue = taskData.latest_metrics[`gsc_${kpiKey}`] ?? taskData.latest_metrics[kpiKey] ?? null;
-          baselineValue = taskData.baseline_metrics[`gsc_${kpiKey}`] ?? taskData.baseline_metrics[kpiKey] ?? null;
-        }
-        
-        // Validate status based on values
-        if (latestValue == null) {
-          return 'no_measurement';
-        } else if (targetType === 'absolute') {
-          let direction = 'higher_better';
-          if (objective?.kpi === 'current_rank' || objective?.kpi === 'rank') {
-            direction = 'lower_better';
-          }
-          const meetsTarget = direction === 'higher_better' 
-            ? latestValue >= target 
-            : latestValue <= target;
-          return meetsTarget ? 'met' : 'off_track';
-        } else if (targetType === 'delta') {
-          if (baselineValue == null) {
-            return 'no_measurement';
-          } else {
-            const delta = latestValue - baselineValue;
-            const direction = taskData.objective_direction || 'increase';
-            const meetsTarget = direction === 'decrease' 
-              ? delta <= (target * -1)
-              : delta >= target;
-            return meetsTarget ? 'met' : 'off_track';
-          }
-        }
-        
-        return taskData.objective_status || taskData.goal_state || 'not_set';
       }
 
       // Update progress badge - Use objective_status from cycle (Phase 5) or fallback to goal_state
