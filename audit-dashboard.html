@@ -3707,7 +3707,7 @@
       </div>
           
           <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin-top: 1.5rem;">
-        <button class="btn" onclick="runAudit()" title="Start a comprehensive audit scan. Fetches Google Search Console data, performs schema audit (if site URLs CSV loaded), and uses backlink data (if backlink CSV uploaded). Results will appear in the dashboard below.">Run Audit Scan</button>
+        <button class="btn" onclick="runAudit()" title="Start a GSC & Backlink audit scan. Fetches Google Search Console data and uses backlink data (if backlink CSV uploaded). Results will appear in the dashboard below.">GSC & Backlink Audit</button>
             <button class="btn btn-secondary" onclick="shareAudit()" title="Generate a shareable link to your current audit results. The link will allow others to view your audit data without running a new scan.">Share Audit</button>
         <button class="btn btn-secondary" onclick="saveConfig()" title="Save your current configuration (property URL and date range) to browser localStorage. Settings will be restored when you reload the page.">Save Configuration</button>
             <button class="btn btn-success" onclick="syncCsv()" title="Sync CSV data from the configured source. This will update your URL list and backlink data from the remote CSV file.">Sync CSV</button>
@@ -28114,10 +28114,16 @@
                               localStorage.getItem('gsc_property_url') ||
                               'https://www.alanranger.com';
           
+          debugLog('=== SAVING AUDIT TO SUPABASE ===', 'info');
+          debugLog(`Property URL: ${propertyUrl}`, 'info');
+          debugLog(`Audit Date: ${new Date().toISOString().split('T')[0]}`, 'info');
+          
           await saveAuditToSupabase(propertyUrl, scores, searchData, snippetReadiness, schemaAudit, localSignals, new Date().toISOString().split('T')[0]);
           debugLog('✓ Audit saved to Supabase successfully', 'success');
         } catch (supabaseErr) {
-          debugLog(`⚠ Failed to save audit to Supabase: ${supabaseErr.message}`, 'warn');
+          debugLog(`✗ CRITICAL: Failed to save audit to Supabase: ${supabaseErr.message}`, 'error');
+          debugLog(`✗ Error stack: ${supabaseErr.stack}`, 'error');
+          showStatus(`✗ CRITICAL: Audit completed but FAILED to save to Supabase. Error: ${supabaseErr.message}`, 'error');
           // Continue anyway - will save to localStorage as fallback
         }
         
@@ -57348,7 +57354,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const startIso = new Date().toISOString();
         const stepDefs = [
           { key: 'sync_csv', label: 'Sync CSV', runner: async () => { if (typeof window.syncCsv === 'function') await window.syncCsv(); } },
-          { key: 'audit_scan', label: 'Run Audit Scan', runner: async () => { if (typeof window.runAudit === 'function') await window.runAudit(); } },
+          { key: 'audit_scan', label: 'GSC & Backlink Audit', runner: async () => { if (typeof window.runAudit === 'function') await window.runAudit(); } },
           { key: 'ranking_ai', label: 'Run Ranking & AI Scan', runner: async () => { 
             if (typeof window.loadRankingAiData === 'function') {
               await window.loadRankingAiData(true);
