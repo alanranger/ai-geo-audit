@@ -11257,10 +11257,13 @@
         
         // Compute delta for rank tasks if not already set
         let delta = task.delta;
+        let baselineValue = null;
+        let latestValue = null;
+        
         if (objectiveKpiKey === 'current_rank' && delta == null) {
           // Get baseline and latest values for rank
-          let baselineValue = task.baselineValue;
-          let latestValue = task.latestValue;
+          baselineValue = task.baselineValue;
+          latestValue = task.latestValue;
           
           // Fallback to extracting from metrics if not directly available
           if (baselineValue == null || latestValue == null) {
@@ -11293,6 +11296,10 @@
         // Positive delta = rank improved (went down, e.g., 10 -> 5)
         // Negative delta = rank worsened (went up, e.g., 5 -> 10)
         if (objectiveKpiKey === 'current_rank' && delta != null) {
+          // Get baseline/latest values for logging if not already set
+          if (baselineValue == null) baselineValue = task.baselineValue;
+          if (latestValue == null) latestValue = task.latestValue;
+          
           // Only count tasks that have a rank objective set
           if (delta > 0) {
             tiles.rank.improved++;
