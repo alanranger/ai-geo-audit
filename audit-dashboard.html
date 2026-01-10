@@ -17293,6 +17293,7 @@
           // Use shared helper functions to ensure consistency across all update paths
           const taskKeyword = task.keyword_text || '';
           const hasKeyword = !!(taskKeyword && taskKeyword.trim());
+          const taskUrl = task.target_url_clean || task.target_url || ''; // Define early for use in error messages
           
           let currentMetrics = null;
           let matchingRow = null; // Declare for legacy fallback code
@@ -17311,7 +17312,6 @@
             // Fallback: If GSC API failed, try Money Pages data (from latest audit)
             if (!currentMetrics) {
               debugLog(`[Optimisation] Task ${task.id}: GSC API failed, trying Money Pages data fallback...`, 'warn');
-              const taskUrl = task.target_url_clean || task.target_url || '';
               let normalizedTaskUrl = taskUrl.toLowerCase()
                 .replace(/^https?:\/\//, '')
                 .replace(/^www\./, '')
@@ -17894,10 +17894,9 @@
 
           if (!currentMetrics) {
             failCount++;
-            const taskUrl = task.target_url_clean || task.target_url || '';
-            const errorMsg = `${task.keyword_text || taskUrl}: No data found`;
+            const errorMsg = `${task.keyword_text || taskUrl || 'Unknown task'}: No data found`;
             errors.push(errorMsg);
-            debugLog(`[Optimisation] Task ${task.id} (${task.keyword_text || taskUrl}): FAILED - ${errorMsg}`, 'error');
+            debugLog(`[Optimisation] Task ${task.id} (${task.keyword_text || taskUrl || 'Unknown task'}): FAILED - ${errorMsg}`, 'error');
             return;
           }
 
