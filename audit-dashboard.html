@@ -9925,6 +9925,17 @@
         }
       }
       
+      // Fallback: if latest is null but baseline exists, use baseline as latest
+      // This handles cases where baseline was captured but latest measurement is missing the KPI
+      if (latestValue == null && baselineValue != null) {
+        if (typeof debugLog === 'function') {
+          debugLog(`[validateObjectiveStatus] latestValue is null but baselineValue exists (${baselineValue}). Using baseline as latest for validation.`, 'warn');
+        }
+        latestValue = baselineValue;
+        // For delta targets, we still need both values, so keep baselineValue as is
+        // For absolute targets, we can validate with baseline as latest
+      }
+      
       // Final check: if still null, log what we have
       if (latestValue == null && typeof debugLog === 'function') {
         debugLog(`[validateObjectiveStatus] WARNING: latestValue is null after all extraction attempts. kpi="${objectiveKpi}", latest_metrics=${JSON.stringify(taskData.latest_metrics)}, baseline_metrics=${JSON.stringify(taskData.baseline_metrics)}`, 'warn');
