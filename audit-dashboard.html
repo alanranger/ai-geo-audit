@@ -4411,7 +4411,7 @@
             <button class="date-range-btn" onclick="setDateRange(540)" data-days="540" title="Analyze search performance data from the last 18 months (540 days)">Last 18 Months</button>
             <button class="date-range-btn" onclick="showCustomDateRange()" id="customDateBtn" title="Set a custom date range for analysis (enter number of days)">Custom</button>
         </div>
-          <input type="number" id="dateRange" value="30" min="1" style="display: none;">
+          <input type="number" id="dateRange" value="28" min="1" style="display: none;">
           <div id="customDateRange" style="display: none; margin-top: 0.5rem;">
             <input type="number" id="customDays" placeholder="Enter days" min="1" style="width: 150px; padding: 0.5rem; border: 2px solid #e2e8f0; border-radius: 6px;">
             <button class="btn btn-small" onclick="applyCustomDateRange()" style="margin-left: 0.5rem; padding: 0.5rem 1rem;" title="Apply the custom date range you entered">Apply</button>
@@ -15923,9 +15923,29 @@
                 localStorage.getItem('gsc_property_url') ||
                 localStorage.getItem('last_property_url') || '';
               if (property) {
-                const range = (typeof getGscDateRange === 'function') ? getGscDateRange(28, 2) : null;
-                const startDate = range?.startDate ? `&startDate=${encodeURIComponent(range.startDate)}` : '';
-                const endDate = range?.endDate ? `&endDate=${encodeURIComponent(range.endDate)}` : '';
+                // CRITICAL: Use the audit's date range (28 days ending 2 days before audit date) for consistency
+                let auditDateRange = null;
+                if (latestAuditFromSupabase && latestAuditFromSupabase.audit_date) {
+                  const auditDate = new Date(latestAuditFromSupabase.audit_date);
+                  const endDate = new Date(auditDate);
+                  endDate.setDate(endDate.getDate() - 2); // 2 days before audit date
+                  endDate.setHours(0, 0, 0, 0);
+                  
+                  const startDate = new Date(endDate);
+                  startDate.setDate(startDate.getDate() - 27); // 27 days back = 28 days total (inclusive)
+                  startDate.setHours(0, 0, 0, 0);
+                  
+                  auditDateRange = {
+                    startDate: startDate.toISOString().split('T')[0],
+                    endDate: endDate.toISOString().split('T')[0]
+                  };
+                } else {
+                  // Fallback to getGscDateRange if no audit available
+                  auditDateRange = (typeof getGscDateRange === 'function') ? getGscDateRange(28, 2) : null;
+                }
+                
+                const startDate = auditDateRange?.startDate ? `&startDate=${encodeURIComponent(auditDateRange.startDate)}` : '';
+                const endDate = auditDateRange?.endDate ? `&endDate=${encodeURIComponent(auditDateRange.endDate)}` : '';
                 const pageUrlForGsc = toAbsoluteUrlForGsc(taskUrlForPage, property);
                 const totalsUrl = apiUrl(`/api/aigeo/gsc-page-totals?property=${encodeURIComponent(property)}&pageUrl=${encodeURIComponent(pageUrlForGsc)}${startDate}${endDate}`);
                 const totalsRes = await fetch(totalsUrl);
@@ -16696,11 +16716,33 @@
         }
         
         // Fallback to GSC API only if no match found in stored data
+        // CRITICAL: Use the audit's date range (28 days ending 2 days before audit date) for consistency
         if (!totals) {
           debugLog(`[Optimisation] URL task ${task.id}: No match in stored data, falling back to GSC API`, 'warn');
-          const range = (typeof getGscDateRange === 'function') ? getGscDateRange(28, 2) : null;
-          const startDate = range?.startDate ? `&startDate=${encodeURIComponent(range.startDate)}` : '';
-          const endDate = range?.endDate ? `&endDate=${encodeURIComponent(range.endDate)}` : '';
+          
+          // Get the audit's date range for consistency
+          let auditDateRange = null;
+          if (latestAudit && latestAudit.audit_date) {
+            const auditDate = new Date(latestAudit.audit_date);
+            const endDate = new Date(auditDate);
+            endDate.setDate(endDate.getDate() - 2); // 2 days before audit date
+            endDate.setHours(0, 0, 0, 0);
+            
+            const startDate = new Date(endDate);
+            startDate.setDate(startDate.getDate() - 27); // 27 days back = 28 days total (inclusive)
+            startDate.setHours(0, 0, 0, 0);
+            
+            auditDateRange = {
+              startDate: startDate.toISOString().split('T')[0],
+              endDate: endDate.toISOString().split('T')[0]
+            };
+          } else {
+            // Fallback to getGscDateRange if no audit available
+            auditDateRange = (typeof getGscDateRange === 'function') ? getGscDateRange(28, 2) : null;
+          }
+          
+          const startDate = auditDateRange?.startDate ? `&startDate=${encodeURIComponent(auditDateRange.startDate)}` : '';
+          const endDate = auditDateRange?.endDate ? `&endDate=${encodeURIComponent(auditDateRange.endDate)}` : '';
           const totalsUrl = apiUrl(`/api/aigeo/gsc-page-totals?property=${encodeURIComponent(property)}&pageUrl=${encodeURIComponent(pageUrlForGsc)}${startDate}${endDate}`);
           
           const totalsRes = await fetch(totalsUrl);
@@ -22099,7 +22141,7 @@
           }
         });
         // If no preset matches, show custom
-        const presetDays = [7, 30, 90, 180, 365];
+        const presetDays = [7, 28, 30, 90, 180, 365];
         if (!presetDays.includes(savedDays)) {
           document.getElementById('customDateBtn').classList.add('active');
           document.getElementById('customDays').value = savedDays;
@@ -22155,7 +22197,7 @@
     // Save configuration
     // Date range selector functions
     function setDateRange(days) {
-      const oldDateRange = parseInt(document.getElementById('dateRange').value) || 30;
+      const oldDateRange = parseInt(document.getElementById('dateRange').value) || 28;
       document.getElementById('dateRange').value = days;
       localStorage.setItem('gsc_date_range', days);
       
@@ -22215,7 +22257,7 @@
     function applyCustomDateRange() {
       const customDays = parseInt(document.getElementById('customDays').value);
       if (customDays && customDays > 0) {
-        const oldDateRange = parseInt(document.getElementById('dateRange').value) || 30;
+        const oldDateRange = parseInt(document.getElementById('dateRange').value) || 28;
         document.getElementById('dateRange').value = customDays;
         localStorage.setItem('gsc_date_range', customDays);
         document.getElementById('customDateRange').style.display = 'none';
@@ -23028,7 +23070,7 @@
     // Save audit results to localStorage
     function saveAuditResults(scores, searchData, snippetReadiness, schemaAudit, localSignals = null, siteReviews = null, backlinkMetrics = null, preserveTimestamp = false) {
       try {
-        const dateRange = parseInt(document.getElementById('dateRange')?.value) || 30;
+        const dateRange = parseInt(document.getElementById('dateRange')?.value) || 28;
         // Get property URL from input field or from searchData
         const propertyUrl = document.getElementById('propertyUrl')?.value || 
                            searchData?.propertyUrl || 
@@ -26921,12 +26963,43 @@
       const isFreshAudit = window._isFreshAuditRun === true;
       
       // Try to load from Supabase first (preferred source)
+      // CRITICAL: Use the audit's date range (28 days ending on audit end date) for consistency
       if (!isFreshAudit) {
         try {
           const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
           if (propertyUrl) {
-            debugLog(`📊 Loading page metrics from Supabase...`, 'info');
-            const supabaseResponse = await fetch(apiUrl(`/api/supabase/get-gsc-page-metrics?siteUrl=${encodeURIComponent(propertyUrl)}`));
+            debugLog(`📊 Loading page metrics from Supabase using audit date range...`, 'info');
+            
+            // First, get the latest audit to determine the correct date range
+            let auditDateRange = null;
+            if (typeof window.fetchLatestAuditFromSupabase === 'function') {
+              const latestAudit = await window.fetchLatestAuditFromSupabase(propertyUrl, true); // minimalOnly=true for speed
+              if (latestAudit && latestAudit.audit_date) {
+                // Calculate 28-day range ending 2 days before audit date (same as audit data)
+                const auditDate = new Date(latestAudit.audit_date);
+                const endDate = new Date(auditDate);
+                endDate.setDate(endDate.getDate() - 2); // 2 days before audit date
+                endDate.setHours(0, 0, 0, 0);
+                
+                const startDate = new Date(endDate);
+                startDate.setDate(startDate.getDate() - 27); // 27 days back = 28 days total (inclusive)
+                startDate.setHours(0, 0, 0, 0);
+                
+                auditDateRange = {
+                  startDate: startDate.toISOString().split('T')[0],
+                  endDate: endDate.toISOString().split('T')[0]
+                };
+                debugLog(`📊 Using audit date range: ${auditDateRange.startDate} to ${auditDateRange.endDate} (28 days ending on ${auditDateRange.endDate})`, 'info');
+              }
+            }
+            
+            // Build API URL with date range if we have it
+            let apiUrlParams = `siteUrl=${encodeURIComponent(propertyUrl)}`;
+            if (auditDateRange) {
+              apiUrlParams += `&dateStart=${encodeURIComponent(auditDateRange.startDate)}&dateEnd=${encodeURIComponent(auditDateRange.endDate)}`;
+            }
+            
+            const supabaseResponse = await fetch(apiUrl(`/api/supabase/get-gsc-page-metrics?${apiUrlParams}`));
             
             if (supabaseResponse.ok) {
               const supabaseData = await supabaseResponse.json();
@@ -27019,12 +27092,28 @@
           const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
           
           if (propertyUrl) {
-          // Force Money Pages to always use a rolling "last 28d" range for page totals
-          // Rolling 28d: endDate = yesterday, startDate = endDate - 27 days (inclusive = 28 days total)
-          // Use endOffsetDays=1 for yesterday (GSC UI uses yesterday as end date)
-          const endDate = new Date();
-          endDate.setDate(endDate.getDate() - 1); // Yesterday
-          endDate.setHours(0, 0, 0, 0);
+          // CRITICAL: Use the audit's date range (28 days ending 2 days before audit date) for consistency
+          // This matches the date range used by the audit data and DataForSEO
+          // Get the latest audit to determine the correct date range
+          let auditEndDate = null;
+          if (typeof window.fetchLatestAuditFromSupabase === 'function') {
+            const latestAudit = await window.fetchLatestAuditFromSupabase(propertyUrl, true); // minimalOnly=true for speed
+            if (latestAudit && latestAudit.audit_date) {
+              const auditDate = new Date(latestAudit.audit_date);
+              auditEndDate = new Date(auditDate);
+              auditEndDate.setDate(auditEndDate.getDate() - 2); // 2 days before audit date
+              auditEndDate.setHours(0, 0, 0, 0);
+            }
+          }
+          
+          // If we have audit end date, use it; otherwise fall back to yesterday
+          const endDate = auditEndDate || (() => {
+            const d = new Date();
+            d.setDate(d.getDate() - 1); // Yesterday
+            d.setHours(0, 0, 0, 0);
+            return d;
+          })();
+          
           const startDate = new Date(endDate);
           startDate.setDate(startDate.getDate() - 27); // 27 days back = 28 days total (inclusive)
           startDate.setHours(0, 0, 0, 0);
@@ -27033,7 +27122,7 @@
             startDate: startDate.toISOString().split('T')[0],
             endDate: endDate.toISOString().split('T')[0]
           };
-          debugLog(`📊 Fetching page-level GSC data (unfiltered, all positions) for last 28d: ${gscRange.startDate} to ${gscRange.endDate}...`, 'info');
+          debugLog(`📊 Fetching page-level GSC data (unfiltered, all positions) for 28d range matching audit: ${gscRange.startDate} to ${gscRange.endDate}...`, 'info');
           
           debugLog(`📊 Calling GSC page-level API: ${apiUrl('/api/aigeo/gsc-page-level')}`, 'info');
           debugLog(`📊 Request body: propertyUrl=${propertyUrl}, startDate=${gscRange.startDate}, endDate=${gscRange.endDate}`, 'info');
@@ -28756,11 +28845,12 @@
       debugLog('Dashboard div displayed', 'info');
       
       // Update trend chart description with date range
-      const dateRange = parseInt(document.getElementById('dateRange').value) || 30;
+      const dateRange = parseInt(document.getElementById('dateRange').value) || 28;
       const trendDesc = document.getElementById('trendChartDescription');
       if (trendDesc) {
         let rangeText = '';
-        if (dateRange === 30) rangeText = 'Last 30 Days';
+        if (dateRange === 28) rangeText = 'Last 28 Days';
+        else if (dateRange === 30) rangeText = 'Last 30 Days';
         else if (dateRange === 60) rangeText = 'Last 60 Days';
         else if (dateRange === 90) rangeText = 'Last 90 Days';
         else if (dateRange === 120) rangeText = 'Last 120 Days';
@@ -30747,7 +30837,7 @@ Final Score: ${score}/100`;
       }
       
       // Render recommendations table
-      function renderRecommendationsTable(segment, metrics, segmentLabel, dateRangeText = '30 days') {
+      function renderRecommendationsTable(segment, metrics, segmentLabel, dateRangeText = '28 days') {
         if (!metrics) {
           return '<div style="font-size: 0.85rem; color: #999; padding: 1rem; text-align: center;">No metrics available for recommendations.</div>';
         }
@@ -30898,7 +30988,7 @@ Final Score: ${score}/100`;
       }
       
       // Function to render full-width top pages table (shared by both createTopPagesSection functions)
-      function renderFullWidthTopPagesTable(topPages, segmentLabel, dateRangeText = '30 days') {
+      function renderFullWidthTopPagesTable(topPages, segmentLabel, dateRangeText = '28 days') {
         if (!topPages || topPages.length === 0) {
           return '<div style="font-size: 0.85rem; color: #999; padding: 1rem; text-align: center;">No page data available for this segment. This table shows the latest snapshot from your most recent audit (static data, not affected by time period selections). If you see this message, the data may not have been computed during the last audit. Make sure your audit includes Google Search Console query+page metrics (queryPages dimension) and that you have uploaded site-urls.csv for segmentation.</div>';
         }
@@ -31072,8 +31162,8 @@ Final Score: ${score}/100`;
             : 'Money pages only';
           
           // Get date range for display
-          const dateRange = parseInt(localStorage.getItem('gsc_date_range') || '30', 10);
-          const dateRangeText = dateRange === 30 ? '30 days' : dateRange === 60 ? '60 days' : dateRange === 90 ? '90 days' : dateRange === 120 ? '120 days' : dateRange === 180 ? '180 days' : dateRange === 365 ? '365 days' : dateRange === 540 ? '540 days' : `${dateRange} days`;
+          const dateRange = parseInt(localStorage.getItem('gsc_date_range') || '28', 10);
+          const dateRangeText = dateRange === 28 ? '28 days' : dateRange === 30 ? '30 days' : dateRange === 60 ? '60 days' : dateRange === 90 ? '90 days' : dateRange === 120 ? '120 days' : dateRange === 180 ? '180 days' : dateRange === 365 ? '365 days' : dateRange === 540 ? '540 days' : `${dateRange} days`;
           
           const tableContainer = document.getElementById('top-pages-table-container');
           if (tableContainer) {
@@ -31426,8 +31516,8 @@ Final Score: ${score}/100`;
           }
           
           // Get date range for display
-          const dateRange = parseInt(localStorage.getItem('gsc_date_range') || '30', 10);
-          const dateRangeText = dateRange === 30 ? '30 days' : dateRange === 60 ? '60 days' : dateRange === 90 ? '90 days' : dateRange === 120 ? '120 days' : dateRange === 180 ? '180 days' : dateRange === 365 ? '365 days' : dateRange === 540 ? '540 days' : `${dateRange} days`;
+          const dateRange = parseInt(localStorage.getItem('gsc_date_range') || '28', 10);
+          const dateRangeText = dateRange === 28 ? '28 days' : dateRange === 30 ? '30 days' : dateRange === 60 ? '60 days' : dateRange === 90 ? '90 days' : dateRange === 120 ? '120 days' : dateRange === 180 ? '180 days' : dateRange === 365 ? '365 days' : dateRange === 540 ? '540 days' : `${dateRange} days`;
           
           // Update table (reset sort when switching segments)
           window.topPagesData = topPages;
@@ -31448,8 +31538,8 @@ Final Score: ${score}/100`;
               : mode === 'nonEducation'
               ? 'Exclude education (blogs / free course)'
               : 'Money pages only';
-            const dateRange = parseInt(localStorage.getItem('gsc_date_range') || '30', 10);
-            const dateRangeText = dateRange === 30 ? '30 days' : dateRange === 60 ? '60 days' : dateRange === 90 ? '90 days' : dateRange === 120 ? '120 days' : dateRange === 180 ? '180 days' : dateRange === 365 ? '365 days' : dateRange === 540 ? '540 days' : `${dateRange} days`;
+            const dateRange = parseInt(localStorage.getItem('gsc_date_range') || '28', 10);
+            const dateRangeText = dateRange === 28 ? '28 days' : dateRange === 30 ? '30 days' : dateRange === 60 ? '60 days' : dateRange === 90 ? '90 days' : dateRange === 120 ? '120 days' : dateRange === 180 ? '180 days' : dateRange === 365 ? '365 days' : dateRange === 540 ? '540 days' : `${dateRange} days`;
             recommendationsContainer.innerHTML = renderRecommendationsTable(mode, {
               siteCtr: authorityBySegment[mode].siteCtr || 0,
               top10Ctr: authorityBySegment[mode].top10Ctr || 0,
@@ -32322,8 +32412,8 @@ Final Score: ${score}/100`;
         };
         
         // Get date range for display
-        const dateRange = parseInt(localStorage.getItem('gsc_date_range') || '30', 10);
-        const dateRangeText = dateRange === 30 ? '30 days' : dateRange === 60 ? '60 days' : dateRange === 90 ? '90 days' : dateRange === 120 ? '120 days' : dateRange === 180 ? '180 days' : dateRange === 365 ? '365 days' : dateRange === 540 ? '540 days' : `${dateRange} days`;
+        const dateRange = parseInt(localStorage.getItem('gsc_date_range') || '28', 10);
+        const dateRangeText = dateRange === 28 ? '28 days' : dateRange === 30 ? '30 days' : dateRange === 60 ? '60 days' : dateRange === 90 ? '90 days' : dateRange === 120 ? '120 days' : dateRange === 180 ? '180 days' : dateRange === 365 ? '365 days' : dateRange === 540 ? '540 days' : `${dateRange} days`;
         
         // Get current filter values (stored globally) - normalize for robustness
         const currentCategoryFilter = String(window.moneyPagesCategoryFilter || 'ALL').toUpperCase();
@@ -40489,8 +40579,8 @@ Final Score: ${score}/100`;
           }
           
           // Get date range for display
-          const dateRange = parseInt(localStorage.getItem('gsc_date_range') || '30', 10);
-          const dateRangeText = dateRange === 30 ? '30 days' : dateRange === 60 ? '60 days' : dateRange === 90 ? '90 days' : dateRange === 120 ? '120 days' : dateRange === 180 ? '180 days' : dateRange === 365 ? '365 days' : dateRange === 540 ? '540 days' : `${dateRange} days`;
+          const dateRange = parseInt(localStorage.getItem('gsc_date_range') || '28', 10);
+          const dateRangeText = dateRange === 28 ? '28 days' : dateRange === 30 ? '30 days' : dateRange === 60 ? '60 days' : dateRange === 90 ? '90 days' : dateRange === 120 ? '120 days' : dateRange === 180 ? '180 days' : dateRange === 365 ? '365 days' : dateRange === 540 ? '540 days' : `${dateRange} days`;
           
           // Update table (reset sort when switching segments)
           window.topPagesData = topPages;
@@ -40511,8 +40601,8 @@ Final Score: ${score}/100`;
               : mode === 'nonEducation'
               ? 'Exclude education (blogs / free course)'
               : 'Money pages only';
-            const dateRange = parseInt(localStorage.getItem('gsc_date_range') || '30', 10);
-            const dateRangeText = dateRange === 30 ? '30 days' : dateRange === 60 ? '60 days' : dateRange === 90 ? '90 days' : dateRange === 120 ? '120 days' : dateRange === 180 ? '180 days' : dateRange === 365 ? '365 days' : dateRange === 540 ? '540 days' : `${dateRange} days`;
+            const dateRange = parseInt(localStorage.getItem('gsc_date_range') || '28', 10);
+            const dateRangeText = dateRange === 28 ? '28 days' : dateRange === 30 ? '30 days' : dateRange === 60 ? '60 days' : dateRange === 90 ? '90 days' : dateRange === 120 ? '120 days' : dateRange === 180 ? '180 days' : dateRange === 365 ? '365 days' : dateRange === 540 ? '540 days' : `${dateRange} days`;
             recommendationsContainer.innerHTML = renderRecommendationsTable(mode, {
               siteCtr: segData[mode].siteCtr || 0,
               top10Ctr: segData[mode].top10Ctr || 0,
