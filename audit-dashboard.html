@@ -9856,30 +9856,28 @@
       let latestValue = null;
       let baselineValue = null;
       
-      // Debug logging
-      if (typeof console !== 'undefined' && console.log) {
-        console.log('[validateObjectiveStatus] Extracting values:', {
-          objectiveKpi,
-          hasProgressData: !!progressData,
-          hasObjectiveProgress: !!taskData.objective_progress,
-          hasLatestMetrics: !!taskData.latest_metrics,
-          hasBaselineMetrics: !!taskData.baseline_metrics,
-          latestMetricsKeys: taskData.latest_metrics ? Object.keys(taskData.latest_metrics) : [],
-          baselineMetricsKeys: taskData.baseline_metrics ? Object.keys(taskData.baseline_metrics) : []
-        });
+      // Debug logging using UI debug log
+      if (typeof debugLog === 'function') {
+        debugLog(`[validateObjectiveStatus] Extracting values: kpi="${objectiveKpi}", hasProgressData=${!!progressData}, hasObjectiveProgress=${!!taskData.objective_progress}, hasLatestMetrics=${!!taskData.latest_metrics}, hasBaselineMetrics=${!!taskData.baseline_metrics}`, 'info');
+        if (taskData.latest_metrics) {
+          debugLog(`[validateObjectiveStatus] latest_metrics keys: ${Object.keys(taskData.latest_metrics).join(', ')}`, 'info');
+        }
+        if (taskData.baseline_metrics) {
+          debugLog(`[validateObjectiveStatus] baseline_metrics keys: ${Object.keys(taskData.baseline_metrics).join(', ')}`, 'info');
+        }
       }
       
       if (progressData && progressData.latest_value != null && progressData.baseline_value != null) {
         latestValue = progressData.latest_value;
         baselineValue = progressData.baseline_value;
-        if (typeof console !== 'undefined' && console.log) {
-          console.log('[validateObjectiveStatus] Using progressData:', { latestValue, baselineValue });
+        if (typeof debugLog === 'function') {
+          debugLog(`[validateObjectiveStatus] Using progressData: latestValue=${latestValue}, baselineValue=${baselineValue}`, 'info');
         }
       } else if (taskData.objective_progress) {
         latestValue = taskData.objective_progress.latest_value ?? null;
         baselineValue = taskData.objective_progress.baseline_value ?? null;
-        if (typeof console !== 'undefined' && console.log) {
-          console.log('[validateObjectiveStatus] Using objective_progress:', { latestValue, baselineValue });
+        if (typeof debugLog === 'function') {
+          debugLog(`[validateObjectiveStatus] Using objective_progress: latestValue=${latestValue}, baselineValue=${baselineValue}`, 'info');
         }
       } else if (taskData.latest_metrics && taskData.baseline_metrics) {
         // Use same extraction logic as API KPI_EXTRACTORS
@@ -9915,26 +9913,21 @@
               // Fallback: try gsc_ prefix first, then direct key
               value = metrics[`gsc_${kpi}`] ?? metrics[kpi] ?? null;
           }
-          if (typeof console !== 'undefined' && console.log) {
-            console.log(`[validateObjectiveStatus] Extracted ${kpi}:`, { value, metricsKeys: Object.keys(metrics) });
+          if (typeof debugLog === 'function') {
+            debugLog(`[validateObjectiveStatus] Extracted ${kpi} from metrics: value=${value}, tried keys: ${kpi === 'current_rank' || kpi === 'rank' ? 'gsc_position_28d, current_rank, rank, gsc_current_rank' : `gsc_${kpi}, ${kpi}`}`, 'info');
           }
           return value;
         };
         latestValue = extractValue(taskData.latest_metrics, objectiveKpi);
         baselineValue = extractValue(taskData.baseline_metrics, objectiveKpi);
-        if (typeof console !== 'undefined' && console.log) {
-          console.log('[validateObjectiveStatus] Extracted from metrics:', { latestValue, baselineValue, objectiveKpi });
+        if (typeof debugLog === 'function') {
+          debugLog(`[validateObjectiveStatus] Final extracted values: latestValue=${latestValue}, baselineValue=${baselineValue}, kpi="${objectiveKpi}"`, 'info');
         }
       }
       
       // Final check: if still null, log what we have
-      if (latestValue == null && typeof console !== 'undefined' && console.log) {
-        console.warn('[validateObjectiveStatus] latestValue is null after all extraction attempts:', {
-          objectiveKpi,
-          taskDataKeys: Object.keys(taskData),
-          latestMetrics: taskData.latest_metrics,
-          baselineMetrics: taskData.baseline_metrics
-        });
+      if (latestValue == null && typeof debugLog === 'function') {
+        debugLog(`[validateObjectiveStatus] WARNING: latestValue is null after all extraction attempts. kpi="${objectiveKpi}", latest_metrics=${JSON.stringify(taskData.latest_metrics)}, baseline_metrics=${JSON.stringify(taskData.baseline_metrics)}`, 'warn');
       }
       
       // Validate status based on values
