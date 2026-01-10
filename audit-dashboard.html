@@ -23761,10 +23761,22 @@
                     
                     if (gscAuditDate) {
                       const auditDate = new Date(gscAuditDate + 'T00:00:00Z');
+                      // End date is 2 days before audit date (GSC data lag)
                       gscEndDate = new Date(auditDate);
-                      gscEndDate.setUTCDate(gscEndDate.getUTCDate() - 2); // 2 days before audit date
+                      gscEndDate.setUTCDate(gscEndDate.getUTCDate() - 2);
+                      
+                      // Start date is (dateRange - 1) days before end date to get dateRange days inclusive
+                      // For 28 days: end date is day 28, start date is 27 days earlier = day 1
                       gscStartDate = new Date(gscEndDate);
-                      gscStartDate.setUTCDate(gscStartDate.getUTCDate() - (dateRange - 1)); // (date_range - 1) days before end date
+                      gscStartDate.setUTCDate(gscStartDate.getUTCDate() - (dateRange - 1));
+                      
+                      console.log('[updateAuditTimestamp] Date calculation:', {
+                        auditDate: auditDate.toISOString().split('T')[0],
+                        dateRange,
+                        gscEndDate: gscEndDate.toISOString().split('T')[0],
+                        gscStartDate: gscStartDate.toISOString().split('T')[0],
+                        daysBetween: Math.round((gscEndDate - gscStartDate) / (1000 * 60 * 60 * 24)) + 1
+                      });
                       
                       // Get timestamp - timestamp is returned as milliseconds (number), convert to ISO string
                       if (fullData.data.timestamp) {
