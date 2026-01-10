@@ -16591,6 +16591,70 @@
       }
     };
 
+    /**
+     * Fetches latest audit from Supabase and loads combinedRows from Ranking & AI data
+     * Unified data fetching for all task update functions
+     * @returns {Promise<Object>} Object with { latestAudit, combinedRows }
+     */
+    window.fetchLatestAuditAndCombinedRows = async function fetchLatestAuditAndCombinedRows() {
+      let latestAudit = null;
+      let combinedRows = [];
+
+      try {
+        const propertyUrl = document.getElementById('propertyUrl')?.value || 
+                          localStorage.getItem('gsc_property_url') || 
+                          localStorage.getItem('last_property_url') || 
+                          'https://www.alanranger.com';
+        
+        if (typeof window.fetchLatestAuditFromSupabase === 'function') {
+          debugLog(`[Optimisation] Fetching latest audit from Supabase for ${propertyUrl}...`, 'info');
+          latestAudit = await window.fetchLatestAuditFromSupabase(propertyUrl, false);
+          
+          if (latestAudit && latestAudit.ranking_ai_data) {
+            try {
+              const rankingAiData = latestAudit.ranking_ai_data;
+              if (rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
+                localStorage.setItem('rankingAiData', JSON.stringify(rankingAiData));
+                window.rankingAiData = rankingAiData.combinedRows;
+                combinedRows = rankingAiData.combinedRows;
+                debugLog(`[Optimisation] Loaded ${combinedRows.length} keywords from latest audit`, 'success');
+              }
+            } catch (rankingErr) {
+              debugLog(`[Optimisation] Error loading ranking_ai_data: ${rankingErr.message}`, 'warn');
+            }
+          }
+        }
+      } catch (fetchErr) {
+        debugLog(`[Optimisation] Error fetching latest audit: ${fetchErr.message}`, 'warn');
+      }
+
+      // Fallback: Try to get combinedRows from other sources
+      if (combinedRows.length === 0) {
+        if (typeof RankingAiModule !== 'undefined' && RankingAiModule.state) {
+          const state = RankingAiModule.state();
+          combinedRows = state.combinedRows || [];
+        }
+        if (combinedRows.length === 0 && typeof window.rankingAiData !== 'undefined' && Array.isArray(window.rankingAiData)) {
+          combinedRows = window.rankingAiData;
+        }
+        if (combinedRows.length === 0) {
+          try {
+            const local = localStorage.getItem('rankingAiData');
+            if (local) {
+              const parsed = JSON.parse(local);
+              if (parsed && Array.isArray(parsed.combinedRows)) {
+                combinedRows = parsed.combinedRows;
+              }
+            }
+          } catch (e) {
+            // ignore
+          }
+        }
+      }
+
+      return { latestAudit, combinedRows };
+    };
+
     // Bulk update all tasks with latest data
     window.bulkUpdateAllTasks = async function bulkUpdateAllTasks(skipConfirmation = false) {
       debugLog('[Optimisation] ===== bulkUpdateAllTasks START =====', 'info');
