@@ -60,7 +60,9 @@ export default async function handler(req, res) {
     }));
 
     // Insert or update (upsert) using Supabase REST API
-    const response = await fetch(`${supabaseUrl}/rest/v1/gsc_timeseries`, {
+    // For bulk upserts, we need to handle duplicates gracefully
+    // Try POST first, and if we get duplicate errors, handle them individually
+    let response = await fetch(`${supabaseUrl}/rest/v1/gsc_timeseries`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -71,14 +73,52 @@ export default async function handler(req, res) {
       body: JSON.stringify(records)
     });
 
-    if (!response.ok) {
+    // If we get a conflict error, try individual upserts
+    if (response.status === 409 || !response.ok) {
       const errorText = await response.text();
-      console.error('Supabase error:', errorText);
-      return res.status(response.status).json({
-        status: 'error',
-        message: 'Failed to save GSC timeseries to Supabase',
-        details: errorText,
-        saved: 0
+      console.warn('Bulk insert failed, trying individual upserts:', errorText);
+      
+      // Try individual records with upsert
+      let successCount = 0;
+      let errorCount = 0;
+      
+      for (const record of records) {
+        try {
+          const individualResponse = await fetch(`${supabaseUrl}/rest/v1/gsc_timeseries`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': supabaseKey,
+              'Authorization': `Bearer ${supabaseKey}`,
+              'Prefer': 'resolution=merge-duplicates'
+            },
+            body: JSON.stringify(record)
+          });
+          
+          if (individualResponse.ok || individualResponse.status === 409) {
+            // 409 means duplicate, which is fine - record already exists
+            successCount++;
+          } else {
+            const errorText = await individualResponse.text();
+            console.warn(`Failed to save record for ${record.date}:`, errorText);
+            errorCount++;
+          }
+        } catch (err) {
+          console.warn(`Error saving individual record for ${record.date}:`, err.message);
+          errorCount++;
+        }
+      }
+      
+      return res.status(200).json({
+        status: 'ok',
+        message: `Saved ${successCount} GSC timeseries records (${errorCount} errors, duplicates ignored)`,
+        saved: successCount,
+        errors: errorCount,
+        meta: {
+          propertyUrl,
+          recordsCount: records.length,
+          generatedAt: new Date().toISOString()
+        }
       });
     }
 
