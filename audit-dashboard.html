@@ -23753,17 +23753,40 @@
                   });
                   
                   if (fullData.status === 'ok' && fullData.data) {
-                    // Get auditDate from data
+                    // Get auditDate from data - this is the date the audit was run
                     gscAuditDate = fullData.data.auditDate;
                     
+                    // CRITICAL: Use the timestamp to determine the actual audit date
+                    // The timestamp reflects when the audit actually completed, which may be different from auditDate
+                    // For date range calculation, we want the date when the audit data was captured
+                    let auditDateForCalculation;
+                    if (fullData.data.timestamp) {
+                      // timestamp is milliseconds, convert to date
+                      const timestampDate = new Date(fullData.data.timestamp);
+                      // Use the date part of the timestamp (this is the actual audit completion date)
+                      auditDateForCalculation = new Date(Date.UTC(
+                        timestampDate.getUTCFullYear(),
+                        timestampDate.getUTCMonth(),
+                        timestampDate.getUTCDate()
+                      ));
+                    } else if (gscAuditDate) {
+                      // Fallback to auditDate if timestamp not available
+                      auditDateForCalculation = new Date(gscAuditDate + 'T00:00:00Z');
+                    }
+                    
+                    console.log('[updateAuditTimestamp] Date sources:', {
+                      auditDate: gscAuditDate,
+                      timestamp: fullData.data.timestamp,
+                      timestampAsDate: fullData.data.timestamp ? new Date(fullData.data.timestamp).toISOString().split('T')[0] : null,
+                      auditDateForCalculation: auditDateForCalculation?.toISOString().split('T')[0]
+                    });
+                    
                     // Get dateRange - always use 28 days for GSC 28-day date range display
-                    // Even if the stored audit used a different range, we display the 28-day range
                     const dateRange = 28;
                     
-                    if (gscAuditDate) {
-                      const auditDate = new Date(gscAuditDate + 'T00:00:00Z');
+                    if (auditDateForCalculation) {
                       // End date is 2 days before audit date (GSC data lag)
-                      gscEndDate = new Date(auditDate);
+                      gscEndDate = new Date(auditDateForCalculation);
                       gscEndDate.setUTCDate(gscEndDate.getUTCDate() - 2);
                       
                       // Start date is (dateRange - 1) days before end date to get dateRange days inclusive
@@ -23772,7 +23795,7 @@
                       gscStartDate.setUTCDate(gscStartDate.getUTCDate() - (dateRange - 1));
                       
                       console.log('[updateAuditTimestamp] Date calculation:', {
-                        auditDate: auditDate.toISOString().split('T')[0],
+                        auditDateForCalculation: auditDateForCalculation.toISOString().split('T')[0],
                         dateRange,
                         gscEndDate: gscEndDate.toISOString().split('T')[0],
                         gscStartDate: gscStartDate.toISOString().split('T')[0],
