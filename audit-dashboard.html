@@ -28694,9 +28694,22 @@
         // Save audit results to localStorage AFTER Supabase save (for performance/caching)
         saveAuditResults(scores, searchData, snippetReadiness, schemaAudit, localSignals, siteReviews, backlinkMetrics);
         
-        // Update audit timestamp display after saving
+        // Update audit timestamp display after saving - with retry mechanism for Supabase commit delay
         if (typeof updateAuditTimestamp === 'function') {
-          updateAuditTimestamp();
+          // First attempt after 2 seconds (allow Supabase to commit)
+          setTimeout(() => {
+            updateAuditTimestamp();
+          }, 2000);
+          
+          // Retry after 5 seconds if first attempt didn't find the new audit
+          setTimeout(() => {
+            updateAuditTimestamp();
+          }, 5000);
+          
+          // Final retry after 10 seconds
+          setTimeout(() => {
+            updateAuditTimestamp();
+          }, 10000);
         }
         
         // Save GSC timeseries data to database (for last 28 days, updated each audit)
