@@ -55996,9 +55996,19 @@ Final Score: ${score}/100`;
           aiSummaryScore = typeof health.aiSummary?.score === 'number' ? Math.round(health.aiSummary.score) : null;
           
           // Extract AI Summary components for radar chart
-          const snippetReadinessScore = typeof audit.snippetReadiness === 'number' 
+          let snippetReadinessScore = typeof audit.snippetReadiness === 'number' 
             ? audit.snippetReadiness 
             : (audit.snippetReadiness?.overallScore || 0);
+          
+          // If snippetReadiness is 0 or invalid but we have component scores, recalculate it
+          // (Same logic as in snippet readiness gauge display)
+          if (snippetReadinessScore === 0 && audit.scores && 
+              (audit.scores.contentSchema != null || audit.scores.visibility != null || audit.scores.authority != null) &&
+              typeof calculateSnippetReadiness === 'function') {
+            snippetReadinessScore = calculateSnippetReadiness(audit.scores, audit.searchData || {});
+            console.log('[Dashboard] Recalculated snippetReadiness from scores:', snippetReadinessScore);
+          }
+          
           // Get visibility score directly from audit (pillars computed later)
           const visibilityScore = audit.scores?.visibility || 0;
           const brandScore = audit.scores?.brandOverlay?.score || 0;
@@ -57122,7 +57132,36 @@ Final Score: ${score}/100`;
         const moneySharePct = moneyShare.pct; // This is the percentage (0-100)
         
         // Extract AI Summary components (needed for AI Summary radar chart deltas)
-        const aiSummaryComponents = auditData.aiSummaryComponents || null;
+        let aiSummaryComponents = auditData.aiSummaryComponents || null;
+        
+        // If aiSummaryComponents is missing or has snippetReadiness=0, try to recalculate it
+        if (!aiSummaryComponents || (aiSummaryComponents.snippetReadiness === 0 && 
+            (scores.contentSchema != null || scores.visibility != null || scores.authority != null))) {
+          let snippetReadinessScore = 0;
+          // Try to get from auditData.snippetReadiness first
+          if (auditData.snippetReadiness) {
+            snippetReadinessScore = typeof auditData.snippetReadiness === 'number' 
+              ? auditData.snippetReadiness 
+              : (auditData.snippetReadiness?.overallScore || 0);
+          }
+          
+          // If still 0, recalculate from component scores
+          if (snippetReadinessScore === 0 && typeof calculateSnippetReadiness === 'function') {
+            snippetReadinessScore = calculateSnippetReadiness(scores, searchData);
+            console.log('[Dashboard] computeDashboardSnapshotFromAuditData: Recalculated snippetReadiness from scores:', snippetReadinessScore);
+          }
+          
+          const visibilityScore = scores.visibility || 0;
+          const brandScore = scores.brandOverlay?.score || 0;
+          
+          if (snippetReadinessScore > 0 || visibilityScore > 0 || brandScore > 0) {
+            aiSummaryComponents = {
+              snippetReadiness: snippetReadinessScore,
+              visibility: visibilityScore,
+              brand: brandScore
+            };
+          }
+        }
         
         // Extract domain strength (needed for Domain Strength tile deltas)
         const domainStrength = auditData.domainStrength || null;
