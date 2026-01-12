@@ -5341,6 +5341,9 @@
           <button id="optimisation-bulk-rebaseline-btn" class="btn" style="padding: 0.75rem 1.5rem; font-size: 0.95rem; white-space: nowrap; background: #f59e0b; color: #000000; border: 1px solid #f59e0b;" title="Rebaseline all tasks with incomplete baselines (missing AI Overview, AI Citations, or Current Rank).">
             ⚠ Rebaseline Incomplete Baselines (<span id="optimisation-incomplete-baseline-count">0</span>)
           </button>
+          <button id="optimisation-copy-urls-btn" class="btn" style="padding: 0.75rem 1.5rem; font-size: 0.95rem; white-space: nowrap; background: #3b82f6; color: #ffffff; border: 1px solid #3b82f6;" title="Copy all task URLs to clipboard (one URL per line).">
+            📋 Copy All Task URLs
+          </button>
         </div>
 
         <!-- Summary Cards (B6) -->
@@ -9146,6 +9149,85 @@
       });
       return sorted;
     }
+
+    // Copy all task URLs to clipboard
+    window.copyOptimisationTaskUrls = function copyOptimisationTaskUrls() {
+      try {
+        if (!window.optimisationModuleState || !window.optimisationModuleState.filteredTasks) {
+          alert('No tasks available to copy.');
+          return;
+        }
+
+        let tasks = window.optimisationModuleState.filteredTasks;
+
+        // Apply tab filter (same as table)
+        if (window.optimisationModuleState.activeTab === 'active') {
+          tasks = tasks.filter(t => ['planned', 'in_progress', 'monitoring', 'paused'].includes(t.status));
+        } else if (window.optimisationModuleState.activeTab === 'done') {
+          tasks = tasks.filter(t => t.status === 'done');
+        } else if (window.optimisationModuleState.activeTab === 'paused-cancelled') {
+          tasks = tasks.filter(t => ['paused', 'cancelled'].includes(t.status));
+        }
+
+        // Extract unique URLs from tasks
+        const urls = new Set();
+        tasks.forEach(task => {
+          const url = task.target_url_clean || task.target_url || '';
+          if (url) {
+            // Normalize URL to full URL format
+            let fullUrl = '';
+            try {
+              if (url.includes('alanranger.com') || url.startsWith('http')) {
+                const urlObj = new URL(url.startsWith('http') ? url : 'https://' + url);
+                fullUrl = urlObj.href;
+              } else if (url.startsWith('/')) {
+                fullUrl = 'https://www.alanranger.com' + url;
+              } else {
+                fullUrl = 'https://www.alanranger.com/' + url;
+              }
+              urls.add(fullUrl);
+            } catch (e) {
+              // Fallback: treat as path
+              const path = url.startsWith('/') ? url : '/' + url;
+              urls.add('https://www.alanranger.com' + path);
+            }
+          }
+        });
+
+        if (urls.size === 0) {
+          alert('No URLs found in tasks.');
+          return;
+        }
+
+        // Convert to sorted array and join with newlines
+        const urlList = Array.from(urls).sort().join('\n');
+
+        // Copy to clipboard
+        navigator.clipboard.writeText(urlList).then(() => {
+          alert(`Copied ${urls.size} unique URL${urls.size !== 1 ? 's' : ''} to clipboard.`);
+        }).catch(err => {
+          console.error('Failed to copy to clipboard:', err);
+          // Fallback: use textarea method
+          const textarea = document.createElement('textarea');
+          textarea.value = urlList;
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          document.body.appendChild(textarea);
+          textarea.select();
+          try {
+            document.execCommand('copy');
+            alert(`Copied ${urls.size} unique URL${urls.size !== 1 ? 's' : ''} to clipboard.`);
+          } catch (fallbackErr) {
+            console.error('Fallback copy failed:', fallbackErr);
+            alert('Failed to copy URLs. Please try again or check browser permissions.');
+          }
+          document.body.removeChild(textarea);
+        });
+      } catch (err) {
+        console.error('Error copying URLs:', err);
+        alert('An error occurred while copying URLs: ' + err.message);
+      }
+    };
 
     // Render tasks table (B2)
     function renderOptimisationTasksTable() {
@@ -13889,23 +13971,33 @@
         });
       }
 
-      // Bulk rebaseline button
-      const bulkRebaselineBtn = document.getElementById('optimisation-bulk-rebaseline-btn');
-      if (bulkRebaselineBtn) {
-        bulkRebaselineBtn.addEventListener('click', async () => {
-          if (window.isShareMode) {
-            alert('Write operations are not available in share mode (read-only).');
-            return;
-          }
-          if (!window.hasAdminKey()) {
-            alert('Admin key required. Please set your admin key in the "Optimisation Tracking Security" section.');
-            return;
-          }
-          if (typeof window.bulkRebaselineIncompleteBaselines === 'function') {
-            await window.bulkRebaselineIncompleteBaselines();
-          }
-        });
-      }
+        // Bulk rebaseline button
+        const bulkRebaselineBtn = document.getElementById('optimisation-bulk-rebaseline-btn');
+        if (bulkRebaselineBtn) {
+          bulkRebaselineBtn.addEventListener('click', async () => {
+            if (window.isShareMode) {
+              alert('Write operations are not available in share mode (read-only).');
+              return;
+            }
+            if (!window.hasAdminKey()) {
+              alert('Admin key required. Please set your admin key in the "Optimisation Tracking Security" section.');
+              return;
+            }
+            if (typeof window.bulkRebaselineIncompleteBaselines === 'function') {
+              await window.bulkRebaselineIncompleteBaselines();
+            }
+          });
+        }
+
+        // Copy URLs button
+        const copyUrlsBtn = document.getElementById('optimisation-copy-urls-btn');
+        if (copyUrlsBtn) {
+          copyUrlsBtn.addEventListener('click', () => {
+            if (typeof window.copyOptimisationTaskUrls === 'function') {
+              window.copyOptimisationTaskUrls();
+            }
+          });
+        }
 
       // Timeline toggle (collapsed by default)
       const timelineHeader = document.getElementById('optimisation-timeline-header');
