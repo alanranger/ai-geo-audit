@@ -14787,7 +14787,32 @@
                   try {
                     const rankingAiData = latestAuditFromSupabase.ranking_ai_data;
                     if (rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
-                      localStorage.setItem('rankingAiData', JSON.stringify(rankingAiData));
+                      // Helper function to safely save to localStorage with size check
+                      const safeSetItem = (key, value) => {
+                        try {
+                          const jsonStr = JSON.stringify(value);
+                          const sizeKB = (new Blob([jsonStr]).size) / 1024;
+                          const maxSizeKB = 4000; // Leave some headroom (browsers typically allow 5-10MB total)
+                          
+                          if (sizeKB > maxSizeKB) {
+                            debugLog(`⚠ Data too large for localStorage (${sizeKB.toFixed(1)}KB), skipping save. Supabase is source of truth.`, 'warn');
+                            return false;
+                          }
+                          localStorage.setItem(key, jsonStr);
+                          return true;
+                        } catch (err) {
+                          if (err.name === 'QuotaExceededError' || err.message.includes('quota')) {
+                            debugLog(`⚠ Data too large for localStorage, skipping save. Supabase is source of truth.`, 'warn');
+                          } else {
+                            debugLog(`⚠ Error saving to localStorage: ${err.message}`, 'warn');
+                          }
+                          return false;
+                        }
+                      };
+                      
+                      // Try to save, but don't fail if it's too large
+                      safeSetItem('rankingAiData', rankingAiData);
+                      // Always set window.rankingAiData regardless of localStorage success
                       window.rankingAiData = rankingAiData.combinedRows;
                       debugLog(`[Optimisation] URL task: Loaded ${rankingAiData.combinedRows.length} keywords from latest audit`, 'success');
                     }
@@ -15131,8 +15156,32 @@
                   try {
                     const rankingAiData = latestAuditFromSupabase.ranking_ai_data;
                     if (rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
-                      // Store in localStorage for RankingAiModule to use
-                      localStorage.setItem('rankingAiData', JSON.stringify(rankingAiData));
+                      // Helper function to safely save to localStorage with size check
+                      const safeSetItem = (key, value) => {
+                        try {
+                          const jsonStr = JSON.stringify(value);
+                          const sizeKB = (new Blob([jsonStr]).size) / 1024;
+                          const maxSizeKB = 4000; // Leave some headroom (browsers typically allow 5-10MB total)
+                          
+                          if (sizeKB > maxSizeKB) {
+                            debugLog(`⚠ Data too large for localStorage (${sizeKB.toFixed(1)}KB), skipping save. Supabase is source of truth.`, 'warn');
+                            return false;
+                          }
+                          localStorage.setItem(key, jsonStr);
+                          return true;
+                        } catch (err) {
+                          if (err.name === 'QuotaExceededError' || err.message.includes('quota')) {
+                            debugLog(`⚠ Data too large for localStorage, skipping save. Supabase is source of truth.`, 'warn');
+                          } else {
+                            debugLog(`⚠ Error saving to localStorage: ${err.message}`, 'warn');
+                          }
+                          return false;
+                        }
+                      };
+                      
+                      // Try to save, but don't fail if it's too large
+                      safeSetItem('rankingAiData', rankingAiData);
+                      // Always set window.rankingAiData regardless of localStorage success
                       debugLog(`[Optimisation] Loaded ${rankingAiData.combinedRows.length} keywords from latest audit's ranking_ai_data`, 'success');
                       // Also set window.rankingAiData
                       window.rankingAiData = rankingAiData.combinedRows;
@@ -17301,8 +17350,33 @@
           debugLog(`[Optimisation] Loading Ranking & AI data from latest audit's ranking_ai_data...`, 'info');
           const rankingAiData = latestAuditFromSupabase.ranking_ai_data;
           if (rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
-            // Store in localStorage for RankingAiModule to use
-            localStorage.setItem('rankingAiData', JSON.stringify(rankingAiData));
+            // Helper function to safely save to localStorage with size check
+            const safeSetItem = (key, value) => {
+              try {
+                const jsonStr = JSON.stringify(value);
+                const sizeKB = (new Blob([jsonStr]).size) / 1024;
+                const maxSizeKB = 4000; // Leave some headroom (browsers typically allow 5-10MB total)
+                
+                if (sizeKB > maxSizeKB) {
+                  debugLog(`⚠ Data too large for localStorage (${sizeKB.toFixed(1)}KB), skipping save. Supabase is source of truth.`, 'warn');
+                  return false;
+                }
+                localStorage.setItem(key, jsonStr);
+                return true;
+              } catch (err) {
+                if (err.name === 'QuotaExceededError' || err.message.includes('quota')) {
+                  debugLog(`⚠ Data too large for localStorage, skipping save. Supabase is source of truth.`, 'warn');
+                } else {
+                  debugLog(`⚠ Error saving to localStorage: ${err.message}`, 'warn');
+                }
+                return false;
+              }
+            };
+            
+            // Try to save, but don't fail if it's too large
+            safeSetItem('rankingAiData', rankingAiData);
+            // Always set window.rankingAiData regardless of localStorage success
+            window.rankingAiData = rankingAiData.combinedRows;
             debugLog(`[Optimisation] Loaded ${rankingAiData.combinedRows.length} keywords from latest audit's ranking_ai_data`, 'success');
             // Also set window.combinedRows if RankingAiModule expects it
             if (typeof RankingAiModule !== 'undefined' && RankingAiModule.state) {
@@ -23961,10 +24035,13 @@
           }
           
           // Fetch latest Ranking & AI audit - check if latest audit has ranking_ai_data
+          // CRITICAL: Also check keyword_rankings table directly for most recent date
+          // This ensures we show the latest Ranking & AI date even if latest audit doesn't have ranking data
           let rankingAiAuditDate = null;
           let rankingAiTimestamp = null;
           
           try {
+            // First, try to get from latest audit (preferred - matches audit date)
             const rankingAiUrl = apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}`);
             console.log('[updateAuditTimestamp] Ranking & AI URL:', rankingAiUrl);
             const rankingAiResponse = await fetch(rankingAiUrl);
@@ -23987,6 +24064,49 @@
                   debugLog(`[updateAuditTimestamp] Ranking & AI audit found: date=${rankingAiAuditDate}, timestamp=${rankingAiTimestamp}, rows=${rankingAiData.data.rankingAiData.combinedRows.length}`, 'info');
                 } else {
                   debugLog(`[updateAuditTimestamp] Ranking & AI audit has no ranking data: hasRankingAiData=${!!rankingAiData.data.rankingAiData}, hasCombinedRows=${!!rankingAiData.data.rankingAiData?.combinedRows}, rowCount=${rankingAiData.data.rankingAiData?.combinedRows?.length || 0}`, 'warn');
+                  
+                  // FALLBACK: If latest audit doesn't have ranking data, query keyword_rankings table directly via Supabase REST API
+                  // This ensures we show the most recent Ranking & AI date even if it's from an older audit
+                  try {
+                    const supabaseUrl = window.SUPABASE_URL || (typeof config !== 'undefined' && config.SUPABASE_URL) || '';
+                    const supabaseKey = window.SUPABASE_KEY || (typeof config !== 'undefined' && config.SUPABASE_SERVICE_ROLE_KEY) || '';
+                    
+                    if (supabaseUrl && supabaseKey) {
+                      // Query keyword_rankings table directly for most recent audit_date
+                      const keywordRankingsUrl = `${supabaseUrl}/rest/v1/keyword_rankings?property_url=eq.${encodeURIComponent(propertyUrl)}&select=audit_date,updated_at&order=audit_date.desc&limit=1`;
+                      const keywordResponse = await fetch(keywordRankingsUrl, {
+                        method: 'GET',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          'apikey': supabaseKey,
+                          'Authorization': `Bearer ${supabaseKey}`
+                        }
+                      });
+                      
+                      if (keywordResponse.ok) {
+                        const keywordData = await keywordResponse.json();
+                        if (Array.isArray(keywordData) && keywordData.length > 0) {
+                          const latestKeyword = keywordData[0];
+                          if (latestKeyword.audit_date) {
+                            rankingAiAuditDate = latestKeyword.audit_date;
+                            // Use updated_at if available, otherwise use audit_date
+                            if (latestKeyword.updated_at) {
+                              rankingAiTimestamp = new Date(latestKeyword.updated_at).toISOString();
+                            } else {
+                              rankingAiTimestamp = new Date(latestKeyword.audit_date + 'T00:00:00Z').toISOString();
+                            }
+                            debugLog(`[updateAuditTimestamp] Ranking & AI date from keyword_rankings table: date=${rankingAiAuditDate}, timestamp=${rankingAiTimestamp}`, 'info');
+                          }
+                        }
+                      } else {
+                        debugLog(`[updateAuditTimestamp] keyword_rankings query failed: ${keywordResponse.status}`, 'warn');
+                      }
+                    } else {
+                      debugLog(`[updateAuditTimestamp] Supabase credentials not available for keyword_rankings fallback`, 'warn');
+                    }
+                  } catch (keywordErr) {
+                    debugLog(`[updateAuditTimestamp] Error fetching from keyword_rankings table: ${keywordErr?.message || keywordErr}`, 'warn');
+                  }
                 }
               } else {
                 debugLog(`[updateAuditTimestamp] Ranking & AI audit response invalid: status=${rankingAiData?.status}, hasData=${!!rankingAiData?.data}`, 'warn');
