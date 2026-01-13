@@ -43,8 +43,9 @@ export default async function handler(req, res) {
       need('SUPABASE_SERVICE_ROLE_KEY')
     );
 
-    // If latestOnly=true, just return the latest audit_date
+    // If latestOnly=true, return the latest audit_date AND timestamp from audit_results
     if (latestOnly === 'true') {
+      // Get latest audit_date from keyword_rankings
       const { data: latestRow, error } = await supabase
         .from('keyword_rankings')
         .select('audit_date')
@@ -57,10 +58,29 @@ export default async function handler(req, res) {
         throw error;
       }
 
+      let latestTimestamp = null;
+      // If we have an audit_date, try to get the timestamp from audit_results
+      if (latestRow?.audit_date) {
+        const { data: auditResult, error: auditError } = await supabase
+          .from('audit_results')
+          .select('timestamp, audit_date')
+          .eq('property_url', propertyUrl)
+          .eq('audit_date', latestRow.audit_date)
+          .not('ranking_ai_data', 'is', null) // Only audits that have ranking_ai_data
+          .order('timestamp', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (!auditError && auditResult?.timestamp) {
+          latestTimestamp = auditResult.timestamp;
+        }
+      }
+
       return sendJSON(res, 200, {
         status: 'ok',
         data: {
-          latestAuditDate: latestRow?.audit_date || null
+          latestAuditDate: latestRow?.audit_date || null,
+          latestTimestamp: latestTimestamp || null
         }
       });
     }

@@ -24323,9 +24323,16 @@
               const keywordRankingsData = await keywordRankingsResponse.json();
               if (keywordRankingsData.status === 'ok' && keywordRankingsData.data && keywordRankingsData.data.latestAuditDate) {
                 rankingAiAuditDate = keywordRankingsData.data.latestAuditDate;
-                const auditDate = new Date(rankingAiAuditDate + 'T00:00:00Z');
-                rankingAiTimestamp = auditDate.toISOString();
-                debugLog(`[updateAuditTimestamp] ✓ Found latest Ranking & AI date from keyword_rankings: ${rankingAiAuditDate}`, 'success');
+                // CRITICAL FIX: Use timestamp from audit_results if available, otherwise use audit_date at midnight
+                if (keywordRankingsData.data.latestTimestamp) {
+                  rankingAiTimestamp = new Date(keywordRankingsData.data.latestTimestamp).toISOString();
+                  debugLog(`[updateAuditTimestamp] ✓ Found latest Ranking & AI timestamp from audit_results: ${rankingAiTimestamp}`, 'success');
+                } else {
+                  // Fallback to audit_date at midnight if no timestamp available
+                  const auditDate = new Date(rankingAiAuditDate + 'T00:00:00Z');
+                  rankingAiTimestamp = auditDate.toISOString();
+                  debugLog(`[updateAuditTimestamp] ✓ Found latest Ranking & AI date from keyword_rankings (no timestamp): ${rankingAiAuditDate}`, 'info');
+                }
               } else {
                 debugLog(`[updateAuditTimestamp] keyword_rankings query returned no latest date: status=${keywordRankingsData?.status}, hasData=${!!keywordRankingsData?.data}`, 'warn');
               }
@@ -26510,11 +26517,24 @@
       let authorityBySegment = null;
       // CRITICAL: Check if we have queryPages data - if not, authorityBySegment will be null
       // and Authority tab will show "No page data available"
-      // Use the already-extracted queryPages variable (extracted at line 26247 from data.queryPages)
+      // CRITICAL FIX: Use the already-extracted queryPages variable (extracted at line 26247 from data.queryPages)
       // Also check data.searchData?.queryPages as fallback for different storage formats
       // IMPORTANT: queryPages is already in scope from line 26247, so use it directly
-      const queryPagesData = (queryPages && queryPages.length > 0) ? queryPages : ((typeof data !== 'undefined' && data?.searchData?.queryPages) ? data.searchData.queryPages : []);
-      debugLog(`[Authority] queryPagesData length: ${queryPagesData.length} (queryPages=${queryPages?.length || 0}, data.searchData?.queryPages=${(typeof data !== 'undefined' && data?.searchData?.queryPages) ? data.searchData.queryPages.length : 'N/A'})`, 'info');
+      // Also check if queryPages is in the function parameter 'data' directly (sometimes it's nested differently)
+      let queryPagesData = [];
+      if (queryPages && queryPages.length > 0) {
+        queryPagesData = queryPages;
+        debugLog(`[Authority] Using queryPages from line 26247: ${queryPages.length} rows`, 'info');
+      } else if (typeof data !== 'undefined' && data?.queryPages && Array.isArray(data.queryPages) && data.queryPages.length > 0) {
+        queryPagesData = data.queryPages;
+        debugLog(`[Authority] Using data.queryPages: ${data.queryPages.length} rows`, 'info');
+      } else if (typeof data !== 'undefined' && data?.searchData?.queryPages && Array.isArray(data.searchData.queryPages) && data.searchData.queryPages.length > 0) {
+        queryPagesData = data.searchData.queryPages;
+        debugLog(`[Authority] Using data.searchData.queryPages: ${data.searchData.queryPages.length} rows`, 'info');
+      } else {
+        debugLog(`[Authority] ⚠ No queryPages data found in any location`, 'warn');
+      }
+      debugLog(`[Authority] Final queryPagesData length: ${queryPagesData.length}`, 'info');
       
       if (behaviourScoresSegmented && rankingScoresSegmented && queryPagesData.length > 0) {
         // Get page-level data for top pages computation
@@ -30740,15 +30760,26 @@ Final Score: ${score}/100`;
             if (authorityBySegment && authorityBySegment.all) {
               return authorityBySegment.all;
             }
-            // Legacy fallback
-            const components = scores.authorityComponents || {};
-            return {
-              total: score,
-              behaviour: components.behaviour || 0,
-              ranking: components.ranking || 0,
-              backlinks: components.backlinks || 0,
-              reviews: components.reviews || 0
-            };
+          // Legacy fallback - use authorityComponents from scores
+          const components = scores.authorityComponents || {};
+          // CRITICAL FIX: Ensure we use actual component scores, not 0
+          // If authorityComponents exists, use it; otherwise try to extract from authority object
+          const behaviourScore = components.behaviour !== undefined ? components.behaviour : 
+            (typeof scores.authority === 'object' && scores.authority !== null ? (scores.authority.behaviour || 0) : 0);
+          const rankingScore = components.ranking !== undefined ? components.ranking : 
+            (typeof scores.authority === 'object' && scores.authority !== null ? (scores.authority.ranking || 0) : 0);
+          const backlinksScore = components.backlinks !== undefined ? components.backlinks : 0;
+          const reviewsScore = components.reviews !== undefined ? components.reviews : 0;
+          
+          debugLog(`[Authority Card] Fallback component scores: behaviour=${behaviourScore}, ranking=${rankingScore}, backlinks=${backlinksScore}, reviews=${reviewsScore}`, 'info');
+          
+          return {
+            total: score,
+            behaviour: behaviourScore,
+            ranking: rankingScore,
+            backlinks: backlinksScore,
+            reviews: reviewsScore
+          };
           };
           
           // Get current Authority data
