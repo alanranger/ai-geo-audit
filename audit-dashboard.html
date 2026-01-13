@@ -23787,7 +23787,7 @@
               // Always use fresh data if API returned successfully, even if locations is 0
               // (API might return 0 locations legitimately, or we want to update cached data)
               localSignals = freshLocalSignals;
-              debugLog(`✓ Local signals data fetched successfully - Locations: ${freshLocalSignals.data.locations?.length || 0}, Service Areas: ${freshLocalSignals.data.serviceAreas?.length || 0}, NAP: ${freshLocalSignals.data.napConsistencyScore}`, 'success');
+              debugLog(`✓ Local signals data fetched successfully - Locations: ${freshLocalSignals.data.locations?.length || 0}, Service Areas: ${freshLocalSignals.data.serviceAreas?.length || 0}, NAP: ${freshLocalSignals.data.napConsistencyScore || 'null'}`, 'success');
             } else if (freshLocalSignals.status === 'error') {
               debugLog(`⚠ Local signals API error: ${freshLocalSignals.error?.message || 'Unknown error'}, keeping cached data`, 'warn');
               // Keep using cached data - don't overwrite with error response
@@ -23795,9 +23795,13 @@
               debugLog(`⚠ Local signals API returned unexpected status (status: ${freshLocalSignals.status}, has data: ${!!freshLocalSignals.data}, locations: ${freshLocalSignals.data?.locations?.length || 0}), keeping cached data`, 'warn');
               // Keep using cached data - don't overwrite with unexpected response
             }
+          } else {
+            const errorText = await localSignalsResponse.text();
+            debugLog(`⚠ Local signals API HTTP error: ${localSignalsResponse.status} - ${errorText}`, 'error');
           }
         } catch (localSignalsError) {
-          debugLog(`⚠ Local signals error: ${localSignalsError.message}, using cached data if available`, 'warn');
+          debugLog(`⚠ Local signals fetch error: ${localSignalsError.message}, using cached data if available`, 'error');
+          console.error('[Local Signals] Fetch error:', localSignalsError);
         }
         
         // Final normalization - ensure localSignals always has the correct structure
@@ -24321,6 +24325,7 @@
             
             if (keywordRankingsResponse.ok) {
               const keywordRankingsData = await keywordRankingsResponse.json();
+              debugLog(`[updateAuditTimestamp] keyword_rankings API response: status=${keywordRankingsData?.status}, hasData=${!!keywordRankingsData?.data}, latestAuditDate=${keywordRankingsData?.data?.latestAuditDate || 'null'}, latestTimestamp=${keywordRankingsData?.data?.latestTimestamp || 'null'}`, 'info');
               if (keywordRankingsData.status === 'ok' && keywordRankingsData.data && keywordRankingsData.data.latestAuditDate) {
                 rankingAiAuditDate = keywordRankingsData.data.latestAuditDate;
                 // CRITICAL FIX: Use timestamp from audit_results if available, otherwise use audit_date at midnight
@@ -24331,13 +24336,15 @@
                   // Fallback to audit_date at midnight if no timestamp available
                   const auditDate = new Date(rankingAiAuditDate + 'T00:00:00Z');
                   rankingAiTimestamp = auditDate.toISOString();
-                  debugLog(`[updateAuditTimestamp] ✓ Found latest Ranking & AI date from keyword_rankings (no timestamp): ${rankingAiAuditDate}`, 'info');
+                  debugLog(`[updateAuditTimestamp] ⚠ Found latest Ranking & AI date from keyword_rankings but NO timestamp - using midnight: ${rankingAiAuditDate}`, 'warn');
+                  debugLog(`[updateAuditTimestamp] This means the audit_results query didn't find a matching row with ranking_ai_data. Check API logs.`, 'warn');
                 }
               } else {
                 debugLog(`[updateAuditTimestamp] keyword_rankings query returned no latest date: status=${keywordRankingsData?.status}, hasData=${!!keywordRankingsData?.data}`, 'warn');
               }
             } else {
-              debugLog(`[updateAuditTimestamp] keyword_rankings query failed: ${keywordRankingsResponse.status}`, 'warn');
+              const errorText = await keywordRankingsResponse.text();
+              debugLog(`[updateAuditTimestamp] keyword_rankings query failed: ${keywordRankingsResponse.status} - ${errorText}`, 'error');
             }
             
             // FALLBACK: If direct query failed, try get-latest-audit API
