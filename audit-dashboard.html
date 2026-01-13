@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Cache-busting: 2026-01-13T23:25:00Z - Updated version to 7d77c98, fixed syntax errors, fetch error handling, and toFixed null checks -->
+<!-- Cache-busting: 2026-01-13T23:45:00Z - CRITICAL: Fixed all toFixed() calls with proper type checks, fixed template literal issues -->
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -31026,11 +31026,11 @@ Final Score: ${score}/100`;
             const metrics = getGSCMetricsForSegment(mode, qp, tq);
             const metricsDiv = document.getElementById(`${modeId}-gsc-metrics`);
             if (metricsDiv) {
-              const siteCtrStr = metrics.siteCtr != null ? metrics.siteCtr.toFixed(2) : 'N/A';
-              const avgPosStr = metrics.avgPosition != null ? metrics.avgPosition.toFixed(1) : 'N/A';
+              const siteCtrStr = (metrics.siteCtr != null && typeof metrics.siteCtr === 'number' && !isNaN(metrics.siteCtr)) ? metrics.siteCtr.toFixed(2) : 'N/A';
+              const avgPosStr = (metrics.avgPosition != null && typeof metrics.avgPosition === 'number' && !isNaN(metrics.avgPosition)) ? metrics.avgPosition.toFixed(1) : 'N/A';
               debugLog(`📊 Updating GSC metrics for mode ${mode}: CTR=${siteCtrStr}%, Position=${avgPosStr}`, 'info');
-              const top10CtrStr = metrics.top10Ctr != null ? metrics.top10Ctr.toFixed(2) : 'N/A';
-              const top10ShareStr = metrics.top10ImpressionShare != null ? metrics.top10ImpressionShare.toFixed(1) : 'N/A';
+              const top10CtrStr = (metrics.top10Ctr != null && typeof metrics.top10Ctr === 'number' && !isNaN(metrics.top10Ctr)) ? metrics.top10Ctr.toFixed(2) : 'N/A';
+              const top10ShareStr = (metrics.top10ImpressionShare != null && typeof metrics.top10ImpressionShare === 'number' && !isNaN(metrics.top10ImpressionShare)) ? metrics.top10ImpressionShare.toFixed(1) : 'N/A';
               metricsDiv.innerHTML = `
                 <div style="margin-bottom: 0.5rem;"><strong>Behaviour & Ranking:</strong></div>
                 <div style="margin-bottom: 0.25rem; font-size: 0.7rem; color: #999;">Segment: ${mode === 'all' ? 'All pages' : mode === 'nonEducation' ? 'Exclude education (blogs / free course)' : 'Money pages only'}</div>
@@ -31090,10 +31090,10 @@ Final Score: ${score}/100`;
                 <div id="${modeId}-gsc-metrics">
                   <div style="margin-bottom: 0.5rem;"><strong>Behaviour & Ranking:</strong></div>
                   <div style="margin-bottom: 0.25rem; font-size: 0.7rem; color: #999;">Segment: ${currentMode === 'all' ? 'All pages' : currentMode === 'nonEducation' ? 'Exclude education (blogs / free course)' : 'Money pages only'}</div>
-                  <div>Site CTR (ranking queries): ${siteCtr != null ? siteCtr.toFixed(1) : 'N/A'}%</div>
-                  <div>Top-10 CTR: ${top10Ctr != null ? top10Ctr.toFixed(1) : 'N/A'}%</div>
-                  <div>Avg position (ranking): ${avgPosition != null ? avgPosition.toFixed(1) : 'N/A'}</div>
-                  <div>Top-10 impression share: ${top10ImpressionShare != null ? top10ImpressionShare.toFixed(1) : 'N/A'}%</div>
+                  <div>Site CTR (ranking queries): ${(siteCtr != null && typeof siteCtr === 'number' && !isNaN(siteCtr)) ? siteCtr.toFixed(1) : 'N/A'}%</div>
+                  <div>Top-10 CTR: ${(top10Ctr != null && typeof top10Ctr === 'number' && !isNaN(top10Ctr)) ? top10Ctr.toFixed(1) : 'N/A'}%</div>
+                  <div>Avg position (ranking): ${(avgPosition != null && typeof avgPosition === 'number' && !isNaN(avgPosition)) ? avgPosition.toFixed(1) : 'N/A'}</div>
+                  <div>Top-10 impression share: ${(top10ImpressionShare != null && typeof top10ImpressionShare === 'number' && !isNaN(top10ImpressionShare)) ? top10ImpressionShare.toFixed(1) : 'N/A'}%</div>
                 </div>
                 ${(() => {
                   // Use authorityComponents.backlinks to determine if backlinks exist
@@ -46870,11 +46870,13 @@ Final Score: ${score}/100`;
         }
         
         if (summary.avgPositionUnweighted !== null && summary.avgPositionUnweighted !== undefined) {
-          summaryItems.push(`<div style="padding: 0.75rem; background: #f0f9ff; border-radius: 6px; border-left: 3px solid #0284c7;"><strong style="color: #0284c7;">Avg Position (Unweighted):</strong><br><span style="font-size: 1.1rem; font-weight: 600;">${summary.avgPositionUnweighted.toFixed(1)}</span></div>`);
+          const avgPosUnw = (typeof summary.avgPositionUnweighted === 'number' && !isNaN(summary.avgPositionUnweighted)) ? summary.avgPositionUnweighted.toFixed(1) : String(summary.avgPositionUnweighted);
+          summaryItems.push(`<div style="padding: 0.75rem; background: #f0f9ff; border-radius: 6px; border-left: 3px solid #0284c7;"><strong style="color: #0284c7;">Avg Position (Unweighted):</strong><br><span style="font-size: 1.1rem; font-weight: 600;">${avgPosUnw}</span></div>`);
         }
         
         if (summary.avgPositionVolumeWeighted !== null && summary.avgPositionVolumeWeighted !== undefined) {
-          summaryItems.push(`<div style="padding: 0.75rem; background: #f0f9ff; border-radius: 6px; border-left: 3px solid #0284c7;"><strong style="color: #0284c7;">Avg Position (Weighted):</strong><br><span style="font-size: 1.1rem; font-weight: 600;">${summary.avgPositionVolumeWeighted.toFixed(1)}</span></div>`);
+          const avgPosW = (typeof summary.avgPositionVolumeWeighted === 'number' && !isNaN(summary.avgPositionVolumeWeighted)) ? summary.avgPositionVolumeWeighted.toFixed(1) : String(summary.avgPositionVolumeWeighted);
+          summaryItems.push(`<div style="padding: 0.75rem; background: #f0f9ff; border-radius: 6px; border-left: 3px solid #0284c7;"><strong style="color: #0284c7;">Avg Position (Weighted):</strong><br><span style="font-size: 1.1rem; font-weight: 600;">${avgPosW}</span></div>`);
         }
         
         if (summary.keywordsWithVolume !== undefined) {
