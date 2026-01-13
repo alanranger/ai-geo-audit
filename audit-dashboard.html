@@ -3770,7 +3770,11 @@
         </div>
 
         <div id="dashboardRunCurrentStep" style="font-size: 1rem; font-weight: 700; margin-bottom: 0.5rem;">Initializing…</div>
-        <div id="dashboardRunNarrative" style="font-size: 0.95rem; color: var(--dark-text-muted); line-height: 1.5; margin-bottom: 1rem;">Preparing to run all audits and updates.</div>
+        <div id="dashboardRunNarrative" style="font-size: 0.95rem; color: var(--dark-text-muted); line-height: 1.5; margin-bottom: 0.5rem;">Preparing to run all audits and updates.</div>
+        <div id="dashboardRunTimeInfo" style="font-size: 0.85rem; color: var(--dark-text-muted); margin-bottom: 1rem;">
+          <div>Elapsed: <span id="dashboardRunElapsedTime">0:00</span></div>
+          <div style="margin-top: 0.25rem;">Current step: <span id="dashboardRunStepTime">0:00</span></div>
+        </div>
 
         <div style="border-top: 1px solid var(--dark-border); padding-top: 1rem;">
           <div style="font-size: 0.8rem; font-weight: 700; color: var(--dark-text-muted); margin-bottom: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;">Steps</div>
@@ -24279,60 +24283,68 @@
             console.error('[updateAuditTimestamp] Error fetching GSC audit:', e);
           }
           
-          // Fetch latest Ranking & AI audit - check if latest audit has ranking_ai_data
-          // CRITICAL: Also check keyword_rankings table directly for most recent date
+          // Fetch latest Ranking & AI audit date
+          // CRITICAL: Query keyword_rankings table directly for the most recent audit_date
           // This ensures we show the latest Ranking & AI date even if latest audit doesn't have ranking data
           let rankingAiAuditDate = null;
           let rankingAiTimestamp = null;
           
           try {
-            // First, try to get from latest audit (preferred - matches audit date)
-            const rankingAiUrl = apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}`);
-            console.log('[updateAuditTimestamp] Ranking & AI URL:', rankingAiUrl);
-            const rankingAiResponse = await fetch(rankingAiUrl);
-            if (rankingAiResponse.ok) {
-              const rankingAiData = await rankingAiResponse.json();
-              if (rankingAiData.status === 'ok' && rankingAiData.data) {
-                // Check if rankingAiData exists (can be null if no ranking data)
-                // CRITICAL: Even if latest audit doesn't have ranking data, get-latest-audit may have fetched
-                // ranking data from an older audit. Check for rankingAiData.audit_date which contains the actual date
-                if (rankingAiData.data.rankingAiData && rankingAiData.data.rankingAiData.combinedRows && rankingAiData.data.rankingAiData.combinedRows.length > 0) {
-                  // CRITICAL FIX: Use audit_date from rankingAiData (this is the actual date of the ranking data from keyword_rankings table)
-                  // The API returns audit_date in the rankingAiData object (set from rankingDataAuditDate)
-                  rankingAiAuditDate = rankingAiData.data.rankingAiData.audit_date || rankingAiData.data.auditDate;
-                  console.log('[updateAuditTimestamp] Ranking & AI date sources:', {
-                    rankingAiDataAuditDate: rankingAiData.data.rankingAiData.audit_date,
-                    auditDate: rankingAiData.data.auditDate,
-                    final: rankingAiAuditDate
-                  });
-                  // Get timestamp - timestamp is returned as milliseconds (number), convert to ISO string
-                  if (rankingAiData.data.timestamp) {
-                    // timestamp is a number (milliseconds since epoch)
-                    rankingAiTimestamp = new Date(rankingAiData.data.timestamp).toISOString();
-                  } else if (rankingAiAuditDate) {
-                    // Fallback to audit_date if timestamp not available
-                    const auditDate = new Date(rankingAiAuditDate + 'T00:00:00Z');
-                    rankingAiTimestamp = auditDate.toISOString();
-                  }
-                  
-                  debugLog(`[updateAuditTimestamp] Ranking & AI audit found: date=${rankingAiAuditDate}, timestamp=${rankingAiTimestamp}, rows=${rankingAiData.data.rankingAiData.combinedRows.length}`, 'info');
-                } else {
-                  debugLog(`[updateAuditTimestamp] Ranking & AI audit has no ranking data: hasRankingAiData=${!!rankingAiData.data.rankingAiData}, hasCombinedRows=${!!rankingAiData.data.rankingAiData?.combinedRows}, rowCount=${rankingAiData.data.rankingAiData?.combinedRows?.length || 0}`, 'warn');
-                  
-                  // FALLBACK: The get-latest-audit API should have tried to fetch from keyword_rankings table
-                  // but if it didn't return rankingAiData, we need to check if there's a way to get the date
-                  // For now, if there's no ranking data, we'll leave it as null (shows "Not yet run")
-                  // The user needs to run a Ranking & AI scan to populate this data
-                }
+            // PRIMARY METHOD: Query keyword_rankings table directly for MAX(audit_date)
+            // This is the most reliable way to get the latest Ranking & AI date
+            debugLog('[updateAuditTimestamp] Querying keyword_rankings table directly for latest audit_date...', 'info');
+            const keywordRankingsUrl = apiUrl(`/api/supabase/get-keyword-rankings?propertyUrl=${encodeURIComponent(propertyUrl)}&latestOnly=true`);
+            const keywordRankingsResponse = await fetch(keywordRankingsUrl);
+            
+            if (keywordRankingsResponse.ok) {
+              const keywordRankingsData = await keywordRankingsResponse.json();
+              if (keywordRankingsData.status === 'ok' && keywordRankingsData.data && keywordRankingsData.data.latestAuditDate) {
+                rankingAiAuditDate = keywordRankingsData.data.latestAuditDate;
+                const auditDate = new Date(rankingAiAuditDate + 'T00:00:00Z');
+                rankingAiTimestamp = auditDate.toISOString();
+                debugLog(`[updateAuditTimestamp] ✓ Found latest Ranking & AI date from keyword_rankings: ${rankingAiAuditDate}`, 'success');
               } else {
-                debugLog(`[updateAuditTimestamp] Ranking & AI audit response invalid: status=${rankingAiData?.status}, hasData=${!!rankingAiData?.data}`, 'warn');
+                debugLog(`[updateAuditTimestamp] keyword_rankings query returned no latest date: status=${keywordRankingsData?.status}, hasData=${!!keywordRankingsData?.data}`, 'warn');
               }
             } else {
-              debugLog(`[updateAuditTimestamp] Ranking & AI audit fetch failed: ${rankingAiResponse.status}`, 'warn');
+              debugLog(`[updateAuditTimestamp] keyword_rankings query failed: ${keywordRankingsResponse.status}`, 'warn');
+            }
+            
+            // FALLBACK: If direct query failed, try get-latest-audit API
+            if (!rankingAiAuditDate) {
+              debugLog('[updateAuditTimestamp] Falling back to get-latest-audit API...', 'info');
+              const rankingAiUrl = apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}`);
+              const rankingAiResponse = await fetch(rankingAiUrl);
+              if (rankingAiResponse.ok) {
+                const rankingAiData = await rankingAiResponse.json();
+                if (rankingAiData.status === 'ok' && rankingAiData.data) {
+                  // Check if rankingAiData exists and has audit_date
+                  if (rankingAiData.data.rankingAiData && rankingAiData.data.rankingAiData.audit_date) {
+                    rankingAiAuditDate = rankingAiData.data.rankingAiData.audit_date;
+                    if (rankingAiData.data.timestamp) {
+                      rankingAiTimestamp = new Date(rankingAiData.data.timestamp).toISOString();
+                    } else if (rankingAiAuditDate) {
+                      const auditDate = new Date(rankingAiAuditDate + 'T00:00:00Z');
+                      rankingAiTimestamp = auditDate.toISOString();
+                    }
+                    debugLog(`[updateAuditTimestamp] ✓ Found Ranking & AI date from get-latest-audit: ${rankingAiAuditDate}`, 'info');
+                  } else if (rankingAiData.data.auditDate) {
+                    // Last resort: use audit date from latest audit (may not have ranking data)
+                    rankingAiAuditDate = rankingAiData.data.auditDate;
+                    if (rankingAiData.data.timestamp) {
+                      rankingAiTimestamp = new Date(rankingAiData.data.timestamp).toISOString();
+                    } else {
+                      const auditDate = new Date(rankingAiAuditDate + 'T00:00:00Z');
+                      rankingAiTimestamp = auditDate.toISOString();
+                    }
+                    debugLog(`[updateAuditTimestamp] ⚠ Using audit date from latest audit (no ranking data): ${rankingAiAuditDate}`, 'warn');
+                  }
+                }
+              }
             }
           } catch (e) {
-            debugLog(`[updateAuditTimestamp] Error fetching Ranking & AI audit: ${e?.message || e}`, 'error');
-            console.warn('[updateAuditTimestamp] Error fetching Ranking & AI audit:', e);
+            debugLog(`[updateAuditTimestamp] Error fetching Ranking & AI audit date: ${e?.message || e}`, 'error');
+            console.warn('[updateAuditTimestamp] Error fetching Ranking & AI audit date:', e);
           }
           
           // Update GSC audit date
@@ -46628,12 +46640,16 @@ Final Score: ${score}/100`;
         }
       },
       
-      setActiveStep(stepIndex) {
+      setActiveStep(stepIndex, isComplete = false) {
         const steps = document.querySelectorAll('.ranking-ai-step-item');
+        const progressFill = document.getElementById('rankingAiProgressFill');
+        const progressPercent = progressFill ? parseFloat(progressFill.style.width) || 0 : 0;
+        const isFullyComplete = isComplete || (stepIndex === this.steps.length - 1 && progressPercent >= 100);
+        
         steps.forEach((step, idx) => {
           step.classList.remove('active', 'completed', 'pending');
           const icon = step.querySelector('.ranking-ai-step-icon');
-          if (idx < stepIndex) {
+          if (idx < stepIndex || (idx === stepIndex && isFullyComplete)) {
             step.classList.add('completed');
             if (icon) icon.textContent = '✓';
           } else if (idx === stepIndex) {
@@ -46800,17 +46816,30 @@ Final Score: ${score}/100`;
         const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
         if (!propertyUrl) {
           debugLog('⚠ Cannot save Ranking & AI data: property URL not set', 'warn');
-          return;
+          return { success: false, error: 'Property URL not set' };
         }
 
-        // Save to localStorage first
+        // Save to localStorage first (with quota error handling)
         const rankingAiData = {
           combinedRows,
           summary,
           timestamp: new Date().toISOString()
         };
-        localStorage.setItem('rankingAiData', JSON.stringify(rankingAiData));
-        debugLog('✓ Ranking & AI data saved to localStorage', 'success');
+        let localStorageSuccess = false;
+        try {
+          const jsonStr = JSON.stringify(rankingAiData);
+          const sizeKB = (new Blob([jsonStr]).size) / 1024;
+          localStorage.setItem('rankingAiData', jsonStr);
+          debugLog(`✓ Ranking & AI data saved to localStorage (${sizeKB.toFixed(1)}KB)`, 'success');
+          localStorageSuccess = true;
+        } catch (localStorageErr) {
+          if (localStorageErr.name === 'QuotaExceededError' || localStorageErr.message.includes('quota')) {
+            debugLog(`⚠ Data too large for localStorage (${(new Blob([JSON.stringify(rankingAiData)]).size) / 1024).toFixed(1)}KB). Supabase is source of truth.`, 'warn');
+          } else {
+            debugLog(`⚠ Error saving to localStorage: ${localStorageErr.message}`, 'warn');
+          }
+          // Continue to Supabase save even if localStorage fails
+        }
         
         // Dashboard: refresh live dials/cards immediately when Ranking & AI saves
         if (typeof window.renderDashboardTab === 'function') {
@@ -46859,14 +46888,18 @@ Final Score: ${score}/100`;
           } catch (aiSyncErr) {
             debugLog(`⚠ Portfolio AI metrics refresh failed: ${aiSyncErr.message}`, 'warn');
           }
+          
+          return { success: true, localStorageSaved: localStorageSuccess };
         } else {
           const errorText = await response.text();
           debugLog(`⚠ Failed to save Ranking & AI data to Supabase: ${response.status} - ${errorText}`, 'warn');
           console.error('[Save Ranking & AI] Full error response:', errorText);
+          return { success: false, error: `Supabase save failed: ${response.status} - ${errorText}` };
         }
       } catch (err) {
         debugLog(`✗ Error saving Ranking & AI data: ${err.message}`, 'error');
         console.error('Save Ranking & AI data error:', err);
+        return { success: false, error: err.message };
       }
     }
 
@@ -48241,7 +48274,31 @@ Final Score: ${score}/100`;
         }
         
         // Save to Supabase and localStorage
-        await saveRankingAiData(combined, summary);
+        const saveResult = await saveRankingAiData(combined, summary);
+        
+        if (!saveResult || !saveResult.success) {
+          const errorMsg = saveResult?.error || 'Unknown error';
+          debugLog(`✗ CRITICAL: Save failed - ${errorMsg}`, 'error');
+          RankingAiProgressModal.updateProgress(95, 4);
+          RankingAiProgressModal.updateCounts(`⚠ Save failed: ${errorMsg.substring(0, 100)}`);
+          RankingAiProgressModal.setActiveStep(4); // Keep on step 4 (Save Data)
+          // Show error in summary
+          RankingAiProgressModal.showSummary({
+            error: true,
+            errorMessage: `Failed to save data: ${errorMsg}. Please check the debug log for details.`,
+            totalKeywords,
+            keywordsWithRank: withRank,
+            top10,
+            top3,
+            keywordsWithAiOverview: withAiOverview,
+            keywordsWithAiCitations: withAiCitation,
+            avgPositionUnweighted: summary.avg_position_unweighted,
+            avgPositionVolumeWeighted: summary.avg_position_volume_weighted,
+            keywordsWithVolume: summary.keywords_with_volume,
+            aiFetchError: aiFetchError || null
+          });
+          return; // Stop here - don't mark as complete
+        }
         
         // CRITICAL: Fetch and save queryTotals for all ranking keywords
         RankingAiProgressModal.updateProgress(96, 4);
@@ -48365,9 +48422,9 @@ Final Score: ${score}/100`;
         RankingAiProgressModal.updateProgress(98, 4);
         RankingAiProgressModal.updateCounts(`✓ Data saved successfully`);
         
-        // Step 5: Complete
+        // Step 5: Complete (only reached if save succeeded)
         RankingAiProgressModal.updateProgress(100, 5);
-        RankingAiProgressModal.setActiveStep(5);
+        RankingAiProgressModal.setActiveStep(5, true); // Mark as complete (green) not active (amber)
         
         // Show completion summary
         RankingAiProgressModal.showSummary({
@@ -58431,13 +58488,40 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           row.style.background = 'rgba(15, 20, 25, 0.35)';
 
           const left = document.createElement('div');
-          left.textContent = s.label;
-          left.style.fontWeight = '700';
+          left.style.display = 'flex';
+          left.style.flexDirection = 'column';
+          left.style.gap = '0.25rem';
+          const labelDiv = document.createElement('div');
+          labelDiv.textContent = s.label;
+          labelDiv.style.fontWeight = '700';
+          left.appendChild(labelDiv);
+          if (s.elapsedTime !== undefined) {
+            const timeDiv = document.createElement('div');
+            timeDiv.textContent = `⏱ ${s.elapsedTime}`;
+            timeDiv.style.fontSize = '0.75rem';
+            timeDiv.style.color = 'var(--dark-text-muted)';
+            left.appendChild(timeDiv);
+          }
 
           const right = document.createElement('div');
-          right.textContent = s.status;
-          right.style.fontWeight = '800';
-          right.style.color = s.status === 'Done' ? '#10b981' : (s.status === 'Running' ? '#f59e0b' : (s.status === 'Failed' ? '#ef4444' : 'var(--dark-text-muted)'));
+          right.style.display = 'flex';
+          right.style.flexDirection = 'column';
+          right.style.alignItems = 'flex-end';
+          right.style.gap = '0.25rem';
+          const statusDiv = document.createElement('div');
+          statusDiv.textContent = s.status;
+          statusDiv.style.fontWeight = '800';
+          statusDiv.style.color = s.status === 'Done' ? '#10b981' : (s.status === 'Running' ? '#f59e0b' : (s.status === 'Failed' ? '#ef4444' : 'var(--dark-text-muted)'));
+          right.appendChild(statusDiv);
+          if (s.errorMessage) {
+            const errorDiv = document.createElement('div');
+            errorDiv.textContent = s.errorMessage;
+            errorDiv.style.fontSize = '0.75rem';
+            errorDiv.style.color = '#ef4444';
+            errorDiv.style.maxWidth = '300px';
+            errorDiv.style.textAlign = 'right';
+            right.appendChild(errorDiv);
+          }
 
           row.appendChild(left);
           row.appendChild(right);
@@ -58483,6 +58567,10 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
       }
 
       window.runDashboardGlobalRun = async function runDashboardGlobalRun() {
+        debugLog('[Global Run] ========================================', 'info');
+        debugLog('[Global Run] Starting Global Audit Run', 'info');
+        debugLog('[Global Run] ========================================', 'info');
+        
         const runBtn = document.getElementById('dashboard-run-all-btn');
         if (runBtn) runBtn.disabled = true;
 
@@ -58490,28 +58578,80 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         if (typeof window.hasAdminKey === 'function' && !window.hasAdminKey()) {
           const proceed = confirm('Admin key is not set. The "Update All Tasks" step will likely fail.\n\nRun anyway?');
           if (!proceed) {
+            debugLog('[Global Run] Cancelled by user (admin key missing)', 'warn');
             if (runBtn) runBtn.disabled = false;
             return;
           }
         }
 
         const startIso = new Date().toISOString();
+        debugLog(`[Global Run] Start time: ${startIso}`, 'info');
+        
         const stepDefs = [
-          { key: 'sync_csv', label: 'Sync CSV', runner: async () => { if (typeof window.syncCsv === 'function') await window.syncCsv(); } },
-          { key: 'audit_scan', label: 'GSC & Backlink Audit', runner: async () => { if (typeof window.runAudit === 'function') await window.runAudit(); } },
+          { key: 'sync_csv', label: 'Sync CSV', runner: async () => { 
+            debugLog('[Global Run] [Sync CSV] Starting...', 'info');
+            if (typeof window.syncCsv === 'function') {
+              const result = await window.syncCsv();
+              debugLog(`[Global Run] [Sync CSV] Completed. Result: ${JSON.stringify(result || 'undefined')}`, 'info');
+              return result;
+            } else {
+              throw new Error('syncCsv function not available');
+            }
+          } },
+          { key: 'audit_scan', label: 'GSC & Backlink Audit', runner: async () => { 
+            debugLog('[Global Run] [GSC & Backlink Audit] Starting...', 'info');
+            if (typeof window.runAudit === 'function') {
+              const result = await window.runAudit();
+              debugLog(`[Global Run] [GSC & Backlink Audit] Completed. Result: ${JSON.stringify(result || 'undefined')}`, 'info');
+              // Verify audit was saved by checking localStorage or Supabase
+              const savedAudit = loadAuditResultsSync();
+              if (savedAudit && savedAudit.timestamp) {
+                debugLog(`[Global Run] [GSC & Backlink Audit] ✓ Verified: Audit saved with timestamp ${new Date(savedAudit.timestamp).toISOString()}`, 'success');
+              } else {
+                debugLog('[Global Run] [GSC & Backlink Audit] ⚠ Warning: Could not verify audit save', 'warn');
+              }
+              return result;
+            } else {
+              throw new Error('runAudit function not available');
+            }
+          } },
           { key: 'ranking_ai', label: 'Run Ranking & AI Scan', runner: async () => { 
+            debugLog('[Global Run] [Ranking & AI Scan] Starting...', 'info');
             if (typeof window.loadRankingAiData === 'function') {
-              await window.loadRankingAiData(true);
+              const result = await window.loadRankingAiData(true);
+              debugLog(`[Global Run] [Ranking & AI Scan] Data loaded. Result: ${JSON.stringify(result || 'undefined')}`, 'info');
+              
+              // Verify Ranking & AI data was saved
+              const savedRankingData = localStorage.getItem('rankingAiData');
+              if (savedRankingData) {
+                try {
+                  const parsed = JSON.parse(savedRankingData);
+                  debugLog(`[Global Run] [Ranking & AI Scan] ✓ Verified: Data saved to localStorage (${parsed.combinedRows?.length || 0} keywords)`, 'success');
+                } catch (e) {
+                  debugLog('[Global Run] [Ranking & AI Scan] ⚠ Warning: Could not parse saved data', 'warn');
+                }
+              } else {
+                debugLog('[Global Run] [Ranking & AI Scan] ⚠ Warning: No data found in localStorage (may be in Supabase only)', 'warn');
+              }
+              
               // Ensure Ranking & AI tab is refreshed after data loads
               if (typeof window.renderRankingAiTab === 'function') {
                 await new Promise(resolve => setTimeout(resolve, 500)); // Small delay to ensure data is set
                 window.renderRankingAiTab();
               }
+              return result;
+            } else {
+              throw new Error('loadRankingAiData function not available');
             }
           } },
           { key: 'money_pages', label: 'Run Money Pages Scan', runner: async () => { 
+            debugLog('[Global Run] [Money Pages Scan] Starting...', 'info');
             if (typeof window.dashboardRunMoneyPagesScan === 'function') {
-              await window.dashboardRunMoneyPagesScan();
+              const result = await window.dashboardRunMoneyPagesScan();
+              debugLog(`[Global Run] [Money Pages Scan] Completed. Result: ${JSON.stringify(result || 'undefined')}`, 'info');
+              return result;
+            } else {
+              throw new Error('dashboardRunMoneyPagesScan function not available');
             }
           } },
           { key: 'domain_strength', label: 'Run Domain Strength Snapshot (All Batches)', runner: async () => {
@@ -58554,6 +58694,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             }
           } },
           { key: 'update_tasks', label: 'Update All Tasks with Latest Data', runner: async () => {
+            debugLog('[Global Run] [Update All Tasks] Starting...', 'info');
             // Use unified data fetching utility (Phase 4)
             const auditData = await fetchAuditDataUnified(null, {
               minimalOnly: false,
@@ -58563,7 +58704,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             });
             
             if (!auditData || !auditData.searchData) {
-              debugLog('[Global Run] Audit data not available from Supabase or localStorage, but continuing with task update...', 'warn');
+              debugLog('[Global Run] [Update All Tasks] ⚠ Audit data not available from Supabase or localStorage, but continuing with task update...', 'warn');
+            } else {
+              debugLog('[Global Run] [Update All Tasks] ✓ Audit data loaded successfully', 'success');
             }
             
             // Ensure tasks are actually loaded before/after bulk update so the dashboard reflects real outcomes.
@@ -58587,10 +58730,22 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             
             if (typeof window.bulkUpdateAllTasks === 'function') {
               try {
+                debugLog('[Global Run] [Update All Tasks] Running bulk update...', 'info');
                 // Pass skipConfirmation=true to bypass confirmation dialog in global run
-                await window.bulkUpdateAllTasks(true);
+                const bulkUpdateResult = await window.bulkUpdateAllTasks(true);
+                debugLog(`[Global Run] [Update All Tasks] Bulk update completed. Result: ${JSON.stringify(bulkUpdateResult || 'undefined')}`, 'info');
+                
+                // Verify tasks were updated by checking if measurements were created
+                if (bulkUpdateResult && typeof bulkUpdateResult === 'object') {
+                  if (bulkUpdateResult.updated !== undefined) {
+                    debugLog(`[Global Run] [Update All Tasks] ✓ Verified: ${bulkUpdateResult.updated} tasks updated`, 'success');
+                  }
+                  if (bulkUpdateResult.errors && bulkUpdateResult.errors.length > 0) {
+                    debugLog(`[Global Run] [Update All Tasks] ⚠ Warning: ${bulkUpdateResult.errors.length} errors during bulk update`, 'warn');
+                  }
+                }
               } catch (err) {
-                debugLog(`[Global Run] Bulk update failed: ${err?.message || err}`, 'error');
+                debugLog(`[Global Run] [Update All Tasks] ✗ Bulk update failed: ${err?.message || err}`, 'error');
                 throw new Error(`Bulk update failed: ${err?.message || err}`);
               }
             } else {
@@ -58600,24 +58755,48 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             // Reload tasks to reflect updates
             if (typeof window.loadAllOptimisationTasks === 'function') {
               try { 
+                debugLog('[Global Run] [Update All Tasks] Reloading tasks to reflect updates...', 'info');
                 await window.loadAllOptimisationTasks();
+                debugLog('[Global Run] [Update All Tasks] ✓ Tasks reloaded', 'success');
               } catch (err) {
-                debugLog(`[Global Run] Failed to reload tasks after update: ${err?.message || err}`, 'warn');
+                debugLog(`[Global Run] [Update All Tasks] ⚠ Failed to reload tasks after update: ${err?.message || err}`, 'warn');
               }
             }
           } }
         ];
 
-        const steps = stepDefs.map(s => ({ key: s.key, label: s.label, status: 'Pending' }));
+        const steps = stepDefs.map(s => ({ key: s.key, label: s.label, status: 'Pending', elapsedTime: undefined, errorMessage: undefined }));
         const results = { ok: true, errors: [] };
+        const overallStartTime = Date.now();
+        let timeUpdateInterval = null;
+
+        // Helper function to format elapsed time
+        const formatElapsedTime = (ms) => {
+          const totalSeconds = Math.floor(ms / 1000);
+          const minutes = Math.floor(totalSeconds / 60);
+          const seconds = totalSeconds % 60;
+          return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        };
+
+        // Update time display periodically
+        const updateTimeDisplay = () => {
+          const elapsed = Date.now() - overallStartTime;
+          const elapsedEl = document.getElementById('dashboardRunElapsedTime');
+          if (elapsedEl) elapsedEl.textContent = formatElapsedTime(elapsed);
+        };
 
         showDashboardRunModal();
         dashboardRunModalRenderSteps(steps);
+        
+        // Start time update interval
+        timeUpdateInterval = setInterval(updateTimeDisplay, 1000);
+        updateTimeDisplay();
 
         // Set up close button handlers - ensure they work even after completion
         const closeBtn = document.getElementById('dashboardRunClose');
         const closeBtnBottom = document.getElementById('dashboardRunCloseBottom');
         const closeHandler = () => {
+          if (timeUpdateInterval) clearInterval(timeUpdateInterval);
           const modal = document.getElementById('dashboardRunModal');
           if (modal) modal.style.display = 'none';
         };
@@ -58630,25 +58809,89 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
 
         for (let i = 0; i < stepDefs.length; i++) {
           const s = stepDefs[i];
+          const stepStartTime = Date.now();
           steps[i].status = 'Running';
+          steps[i].elapsedTime = undefined;
+          steps[i].errorMessage = undefined;
           dashboardRunModalRenderSteps(steps);
           dashboardRunModalSetProgress(Math.round((i / stepDefs.length) * 100));
           dashboardRunModalSetStep(s.label, 'Working…');
+          
+          // Update step time display
+          const updateStepTime = () => {
+            const stepElapsed = Date.now() - stepStartTime;
+            const stepTimeEl = document.getElementById('dashboardRunStepTime');
+            if (stepTimeEl) stepTimeEl.textContent = formatElapsedTime(stepElapsed);
+          };
+          const stepTimeInterval = setInterval(updateStepTime, 100);
+          updateStepTime();
 
           try {
-            await s.runner();
+            debugLog(`[Global Run] Starting step: ${s.label} (${s.key})`, 'info');
+            const stepResult = await s.runner();
+            
+            // Verify save succeeded if runner returns a result
+            if (stepResult !== undefined && stepResult !== null) {
+              if (typeof stepResult === 'object') {
+                if (stepResult.success === false) {
+                  throw new Error(stepResult.error || stepResult.message || 'Step reported failure');
+                }
+                if (stepResult.saved !== undefined && stepResult.saved === 0 && stepResult.success !== true) {
+                  debugLog(`[Global Run] ⚠ Step ${s.label} completed but may not have saved data`, 'warn');
+                }
+              }
+            }
+            
+            const stepElapsed = Date.now() - stepStartTime;
             steps[i].status = 'Done';
+            steps[i].elapsedTime = formatElapsedTime(stepElapsed);
+            debugLog(`[Global Run] ✓ Step completed: ${s.label} (${formatElapsedTime(stepElapsed)})`, 'success');
           } catch (err) {
+            const stepElapsed = Date.now() - stepStartTime;
             steps[i].status = 'Failed';
+            steps[i].elapsedTime = formatElapsedTime(stepElapsed);
+            steps[i].errorMessage = err?.message || String(err);
             results.ok = false;
             results.errors.push({ step: s.key, message: err?.message || String(err) });
+            debugLog(`[Global Run] ✗ Step failed: ${s.label} - ${err?.message || String(err)} (${formatElapsedTime(stepElapsed)})`, 'error');
+            
+            // STOP EXECUTION ON FAILURE - user requirement
+            clearInterval(stepTimeInterval);
+            if (timeUpdateInterval) clearInterval(timeUpdateInterval);
+            dashboardRunModalSetStep('Failed', `Step "${s.label}" failed. Process stopped.`);
+            dashboardRunModalRenderSteps(steps);
+            break; // Exit loop immediately
           }
 
+          clearInterval(stepTimeInterval);
           dashboardRunModalRenderSteps(steps);
         }
+        
+        // Clear time update interval
+        if (timeUpdateInterval) clearInterval(timeUpdateInterval);
 
+        const totalElapsed = Date.now() - overallStartTime;
         dashboardRunModalSetProgress(100);
-        dashboardRunModalSetStep('Done', results.ok ? 'All steps completed.' : 'Completed with errors.');
+        const finalMessage = results.ok 
+          ? `All steps completed in ${formatElapsedTime(totalElapsed)}.` 
+          : `Process stopped due to errors. Total time: ${formatElapsedTime(totalElapsed)}.`;
+        dashboardRunModalSetStep('Done', finalMessage);
+        
+        // Update final elapsed time display
+        const elapsedEl = document.getElementById('dashboardRunElapsedTime');
+        if (elapsedEl) elapsedEl.textContent = formatElapsedTime(totalElapsed);
+        const stepTimeEl = document.getElementById('dashboardRunStepTime');
+        if (stepTimeEl) stepTimeEl.textContent = '—';
+        
+        // Final summary logging
+        debugLog('[Global Run] ========================================', 'info');
+        debugLog(`[Global Run] Global Audit Run ${results.ok ? 'COMPLETED' : 'FAILED'}`, results.ok ? 'success' : 'error');
+        debugLog(`[Global Run] Total time: ${formatElapsedTime(totalElapsed)}`, 'info');
+        debugLog(`[Global Run] Steps completed: ${steps.filter(s => s.status === 'Done').length}/${steps.length}`, 'info');
+        if (results.errors.length > 0) {
+          debugLog(`[Global Run] Errors: ${results.errors.map(e => `${e.step}: ${e.message}`).join('; ')}`, 'error');
+        }
+        debugLog('[Global Run] ========================================', 'info');
 
         // Refresh optimisation tasks so execution dial reflects latest measurements
         try {

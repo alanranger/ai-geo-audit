@@ -32,16 +32,43 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { auditDate, propertyUrl } = req.query;
+    const { auditDate, propertyUrl, latestOnly } = req.query;
     
-    if (!auditDate || !propertyUrl) {
-      return sendJSON(res, 400, { error: 'auditDate and propertyUrl are required' });
+    if (!propertyUrl) {
+      return sendJSON(res, 400, { error: 'propertyUrl is required' });
     }
     
     const supabase = createClient(
       need('SUPABASE_URL'),
       need('SUPABASE_SERVICE_ROLE_KEY')
     );
+
+    // If latestOnly=true, just return the latest audit_date
+    if (latestOnly === 'true') {
+      const { data: latestRow, error } = await supabase
+        .from('keyword_rankings')
+        .select('audit_date')
+        .eq('property_url', propertyUrl)
+        .order('audit_date', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
+        throw error;
+      }
+
+      return sendJSON(res, 200, {
+        status: 'ok',
+        data: {
+          latestAuditDate: latestRow?.audit_date || null
+        }
+      });
+    }
+
+    // Otherwise, require auditDate and return keywords for that date
+    if (!auditDate) {
+      return sendJSON(res, 400, { error: 'auditDate is required when latestOnly is not true' });
+    }
 
     const { data: keywords, error } = await supabase
       .from('keyword_rankings')
@@ -54,13 +81,15 @@ export default async function handler(req, res) {
     }
 
     return sendJSON(res, 200, {
-      success: true,
-      keywords: keywords || []
+      status: 'ok',
+      data: {
+        keywords: keywords || []
+      }
     });
 
   } catch (err) {
     console.error('[Get Keyword Rankings] Error:', err);
-    return sendJSON(res, 500, { error: err.message });
+    return sendJSON(res, 500, { status: 'error', error: err.message });
   }
 }
 
