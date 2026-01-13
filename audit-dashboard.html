@@ -19,60 +19,98 @@
       window._capturedErrors = window._capturedErrors || [];
       window._capturedWarnings = window._capturedWarnings || [];
       
-      // Store original console methods
-      const originalConsoleError = console.error;
-      const originalConsoleWarn = console.warn;
+      // Store original console methods globally so debugLog can use them
+      window._originalConsoleError = console.error;
+      window._originalConsoleWarn = console.warn;
+      const originalConsoleError = window._originalConsoleError;
+      const originalConsoleWarn = window._originalConsoleWarn;
+      
+      // Flag to prevent infinite recursion
+      let isCapturingError = false;
+      let isCapturingWarn = false;
       
       // Override console.error IMMEDIATELY
       console.error = function(...args) {
-        // Call original first
-        originalConsoleError.apply(console, args);
+        // Prevent infinite recursion
+        if (isCapturingError) {
+          // If we're already capturing, just use original console.error
+          originalConsoleError.apply(console, args);
+          return;
+        }
         
-        // Capture error immediately
-        const errorMessage = args.map(arg => {
-          if (arg instanceof Error) {
-            return `${arg.message}\n${arg.stack || ''}`;
+        isCapturingError = true;
+        try {
+          // Call original first
+          originalConsoleError.apply(console, args);
+          
+          // Capture error immediately
+          const errorMessage = args.map(arg => {
+            if (arg instanceof Error) {
+              return `${arg.message}\n${arg.stack || ''}`;
+            }
+            return String(arg);
+          }).join(' ');
+          
+          const errorEntry = {
+            timestamp: new Date().toISOString(),
+            message: `[CONSOLE ERROR] ${errorMessage}`,
+            type: 'error',
+            args: args.map(a => String(a))
+          };
+          window._capturedErrors.push(errorEntry);
+          
+          // Try to log to debugLog if available (will be set up later)
+          // CRITICAL: Use originalConsoleError to avoid recursion
+          if (typeof window.debugLog === 'function') {
+            try {
+              // Temporarily restore original to prevent recursion
+              const tempError = console.error;
+              console.error = originalConsoleError;
+              window.debugLog(errorEntry.message, 'error');
+              console.error = tempError;
+            } catch (e) {
+              // Ignore if debugLog fails
+            }
           }
-          return String(arg);
-        }).join(' ');
-        
-        const errorEntry = {
-          timestamp: new Date().toISOString(),
-          message: `[CONSOLE ERROR] ${errorMessage}`,
-          type: 'error',
-          args: args.map(a => String(a))
-        };
-        window._capturedErrors.push(errorEntry);
-        
-        // Try to log to debugLog if available (will be set up later)
-        if (typeof window.debugLog === 'function') {
-          try {
-            window.debugLog(errorEntry.message, 'error');
-          } catch (e) {
-            // Ignore if debugLog fails
-          }
+        } finally {
+          isCapturingError = false;
         }
       };
       
       // Override console.warn IMMEDIATELY
       console.warn = function(...args) {
-        originalConsoleWarn.apply(console, args);
+        // Prevent infinite recursion
+        if (isCapturingWarn) {
+          originalConsoleWarn.apply(console, args);
+          return;
+        }
         
-        const warnMessage = args.map(arg => String(arg)).join(' ');
-        const warnEntry = {
-          timestamp: new Date().toISOString(),
-          message: `[CONSOLE WARN] ${warnMessage}`,
-          type: 'warn',
-          args: args.map(a => String(a))
-        };
-        window._capturedWarnings.push(warnEntry);
-        
-        if (typeof window.debugLog === 'function') {
-          try {
-            window.debugLog(warnEntry.message, 'warn');
-          } catch (e) {
-            // Ignore
+        isCapturingWarn = true;
+        try {
+          originalConsoleWarn.apply(console, args);
+          
+          const warnMessage = args.map(arg => String(arg)).join(' ');
+          const warnEntry = {
+            timestamp: new Date().toISOString(),
+            message: `[CONSOLE WARN] ${warnMessage}`,
+            type: 'warn',
+            args: args.map(a => String(a))
+          };
+          window._capturedWarnings.push(warnEntry);
+          
+          if (typeof window.debugLog === 'function') {
+            try {
+              // Use original console methods to prevent recursion
+              const tempWarn = console.warn;
+              console.warn = originalConsoleWarn;
+              window.debugLog(warnEntry.message, 'warn');
+              console.warn = tempWarn;
+            } catch (e) {
+              // Ignore
+            }
           }
+        } finally {
+          isCapturingWarn = false;
         }
       };
       
@@ -19639,8 +19677,20 @@
       
       // Only log critical errors to browser console (for debugging production issues)
       // All other logs go to UI debug console only
+      // CRITICAL: Use original console.error to prevent infinite recursion with our override
       if (type === 'error') {
-        console.error(`[DEBUG ERROR]`, truncatedMessage);
+        // Check if we have access to original console.error
+        if (window._originalConsoleError) {
+          window._originalConsoleError(`[DEBUG ERROR]`, truncatedMessage);
+        } else {
+          // Fallback: use console.error but this might cause recursion
+          // This should only happen if error handlers aren't set up yet
+          try {
+            console.error(`[DEBUG ERROR]`, truncatedMessage);
+          } catch (e) {
+            // If recursion detected, just skip console output
+          }
+        }
       }
     }
     
