@@ -26524,28 +26524,50 @@
       let authorityBySegment = null;
       // CRITICAL: Check if we have queryPages data - if not, authorityBySegment will be null
       // and Authority tab will show "No page data available"
-      // CRITICAL FIX: queryPages is extracted at line 26294 from data.queryPages in calculatePillarScores
-      // But we need to check multiple sources since data structure can vary
-      // Also check window.rankingAiData which might have queryPages from the latest audit
+      // CRITICAL FIX: queryPages is extracted at line 26301 from data.queryPages in calculatePillarScores
+      // The variable 'queryPages' is in scope here (extracted from data.queryPages at line 26301)
+      // But we also need to check data directly since it might be passed differently
       let queryPagesData = [];
+      
+      // Priority 1: Use the queryPages variable extracted at line 26301 (most reliable)
       if (queryPages && Array.isArray(queryPages) && queryPages.length > 0) {
         queryPagesData = queryPages;
-        debugLog(`[Authority] Using queryPages from calculatePillarScores: ${queryPages.length} rows`, 'info');
-      } else if (typeof data !== 'undefined' && data?.queryPages && Array.isArray(data.queryPages) && data.queryPages.length > 0) {
+        debugLog(`[Authority] ✓ Using queryPages from calculatePillarScores (line 26301): ${queryPages.length} rows`, 'success');
+      } 
+      // Priority 2: Check data.queryPages directly (in case variable wasn't set)
+      else if (data && data.queryPages && Array.isArray(data.queryPages) && data.queryPages.length > 0) {
         queryPagesData = data.queryPages;
-        debugLog(`[Authority] Using data.queryPages: ${data.queryPages.length} rows`, 'info');
-      } else if (typeof data !== 'undefined' && data?.searchData?.queryPages && Array.isArray(data.searchData.queryPages) && data.searchData.queryPages.length > 0) {
+        debugLog(`[Authority] ✓ Using data.queryPages directly: ${data.queryPages.length} rows`, 'success');
+      } 
+      // Priority 3: Check data.searchData?.queryPages (nested structure)
+      else if (data && data.searchData && data.searchData.queryPages && Array.isArray(data.searchData.queryPages) && data.searchData.queryPages.length > 0) {
         queryPagesData = data.searchData.queryPages;
-        debugLog(`[Authority] Using data.searchData.queryPages: ${data.searchData.queryPages.length} rows`, 'info');
-      } else if (window.rankingAiData && window.rankingAiData.queryPages && Array.isArray(window.rankingAiData.queryPages) && window.rankingAiData.queryPages.length > 0) {
+        debugLog(`[Authority] ✓ Using data.searchData.queryPages: ${data.searchData.queryPages.length} rows`, 'success');
+      } 
+      // Priority 4: Check window.rankingAiData (from latest audit)
+      else if (window.rankingAiData && window.rankingAiData.queryPages && Array.isArray(window.rankingAiData.queryPages) && window.rankingAiData.queryPages.length > 0) {
         queryPagesData = window.rankingAiData.queryPages;
-        debugLog(`[Authority] Using window.rankingAiData.queryPages: ${window.rankingAiData.queryPages.length} rows`, 'info');
-      } else {
-        const queryPagesLen = queryPages?.length || 'null';
-        const dataQueryPagesLen = (typeof data !== 'undefined' && data?.queryPages) ? data.queryPages.length : 'null';
-        const searchDataQueryPagesLen = (typeof data !== 'undefined' && data?.searchData?.queryPages) ? data.searchData.queryPages.length : 'null';
-        const windowQueryPagesLen = (window.rankingAiData && window.rankingAiData.queryPages) ? window.rankingAiData.queryPages.length : 'null';
-        debugLog(`[Authority] ⚠ No queryPages data found - queryPages=${queryPagesLen}, data.queryPages=${dataQueryPagesLen}, data.searchData?.queryPages=${searchDataQueryPagesLen}, window.rankingAiData.queryPages=${windowQueryPagesLen}`, 'warn');
+        debugLog(`[Authority] ✓ Using window.rankingAiData.queryPages: ${window.rankingAiData.queryPages.length} rows`, 'success');
+      } 
+      // Priority 5: Check saved audit data
+      else {
+        // Try to get from saved audit if available
+        try {
+          const savedAudit = loadAuditResultsSync();
+          if (savedAudit && savedAudit.searchData && savedAudit.searchData.queryPages && Array.isArray(savedAudit.searchData.queryPages) && savedAudit.searchData.queryPages.length > 0) {
+            queryPagesData = savedAudit.searchData.queryPages;
+            debugLog(`[Authority] ✓ Using savedAudit.searchData.queryPages: ${savedAudit.searchData.queryPages.length} rows`, 'success');
+          } else {
+            const queryPagesLen = queryPages?.length || 'null';
+            const dataQueryPagesLen = (data && data.queryPages) ? data.queryPages.length : 'null';
+            const searchDataQueryPagesLen = (data && data.searchData && data.searchData.queryPages) ? data.searchData.queryPages.length : 'null';
+            const windowQueryPagesLen = (window.rankingAiData && window.rankingAiData.queryPages) ? window.rankingAiData.queryPages.length : 'null';
+            const savedQueryPagesLen = (savedAudit && savedAudit.searchData && savedAudit.searchData.queryPages) ? savedAudit.searchData.queryPages.length : 'null';
+            debugLog(`[Authority] ⚠ No queryPages data found - queryPages=${queryPagesLen}, data.queryPages=${dataQueryPagesLen}, data.searchData?.queryPages=${searchDataQueryPagesLen}, window.rankingAiData.queryPages=${windowQueryPagesLen}, savedAudit.searchData.queryPages=${savedQueryPagesLen}`, 'warn');
+          }
+        } catch (e) {
+          debugLog(`[Authority] ⚠ Error checking saved audit for queryPages: ${e.message}`, 'warn');
+        }
       }
       debugLog(`[Authority] Final queryPagesData length: ${queryPagesData.length}`, 'info');
       
@@ -28906,14 +28928,17 @@
               localSignals = freshLocalSignals;
               debugLog('✓ Local signals data fetched successfully', 'success');
               debugLog(`Service areas: ${localSignals.data.serviceAreas?.length || 0}, NAP score: ${localSignals.data.napConsistencyScore || 'N/A'}`, 'info');
-            } else {
-              debugLog('⚠ Local signals returned error, using saved data if available', 'warn');
-            }
           } else {
-            debugLog('⚠ Local signals endpoint not available, using saved data if available', 'warn');
+            const errorText = await localSignalsResponse.text();
+            debugLog(`⚠ Local signals API returned error status: ${localSignalsResponse.status} - ${errorText.substring(0, 200)}`, 'error');
           }
+        } else {
+          const errorText = await localSignalsResponse.text();
+          debugLog(`⚠ Local signals endpoint HTTP error: ${localSignalsResponse.status} - ${errorText.substring(0, 200)}`, 'error');
+        }
         } catch (localSignalsError) {
-          debugLog(`⚠ Local signals error: ${localSignalsError.message}, using saved data if available`, 'warn');
+          debugLog(`⚠ Local signals fetch error: ${localSignalsError.message}`, 'error');
+          console.error('[Local Signals] Fetch error:', localSignalsError);
         }
         
         // If fetch failed but we have saved data, keep using it
