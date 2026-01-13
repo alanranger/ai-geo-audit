@@ -24199,141 +24199,136 @@
               console.log('[updateAuditTimestamp] GSC minimal response status:', gscResponse.status);
               
               if (gscResponse.ok) {
-              const gscData = await gscResponse.json();
-              console.log('[updateAuditTimestamp] GSC minimal data:', {
-                status: gscData.status,
-                hasData: !!gscData.data,
-                auditDate: gscData.data?.auditDate,
-                timestamp: gscData.data?.timestamp,
-                dataKeys: gscData.data ? Object.keys(gscData.data) : []
-              });
-              
-              if (gscData.status === 'ok' && gscData.data && gscData.data.auditDate) {
-                // Now fetch full record to get date_range and timestamp
-                // Include partial audits (GSC-only audits) by setting includePartial=true
-                const fullUrl = apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}&includePartial=true`);
-                console.log('[updateAuditTimestamp] GSC full URL:', fullUrl);
-                let fullResponse;
-                try {
-                  fullResponse = await fetch(fullUrl);
-                } catch (fetchError) {
-                  console.error('[updateAuditTimestamp] Error fetching GSC full audit:', fetchError);
-                  debugLog(`[updateAuditTimestamp] ⚠ Failed to fetch GSC full audit: ${fetchError.message}`, 'warn');
-                  fullResponse = null;
-                }
-                if (!fullResponse) {
-                  console.log('[updateAuditTimestamp] Skipping GSC full data due to fetch error');
-                } else {
-                  console.log('[updateAuditTimestamp] GSC full response status:', fullResponse.status);
+                const gscData = await gscResponse.json();
+                console.log('[updateAuditTimestamp] GSC minimal data:', {
+                  status: gscData.status,
+                  hasData: !!gscData.data,
+                  auditDate: gscData.data?.auditDate,
+                  timestamp: gscData.data?.timestamp,
+                  dataKeys: gscData.data ? Object.keys(gscData.data) : []
+                });
                 
-                if (fullResponse.ok) {
-                  const fullData = await fullResponse.json();
-                  console.log('[updateAuditTimestamp] GSC full data:', {
-                    status: fullData.status,
-                    hasData: !!fullData.data,
-                    auditDate: fullData.data?.auditDate,
-                    timestamp: fullData.data?.timestamp,
-                    hasSearchData: !!fullData.data?.searchData,
-                    searchDataKeys: fullData.data?.searchData ? Object.keys(fullData.data.searchData) : [],
-                    dateRange: fullData.data?.searchData?.dateRange,
-                    dataKeys: fullData.data ? Object.keys(fullData.data) : []
-                  });
-                  
-                  if (fullData.status === 'ok' && fullData.data) {
-                    // Get auditDate from data - this is the date the audit was run
-                    gscAuditDate = fullData.data.auditDate;
-                    
-                    // CRITICAL: Use the timestamp to determine the actual audit date
-                    // The timestamp reflects when the audit actually completed, which may be different from auditDate
-                    // For date range calculation, we want the date when the audit data was captured
-                    let auditDateForCalculation;
-                    if (fullData.data.timestamp) {
-                      // timestamp is milliseconds, convert to date
-                      const timestampDate = new Date(fullData.data.timestamp);
-                      // Use the date part of the timestamp (this is the actual audit completion date)
-                      auditDateForCalculation = new Date(Date.UTC(
-                        timestampDate.getUTCFullYear(),
-                        timestampDate.getUTCMonth(),
-                        timestampDate.getUTCDate()
-                      ));
-                    } else if (gscAuditDate) {
-                      // Fallback to auditDate if timestamp not available
-                      auditDateForCalculation = new Date(gscAuditDate + 'T00:00:00Z');
-                    }
-                    
-                    console.log('[updateAuditTimestamp] Date sources:', {
-                      auditDate: gscAuditDate,
-                      timestamp: fullData.data.timestamp,
-                      timestampAsDate: fullData.data.timestamp ? new Date(fullData.data.timestamp).toISOString().split('T')[0] : null,
-                      auditDateForCalculation: auditDateForCalculation?.toISOString().split('T')[0]
-                    });
-                    
-                    // Get dateRange - always use 28 days for GSC 28-day date range display
-                    const dateRange = 28;
-                    
-                    if (auditDateForCalculation) {
-                      // End date is 2 days before audit date (GSC data lag)
-                      gscEndDate = new Date(auditDateForCalculation);
-                      gscEndDate.setUTCDate(gscEndDate.getUTCDate() - 2);
-                      
-                      // Start date is (dateRange - 1) days before end date to get dateRange days inclusive
-                      // For 28 days: end date is day 28, start date is 27 days earlier = day 1
-                      gscStartDate = new Date(gscEndDate);
-                      gscStartDate.setUTCDate(gscStartDate.getUTCDate() - (dateRange - 1));
-                      
-                      console.log('[updateAuditTimestamp] Date calculation:', {
-                        auditDateForCalculation: auditDateForCalculation.toISOString().split('T')[0],
-                        dateRange,
-                        gscEndDate: gscEndDate.toISOString().split('T')[0],
-                        gscStartDate: gscStartDate.toISOString().split('T')[0],
-                        daysBetween: Math.round((gscEndDate - gscStartDate) / (1000 * 60 * 60 * 24)) + 1
-                      });
-                      
-                      // Get timestamp - timestamp is returned as milliseconds (number), convert to ISO string
-                      if (fullData.data.timestamp) {
-                        // timestamp is a number (milliseconds since epoch)
-                        gscTimestamp = new Date(fullData.data.timestamp).toISOString();
-                      } else if (gscAuditDate) {
-                        // Fallback to audit_date if timestamp not available
-                        gscTimestamp = auditDate.toISOString();
-                      }
-                      
-                      debugLog(`[updateAuditTimestamp] GSC audit found: date=${gscAuditDate}, timestamp=${gscTimestamp}, dateRange=${dateRange}`, 'info');
-                      console.log('[updateAuditTimestamp] ✓ GSC data extracted:', {
-                        gscAuditDate,
-                        gscTimestamp,
-                        dateRange,
-                        gscStartDate: gscStartDate?.toISOString(),
-                        gscEndDate: gscEndDate?.toISOString()
-                      });
-                    } else {
-                      console.warn('[updateAuditTimestamp] GSC auditDate is missing from fullData.data');
-                    }
-                  } else {
-                    debugLog(`[updateAuditTimestamp] GSC audit response invalid: status=${fullData?.status}, hasData=${!!fullData?.data}`, 'warn');
-                    console.warn('[updateAuditTimestamp] GSC full data invalid:', fullData);
+                if (gscData.status === 'ok' && gscData.data && gscData.data.auditDate) {
+                  // Now fetch full record to get date_range and timestamp
+                  // Include partial audits (GSC-only audits) by setting includePartial=true
+                  const fullUrl = apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}&includePartial=true`);
+                  console.log('[updateAuditTimestamp] GSC full URL:', fullUrl);
+                  let fullResponse;
+                  try {
+                    fullResponse = await fetch(fullUrl);
+                  } catch (fetchError) {
+                    console.error('[updateAuditTimestamp] Error fetching GSC full audit:', fetchError);
+                    debugLog(`[updateAuditTimestamp] ⚠ Failed to fetch GSC full audit: ${fetchError.message}`, 'warn');
+                    fullResponse = null;
                   }
+                  if (!fullResponse) {
+                    console.log('[updateAuditTimestamp] Skipping GSC full data due to fetch error');
+                  } else {
+                    console.log('[updateAuditTimestamp] GSC full response status:', fullResponse.status);
+                    
+                    if (fullResponse.ok) {
+                      const fullData = await fullResponse.json();
+                      console.log('[updateAuditTimestamp] GSC full data:', {
+                        status: fullData.status,
+                        hasData: !!fullData.data,
+                        auditDate: fullData.data?.auditDate,
+                        timestamp: fullData.data?.timestamp,
+                        hasSearchData: !!fullData.data?.searchData,
+                        searchDataKeys: fullData.data?.searchData ? Object.keys(fullData.data.searchData) : [],
+                        dateRange: fullData.data?.searchData?.dateRange,
+                        dataKeys: fullData.data ? Object.keys(fullData.data) : []
+                      });
+                      
+                      if (fullData.status === 'ok' && fullData.data) {
+                        // Get auditDate from data - this is the date the audit was run
+                        gscAuditDate = fullData.data.auditDate;
+                        
+                        // CRITICAL: Use the timestamp to determine the actual audit date
+                        // The timestamp reflects when the audit actually completed, which may be different from auditDate
+                        // For date range calculation, we want the date when the audit data was captured
+                        let auditDateForCalculation;
+                        if (fullData.data.timestamp) {
+                          // timestamp is milliseconds, convert to date
+                          const timestampDate = new Date(fullData.data.timestamp);
+                          // Use the date part of the timestamp (this is the actual audit completion date)
+                          auditDateForCalculation = new Date(Date.UTC(
+                            timestampDate.getUTCFullYear(),
+                            timestampDate.getUTCMonth(),
+                            timestampDate.getUTCDate()
+                          ));
+                        } else if (gscAuditDate) {
+                          // Fallback to auditDate if timestamp not available
+                          auditDateForCalculation = new Date(gscAuditDate + 'T00:00:00Z');
+                        }
+                        
+                        console.log('[updateAuditTimestamp] Date sources:', {
+                          auditDate: gscAuditDate,
+                          timestamp: fullData.data.timestamp,
+                          timestampAsDate: fullData.data.timestamp ? new Date(fullData.data.timestamp).toISOString().split('T')[0] : null,
+                          auditDateForCalculation: auditDateForCalculation?.toISOString().split('T')[0]
+                        });
+                        
+                        // Get dateRange - always use 28 days for GSC 28-day date range display
+                        const dateRange = 28;
+                        
+                        if (auditDateForCalculation) {
+                          // End date is 2 days before audit date (GSC data lag)
+                          gscEndDate = new Date(auditDateForCalculation);
+                          gscEndDate.setUTCDate(gscEndDate.getUTCDate() - 2);
+                          
+                          // Start date is (dateRange - 1) days before end date to get dateRange days inclusive
+                          // For 28 days: end date is day 28, start date is 27 days earlier = day 1
+                          gscStartDate = new Date(gscEndDate);
+                          gscStartDate.setUTCDate(gscStartDate.getUTCDate() - (dateRange - 1));
+                          
+                          console.log('[updateAuditTimestamp] Date calculation:', {
+                            auditDateForCalculation: auditDateForCalculation.toISOString().split('T')[0],
+                            dateRange,
+                            gscEndDate: gscEndDate.toISOString().split('T')[0],
+                            gscStartDate: gscStartDate.toISOString().split('T')[0],
+                            daysBetween: Math.round((gscEndDate - gscStartDate) / (1000 * 60 * 60 * 24)) + 1
+                          });
+                          
+                          // Get timestamp - timestamp is returned as milliseconds (number), convert to ISO string
+                          if (fullData.data.timestamp) {
+                            // timestamp is a number (milliseconds since epoch)
+                            gscTimestamp = new Date(fullData.data.timestamp).toISOString();
+                          } else if (gscAuditDate) {
+                            // Fallback to audit_date if timestamp not available
+                            gscTimestamp = auditDate.toISOString();
+                          }
+                          
+                          debugLog(`[updateAuditTimestamp] GSC audit found: date=${gscAuditDate}, timestamp=${gscTimestamp}, dateRange=${dateRange}`, 'info');
+                          console.log('[updateAuditTimestamp] ✓ GSC data extracted:', {
+                            gscAuditDate,
+                            gscTimestamp,
+                            dateRange,
+                            gscStartDate: gscStartDate?.toISOString(),
+                            gscEndDate: gscEndDate?.toISOString()
+                          });
+                        } else {
+                          console.warn('[updateAuditTimestamp] GSC auditDate is missing from fullData.data');
+                        }
+                      } else {
+                        debugLog(`[updateAuditTimestamp] GSC audit response invalid: status=${fullData?.status}, hasData=${!!fullData?.data}`, 'warn');
+                        console.warn('[updateAuditTimestamp] GSC full data invalid:', fullData);
+                      }
+                    } else {
+                      const errorText = await fullResponse.text();
+                      debugLog(`[updateAuditTimestamp] GSC full audit fetch failed: ${fullResponse.status}`, 'warn');
+                      console.error('[updateAuditTimestamp] GSC full fetch failed:', fullResponse.status, errorText);
+                    }
+                  } // Close else block for fullResponse
                 } else {
-                  const errorText = await fullResponse.text();
-                  debugLog(`[updateAuditTimestamp] GSC full audit fetch failed: ${fullResponse.status}`, 'warn');
-                  console.error('[updateAuditTimestamp] GSC full fetch failed:', fullResponse.status, errorText);
+                  debugLog(`[updateAuditTimestamp] GSC minimal audit check failed: status=${gscData?.status}, hasData=${!!gscData?.data}, hasAuditDate=${!!gscData?.data?.auditDate}`, 'warn');
+                  console.warn('[updateAuditTimestamp] GSC minimal check failed:', gscData);
                 }
-                } // Close else block for fullResponse
               } else {
                 const errorText = await gscResponse.text();
                 debugLog(`[updateAuditTimestamp] GSC minimal audit fetch failed: ${gscResponse.status}`, 'warn');
                 console.error('[updateAuditTimestamp] GSC minimal fetch failed:', gscResponse.status, errorText);
               }
             } // Close else block for gscResponse
-              } else {
-                debugLog(`[updateAuditTimestamp] GSC minimal audit check failed: status=${gscData?.status}, hasData=${!!gscData?.data}, hasAuditDate=${!!gscData?.data?.auditDate}`, 'warn');
-                console.warn('[updateAuditTimestamp] GSC minimal check failed:', gscData);
-              }
-            } else {
-              const errorText = await gscResponse.text();
-              debugLog(`[updateAuditTimestamp] GSC minimal audit fetch failed: ${gscResponse.status}`, 'warn');
-              console.error('[updateAuditTimestamp] GSC minimal fetch failed:', gscResponse.status, errorText);
-            }
           } catch (e) {
             debugLog(`[updateAuditTimestamp] Error fetching GSC audit: ${e?.message || e}`, 'error');
             console.error('[updateAuditTimestamp] Error fetching GSC audit:', e);
