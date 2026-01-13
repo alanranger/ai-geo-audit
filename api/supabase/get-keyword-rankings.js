@@ -63,10 +63,10 @@ export default async function handler(req, res) {
       // CRITICAL FIX: Query for ANY audit_result with ranking_ai_data, not just matching audit_date
       // This ensures we get the timestamp even if audit_date formats differ slightly
       if (latestRow?.audit_date) {
-        // First try exact match
+        // First try exact match - check for non-null AND non-empty ranking_ai_data
         let { data: auditResult, error: auditError } = await supabase
           .from('audit_results')
-          .select('timestamp, audit_date')
+          .select('timestamp, audit_date, ranking_ai_data')
           .eq('property_url', propertyUrl)
           .eq('audit_date', latestRow.audit_date)
           .not('ranking_ai_data', 'is', null)
@@ -74,31 +74,61 @@ export default async function handler(req, res) {
           .limit(1)
           .maybeSingle(); // Use maybeSingle() instead of single() to avoid error if no rows
 
+        // Check if ranking_ai_data is not empty (might be {} instead of null)
+        if (auditResult && auditResult.ranking_ai_data) {
+          try {
+            const rankingData = typeof auditResult.ranking_ai_data === 'string' 
+              ? JSON.parse(auditResult.ranking_ai_data) 
+              : auditResult.ranking_ai_data;
+            // If it's an empty object or has no combinedRows, treat as no data
+            if (!rankingData || (typeof rankingData === 'object' && Object.keys(rankingData).length === 0)) {
+              auditResult = null;
+              auditError = { message: 'ranking_ai_data is empty object' };
+            }
+          } catch (e) {
+            // If parsing fails, treat as no data
+            auditResult = null;
+            auditError = { message: 'Failed to parse ranking_ai_data' };
+          }
+        }
+
         // If no exact match or no timestamp, try to find any audit_result with ranking_ai_data for this property
         if (auditError || !auditResult?.timestamp) {
           const { data: anyAuditResult, error: anyError } = await supabase
             .from('audit_results')
-            .select('timestamp, audit_date')
+            .select('timestamp, audit_date, ranking_ai_data')
             .eq('property_url', propertyUrl)
             .not('ranking_ai_data', 'is', null)
             .order('timestamp', { ascending: false })
             .limit(1)
             .maybeSingle(); // Use maybeSingle() instead of single()
           
-          if (!anyError && anyAuditResult?.timestamp) {
-            auditResult = anyAuditResult;
-            auditError = null;
-            console.log(`[Get Keyword Rankings] Found timestamp from any audit_result: ${auditResult.timestamp}`);
-          } else {
+          // Check if ranking_ai_data is not empty
+          if (anyAuditResult && anyAuditResult.ranking_ai_data) {
+            try {
+              const rankingData = typeof anyAuditResult.ranking_ai_data === 'string' 
+                ? JSON.parse(anyAuditResult.ranking_ai_data) 
+                : anyAuditResult.ranking_ai_data;
+              if (rankingData && typeof rankingData === 'object' && Object.keys(rankingData).length > 0) {
+                auditResult = anyAuditResult;
+                auditError = null;
+                console.log(`[Get Keyword Rankings] Found timestamp from any audit_result: ${auditResult.timestamp}`);
+              }
+            } catch (e) {
+              console.log(`[Get Keyword Rankings] Failed to parse ranking_ai_data: ${e.message}`);
+            }
+          }
+          
+          if (anyError && !auditResult) {
             console.log(`[Get Keyword Rankings] No audit_result with ranking_ai_data found. Error: ${anyError?.message || 'none'}`);
           }
         }
 
         if (!auditError && auditResult?.timestamp) {
           latestTimestamp = auditResult.timestamp;
-          console.log(`[Get Keyword Rankings] Using timestamp: ${latestTimestamp}`);
+          console.log(`[Get Keyword Rankings] Using timestamp: ${latestTimestamp} from audit_date: ${auditResult.audit_date}`);
         } else {
-          console.log(`[Get Keyword Rankings] No timestamp found. auditError: ${auditError?.message || 'none'}, hasTimestamp: ${!!auditResult?.timestamp}`);
+          console.log(`[Get Keyword Rankings] No timestamp found. auditError: ${auditError?.message || 'none'}, hasTimestamp: ${!!auditResult?.timestamp}, audit_date: ${latestRow.audit_date}`);
         }
       }
 
