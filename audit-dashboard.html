@@ -59,6 +59,17 @@
           };
           window._capturedErrors.push(errorEntry);
           
+          // Persist to localStorage so errors don't disappear on refresh
+          try {
+            const stored = JSON.parse(localStorage.getItem('_capturedErrors') || '[]');
+            stored.push(errorEntry);
+            // Keep only last 100 errors to avoid quota issues
+            if (stored.length > 100) stored.shift();
+            localStorage.setItem('_capturedErrors', JSON.stringify(stored));
+          } catch (e) {
+            // Ignore localStorage errors
+          }
+          
           // Try to log to debugLog if available (will be set up later)
           // CRITICAL: Use originalConsoleError to avoid recursion
           if (typeof window.debugLog === 'function') {
@@ -132,6 +143,17 @@
         };
         window._capturedErrors.push(errorEntry);
         
+        // Persist to localStorage so errors don't disappear on refresh
+        try {
+          const stored = JSON.parse(localStorage.getItem('_capturedErrors') || '[]');
+          stored.push(errorEntry);
+          // Keep only last 100 errors to avoid quota issues
+          if (stored.length > 100) stored.shift();
+          localStorage.setItem('_capturedErrors', JSON.stringify(stored));
+        } catch (e) {
+          // Ignore localStorage errors
+        }
+        
         if (typeof window.debugLog === 'function') {
           try {
             window.debugLog(fullError, 'error');
@@ -158,6 +180,17 @@
           reason: reason instanceof Error ? reason.message : String(reason)
         };
         window._capturedErrors.push(errorEntry);
+        
+        // Persist to localStorage so errors don't disappear on refresh
+        try {
+          const stored = JSON.parse(localStorage.getItem('_capturedErrors') || '[]');
+          stored.push(errorEntry);
+          // Keep only last 100 errors to avoid quota issues
+          if (stored.length > 100) stored.shift();
+          localStorage.setItem('_capturedErrors', JSON.stringify(stored));
+        } catch (e) {
+          // Ignore localStorage errors
+        }
         
         if (typeof window.debugLog === 'function') {
           try {
@@ -26426,8 +26459,9 @@
       let authorityBySegment = null;
       // CRITICAL: Check if we have queryPages data - if not, authorityBySegment will be null
       // and Authority tab will show "No page data available"
-      const queryPagesData = data.queryPages || [];
-      debugLog(`[Authority] queryPagesData length: ${queryPagesData.length}`, 'info');
+      // Check both data.queryPages and data.searchData?.queryPages (different storage formats)
+      const queryPagesData = data.queryPages || data.searchData?.queryPages || [];
+      debugLog(`[Authority] queryPagesData length: ${queryPagesData.length} (checked data.queryPages and data.searchData?.queryPages)`, 'info');
       
       if (behaviourScoresSegmented && rankingScoresSegmented && queryPagesData.length > 0) {
         // Get page-level data for top pages computation
@@ -28485,9 +28519,17 @@
       
       // Phase 1: Calculate AI Summary Likelihood using new method (overlay only, not part of GAIO score)
       // Handle both number format (legacy) and object format (if it exists)
-      const snippetReadinessScore = typeof snippetReadiness === 'number' 
+      let snippetReadinessScore = typeof snippetReadiness === 'number' 
         ? snippetReadiness 
         : (snippetReadiness?.overallScore || 0);
+      
+      // CRITICAL FIX: If snippetReadiness is 0 but we have scores, recalculate it
+      // This fixes the issue where snippet readiness shows 0/100 but AI summary shows 80
+      if (snippetReadinessScore === 0 && scores && typeof calculateSnippetReadiness === 'function') {
+        snippetReadinessScore = calculateSnippetReadiness(scores, data || {});
+        debugLog(`[calculateAiGeoScore] Recalculated snippetReadiness from scores: ${snippetReadinessScore} (was 0)`, 'info');
+      }
+      
       const brandScore = scores.brandOverlay?.score || 0;
       
       // Use new computeAiSummaryLikelihood if we have snippet readiness data (brandScore can be 0)
@@ -30360,9 +30402,16 @@ Final Score: ${aiGeoHealth.aiGeoScore}/100`;
                         
                         // Build AI Summary breakdown
                         // Handle both number format (legacy) and object format (if it exists)
-                        const snippetReadinessScore = typeof snippetReadiness === 'number' 
+                        let snippetReadinessScore = typeof snippetReadiness === 'number' 
                           ? snippetReadiness 
                           : (snippetReadiness?.overallScore || 0);
+                        
+                        // CRITICAL FIX: If snippetReadiness is 0 but we have scores, recalculate it
+                        // This ensures the displayed value matches the calculated AI summary score
+                        if (snippetReadinessScore === 0 && scores && typeof calculateSnippetReadiness === 'function') {
+                          snippetReadinessScore = calculateSnippetReadiness(scores, data || {});
+                        }
+                        
                         const visibilityScore = scores.visibility || 0;
                         const brandScore = scores.brandOverlay?.score || 0;
                         
