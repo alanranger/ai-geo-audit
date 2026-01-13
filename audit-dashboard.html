@@ -26470,9 +26470,10 @@
       let authorityBySegment = null;
       // CRITICAL: Check if we have queryPages data - if not, authorityBySegment will be null
       // and Authority tab will show "No page data available"
-      // Check both data.queryPages and data.searchData?.queryPages (different storage formats)
-      const queryPagesData = data.queryPages || data.searchData?.queryPages || [];
-      debugLog(`[Authority] queryPagesData length: ${queryPagesData.length} (checked data.queryPages and data.searchData?.queryPages)`, 'info');
+      // Use the already-extracted queryPages variable, but also check data.searchData?.queryPages as fallback
+      // (different storage formats - sometimes data is nested in searchData)
+      const queryPagesData = queryPages && queryPages.length > 0 ? queryPages : (data.searchData?.queryPages || []);
+      debugLog(`[Authority] queryPagesData length: ${queryPagesData.length} (using queryPages=${queryPages?.length || 0} or data.searchData?.queryPages=${data.searchData?.queryPages?.length || 0})`, 'info');
       
       if (behaviourScoresSegmented && rankingScoresSegmented && queryPagesData.length > 0) {
         // Get page-level data for top pages computation
