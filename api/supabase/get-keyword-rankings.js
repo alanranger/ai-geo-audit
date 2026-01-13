@@ -72,9 +72,9 @@ export default async function handler(req, res) {
           .not('ranking_ai_data', 'is', null)
           .order('timestamp', { ascending: false })
           .limit(1)
-          .single();
+          .maybeSingle(); // Use maybeSingle() instead of single() to avoid error if no rows
 
-        // If no exact match, try to find any audit_result with ranking_ai_data for this property
+        // If no exact match or no timestamp, try to find any audit_result with ranking_ai_data for this property
         if (auditError || !auditResult?.timestamp) {
           const { data: anyAuditResult, error: anyError } = await supabase
             .from('audit_results')
@@ -83,16 +83,22 @@ export default async function handler(req, res) {
             .not('ranking_ai_data', 'is', null)
             .order('timestamp', { ascending: false })
             .limit(1)
-            .single();
+            .maybeSingle(); // Use maybeSingle() instead of single()
           
           if (!anyError && anyAuditResult?.timestamp) {
             auditResult = anyAuditResult;
             auditError = null;
+            console.log(`[Get Keyword Rankings] Found timestamp from any audit_result: ${auditResult.timestamp}`);
+          } else {
+            console.log(`[Get Keyword Rankings] No audit_result with ranking_ai_data found. Error: ${anyError?.message || 'none'}`);
           }
         }
 
         if (!auditError && auditResult?.timestamp) {
           latestTimestamp = auditResult.timestamp;
+          console.log(`[Get Keyword Rankings] Using timestamp: ${latestTimestamp}`);
+        } else {
+          console.log(`[Get Keyword Rankings] No timestamp found. auditError: ${auditError?.message || 'none'}, hasTimestamp: ${!!auditResult?.timestamp}`);
         }
       }
 
