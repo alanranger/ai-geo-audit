@@ -26573,9 +26573,16 @@
         }
       }
       debugLog(`[Authority] Final queryPagesData length: ${queryPagesData.length}`, 'info');
-      debugLog(`[Authority] Segmented scores check: behaviourScoresSegmented=${!!behaviourScoresSegmented}, rankingScoresSegmented=${!!rankingScoresSegmented}, queryPagesData.length=${queryPagesData.length}`, 'info');
       
-      if (behaviourScoresSegmented && rankingScoresSegmented && queryPagesData.length > 0) {
+      // CRITICAL FIX: Get segmented scores from scores.authority if not in scope
+      // This handles the case where displayDashboard is called with pre-calculated scores
+      const behaviourScoresForAuthority = behaviourScoresSegmented || (scores?.authority?.behaviourScoresSegmented) || null;
+      const rankingScoresForAuthority = rankingScoresSegmented || (scores?.authority?.rankingScoresSegmented) || null;
+      
+      debugLog(`[Authority] Segmented scores check: behaviourScoresSegmented=${!!behaviourScoresForAuthority}, rankingScoresSegmented=${!!rankingScoresForAuthority}, queryPagesData.length=${queryPagesData.length}`, 'info');
+      debugLog(`[Authority] Segmented scores source: behaviourScoresSegmented=${behaviourScoresSegmented ? 'local' : (scores?.authority?.behaviourScoresSegmented ? 'scores.authority' : 'null')}, rankingScoresSegmented=${rankingScoresSegmented ? 'local' : (scores?.authority?.rankingScoresSegmented ? 'scores.authority' : 'null')}`, 'info');
+      
+      if (behaviourScoresForAuthority && rankingScoresForAuthority && queryPagesData.length > 0) {
         debugLog(`[Authority] ✓ All conditions met - building authorityBySegment`, 'success');
         // Get page-level data for top pages computation
         
@@ -26604,16 +26611,16 @@
         
         // Non-education (exclude education pages)
         const authorityNonEducation = computeAuthorityFromComponents({
-          behaviour: behaviourScoresSegmented.nonBlog,
-          ranking: rankingScoresSegmented.nonBlog,
+          behaviour: behaviourScoresForAuthority.nonBlog,
+          ranking: rankingScoresForAuthority.nonBlog,
           backlinks: backlinkScore, // Same across all segments
           reviews: reviewScore      // Same across all segments
         });
         
         // Money pages only
         const authorityMoney = computeAuthorityFromComponents({
-          behaviour: behaviourScoresSegmented.money,
-          ranking: rankingScoresSegmented.money,
+          behaviour: behaviourScoresForAuthority.money,
+          ranking: rankingScoresForAuthority.money,
           backlinks: backlinkScore, // Same across all segments
           reviews: reviewScore      // Same across all segments
         });
@@ -28572,7 +28579,10 @@
         serviceArea,
         authority: {
           score: authority, // Main score (default: all pages)
-          bySegment: authorityBySegment // Per-segment Authority scores (if available)
+          bySegment: authorityBySegment, // Per-segment Authority scores (if available)
+          // CRITICAL: Store segmented scores so Authority tab can access them
+          behaviourScoresSegmented: behaviourScoresSegmented,
+          rankingScoresSegmented: rankingScoresSegmented
         },
         visibility,
         contentSchema,
