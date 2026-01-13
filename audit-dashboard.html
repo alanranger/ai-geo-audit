@@ -10,6 +10,129 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
   <script>
+    // CRITICAL: Set up error capture IMMEDIATELY, before any other code runs
+    // This must be the very first script to execute
+    (function() {
+      'use strict';
+      
+      // Initialize error storage arrays immediately
+      window._capturedErrors = window._capturedErrors || [];
+      window._capturedWarnings = window._capturedWarnings || [];
+      
+      // Store original console methods
+      const originalConsoleError = console.error;
+      const originalConsoleWarn = console.warn;
+      
+      // Override console.error IMMEDIATELY
+      console.error = function(...args) {
+        // Call original first
+        originalConsoleError.apply(console, args);
+        
+        // Capture error immediately
+        const errorMessage = args.map(arg => {
+          if (arg instanceof Error) {
+            return `${arg.message}\n${arg.stack || ''}`;
+          }
+          return String(arg);
+        }).join(' ');
+        
+        const errorEntry = {
+          timestamp: new Date().toISOString(),
+          message: `[CONSOLE ERROR] ${errorMessage}`,
+          type: 'error',
+          args: args.map(a => String(a))
+        };
+        window._capturedErrors.push(errorEntry);
+        
+        // Try to log to debugLog if available (will be set up later)
+        if (typeof window.debugLog === 'function') {
+          try {
+            window.debugLog(errorEntry.message, 'error');
+          } catch (e) {
+            // Ignore if debugLog fails
+          }
+        }
+      };
+      
+      // Override console.warn IMMEDIATELY
+      console.warn = function(...args) {
+        originalConsoleWarn.apply(console, args);
+        
+        const warnMessage = args.map(arg => String(arg)).join(' ');
+        const warnEntry = {
+          timestamp: new Date().toISOString(),
+          message: `[CONSOLE WARN] ${warnMessage}`,
+          type: 'warn',
+          args: args.map(a => String(a))
+        };
+        window._capturedWarnings.push(warnEntry);
+        
+        if (typeof window.debugLog === 'function') {
+          try {
+            window.debugLog(warnEntry.message, 'warn');
+          } catch (e) {
+            // Ignore
+          }
+        }
+      };
+      
+      // Global error handler - set up immediately
+      window.addEventListener('error', function(event) {
+        const errorMsg = `[UNCAUGHT ERROR] ${event.message} at ${event.filename}:${event.lineno}:${event.colno}`;
+        const fullError = event.error && event.error.stack 
+          ? `${errorMsg}\nStack: ${event.error.stack}`
+          : errorMsg;
+        
+        const errorEntry = {
+          timestamp: new Date().toISOString(),
+          message: fullError,
+          type: 'error',
+          filename: event.filename,
+          lineno: event.lineno,
+          colno: event.colno,
+          error: event.error ? event.error.message : null
+        };
+        window._capturedErrors.push(errorEntry);
+        
+        if (typeof window.debugLog === 'function') {
+          try {
+            window.debugLog(fullError, 'error');
+          } catch (e) {
+            // Ignore
+          }
+        }
+      }, true);
+      
+      // Unhandled promise rejection handler - set up immediately
+      window.addEventListener('unhandledrejection', function(event) {
+        const reason = event.reason;
+        let errorMsg = '[UNHANDLED PROMISE REJECTION] ';
+        if (reason instanceof Error) {
+          errorMsg += `${reason.message}\nStack: ${reason.stack || ''}`;
+        } else {
+          errorMsg += String(reason);
+        }
+        
+        const errorEntry = {
+          timestamp: new Date().toISOString(),
+          message: errorMsg,
+          type: 'error',
+          reason: reason instanceof Error ? reason.message : String(reason)
+        };
+        window._capturedErrors.push(errorEntry);
+        
+        if (typeof window.debugLog === 'function') {
+          try {
+            window.debugLog(errorMsg, 'error');
+          } catch (e) {
+            // Ignore
+          }
+        }
+      }, true);
+      
+      console.log('[Error Capture] Global error handlers installed immediately');
+    })();
+    
     // Try to load config.js if it exists (for local development)
     // Note: config.js is gitignored and won't be deployed to Vercel
     // Silently fail if config.js doesn't exist (expected on Vercel)
@@ -19554,129 +19677,8 @@
       debugLog('Debug log cleared', 'info');
     }
     
-    // Global error handlers to capture errors that might disappear from console
-    // CRITICAL: Set these up IMMEDIATELY, before any other code runs
-    // Store errors in a persistent array that won't be cleared
-    window._capturedErrors = window._capturedErrors || [];
-    window._capturedWarnings = window._capturedWarnings || [];
-    
-    // Store original console methods
-    const originalConsoleError = console.error;
-    const originalConsoleWarn = console.warn;
-    const originalConsoleLog = console.log;
-    
-    // Override console.error to capture and persist errors
-    console.error = function(...args) {
-      // Call original console.error
-      originalConsoleError.apply(console, args);
-      
-      // Capture error immediately (before debugLog might be available)
-      const errorMessage = args.map(arg => {
-        if (arg instanceof Error) {
-          return `${arg.message}\n${arg.stack || ''}`;
-        }
-        return String(arg);
-      }).join(' ');
-      
-      const errorEntry = {
-        timestamp: new Date().toISOString(),
-        message: `[CONSOLE ERROR] ${errorMessage}`,
-        type: 'error'
-      };
-      window._capturedErrors.push(errorEntry);
-      
-      // Also log to debug log if available
-      if (typeof debugLog === 'function') {
-        debugLog(errorEntry.message, 'error');
-      } else {
-        // If debugLog not available yet, store for later
-        setTimeout(() => {
-          if (typeof debugLog === 'function') {
-            debugLog(errorEntry.message, 'error');
-          }
-        }, 100);
-      }
-    };
-    
-    // Override console.warn to capture warnings
-    console.warn = function(...args) {
-      // Call original console.warn
-      originalConsoleWarn.apply(console, args);
-      
-      // Capture warning immediately
-      const warnMessage = args.map(arg => String(arg)).join(' ');
-      const warnEntry = {
-        timestamp: new Date().toISOString(),
-        message: `[CONSOLE WARN] ${warnMessage}`,
-        type: 'warn'
-      };
-      window._capturedWarnings.push(warnEntry);
-      
-      // Also log to debug log if available
-      if (typeof debugLog === 'function') {
-        debugLog(warnEntry.message, 'warn');
-      } else {
-        setTimeout(() => {
-          if (typeof debugLog === 'function') {
-            debugLog(warnEntry.message, 'warn');
-          }
-        }, 100);
-      }
-    };
-    
-    // Global error handler for uncaught errors (set up immediately)
-    window.addEventListener('error', (event) => {
-      const errorMsg = `[UNCAUGHT ERROR] ${event.message} at ${event.filename}:${event.lineno}:${event.colno}`;
-      const fullError = event.error && event.error.stack 
-        ? `${errorMsg}\nStack: ${event.error.stack}`
-        : errorMsg;
-      
-      const errorEntry = {
-        timestamp: new Date().toISOString(),
-        message: fullError,
-        type: 'error'
-      };
-      window._capturedErrors.push(errorEntry);
-      
-      if (typeof debugLog === 'function') {
-        debugLog(fullError, 'error');
-      } else {
-        setTimeout(() => {
-          if (typeof debugLog === 'function') {
-            debugLog(fullError, 'error');
-          }
-        }, 100);
-      }
-    }, true); // Use capture phase to catch more errors
-    
-    // Global handler for unhandled promise rejections (set up immediately)
-    window.addEventListener('unhandledrejection', (event) => {
-      const reason = event.reason;
-      let errorMsg = '[UNHANDLED PROMISE REJECTION] ';
-      if (reason instanceof Error) {
-        errorMsg += `${reason.message}\nStack: ${reason.stack || ''}`;
-      } else {
-        errorMsg += String(reason);
-      }
-      
-      const errorEntry = {
-        timestamp: new Date().toISOString(),
-        message: errorMsg,
-        type: 'error'
-      };
-      window._capturedErrors.push(errorEntry);
-      
-      if (typeof debugLog === 'function') {
-        debugLog(errorMsg, 'error');
-      } else {
-        setTimeout(() => {
-          if (typeof debugLog === 'function') {
-            debugLog(errorMsg, 'error');
-          }
-        }, 100);
-      }
-    }, true);
-    
+    // NOTE: Error handlers are set up in the <head> section (line ~12) to run IMMEDIATELY
+    // This ensures errors are captured before any other code runs
     // Function to display all captured errors in debug log (call after page loads)
     window.displayCapturedErrors = function() {
       if (typeof debugLog !== 'function') return;
