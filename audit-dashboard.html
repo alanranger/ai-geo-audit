@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- Cache-busting: 2026-01-13T19:30:00Z - Fixed fetch error handling and toFixed null checks -->
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -24183,10 +24184,21 @@
             // Include partial audits (GSC-only audits) by setting includePartial=true
             const gscUrl = apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}&minimal=true&includePartial=true`);
             console.log('[updateAuditTimestamp] GSC minimal URL:', gscUrl);
-            const gscResponse = await fetch(gscUrl);
-            console.log('[updateAuditTimestamp] GSC minimal response status:', gscResponse.status);
-            
-            if (gscResponse.ok) {
+            let gscResponse;
+            try {
+              gscResponse = await fetch(gscUrl);
+            } catch (fetchError) {
+              console.error('[updateAuditTimestamp] Error fetching GSC audit:', fetchError);
+              debugLog(`[updateAuditTimestamp] ⚠ Failed to fetch GSC audit: ${fetchError.message}`, 'warn');
+              // Continue with keyword rankings data if GSC fetch fails
+              gscResponse = null;
+            }
+            if (!gscResponse) {
+              console.log('[updateAuditTimestamp] Skipping GSC data due to fetch error');
+            } else {
+              console.log('[updateAuditTimestamp] GSC minimal response status:', gscResponse.status);
+              
+              if (gscResponse.ok) {
               const gscData = await gscResponse.json();
               console.log('[updateAuditTimestamp] GSC minimal data:', {
                 status: gscData.status,
@@ -24201,8 +24213,18 @@
                 // Include partial audits (GSC-only audits) by setting includePartial=true
                 const fullUrl = apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}&includePartial=true`);
                 console.log('[updateAuditTimestamp] GSC full URL:', fullUrl);
-                const fullResponse = await fetch(fullUrl);
-                console.log('[updateAuditTimestamp] GSC full response status:', fullResponse.status);
+                let fullResponse;
+                try {
+                  fullResponse = await fetch(fullUrl);
+                } catch (fetchError) {
+                  console.error('[updateAuditTimestamp] Error fetching GSC full audit:', fetchError);
+                  debugLog(`[updateAuditTimestamp] ⚠ Failed to fetch GSC full audit: ${fetchError.message}`, 'warn');
+                  fullResponse = null;
+                }
+                if (!fullResponse) {
+                  console.log('[updateAuditTimestamp] Skipping GSC full data due to fetch error');
+                } else {
+                  console.log('[updateAuditTimestamp] GSC full response status:', fullResponse.status);
                 
                 if (fullResponse.ok) {
                   const fullData = await fullResponse.json();
@@ -24296,6 +24318,13 @@
                   debugLog(`[updateAuditTimestamp] GSC full audit fetch failed: ${fullResponse.status}`, 'warn');
                   console.error('[updateAuditTimestamp] GSC full fetch failed:', fullResponse.status, errorText);
                 }
+                } // Close else block for fullResponse
+              } else {
+                const errorText = await gscResponse.text();
+                debugLog(`[updateAuditTimestamp] GSC minimal audit fetch failed: ${gscResponse.status}`, 'warn');
+                console.error('[updateAuditTimestamp] GSC minimal fetch failed:', gscResponse.status, errorText);
+              }
+            } // Close else block for gscResponse
               } else {
                 debugLog(`[updateAuditTimestamp] GSC minimal audit check failed: status=${gscData?.status}, hasData=${!!gscData?.data}, hasAuditDate=${!!gscData?.data?.auditDate}`, 'warn');
                 console.warn('[updateAuditTimestamp] GSC minimal check failed:', gscData);
@@ -31098,7 +31127,7 @@ Final Score: ${score}/100`;
                     const backlinksScore = (selectedAuthority && typeof selectedAuthority.backlinks === 'number' && !isNaN(selectedAuthority.backlinks)) ? selectedAuthority.backlinks : 0;
                     return `
                       <div style="margin-top: 0.75rem; margin-bottom: 0.5rem;"><strong>Backlink Metrics:</strong></div>
-                      <div>Backlink score: ${backlinksScore.toFixed(0)}</div>
+                      <div>Backlink score: ${(backlinksScore !== null && typeof backlinksScore === 'number' && !isNaN(backlinksScore)) ? backlinksScore.toFixed(0) : '0'}</div>
                       <div style="font-size: 0.7rem; color: #999;">Detailed metrics not available</div>
                     `;
                   }
