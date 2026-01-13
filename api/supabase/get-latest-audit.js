@@ -237,6 +237,7 @@ export default async function handler(req, res) {
     // Fetch keyword rankings from keyword_rankings table for this audit_date and property_url
     // Re-enabled: Fetching from keyword_rankings table with proper limits to prevent timeouts
     let rankingAiData = null;
+    let rankingDataAuditDate = null; // Track the actual audit_date of ranking data (may differ from latest audit)
     
     // Re-enabled: Keyword rankings fetch with proper limits (2000 rows max)
     try {
@@ -259,6 +260,9 @@ export default async function handler(req, res) {
       if (keywordRankingsResponse.ok) {
         keywordRows = await keywordRankingsResponse.json();
         console.log(`[get-latest-audit] Found ${keywordRows?.length || 0} keyword rows for audit_date=${auditDate}`);
+        if (keywordRows && keywordRows.length > 0) {
+          rankingDataAuditDate = auditDate; // Ranking data matches latest audit date
+        }
       } else {
         const errorText = await keywordRankingsResponse.text();
         console.log(`[get-latest-audit] Query with audit_date=${auditDate} failed: ${keywordRankingsResponse.status} - ${errorText}`);
@@ -291,7 +295,11 @@ export default async function handler(req, res) {
             const dates = Object.keys(rowsByDate).sort().reverse();
             if (dates.length > 0) {
               keywordRows = rowsByDate[dates[0]];
-              console.log(`[get-latest-audit] Found ${keywordRows.length} keyword rows for most recent audit_date=${dates[0]}`);
+              rankingDataAuditDate = dates[0]; // Store the actual audit_date of the ranking data
+              console.log(`[get-latest-audit] Found ${keywordRows.length} keyword rows for most recent audit_date=${rankingDataAuditDate}`);
+              if (rankingDataAuditDate !== auditDate) {
+                console.log(`[get-latest-audit] Ranking data is from older audit (${rankingDataAuditDate}) than latest audit (${auditDate})`);
+              }
             }
           }
         }
@@ -432,7 +440,9 @@ export default async function handler(req, res) {
               avg_position_volume_weighted: avgPositionVolumeWeighted,
               keywords_used_for_avg: validRankingRows.length,
               keywords_with_volume: keywordsWithVolume.length
-            }
+            },
+            // Include the actual audit_date of the ranking data (may differ from latest audit)
+            audit_date: rankingDataAuditDate || null
           };
           console.log(`[get-latest-audit] Successfully reconstructed rankingAiData with ${combinedRows.length} keywords`);
         } else {
