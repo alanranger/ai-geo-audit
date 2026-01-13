@@ -26517,14 +26517,12 @@
       let authorityBySegment = null;
       // CRITICAL: Check if we have queryPages data - if not, authorityBySegment will be null
       // and Authority tab will show "No page data available"
-      // CRITICAL FIX: Use the already-extracted queryPages variable (extracted at line 26247 from data.queryPages)
-      // Also check data.searchData?.queryPages as fallback for different storage formats
-      // IMPORTANT: queryPages is already in scope from line 26247, so use it directly
-      // Also check if queryPages is in the function parameter 'data' directly (sometimes it's nested differently)
+      // CRITICAL FIX: queryPages is extracted at line 26294 from data.queryPages in calculatePillarScores
+      // But we need to check multiple sources since data structure can vary
       let queryPagesData = [];
-      if (queryPages && queryPages.length > 0) {
+      if (queryPages && Array.isArray(queryPages) && queryPages.length > 0) {
         queryPagesData = queryPages;
-        debugLog(`[Authority] Using queryPages from line 26247: ${queryPages.length} rows`, 'info');
+        debugLog(`[Authority] Using queryPages from calculatePillarScores: ${queryPages.length} rows`, 'info');
       } else if (typeof data !== 'undefined' && data?.queryPages && Array.isArray(data.queryPages) && data.queryPages.length > 0) {
         queryPagesData = data.queryPages;
         debugLog(`[Authority] Using data.queryPages: ${data.queryPages.length} rows`, 'info');
@@ -26532,7 +26530,7 @@
         queryPagesData = data.searchData.queryPages;
         debugLog(`[Authority] Using data.searchData.queryPages: ${data.searchData.queryPages.length} rows`, 'info');
       } else {
-        debugLog(`[Authority] ⚠ No queryPages data found in any location`, 'warn');
+        debugLog(`[Authority] ⚠ No queryPages data found - queryPages=${queryPages?.length || 'null'}, data.queryPages=${(typeof data !== 'undefined' && data?.queryPages) ? data.queryPages.length : 'null'}, data.searchData?.queryPages=${(typeof data !== 'undefined' && data?.searchData?.queryPages) ? data.searchData.queryPages.length : 'null'}`, 'warn');
       }
       debugLog(`[Authority] Final queryPagesData length: ${queryPagesData.length}`, 'info');
       
@@ -30760,26 +30758,15 @@ Final Score: ${score}/100`;
             if (authorityBySegment && authorityBySegment.all) {
               return authorityBySegment.all;
             }
-          // Legacy fallback - use authorityComponents from scores
-          const components = scores.authorityComponents || {};
-          // CRITICAL FIX: Ensure we use actual component scores, not 0
-          // If authorityComponents exists, use it; otherwise try to extract from authority object
-          const behaviourScore = components.behaviour !== undefined ? components.behaviour : 
-            (typeof scores.authority === 'object' && scores.authority !== null ? (scores.authority.behaviour || 0) : 0);
-          const rankingScore = components.ranking !== undefined ? components.ranking : 
-            (typeof scores.authority === 'object' && scores.authority !== null ? (scores.authority.ranking || 0) : 0);
-          const backlinksScore = components.backlinks !== undefined ? components.backlinks : 0;
-          const reviewsScore = components.reviews !== undefined ? components.reviews : 0;
-          
-          debugLog(`[Authority Card] Fallback component scores: behaviour=${behaviourScore}, ranking=${rankingScore}, backlinks=${backlinksScore}, reviews=${reviewsScore}`, 'info');
-          
-          return {
-            total: score,
-            behaviour: behaviourScore,
-            ranking: rankingScore,
-            backlinks: backlinksScore,
-            reviews: reviewsScore
-          };
+            // Legacy fallback
+            const components = scores.authorityComponents || {};
+            return {
+              total: score,
+              behaviour: components.behaviour || 0,
+              ranking: components.ranking || 0,
+              backlinks: components.backlinks || 0,
+              reviews: components.reviews || 0
+            };
           };
           
           // Get current Authority data
@@ -31105,10 +31092,13 @@ Final Score: ${score}/100`;
             `;
             
             topPages.forEach((page, idx) => {
-              const ctrStr = page.ctr != null ? page.ctr.toFixed(1) : 'N/A';
-              const posStr = page.avgPosition != null ? page.avgPosition.toFixed(1) : 'N/A';
-              const impressionsStr = page.impressions != null ? page.impressions.toLocaleString() : 'N/A';
-              const clicksStr = page.clicks != null ? page.clicks.toLocaleString() : 'N/A';
+              // CRITICAL FIX: Add defensive checks for null/undefined and ensure values are numbers before calling toFixed
+              const ctrValue = (page && typeof page.ctr === 'number' && !isNaN(page.ctr)) ? page.ctr : null;
+              const posValue = (page && typeof page.avgPosition === 'number' && !isNaN(page.avgPosition)) ? page.avgPosition : null;
+              const ctrStr = ctrValue !== null ? ctrValue.toFixed(1) : 'N/A';
+              const posStr = posValue !== null ? posValue.toFixed(1) : 'N/A';
+              const impressionsStr = (page && page.impressions != null) ? page.impressions.toLocaleString() : 'N/A';
+              const clicksStr = (page && page.clicks != null) ? page.clicks.toLocaleString() : 'N/A';
               tableHtml += `
                 <tr style="border-bottom: 1px solid #f1f5f9;">
                   <td style="padding: 0.25rem 0.4rem; color: #666;">${idx + 1}</td>

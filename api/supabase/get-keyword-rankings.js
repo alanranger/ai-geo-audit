@@ -60,16 +60,36 @@ export default async function handler(req, res) {
 
       let latestTimestamp = null;
       // If we have an audit_date, try to get the timestamp from audit_results
+      // CRITICAL FIX: Query for ANY audit_result with ranking_ai_data, not just matching audit_date
+      // This ensures we get the timestamp even if audit_date formats differ slightly
       if (latestRow?.audit_date) {
-        const { data: auditResult, error: auditError } = await supabase
+        // First try exact match
+        let { data: auditResult, error: auditError } = await supabase
           .from('audit_results')
           .select('timestamp, audit_date')
           .eq('property_url', propertyUrl)
           .eq('audit_date', latestRow.audit_date)
-          .not('ranking_ai_data', 'is', null) // Only audits that have ranking_ai_data
+          .not('ranking_ai_data', 'is', null)
           .order('timestamp', { ascending: false })
           .limit(1)
           .single();
+
+        // If no exact match, try to find any audit_result with ranking_ai_data for this property
+        if (auditError || !auditResult?.timestamp) {
+          const { data: anyAuditResult, error: anyError } = await supabase
+            .from('audit_results')
+            .select('timestamp, audit_date')
+            .eq('property_url', propertyUrl)
+            .not('ranking_ai_data', 'is', null)
+            .order('timestamp', { ascending: false })
+            .limit(1)
+            .single();
+          
+          if (!anyError && anyAuditResult?.timestamp) {
+            auditResult = anyAuditResult;
+            auditError = null;
+          }
+        }
 
         if (!auditError && auditResult?.timestamp) {
           latestTimestamp = auditResult.timestamp;
