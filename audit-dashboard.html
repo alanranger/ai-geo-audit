@@ -24297,9 +24297,14 @@
                 // CRITICAL: Even if latest audit doesn't have ranking data, get-latest-audit may have fetched
                 // ranking data from an older audit. Check for rankingAiData.audit_date which contains the actual date
                 if (rankingAiData.data.rankingAiData && rankingAiData.data.rankingAiData.combinedRows && rankingAiData.data.rankingAiData.combinedRows.length > 0) {
-                  // Use the audit_date from rankingAiData if available (this is the actual date of the ranking data)
-                  // Otherwise fall back to the audit's auditDate
+                  // CRITICAL FIX: Use audit_date from rankingAiData (this is the actual date of the ranking data from keyword_rankings table)
+                  // The API returns audit_date in the rankingAiData object (set from rankingDataAuditDate)
                   rankingAiAuditDate = rankingAiData.data.rankingAiData.audit_date || rankingAiData.data.auditDate;
+                  console.log('[updateAuditTimestamp] Ranking & AI date sources:', {
+                    rankingAiDataAuditDate: rankingAiData.data.rankingAiData.audit_date,
+                    auditDate: rankingAiData.data.auditDate,
+                    final: rankingAiAuditDate
+                  });
                   // Get timestamp - timestamp is returned as milliseconds (number), convert to ISO string
                   if (rankingAiData.data.timestamp) {
                     // timestamp is a number (milliseconds since epoch)
@@ -26470,10 +26475,11 @@
       let authorityBySegment = null;
       // CRITICAL: Check if we have queryPages data - if not, authorityBySegment will be null
       // and Authority tab will show "No page data available"
-      // Use the already-extracted queryPages variable, but also check data.searchData?.queryPages as fallback
-      // (different storage formats - sometimes data is nested in searchData)
-      const queryPagesData = queryPages && queryPages.length > 0 ? queryPages : (data.searchData?.queryPages || []);
-      debugLog(`[Authority] queryPagesData length: ${queryPagesData.length} (using queryPages=${queryPages?.length || 0} or data.searchData?.queryPages=${data.searchData?.queryPages?.length || 0})`, 'info');
+      // Use the already-extracted queryPages variable (extracted at line 26247 from data.queryPages)
+      // Also check data.searchData?.queryPages as fallback for different storage formats
+      // IMPORTANT: queryPages is already in scope from line 26247, so use it directly
+      const queryPagesData = (queryPages && queryPages.length > 0) ? queryPages : ((typeof data !== 'undefined' && data?.searchData?.queryPages) ? data.searchData.queryPages : []);
+      debugLog(`[Authority] queryPagesData length: ${queryPagesData.length} (queryPages=${queryPages?.length || 0}, data.searchData?.queryPages=${(typeof data !== 'undefined' && data?.searchData?.queryPages) ? data.searchData.queryPages.length : 'N/A'})`, 'info');
       
       if (behaviourScoresSegmented && rankingScoresSegmented && queryPagesData.length > 0) {
         // Get page-level data for top pages computation
