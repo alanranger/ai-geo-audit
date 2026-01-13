@@ -19555,16 +19555,22 @@
     }
     
     // Global error handlers to capture errors that might disappear from console
+    // CRITICAL: Set these up IMMEDIATELY, before any other code runs
+    // Store errors in a persistent array that won't be cleared
+    window._capturedErrors = window._capturedErrors || [];
+    window._capturedWarnings = window._capturedWarnings || [];
+    
     // Store original console methods
     const originalConsoleError = console.error;
     const originalConsoleWarn = console.warn;
+    const originalConsoleLog = console.log;
     
     // Override console.error to capture and persist errors
     console.error = function(...args) {
       // Call original console.error
       originalConsoleError.apply(console, args);
       
-      // Also log to debug log so it persists
+      // Capture error immediately (before debugLog might be available)
       const errorMessage = args.map(arg => {
         if (arg instanceof Error) {
           return `${arg.message}\n${arg.stack || ''}`;
@@ -19572,7 +19578,24 @@
         return String(arg);
       }).join(' ');
       
-      debugLog(`[CONSOLE ERROR] ${errorMessage}`, 'error');
+      const errorEntry = {
+        timestamp: new Date().toISOString(),
+        message: `[CONSOLE ERROR] ${errorMessage}`,
+        type: 'error'
+      };
+      window._capturedErrors.push(errorEntry);
+      
+      // Also log to debug log if available
+      if (typeof debugLog === 'function') {
+        debugLog(errorEntry.message, 'error');
+      } else {
+        // If debugLog not available yet, store for later
+        setTimeout(() => {
+          if (typeof debugLog === 'function') {
+            debugLog(errorEntry.message, 'error');
+          }
+        }, 100);
+      }
     };
     
     // Override console.warn to capture warnings
@@ -19580,22 +19603,53 @@
       // Call original console.warn
       originalConsoleWarn.apply(console, args);
       
-      // Also log to debug log
+      // Capture warning immediately
       const warnMessage = args.map(arg => String(arg)).join(' ');
-      debugLog(`[CONSOLE WARN] ${warnMessage}`, 'warn');
+      const warnEntry = {
+        timestamp: new Date().toISOString(),
+        message: `[CONSOLE WARN] ${warnMessage}`,
+        type: 'warn'
+      };
+      window._capturedWarnings.push(warnEntry);
+      
+      // Also log to debug log if available
+      if (typeof debugLog === 'function') {
+        debugLog(warnEntry.message, 'warn');
+      } else {
+        setTimeout(() => {
+          if (typeof debugLog === 'function') {
+            debugLog(warnEntry.message, 'warn');
+          }
+        }, 100);
+      }
     };
     
-    // Global error handler for uncaught errors
+    // Global error handler for uncaught errors (set up immediately)
     window.addEventListener('error', (event) => {
       const errorMsg = `[UNCAUGHT ERROR] ${event.message} at ${event.filename}:${event.lineno}:${event.colno}`;
-      if (event.error && event.error.stack) {
-        debugLog(`${errorMsg}\nStack: ${event.error.stack}`, 'error');
+      const fullError = event.error && event.error.stack 
+        ? `${errorMsg}\nStack: ${event.error.stack}`
+        : errorMsg;
+      
+      const errorEntry = {
+        timestamp: new Date().toISOString(),
+        message: fullError,
+        type: 'error'
+      };
+      window._capturedErrors.push(errorEntry);
+      
+      if (typeof debugLog === 'function') {
+        debugLog(fullError, 'error');
       } else {
-        debugLog(errorMsg, 'error');
+        setTimeout(() => {
+          if (typeof debugLog === 'function') {
+            debugLog(fullError, 'error');
+          }
+        }, 100);
       }
     }, true); // Use capture phase to catch more errors
     
-    // Global handler for unhandled promise rejections
+    // Global handler for unhandled promise rejections (set up immediately)
     window.addEventListener('unhandledrejection', (event) => {
       const reason = event.reason;
       let errorMsg = '[UNHANDLED PROMISE REJECTION] ';
@@ -19604,8 +19658,43 @@
       } else {
         errorMsg += String(reason);
       }
-      debugLog(errorMsg, 'error');
-    });
+      
+      const errorEntry = {
+        timestamp: new Date().toISOString(),
+        message: errorMsg,
+        type: 'error'
+      };
+      window._capturedErrors.push(errorEntry);
+      
+      if (typeof debugLog === 'function') {
+        debugLog(errorMsg, 'error');
+      } else {
+        setTimeout(() => {
+          if (typeof debugLog === 'function') {
+            debugLog(errorMsg, 'error');
+          }
+        }, 100);
+      }
+    }, true);
+    
+    // Function to display all captured errors in debug log (call after page loads)
+    window.displayCapturedErrors = function() {
+      if (typeof debugLog !== 'function') return;
+      
+      // Display all captured errors
+      window._capturedErrors.forEach(entry => {
+        debugLog(entry.message, 'error');
+      });
+      
+      // Display all captured warnings
+      window._capturedWarnings.forEach(entry => {
+        debugLog(entry.message, 'warn');
+      });
+      
+      if (window._capturedErrors.length > 0 || window._capturedWarnings.length > 0) {
+        debugLog(`[ERROR CAPTURE] Displayed ${window._capturedErrors.length} errors and ${window._capturedWarnings.length} warnings that occurred during page load`, 'info');
+      }
+    };
     
     // Initialize filter button text on page load
     window.addEventListener('DOMContentLoaded', () => {
@@ -19613,6 +19702,13 @@
       if (filterBtn) {
         filterBtn.textContent = `Filter: ${debugLogFilter === 'all' ? 'All' : 'Warnings/Errors'}`;
       }
+      
+      // Display any errors that were captured before debugLog was available
+      setTimeout(() => {
+        if (typeof window.displayCapturedErrors === 'function') {
+          window.displayCapturedErrors();
+        }
+      }, 500);
       
       // Call updateAuditTimestamp on page load after a short delay to ensure DOM is ready
       setTimeout(() => {
