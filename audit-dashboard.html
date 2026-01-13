@@ -28536,9 +28536,16 @@
       
       // CRITICAL FIX: If snippetReadiness is 0 but we have scores, recalculate it
       // This fixes the issue where snippet readiness shows 0/100 but AI summary shows 80
+      // FIXED: Pass empty object {} instead of undefined 'data' variable
       if (snippetReadinessScore === 0 && scores && typeof calculateSnippetReadiness === 'function') {
-        snippetReadinessScore = calculateSnippetReadiness(scores, {});
-        debugLog(`[calculateAiGeoScore] Recalculated snippetReadiness from scores: ${snippetReadinessScore} (was 0)`, 'info');
+        try {
+          snippetReadinessScore = calculateSnippetReadiness(scores, {});
+          debugLog(`[calculateAiGeoScore] Recalculated snippetReadiness from scores: ${snippetReadinessScore} (was 0)`, 'info');
+        } catch (e) {
+          debugLog(`[calculateAiGeoScore] Error recalculating snippetReadiness: ${e.message}`, 'error');
+          // Fallback: use 0 if calculation fails
+          snippetReadinessScore = 0;
+        }
       }
       
       const brandScore = scores.brandOverlay?.score || 0;
