@@ -26424,9 +26424,13 @@
       }
       
       let authorityBySegment = null;
-      if (behaviourScoresSegmented && rankingScoresSegmented) {
+      // CRITICAL: Check if we have queryPages data - if not, authorityBySegment will be null
+      // and Authority tab will show "No page data available"
+      const queryPagesData = data.queryPages || [];
+      debugLog(`[Authority] queryPagesData length: ${queryPagesData.length}`, 'info');
+      
+      if (behaviourScoresSegmented && rankingScoresSegmented && queryPagesData.length > 0) {
         // Get page-level data for top pages computation
-        const queryPagesData = data.queryPages || [];
         
         // Filter to ranking pages (position 1-20, with impressions)
         const rankingPages = queryPagesData.filter(row => {
@@ -42412,10 +42416,15 @@ Final Score: ${score}/100`;
       } else if (snippetReadiness && typeof snippetReadiness === 'object' && snippetReadiness.overallScore != null) {
         overallSnippetReadiness = snippetReadiness.overallScore;
         debugLog(`[Snippet Readiness] Using object.overallScore: ${overallSnippetReadiness}`, 'info');
-      } else if (scores && (scores.contentSchema != null || scores.visibility != null || scores.authority != null)) {
-        // Recalculate if snippetReadiness is invalid/zero but we have scores
+      } else if (scores) {
+        // ALWAYS recalculate if we have scores, even if snippetReadiness is 0
+        // This ensures we show the correct value even if snippetReadiness wasn't saved properly
+        const contentSchema = scores.contentSchema || 0;
+        const visibility = scores.visibility || 0;
+        const authority = typeof scores.authority === 'object' ? (scores.authority?.score || 0) : (scores.authority || 0);
+        
         overallSnippetReadiness = calculateSnippetReadiness(scores, data);
-        debugLog(`[Snippet Readiness] Recalculated from scores: ${overallSnippetReadiness} (contentSchema=${scores.contentSchema}, visibility=${scores.visibility}, authority=${typeof scores.authority === 'object' ? scores.authority.score : scores.authority})`, 'info');
+        debugLog(`[Snippet Readiness] Recalculated from scores: ${overallSnippetReadiness} (contentSchema=${contentSchema}, visibility=${visibility}, authority=${authority})`, 'info');
       } else {
         debugLog(`[Snippet Readiness] ⚠️ Cannot calculate: snippetReadiness=${snippetReadiness}, scores=${scores ? 'present' : 'missing'}`, 'warn');
       }
