@@ -19554,6 +19554,59 @@
       debugLog('Debug log cleared', 'info');
     }
     
+    // Global error handlers to capture errors that might disappear from console
+    // Store original console methods
+    const originalConsoleError = console.error;
+    const originalConsoleWarn = console.warn;
+    
+    // Override console.error to capture and persist errors
+    console.error = function(...args) {
+      // Call original console.error
+      originalConsoleError.apply(console, args);
+      
+      // Also log to debug log so it persists
+      const errorMessage = args.map(arg => {
+        if (arg instanceof Error) {
+          return `${arg.message}\n${arg.stack || ''}`;
+        }
+        return String(arg);
+      }).join(' ');
+      
+      debugLog(`[CONSOLE ERROR] ${errorMessage}`, 'error');
+    };
+    
+    // Override console.warn to capture warnings
+    console.warn = function(...args) {
+      // Call original console.warn
+      originalConsoleWarn.apply(console, args);
+      
+      // Also log to debug log
+      const warnMessage = args.map(arg => String(arg)).join(' ');
+      debugLog(`[CONSOLE WARN] ${warnMessage}`, 'warn');
+    };
+    
+    // Global error handler for uncaught errors
+    window.addEventListener('error', (event) => {
+      const errorMsg = `[UNCAUGHT ERROR] ${event.message} at ${event.filename}:${event.lineno}:${event.colno}`;
+      if (event.error && event.error.stack) {
+        debugLog(`${errorMsg}\nStack: ${event.error.stack}`, 'error');
+      } else {
+        debugLog(errorMsg, 'error');
+      }
+    }, true); // Use capture phase to catch more errors
+    
+    // Global handler for unhandled promise rejections
+    window.addEventListener('unhandledrejection', (event) => {
+      const reason = event.reason;
+      let errorMsg = '[UNHANDLED PROMISE REJECTION] ';
+      if (reason instanceof Error) {
+        errorMsg += `${reason.message}\nStack: ${reason.stack || ''}`;
+      } else {
+        errorMsg += String(reason);
+      }
+      debugLog(errorMsg, 'error');
+    });
+    
     // Initialize filter button text on page load
     window.addEventListener('DOMContentLoaded', () => {
       const filterBtn = document.getElementById('debugFilterBtn');
