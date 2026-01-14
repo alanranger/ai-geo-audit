@@ -24168,15 +24168,16 @@
       }
       
       updateAuditTimestampDebounceTimer = setTimeout(async () => {
-        const gscAuditElement = document.getElementById('gscAuditDate');
-        const gscDateRangeElement = document.getElementById('gscDateRange');
-        const rankingAiAuditElement = document.getElementById('rankingAiAuditDate');
-        const snippetTimestampElement = document.getElementById('snippetReadinessAuditTime');
-        const snippetTimestampContainer = document.getElementById('snippetReadinessTimestamp');
-        const radarTimestampElement = document.getElementById('radarChartAuditTime');
-        const radarTimestampContainer = document.getElementById('radarChartTimestamp');
-        
-        // Helper function to format date as dd-mmm-yy, HH:MM
+        try {
+          const gscAuditElement = document.getElementById('gscAuditDate');
+          const gscDateRangeElement = document.getElementById('gscDateRange');
+          const rankingAiAuditElement = document.getElementById('rankingAiAuditDate');
+          const snippetTimestampElement = document.getElementById('snippetReadinessAuditTime');
+          const snippetTimestampContainer = document.getElementById('snippetReadinessTimestamp');
+          const radarTimestampElement = document.getElementById('radarChartAuditTime');
+          const radarTimestampContainer = document.getElementById('radarChartTimestamp');
+          
+          // Helper function to format date as dd-mmm-yy, HH:MM
         const formatDateShort = (dateStr) => {
           if (!dateStr) return 'Not yet run';
           try {
@@ -24410,8 +24411,9 @@
           let rankingAiAuditDate = null;
           let rankingAiTimestamp = null;
           
-          // FIRST: Check localStorage for saved ranking_ai_data with timestamp (fastest, works offline)
           try {
+            // FIRST: Check localStorage for saved ranking_ai_data with timestamp (fastest, works offline)
+            try {
             const savedAudit = localStorage.getItem('last_audit_results');
             const savedRankingData = localStorage.getItem('ranking_ai_data');
             
@@ -24612,6 +24614,10 @@
             } catch (fallbackError) {
               debugLog(`[updateAuditTimestamp] Error calling get-latest-audit API: ${fallbackError.message}`, 'warn');
             }
+          }
+          } catch (rankingAiError) {
+            debugLog(`[updateAuditTimestamp] Error fetching Ranking & AI audit date: ${rankingAiError?.message || rankingAiError}`, 'error');
+            console.warn('[updateAuditTimestamp] Error fetching Ranking & AI audit date:', rankingAiError);
           }
           
           // Update GSC audit date
