@@ -58,6 +58,14 @@
           // Fallback: show unknown if API fails
           window.__GAIO_DIAG_BUILD__ = 'unknown';
           console.log('[Version Pill] API failed after retries, using fallback:', window.__GAIO_DIAG_BUILD__);
+          // Set build date to current time as fallback (better than showing "Loading...")
+          const buildDateEl = document.getElementById('buildDate');
+          if (buildDateEl && buildDateEl.textContent === 'Loading...') {
+            const now = new Date();
+            const gmtDate = now.toISOString().split('T')[0];
+            const gmtTime = now.toISOString().split('T')[1].split('.')[0];
+            buildDateEl.textContent = gmtDate + ' ' + gmtTime + ' GMT (approx)';
+          }
         }
       } catch (e) {
         // If fetch fails, retry if we haven't exceeded max retries
@@ -69,6 +77,14 @@
         // Fallback: show unknown if all retries fail
         window.__GAIO_DIAG_BUILD__ = 'unknown';
         console.warn('[Version Pill] Error fetching from API after retries:', e.message, 'using fallback:', window.__GAIO_DIAG_BUILD__);
+        // Set build date to current time as fallback
+        const buildDateEl = document.getElementById('buildDate');
+        if (buildDateEl && buildDateEl.textContent === 'Loading...') {
+          const now = new Date();
+          const gmtDate = now.toISOString().split('T')[0];
+          const gmtTime = now.toISOString().split('T')[1].split('.')[0];
+          buildDateEl.textContent = gmtDate + ' ' + gmtTime + ' GMT (approx)';
+        }
       }
       
       // Update the version pill element
@@ -24567,6 +24583,7 @@
             }
             // Continue to fallback methods below
           }
+          } // Close if (!rankingAiTimestamp) block at line 24496
           
           // THIRD: Final localStorage check (if API failed)
           if (!rankingAiTimestamp) {
