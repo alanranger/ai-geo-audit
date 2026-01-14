@@ -11,15 +11,14 @@
 
   <script>
     // Diagnostic build marker (helps correlate UI with deployment)
-    // Get previous commit hash (one version back from current) - this will be updated at build time
-    // For now, fetch it dynamically or use the previous commit
+    // Get current deployment's commit hash - fetched dynamically from Vercel API or env
     // Function to update version pill with retry logic
     async function updateVersionPill(retryCount = 0) {
       const maxRetries = 3;
       const retryDelay = 1000; // 1 second
       
       try {
-        // Try to get previous commit hash from API endpoint (if available)
+        // Try to get current commit hash from API endpoint (if available)
         const response = await fetch('/api/git/previous-commit', {
           method: 'GET',
           headers: {
@@ -29,7 +28,7 @@
         
         if (response.ok) {
           const data = await response.json();
-          window.__GAIO_DIAG_BUILD__ = data.commitHash || '497151d';
+          window.__GAIO_DIAG_BUILD__ = data.commitHash || 'unknown';
           console.log('[Version Pill] Loaded from API:', data.commitHash, 'source:', data.source);
         } else {
           // If API returns error, retry if we haven't exceeded max retries
@@ -38,8 +37,8 @@
             setTimeout(() => updateVersionPill(retryCount + 1), retryDelay);
             return;
           }
-          // Fallback: use previous commit hash (one deployment ago - updated with each deployment)
-          window.__GAIO_DIAG_BUILD__ = '497151d';
+          // Fallback: show unknown if API fails
+          window.__GAIO_DIAG_BUILD__ = 'unknown';
           console.log('[Version Pill] API failed after retries, using fallback:', window.__GAIO_DIAG_BUILD__);
         }
       } catch (e) {
@@ -49,8 +48,8 @@
           setTimeout(() => updateVersionPill(retryCount + 1), retryDelay);
           return;
         }
-        // Fallback: use previous commit hash (one deployment ago)
-        window.__GAIO_DIAG_BUILD__ = '497151d';
+        // Fallback: show unknown if all retries fail
+        window.__GAIO_DIAG_BUILD__ = 'unknown';
         console.warn('[Version Pill] Error fetching from API after retries:', e.message, 'using fallback:', window.__GAIO_DIAG_BUILD__);
       }
       

@@ -1,13 +1,25 @@
-// API endpoint to get the previous commit hash (one version back from current)
+// API endpoint to get the current deployment's commit hash
 // This is used by the version pill to show the deployed version
-// Uses Vercel API to get the previous deployment's commit hash
+// Uses Vercel API to get the current deployment's commit hash, or falls back to VERCEL_GIT_COMMIT_SHA
 
 export default async function handler(req, res) {
   try {
-    // Get current deployment's commit from environment variable
+    // Get current deployment's commit from environment variable (most reliable)
     const currentCommit = process.env.VERCEL_GIT_COMMIT_SHA;
     
-    // Try to get previous deployment from Vercel API
+    // If we have the current commit from env, use it directly (fastest and most accurate)
+    if (currentCommit) {
+      const shortHash = currentCommit.substring(0, 7);
+      console.log(`[Git API] Using current commit from VERCEL_GIT_COMMIT_SHA: ${shortHash}`);
+      return res.status(200).json({
+        status: 'ok',
+        commitHash: shortHash,
+        fullHash: currentCommit,
+        source: 'vercel_env'
+      });
+    }
+    
+    // Fallback: Try to get current deployment from Vercel API
     const vercelToken = process.env.VERCEL_TOKEN || process.env.VERCEL_AUTH_TOKEN;
     const vercelTeamId = process.env.VERCEL_TEAM_ID;
     const vercelProjectId = process.env.VERCEL_PROJECT_ID;
@@ -49,26 +61,26 @@ export default async function handler(req, res) {
             .filter(d => d.target === 'production' || !d.target) // Include deployments without target (defaults to production)
             .sort((a, b) => new Date(b.createdAt || b.created) - new Date(a.createdAt || a.created));
           
-          // Get the second deployment (one deployment ago)
-          if (projectDeployments.length > 1) {
-            const previousDeployment = projectDeployments[1];
-            const previousCommit = previousDeployment.meta?.git?.commitSha || 
-                                   previousDeployment.meta?.githubCommitSha ||
-                                   previousDeployment.meta?.gitCommitSha ||
-                                   previousDeployment.gitSource?.sha;
+          // Get the first deployment (current/latest deployment)
+          if (projectDeployments.length > 0) {
+            const currentDeployment = projectDeployments[0];
+            const deploymentCommit = currentDeployment.meta?.git?.commitSha || 
+                                    currentDeployment.meta?.githubCommitSha ||
+                                    currentDeployment.meta?.gitCommitSha ||
+                                    currentDeployment.gitSource?.sha;
             
-            if (previousCommit) {
-              const shortHash = previousCommit.substring(0, 7);
-              console.log(`[Git API] Found previous deployment commit: ${shortHash} from Vercel API`);
+            if (deploymentCommit) {
+              const shortHash = deploymentCommit.substring(0, 7);
+              console.log(`[Git API] Found current deployment commit: ${shortHash} from Vercel API`);
               return res.status(200).json({
                 status: 'ok',
                 commitHash: shortHash,
-                fullHash: previousCommit,
+                fullHash: deploymentCommit,
                 source: 'vercel_api'
               });
             }
           } else {
-            console.warn(`[Git API] Found ${projectDeployments.length} production deployments, need at least 2`);
+            console.warn(`[Git API] Found ${projectDeployments.length} production deployments`);
           }
         } else {
           const errorText = await deploymentsResponse.text();
@@ -81,25 +93,21 @@ export default async function handler(req, res) {
       console.warn('[Git API] VERCEL_TOKEN not found, skipping Vercel API call');
     }
     
-    // Note: Git command fallback removed - Vercel API is the primary method
-    // Git commands may not be available in Vercel's serverless environment
-    
-    // Fallback 2: Use hardcoded previous commit (will be updated with each deployment)
-    // This should be the commit that was deployed before the current one
+    // Final fallback: Use hardcoded commit (should rarely be needed)
     return res.status(200).json({
       status: 'ok',
-      commitHash: '497151d', // Updated to one deployment ago (497151d is before 923d567)
+      commitHash: 'unknown', // No commit available
       fullHash: null,
       source: 'fallback',
       currentCommit: currentCommit,
-      note: 'Using fallback - update this value with each deployment or configure VERCEL_TOKEN'
+      note: 'No commit hash available - VERCEL_GIT_COMMIT_SHA not set and Vercel API unavailable'
     });
   } catch (error) {
     // Final fallback
-    console.error('[Git API] Error getting previous commit:', error);
+    console.error('[Git API] Error getting current commit:', error);
     return res.status(200).json({
       status: 'ok',
-      commitHash: '497151d', // One deployment ago
+      commitHash: 'unknown',
       fullHash: null,
       error: error.message,
       source: 'error_fallback'
