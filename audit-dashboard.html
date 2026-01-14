@@ -24581,70 +24581,37 @@
           } else {
             debugLog(`[updateAuditTimestamp] ⚠ No Ranking & AI timestamp available`, 'warn');
           }
-          // that was at the end
-            
-            // FALLBACK: If direct query failed, try get-latest-audit API
-            if (!rankingAiAuditDate || !rankingAiTimestamp) {
-              debugLog('[updateAuditTimestamp] Falling back to get-latest-audit API...', 'info');
-              try {
-                const rankingAiUrl = apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}`);
-                const rankingAiResponse = await fetch(rankingAiUrl);
-                if (rankingAiResponse.ok) {
-                  const rankingAiData = await rankingAiResponse.json();
-                  if (rankingAiData.status === 'ok' && rankingAiData.data) {
-                    // Check if rankingAiData exists and has audit_date
-                    if (rankingAiData.data.rankingAiData && rankingAiData.data.rankingAiData.audit_date) {
-                      rankingAiAuditDate = rankingAiData.data.rankingAiData.audit_date;
-                      if (rankingAiData.data.timestamp) {
-                        rankingAiTimestamp = new Date(rankingAiData.data.timestamp).toISOString();
-                      } else if (rankingAiAuditDate) {
-                        const auditDate = new Date(rankingAiAuditDate + 'T00:00:00Z');
-                        rankingAiTimestamp = auditDate.toISOString();
-                      }
-                      debugLog(`[updateAuditTimestamp] ✓ Found Ranking & AI date from get-latest-audit: ${rankingAiAuditDate}`, 'info');
-                    } else if (rankingAiData.data.auditDate) {
-                      // Last resort: use audit date from latest audit (may not have ranking data)
-                      rankingAiAuditDate = rankingAiData.data.auditDate;
-                      if (rankingAiData.data.timestamp) {
-                        rankingAiTimestamp = new Date(rankingAiData.data.timestamp).toISOString();
-                      } else {
-                        const auditDate = new Date(rankingAiAuditDate + 'T00:00:00Z');
-                        rankingAiTimestamp = auditDate.toISOString();
-                      }
-                      debugLog(`[updateAuditTimestamp] ⚠ Using audit date from latest audit (no ranking data): ${rankingAiAuditDate}`, 'warn');
+          
+          // Additional fallback: Try get-latest-audit API if we still don't have timestamp
+          if (!rankingAiTimestamp && !rankingAiAuditDate) {
+            debugLog('[updateAuditTimestamp] Trying get-latest-audit API as additional fallback...', 'info');
+            try {
+              const rankingAiUrl = apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}`);
+              const controller2 = new AbortController();
+              const timeoutId2 = setTimeout(() => controller2.abort(), 10000);
+              const rankingAiResponse = await fetch(rankingAiUrl, { signal: controller2.signal });
+              clearTimeout(timeoutId2);
+              
+              if (rankingAiResponse.ok) {
+                const rankingAiData = await rankingAiResponse.json();
+                if (rankingAiData.status === 'ok' && rankingAiData.data) {
+                  // Check if rankingAiData exists and has audit_date
+                  if (rankingAiData.data.rankingAiData && rankingAiData.data.rankingAiData.audit_date) {
+                    rankingAiAuditDate = rankingAiData.data.rankingAiData.audit_date;
+                    if (rankingAiData.data.timestamp) {
+                      rankingAiTimestamp = new Date(rankingAiData.data.timestamp).toISOString();
+                      debugLog(`[updateAuditTimestamp] ✓ Found Ranking & AI timestamp from get-latest-audit: ${rankingAiTimestamp}`, 'success');
                     }
-                  }
-                } else {
-                  debugLog(`[updateAuditTimestamp] get-latest-audit API failed: ${rankingAiResponse.status}`, 'warn');
-                }
-              } catch (fallbackError) {
-                debugLog(`[updateAuditTimestamp] Error calling get-latest-audit API: ${fallbackError.message}`, 'warn');
-              }
-            }
-            
-            // FINAL FALLBACK: Check localStorage for saved audit data with ranking_ai_data
-            if (!rankingAiTimestamp && rankingAiAuditDate) {
-              try {
-                const savedAudit = localStorage.getItem('last_audit_results');
-                if (savedAudit) {
-                  const parsed = JSON.parse(savedAudit);
-                  // Check if we have ranking_ai_data with a timestamp
-                  if (parsed.ranking_ai_data && parsed.timestamp) {
-                    // Use the audit's timestamp if it has ranking_ai_data
-                    const auditTimestamp = new Date(parsed.timestamp);
-                    if (!isNaN(auditTimestamp.getTime())) {
-                      rankingAiTimestamp = auditTimestamp.toISOString();
-                      debugLog(`[updateAuditTimestamp] ✓ Found timestamp from localStorage saved audit: ${rankingAiTimestamp}`, 'success');
-                    }
+                  } else if (rankingAiData.data.auditDate && rankingAiData.data.timestamp) {
+                    rankingAiAuditDate = rankingAiData.data.auditDate;
+                    rankingAiTimestamp = new Date(rankingAiData.data.timestamp).toISOString();
+                    debugLog(`[updateAuditTimestamp] ✓ Found timestamp from get-latest-audit (no ranking data): ${rankingAiTimestamp}`, 'info');
                   }
                 }
-              } catch (localStorageError) {
-                debugLog(`[updateAuditTimestamp] Error reading localStorage: ${localStorageError.message}`, 'warn');
               }
+            } catch (fallbackError) {
+              debugLog(`[updateAuditTimestamp] Error calling get-latest-audit API: ${fallbackError.message}`, 'warn');
             }
-          } catch (e) {
-            debugLog(`[updateAuditTimestamp] Error fetching Ranking & AI audit date: ${e?.message || e}`, 'error');
-            console.warn('[updateAuditTimestamp] Error fetching Ranking & AI audit date:', e);
           }
           
           // Update GSC audit date
