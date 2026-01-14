@@ -13,28 +13,67 @@
     // Diagnostic build marker (helps correlate UI with deployment)
     // Get previous commit hash (one version back from current) - this will be updated at build time
     // For now, fetch it dynamically or use the previous commit
-    (async function() {
+    // Function to update version pill with retry logic
+    async function updateVersionPill(retryCount = 0) {
+      const maxRetries = 3;
+      const retryDelay = 1000; // 1 second
+      
       try {
         // Try to get previous commit hash from API endpoint (if available)
-        const response = await fetch('/api/git/previous-commit');
+        const response = await fetch('/api/git/previous-commit', {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        });
+        
         if (response.ok) {
           const data = await response.json();
           window.__GAIO_DIAG_BUILD__ = data.commitHash || '497151d';
+          console.log('[Version Pill] Loaded from API:', data.commitHash, 'source:', data.source);
         } else {
+          // If API returns error, retry if we haven't exceeded max retries
+          if (retryCount < maxRetries) {
+            console.log(`[Version Pill] API returned ${response.status}, retrying in ${retryDelay}ms... (attempt ${retryCount + 1}/${maxRetries})`);
+            setTimeout(() => updateVersionPill(retryCount + 1), retryDelay);
+            return;
+          }
           // Fallback: use previous commit hash (one deployment ago - updated with each deployment)
           window.__GAIO_DIAG_BUILD__ = '497151d';
+          console.log('[Version Pill] API failed after retries, using fallback:', window.__GAIO_DIAG_BUILD__);
         }
       } catch (e) {
+        // If fetch fails, retry if we haven't exceeded max retries
+        if (retryCount < maxRetries) {
+          console.log(`[Version Pill] Fetch error: ${e.message}, retrying in ${retryDelay}ms... (attempt ${retryCount + 1}/${maxRetries})`);
+          setTimeout(() => updateVersionPill(retryCount + 1), retryDelay);
+          return;
+        }
         // Fallback: use previous commit hash (one deployment ago)
         window.__GAIO_DIAG_BUILD__ = '497151d';
+        console.warn('[Version Pill] Error fetching from API after retries:', e.message, 'using fallback:', window.__GAIO_DIAG_BUILD__);
       }
-      console.log('[DIAG-LINECHECK] build=', window.__GAIO_DIAG_BUILD__, 'src=', location.href);
-      // Keep the version pill in sync with the build marker
-      document.addEventListener('DOMContentLoaded', () => {
-        const verEl = document.getElementById('gitVersion');
-        if (verEl) verEl.textContent = window.__GAIO_DIAG_BUILD__ || 'unknown';
-      });
-    })();
+      
+      // Update the version pill element
+      const verEl = document.getElementById('gitVersion');
+      if (verEl) {
+        verEl.textContent = window.__GAIO_DIAG_BUILD__ || 'unknown';
+        console.log('[DIAG-LINECHECK] build=', window.__GAIO_DIAG_BUILD__, 'src=', location.href);
+      } else if (document.readyState === 'loading') {
+        // If element doesn't exist yet, wait for DOM
+        document.addEventListener('DOMContentLoaded', () => {
+          const verEl = document.getElementById('gitVersion');
+          if (verEl) verEl.textContent = window.__GAIO_DIAG_BUILD__ || 'unknown';
+        });
+      }
+    }
+    
+    // Update version pill - will retry if it fails
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => updateVersionPill());
+    } else {
+      updateVersionPill();
+    }
   </script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
@@ -3678,7 +3717,7 @@
     <h1>GAIO (Generative AI Optimization) Audit Dashboard</h1>
     <p>Automated GAIO Performance Tracking & Optimisation</p>
     <p style="font-size: 0.9rem; margin-top: 0.5rem; opacity: 1; background: rgba(0,0,0,0.3); padding: 0.25rem 0.5rem; border-radius: 4px; display: inline-block;">
-      <strong>Version: <span id="gitVersion">7d77c98</span></strong> | Built: <span id="buildDate"></span> |
+      <strong>Version: <span id="gitVersion">Loading...</span></strong> | Built: <span id="buildDate"></span> |
       <span id="loadTime" style="color: #4f4;">Loaded: <span id="loadTimeValue"></span></span>
     </p>
     <script>
@@ -24440,35 +24479,62 @@
             }
             
             // FALLBACK: If direct query failed, try get-latest-audit API
-            if (!rankingAiAuditDate) {
+            if (!rankingAiAuditDate || !rankingAiTimestamp) {
               debugLog('[updateAuditTimestamp] Falling back to get-latest-audit API...', 'info');
-              const rankingAiUrl = apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}`);
-              const rankingAiResponse = await fetch(rankingAiUrl);
-              if (rankingAiResponse.ok) {
-                const rankingAiData = await rankingAiResponse.json();
-                if (rankingAiData.status === 'ok' && rankingAiData.data) {
-                  // Check if rankingAiData exists and has audit_date
-                  if (rankingAiData.data.rankingAiData && rankingAiData.data.rankingAiData.audit_date) {
-                    rankingAiAuditDate = rankingAiData.data.rankingAiData.audit_date;
-                    if (rankingAiData.data.timestamp) {
-                      rankingAiTimestamp = new Date(rankingAiData.data.timestamp).toISOString();
-                    } else if (rankingAiAuditDate) {
-                      const auditDate = new Date(rankingAiAuditDate + 'T00:00:00Z');
-                      rankingAiTimestamp = auditDate.toISOString();
+              try {
+                const rankingAiUrl = apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}`);
+                const rankingAiResponse = await fetch(rankingAiUrl);
+                if (rankingAiResponse.ok) {
+                  const rankingAiData = await rankingAiResponse.json();
+                  if (rankingAiData.status === 'ok' && rankingAiData.data) {
+                    // Check if rankingAiData exists and has audit_date
+                    if (rankingAiData.data.rankingAiData && rankingAiData.data.rankingAiData.audit_date) {
+                      rankingAiAuditDate = rankingAiData.data.rankingAiData.audit_date;
+                      if (rankingAiData.data.timestamp) {
+                        rankingAiTimestamp = new Date(rankingAiData.data.timestamp).toISOString();
+                      } else if (rankingAiAuditDate) {
+                        const auditDate = new Date(rankingAiAuditDate + 'T00:00:00Z');
+                        rankingAiTimestamp = auditDate.toISOString();
+                      }
+                      debugLog(`[updateAuditTimestamp] ✓ Found Ranking & AI date from get-latest-audit: ${rankingAiAuditDate}`, 'info');
+                    } else if (rankingAiData.data.auditDate) {
+                      // Last resort: use audit date from latest audit (may not have ranking data)
+                      rankingAiAuditDate = rankingAiData.data.auditDate;
+                      if (rankingAiData.data.timestamp) {
+                        rankingAiTimestamp = new Date(rankingAiData.data.timestamp).toISOString();
+                      } else {
+                        const auditDate = new Date(rankingAiAuditDate + 'T00:00:00Z');
+                        rankingAiTimestamp = auditDate.toISOString();
+                      }
+                      debugLog(`[updateAuditTimestamp] ⚠ Using audit date from latest audit (no ranking data): ${rankingAiAuditDate}`, 'warn');
                     }
-                    debugLog(`[updateAuditTimestamp] ✓ Found Ranking & AI date from get-latest-audit: ${rankingAiAuditDate}`, 'info');
-                  } else if (rankingAiData.data.auditDate) {
-                    // Last resort: use audit date from latest audit (may not have ranking data)
-                    rankingAiAuditDate = rankingAiData.data.auditDate;
-                    if (rankingAiData.data.timestamp) {
-                      rankingAiTimestamp = new Date(rankingAiData.data.timestamp).toISOString();
-                    } else {
-                      const auditDate = new Date(rankingAiAuditDate + 'T00:00:00Z');
-                      rankingAiTimestamp = auditDate.toISOString();
+                  }
+                } else {
+                  debugLog(`[updateAuditTimestamp] get-latest-audit API failed: ${rankingAiResponse.status}`, 'warn');
+                }
+              } catch (fallbackError) {
+                debugLog(`[updateAuditTimestamp] Error calling get-latest-audit API: ${fallbackError.message}`, 'warn');
+              }
+            }
+            
+            // FINAL FALLBACK: Check localStorage for saved audit data with ranking_ai_data
+            if (!rankingAiTimestamp && rankingAiAuditDate) {
+              try {
+                const savedAudit = localStorage.getItem('last_audit_results');
+                if (savedAudit) {
+                  const parsed = JSON.parse(savedAudit);
+                  // Check if we have ranking_ai_data with a timestamp
+                  if (parsed.ranking_ai_data && parsed.timestamp) {
+                    // Use the audit's timestamp if it has ranking_ai_data
+                    const auditTimestamp = new Date(parsed.timestamp);
+                    if (!isNaN(auditTimestamp.getTime())) {
+                      rankingAiTimestamp = auditTimestamp.toISOString();
+                      debugLog(`[updateAuditTimestamp] ✓ Found timestamp from localStorage saved audit: ${rankingAiTimestamp}`, 'success');
                     }
-                    debugLog(`[updateAuditTimestamp] ⚠ Using audit date from latest audit (no ranking data): ${rankingAiAuditDate}`, 'warn');
                   }
                 }
+              } catch (localStorageError) {
+                debugLog(`[updateAuditTimestamp] Error reading localStorage: ${localStorageError.message}`, 'warn');
               }
             }
           } catch (e) {
