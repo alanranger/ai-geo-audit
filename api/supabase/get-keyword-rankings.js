@@ -140,6 +140,23 @@ export default async function handler(req, res) {
           console.log(`[Get Keyword Rankings] Fallback timestamp using audit_date midnight: ${latestTimestamp}`);
         }
       }
+      // Secondary fallback: if still null, take the most recent audit_results row with a timestamp for this property
+      if (!latestTimestamp) {
+        const { data: recentResult, error: recentErr } = await supabase
+          .from('audit_results')
+          .select('timestamp, audit_date')
+          .eq('property_url', propertyUrl)
+          .not('timestamp', 'is', null)
+          .order('timestamp', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (recentResult?.timestamp) {
+          latestTimestamp = recentResult.timestamp;
+          console.log(`[Get Keyword Rankings] Using recent audit_results timestamp fallback: ${latestTimestamp} (audit_date ${recentResult.audit_date})`);
+        } else if (recentErr) {
+          console.log(`[Get Keyword Rankings] No recent audit_results timestamp fallback. Error: ${recentErr.message}`);
+        }
+      }
 
       return sendJSON(res, 200, {
         status: 'ok',
