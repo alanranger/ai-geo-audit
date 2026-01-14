@@ -29587,16 +29587,22 @@
         
         // Parse CSV - extract URLs from url column
         const lines = csvText.split('\n').filter(line => line.trim());
+        const headerLine = lines[0] ? lines[0].trim() : '';
+        // Guard: primary URL sometimes returns HTML (not CSV)
+        if (!headerLine || headerLine.toLowerCase().startsWith('<!doctype') || headerLine.toLowerCase().startsWith('<html')) {
+          throw new Error('Primary CSV response looks like HTML, falling back');
+        }
         const urls = [];
         
         // Parse header row to find URL column index
         let urlColumnIndex = 0;
         if (lines.length > 0) {
-          const headerLine = lines[0].trim();
           const headers = parseCsvLine(headerLine);
           const urlHeaderIndex = headers.findIndex(h => h.toLowerCase() === 'url');
           if (urlHeaderIndex !== -1) {
             urlColumnIndex = urlHeaderIndex;
+          } else {
+            throw new Error('Primary CSV missing url header, falling back');
           }
         }
         
