@@ -260,12 +260,17 @@ export default async function handler(req, res) {
       }
     };
 
-    const stripMissingColumn = (payload, errorText) => {
+    const extractMissingColumn = (errorText) => {
       if (!errorText || typeof errorText !== 'string') return null;
-      const match = errorText.match(/Could not find the '([^']+)' column/i);
-      if (!match) return null;
-      const missingColumn = match[1];
-      if (!(missingColumn in payload)) return null;
+      let match = errorText.match(/Could not find the '([^']+)' column/i);
+      if (!match) match = errorText.match(/column \"([^\"]+)\" of relation/i);
+      if (!match) match = errorText.match(/column \"([^\"]+)\" does not exist/i);
+      return match ? match[1] : null;
+    };
+
+    const stripMissingColumn = (payload, errorText) => {
+      const missingColumn = extractMissingColumn(errorText);
+      if (!missingColumn || !(missingColumn in payload)) return null;
       const nextPayload = { ...payload };
       delete nextPayload[missingColumn];
       return { missingColumn, nextPayload };
@@ -1005,8 +1010,9 @@ export default async function handler(req, res) {
         errorText = `HTTP ${updateResponse.status}: ${updateResponse.statusText}`;
       }
       
-      const strippedUpdate = stripMissingColumn(updatePayload, errorText);
-      if (strippedUpdate) {
+      let strippedUpdate = stripMissingColumn(updatePayload, errorText);
+      let retryCount = 0;
+      while (strippedUpdate && retryCount < 10) {
         console.warn(`[Supabase Save] ⚠ Missing column "${strippedUpdate.missingColumn}" detected. Retrying update without it.`);
         updatePayload = strippedUpdate.nextPayload;
         if (auditRecord[strippedUpdate.missingColumn] !== undefined) {
@@ -1026,7 +1032,7 @@ export default async function handler(req, res) {
           const retryText = await retryUpdate.text();
           const retryResult = retryText ? JSON.parse(retryText) : [];
           if (Array.isArray(retryResult) && retryResult.length > 0) {
-            console.log('[Supabase Save] ✓ Updated existing audit record after stripping missing column');
+            console.log('[Supabase Save] ✓ Updated existing audit record after stripping missing columns');
             return res.status(200).json({
               status: 'ok',
               message: 'Audit results saved successfully',
@@ -1034,9 +1040,13 @@ export default async function handler(req, res) {
               meta: { generatedAt: new Date().toISOString() }
             });
           }
+          break;
         }
-        console.warn('[Supabase Save] Update retry did not modify existing record. Continuing to insert.');
-      } else {
+        errorText = await retryUpdate.text().catch(() => `HTTP ${retryUpdate.status}: ${retryUpdate.statusText}`);
+        strippedUpdate = stripMissingColumn(updatePayload, errorText);
+        retryCount += 1;
+      }
+      if (!strippedUpdate) {
         console.error('[Supabase Save] Update failed with status:', updateResponse.status);
         console.error('[Supabase Save] Error response:', errorText);
       }
@@ -1050,8 +1060,9 @@ export default async function handler(req, res) {
         errorText = `HTTP ${response.status}: ${response.statusText}`;
       }
 
-      const strippedInsert = stripMissingColumn(auditRecord, errorText);
-      if (strippedInsert) {
+      let strippedInsert = stripMissingColumn(auditRecord, errorText);
+      let retryInsertCount = 0;
+      while (strippedInsert && retryInsertCount < 10) {
         console.warn(`[Supabase Save] ⚠ Missing column "${strippedInsert.missingColumn}" detected. Retrying insert without it.`);
         const retryInsert = await fetch(`${supabaseUrl}/rest/v1/audit_results`, {
           method: 'POST',
@@ -1066,7 +1077,7 @@ export default async function handler(req, res) {
         if (retryInsert.ok) {
           const retryText = await retryInsert.text();
           const retryResult = retryText ? JSON.parse(retryText) : null;
-          console.log('[Supabase Save] ✓ Successfully inserted audit after stripping missing column');
+          console.log('[Supabase Save] ✓ Successfully inserted audit after stripping missing columns');
           return res.status(200).json({
             status: 'ok',
             message: 'Audit results saved successfully',
@@ -1075,6 +1086,8 @@ export default async function handler(req, res) {
           });
         }
         errorText = await retryInsert.text().catch(() => errorText);
+        strippedInsert = stripMissingColumn(strippedInsert.nextPayload, errorText);
+        retryInsertCount += 1;
       }
       
       console.error('[Supabase Save] Error response status:', response.status);
