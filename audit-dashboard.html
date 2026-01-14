@@ -302,14 +302,18 @@
         }
       }, true);
       
-      console.log('[Error Capture] Global error handlers installed immediately');
+      if (window.DEBUG_LOG_TO_CONSOLE === true) {
+        console.log('[Error Capture] Global error handlers installed immediately');
+      }
       
       // Restore errors from localStorage on page load (so they don't disappear)
       try {
         const stored = JSON.parse(localStorage.getItem('_capturedErrors') || '[]');
         if (stored.length > 0) {
           window._capturedErrors = stored;
-          console.log(`[Error Capture] Restored ${stored.length} errors from localStorage`);
+          if (window.DEBUG_LOG_TO_CONSOLE === true) {
+            console.log(`[Error Capture] Restored ${stored.length} errors from localStorage`);
+          }
         }
       } catch (e) {
         // Ignore parse errors
@@ -19828,20 +19832,17 @@
       // DISABLED: Supabase saving is causing schema cache issues and spam
       // Re-enable later once schema cache is stable
       
-      // Only log critical errors to browser console (for debugging production issues)
-      // All other logs go to UI debug console only
-      // CRITICAL: Use original console.error to prevent infinite recursion with our override
-      if (type === 'error') {
-        // Check if we have access to original console.error
+      // Only log to browser console if explicitly enabled
+      // Default: keep debug output in the UI log only
+      const shouldConsoleLogErrors = window.DEBUG_LOG_TO_CONSOLE === true;
+      if (type === 'error' && shouldConsoleLogErrors) {
         if (window._originalConsoleError) {
           window._originalConsoleError(`[DEBUG ERROR]`, truncatedMessage);
         } else {
-          // Fallback: use console.error but this might cause recursion
-          // This should only happen if error handlers aren't set up yet
           try {
             console.error(`[DEBUG ERROR]`, truncatedMessage);
           } catch (e) {
-            // If recursion detected, just skip console output
+            // Skip console output if recursion detected
           }
         }
       }
@@ -29451,7 +29452,11 @@
       
       try {
         // Try primary source first to avoid noisy 404s
-        const res = await fetch(PRIMARY_CSV_URL, { cache: 'no-store' });
+        const cacheBust = `cb=${Date.now()}`;
+        const primaryUrl = PRIMARY_CSV_URL.includes('?')
+          ? `${PRIMARY_CSV_URL}&${cacheBust}`
+          : `${PRIMARY_CSV_URL}?${cacheBust}`;
+        const res = await fetch(primaryUrl, { cache: 'no-store' });
         if (!res.ok) throw new Error(`Primary fetch failed: HTTP ${res.status}`);
         const csvText = await res.text();
         
