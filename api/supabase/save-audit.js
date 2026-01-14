@@ -99,6 +99,7 @@ export default async function handler(req, res) {
       searchData,
       snippetReadiness,
       localSignals,
+      backlinkMetrics, // Backlink metrics data for Authority score calculation
       moneyPagesSummary, // Phase 3: Money Pages summary for trend tracking
       moneySegmentMetrics, // Phase: Money Pages Priority Matrix - segment metrics for KPI tracker
       moneyPagePriorityData, // CRITICAL: Money Pages Priority Matrix data for Priority & Actions table
@@ -659,6 +660,9 @@ export default async function handler(req, res) {
       locations: Array.isArray(localSignalsToUse?.data?.locations) ? localSignalsToUse.data.locations : null, // Array of location objects
       gbp_rating: localSignalsToUse?.data?.gbpRating !== null && localSignalsToUse?.data?.gbpRating !== undefined ? parseFloat(localSignalsToUse.data.gbpRating) : null,
       gbp_review_count: localSignalsToUse?.data?.gbpReviewCount !== null && localSignalsToUse?.data?.gbpReviewCount !== undefined ? parseInt(localSignalsToUse.data.gbpReviewCount) : null,
+      
+      // Backlink Metrics Data (for Authority score calculation and historical tracking)
+      backlink_metrics: ensureJson(backlinkMetrics), // JSON object: {referringDomains, totalBacklinks, followRatio, nofollowRatio}
       
       // Partial write flags (set below after validation)
       is_partial: false,

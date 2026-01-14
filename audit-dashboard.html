@@ -20138,7 +20138,7 @@
                 debugLog(`[Overview Tab] ⚠️ localSignals is missing from saved audit data`, 'warn');
               }
               try {
-                await displayDashboard(saved.scores, saved.searchData, saved.snippetReadiness || 0, saved.schemaAudit || null, saved.localSignals || null);
+                await displayDashboard(saved.scores, saved.searchData, saved.snippetReadiness || 0, saved.schemaAudit || null, saved.localSignals || null, saved.backlinkMetrics || null);
               } catch (err) {
                 debugLog(`Error re-rendering trend chart: ${err.message}`, 'warn');
               }
@@ -24513,7 +24513,7 @@
     window.updateAuditTimestamp = updateAuditTimestamp;
     
     // Save audit results to Supabase for historical tracking
-    async function saveAuditToSupabase(propertyUrl, scores, searchData, snippetReadiness, schemaAudit, localSignals = null, auditDateOverride = null) {
+    async function saveAuditToSupabase(propertyUrl, scores, searchData, snippetReadiness, schemaAudit, localSignals = null, auditDateOverride = null, backlinkMetrics = null) {
       try {
         // IMPORTANT: Only full audits should write a new audit_date.
         // If auditDateOverride is provided, use it; otherwise try to derive from the saved audit timestamp.
@@ -24782,6 +24782,7 @@
           searchData,
           snippetReadiness,
           localSignals, // Pass Business Profile data for storage
+          backlinkMetrics, // Pass backlink metrics data for storage
           moneyPagesSummary, // Phase 3: Money Pages summary for trend tracking
           moneySegmentMetrics, // Phase: Money Pages Priority Matrix - segment metrics for KPI tracker
           moneyPagePriorityData: window.moneyPagePriorityData || null, // CRITICAL: Save Priority Matrix data to Supabase
@@ -29261,8 +29262,8 @@
 
         updateProgress(95, 'Generating dashboard...');
         debugLog('Displaying dashboard...', 'info');
-        // Display results (pass current audit data including localSignals)
-        displayDashboard(scores, searchData, snippetReadiness, schemaAudit, localSignals);
+        // Display results (pass current audit data including localSignals and backlinkMetrics)
+        displayDashboard(scores, searchData, snippetReadiness, schemaAudit, localSignals, backlinkMetrics);
         
         updateProgress(100, 'Audit completed successfully!');
         debugLog('=== AUDIT COMPLETE: Success ===', 'success');
@@ -29280,7 +29281,7 @@
           debugLog(`Property URL: ${propertyUrl}`, 'info');
           debugLog(`Audit Date: ${new Date().toISOString().split('T')[0]}`, 'info');
           
-          await saveAuditToSupabase(propertyUrl, scores, searchData, snippetReadiness, schemaAudit, localSignals, new Date().toISOString().split('T')[0]);
+          await saveAuditToSupabase(propertyUrl, scores, searchData, snippetReadiness, schemaAudit, localSignals, new Date().toISOString().split('T')[0], backlinkMetrics);
           debugLog('✓ Audit saved to Supabase successfully', 'success');
         } catch (supabaseErr) {
           debugLog(`✗ CRITICAL: Failed to save audit to Supabase: ${supabaseErr.message}`, 'error');
@@ -29690,7 +29691,7 @@
     }
 
     // Display dashboard
-    async function displayDashboard(scores, data, snippetReadiness = 0, schemaAudit = null, localSignals = null) {
+    async function displayDashboard(scores, data, snippetReadiness = 0, schemaAudit = null, localSignals = null, backlinkMetrics = null) {
       // Normalize localSignals structure if needed (handle old format where it might just be {data: {...}})
       if (localSignals && localSignals.data && !localSignals.status) {
         debugLog(`[displayDashboard] Normalizing localSignals structure - wrapping in status/data format`, 'info');
@@ -58912,6 +58913,47 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
                 }
               } else {
                 debugLog('[Global Run] [Ranking & AI Scan] ⚠ Warning: No data found in localStorage (may be in Supabase only)', 'warn');
+              }
+              
+              // CRITICAL: Wait for Ranking & AI data to be fully saved to Supabase before proceeding
+              // This ensures bulkUpdateAllTasks can access the data when it runs
+              debugLog('[Global Run] [Ranking & AI Scan] Waiting for data to be saved to Supabase...', 'info');
+              const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || 'https://www.alanranger.com';
+              let retries = 0;
+              const maxRetries = 10;
+              const retryDelay = 2000; // 2 seconds between retries
+              
+              while (retries < maxRetries) {
+                try {
+                  // Check if latest audit has ranking_ai_data
+                  const checkUrl = apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}&minimal=true`);
+                  const checkResponse = await fetch(checkUrl);
+                  
+                  if (checkResponse.ok) {
+                    const checkData = await checkResponse.json();
+                    if (checkData.status === 'ok' && checkData.data && checkData.data.ranking_ai_data) {
+                      const rankingAiData = checkData.data.ranking_ai_data;
+                      if (rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows) && rankingAiData.combinedRows.length > 0) {
+                        debugLog(`[Global Run] [Ranking & AI Scan] ✓ Verified: Data saved to Supabase (${rankingAiData.combinedRows.length} keywords)`, 'success');
+                        break; // Data is in Supabase, proceed
+                      }
+                    }
+                  }
+                  
+                  retries++;
+                  if (retries < maxRetries) {
+                    debugLog(`[Global Run] [Ranking & AI Scan] Waiting for Supabase save... (attempt ${retries}/${maxRetries})`, 'info');
+                    await new Promise(resolve => setTimeout(resolve, retryDelay));
+                  } else {
+                    debugLog('[Global Run] [Ranking & AI Scan] ⚠ Warning: Could not verify Supabase save after all retries. Proceeding anyway...', 'warn');
+                  }
+                } catch (e) {
+                  debugLog(`[Global Run] [Ranking & AI Scan] Error checking Supabase: ${e?.message || e}`, 'warn');
+                  retries++;
+                  if (retries < maxRetries) {
+                    await new Promise(resolve => setTimeout(resolve, retryDelay));
+                  }
+                }
               }
               
               // Ensure Ranking & AI tab is refreshed after data loads
