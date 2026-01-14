@@ -115,6 +115,18 @@ export default async function handler(req, res) {
       });
     }
 
+    // Get Supabase credentials from environment (needed for partial update merges)
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!supabaseUrl || !supabaseKey) {
+      return res.status(500).json({
+        status: 'error',
+        message: 'Supabase not configured. Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables.',
+        meta: { generatedAt: new Date().toISOString() }
+      });
+    }
+
     // CRITICAL: Handle partial updates (e.g., only rankingAiData sent from Ranking & AI scan)
     // Fetch latest audit data to recompute computed fields with complete data
     let mergedScores = scores;
@@ -202,18 +214,6 @@ export default async function handler(req, res) {
     const finalSchemaAudit = mergedSchemaAudit || schemaAudit;
     const finalLocalSignals = mergedLocalSignals || localSignals;
     const finalDomainStrength = mergedDomainStrength || domainStrength;
-
-    // Get Supabase credentials from environment
-    const supabaseUrl = process.env.SUPABASE_URL;
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (!supabaseUrl || !supabaseKey) {
-      return res.status(500).json({
-        status: 'error',
-        message: 'Supabase not configured. Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables.',
-        meta: { generatedAt: new Date().toISOString() }
-      });
-    }
 
     // Use merged data for all calculations
     const schemaAuditToUse = finalSchemaAudit;
