@@ -15,6 +15,27 @@ import { getBusinessProfileAccessToken } from './utils.js';
 import fs from 'fs/promises';
 import path from 'path';
 
+async function readGbpFallback() {
+  try {
+    const gbpReviewsPath = path.join(process.cwd(), 'data', 'gbp-reviews.json');
+    const gbpReviewsContent = await fs.readFile(gbpReviewsPath, 'utf8');
+    const gbpReviews = JSON.parse(gbpReviewsContent);
+
+    const rating = Number(gbpReviews.gbpRating || gbpReviews.rating);
+    const count = Number(gbpReviews.gbpReviewCount || gbpReviews.reviewCount || gbpReviews.count);
+
+    if (Number.isFinite(rating) && rating > 0 && Number.isFinite(count) && count > 0) {
+      return { gbpRating: rating, gbpReviewCount: count };
+    }
+
+    console.warn('[Local Signals] Fallback file is missing rating or count', gbpReviews);
+    return { gbpRating: null, gbpReviewCount: null };
+  } catch (fileError) {
+    console.error('[Local Signals] Could not read gbp-reviews.json fallback file:', fileError.message);
+    return { gbpRating: null, gbpReviewCount: null };
+  }
+}
+
 export default async function handler(req, res) {
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -462,6 +483,7 @@ export default async function handler(req, res) {
       if (locationsResponse.status === 403) {
         const isScopeError = errorData?.error?.details?.some(d => d.reason === 'ACCESS_TOKEN_SCOPE_INSUFFICIENT');
         if (isScopeError) {
+          const fallback = await readGbpFallback();
           return res.status(200).json({
             status: 'error',
             source: 'local-signals',
@@ -477,8 +499,8 @@ export default async function handler(req, res) {
               knowledgePanelDetected: false,
               serviceAreas: [],
               locations: [],
-              gbpRating: null,
-              gbpReviewCount: null,
+              gbpRating: fallback.gbpRating,
+              gbpReviewCount: fallback.gbpReviewCount,
               notes: 'API call failed due to insufficient OAuth scopes. Using cached data if available.'
             },
             meta: { generatedAt: new Date().toISOString() }
@@ -504,25 +526,15 @@ export default async function handler(req, res) {
     
     // Fallback to static JSON file if API didn't return rating/review count
     // This runs AFTER locations processing to avoid interfering with it
-    if (!gbpRating || !gbpReviewCount) {
-      try {
-        const gbpReviewsPath = path.join(process.cwd(), 'data', 'gbp-reviews.json');
-        const gbpReviewsContent = await fs.readFile(gbpReviewsPath, 'utf8');
-        const gbpReviews = JSON.parse(gbpReviewsContent);
-        
-        const rating = Number(gbpReviews.gbpRating || gbpReviews.rating);
-        const count = Number(gbpReviews.gbpReviewCount || gbpReviews.reviewCount || gbpReviews.count);
-        
-        if (rating && count) {
-          gbpRating = rating;
-          gbpReviewCount = count;
-          console.info('[Local Signals] Using GBP rating from fallback file:', { rating, count });
-        } else {
-          console.warn('[Local Signals] Fallback file is missing rating or count', gbpReviews);
-        }
-      } catch (fileError) {
-        console.error('[Local Signals] Could not read gbp-reviews.json fallback file:', fileError.message);
-        // Don't let file read errors affect locations processing
+    if (gbpRating == null || gbpReviewCount == null) {
+      const fallback = await readGbpFallback();
+      if (fallback.gbpRating != null && fallback.gbpReviewCount != null) {
+        gbpRating = fallback.gbpRating;
+        gbpReviewCount = fallback.gbpReviewCount;
+        console.info('[Local Signals] Using GBP rating from fallback file:', {
+          rating: gbpRating,
+          count: gbpReviewCount
+        });
       }
     }
     
@@ -650,24 +662,14 @@ export default async function handler(req, res) {
     console.error('[Local Signals] Error in local-signals handler:', error);
     
     // Even on error, try to return fallback GBP data and basic structure
-    let gbpRating = null;
-    let gbpReviewCount = null;
-    
-    try {
-      const gbpReviewsPath = path.join(process.cwd(), 'data', 'gbp-reviews.json');
-      const gbpReviewsContent = await fs.readFile(gbpReviewsPath, 'utf8');
-      const gbpReviews = JSON.parse(gbpReviewsContent);
-      
-      const rating = Number(gbpReviews.gbpRating || gbpReviews.rating);
-      const count = Number(gbpReviews.gbpReviewCount || gbpReviews.reviewCount || gbpReviews.count);
-      
-      if (rating && count) {
-        gbpRating = rating;
-        gbpReviewCount = count;
-        console.info('[Local Signals] Using GBP rating from fallback file (error recovery):', { rating, count });
-      }
-    } catch (fileError) {
-      console.error('[Local Signals] Could not read gbp-reviews.json fallback file (error recovery):', fileError.message);
+    const fallback = await readGbpFallback();
+    let gbpRating = fallback.gbpRating;
+    let gbpReviewCount = fallback.gbpReviewCount;
+    if (gbpRating != null && gbpReviewCount != null) {
+      console.info('[Local Signals] Using GBP rating from fallback file (error recovery):', {
+        rating: gbpRating,
+        count: gbpReviewCount
+      });
     }
     
     // Always return 200 with JSON, even on error (so client doesn't hit "endpoint not available")
