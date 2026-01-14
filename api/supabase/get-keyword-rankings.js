@@ -132,6 +132,15 @@ export default async function handler(req, res) {
         }
       }
 
+      // Fallback: if we still have no timestamp but do have an audit_date, use midnight of that date
+      if (!latestTimestamp && latestRow?.audit_date) {
+        const ts = new Date(`${latestRow.audit_date}T00:00:00Z`);
+        if (!isNaN(ts.getTime())) {
+          latestTimestamp = ts.toISOString();
+          console.log(`[Get Keyword Rankings] Fallback timestamp using audit_date midnight: ${latestTimestamp}`);
+        }
+      }
+
       return sendJSON(res, 200, {
         status: 'ok',
         data: {

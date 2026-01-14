@@ -29691,6 +29691,40 @@
       // This ensures we always use the most recent audit run data, not stale localStorage
       // Check both localSignals and localSignalsSnapshot (different storage formats)
       const currentLocalSignals = localSignals || (saved && (saved.localSignals || saved.localSignalsSnapshot)) || null;
+      // If Authority components/segmented scores are missing but we have queryPages, recompute from searchData
+      const searchDataForRecalc = data?.searchData || data || saved?.searchData || null;
+      const missingAuthority =
+        !scores?.authority ||
+        !scores?.authority?.behaviourScoresSegmented ||
+        !scores?.authority?.rankingScoresSegmented ||
+        !scores?.authorityComponents ||
+        scores?.authorityComponents?.behaviour == null ||
+        scores?.authorityComponents?.ranking == null ||
+        scores?.authorityComponents?.backlinks == null ||
+        scores?.authorityComponents?.reviews == null;
+      if (missingAuthority && searchDataForRecalc && Array.isArray(searchDataForRecalc.queryPages) && searchDataForRecalc.queryPages.length > 0) {
+        try {
+          debugLog(`[displayDashboard] Recomputing authority from queryPages (${searchDataForRecalc.queryPages.length} rows) due to missing segmented scores/components`, 'info');
+          const recomputed = await calculatePillarScores(
+            searchDataForRecalc,
+            schemaAudit || saved?.schemaAudit || null,
+            currentLocalSignals || saved?.localSignals || null,
+            null,
+            null
+          );
+          // Merge recomputed scores back into current scores
+          scores = { ...scores, ...recomputed };
+          if (recomputed.authority) {
+            scores.authority = { ...scores.authority, ...recomputed.authority };
+          }
+          if (recomputed.authorityComponents) {
+            scores.authorityComponents = recomputed.authorityComponents;
+          }
+          debugLog(`[displayDashboard] ✓ Recomputed authority with segmented scores: behaviour=${recomputed.authorityComponents?.behaviour}, ranking=${recomputed.authorityComponents?.ranking}`, 'success');
+        } catch (e) {
+          debugLog(`[displayDashboard] ⚠ Failed to recompute authority from queryPages: ${e?.message || e}`, 'warn');
+        }
+      }
       
       // DEBUG: Log currentLocalSignals structure
       if (currentLocalSignals) {
