@@ -24181,27 +24181,9 @@
     // Update audit timestamp display - shows GSC and Ranking & AI audit dates separately
     // Debounced to prevent rapid updates from multiple callers
     let updateAuditTimestampDebounceTimer = null;
-    async function updateAuditTimestamp(ignoreParam) {
+    async function updateAuditTimestamp() {
       debugLog('[updateAuditTimestamp] Function called', 'info');
-      console.log('[updateAuditTimestamp] Function called');
-      
-      // Check if DOM elements exist
-      const gscAuditElement = document.getElementById('gscAuditDate');
-      const gscDateRangeElement = document.getElementById('gscDateRange');
-      const rankingAiAuditElement = document.getElementById('rankingAiAuditDate');
-      
-      debugLog(`[updateAuditTimestamp] DOM elements check: gscAuditElement=${!!gscAuditElement}, gscDateRangeElement=${!!gscDateRangeElement}, rankingAiAuditElement=${!!rankingAiAuditElement}`, 'info');
-      console.log('[updateAuditTimestamp] DOM elements:', {
-        gscAuditElement: !!gscAuditElement,
-        gscDateRangeElement: !!gscDateRangeElement,
-        rankingAiAuditElement: !!rankingAiAuditElement
-      });
-      
-      // Debounce: Clear any pending update and schedule a new one
-      if (updateAuditTimestampDebounceTimer) {
-        clearTimeout(updateAuditTimestampDebounceTimer);
-      }
-      
+      if (updateAuditTimestampDebounceTimer) clearTimeout(updateAuditTimestampDebounceTimer);
       updateAuditTimestampDebounceTimer = setTimeout(async () => {
         try {
           const gscAuditElement = document.getElementById('gscAuditDate');
@@ -24211,233 +24193,131 @@
           const snippetTimestampContainer = document.getElementById('snippetReadinessTimestamp');
           const radarTimestampElement = document.getElementById('radarChartAuditTime');
           const radarTimestampContainer = document.getElementById('radarChartTimestamp');
-          
-          // Helper function to format date as dd-mmm-yy, HH:MM
-        const formatDateShort = (dateStr) => {
-          if (!dateStr) return 'Not yet run';
-          try {
-            const date = new Date(dateStr);
-            if (isNaN(date.getTime())) return 'Not yet run';
-            const day = String(date.getUTCDate()).padStart(2, '0');
-            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-            const month = monthNames[date.getUTCMonth()];
-            const year = String(date.getUTCFullYear()).slice(-2);
-            const hours = String(date.getUTCHours()).padStart(2, '0');
-            const minutes = String(date.getUTCMinutes()).padStart(2, '0');
-            return `${day}-${month}-${year}, ${hours}:${minutes}`;
-          } catch (e) {
-            return 'Not yet run';
-          }
-        };
-        
-        // Helper function to format date range as dd-mmm-yy -> dd-mmm-yy
-        const formatDateRange = (startDateStr, endDateStr) => {
-          if (!startDateStr || !endDateStr) return '-';
-          try {
-            const start = new Date(startDateStr);
-            const end = new Date(endDateStr);
-            if (isNaN(start.getTime()) || isNaN(end.getTime())) return '-';
-            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-            const formatDate = (d) => {
-              const day = String(d.getUTCDate()).padStart(2, '0');
-              const month = monthNames[d.getUTCMonth()];
-              const year = String(d.getUTCFullYear()).slice(-2);
-              return `${day}-${month}-${year}`;
-            };
-            return `${formatDate(start)} -> ${formatDate(end)}`;
-          } catch (e) {
-            return '-';
-          }
-        };
-        
-        // Get property URL from multiple possible sources
-        const propertyUrlInput = document.getElementById('propertyUrl');
-        const propertyUrlFromInput = propertyUrlInput?.value?.trim();
-        const propertyUrlFromStorage = localStorage.getItem('gsc_property_url')?.trim();
-        const propertyUrlDefault = 'https://www.alanranger.com';
-        
-        const propertyUrl = propertyUrlFromInput || propertyUrlFromStorage || propertyUrlDefault;
-        
-        debugLog(`[updateAuditTimestamp] Using property URL: ${propertyUrl}`, 'info');
-        console.log('[updateAuditTimestamp] Property URL sources:', {
-          fromInput: propertyUrlFromInput,
-          fromStorage: propertyUrlFromStorage,
-          default: propertyUrlDefault,
-          final: propertyUrl,
-          hasInput: !!propertyUrlInput,
-          inputValue: propertyUrlInput?.value
-        });
-        
-        // Validate propertyUrl is not empty
-        if (!propertyUrl || propertyUrl.trim() === '') {
-          debugLog('[updateAuditTimestamp] Property URL is empty, cannot fetch audit data', 'error');
-          console.error('[updateAuditTimestamp] Property URL is empty!');
-          return;
-        }
-        
-        // Fetch latest GSC audit (has query_pages) - query Supabase directly
-        let gscAuditDate = null;
-        let gscTimestamp = null;
-        let gscDateRange = null;
-        let gscStartDate = null;
-        let gscEndDate = null;
-        
-        try {
-            // Query Supabase directly for latest audit with query_pages
-            // Use propertyUrl query parameter (API expects 'propertyUrl', not 'property')
-            // Include partial audits (GSC-only audits) by setting includePartial=true
-            const gscUrl = apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}&minimal=true&includePartial=true`);
-            let gscResponse;
+
+          const formatDateShort = (dateStr) => {
+            if (!dateStr) return 'Not yet run';
             try {
-              gscResponse = await fetch(gscUrl);
-            } catch (fetchError) {
-              debugLog(`[updateAuditTimestamp] ⚠ Failed to fetch GSC audit: ${fetchError.message}`, 'warn');
-              // Continue with keyword rankings data if GSC fetch fails
-              gscResponse = null;
+              const date = new Date(dateStr);
+              if (isNaN(date.getTime())) return 'Not yet run';
+              const day = String(date.getUTCDate()).padStart(2, '0');
+              const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+              const month = monthNames[date.getUTCMonth()];
+              const year = String(date.getUTCFullYear()).slice(-2);
+              const hours = String(date.getUTCHours()).padStart(2, '0');
+              const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+              return `${day}-${month}-${year}, ${hours}:${minutes}`;
+            } catch (e) {
+              return 'Not yet run';
             }
-            if (!gscResponse) {
-              debugLog('[updateAuditTimestamp] Skipping GSC data due to fetch error', 'warn');
-            } else {
-              debugLog(`[updateAuditTimestamp] GSC minimal response status: ${gscResponse.status}`, 'info');
-              if (gscResponse.ok) {
-                const gscData = await gscResponse.json();
-                debugLog(`[updateAuditTimestamp] GSC minimal data: status=${gscData?.status}, hasData=${!!gscData?.data}, auditDate=${gscData?.data?.auditDate || 'null'}, timestamp=${gscData?.data?.timestamp || 'null'}`, 'info');
-                
-                if (gscData.status === 'ok' && gscData.data && gscData.data.auditDate) {
-                  // Now fetch full record to get date_range and timestamp
-                  // Include partial audits (GSC-only audits) by setting includePartial=true
-                  const fullUrl = apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}&includePartial=true`);
-                  let fullResponse;
-                  try {
-                    fullResponse = await fetch(fullUrl);
-                  } catch (fetchError) {
-                    debugLog(`[updateAuditTimestamp] ⚠ Failed to fetch GSC full audit: ${fetchError.message}`, 'warn');
-                    fullResponse = null;
-                  }
-                  if (!fullResponse) {
-                    debugLog('[updateAuditTimestamp] Skipping GSC full data due to fetch error', 'warn');
-                  } else {
-                    debugLog(`[updateAuditTimestamp] GSC full response status: ${fullResponse.status}`, 'info');
-                    if (fullResponse.ok) {
-                      const fullData = await fullResponse.json();
-                      debugLog(`[updateAuditTimestamp] GSC full data: status=${fullData?.status}, hasData=${!!fullData?.data}, auditDate=${fullData?.data?.auditDate || 'null'}, timestamp=${fullData?.data?.timestamp || 'null'}, hasSearchData=${!!fullData?.data?.searchData}`, 'info');
-                      
-                      if (fullData.status === 'ok' && fullData.data) {
-                    // Get auditDate from data - this is the date the audit was run
-                    gscAuditDate = fullData.data.auditDate;
-                    window.lastGscAuditDate = gscAuditDate;
-                        
-                        // CRITICAL: Use the timestamp to determine the actual audit date
-                        // The timestamp reflects when the audit actually completed, which may be different from auditDate
-                        // For date range calculation, we want the date when the audit data was captured
-                        let auditDateForCalculation;
-                        if (fullData.data.timestamp) {
-                          // timestamp is milliseconds, convert to date
-                          const timestampDate = new Date(fullData.data.timestamp);
-                          // Use the date part of the timestamp (this is the actual audit completion date)
-                          auditDateForCalculation = new Date(Date.UTC(
-                            timestampDate.getUTCFullYear(),
-                            timestampDate.getUTCMonth(),
-                            timestampDate.getUTCDate()
-                          ));
-                        } else if (gscAuditDate) {
-                          // Fallback to auditDate if timestamp not available
-                          auditDateForCalculation = new Date(gscAuditDate + 'T00:00:00Z');
-                        }
-                        
-                        debugLog(`[updateAuditTimestamp] Date sources: auditDate=${gscAuditDate}, timestamp=${fullData.data.timestamp || 'null'}, auditDateForCalculation=${auditDateForCalculation?.toISOString().split('T')[0]}`, 'info');
-                        
-                        // Get dateRange - always use 28 days for GSC 28-day date range display
-                        const dateRange = 28;
-                        
-                        if (auditDateForCalculation) {
-                          // End date is 2 days before audit date (GSC data lag)
-                          gscEndDate = new Date(auditDateForCalculation);
-                          gscEndDate.setUTCDate(gscEndDate.getUTCDate() - 2);
-                          
-                          // Start date is (dateRange - 1) days before end date to get dateRange days inclusive
-                          // For 28 days: end date is day 28, start date is 27 days earlier = day 1
-                          gscStartDate = new Date(gscEndDate);
-                          gscStartDate.setUTCDate(gscStartDate.getUTCDate() - (dateRange - 1));
-                          
-                          debugLog(`[updateAuditTimestamp] Date calculation: auditDateForCalculation=${auditDateForCalculation.toISOString().split('T')[0]}, dateRange=${dateRange}, gscEndDate=${gscEndDate.toISOString().split('T')[0]}, gscStartDate=${gscStartDate.toISOString().split('T')[0]}, daysBetween=${Math.round((gscEndDate - gscStartDate) / (1000 * 60 * 60 * 24)) + 1}`, 'info');
-                          
-                          // Get timestamp - timestamp is returned as milliseconds (number), convert to ISO string
-                          if (fullData.data.timestamp) {
-                            // timestamp is a number (milliseconds since epoch)
-                            gscTimestamp = new Date(fullData.data.timestamp).toISOString();
-                          } else if (gscAuditDate) {
-                            // Fallback to audit_date if timestamp not available
-                            gscTimestamp = auditDate.toISOString();
-                          }
-                          
-                          debugLog(`[updateAuditTimestamp] GSC audit found: date=${gscAuditDate}, timestamp=${gscTimestamp}, dateRange=${dateRange}`, 'info');
-                        } else {
-                          debugLog('[updateAuditTimestamp] GSC auditDate is missing from fullData.data', 'warn');
-                        }
-                      } else {
-                        debugLog(`[updateAuditTimestamp] GSC audit response invalid: status=${fullData?.status}, hasData=${!!fullData?.data}`, 'warn');
-                      }
-                    } else {
-                      const errorText = await fullResponse.text();
-                      debugLog(`[updateAuditTimestamp] GSC full audit fetch failed: ${fullResponse.status}`, 'warn');
-                      debugLog(`[updateAuditTimestamp] GSC full fetch failed: ${fullResponse.status} - ${errorText}`, 'warn');
-                    }
-                  } // Close else block for fullResponse
-                } else {
-                  debugLog(`[updateAuditTimestamp] GSC minimal audit check failed: status=${gscData?.status}, hasData=${!!gscData?.data}, hasAuditDate=${!!gscData?.data?.auditDate}`, 'warn');
-                }
-              } else {
-                const errorText = await gscResponse.text();
-                debugLog(`[updateAuditTimestamp] GSC minimal audit fetch failed: ${gscResponse.status}`, 'warn');
-                debugLog(`[updateAuditTimestamp] GSC minimal fetch failed: ${gscResponse.status} - ${errorText}`, 'warn');
-              }
-            } // Close else block for gscResponse
-        } catch (e) {
-          debugLog(`[updateAuditTimestamp] Error fetching GSC audit: ${e?.message || e}`, 'error');
-        }
-        
-        // Fetch latest Ranking & AI audit date
-        // CRITICAL: Query keyword_rankings table directly for the most recent audit_date
-        // This ensures we show the latest Ranking & AI date even if latest audit doesn't have ranking data
-        let rankingAiAuditDate = null;
-        let rankingAiTimestamp = null;
-        
-        try {
-            // FIRST: Check localStorage for saved ranking_ai_data with timestamp (fastest, works offline)
+          };
+
+          const formatDateRange = (startDateStr, endDateStr) => {
+            if (!startDateStr || !endDateStr) return '-';
             try {
+              const start = new Date(startDateStr);
+              const end = new Date(endDateStr);
+              if (isNaN(start.getTime()) || isNaN(end.getTime())) return '-';
+              const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+              const formatDate = (d) => {
+                const day = String(d.getUTCDate()).padStart(2, '0');
+                const month = monthNames[d.getUTCMonth()];
+                const year = String(d.getUTCFullYear()).slice(-2);
+                return `${day}-${month}-${year}`;
+              };
+              return `${formatDate(start)} -> ${formatDate(end)}`;
+            } catch (e) {
+              return '-';
+            }
+          };
+
+          const propertyUrlInput = document.getElementById('propertyUrl');
+          const propertyUrlFromInput = propertyUrlInput?.value?.trim();
+          const propertyUrlFromStorage = localStorage.getItem('gsc_property_url')?.trim();
+          const propertyUrlDefault = 'https://www.alanranger.com';
+          const propertyUrl = propertyUrlFromInput || propertyUrlFromStorage || propertyUrlDefault;
+          if (!propertyUrl || propertyUrl.trim() === '') {
+            debugLog('[updateAuditTimestamp] Property URL is empty, cannot fetch audit data', 'error');
+            return;
+          }
+
+          let gscAuditDate = null;
+          let gscTimestamp = null;
+          let gscStartDate = null;
+          let gscEndDate = null;
+          let rankingAiAuditDate = null;
+          let rankingAiTimestamp = null;
+
+          const safeFetch = async (url, label, controller) => {
+            try {
+              const res = await fetch(url, controller ? { signal: controller.signal } : undefined);
+              if (!res.ok) throw new Error(`${res.status}`);
+              return res;
+            } catch (err) {
+              debugLog(`[updateAuditTimestamp] ${label}: ${err.message}`, 'warn');
+              return null;
+            }
+          };
+
+          // GSC minimal + full
+          const gscMinimalUrl = apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}&minimal=true&includePartial=true`);
+          const gscRes = await safeFetch(gscMinimalUrl, 'GSC minimal fetch failed');
+          if (gscRes) {
+            const gscData = await gscRes.json();
+            if (gscData.status === 'ok' && gscData.data?.auditDate) {
+              const fullUrl = apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}&includePartial=true`);
+              const fullRes = await safeFetch(fullUrl, 'GSC full fetch failed');
+              if (fullRes) {
+                const fullData = await fullRes.json();
+                if (fullData.status === 'ok' && fullData.data) {
+                  gscAuditDate = fullData.data.auditDate;
+                  window.lastGscAuditDate = gscAuditDate;
+                  let auditDateForCalculation = null;
+                  if (fullData.data.timestamp) {
+                    const tsDate = new Date(fullData.data.timestamp);
+                    auditDateForCalculation = new Date(Date.UTC(tsDate.getUTCFullYear(), tsDate.getUTCMonth(), tsDate.getUTCDate()));
+                  } else if (gscAuditDate) {
+                    auditDateForCalculation = new Date(gscAuditDate + 'T00:00:00Z');
+                  }
+                  const dateRange = 28;
+                  if (auditDateForCalculation) {
+                    gscEndDate = new Date(auditDateForCalculation);
+                    gscEndDate.setUTCDate(gscEndDate.getUTCDate() - 2);
+                    gscStartDate = new Date(gscEndDate);
+                    gscStartDate.setUTCDate(gscStartDate.getUTCDate() - (dateRange - 1));
+                    if (fullData.data.timestamp) {
+                      gscTimestamp = new Date(fullData.data.timestamp).toISOString();
+                    } else if (gscAuditDate) {
+                      gscTimestamp = auditDateForCalculation.toISOString();
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          // Ranking & AI: localStorage fast path
+          try {
             const savedAudit = localStorage.getItem('last_audit_results');
             const savedRankingData = localStorage.getItem('ranking_ai_data');
-            
             if (savedAudit) {
               const parsed = JSON.parse(savedAudit);
-              // Check if we have ranking_ai_data with a timestamp
               if (parsed.ranking_ai_data && parsed.timestamp) {
-                const auditTimestamp = new Date(parsed.timestamp);
-                if (!isNaN(auditTimestamp.getTime())) {
-                  rankingAiTimestamp = auditTimestamp.toISOString();
-                  // Try to get audit_date from the saved data
-                  if (parsed.audit_date) {
-                    rankingAiAuditDate = parsed.audit_date;
-                  } else if (parsed.ranking_ai_data.audit_date) {
-                    rankingAiAuditDate = parsed.ranking_ai_data.audit_date;
-                  }
+                const auditTs = new Date(parsed.timestamp);
+                if (!isNaN(auditTs.getTime())) {
+                  rankingAiTimestamp = auditTs.toISOString();
+                  rankingAiAuditDate = parsed.audit_date || parsed.ranking_ai_data.audit_date || rankingAiAuditDate;
                   debugLog(`[updateAuditTimestamp] ✓ Found timestamp from localStorage (fast path): ${rankingAiTimestamp}`, 'success');
                 }
               }
             }
-            
-            // Also check dedicated ranking_ai_data localStorage key
             if (!rankingAiTimestamp && savedRankingData) {
               try {
                 const parsedRanking = JSON.parse(savedRankingData);
                 if (parsedRanking.timestamp) {
-                  const rankingTimestamp = new Date(parsedRanking.timestamp);
-                  if (!isNaN(rankingTimestamp.getTime())) {
-                    rankingAiTimestamp = rankingTimestamp.toISOString();
-                    if (parsedRanking.audit_date) {
-                      rankingAiAuditDate = parsedRanking.audit_date;
-                    }
+                  const ts = new Date(parsedRanking.timestamp);
+                  if (!isNaN(ts.getTime())) {
+                    rankingAiTimestamp = ts.toISOString();
+                    rankingAiAuditDate = parsedRanking.audit_date || rankingAiAuditDate;
                     debugLog(`[updateAuditTimestamp] ✓ Found timestamp from ranking_ai_data localStorage: ${rankingAiTimestamp}`, 'success');
                   }
                 }
@@ -24445,235 +24325,150 @@
                 debugLog(`[updateAuditTimestamp] Error parsing ranking_ai_data from localStorage: ${e.message}`, 'warn');
               }
             }
-          } catch (localStorageError) {
-            debugLog(`[updateAuditTimestamp] Error reading localStorage (fast path): ${localStorageError.message}`, 'warn');
+          } catch (localErr) {
+            debugLog(`[updateAuditTimestamp] Error reading localStorage (fast path): ${localErr.message}`, 'warn');
           }
-          
-          // SECOND: Try API calls to get latest data (if localStorage didn't have it)
+
+          // Ranking & AI: API path
           if (!rankingAiTimestamp) {
             try {
-              // PRIMARY METHOD: Query keyword_rankings table directly for MAX(audit_date)
-              // This is the most reliable way to get the latest Ranking & AI date
-              debugLog('[updateAuditTimestamp] Querying keyword_rankings table directly for latest audit_date...', 'info');
-              const keywordRankingsUrl = apiUrl(`/api/supabase/get-keyword-rankings?propertyUrl=${encodeURIComponent(propertyUrl)}&latestOnly=true`);
-              
-              // Add timeout using AbortController (more compatible than AbortSignal.timeout)
+              const rankingsUrl = apiUrl(`/api/supabase/get-keyword-rankings?propertyUrl=${encodeURIComponent(propertyUrl)}&latestOnly=true`);
               const controller = new AbortController();
-              const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-              
-              const keywordRankingsResponse = await fetch(keywordRankingsUrl, {
-                method: 'GET',
-                headers: {
-                  'Content-Type': 'application/json'
-                },
-                signal: controller.signal
-              });
-              
-              clearTimeout(timeoutId); // Clear timeout if fetch succeeds
-            
-            if (keywordRankingsResponse.ok) {
-              const keywordRankingsData = await keywordRankingsResponse.json();
-              debugLog(`[updateAuditTimestamp] keyword_rankings API response: status=${keywordRankingsData?.status}, hasData=${!!keywordRankingsData?.data}, latestAuditDate=${keywordRankingsData?.data?.latestAuditDate || 'null'}, latestTimestamp=${keywordRankingsData?.data?.latestTimestamp || 'null'}`, 'info');
-              if (keywordRankingsData.status === 'ok' && keywordRankingsData.data && keywordRankingsData.data.latestAuditDate) {
-                rankingAiAuditDate = keywordRankingsData.data.latestAuditDate;
-                // CRITICAL FIX: Use timestamp from audit_results if available, otherwise try to get from ranking_ai_data
-                if (keywordRankingsData.data.latestTimestamp) {
-                  // Ensure timestamp is in ISO format with time component
-                  const ts = keywordRankingsData.data.latestTimestamp;
-                  // Handle both string and number timestamps
-                  const timestampDate = typeof ts === 'string' ? new Date(ts) : new Date(ts);
-                  rankingAiTimestamp = timestampDate.toISOString();
-                  debugLog(`[updateAuditTimestamp] ✓ Found latest Ranking & AI timestamp from audit_results: ${rankingAiTimestamp}`, 'success');
-                } else if (keywordRankingsData.data.rankingAiTimestamp) {
-                  // Try alternative field name
-                  const ts = keywordRankingsData.data.rankingAiTimestamp;
-                  const timestampDate = typeof ts === 'string' ? new Date(ts) : new Date(ts);
-                  rankingAiTimestamp = timestampDate.toISOString();
-                  debugLog(`[updateAuditTimestamp] ✓ Found latest Ranking & AI timestamp from alternative field: ${rankingAiTimestamp}`, 'success');
-                } else {
-                  // Fallback: Try to get timestamp from latest audit_results row with ranking_ai_data
-                  // Query audit_results directly for the timestamp
-                  debugLog(`[updateAuditTimestamp] No timestamp in keyword_rankings response, querying audit_results directly...`, 'info');
-                  try {
-                    const auditResultsUrl = apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}&minimal=true`);
-                    const auditResultsResponse = await fetch(auditResultsUrl);
-                    if (auditResultsResponse.ok) {
-                      const auditResultsData = await auditResultsResponse.json();
-                      if (auditResultsData.status === 'ok' && auditResultsData.data && auditResultsData.data.timestamp) {
-                        const ts = auditResultsData.data.timestamp;
-                        const timestampDate = typeof ts === 'string' ? new Date(ts) : new Date(ts);
-                        rankingAiTimestamp = timestampDate.toISOString();
-                        debugLog(`[updateAuditTimestamp] ✓ Found timestamp from audit_results direct query: ${rankingAiTimestamp}`, 'success');
-                      } else {
-                        // Last resort: use audit_date at midnight
-                        const auditDate = new Date(rankingAiAuditDate + 'T00:00:00Z');
-                        rankingAiTimestamp = auditDate.toISOString();
-                        debugLog(`[updateAuditTimestamp] ⚠ No timestamp found anywhere - using midnight: ${rankingAiAuditDate}`, 'warn');
-                      }
-                    } else {
-                      // Last resort: use audit_date at midnight
-                      const auditDate = new Date(rankingAiAuditDate + 'T00:00:00Z');
-                      rankingAiTimestamp = auditDate.toISOString();
-                      debugLog(`[updateAuditTimestamp] ⚠ audit_results query failed - using midnight: ${rankingAiAuditDate}`, 'warn');
+              const timeoutId = setTimeout(() => controller.abort(), 10000);
+              const rankingsRes = await safeFetch(rankingsUrl, 'keyword_rankings fetch failed', controller);
+              clearTimeout(timeoutId);
+              if (rankingsRes) {
+                const rankingsData = await rankingsRes.json();
+                if (rankingsData.status === 'ok' && rankingsData.data?.latestAuditDate) {
+                  rankingAiAuditDate = rankingsData.data.latestAuditDate;
+                  const ts = rankingsData.data.latestTimestamp || rankingsData.data.rankingAiTimestamp;
+                  if (ts) {
+                    const tsDate = new Date(ts);
+                    if (!isNaN(tsDate.getTime())) {
+                      rankingAiTimestamp = tsDate.toISOString();
                     }
-                  } catch (e) {
-                    // Last resort: use audit_date at midnight
+                  }
+                  if (!rankingAiTimestamp && rankingAiAuditDate) {
+                    try {
+                      const auditResultsUrl = apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}&minimal=true`);
+                      const auditRes = await safeFetch(auditResultsUrl, 'audit_results minimal fetch failed');
+                      if (auditRes) {
+                        const auditData = await auditRes.json();
+                        if (auditData.status === 'ok' && auditData.data?.timestamp) {
+                          const ts2 = new Date(auditData.data.timestamp);
+                          if (!isNaN(ts2.getTime())) {
+                            rankingAiTimestamp = ts2.toISOString();
+                          }
+                        }
+                      }
+                    } catch (_) { /* ignore */ }
+                  }
+                  if (!rankingAiTimestamp && rankingAiAuditDate) {
                     const auditDate = new Date(rankingAiAuditDate + 'T00:00:00Z');
                     rankingAiTimestamp = auditDate.toISOString();
-                    debugLog(`[updateAuditTimestamp] ⚠ Error querying audit_results - using midnight: ${e.message}`, 'warn');
                   }
                 }
-              } else {
-                debugLog(`[updateAuditTimestamp] keyword_rankings query returned no latest date: status=${keywordRankingsData?.status}, hasData=${!!keywordRankingsData?.data}`, 'warn');
               }
-            } else {
-              const errorText = await keywordRankingsResponse.text().catch(() => 'Unable to read error response');
-              debugLog(`[updateAuditTimestamp] keyword_rankings query failed: ${keywordRankingsResponse.status} - ${errorText}`, 'error');
-              // Don't throw - continue to fallback methods
+            } catch (apiErr) {
+              debugLog(`[updateAuditTimestamp] Ranking API error: ${apiErr.message}`, 'warn');
             }
-          } catch (apiError) {
-            // Handle network errors, timeouts, etc.
-            if (apiError.name === 'AbortError' || apiError.name === 'TimeoutError') {
-              debugLog(`[updateAuditTimestamp] API call timed out after 10s, using localStorage fallback`, 'warn');
-            } else {
-              debugLog(`[updateAuditTimestamp] API call failed: ${apiError.message}, using localStorage fallback`, 'warn');
-            }
-            // Continue to fallback methods below
           }
-          } // Close if (!rankingAiTimestamp) block at line 24496
-          
-          // THIRD: Final localStorage check (if API failed)
+
+          // Final localStorage fallback
           if (!rankingAiTimestamp) {
             try {
               const savedAudit = localStorage.getItem('last_audit_results');
               if (savedAudit) {
                 const parsed = JSON.parse(savedAudit);
-                // Check if we have ranking_ai_data with a timestamp
                 if (parsed.ranking_ai_data && parsed.timestamp) {
-                  // Use the audit's timestamp if it has ranking_ai_data
-                  const auditTimestamp = new Date(parsed.timestamp);
-                  if (!isNaN(auditTimestamp.getTime())) {
-                    rankingAiTimestamp = auditTimestamp.toISOString();
+                  const auditTs = new Date(parsed.timestamp);
+                  if (!isNaN(auditTs.getTime())) {
+                    rankingAiTimestamp = auditTs.toISOString();
                     debugLog(`[updateAuditTimestamp] ✓ Found timestamp from localStorage (fallback): ${rankingAiTimestamp}`, 'success');
                   }
                 }
               }
-            } catch (localStorageError) {
-              debugLog(`[updateAuditTimestamp] Error reading localStorage (fallback): ${localStorageError.message}`, 'warn');
+            } catch (e) {
+              debugLog(`[updateAuditTimestamp] Error reading localStorage (fallback): ${e.message}`, 'warn');
             }
           }
-          
-          // FOURTH: If we still don't have a timestamp but have a date, only then default to midnight
+
           if (!rankingAiTimestamp && rankingAiAuditDate) {
             const auditDate = new Date(rankingAiAuditDate + 'T00:00:00Z');
             rankingAiTimestamp = auditDate.toISOString();
             debugLog(`[updateAuditTimestamp] ⚠ No timestamp found - using midnight as last resort: ${rankingAiAuditDate}`, 'warn');
           }
-        } catch (rankingAiError) {
-          debugLog(`[updateAuditTimestamp] Error fetching Ranking & AI audit date: ${rankingAiError?.message || rankingAiError}`, 'error');
-          console.warn('[updateAuditTimestamp] Error fetching Ranking & AI audit date:', rankingAiError);
-        }
-          
-          // Additional fallback: Try get-latest-audit API if we still don't have timestamp (outside try-catch)
+
           if (!rankingAiTimestamp && !rankingAiAuditDate) {
-            debugLog('[updateAuditTimestamp] Trying get-latest-audit API as additional fallback...', 'info');
             try {
               const rankingAiUrl = apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}`);
               const controller2 = new AbortController();
               const timeoutId2 = setTimeout(() => controller2.abort(), 10000);
-              const rankingAiResponse = await fetch(rankingAiUrl, { signal: controller2.signal });
+              const rankingAiRes = await safeFetch(rankingAiUrl, 'get-latest-audit fetch failed', controller2);
               clearTimeout(timeoutId2);
-              
-              if (rankingAiResponse.ok) {
-                const rankingAiData = await rankingAiResponse.json();
+              if (rankingAiRes) {
+                const rankingAiData = await rankingAiRes.json();
                 if (rankingAiData.status === 'ok' && rankingAiData.data) {
-                  // Check if rankingAiData exists and has audit_date
-                  if (rankingAiData.data.rankingAiData && rankingAiData.data.rankingAiData.audit_date) {
+                  if (rankingAiData.data.rankingAiData?.audit_date) {
                     rankingAiAuditDate = rankingAiData.data.rankingAiData.audit_date;
                     if (rankingAiData.data.timestamp) {
-                      rankingAiTimestamp = new Date(rankingAiData.data.timestamp).toISOString();
-                      debugLog(`[updateAuditTimestamp] ✓ Found Ranking & AI timestamp from get-latest-audit: ${rankingAiTimestamp}`, 'success');
+                      const ts = new Date(rankingAiData.data.timestamp);
+                      if (!isNaN(ts.getTime())) rankingAiTimestamp = ts.toISOString();
                     }
                   } else if (rankingAiData.data.auditDate && rankingAiData.data.timestamp) {
                     rankingAiAuditDate = rankingAiData.data.auditDate;
                     rankingAiTimestamp = new Date(rankingAiData.data.timestamp).toISOString();
-                    debugLog(`[updateAuditTimestamp] ✓ Found timestamp from get-latest-audit (no ranking data): ${rankingAiTimestamp}`, 'info');
                   }
                 }
               }
-            } catch (fallbackError) {
-              debugLog(`[updateAuditTimestamp] Error calling get-latest-audit API: ${fallbackError.message}`, 'warn');
+            } catch (fallbackErr) {
+              debugLog(`[updateAuditTimestamp] Error calling get-latest-audit API: ${fallbackErr.message}`, 'warn');
             }
           }
-          
-          // Log final result (after all try-catch blocks)
+
           if (rankingAiTimestamp) {
             debugLog(`[updateAuditTimestamp] Final Ranking & AI timestamp: ${rankingAiTimestamp}`, 'info');
           } else {
             debugLog(`[updateAuditTimestamp] ⚠ No Ranking & AI timestamp available`, 'warn');
           }
-          
-          // Update GSC audit date
-          console.log('[updateAuditTimestamp] Updating elements:', {
-            gscAuditElement: !!gscAuditElement,
-            gscTimestamp: gscTimestamp,
-            gscDateRangeElement: !!gscDateRangeElement,
-            gscStartDate: gscStartDate?.toISOString(),
-            gscEndDate: gscEndDate?.toISOString(),
-            rankingAiAuditElement: !!rankingAiAuditElement,
-            rankingAiTimestamp: rankingAiTimestamp
-          });
-          
+
           if (gscAuditElement) {
             if (gscTimestamp) {
-              const formatted = formatDateShort(gscTimestamp);
-              gscAuditElement.textContent = formatted;
-              debugLog(`[updateAuditTimestamp] Updated GSC audit date element: ${formatted}`, 'info');
+              gscAuditElement.textContent = formatDateShort(gscTimestamp);
+              debugLog(`[updateAuditTimestamp] Updated GSC audit date element`, 'info');
             } else {
               gscAuditElement.textContent = 'Not yet run';
               debugLog('[updateAuditTimestamp] GSC timestamp is null, showing "Not yet run"', 'warn');
             }
-          } else {
-            debugLog('[updateAuditTimestamp] GSC audit date element not found in DOM', 'warn');
           }
-          
-          // Update GSC date range
+
           if (gscDateRangeElement) {
             if (gscStartDate && gscEndDate) {
               const rangeText = formatDateRange(gscStartDate.toISOString(), gscEndDate.toISOString());
               gscDateRangeElement.textContent = rangeText;
-              debugLog(`[updateAuditTimestamp] Updated GSC date range element: ${rangeText}`, 'info');
+              debugLog(`[updateAuditTimestamp] Updated GSC date range element`, 'info');
             } else {
               gscDateRangeElement.textContent = '-';
               debugLog('[updateAuditTimestamp] GSC date range is null, showing "-"', 'warn');
             }
-          } else {
-            debugLog('[updateAuditTimestamp] GSC date range element not found in DOM', 'warn');
           }
-          
-          // Update Ranking & AI audit date
+
           if (rankingAiAuditElement) {
             if (rankingAiTimestamp) {
-              const formatted = formatDateShort(rankingAiTimestamp);
-              rankingAiAuditElement.textContent = formatted;
-              debugLog(`[updateAuditTimestamp] Updated Ranking & AI audit date element: ${formatted}`, 'info');
+              rankingAiAuditElement.textContent = formatDateShort(rankingAiTimestamp);
+              debugLog(`[updateAuditTimestamp] Updated Ranking & AI audit date element`, 'info');
             } else {
               rankingAiAuditElement.textContent = 'Not yet run';
               debugLog('[updateAuditTimestamp] Ranking & AI timestamp is null, showing "Not yet run"', 'warn');
             }
-          } else {
-            debugLog('[updateAuditTimestamp] Ranking & AI audit date element not found in DOM', 'warn');
           }
-          
-          // Update snippet readiness timestamp (use GSC timestamp if available)
+
           if (snippetTimestampElement && gscTimestamp) {
             snippetTimestampElement.textContent = formatDateShort(gscTimestamp);
           }
           if (snippetTimestampContainer) {
             snippetTimestampContainer.style.display = gscTimestamp ? 'block' : 'none';
           }
-          
-          // Update radar chart timestamp (use GSC timestamp if available)
           if (radarTimestampElement && gscTimestamp) {
             radarTimestampElement.textContent = formatDateShort(gscTimestamp);
           }
@@ -24682,11 +24477,14 @@
           }
         } catch (e) {
           debugLog(`[updateAuditTimestamp] Error updating audit timestamps: ${e?.message || e}`, 'error');
+          const gscAuditElement = document.getElementById('gscAuditDate');
+          const gscDateRangeElement = document.getElementById('gscDateRange');
+          const rankingAiAuditElement = document.getElementById('rankingAiAuditDate');
           if (gscAuditElement) gscAuditElement.textContent = 'Not yet run';
           if (gscDateRangeElement) gscDateRangeElement.textContent = '-';
           if (rankingAiAuditElement) rankingAiAuditElement.textContent = 'Not yet run';
         }
-      }, 100); // Debounce: Wait 100ms before updating, cancels previous pending updates
+      }, 100);
     }
     
     // Expose to window for global audit to call
