@@ -11,13 +11,30 @@
 
   <script>
     // Diagnostic build marker (helps correlate UI with deployment)
-    window.__GAIO_DIAG_BUILD__ = '7ff0f91-diag';
-    console.log('[DIAG-LINECHECK] build=', window.__GAIO_DIAG_BUILD__, 'src=', location.href);
-    // Keep the version pill in sync with the build marker
-    document.addEventListener('DOMContentLoaded', () => {
-      const verEl = document.getElementById('gitVersion');
-      if (verEl) verEl.textContent = window.__GAIO_DIAG_BUILD__ || 'unknown';
-    });
+    // Get previous commit hash (one version back from current) - this will be updated at build time
+    // For now, fetch it dynamically or use the previous commit
+    (async function() {
+      try {
+        // Try to get previous commit hash from API endpoint (if available)
+        const response = await fetch('/api/git/previous-commit');
+        if (response.ok) {
+          const data = await response.json();
+          window.__GAIO_DIAG_BUILD__ = data.commitHash || '3eae317';
+        } else {
+          // Fallback: use previous commit hash (will be updated at build time)
+          window.__GAIO_DIAG_BUILD__ = '3eae317';
+        }
+      } catch (e) {
+        // Fallback: use previous commit hash
+        window.__GAIO_DIAG_BUILD__ = '3eae317';
+      }
+      console.log('[DIAG-LINECHECK] build=', window.__GAIO_DIAG_BUILD__, 'src=', location.href);
+      // Keep the version pill in sync with the build marker
+      document.addEventListener('DOMContentLoaded', () => {
+        const verEl = document.getElementById('gitVersion');
+        if (verEl) verEl.textContent = window.__GAIO_DIAG_BUILD__ || 'unknown';
+      });
+    })();
   </script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
@@ -24367,16 +24384,52 @@
               debugLog(`[updateAuditTimestamp] keyword_rankings API response: status=${keywordRankingsData?.status}, hasData=${!!keywordRankingsData?.data}, latestAuditDate=${keywordRankingsData?.data?.latestAuditDate || 'null'}, latestTimestamp=${keywordRankingsData?.data?.latestTimestamp || 'null'}`, 'info');
               if (keywordRankingsData.status === 'ok' && keywordRankingsData.data && keywordRankingsData.data.latestAuditDate) {
                 rankingAiAuditDate = keywordRankingsData.data.latestAuditDate;
-                // CRITICAL FIX: Use timestamp from audit_results if available, otherwise use audit_date at midnight
+                // CRITICAL FIX: Use timestamp from audit_results if available, otherwise try to get from ranking_ai_data
                 if (keywordRankingsData.data.latestTimestamp) {
-                  rankingAiTimestamp = new Date(keywordRankingsData.data.latestTimestamp).toISOString();
+                  // Ensure timestamp is in ISO format with time component
+                  const ts = keywordRankingsData.data.latestTimestamp;
+                  // Handle both string and number timestamps
+                  const timestampDate = typeof ts === 'string' ? new Date(ts) : new Date(ts);
+                  rankingAiTimestamp = timestampDate.toISOString();
                   debugLog(`[updateAuditTimestamp] ✓ Found latest Ranking & AI timestamp from audit_results: ${rankingAiTimestamp}`, 'success');
+                } else if (keywordRankingsData.data.rankingAiTimestamp) {
+                  // Try alternative field name
+                  const ts = keywordRankingsData.data.rankingAiTimestamp;
+                  const timestampDate = typeof ts === 'string' ? new Date(ts) : new Date(ts);
+                  rankingAiTimestamp = timestampDate.toISOString();
+                  debugLog(`[updateAuditTimestamp] ✓ Found latest Ranking & AI timestamp from alternative field: ${rankingAiTimestamp}`, 'success');
                 } else {
-                  // Fallback to audit_date at midnight if no timestamp available
-                  const auditDate = new Date(rankingAiAuditDate + 'T00:00:00Z');
-                  rankingAiTimestamp = auditDate.toISOString();
-                  debugLog(`[updateAuditTimestamp] ⚠ Found latest Ranking & AI date from keyword_rankings but NO timestamp - using midnight: ${rankingAiAuditDate}`, 'warn');
-                  debugLog(`[updateAuditTimestamp] This means the audit_results query didn't find a matching row with ranking_ai_data. Check API logs.`, 'warn');
+                  // Fallback: Try to get timestamp from latest audit_results row with ranking_ai_data
+                  // Query audit_results directly for the timestamp
+                  debugLog(`[updateAuditTimestamp] No timestamp in keyword_rankings response, querying audit_results directly...`, 'info');
+                  try {
+                    const auditResultsUrl = apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}&minimal=true`);
+                    const auditResultsResponse = await fetch(auditResultsUrl);
+                    if (auditResultsResponse.ok) {
+                      const auditResultsData = await auditResultsResponse.json();
+                      if (auditResultsData.status === 'ok' && auditResultsData.data && auditResultsData.data.timestamp) {
+                        const ts = auditResultsData.data.timestamp;
+                        const timestampDate = typeof ts === 'string' ? new Date(ts) : new Date(ts);
+                        rankingAiTimestamp = timestampDate.toISOString();
+                        debugLog(`[updateAuditTimestamp] ✓ Found timestamp from audit_results direct query: ${rankingAiTimestamp}`, 'success');
+                      } else {
+                        // Last resort: use audit_date at midnight
+                        const auditDate = new Date(rankingAiAuditDate + 'T00:00:00Z');
+                        rankingAiTimestamp = auditDate.toISOString();
+                        debugLog(`[updateAuditTimestamp] ⚠ No timestamp found anywhere - using midnight: ${rankingAiAuditDate}`, 'warn');
+                      }
+                    } else {
+                      // Last resort: use audit_date at midnight
+                      const auditDate = new Date(rankingAiAuditDate + 'T00:00:00Z');
+                      rankingAiTimestamp = auditDate.toISOString();
+                      debugLog(`[updateAuditTimestamp] ⚠ audit_results query failed - using midnight: ${rankingAiAuditDate}`, 'warn');
+                    }
+                  } catch (e) {
+                    // Last resort: use audit_date at midnight
+                    const auditDate = new Date(rankingAiAuditDate + 'T00:00:00Z');
+                    rankingAiTimestamp = auditDate.toISOString();
+                    debugLog(`[updateAuditTimestamp] ⚠ Error querying audit_results - using midnight: ${e.message}`, 'warn');
+                  }
                 }
               } else {
                 debugLog(`[updateAuditTimestamp] keyword_rankings query returned no latest date: status=${keywordRankingsData?.status}, hasData=${!!keywordRankingsData?.data}`, 'warn');
