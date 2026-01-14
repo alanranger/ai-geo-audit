@@ -44,6 +44,36 @@ export default async function handler(req, res) {
       });
     }
 
+    const normalizePropertyUrl = (value) => {
+      if (!value || typeof value !== 'string') return null;
+      let raw = value.trim();
+      if (!raw) return null;
+      try {
+        if (!/^https?:\/\//i.test(raw)) raw = `https://${raw}`;
+        const url = new URL(raw);
+        return `${url.protocol}//${url.hostname}`;
+      } catch {
+        return raw;
+      }
+    };
+
+    const buildPropertyUrlCandidates = (value) => {
+      const normalized = normalizePropertyUrl(value);
+      if (!normalized) return [];
+      const url = new URL(normalized);
+      const candidates = [normalized];
+      if (url.hostname.startsWith('www.')) {
+        const alt = new URL(normalized);
+        alt.hostname = url.hostname.replace(/^www\./, '');
+        candidates.push(alt.origin);
+      } else {
+        const alt = new URL(normalized);
+        alt.hostname = `www.${url.hostname}`;
+        candidates.push(alt.origin);
+      }
+      return [...new Set(candidates)];
+    };
+
     // Get Supabase credentials from environment
     const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -68,8 +98,8 @@ export default async function handler(req, res) {
     try {
       // Prefer latest *complete* audit (schema_pages_detail present) to avoid
       // treating "refresh/partial" rows as a full audit run.
-      const buildQueryUrl = (includeSchemaDetailFilter) => {
-        const base = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.desc&limit=1`;
+      const buildQueryUrl = (candidateUrl, includeSchemaDetailFilter) => {
+        const base = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(candidateUrl)}&order=audit_date.desc&limit=1`;
         // If includePartial is true, don't filter by is_partial (include both partial and complete audits)
         // Otherwise, only return complete audits (is_partial=eq.false)
         const partialFilter = includePartialAudits ? '' : '&is_partial=eq.false';
@@ -81,77 +111,85 @@ export default async function handler(req, res) {
         return `${base}${schemaFilter}&select=*`;
       };
 
-      const queryAttempts = [buildQueryUrl(true), buildQueryUrl(false)];
       let results;
       let lastErrorText = null;
       let lastStatus = null;
+      const propertyUrlCandidates = buildPropertyUrlCandidates(propertyUrl);
+      let resolvedPropertyUrl = propertyUrlCandidates[0] || propertyUrl;
 
-      for (const queryUrl of queryAttempts) {
-        let response;
-        try {
-          response = await fetch(queryUrl, {
-            method: 'GET',
-            headers: {
-              'Content-Type': 'application/json',
-              'apikey': supabaseKey,
-              'Authorization': `Bearer ${supabaseKey}`
+      for (const candidateUrl of propertyUrlCandidates) {
+        const queryAttempts = [buildQueryUrl(candidateUrl, true), buildQueryUrl(candidateUrl, false)];
+        for (const queryUrl of queryAttempts) {
+          let response;
+          try {
+            response = await fetch(queryUrl, {
+              method: 'GET',
+              headers: {
+                'Content-Type': 'application/json',
+                'apikey': supabaseKey,
+                'Authorization': `Bearer ${supabaseKey}`
+              }
+            });
+            lastStatus = response.status;
+            console.log(`[get-latest-audit] Supabase fetch completed, status: ${response.status}`);
+          } catch (fetchError) {
+            console.error('[get-latest-audit] Fetch error:', fetchError.message);
+            console.error('[get-latest-audit] Fetch error stack:', fetchError.stack);
+            return res.status(500).json({
+              status: 'error',
+              message: 'Failed to fetch from Supabase',
+              details: fetchError.message,
+              meta: { generatedAt: new Date().toISOString() }
+            });
+          }
+
+          if (!response.ok) {
+            try {
+              lastErrorText = await response.text();
+            } catch (textError) {
+              lastErrorText = `HTTP ${response.status}: ${response.statusText}`;
             }
-          });
-          lastStatus = response.status;
-          console.log(`[get-latest-audit] Supabase fetch completed, status: ${response.status}`);
-        } catch (fetchError) {
-          console.error('[get-latest-audit] Fetch error:', fetchError.message);
-          console.error('[get-latest-audit] Fetch error stack:', fetchError.stack);
-          return res.status(500).json({
-            status: 'error',
-            message: 'Failed to fetch from Supabase',
-            details: fetchError.message,
-            meta: { generatedAt: new Date().toISOString() }
-          });
-        }
+            console.error('[get-latest-audit] Supabase query error:', lastErrorText);
+            continue;
+          }
 
-        if (!response.ok) {
+          // Check response size before parsing (for minimal requests, should be very small)
+          const contentLength = response.headers.get('content-length');
+          if (contentLength && isMinimalRequest) {
+            const sizeKB = Math.round(parseInt(contentLength) / 1024);
+            console.log(`[get-latest-audit] Minimal response size: ${sizeKB}KB`);
+            if (sizeKB > 100) {
+              console.warn(`[get-latest-audit] ⚠️  Minimal response is unexpectedly large (${sizeKB}KB)`);
+            }
+          }
+
           try {
-            lastErrorText = await response.text();
-          } catch (textError) {
-            lastErrorText = `HTTP ${response.status}: ${response.statusText}`;
+            results = await response.json();
+            console.log(`[get-latest-audit] Successfully parsed JSON, results length: ${results?.length || 0}`);
+          } catch (jsonError) {
+            console.error('[get-latest-audit] Failed to parse Supabase response as JSON:', jsonError.message);
+            console.error('[get-latest-audit] JSON error stack:', jsonError.stack);
+            // Try to get the raw response for debugging (but this might fail if body was already consumed)
+            try {
+              const responseClone = response.clone();
+              const rawText = await responseClone.text();
+              console.error('[get-latest-audit] Raw response (first 500 chars):', rawText.substring(0, 500));
+            } catch (cloneError) {
+              console.error('[get-latest-audit] Could not clone response for debugging:', cloneError.message);
+            }
+            return res.status(500).json({
+              status: 'error',
+              message: 'Failed to parse Supabase response',
+              details: jsonError.message,
+              meta: { generatedAt: new Date().toISOString() }
+            });
           }
-          console.error('[get-latest-audit] Supabase query error:', lastErrorText);
-          continue;
-        }
 
-        // Check response size before parsing (for minimal requests, should be very small)
-        const contentLength = response.headers.get('content-length');
-        if (contentLength && isMinimalRequest) {
-          const sizeKB = Math.round(parseInt(contentLength) / 1024);
-          console.log(`[get-latest-audit] Minimal response size: ${sizeKB}KB`);
-          if (sizeKB > 100) {
-            console.warn(`[get-latest-audit] ⚠️  Minimal response is unexpectedly large (${sizeKB}KB)`);
+          if (results && Array.isArray(results) && results.length > 0) {
+            resolvedPropertyUrl = candidateUrl;
+            break;
           }
         }
-
-        try {
-          results = await response.json();
-          console.log(`[get-latest-audit] Successfully parsed JSON, results length: ${results?.length || 0}`);
-        } catch (jsonError) {
-          console.error('[get-latest-audit] Failed to parse Supabase response as JSON:', jsonError.message);
-          console.error('[get-latest-audit] JSON error stack:', jsonError.stack);
-          // Try to get the raw response for debugging (but this might fail if body was already consumed)
-          try {
-            const responseClone = response.clone();
-            const rawText = await responseClone.text();
-            console.error('[get-latest-audit] Raw response (first 500 chars):', rawText.substring(0, 500));
-          } catch (cloneError) {
-            console.error('[get-latest-audit] Could not clone response for debugging:', cloneError.message);
-          }
-          return res.status(500).json({
-            status: 'error',
-            message: 'Failed to parse Supabase response',
-            details: jsonError.message,
-            meta: { generatedAt: new Date().toISOString() }
-          });
-        }
-
         if (results && Array.isArray(results) && results.length > 0) {
           break;
         }
@@ -241,11 +279,12 @@ export default async function handler(req, res) {
     
     // Re-enabled: Keyword rankings fetch with proper limits (2000 rows max)
     try {
-      console.log(`[get-latest-audit] Fetching keyword rankings for audit_date=${auditDate}, property_url=${propertyUrl}`);
+      const resolvedPropertyUrl = record?.property_url || propertyUrl;
+      console.log(`[get-latest-audit] Fetching keyword rankings for audit_date=${auditDate}, property_url=${resolvedPropertyUrl}`);
       
       // First, try to fetch using the audit_date from audit_results
       // Limit to 2000 rows initially to prevent timeout/response size issues
-      let keywordRankingsUrl = `${supabaseUrl}/rest/v1/keyword_rankings?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${encodeURIComponent(auditDate)}&select=*&order=keyword.asc&limit=2000`;
+      let keywordRankingsUrl = `${supabaseUrl}/rest/v1/keyword_rankings?property_url=eq.${encodeURIComponent(resolvedPropertyUrl)}&audit_date=eq.${encodeURIComponent(auditDate)}&select=*&order=keyword.asc&limit=2000`;
       
       let keywordRankingsResponse = await fetch(keywordRankingsUrl, {
         method: 'GET',
@@ -271,7 +310,7 @@ export default async function handler(req, res) {
       // If no rows found with the audit_date from audit_results, try to get the most recent data
       if (!keywordRows || keywordRows.length === 0) {
         console.log(`[get-latest-audit] No rows found for audit_date=${auditDate}, trying to fetch most recent data...`);
-        keywordRankingsUrl = `${supabaseUrl}/rest/v1/keyword_rankings?property_url=eq.${encodeURIComponent(propertyUrl)}&select=*&order=audit_date.desc,keyword.asc&limit=1000`;
+        keywordRankingsUrl = `${supabaseUrl}/rest/v1/keyword_rankings?property_url=eq.${encodeURIComponent(resolvedPropertyUrl)}&select=*&order=audit_date.desc,keyword.asc&limit=1000`;
         keywordRankingsResponse = await fetch(keywordRankingsUrl, {
           method: 'GET',
           headers: {

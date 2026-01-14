@@ -6390,6 +6390,17 @@
     const BUILD_ID = '2026-01-14T21-55Z';
     window.__BUILD_ID__ = BUILD_ID;
     console.log('Build ID:', BUILD_ID);
+    // Clear persisted error logs when build changes to avoid stale errors.
+    try {
+      const previousBuildId = localStorage.getItem('_build_id');
+      if (previousBuildId && previousBuildId !== BUILD_ID) {
+        localStorage.removeItem('_capturedErrors');
+        localStorage.removeItem('_capturedWarnings');
+      }
+      localStorage.setItem('_build_id', BUILD_ID);
+    } catch (e) {
+      // Ignore localStorage issues.
+    }
     
     // Helper function to safely save to localStorage (handles quota errors gracefully)
     // Define apiUrl helper IMMEDIATELY at the top level so it's available to all functions
@@ -19884,6 +19895,14 @@
 
     function clearDebugLog() {
       debugLogEntries.length = 0;
+      window._capturedErrors = [];
+      window._capturedWarnings = [];
+      try {
+        localStorage.removeItem('_capturedErrors');
+        localStorage.removeItem('_capturedWarnings');
+      } catch (e) {
+        // Ignore localStorage errors
+      }
       const logElement = document.getElementById('debugLog');
       if (logElement) {
         logElement.innerHTML = '';

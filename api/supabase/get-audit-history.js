@@ -36,6 +36,36 @@ export default async function handler(req, res) {
       });
     }
 
+    const normalizePropertyUrl = (value) => {
+      if (!value || typeof value !== 'string') return null;
+      let raw = value.trim();
+      if (!raw) return null;
+      try {
+        if (!/^https?:\/\//i.test(raw)) raw = `https://${raw}`;
+        const url = new URL(raw);
+        return `${url.protocol}//${url.hostname}`;
+      } catch {
+        return raw;
+      }
+    };
+
+    const buildPropertyUrlCandidates = (value) => {
+      const normalized = normalizePropertyUrl(value);
+      if (!normalized) return [];
+      const url = new URL(normalized);
+      const candidates = [normalized];
+      if (url.hostname.startsWith('www.')) {
+        const alt = new URL(normalized);
+        alt.hostname = url.hostname.replace(/^www\./, '');
+        candidates.push(alt.origin);
+      } else {
+        const alt = new URL(normalized);
+        alt.hostname = `www.${url.hostname}`;
+        candidates.push(alt.origin);
+      }
+      return [...new Set(candidates)];
+    };
+
     // Get Supabase credentials from environment
     const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -56,7 +86,35 @@ export default async function handler(req, res) {
     // We'll fetch all audits and filter client-side to include:
     // 1. Non-partial audits (is_partial=false)
     // 2. Partial audits with money_segment_metrics (is_partial=true AND money_segment_metrics IS NOT NULL)
-    let queryUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.asc&select=audit_date,content_schema_score,visibility_score,authority_score,local_entity_score,service_area_score,brand_score,ai_summary_score,money_pages_behaviour_score,money_pages_summary,money_segment_metrics,schema_total_pages,schema_pages_with_schema,schema_coverage,is_partial`;
+    let resolvedPropertyUrl = propertyUrl;
+    const propertyUrlCandidates = buildPropertyUrlCandidates(propertyUrl);
+    const resolvePropertyUrl = async () => {
+      for (const candidate of propertyUrlCandidates) {
+        const probeUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(candidate)}&select=id&limit=1`;
+        try {
+          const probeResp = await fetch(probeUrl, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': supabaseKey,
+              'Authorization': `Bearer ${supabaseKey}`
+            }
+          });
+          if (probeResp.ok) {
+            const rows = await probeResp.json();
+            if (Array.isArray(rows) && rows.length > 0) {
+              return candidate;
+            }
+          }
+        } catch (e) {
+          // Ignore and try next candidate
+        }
+      }
+      return propertyUrlCandidates[0] || propertyUrl;
+    };
+
+    resolvedPropertyUrl = await resolvePropertyUrl();
+    let queryUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(resolvedPropertyUrl)}&order=audit_date.asc&select=audit_date,content_schema_score,visibility_score,authority_score,local_entity_score,service_area_score,brand_score,ai_summary_score,money_pages_behaviour_score,money_pages_summary,money_segment_metrics,schema_total_pages,schema_pages_with_schema,schema_coverage,is_partial`;
     
     if (startDate) {
       queryUrl += `&audit_date=gte.${startDate}`;
@@ -77,7 +135,7 @@ export default async function handler(req, res) {
       // GSC is often 1–2 days behind, so "yesterday" is not always correct.
       let endDateForTimeseries = null;
       try {
-        const latestDateQuery = `${supabaseUrl}/rest/v1/gsc_timeseries?property_url=eq.${encodeURIComponent(propertyUrl)}&select=date&order=date.desc&limit=1`;
+        const latestDateQuery = `${supabaseUrl}/rest/v1/gsc_timeseries?property_url=eq.${encodeURIComponent(resolvedPropertyUrl)}&select=date&order=date.desc&limit=1`;
         const latestResp = await fetch(latestDateQuery, {
           method: 'GET',
           headers: {
@@ -116,9 +174,9 @@ export default async function handler(req, res) {
       const timeseriesStartDate = formatDate(startDateForTimeseries);
       const timeseriesEndDate = formatDate(endDateForTimeseries);
       
-      let timeseriesQuery = `${supabaseUrl}/rest/v1/gsc_timeseries?property_url=eq.${encodeURIComponent(propertyUrl)}&date=gte.${timeseriesStartDate}&date=lte.${timeseriesEndDate}&order=date.asc`;
+      let timeseriesQuery = `${supabaseUrl}/rest/v1/gsc_timeseries?property_url=eq.${encodeURIComponent(resolvedPropertyUrl)}&date=gte.${timeseriesStartDate}&date=lte.${timeseriesEndDate}&order=date.asc`;
       
-      console.log(`[get-audit-history] Fetching timeseries for ${propertyUrl} from ${timeseriesStartDate} to ${timeseriesEndDate}`);
+      console.log(`[get-audit-history] Fetching timeseries for ${resolvedPropertyUrl} from ${timeseriesStartDate} to ${timeseriesEndDate}`);
       
       const timeseriesResponse = await fetch(timeseriesQuery, {
         method: 'GET',
@@ -138,7 +196,7 @@ export default async function handler(req, res) {
           ctr: parseFloat(record.ctr) || 0,
           position: parseFloat(record.position) || 0
         }));
-        console.log(`[get-audit-history] Fetched ${timeseries.length} timeseries records for ${propertyUrl} (${timeseriesStartDate} to ${timeseriesEndDate})`);
+        console.log(`[get-audit-history] Fetched ${timeseries.length} timeseries records for ${resolvedPropertyUrl} (${timeseriesStartDate} to ${timeseriesEndDate})`);
         if (timeseries.length === 0) {
           console.warn(`[get-audit-history] WARNING: No timeseries data found in database for date range ${timeseriesStartDate} to ${timeseriesEndDate}`);
         }
