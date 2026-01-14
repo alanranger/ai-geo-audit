@@ -8,6 +8,11 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>GAIO (Generative AI Optimization) Audit Dashboard - Automated GAIO Performance Tracking</title>
+
+  <script>
+    // Diagnostic build marker (helps correlate UI with deployment)
+    window.__GAIO_DIAG_BUILD__ = 'abeb871-diag1';
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
   <script>
@@ -24240,8 +24245,9 @@
                       });
                       
                       if (fullData.status === 'ok' && fullData.data) {
-                        // Get auditDate from data - this is the date the audit was run
-                        gscAuditDate = fullData.data.auditDate;
+                    // Get auditDate from data - this is the date the audit was run
+                    gscAuditDate = fullData.data.auditDate;
+                    window.lastGscAuditDate = gscAuditDate;
                         
                         // CRITICAL: Use the timestamp to determine the actual audit date
                         // The timestamp reflects when the audit actually completed, which may be different from auditDate
@@ -29593,6 +29599,55 @@
       }
     }
     
+    // Simple safe extractor for diagnostics
+    function diagVal(val) {
+      if (val === null || val === undefined) return val;
+      if (typeof val === 'number') return isNaN(val) ? 'NaN' : val;
+      if (typeof val === 'string') return val.slice(0, 120);
+      return val;
+    }
+
+    function logDiagnosticSnapshot(scores, data, snippetReadiness, localSignals, rankingAiDataMeta = {}) {
+      try {
+        const authority = scores?.authority || {};
+        const authorityComponents = scores?.authorityComponents || {};
+        const behaviourSeg = authority?.behaviourScoresSegmented || null;
+        const rankingSeg = authority?.rankingScoresSegmented || null;
+        const queryPagesLen = Array.isArray(data?.queryPages) ? data.queryPages.length : 0;
+        const searchDataLen = Array.isArray(data?.searchData?.queryPages) ? data.searchData.queryPages.length : 0;
+        const rankingAiTs = rankingAiDataMeta?.timestamp || rankingAiDataMeta?.audit_date || rankingAiDataMeta?.auditDate || null;
+        const diag = {
+          diagBuild: window.__GAIO_DIAG_BUILD__ || 'unknown',
+          versionLabel: document.getElementById('gitVersion')?.textContent || 'n/a',
+          rankingAiTimestamp: diagVal(rankingAiTs),
+          gscAuditDate: diagVal(window.lastGscAuditDate || null),
+          queryPages: { direct: queryPagesLen, searchData: searchDataLen },
+          behaviourScoresSegmented: behaviourSeg ? {
+            all: diagVal(behaviourSeg.all), nonBlog: diagVal(behaviourSeg.nonBlog), money: diagVal(behaviourSeg.money)
+          } : null,
+          rankingScoresSegmented: rankingSeg ? {
+            all: diagVal(rankingSeg.all), nonBlog: diagVal(rankingSeg.nonBlog), money: diagVal(rankingSeg.money)
+          } : null,
+          authorityComponents: {
+            behaviour: diagVal(authorityComponents.behaviour),
+            ranking: diagVal(authorityComponents.ranking),
+            backlinks: diagVal(authorityComponents.backlinks),
+            reviews: diagVal(authorityComponents.reviews),
+            total: diagVal(authority?.score)
+          },
+          snippetReadiness: diagVal(snippetReadiness),
+          localSignals: {
+            status: localSignals?.status || null,
+            hasData: !!localSignals?.data,
+            locations: Array.isArray(localSignals?.data?.locations) ? localSignals.data.locations.length : null
+          }
+        };
+        debugLog(`[DIAG] Snapshot ${JSON.stringify(diag)}`, 'info');
+      } catch (e) {
+        debugLog(`[DIAG] Failed to log diagnostic snapshot: ${e?.message || e}`, 'warn');
+      }
+    }
+
     // Display dashboard
     async function displayDashboard(scores, data, snippetReadiness = 0, schemaAudit = null, localSignals = null) {
       // Normalize localSignals structure if needed (handle old format where it might just be {data: {...}})
@@ -29605,6 +29660,8 @@
       if (saved && saved.timestamp) {
         updateAuditTimestamp(saved.timestamp);
       }
+      // Log a diagnostic snapshot early (helps correlate UI with data source)
+      logDiagnosticSnapshot(scores, data, snippetReadiness, localSignals, window.rankingAiData || {});
       
       // CRITICAL: Ensure Money Pages data is in scores object
       // If scores.moneyPagesMetrics is missing, get it from saved data
