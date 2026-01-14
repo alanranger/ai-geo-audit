@@ -30,6 +30,24 @@
           const data = await response.json();
           window.__GAIO_DIAG_BUILD__ = data.commitHash || 'unknown';
           console.log('[Version Pill] Loaded from API:', data.commitHash, 'source:', data.source);
+          
+          // Update build date with deployment timestamp if available
+          if (data.deploymentTimestamp) {
+            try {
+              const deploymentDate = new Date(data.deploymentTimestamp);
+              if (!isNaN(deploymentDate.getTime())) {
+                const gmtDate = deploymentDate.toISOString().split('T')[0]; // YYYY-MM-DD
+                const gmtTime = deploymentDate.toISOString().split('T')[1].split('.')[0]; // HH:MM:SS
+                const buildDateEl = document.getElementById('buildDate');
+                if (buildDateEl) {
+                  buildDateEl.textContent = gmtDate + ' ' + gmtTime + ' GMT';
+                  console.log('[Version Pill] Updated build date from deployment timestamp:', gmtDate + ' ' + gmtTime + ' GMT');
+                }
+              }
+            } catch (dateError) {
+              console.warn('[Version Pill] Error parsing deployment timestamp:', dateError);
+            }
+          }
         } else {
           // If API returns error, retry if we haven't exceeded max retries
           if (retryCount < maxRetries) {
@@ -3720,12 +3738,13 @@
       <span id="loadTime" style="color: #4f4;">Loaded: <span id="loadTimeValue"></span></span>
     </p>
     <script>
-      // Set build date to today in GMT
+      // Set load time to current time (this is correct - it's when the page loaded)
       const now = new Date();
-      const gmtDate = now.toISOString().split('T')[0]; // YYYY-MM-DD
-      const gmtTime = now.toISOString().split('T')[1].split('.')[0]; // HH:MM:SS
-      document.getElementById('buildDate').textContent = gmtDate + ' ' + gmtTime + ' GMT';
       document.getElementById('loadTimeValue').textContent = now.toLocaleTimeString();
+      
+      // Build date will be set by updateVersionPill function after fetching from API
+      // For now, show loading state
+      document.getElementById('buildDate').textContent = 'Loading...';
     </script>
   </div>
 

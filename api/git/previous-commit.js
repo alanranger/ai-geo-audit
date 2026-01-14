@@ -10,11 +10,17 @@ export default async function handler(req, res) {
     // If we have the current commit from env, use it directly (fastest and most accurate)
     if (currentCommit) {
       const shortHash = currentCommit.substring(0, 7);
+      // Get deployment timestamp from Vercel environment variables
+      const deploymentTimestamp = process.env.VERCEL_DEPLOYMENT_DATE || 
+                                   process.env.VERCEL_BUILD_DATE ||
+                                   process.env.VERCEL_BUILT_AT ||
+                                   new Date().toISOString(); // Fallback to current time
       console.log(`[Git API] Using current commit from VERCEL_GIT_COMMIT_SHA: ${shortHash}`);
       return res.status(200).json({
         status: 'ok',
         commitHash: shortHash,
         fullHash: currentCommit,
+        deploymentTimestamp: deploymentTimestamp,
         source: 'vercel_env'
       });
     }
@@ -71,11 +77,17 @@ export default async function handler(req, res) {
             
             if (deploymentCommit) {
               const shortHash = deploymentCommit.substring(0, 7);
+              // Get deployment timestamp from the deployment object
+              const deploymentTimestamp = currentDeployment.createdAt || 
+                                         currentDeployment.created ||
+                                         currentDeployment.readyAt ||
+                                         new Date().toISOString();
               console.log(`[Git API] Found current deployment commit: ${shortHash} from Vercel API`);
               return res.status(200).json({
                 status: 'ok',
                 commitHash: shortHash,
                 fullHash: deploymentCommit,
+                deploymentTimestamp: deploymentTimestamp,
                 source: 'vercel_api'
               });
             }
@@ -98,6 +110,7 @@ export default async function handler(req, res) {
       status: 'ok',
       commitHash: 'unknown', // No commit available
       fullHash: null,
+      deploymentTimestamp: new Date().toISOString(), // Use current time as fallback
       source: 'fallback',
       currentCommit: currentCommit,
       note: 'No commit hash available - VERCEL_GIT_COMMIT_SHA not set and Vercel API unavailable'
@@ -109,6 +122,7 @@ export default async function handler(req, res) {
       status: 'ok',
       commitHash: 'unknown',
       fullHash: null,
+      deploymentTimestamp: new Date().toISOString(), // Use current time as fallback
       error: error.message,
       source: 'error_fallback'
     });
