@@ -16743,7 +16743,7 @@
                       combinedRows = parsed.combinedRows;
                     }
                   }
-                } catch {}
+                } catch (e) {}
               }
 
               // Build metrics (same logic as individual rebaseline)
@@ -25511,7 +25511,7 @@
         let p = url.pathname.toLowerCase();
         if (p.length > 1 && p.endsWith('/')) p = p.slice(0, -1);
         return p;
-      } catch {
+      } catch (e) {
         return '/';
       }
     }
@@ -26389,12 +26389,15 @@
       }
 
       // Review Score: Phase 2 - Use real review data if available
-      // Get GBP data (may be null if not available, don't default to 0)
-      const gbpRating = (localSignals && localSignals.status === 'ok' && localSignals.data) 
-        ? (localSignals.data.gbpRating !== null && localSignals.data.gbpRating !== undefined ? localSignals.data.gbpRating : null)
+      // Accept GBP data even when localSignals.status !== 'ok' if data is present.
+      const localSignalsData = localSignals?.data
+        || (localSignals && typeof localSignals === 'object' && !localSignals.status ? localSignals : null)
+        || null;
+      const gbpRating = localSignalsData?.gbpRating !== null && localSignalsData?.gbpRating !== undefined
+        ? localSignalsData.gbpRating
         : null;
-      const gbpCount = (localSignals && localSignals.status === 'ok' && localSignals.data) 
-        ? (localSignals.data.gbpReviewCount !== null && localSignals.data.gbpReviewCount !== undefined ? localSignals.data.gbpReviewCount : null)
+      const gbpCount = localSignalsData?.gbpReviewCount !== null && localSignalsData?.gbpReviewCount !== undefined
+        ? localSignalsData.gbpReviewCount
         : null;
       
       // Get site review data - ALWAYS use correct Trustpilot snapshot (4.6, 610)
@@ -28980,6 +28983,13 @@
           }
           
           if (freshLocalSignals) {
+            // If API reports error but still provides data (e.g., GBP fallback), allow downstream use.
+            if (freshLocalSignals.status !== 'ok' && freshLocalSignals.data) {
+              const hasGbpFallback = freshLocalSignals.data.gbpRating != null || freshLocalSignals.data.gbpReviewCount != null;
+              if (hasGbpFallback) {
+                freshLocalSignals = { ...freshLocalSignals, status: 'ok', _statusOverride: 'gbp-fallback' };
+              }
+            }
             localSignals = freshLocalSignals;
             if (freshLocalSignals.status === 'ok') {
               debugLog('✓ Local signals data fetched successfully', 'success');
@@ -29060,7 +29070,6 @@
         updateProgress(38, 'Fetching backlink metrics data...');
         debugLog('Fetching backlink metrics data...', 'info');
         // Fetch backlink metrics - try localStorage first (from CSV upload), then API
-        let backlinkMetrics = null;
         
         // First, try to get from localStorage (stored when CSV was uploaded)
         try {
