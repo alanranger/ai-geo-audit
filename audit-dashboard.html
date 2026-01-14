@@ -24411,12 +24411,72 @@
           let rankingAiAuditDate = null;
           let rankingAiTimestamp = null;
           
+          // FIRST: Check localStorage for saved ranking_ai_data with timestamp (fastest, works offline)
           try {
-            // PRIMARY METHOD: Query keyword_rankings table directly for MAX(audit_date)
-            // This is the most reliable way to get the latest Ranking & AI date
-            debugLog('[updateAuditTimestamp] Querying keyword_rankings table directly for latest audit_date...', 'info');
-            const keywordRankingsUrl = apiUrl(`/api/supabase/get-keyword-rankings?propertyUrl=${encodeURIComponent(propertyUrl)}&latestOnly=true`);
-            const keywordRankingsResponse = await fetch(keywordRankingsUrl);
+            const savedAudit = localStorage.getItem('last_audit_results');
+            const savedRankingData = localStorage.getItem('ranking_ai_data');
+            
+            if (savedAudit) {
+              const parsed = JSON.parse(savedAudit);
+              // Check if we have ranking_ai_data with a timestamp
+              if (parsed.ranking_ai_data && parsed.timestamp) {
+                const auditTimestamp = new Date(parsed.timestamp);
+                if (!isNaN(auditTimestamp.getTime())) {
+                  rankingAiTimestamp = auditTimestamp.toISOString();
+                  // Try to get audit_date from the saved data
+                  if (parsed.audit_date) {
+                    rankingAiAuditDate = parsed.audit_date;
+                  } else if (parsed.ranking_ai_data.audit_date) {
+                    rankingAiAuditDate = parsed.ranking_ai_data.audit_date;
+                  }
+                  debugLog(`[updateAuditTimestamp] ✓ Found timestamp from localStorage (fast path): ${rankingAiTimestamp}`, 'success');
+                }
+              }
+            }
+            
+            // Also check dedicated ranking_ai_data localStorage key
+            if (!rankingAiTimestamp && savedRankingData) {
+              try {
+                const parsedRanking = JSON.parse(savedRankingData);
+                if (parsedRanking.timestamp) {
+                  const rankingTimestamp = new Date(parsedRanking.timestamp);
+                  if (!isNaN(rankingTimestamp.getTime())) {
+                    rankingAiTimestamp = rankingTimestamp.toISOString();
+                    if (parsedRanking.audit_date) {
+                      rankingAiAuditDate = parsedRanking.audit_date;
+                    }
+                    debugLog(`[updateAuditTimestamp] ✓ Found timestamp from ranking_ai_data localStorage: ${rankingAiTimestamp}`, 'success');
+                  }
+                }
+              } catch (e) {
+                debugLog(`[updateAuditTimestamp] Error parsing ranking_ai_data from localStorage: ${e.message}`, 'warn');
+              }
+            }
+          } catch (localStorageError) {
+            debugLog(`[updateAuditTimestamp] Error reading localStorage (fast path): ${localStorageError.message}`, 'warn');
+          }
+          
+          // SECOND: Try API calls to get latest data (if localStorage didn't have it)
+          if (!rankingAiTimestamp) {
+            try {
+              // PRIMARY METHOD: Query keyword_rankings table directly for MAX(audit_date)
+              // This is the most reliable way to get the latest Ranking & AI date
+              debugLog('[updateAuditTimestamp] Querying keyword_rankings table directly for latest audit_date...', 'info');
+              const keywordRankingsUrl = apiUrl(`/api/supabase/get-keyword-rankings?propertyUrl=${encodeURIComponent(propertyUrl)}&latestOnly=true`);
+              
+              // Add timeout using AbortController (more compatible than AbortSignal.timeout)
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+              
+              const keywordRankingsResponse = await fetch(keywordRankingsUrl, {
+                method: 'GET',
+                headers: {
+                  'Content-Type': 'application/json'
+                },
+                signal: controller.signal
+              });
+              
+              clearTimeout(timeoutId); // Clear timeout if fetch succeeds
             
             if (keywordRankingsResponse.ok) {
               const keywordRankingsData = await keywordRankingsResponse.json();
@@ -24474,9 +24534,55 @@
                 debugLog(`[updateAuditTimestamp] keyword_rankings query returned no latest date: status=${keywordRankingsData?.status}, hasData=${!!keywordRankingsData?.data}`, 'warn');
               }
             } else {
-              const errorText = await keywordRankingsResponse.text();
+              const errorText = await keywordRankingsResponse.text().catch(() => 'Unable to read error response');
               debugLog(`[updateAuditTimestamp] keyword_rankings query failed: ${keywordRankingsResponse.status} - ${errorText}`, 'error');
+              // Don't throw - continue to fallback methods
             }
+          } catch (apiError) {
+            // Handle network errors, timeouts, etc.
+            if (apiError.name === 'AbortError' || apiError.name === 'TimeoutError') {
+              debugLog(`[updateAuditTimestamp] API call timed out after 10s, using localStorage fallback`, 'warn');
+            } else {
+              debugLog(`[updateAuditTimestamp] API call failed: ${apiError.message}, using localStorage fallback`, 'warn');
+            }
+            // Continue to fallback methods below
+          }
+          
+          // THIRD: Final localStorage check (if API failed)
+          if (!rankingAiTimestamp) {
+            try {
+              const savedAudit = localStorage.getItem('last_audit_results');
+              if (savedAudit) {
+                const parsed = JSON.parse(savedAudit);
+                // Check if we have ranking_ai_data with a timestamp
+                if (parsed.ranking_ai_data && parsed.timestamp) {
+                  // Use the audit's timestamp if it has ranking_ai_data
+                  const auditTimestamp = new Date(parsed.timestamp);
+                  if (!isNaN(auditTimestamp.getTime())) {
+                    rankingAiTimestamp = auditTimestamp.toISOString();
+                    debugLog(`[updateAuditTimestamp] ✓ Found timestamp from localStorage (fallback): ${rankingAiTimestamp}`, 'success');
+                  }
+                }
+              }
+            } catch (localStorageError) {
+              debugLog(`[updateAuditTimestamp] Error reading localStorage (fallback): ${localStorageError.message}`, 'warn');
+            }
+          }
+          
+          // FOURTH: If we still don't have a timestamp but have a date, only then default to midnight
+          if (!rankingAiTimestamp && rankingAiAuditDate) {
+            const auditDate = new Date(rankingAiAuditDate + 'T00:00:00Z');
+            rankingAiTimestamp = auditDate.toISOString();
+            debugLog(`[updateAuditTimestamp] ⚠ No timestamp found - using midnight as last resort: ${rankingAiAuditDate}`, 'warn');
+          }
+          
+          // Log final result
+          if (rankingAiTimestamp) {
+            debugLog(`[updateAuditTimestamp] Final Ranking & AI timestamp: ${rankingAiTimestamp}`, 'info');
+          } else {
+            debugLog(`[updateAuditTimestamp] ⚠ No Ranking & AI timestamp available`, 'warn');
+          }
+          // that was at the end
             
             // FALLBACK: If direct query failed, try get-latest-audit API
             if (!rankingAiAuditDate || !rankingAiTimestamp) {
