@@ -6380,6 +6380,19 @@
     console.log('%cDebug panel should be visible at bottom with orange border', 'color: #E57200; font-size: 14px;');
     console.log('Current time:', new Date().toISOString());
     console.log('Page URL:', window.location.href);
+
+    // Force a cache-bust when an old cb param is detected.
+    const BUILD_ID = '2026-01-14T20-45Z';
+    try {
+      const url = new URL(window.location.href);
+      const currentCb = url.searchParams.get('cb');
+      if (currentCb !== BUILD_ID) {
+        url.searchParams.set('cb', BUILD_ID);
+        window.location.replace(url.toString());
+      }
+    } catch (e) {
+      // Ignore cache-bust failures.
+    }
     
     // Helper function to safely save to localStorage (handles quota errors gracefully)
     // Define apiUrl helper IMMEDIATELY at the top level so it's available to all functions
@@ -6458,7 +6471,7 @@
     window.setAdminKey = function setAdminKey(key) {
       if (typeof window === "undefined") return;
       sessionStorage.setItem("arp_admin_key", key);
-      try { localStorage.setItem("arp_admin_key", key); } catch {}
+      try { localStorage.setItem("arp_admin_key", key); } catch (e) {}
     };
 
     window.hasAdminKey = function hasAdminKey() {
@@ -6468,7 +6481,7 @@
     window.clearAdminKey = function clearAdminKey() {
       if (typeof window === "undefined") return;
       sessionStorage.removeItem("arp_admin_key");
-      try { localStorage.removeItem("arp_admin_key"); } catch {}
+      try { localStorage.removeItem("arp_admin_key"); } catch (e) {}
     };
 
     // Share mode detection
@@ -6545,7 +6558,7 @@
             debugLog('[Optimisation] Status fetch requires authentication (expected in share mode)', 'info');
           } else {
             let errText = '';
-            try { errText = await response.text(); } catch {}
+            try { errText = await response.text(); } catch (e) {}
             console.warn('[Optimisation] Failed to fetch statuses:', response.status, errText || '');
             debugLog(`[Optimisation] Failed to fetch statuses: ${response.status} ${errText || ''}`.trim(), 'warn');
           }
@@ -6710,7 +6723,7 @@
 
         console.log(`[Optimisation] Loaded ${window.optimisationStatusCache.size} status records (${(data.statuses || []).filter(s => !s.keyword_key || s.keyword_key.trim() === '').length} page-level)`);
       } catch (error) {
-        console.error('[Optimisation] Error fetching statuses:', error);
+        debugLog(`[Optimisation] Error fetching statuses: ${error?.message || error}`, 'warn');
         window.optimisationStatusCache.clear();
       }
     };
@@ -9245,7 +9258,7 @@
 
         // Dashboard: refresh (will reflect missing task data)
         if (typeof window.renderDashboardTab === 'function') {
-          try { window.renderDashboardTab(); } catch {}
+          try { window.renderDashboardTab(); } catch (e) {}
         }
         return [];
       }
@@ -13492,7 +13505,7 @@
             const s = RankingAiModule.state();
             if (s && Array.isArray(s.combinedRows) && s.combinedRows.length > 0) return s.combinedRows;
           }
-        } catch {
+        } catch (e) {
           // ignore
         }
         if (Array.isArray(window.rankingAiData) && window.rankingAiData.length > 0) return window.rankingAiData;
@@ -13502,7 +13515,7 @@
             const parsed = JSON.parse(local);
             if (parsed && Array.isArray(parsed.combinedRows)) return parsed.combinedRows;
           }
-        } catch {
+        } catch (e) {
           // ignore
         }
         return [];
@@ -17570,7 +17583,7 @@
             const parsed = JSON.parse(stored);
             return parsed.auditDate || null;
           }
-        } catch {}
+        } catch (e) {}
         return null;
       })();
       debugLog(`[Optimisation] Data sources available: last_audit_results=${hasLastAuditResults}, aigeo_audit_data=${hasAigeoAuditData}, window.moneyPagesMetrics=${hasWindowMoneyPages}, audit_date=${auditDate || 'unknown'}`, 'info');
@@ -17622,7 +17635,7 @@
           const daysOld = Math.floor((now.getTime() - ts.getTime()) / 86400000);
           const date = ts.toISOString().split('T')[0];
           return { has: true, date, daysOld };
-        } catch {
+        } catch (e) {
           return { has: false, date: null, daysOld: null };
         }
       };
@@ -17760,7 +17773,7 @@
               combinedRows = parsed.combinedRows;
             }
           }
-        } catch {
+        } catch (e) {
           // ignore
         }
       }
@@ -22065,7 +22078,7 @@
               const parsed = JSON.parse(local);
               addCandidate(parsed?.timestamp ? String(parsed.timestamp).split('T')[0] : null);
             }
-          } catch {
+          } catch (e) {
             // ignore
           }
           // 2) Today's date (Ranking & AI save uses "today")
@@ -23777,7 +23790,7 @@
             if (typeof window.updateAuditTimestamp === 'function') {
               setTimeout(() => window.updateAuditTimestamp(), 500);
             }
-          } catch {}
+          } catch (e) {}
         }
       } catch (error) {
         debugLog(`✗ Error saving audit results: ${error.message}`, 'error');
@@ -23898,17 +23911,25 @@
             const freshLocalSignals = await localSignalsResponse.json();
             debugLog(`[Local Signals API] Response received - status: ${freshLocalSignals.status}, has data: ${!!freshLocalSignals.data}, locations count: ${freshLocalSignals.data?.locations?.length || 0}, structure keys: ${Object.keys(freshLocalSignals).join(', ')}`, 'info');
             
-            // Use fresh data if API returned successfully
-            if (freshLocalSignals.status === 'ok' && freshLocalSignals.data) {
+            const dataPayload = freshLocalSignals.data
+              || (freshLocalSignals && typeof freshLocalSignals === 'object' && !freshLocalSignals.status ? freshLocalSignals : null);
+            const hasGbpFallback = dataPayload && (dataPayload.gbpRating != null || dataPayload.gbpReviewCount != null);
+
+            // Use fresh data if API returned successfully (or fallback data is present)
+            if (freshLocalSignals.status === 'ok' && dataPayload) {
               // Always use fresh data if API returned successfully, even if locations is 0
               // (API might return 0 locations legitimately, or we want to update cached data)
-              localSignals = freshLocalSignals;
-              debugLog(`✓ Local signals data fetched successfully - Locations: ${freshLocalSignals.data.locations?.length || 0}, Service Areas: ${freshLocalSignals.data.serviceAreas?.length || 0}, NAP: ${freshLocalSignals.data.napConsistencyScore || 'null'}`, 'success');
+              localSignals = { ...freshLocalSignals, data: dataPayload };
+              debugLog(`✓ Local signals data fetched successfully - Locations: ${dataPayload.locations?.length || 0}, Service Areas: ${dataPayload.serviceAreas?.length || 0}, NAP: ${dataPayload.napConsistencyScore || 'null'}`, 'success');
+            } else if (hasGbpFallback) {
+              // Allow GBP fallback data even when status is error
+              localSignals = { ...freshLocalSignals, status: 'ok', data: dataPayload, _statusOverride: 'gbp-fallback' };
+              debugLog(`⚠ Local signals API returned status="${freshLocalSignals.status}" but GBP fallback data is present. Using fallback.`, 'warn');
             } else if (freshLocalSignals.status === 'error') {
               debugLog(`⚠ Local signals API error: ${freshLocalSignals.error?.message || 'Unknown error'}, keeping cached data`, 'warn');
               // Keep using cached data - don't overwrite with error response
             } else {
-              debugLog(`⚠ Local signals API returned unexpected status (status: ${freshLocalSignals.status}, has data: ${!!freshLocalSignals.data}, locations: ${freshLocalSignals.data?.locations?.length || 0}), keeping cached data`, 'warn');
+              debugLog(`⚠ Local signals API returned unexpected status (status: ${freshLocalSignals.status}, has data: ${!!dataPayload}, locations: ${dataPayload?.locations?.length || 0}), keeping cached data`, 'warn');
               // Keep using cached data - don't overwrite with unexpected response
             }
           } else {
@@ -23917,7 +23938,6 @@
           }
         } catch (localSignalsError) {
           debugLog(`⚠ Local signals fetch error: ${localSignalsError.message}, using cached data if available`, 'error');
-          console.error('[Local Signals] Fetch error:', localSignalsError);
         }
         
         // Final normalization - ensure localSignals always has the correct structure
@@ -24152,7 +24172,7 @@
                   if (typeof window.updateAuditTimestamp === 'function') {
                     setTimeout(() => window.updateAuditTimestamp(), 500);
                   }
-                } catch {}
+                } catch (e) {}
               }
           } catch (storageError) {
             debugLog(`⚠ Could not store Supabase data in localStorage: ${storageError.message}`, 'warn');
@@ -24826,7 +24846,7 @@
             try {
               const error = JSON.parse(errorText);
               errorMessage = error.message || error.details || errorText;
-            } catch {
+            } catch (e) {
               errorMessage = errorText || `HTTP ${batch1Response.status}: ${batch1Response.statusText}`;
             }
             throw new Error(`Failed to save batch 1 (core data): ${errorMessage}`);
@@ -24860,7 +24880,7 @@
               try {
                 const error = JSON.parse(errorText);
                 errorMessage = error.message || error.details || errorText;
-              } catch {
+              } catch (e) {
                 errorMessage = errorText || `HTTP ${batch2Response.status}: ${batch2Response.statusText}`;
               }
               debugLog(`⚠ Batch 2/3 failed (non-critical): ${errorMessage}`, 'warn');
@@ -24898,7 +24918,7 @@
               try {
                 const error = JSON.parse(errorText);
                 errorMessage = error.message || error.details || errorText;
-              } catch {
+              } catch (e) {
                 errorMessage = errorText || `HTTP ${batch3Response.status}: ${batch3Response.statusText}`;
               }
               debugLog(`⚠ Batch 3/3 failed (non-critical): ${errorMessage}`, 'warn');
@@ -24933,7 +24953,7 @@
             try {
               const error = JSON.parse(errorText);
               errorMessage = error.message || error.details || errorText;
-            } catch {
+            } catch (e) {
               errorMessage = errorText || `HTTP ${response.status}: ${response.statusText}`;
             }
             throw new Error(`Failed to save audit to Supabase: ${errorMessage}`);
@@ -25493,7 +25513,7 @@
         let path = u.pathname || "/";
         if (path.length > 1) path = path.replace(/\/+$/, "");
         return `${u.origin}${path}`;
-      } catch {
+      } catch (e) {
         const noHash = raw.split("#")[0];
         const noQuery = noHash.split("?")[0];
         return (noQuery.replace(/\/+$/, "") || raw).trim();
@@ -30898,13 +30918,9 @@ Final Score: ${score}/100`;
         // Check both localSignals and localSignalsSnapshot (different storage formats)
         const pillarLocalSignals = currentLocalSignals || (saved && (saved.localSignals || saved.localSignalsSnapshot)) || null;
         // Handle both status/data structure and direct data structure
-        const pillarHasLocalSignals = pillarLocalSignals && (
-          (pillarLocalSignals.status === 'ok' && pillarLocalSignals.data) ||
-          (pillarLocalSignals.data && (pillarLocalSignals.data.napConsistencyScore !== undefined || pillarLocalSignals.data.locationsScore !== undefined))
-        );
-        const pillarLocalSignalsData = pillarHasLocalSignals 
-          ? (pillarLocalSignals.data || pillarLocalSignals)
-          : null;
+        const pillarLocalSignalsData = pillarLocalSignals?.data
+          || (pillarLocalSignals && typeof pillarLocalSignals === 'object' && !pillarLocalSignals.status ? pillarLocalSignals : null);
+        const pillarHasLocalSignals = !!pillarLocalSignalsData;
         
         // DEBUG: Log local signals status for pillar cards
         debugLog(`[Pillar Cards] Local signals in definitions: hasLocalSignals=${pillarHasLocalSignals}, currentLocalSignals=${JSON.stringify(pillarLocalSignals ? {status: pillarLocalSignals.status, hasData: !!pillarLocalSignals.data, hasLocations: !!pillarLocalSignals.data?.locations, locationsCount: pillarLocalSignals.data?.locations?.length || 0} : null)}`, 'info');
@@ -31200,11 +31216,14 @@ Final Score: ${score}/100`;
           if (localSignals) {
             // Handle both direct data structure and wrapped response structure
             const signalsStatus = localSignals.status;
-            const signalsData = localSignals.data || (localSignals.locations !== undefined ? localSignals : null);
+            const signalsData = localSignals.data
+              || (localSignals && typeof localSignals === 'object' && !localSignals.status ? localSignals : null);
+            const hasGbpFallback = signalsData && (signalsData.gbpRating != null || signalsData.gbpReviewCount != null);
+            const canUseSignals = !!signalsData && (signalsStatus === 'ok' || hasGbpFallback || signalsStatus == null);
             
             debugLog(`[Authority Card] Local signals status: ${signalsStatus}, has data: ${!!signalsData}, structure: ${JSON.stringify(Object.keys(localSignals))}`, 'info');
             
-            if (signalsStatus === 'ok' && signalsData) {
+            if (canUseSignals) {
               // Enhanced logging for GBP data
               debugLog(`[Authority Card] signalsData keys: ${Object.keys(signalsData).join(', ')}`, 'info');
               debugLog(`[Authority Card] signalsData.gbpRating raw: ${JSON.stringify(signalsData.gbpRating)} (type: ${typeof signalsData.gbpRating})`, 'info');
@@ -35838,7 +35857,7 @@ Final Score: ${score}/100`;
           // remove trailing slash (except root)
           if (path.length > 1) path = path.replace(/\/+$/, "");
           return urlObj.origin.toLowerCase() + path;
-        } catch {
+        } catch (e) {
           // fallback: best-effort normalise
           return u.toLowerCase().replace(/\/+$/, "");
         }
@@ -47136,7 +47155,7 @@ Final Score: ${score}/100`;
         
         // Dashboard: refresh live dials/cards immediately when Ranking & AI saves
         if (typeof window.renderDashboardTab === 'function') {
-          try { window.renderDashboardTab(); } catch {}
+          try { window.renderDashboardTab(); } catch (e) {}
         }
 
         // Save to Supabase
@@ -47212,7 +47231,7 @@ Final Score: ${score}/100`;
           const seg = classifyPageSegment(canonical);
           if (seg !== PageSegment.MONEY) return 'other';
         }
-      } catch {
+      } catch (e) {
         // If classifier fails, treat as Other
         return 'other';
       }
@@ -47405,7 +47424,7 @@ Final Score: ${score}/100`;
             await navigator.clipboard.writeText(txt);
             copyBtn.textContent = 'Copied';
             setTimeout(() => { copyBtn.textContent = 'Copy list'; }, 900);
-          } catch {
+          } catch (e) {
             // ignore
           }
         });
@@ -47526,7 +47545,7 @@ Final Score: ${score}/100`;
             const local = localStorage.getItem('rankingAiData');
             const parsed = local ? JSON.parse(local) : null;
             rows = Array.isArray(parsed?.combinedRows) ? parsed.combinedRows : [];
-          } catch {}
+          } catch (e) {}
 
           // If no localStorage, we can’t easily query keyword_rankings without an API endpoint; show a hint.
           if (!rows || rows.length === 0) {
@@ -47554,7 +47573,7 @@ Final Score: ${score}/100`;
               const totalCitations = rows.reduce((s, r) => s + (parseInt(r.ai_alan_citations_count ?? r.aiAlanCitationsCount ?? 0, 10) || 0), 0);
               const urlItemCount = canonicalItems.length;
               cache.unattributedCitations = Math.max(0, totalCitations - urlItemCount);
-            } catch {
+            } catch (e) {
               cache.unattributedCitations = 0;
             }
           }
@@ -47671,7 +47690,7 @@ Final Score: ${score}/100`;
           authorityPriority: json.authorityPriority || null
         };
         return __rankingAiAuthorityContext;
-      } catch {
+      } catch (e) {
         __rankingAiAuthorityContext = { domainStrength: null, authorityPriority: null };
         return __rankingAiAuthorityContext;
       }
@@ -52489,7 +52508,7 @@ Final Score: ${score}/100`;
       if (!raw) return "";
       try {
         if (raw.includes("://")) return new URL(raw).hostname.replace(/^www\./, "");
-      } catch {
+      } catch (e) {
         // ignore
       }
       return raw.replace(/^www\./, "").split("/")[0];
@@ -52565,7 +52584,7 @@ Final Score: ${score}/100`;
           __domainStrengthLatestCache.set(d, v);
           out[d] = v;
         }
-      } catch {
+      } catch (e) {
         // fail silently
       }
 
@@ -52974,7 +52993,7 @@ Final Score: ${score}/100`;
             const strength = strengthByDomain[d] || null;
             cell.innerHTML = renderDomainRankCellHtml(strength);
           });
-        } catch {
+        } catch (e) {
           // fail silently
         }
       })();
@@ -53136,7 +53155,7 @@ Final Score: ${score}/100`;
                         debugLog(`✓ Tab switch: Refreshed audit data from Supabase (newer timestamp)`, 'success');
                         // Dashboard: refresh live dials/cards if we just pulled newer audit data.
                         if (typeof window.renderDashboardTab === 'function') {
-                          try { window.renderDashboardTab(); } catch {}
+                          try { window.renderDashboardTab(); } catch (e) {}
                         }
                       } else {
                         debugLog(`⚠ Tab switch: Supabase data is not newer than cached data`, 'info');
@@ -53468,7 +53487,7 @@ Final Score: ${score}/100`;
           'https://www.alanranger.com';
         try {
           return new URL(propertyUrl).hostname.replace(/^www\./, '');
-        } catch {
+        } catch (e) {
           return String(propertyUrl).replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
         }
       }
@@ -53567,7 +53586,7 @@ Final Score: ${score}/100`;
 
       function safeDestroyDomainStrengthSparklines() {
         for (const ch of domainStrengthSparklineCharts.values()) {
-          try { ch.destroy(); } catch { /* ignore */ }
+          try { ch.destroy(); } catch (e) { /* ignore */ }
         }
         domainStrengthSparklineCharts.clear();
       }
@@ -53581,7 +53600,7 @@ Final Score: ${score}/100`;
         const id = canvas.id || '';
         const existing = id ? domainStrengthSparklineCharts.get(id) : null;
         if (existing) {
-          try { existing.destroy(); } catch { /* ignore */ }
+          try { existing.destroy(); } catch (e) { /* ignore */ }
           domainStrengthSparklineCharts.delete(id);
         }
 
@@ -54292,7 +54311,7 @@ Final Score: ${score}/100`;
 
           // Dashboard: refresh live dials/cards after a domain strength snapshot
           if (typeof window.renderDashboardTab === 'function') {
-            try { window.renderDashboardTab(); } catch {}
+            try { window.renderDashboardTab(); } catch (e) {}
           }
         } catch (e) {
           const msg = e?.message || String(e);
@@ -54329,7 +54348,7 @@ Final Score: ${score}/100`;
         // Render current view (if history exists) once the ranking module has data
         try {
           renderDomainStrengthSection();
-        } catch {
+        } catch (e) {
           // ignore
         }
       }
@@ -56373,7 +56392,7 @@ Final Score: ${score}/100`;
         try {
           if (!text) return fallback;
           return JSON.parse(text);
-        } catch {
+        } catch (e) {
           return fallback;
         }
       }
@@ -57365,7 +57384,7 @@ Final Score: ${score}/100`;
             window.__dashboardGaioRadarChart.destroy();
             window.__dashboardGaioRadarChart = null;
           }
-        } catch {
+        } catch (e) {
           // ignore
         }
 
@@ -57406,7 +57425,7 @@ Final Score: ${score}/100`;
               }
             }
           });
-        } catch {
+        } catch (e) {
           // ignore
         }
       }
@@ -57475,7 +57494,7 @@ Final Score: ${score}/100`;
           };
           localStorage.setItem('dashboard_domain_strength_cache_v4', JSON.stringify(next));
           return { cache: next, updated: true };
-        } catch {
+        } catch (e) {
           return { cache, updated: false };
         } finally {
           window.__dashboardDomainStrengthRefreshing = false;
@@ -57502,7 +57521,7 @@ Final Score: ${score}/100`;
             window.__dashboardEeatRadarChart.destroy();
             window.__dashboardEeatRadarChart = null;
           }
-        } catch {
+        } catch (e) {
           // ignore
         }
 
@@ -57541,7 +57560,7 @@ Final Score: ${score}/100`;
               }
             }
           });
-        } catch {
+        } catch (e) {
           // ignore
         }
       }
@@ -57590,7 +57609,7 @@ Final Score: ${score}/100`;
             window.__dashboardAiSummaryRadarChart.destroy();
             window.__dashboardAiSummaryRadarChart = null;
           }
-        } catch {
+        } catch (e) {
           // ignore
         }
 
@@ -57668,7 +57687,7 @@ Final Score: ${score}/100`;
               window.__dashboardUpliftChart.destroy();
               window.__dashboardUpliftChart = null;
             }
-          } catch {
+          } catch (e) {
             // ignore
           }
           return;
@@ -57701,7 +57720,7 @@ Final Score: ${score}/100`;
               window.__dashboardUpliftChart.destroy();
               window.__dashboardUpliftChart = null;
             }
-          } catch {
+          } catch (e) {
             // ignore
           }
           return;
@@ -57740,7 +57759,7 @@ Final Score: ${score}/100`;
             window.__dashboardUpliftChart.destroy();
             window.__dashboardUpliftChart = null;
           }
-        } catch {
+        } catch (e) {
           // ignore
         }
 
@@ -57848,7 +57867,7 @@ Final Score: ${score}/100`;
             window.__dashboardMoneyShareRadarChart.destroy();
             window.__dashboardMoneyShareRadarChart = null;
           }
-        } catch {
+        } catch (e) {
           // ignore
         }
 
@@ -58331,10 +58350,10 @@ Final Score: ${score}/100`;
           if (hasKey && canLoad && notLoadedYet && allow) {
             window.__dashboardAutoLoadOptimisationMs = Date.now();
             setTimeout(() => {
-              try { window.loadAllOptimisationTasks(); } catch {}
+              try { window.loadAllOptimisationTasks(); } catch (e) {}
             }, 0);
           }
-        } catch {
+        } catch (e) {
           // ignore
         }
 
@@ -58745,7 +58764,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             // Only re-render if we're still on the dashboard tab.
             const active = document.querySelector('.aigeo-panel.is-active');
             if (active && active.dataset && active.dataset.panel === 'dashboard') {
-              try { window.renderDashboardTab(); } catch {}
+              try { window.renderDashboardTab(); } catch (e) {}
             }
           });
         }, 0);
@@ -59235,7 +59254,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             // Small delay to ensure tasks are fully processed
             await new Promise(resolve => setTimeout(resolve, 500));
           }
-        } catch {
+        } catch (e) {
           // ignore
         }
 
