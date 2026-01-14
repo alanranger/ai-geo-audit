@@ -311,13 +311,19 @@
         console.log('[Error Capture] Global error handlers installed immediately');
       }
       
-      // Restore errors from localStorage on page load (so they don't disappear)
+      // Restore errors from localStorage only when explicitly enabled (avoids stale logs)
       try {
-        const stored = JSON.parse(localStorage.getItem('_capturedErrors') || '[]');
-        if (stored.length > 0) {
-          window._capturedErrors = stored;
-          if (window.DEBUG_LOG_TO_CONSOLE === true) {
-            console.log(`[Error Capture] Restored ${stored.length} errors from localStorage`);
+        const restoreDebugErrors = localStorage.getItem('_restore_debug_errors') === 'true';
+        if (!restoreDebugErrors) {
+          localStorage.removeItem('_capturedErrors');
+          localStorage.removeItem('_capturedWarnings');
+        } else {
+          const stored = JSON.parse(localStorage.getItem('_capturedErrors') || '[]');
+          if (stored.length > 0) {
+            window._capturedErrors = stored;
+            if (window.DEBUG_LOG_TO_CONSOLE === true) {
+              console.log(`[Error Capture] Restored ${stored.length} errors from localStorage`);
+            }
           }
         }
       } catch (e) {
@@ -6387,15 +6393,26 @@
     console.log('Page URL:', window.location.href);
 
     // Build id is logged for verification only (no forced URL changes).
-    const BUILD_ID = '2026-01-14T21-55Z';
+    const BUILD_ID = '2026-01-14T23-10Z';
     window.__BUILD_ID__ = BUILD_ID;
     console.log('Build ID:', BUILD_ID);
     // Clear persisted error logs when build changes to avoid stale errors.
     try {
       const previousBuildId = localStorage.getItem('_build_id');
-      if (previousBuildId && previousBuildId !== BUILD_ID) {
-        localStorage.removeItem('_capturedErrors');
-        localStorage.removeItem('_capturedWarnings');
+      const buildChanged = !!previousBuildId && previousBuildId !== BUILD_ID;
+      if (buildChanged) {
+        const staleKeys = [
+          '_capturedErrors',
+          '_capturedWarnings',
+          'last_audit_results',
+          'aigeo_audit_data',
+          'rankingAiData',
+          'ranking_ai_data',
+          'backlink_metrics'
+        ];
+        staleKeys.forEach((key) => {
+          try { localStorage.removeItem(key); } catch (e) { /* ignore */ }
+        });
       }
       localStorage.setItem('_build_id', BUILD_ID);
     } catch (e) {
@@ -25370,6 +25387,31 @@
       }
     }
     
+    function normalizePropertyHost(value) {
+      if (!value || typeof value !== 'string') return '';
+      const trimmed = value.trim();
+      if (!trimmed) return '';
+      try {
+        const url = trimmed.startsWith('http') ? new URL(trimmed) : new URL(`https://${trimmed}`);
+        return url.hostname.replace(/^www\./i, '').toLowerCase();
+      } catch (e) {
+        return trimmed
+          .replace(/^https?:\/\//i, '')
+          .replace(/^www\./i, '')
+          .split('/')[0]
+          .toLowerCase();
+      }
+    }
+
+    function getAuditPropertyHost(auditData) {
+      const raw = auditData?.propertyUrl ||
+        auditData?.property_url ||
+        auditData?.searchData?.propertyUrl ||
+        auditData?.searchData?.property_url ||
+        '';
+      return normalizePropertyHost(raw);
+    }
+
     /**
      * Unified Data Fetching Utility (Phase 4)
      * Standardized function for fetching audit data with Supabase-first pattern and localStorage fallback
@@ -25441,8 +25483,15 @@
           if (localData) {
             auditData = dashboardSafeJsonParse(localData, null);
             if (auditData) {
-              dataSource = 'localStorage';
-              debugLog(`[${context}] ✓ Using audit data from localStorage (fallback)`, 'info');
+              const requestedHost = normalizePropertyHost(propertyUrl);
+              const storedHost = getAuditPropertyHost(auditData);
+              if (requestedHost && storedHost && requestedHost !== storedHost) {
+                debugLog(`[${context}] ⚠ Ignoring localStorage audit (property mismatch: ${storedHost} vs ${requestedHost})`, 'warn');
+                auditData = null;
+              } else {
+                dataSource = 'localStorage';
+                debugLog(`[${context}] ✓ Using audit data from localStorage (fallback)`, 'info');
+              }
             } else {
               debugLog(`[${context}] ⚠ Invalid data in localStorage`, 'warn');
             }
