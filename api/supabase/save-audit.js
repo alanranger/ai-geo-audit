@@ -259,6 +259,17 @@ export default async function handler(req, res) {
         return null;
       }
     };
+
+    const stripMissingColumn = (payload, errorText) => {
+      if (!errorText || typeof errorText !== 'string') return null;
+      const match = errorText.match(/Could not find the '([^']+)' column/i);
+      if (!match) return null;
+      const missingColumn = match[1];
+      if (!(missingColumn in payload)) return null;
+      const nextPayload = { ...payload };
+      delete nextPayload[missingColumn];
+      return { missingColumn, nextPayload };
+    };
     
     // Prepare data for Supabase
     const auditRecord = {
@@ -962,7 +973,7 @@ export default async function handler(req, res) {
           body: JSON.stringify(auditRecord)
         });
       }
-    } else if (updateResponse.status === 404 || updateResponse.status === 400) {
+    } else if (updateResponse.status === 404) {
       // Record doesn't exist
       if (isPartialUpdate) {
         // For partial updates, don't create a new record if it doesn't exist
@@ -994,16 +1005,41 @@ export default async function handler(req, res) {
         errorText = `HTTP ${updateResponse.status}: ${updateResponse.statusText}`;
       }
       
-      console.error('[Supabase Save] Update failed with status:', updateResponse.status);
-      console.error('[Supabase Save] Error response:', errorText);
-      
-      return res.status(updateResponse.status).json({
-        status: 'error',
-        message: 'Failed to update audit results in Supabase',
-        details: errorText,
-        statusCode: updateResponse.status,
-        meta: { generatedAt: new Date().toISOString() }
-      });
+      const strippedUpdate = stripMissingColumn(updatePayload, errorText);
+      if (strippedUpdate) {
+        console.warn(`[Supabase Save] ⚠ Missing column "${strippedUpdate.missingColumn}" detected. Retrying update without it.`);
+        updatePayload = strippedUpdate.nextPayload;
+        if (auditRecord[strippedUpdate.missingColumn] !== undefined) {
+          delete auditRecord[strippedUpdate.missingColumn];
+        }
+        const retryUpdate = await fetch(`${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${auditDate}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': supabaseKey,
+            'Authorization': `Bearer ${supabaseKey}`,
+            'Prefer': 'return=representation'
+          },
+          body: JSON.stringify(updatePayload)
+        });
+        if (retryUpdate.ok) {
+          const retryText = await retryUpdate.text();
+          const retryResult = retryText ? JSON.parse(retryText) : [];
+          if (Array.isArray(retryResult) && retryResult.length > 0) {
+            console.log('[Supabase Save] ✓ Updated existing audit record after stripping missing column');
+            return res.status(200).json({
+              status: 'ok',
+              message: 'Audit results saved successfully',
+              data: retryResult,
+              meta: { generatedAt: new Date().toISOString() }
+            });
+          }
+        }
+        console.warn('[Supabase Save] Update retry did not modify existing record. Continuing to insert.');
+      } else {
+        console.error('[Supabase Save] Update failed with status:', updateResponse.status);
+        console.error('[Supabase Save] Error response:', errorText);
+      }
     }
 
     if (!response.ok) {
@@ -1012,6 +1048,33 @@ export default async function handler(req, res) {
         errorText = await response.text();
       } catch (e) {
         errorText = `HTTP ${response.status}: ${response.statusText}`;
+      }
+
+      const strippedInsert = stripMissingColumn(auditRecord, errorText);
+      if (strippedInsert) {
+        console.warn(`[Supabase Save] ⚠ Missing column "${strippedInsert.missingColumn}" detected. Retrying insert without it.`);
+        const retryInsert = await fetch(`${supabaseUrl}/rest/v1/audit_results`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': supabaseKey,
+            'Authorization': `Bearer ${supabaseKey}`,
+            'Prefer': 'return=representation'
+          },
+          body: JSON.stringify(strippedInsert.nextPayload)
+        });
+        if (retryInsert.ok) {
+          const retryText = await retryInsert.text();
+          const retryResult = retryText ? JSON.parse(retryText) : null;
+          console.log('[Supabase Save] ✓ Successfully inserted audit after stripping missing column');
+          return res.status(200).json({
+            status: 'ok',
+            message: 'Audit results saved successfully',
+            data: retryResult,
+            meta: { generatedAt: new Date().toISOString() }
+          });
+        }
+        errorText = await retryInsert.text().catch(() => errorText);
       }
       
       console.error('[Supabase Save] Error response status:', response.status);
