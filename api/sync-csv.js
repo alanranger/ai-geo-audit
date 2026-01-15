@@ -252,6 +252,23 @@ export default async function handler(req, res) {
       console.log(`  Sample URLs: ${sampleUrls.join(', ')}`);
     }
     
+    // Guard: if fallback hosted CSV yields too few URLs, treat as invalid
+    if (source === 'hosted' && urlCount < 100) {
+      console.error(`❌ Hosted CSV appears invalid: only ${urlCount} URLs found (expected ~500).`);
+      return res.status(500).json({
+        status: 'error',
+        message: 'Hosted CSV looks invalid (too few URLs found).',
+        details: {
+          source,
+          csvUrl,
+          totalUrls: urlCount,
+          linesProcessed: lines.length - 1
+        },
+        suggestion: 'Use GitHub CSV or upload manually. Hosted CSV may contain non-URL data.',
+        meta: { generatedAt: new Date().toISOString() }
+      });
+    }
+    
     console.log(`✓ CSV parsed: ${urlCount} URLs found from ${source}`);
     
     return res.status(200).json({
