@@ -59,10 +59,27 @@ export default async function handler(req, res) {
       }
 
       let latestTimestamp = null;
+      // Prefer latest timestamp directly from keyword_rankings rows
+      try {
+        const { data: latestRankingRow } = await supabase
+          .from('keyword_rankings')
+          .select('updated_at, created_at, audit_date')
+          .eq('property_url', propertyUrl)
+          .order('updated_at', { ascending: false })
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (latestRankingRow?.updated_at || latestRankingRow?.created_at) {
+          latestTimestamp = latestRankingRow.updated_at || latestRankingRow.created_at;
+          console.log(`[Get Keyword Rankings] Using keyword_rankings timestamp: ${latestTimestamp} (audit_date ${latestRankingRow.audit_date})`);
+        }
+      } catch (rankingTsErr) {
+        console.log(`[Get Keyword Rankings] Failed to read keyword_rankings timestamp: ${rankingTsErr.message}`);
+      }
       // If we have an audit_date, try to get the timestamp from audit_results
       // CRITICAL FIX: Query for ANY audit_result with ranking_ai_data, not just matching audit_date
       // This ensures we get the timestamp even if audit_date formats differ slightly
-      if (latestRow?.audit_date) {
+      if (!latestTimestamp && latestRow?.audit_date) {
         // First try exact match - check for non-null AND non-empty ranking_ai_data
         let { data: auditResult, error: auditError } = await supabase
           .from('audit_results')

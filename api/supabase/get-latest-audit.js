@@ -346,12 +346,25 @@ export default async function handler(req, res) {
         
         if (keywordRows && keywordRows.length > 0) {
           let rankingDataTimestamp = null;
+          const normalizeTimestampValue = (value) => {
+            if (!value) return null;
+            if (value instanceof Date) return value;
+            if (typeof value !== 'string') return null;
+            let normalized = value.trim();
+            if (!normalized) return null;
+            if (normalized.includes(' ') && !normalized.includes('T')) {
+              normalized = normalized.replace(' ', 'T');
+            }
+            if (normalized.endsWith('+00')) {
+              normalized = `${normalized}:00`;
+            }
+            return new Date(normalized);
+          };
           try {
             const candidateTimestamps = keywordRows
               .map(row => row.updated_at || row.created_at || null)
-              .filter(Boolean)
-              .map(value => new Date(value))
-              .filter(date => !isNaN(date.getTime()));
+              .map(normalizeTimestampValue)
+              .filter(date => date && !isNaN(date.getTime()));
             if (candidateTimestamps.length > 0) {
               candidateTimestamps.sort((a, b) => b.getTime() - a.getTime());
               rankingDataTimestamp = candidateTimestamps[0].toISOString();
