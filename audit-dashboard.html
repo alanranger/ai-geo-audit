@@ -15119,6 +15119,10 @@
           
           // Use shared helper functions based on task type
           if (hasKeyword) {
+            if (skipKeywordTasks) {
+              skippedCount += 1;
+              return;
+            }
             // Keyword-based task: Use keyword-specific data
             currentMetrics = await window.fetchMetricsForKeywordTask(task, latestAudit, combinedRows);
           } else if (taskUrlForPage) {
@@ -15139,7 +15143,7 @@
               if (typeof fetchLatestAuditFromSupabase === 'function') {
                 debugLog(`[Optimisation] URL task: Fetching latest audit from Supabase for Ranking & AI data...`, 'info');
                 latestAuditFromSupabase = await fetchLatestAuditFromSupabase(propertyUrl, false);
-                if (latestAuditFromSupabase && latestAuditFromSupabase.ranking_ai_data) {
+                if (!skipRankingAiCheck && latestAuditFromSupabase && latestAuditFromSupabase.ranking_ai_data) {
                   try {
                     const rankingAiData = latestAuditFromSupabase.ranking_ai_data;
                     if (rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows)) {
@@ -17534,7 +17538,13 @@
     };
 
     // Bulk update all tasks with latest data
-    window.bulkUpdateAllTasks = async function bulkUpdateAllTasks(skipConfirmation = false) {
+    window.bulkUpdateAllTasks = async function bulkUpdateAllTasks(skipConfirmation = false, options = {}) {
+      if (skipConfirmation && typeof skipConfirmation === 'object') {
+        options = skipConfirmation;
+        skipConfirmation = !!options.skipConfirmation;
+      }
+      const skipRankingAiCheck = !!options.skipRankingAiCheck;
+      const skipKeywordTasks = !!options.skipKeywordTasks;
       debugLog('[Optimisation] ===== bulkUpdateAllTasks START =====', 'info');
       
       // CRITICAL: Ensure we're using the latest audit data from Supabase (by audit_date, not just localStorage)
@@ -17648,7 +17658,7 @@
       }
 
       // Nudge if Ranking & AI snapshot is stale (bulk update relies on it for keyword-based tasks)
-      const hasKeywordTasks = activeTasks.some(t => (t.keyword_text || t.keyword || '').trim().length > 0);
+      const hasKeywordTasks = !skipKeywordTasks && activeTasks.some(t => (t.keyword_text || t.keyword || '').trim().length > 0);
       const getRankingAiSnapshotInfo = () => {
         try {
           const local = localStorage.getItem('rankingAiData');
@@ -17665,7 +17675,7 @@
         }
       };
 
-      if (hasKeywordTasks) {
+      if (hasKeywordTasks && !skipRankingAiCheck) {
         const info = getRankingAiSnapshotInfo();
         // Thresholds: gentle warning at 3+ days; stronger warning at 7+ days.
         const warnDays = 3;
@@ -17844,6 +17854,10 @@
           // CRITICAL: For keyword-based tasks, use keyword-specific data (NEVER Money Pages)
           // For URL-only tasks, use GSC page totals API + Ranking & AI data
           if (hasKeyword) {
+            if (skipKeywordTasks) {
+              skippedCount += 1;
+              return;
+            }
             // Keyword-based task: Use keyword-specific data from combinedRows
             debugLog(`[Optimisation] Task ${task.id}: Fetching metrics for keyword task "${taskKeyword}"`, 'info');
             currentMetrics = await window.fetchMetricsForKeywordTask(task, latestAuditFromSupabase, combinedRows);
@@ -24232,6 +24246,20 @@
         if (supabaseData) {
           debugLog('✓ Audit results loaded from Supabase', 'success');
           debugLog(`✓ Supabase data structure: scores.moneyPagesMetrics=${!!supabaseData?.scores?.moneyPagesMetrics}, moneyPagesMetrics=${!!supabaseData?.moneyPagesMetrics}, searchData=${!!supabaseData?.searchData}, queryTotals=${supabaseData?.searchData?.queryTotals?.length || 0} keywords`, 'info');
+          // Ensure backlink metrics persist across hard refresh
+          try {
+            const storedBacklink = localStorage.getItem('backlink_metrics');
+            if (!supabaseData.backlinkMetrics && storedBacklink) {
+              supabaseData.backlinkMetrics = JSON.parse(storedBacklink);
+              debugLog('ℹ Restored backlink metrics from localStorage fallback', 'info');
+            }
+            if (supabaseData.backlinkMetrics) {
+              localStorage.setItem('backlink_metrics', JSON.stringify(supabaseData.backlinkMetrics));
+              window.latestBacklinkMetrics = supabaseData.backlinkMetrics;
+            }
+          } catch (e) {
+            debugLog(`⚠ Failed to restore backlink metrics: ${e.message}`, 'warn');
+          }
           if (supabaseData.searchData) {
             debugLog(`✓ Supabase searchData keys: ${Object.keys(supabaseData.searchData).join(', ')}`, 'info');
             if (supabaseData.searchData.queryTotals) {
@@ -29576,7 +29604,11 @@
               // Wait a moment for tab to switch, then trigger bulk update
               setTimeout(() => {
                 if (typeof window.bulkUpdateAllTasks === 'function') {
-                  window.bulkUpdateAllTasks(true); // Skip confirmation since user already confirmed
+                  window.bulkUpdateAllTasks({
+                    skipConfirmation: true,
+                    skipRankingAiCheck: true,
+                    skipKeywordTasks: true
+                  }); // GSC-only update after audit scan
                 } else {
                   alert('Task update function not available. Please use "Update All Tasks" button in the Optimisation tab.');
                 }
