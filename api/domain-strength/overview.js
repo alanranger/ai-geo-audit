@@ -201,13 +201,13 @@ export default async function handler(req, res) {
     const last = sorted[sorted.length - 1] || null;
     const lastScore = num(last?.score);
     
-    // Find the last snapshot with a different score (not just the previous one)
-    // This handles cases where multiple snapshots have the same score
+    // Find the most recent previous snapshot score (even if unchanged)
+    // This ensures delta shows 0.0 when the score is flat between runs
     let prevScore = null;
     for (let i = sorted.length - 2; i >= 0; i--) {
       const prev = sorted[i];
       const score = num(prev?.score);
-      if (score !== null && score !== lastScore) {
+      if (score !== null) {
         prevScore = score;
         break;
       }
