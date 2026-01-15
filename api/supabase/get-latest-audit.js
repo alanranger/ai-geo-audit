@@ -345,6 +345,21 @@ export default async function handler(req, res) {
       }
         
         if (keywordRows && keywordRows.length > 0) {
+          let rankingDataTimestamp = null;
+          try {
+            const candidateTimestamps = keywordRows
+              .map(row => row.updated_at || row.created_at || null)
+              .filter(Boolean)
+              .map(value => new Date(value))
+              .filter(date => !isNaN(date.getTime()));
+            if (candidateTimestamps.length > 0) {
+              candidateTimestamps.sort((a, b) => b.getTime() - a.getTime());
+              rankingDataTimestamp = candidateTimestamps[0].toISOString();
+            }
+          } catch (timestampErr) {
+            console.warn('[get-latest-audit] Failed to compute ranking data timestamp:', timestampErr.message);
+          }
+
           // Early truncation: limit to 2000 rows to prevent processing too much data
           if (keywordRows.length > 2000) {
             console.warn(`[get-latest-audit] Truncating keyword rows from ${keywordRows.length} to 2000 before processing`);
@@ -481,7 +496,9 @@ export default async function handler(req, res) {
               keywords_with_volume: keywordsWithVolume.length
             },
             // Include the actual audit_date of the ranking data (may differ from latest audit)
-            audit_date: rankingDataAuditDate || null
+            audit_date: rankingDataAuditDate || null,
+            // Track the most recent timestamp from keyword_rankings rows
+            timestamp: rankingDataTimestamp || null
           };
           console.log(`[get-latest-audit] Successfully reconstructed rankingAiData with ${combinedRows.length} keywords`);
         } else {
