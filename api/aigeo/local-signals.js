@@ -15,6 +15,62 @@ import { getBusinessProfileAccessToken } from './utils.js';
 import fs from 'fs/promises';
 import path from 'path';
 
+function normalizePropertyUrl(value) {
+  if (!value || typeof value !== 'string') return null;
+  let raw = value.trim();
+  if (!raw) return null;
+  try {
+    if (!/^https?:\/\//i.test(raw)) raw = `https://${raw}`;
+    const url = new URL(raw);
+    return `${url.protocol}//${url.hostname}`;
+  } catch {
+    return raw;
+  }
+}
+
+async function updateSupabaseGbp(propertyUrl, gbpRating, gbpReviewCount) {
+  try {
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!supabaseUrl || !supabaseKey) return;
+    if (gbpRating == null || gbpReviewCount == null) return;
+
+    const normalizedProperty = normalizePropertyUrl(propertyUrl);
+    if (!normalizedProperty) return;
+
+    const latestUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(normalizedProperty)}&select=audit_date&order=audit_date.desc&limit=1`;
+    const latestRes = await fetch(latestUrl, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': supabaseKey,
+        'Authorization': `Bearer ${supabaseKey}`
+      }
+    });
+
+    if (!latestRes.ok) return;
+    const latestRows = await latestRes.json().catch(() => []);
+    const latest = Array.isArray(latestRows) && latestRows.length > 0 ? latestRows[0] : null;
+    if (!latest?.audit_date) return;
+
+    const updateUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(normalizedProperty)}&audit_date=eq.${latest.audit_date}`;
+    await fetch(updateUrl, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': supabaseKey,
+        'Authorization': `Bearer ${supabaseKey}`
+      },
+      body: JSON.stringify({
+        gbp_rating: gbpRating,
+        gbp_review_count: gbpReviewCount
+      })
+    });
+  } catch (e) {
+    console.warn('[Local Signals] Failed to update Supabase GBP values:', e?.message || String(e));
+  }
+}
+
 async function readGbpFallback() {
   try {
     const gbpReviewsPath = path.join(process.cwd(), 'data', 'gbp-reviews.json');
@@ -626,6 +682,9 @@ export default async function handler(req, res) {
         locationNames: locationsToProcess.map(loc => loc.name || loc.title || 'unnamed')
       }
     };
+      
+      // Persist latest GBP values to Supabase for refresh accuracy
+      updateSupabaseGbp(property, responseData.data.gbpRating, responseData.data.gbpReviewCount);
       
       return res.status(200).json({
         ...responseData,

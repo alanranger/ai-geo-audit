@@ -20279,6 +20279,31 @@
               } catch (err) {
                 debugLog(`Error re-rendering trend chart: ${err.message}`, 'warn');
               }
+
+              // Refresh GBP data on overview load to avoid stale review counts
+              try {
+                const propertyUrl = document.getElementById('propertyUrl')?.value || saved.searchData?.propertyUrl || saved.propertyUrl;
+                if (propertyUrl) {
+                  const localSignalsResponse = await fetch(apiUrl(`/api/aigeo/local-signals?property=${encodeURIComponent(propertyUrl)}`));
+                  if (localSignalsResponse.ok) {
+                    const freshLocalSignals = await localSignalsResponse.json();
+                    const freshCount = freshLocalSignals?.data?.gbpReviewCount;
+                    const cachedCount = saved.localSignals?.data?.gbpReviewCount;
+                    if (freshCount != null && freshCount !== cachedCount) {
+                      debugLog(`[Overview Tab] GBP count refreshed: ${cachedCount || 'N/A'} -> ${freshCount}`, 'info');
+                      const updatedSaved = { ...saved, localSignals: freshLocalSignals };
+                      try {
+                        localStorage.setItem('last_audit_results', JSON.stringify(updatedSaved));
+                      } catch (storageErr) {
+                        // Non-fatal
+                      }
+                      await displayDashboard(saved.scores, saved.searchData, saved.snippetReadiness || 0, saved.schemaAudit || null, freshLocalSignals || null, saved.backlinkMetrics || null);
+                    }
+                  }
+                }
+              } catch (err) {
+                debugLog(`[Overview Tab] GBP refresh failed: ${err.message}`, 'warn');
+              }
             }
           }
         }, 200);
