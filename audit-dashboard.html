@@ -23256,6 +23256,7 @@
           // Store in localStorage for persistence
           localStorage.setItem('backlink_csv_content', csvContent);
           localStorage.setItem('backlink_metrics', JSON.stringify(metrics));
+          window.latestBacklinkMetrics = metrics;
           debugLog(`✓ Backlink metrics stored in localStorage`, 'success');
         } else {
           // Error response - log debug info to UI
@@ -26455,6 +26456,12 @@
       const ctr = data.ctr || 0; // 0-100 percentage from API (e.g., 10 = 10%)
       const topQueries = data.topQueries || []; // Array of query objects with clicks, impressions, ctr, position
       const queryPages = data.queryPages || []; // Array of query+page objects for segmentation
+      
+      // Keep backlink metrics stable across recomputations
+      if (!backlinkMetrics && window.latestBacklinkMetrics) {
+        backlinkMetrics = window.latestBacklinkMetrics;
+        debugLog('ℹ Using cached backlink metrics for recalculation', 'info');
+      }
 
       // Map average position (1-40) -> 100-10 (better position => higher score)
       const posScore = (() => {
@@ -29203,6 +29210,7 @@
           const storedMetrics = localStorage.getItem('backlink_metrics');
           if (storedMetrics) {
             backlinkMetrics = JSON.parse(storedMetrics);
+            window.latestBacklinkMetrics = backlinkMetrics;
             debugLog('✓ Backlink metrics loaded from localStorage', 'success');
             debugLog(`Backlink metrics: domains=${backlinkMetrics.referringDomains}, links=${backlinkMetrics.totalBacklinks}, followRatio=${(backlinkMetrics.followRatio * 100).toFixed(1)}%`, 'info');
           }
@@ -29218,6 +29226,7 @@
               const backlinkData = await backlinkResponse.json();
               if (backlinkData.status === 'ok' && backlinkData.data && backlinkData.data.totalBacklinks > 0) {
                 backlinkMetrics = backlinkData.data;
+              window.latestBacklinkMetrics = backlinkMetrics;
                 // Store in localStorage for next time
                 localStorage.setItem('backlink_metrics', JSON.stringify(backlinkMetrics));
                 debugLog('✓ Backlink metrics data fetched from API and stored', 'success');
@@ -29236,6 +29245,7 @@
         // If fetch failed but we have saved data, keep using it
         if (!backlinkMetrics && savedAudit?.backlinkMetrics) {
           backlinkMetrics = savedAudit.backlinkMetrics;
+          window.latestBacklinkMetrics = backlinkMetrics;
           debugLog('✓ Using saved backlink metrics data', 'info');
         }
         
@@ -31086,11 +31096,16 @@ Final Score: ${score}/100`;
               const storedMetrics = localStorage.getItem('backlink_metrics');
               if (storedMetrics) {
                 backlinkMetrics = JSON.parse(storedMetrics);
+                window.latestBacklinkMetrics = backlinkMetrics;
                 debugLog('✓ Backlink metrics loaded from localStorage for Authority card', 'info');
               }
             } catch (e) {
               debugLog(`⚠ Error reading backlink metrics from localStorage: ${e.message}`, 'warn');
             }
+          }
+          if (!backlinkMetrics && window.latestBacklinkMetrics) {
+            backlinkMetrics = window.latestBacklinkMetrics;
+            debugLog('ℹ Using cached backlink metrics for Authority card', 'info');
           }
           // Use currentLocalSignals from displayDashboard parameter, or fallback to savedAudit
           const localSignals = currentLocalSignals || savedAudit?.localSignals || null;
