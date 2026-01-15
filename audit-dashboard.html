@@ -54030,6 +54030,23 @@ Final Score: ${score}/100`;
 
         safeDestroyDomainStrengthSparklines();
 
+        const coerceDomainStrengthDelta = (rawDelta, points) => {
+          const deltaNum = (typeof rawDelta === 'number')
+            ? rawDelta
+            : (rawDelta == null ? null : parseFloat(rawDelta));
+          if (deltaNum != null && isFinite(deltaNum)) return deltaNum;
+          if (Array.isArray(points) && points.length > 1) {
+            const lastPoint = points[points.length - 1];
+            const prevPoint = points[points.length - 2];
+            const lastScore = parseFloat(lastPoint?.score);
+            const prevScore = parseFloat(prevPoint?.score);
+            if (isFinite(lastScore) && isFinite(prevScore)) {
+              return lastScore - prevScore;
+            }
+          }
+          return null;
+        };
+
         const selfDomain = getSelfDomainForDomainStrength();
         debugLog(`[DomainStrength] Self domain: ${selfDomain}`, 'info');
         
@@ -54056,7 +54073,8 @@ Final Score: ${score}/100`;
         if (selfItem && selfItem.latest) {
           const latest = selfItem.latest;
           debugLog(`[DomainStrength] Latest data: score=${latest.score}, snapshotDate=${latest.snapshotDate}, createdAt=${latest.createdAt}`, 'info');
-          const delta = selfItem?.trend?.deltaLatest ?? null;
+          const selfPoints = Array.isArray(selfItem?.trend?.points) ? selfItem.trend.points : [];
+          const delta = coerceDomainStrengthDelta(selfItem?.trend?.deltaLatest, selfPoints);
           const arrow = delta > 0.5 ? '↑' : (delta < -0.5 ? '↓' : '•');
           const cls = delta > 0.5 ? 'kpi-trend-up' : (delta < -0.5 ? 'kpi-trend-down' : 'kpi-trend-flat');
           const changeText = delta === null ? '—' : formatDelta(delta);
@@ -54164,7 +54182,7 @@ Final Score: ${score}/100`;
         tbody.innerHTML = '';
         for (const it of visibleRows) {
           const latest = it?.latest || null;
-          const delta = it?.trend?.deltaLatest ?? null;
+          const delta = coerceDomainStrengthDelta(it?.trend?.deltaLatest, points);
           const points = Array.isArray(it?.trend?.points) ? it.trend.points : [];
           const last12 = points.slice(-12);
           const labels = last12.map((p) => p.date);
