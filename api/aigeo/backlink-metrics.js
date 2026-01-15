@@ -203,6 +203,12 @@ function computeBacklinkMetrics(rows) {
     let hostname = null;
     try {
       hostname = new URL(url).hostname;
+      if (hostname) {
+        hostname = hostname.toLowerCase();
+        if (hostname.startsWith('www.')) {
+          hostname = hostname.slice(4);
+        }
+      }
       if (i < 3) console.log(`Row ${i}: Extracted URL: ${url}, hostname: ${hostname}`);
     } catch (e) {
       skippedInvalidUrl++;
