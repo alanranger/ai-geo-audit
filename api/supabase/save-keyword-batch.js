@@ -68,8 +68,8 @@ export default async function handler(req, res) {
       // Try to update existing row first using PATCH
       const filterParams = new URLSearchParams({
         audit_date: `eq.${row.audit_date}`,
-        property_url: `eq.${encodeURIComponent(row.property_url)}`,
-        keyword: `eq.${encodeURIComponent(row.keyword)}`
+        property_url: `eq.${row.property_url}`,
+        keyword: `eq.${row.keyword}`
       });
 
       const patchResponse = await fetch(`${supabaseUrl}/rest/v1/keyword_rankings?${filterParams}`, {

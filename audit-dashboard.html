@@ -19985,6 +19985,25 @@
           debugLog('[Page Load] updateAuditTimestamp function not found on window', 'error');
         }
       }, 1000);
+
+      // Restore Ranking & AI data after hard refresh (localStorage may be cleared)
+      setTimeout(async () => {
+        try {
+          if (typeof loadRankingAiDataFromStorage === 'function' && window.RankingAiModule) {
+            const stored = await loadRankingAiDataFromStorage(true);
+            if (stored && stored.combinedRows && stored.summary) {
+              const mod = window.RankingAiModule;
+              if (mod?.state && !mod.state().hasLoadedOnce) {
+                const normalizedSummary = normalizeSummaryFields(stored.summary);
+                mod.setData(stored.combinedRows, normalizedSummary);
+                mod.setLoadedOnce(true);
+              }
+            }
+          }
+        } catch (err) {
+          debugLog(`[Page Load] Ranking & AI restore failed: ${err?.message || err}`, 'warn');
+        }
+      }, 1500);
     });
 
     function copyDebugLog() {
