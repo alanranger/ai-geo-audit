@@ -19997,6 +19997,7 @@
                 const normalizedSummary = normalizeSummaryFields(stored.summary);
                 mod.setData(stored.combinedRows, normalizedSummary);
                 mod.setLoadedOnce(true);
+                window.rankingAiData = stored.combinedRows;
               }
             }
           }
@@ -47994,6 +47995,10 @@ Final Score: ${score}/100`;
                 // Store as fallback before checking Supabase
                 localStorageFallback = parsed;
                 
+                // If citations exist but citation URLs are missing, treat as stale and check Supabase
+                const hasCitations = parsed.combinedRows.some(r => (r.ai_alan_citations_count || 0) > 0);
+                const hasCitationUrls = parsed.combinedRows.some(r => Array.isArray(r.ai_alan_citations) && r.ai_alan_citations.length > 0);
+                
                 // Check if localStorage data is missing search_volume (indicates stale data)
                 const keywordsMissingVolume = parsed.combinedRows.filter(r => r.search_volume == null || r.search_volume === undefined).length;
                 const hasMissingVolume = keywordsMissingVolume > 0;
@@ -48002,9 +48007,13 @@ Final Score: ${score}/100`;
                 if (parsed.combinedRows.length < 10) {
                   debugLog(`⚠ LocalStorage has only ${parsed.combinedRows.length} keywords, checking Supabase for more...`, 'info');
                   // Continue to Supabase check below
-                } else if (hasMissingVolume) {
+                } else if (hasMissingVolume || (hasCitations && !hasCitationUrls)) {
                   // Check Supabase if localStorage data is missing search_volume
-                  debugLog(`⚠ LocalStorage data is missing search_volume for ${keywordsMissingVolume}/${parsed.combinedRows.length} keywords, checking Supabase...`, 'info');
+                  if (hasMissingVolume) {
+                    debugLog(`⚠ LocalStorage data is missing search_volume for ${keywordsMissingVolume}/${parsed.combinedRows.length} keywords, checking Supabase...`, 'info');
+                  } else {
+                    debugLog(`⚠ LocalStorage data is missing citation URLs (counts exist), checking Supabase...`, 'info');
+                  }
                   // Continue to Supabase check below
                 } else {
                   // Check if data is recent (within last 24 hours) - if older, check Supabase
@@ -48098,12 +48107,18 @@ Final Score: ${score}/100`;
                 const normalizedSummary = normalizeSummaryFields(json.data.rankingAiData.summary);
                 
                 // Also save to localStorage for faster access next time
-                localStorage.setItem('rankingAiData', JSON.stringify({
-                  combinedRows: combinedRows,
-                  summary: normalizedSummary,
-                  timestamp: new Date().toISOString()
-                }));
-                debugLog(`✓ Saved ${keywordCount} keywords to localStorage`, 'success');
+                try {
+                  localStorage.setItem('rankingAiData', JSON.stringify({
+                    combinedRows: combinedRows,
+                    summary: normalizedSummary,
+                    timestamp: new Date().toISOString()
+                  }));
+                  debugLog(`✓ Saved ${keywordCount} keywords to localStorage`, 'success');
+                } catch (storageErr) {
+                  debugLog(`⚠ Failed to save rankingAiData to localStorage: ${storageErr.message}`, 'warn');
+                }
+                // Ensure window fallback is available for citation breakdowns
+                window.rankingAiData = combinedRows;
                 return { combinedRows, summary: normalizedSummary };
               } else {
                 debugLog('⚠ rankingAiData exists but missing combinedRows array', 'warn');
