@@ -8,6 +8,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 
 const GITHUB_OWNER = 'alanranger';
 const GITHUB_REPO = 'ai-geo-audit';
@@ -240,7 +241,7 @@ Generated: ${new Date().toISOString()}
     
     // Fallback: Try file system write (for local development only)
     try {
-      const debugLogsDir = path.join(process.cwd(), 'debug-logs');
+      const debugLogsDir = path.join(os.tmpdir(), 'ai-geo-audit-debug-logs');
       if (!fs.existsSync(debugLogsDir)) {
         fs.mkdirSync(debugLogsDir, { recursive: true });
       }
@@ -268,7 +269,24 @@ Generated: ${new Date().toISOString()}
       });
     } catch (fsError) {
       console.error('[save-debug-log] File system error:', fsError);
-      throw new Error(`Failed to save debug log: ${fsError.message}`);
+      return res.status(200).json({
+        status: 'warn',
+        source: 'save-debug-log',
+        message: 'Debug log not persisted (Supabase/GitHub unavailable)',
+        data: {
+          filename,
+          filepath,
+          entriesCount: debugLogEntries.length,
+          timestamp,
+          supabaseSaved: false
+        },
+        meta: {
+          generatedAt: new Date().toISOString(),
+          propertyUrl: propertyUrl || 'N/A',
+          method: 'none',
+          error: fsError.message
+        }
+      });
     }
     
   } catch (error) {

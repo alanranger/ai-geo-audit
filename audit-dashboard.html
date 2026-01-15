@@ -44060,6 +44060,15 @@ Final Score: ${score}/100`;
                   
                   // Mark records with suspiciously low page counts
                   const validatedRecords = records.map(record => {
+                    const alreadyPartial =
+                      record?.isPartial === true ||
+                      record?.is_partial === true ||
+                      record?._isPartialAudit === true;
+                    if (alreadyPartial) {
+                      record._isPartialAudit = true;
+                      record._partialReason = record?.partial_reason || record?._partialReason || 'Partial audit';
+                      return record;
+                    }
                     const pageCount = record.schemaTotalPages || record.schema_total_pages || 0;
                     const isSuspicious = pageCount > 0 && pageCount < minAcceptablePages;
                     
@@ -59268,18 +59277,17 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
               
               while (retries < maxRetries) {
                 try {
-                  // Check if latest audit has ranking_ai_data
-                  const checkUrl = apiUrl(`/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}&minimal=true`);
+                  // Verify via keyword_rankings (lightweight, avoids full audit payload)
+                  const checkUrl = apiUrl(`/api/supabase/get-keyword-rankings?propertyUrl=${encodeURIComponent(propertyUrl)}&latestOnly=true`);
                   const checkResponse = await fetch(checkUrl);
                   
                   if (checkResponse.ok) {
                     const checkData = await checkResponse.json();
-                    if (checkData.status === 'ok' && checkData.data && checkData.data.ranking_ai_data) {
-                      const rankingAiData = checkData.data.ranking_ai_data;
-                      if (rankingAiData.combinedRows && Array.isArray(rankingAiData.combinedRows) && rankingAiData.combinedRows.length > 0) {
-                        debugLog(`[Global Run] [Ranking & AI Scan] ✓ Verified: Data saved to Supabase (${rankingAiData.combinedRows.length} keywords)`, 'success');
-                        break; // Data is in Supabase, proceed
-                      }
+                    const latestAuditDate = checkData?.data?.latestAuditDate;
+                    const latestTimestamp = checkData?.data?.latestTimestamp;
+                    if (checkData.status === 'ok' && (latestTimestamp || latestAuditDate)) {
+                      debugLog(`[Global Run] [Ranking & AI Scan] ✓ Verified: keyword_rankings saved (audit_date=${latestAuditDate || 'unknown'})`, 'success');
+                      break; // Data is in Supabase, proceed
                     }
                   }
                   

@@ -765,6 +765,15 @@ export default async function handler(req, res) {
     if (auditRecord.query_pages === null) partialReasons.push('query_pages missing');
     if (!hasAnyPillarScore) partialReasons.push('pillar scores missing');
 
+    const schemaPageCountRaw = auditRecord.schema_total_pages;
+    const schemaDetailCount = Array.isArray(auditRecord.schema_pages_detail)
+      ? auditRecord.schema_pages_detail.length
+      : 0;
+    const schemaPageCount = schemaPageCountRaw || schemaDetailCount;
+    if (schemaPageCount > 0 && schemaPageCount < 50) {
+      partialReasons.push(`Low page count: ${schemaPageCount} pages`);
+    }
+
     if (partialReasons.length > 0) {
       auditRecord.is_partial = true;
       auditRecord.partial_reason = partialReasons.join('; ');
