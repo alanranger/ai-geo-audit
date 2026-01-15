@@ -175,6 +175,41 @@ export default async function handler(req, res) {
       return columns;
     }
     
+    // Helper to split CSV into logical lines (handles quoted newlines)
+    function splitCsvLines(csvContent) {
+      const lines = [];
+      let currentLine = '';
+      let inQuotes = false;
+      
+      for (let i = 0; i < csvContent.length; i++) {
+        const char = csvContent[i];
+        const nextChar = csvContent[i + 1];
+        
+        if (char === '"') {
+          if (inQuotes && nextChar === '"') {
+            currentLine += '"';
+            i++; // Skip escaped quote
+          } else {
+            inQuotes = !inQuotes;
+            currentLine += char;
+          }
+        } else if (char === '\n' && !inQuotes) {
+          if (currentLine.trim()) {
+            lines.push(currentLine.trim());
+          }
+          currentLine = '';
+        } else {
+          currentLine += char;
+        }
+      }
+      
+      if (currentLine.trim()) {
+        lines.push(currentLine.trim());
+      }
+      
+      return lines;
+    }
+    
     // Parse CSV and count URLs
     const lines = csvText.split('\n').filter(line => line.trim());
     console.log(`📊 CSV has ${lines.length} total lines`);
@@ -283,6 +318,70 @@ export default async function handler(req, res) {
     
     console.log(`✓ CSV parsed: ${urlCount} URLs found from ${source}`);
     
+    // Attempt to fetch backlink CSV from GitHub and compute unique domains
+    let backlinkDomains = null;
+    let backlinkRows = null;
+    let backlinkSource = null;
+    let backlinkError = null;
+    try {
+      const BACKLINK_CSV_URL = process.env.GITHUB_BACKLINK_CSV_URL ||
+        "https://raw.githubusercontent.com/alanranger/alan-shared-resources/main/csv/alanranger.com_-backlink-data%20(2).csv";
+      const BACKLINK_CSV_URL_MASTER =
+        "https://raw.githubusercontent.com/alanranger/alan-shared-resources/master/csv/alanranger.com_-backlink-data%20(2).csv";
+      
+      const backlinkUrls = [BACKLINK_CSV_URL, BACKLINK_CSV_URL_MASTER];
+      let backlinkCsvText = '';
+      for (const backlinkUrl of backlinkUrls) {
+        const backlinkResponse = await fetch(backlinkUrl, {
+          headers: {
+            'Accept': 'text/csv',
+            'User-Agent': 'AI-GEO-Audit/1.0',
+            'Cache-Control': 'no-cache'
+          }
+        });
+        if (backlinkResponse.ok) {
+          backlinkCsvText = await backlinkResponse.text();
+          backlinkSource = backlinkUrl;
+          break;
+        }
+      }
+      
+      if (backlinkCsvText) {
+        const backlinkLines = splitCsvLines(backlinkCsvText);
+        if (backlinkLines.length > 1) {
+          const backlinkHeaders = parseCsvLine(backlinkLines[0]).map(h => h.trim().replace(/^"|"$/g, ''));
+          let linkColIndex = 0;
+          const linkHeaderIndex = backlinkHeaders.findIndex(h => h.toLowerCase().includes('linking page'));
+          if (linkHeaderIndex !== -1) {
+            linkColIndex = linkHeaderIndex;
+          }
+          
+          const domains = new Set();
+          for (let i = 1; i < backlinkLines.length; i++) {
+            const cols = parseCsvLine(backlinkLines[i]);
+            const cell = cols[linkColIndex] ? cols[linkColIndex].trim().replace(/^"|"$/g, '') : '';
+            if (!cell) continue;
+            const matches = cell.match(/https?:\/\/[^\s"]+/g) || [];
+            for (const urlStr of matches) {
+              try {
+                const hostname = new URL(urlStr).hostname.replace(/^www\./, '');
+                if (hostname) domains.add(hostname);
+              } catch (e) {
+                // Ignore invalid URLs
+              }
+            }
+          }
+          
+          backlinkDomains = domains.size;
+          backlinkRows = backlinkLines.length - 1;
+        }
+      } else {
+        backlinkError = 'Backlink CSV not available from GitHub.';
+      }
+    } catch (e) {
+      backlinkError = e.message || String(e);
+    }
+    
     return res.status(200).json({
       status: 'ok',
       message: `CSV fetched successfully from ${source}`,
@@ -292,7 +391,11 @@ export default async function handler(req, res) {
         totalUrls: urlCount,
         csvSize: csvText.length,
         linesProcessed: lines.length - 1, // Exclude header
-        fetchedAt: new Date().toISOString()
+        fetchedAt: new Date().toISOString(),
+        backlinkDomains,
+        backlinkRows,
+        backlinkSource,
+        backlinkError
       },
       meta: { generatedAt: new Date().toISOString() }
     });

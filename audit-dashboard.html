@@ -23349,16 +23349,25 @@
         if (response.ok && data.status === 'ok') {
           const urlCount = data.data.totalUrls || 0;
           const source = data.source || 'unknown';
+          const backlinkDomains = data.data.backlinkDomains;
           
           debugLog(`✓ CSV fetched successfully from ${source}`, 'success');
           debugLog(`  CSV URL: ${data.csvUrl || 'not provided'}`, 'info');
           debugLog(`  Total URLs fetched: ${urlCount}`, 'success');
+          if (backlinkDomains !== null && backlinkDomains !== undefined) {
+            debugLog(`  Backlink domains fetched: ${backlinkDomains}`, 'success');
+          } else if (data.data.backlinkError) {
+            debugLog(`  Backlink CSV error: ${data.data.backlinkError}`, 'warn');
+          }
           debugLog(`  CSV size: ${data.data.csvSize} bytes`, 'info');
           debugLog(`  Lines processed: ${data.data.linesProcessed || 'N/A'}`, 'info');
           debugLog(`  Fetched at: ${data.data.fetchedAt}`, 'info');
           
           // Show toast with URL count
-          showStatus(`✅ CSV synced from ${source}! Fetched ${urlCount} URLs.`, 'success');
+          const backlinkSummary = (backlinkDomains !== null && backlinkDomains !== undefined)
+            ? ` Backlink domains: ${backlinkDomains}.`
+            : '';
+          showStatus(`✅ CSV synced from ${source}! Fetched ${urlCount} URLs.${backlinkSummary}`, 'success');
           if (btnText) {
             btnText.textContent = `✅ ${urlCount} URLs`;
           }
