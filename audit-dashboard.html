@@ -54075,6 +54075,14 @@ Final Score: ${score}/100`;
           debugLog(`[DomainStrength] Latest data: score=${latest.score}, snapshotDate=${latest.snapshotDate}, createdAt=${latest.createdAt}`, 'info');
           const selfPoints = Array.isArray(selfItem?.trend?.points) ? selfItem.trend.points : [];
           const delta = coerceDomainStrengthDelta(selfItem?.trend?.deltaLatest, selfPoints);
+          if (selfPoints.length) {
+            const lastPoint = selfPoints[selfPoints.length - 1];
+            const prevPoint = selfPoints.length > 1 ? selfPoints[selfPoints.length - 2] : null;
+            debugLog(
+              `[DomainStrength] Self delta check: raw=${selfItem?.trend?.deltaLatest}, points=${selfPoints.length}, last=${lastPoint?.score}, prev=${prevPoint?.score}, computed=${delta}`,
+              'info'
+            );
+          }
           const arrow = delta > 0.5 ? '↑' : (delta < -0.5 ? '↓' : '•');
           const cls = delta > 0.5 ? 'kpi-trend-up' : (delta < -0.5 ? 'kpi-trend-down' : 'kpi-trend-flat');
           const changeText = delta === null ? '—' : formatDelta(delta);
@@ -54180,10 +54188,20 @@ Final Score: ${score}/100`;
         const hiddenRowsCount = paginatedRows.length - visibleRows.length;
 
         tbody.innerHTML = '';
+        let visibleIndex = 0;
         for (const it of visibleRows) {
           const latest = it?.latest || null;
           const points = Array.isArray(it?.trend?.points) ? it.trend.points : [];
           const delta = coerceDomainStrengthDelta(it?.trend?.deltaLatest, points);
+          if (visibleIndex < 3) {
+            const lastPoint = points.length ? points[points.length - 1] : null;
+            const prevPoint = points.length > 1 ? points[points.length - 2] : null;
+            debugLog(
+              `[DomainStrength] Row delta check: domain=${it?.domain || '—'}, raw=${it?.trend?.deltaLatest}, points=${points.length}, last=${lastPoint?.score}, prev=${prevPoint?.score}, computed=${delta}`,
+              'info'
+            );
+          }
+          visibleIndex += 1;
           const last12 = points.slice(-12);
           const labels = last12.map((p) => p.date);
           const scores = last12.map((p) => p.score);
