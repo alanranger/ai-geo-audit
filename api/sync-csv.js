@@ -43,6 +43,7 @@ export default async function handler(req, res) {
     let csvText = '';
     let csvUrl = GITHUB_CSV_URL;
     let source = 'github';
+    const githubAttempts = [];
     
     // Try GitHub first (source of truth) - try main branch, then master
     let githubFetchError = null;
@@ -63,6 +64,7 @@ export default async function handler(req, res) {
         
         if (response.ok) {
           csvText = await response.text();
+          githubAttempts.push({ url: githubUrl, status: response.status, ok: true });
           const lineCount = csvText.split('\n').filter(l => l.trim()).length;
           console.log(`✓ CSV fetched from GitHub successfully (${csvText.length} bytes, ${lineCount} lines)`);
           
@@ -78,6 +80,7 @@ export default async function handler(req, res) {
         } else if (response.status === 404) {
           // 404 could mean: file doesn't exist, wrong branch, or repository is private
           const errorText = await response.text().catch(() => '');
+          githubAttempts.push({ url: githubUrl, status: response.status, ok: false, error: errorText.substring(0, 120) });
           console.warn(`GitHub fetch 404 for ${githubUrl} - file not found or repository may be private`);
           if (errorText.includes('Not Found') || errorText.includes('404')) {
             githubFetchError = new Error(`GitHub repository may be private or file path incorrect. HTTP 404 - Cannot access raw.githubusercontent.com for private repositories.`);
@@ -88,6 +91,7 @@ export default async function handler(req, res) {
           continue;
         } else {
           const errorText = await response.text().catch(() => '');
+          githubAttempts.push({ url: githubUrl, status: response.status, ok: false, error: errorText.substring(0, 120) });
           console.warn(`GitHub fetch failed for ${githubUrl}: HTTP ${response.status}`);
           if (errorText) {
             console.warn(`Response: ${errorText.substring(0, 200)}`);
@@ -98,6 +102,7 @@ export default async function handler(req, res) {
         }
       } catch (error) {
         console.warn(`GitHub fetch error for ${githubUrl}:`, error.message);
+        githubAttempts.push({ url: githubUrl, status: 'fetch_error', ok: false, error: error.message });
         githubFetchError = error;
         // Continue to next URL
         continue;
@@ -129,7 +134,8 @@ export default async function handler(req, res) {
           status: 'error',
           message: 'Failed to fetch CSV from both GitHub and fallback location',
           details: {
-            githubError: githubError.message,
+            githubError: githubFetchError ? githubFetchError.message : 'Unknown GitHub error',
+            githubAttempts,
             fallbackError: fallbackError.message
           },
           suggestion: 'Please ensure the CSV exists in the GitHub repository or the hosted location is accessible.',
@@ -266,7 +272,9 @@ export default async function handler(req, res) {
           source,
           csvUrl,
           totalUrls: urlCount,
-          linesProcessed: lines.length - 1
+          linesProcessed: lines.length - 1,
+          githubError: githubFetchError ? githubFetchError.message : 'Unknown GitHub error',
+          githubAttempts
         },
         suggestion: 'Use GitHub CSV or upload manually. Hosted CSV may contain non-URL data.',
         meta: { generatedAt: new Date().toISOString() }
