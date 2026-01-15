@@ -928,6 +928,19 @@ export default async function handler(req, res) {
           };
         })()
       } : null,
+      backlinkMetrics: (() => {
+        const metrics = record.backlink_metrics;
+        if (!metrics) return null;
+        if (typeof metrics === 'string') {
+          try {
+            return JSON.parse(metrics);
+          } catch (e) {
+            console.warn('[get-latest-audit] Failed to parse backlink_metrics JSON:', e.message);
+            return null;
+          }
+        }
+        return metrics;
+      })(),
       localSignals: (() => {
         const shouldCreate = record.local_entity_score !== null || record.service_area_score !== null || record.locations || record.gbp_rating !== null || record.gbp_review_count !== null;
         console.log('[get-latest-audit] localSignals condition check:', {
