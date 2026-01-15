@@ -54508,6 +54508,17 @@ Final Score: ${score}/100`;
           
           debugLog(`[DomainStrength] ✓ Snapshot successful: ${json.inserted || 0} domains saved (date: ${json.snapshot_date})`, 'success');
           
+          // Clear domain strength caches so latest snapshot is reflected everywhere
+          try {
+            if (typeof __domainStrengthLatestCache !== 'undefined' && __domainStrengthLatestCache?.clear) {
+              __domainStrengthLatestCache.clear();
+            }
+          } catch (e) {}
+          try {
+            ['dashboard_domain_strength_cache_v4', 'dashboard_domain_strength_cache_v3', 'dashboard_domain_strength_cache_v2', 'dashboard_domain_strength_cache_v1']
+              .forEach((key) => localStorage.removeItem(key));
+          } catch (e) {}
+          
           // Fetch remaining pending count
           let remainingPending = 0;
           try {
@@ -54573,6 +54584,10 @@ Final Score: ${score}/100`;
           // Dashboard: refresh live dials/cards after a domain strength snapshot
           if (typeof window.renderDashboardTab === 'function') {
             try { window.renderDashboardTab(); } catch (e) {}
+          }
+          // Ranking & AI: re-render to refresh domain strength trend line
+          if (typeof window.renderRankingAiTab === 'function') {
+            try { window.renderRankingAiTab(); } catch (e) {}
           }
         } catch (e) {
           const msg = e?.message || String(e);

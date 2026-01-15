@@ -597,13 +597,19 @@ export default async function handler(req, res) {
         const primaryDomainSnapshot = insertPayload.find(r => r.domain === primaryDomain);
         if (primaryDomainSnapshot) {
           try {
-            // Get property URL from environment or use default
-            const propertyUrl = process.env.AI_GEO_DOMAIN 
-              ? `https://${process.env.AI_GEO_DOMAIN}` 
-              : (process.env.SITE_DOMAIN ? `https://${process.env.SITE_DOMAIN}` : 'https://www.alanranger.com');
-            
-            // Fetch latest audit date for this property
-            const latestAuditUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&order=audit_date.desc&limit=1&select=audit_date`;
+            // Get property URL variants from environment (with/without www)
+            const baseDomain = String(process.env.AI_GEO_DOMAIN || process.env.SITE_DOMAIN || "alanranger.com")
+              .replace(/^https?:\/\//, "")
+              .replace(/^www\./, "")
+              .split("/")[0];
+            const propertyUrlVariants = [`https://${baseDomain}`, `https://www.${baseDomain}`];
+
+            // Fetch latest audit date for this property (match either variant)
+            const propertyUrlFilters = propertyUrlVariants
+              .map((url) => `property_url.eq.${encodeURIComponent(url)}`)
+              .join(",");
+            const latestAuditUrl =
+              `${supabaseUrl}/rest/v1/audit_results?or=(${propertyUrlFilters})&order=audit_date.desc&limit=1&select=audit_date,property_url`;
             const latestAuditResp = await fetch(latestAuditUrl, {
               headers: {
                 'Content-Type': 'application/json',
@@ -616,6 +622,7 @@ export default async function handler(req, res) {
               const latestAuditData = await latestAuditResp.json();
               if (Array.isArray(latestAuditData) && latestAuditData.length > 0) {
                 const latestAuditDate = latestAuditData[0].audit_date;
+                const latestPropertyUrl = latestAuditData[0].property_url || propertyUrlVariants[0];
                 
                 // Build domain strength object
                 const domainStrengthData = {
@@ -627,7 +634,7 @@ export default async function handler(req, res) {
                 };
                 
                 // Update latest audit record's domain_strength field
-                const updateUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${encodeURIComponent(latestAuditDate)}`;
+                const updateUrl = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(latestPropertyUrl)}&audit_date=eq.${encodeURIComponent(latestAuditDate)}`;
                 const updateResp = await fetch(updateUrl, {
                   method: 'PATCH',
                   headers: {
