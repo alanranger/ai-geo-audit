@@ -179,6 +179,10 @@ export default async function handler(req, res) {
     if (lines.length > 0) {
       const headerLine = lines[0].trim();
       headers = parseCsvLine(headerLine);
+      // Strip UTF-8 BOM if present on first header
+      if (headers.length > 0) {
+        headers[0] = headers[0].replace(/^\uFEFF/, '');
+      }
       console.log(`📋 CSV headers: ${headers.join(', ')}`);
       const urlHeaderIndex = headers.findIndex(h => h.toLowerCase() === 'url');
       if (urlHeaderIndex !== -1) {

@@ -393,6 +393,12 @@ export default async function handler(req, res) {
       
       console.log('CSV content received, length:', csvContent.length);
       console.log('First 200 chars:', csvContent.substring(0, 200));
+      
+      // Strip UTF-8 BOM if present at start
+      if (csvContent.charCodeAt(0) === 0xFEFF) {
+        csvContent = csvContent.slice(1);
+        console.log('Stripped UTF-8 BOM from CSV content');
+      }
 
       // Parse CSV - handle multi-line quoted fields properly
       let rows = [];
@@ -440,6 +446,9 @@ export default async function handler(req, res) {
         // Parse header row
         const headerLine = lines[0];
         const headers = parseCsvLine(headerLine).map(h => h.trim().replace(/^"|"$/g, ''));
+        if (headers.length > 0) {
+          headers[0] = headers[0].replace(/^\uFEFF/, '');
+        }
         
         console.log('CSV headers:', headers);
         console.log('Total lines in CSV:', lines.length);
