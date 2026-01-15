@@ -839,6 +839,56 @@ export default async function handler(req, res) {
         console.log('[Supabase Save] ⚠ Partial update detected - only updating top_queries to prevent data loss');
       }
     }
+
+    // If query_pages batch arrives last, clear partial flag when all required fields exist.
+    if (isPartialUpdate && hasQueryPagesOnly && updatePayload.query_pages) {
+      try {
+        const selectFields = [
+          'schema_pages_detail',
+          'gsc_timeseries',
+          'visibility_score',
+          'authority_score',
+          'content_schema_score',
+          'local_entity_score',
+          'service_area_score',
+          'is_partial',
+          'partial_reason'
+        ].join(',');
+        const existingRes = await fetch(
+          `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(propertyUrl)}&audit_date=eq.${auditDate}&select=${selectFields}&limit=1`,
+          {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': supabaseKey,
+              'Authorization': `Bearer ${supabaseKey}`
+            }
+          }
+        );
+        if (existingRes.ok) {
+          const existingRows = await existingRes.json().catch(() => []);
+          const existing = Array.isArray(existingRows) && existingRows.length > 0 ? existingRows[0] : null;
+          if (existing) {
+            const hasAnyScore = [
+              existing.visibility_score,
+              existing.authority_score,
+              existing.content_schema_score,
+              existing.local_entity_score,
+              existing.service_area_score
+            ].some(v => v !== null && v !== undefined);
+            const hasSchemaDetail = existing.schema_pages_detail !== null && existing.schema_pages_detail !== undefined;
+            const hasTimeseries = existing.gsc_timeseries !== null && existing.gsc_timeseries !== undefined;
+            if (hasAnyScore && hasSchemaDetail && hasTimeseries) {
+              updatePayload.is_partial = false;
+              updatePayload.partial_reason = null;
+              console.log('[Supabase Save] ✓ Clearing partial flag after query_pages update (audit now complete)');
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[Supabase Save] ⚠ Failed to clear partial flag after query_pages update:', e?.message || String(e));
+      }
+    }
     
     // SAFETY: Prevent partial audits from overwriting existing full audit data with nulls.
     // This can happen if you run an audit and it is missing heavy payload fields (schema_pages_detail, gsc_timeseries, query_pages),
