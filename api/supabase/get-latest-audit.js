@@ -537,6 +537,38 @@ export default async function handler(req, res) {
     // Wrap in try-catch to handle any parsing errors gracefully
     let auditData;
     try {
+      let schemaPagesDetailParsed = null;
+      let schemaPagesDetailTruncated = null;
+      if (record.schema_pages_detail) {
+        if (typeof record.schema_pages_detail === 'string' && record.schema_pages_detail.length > 500 * 1024) {
+          console.warn(`[get-latest-audit] Skipping schema_pages_detail parse (too large: ${Math.round(record.schema_pages_detail.length / 1024)}KB)`);
+        } else {
+          try {
+            schemaPagesDetailParsed = typeof record.schema_pages_detail === 'string'
+              ? JSON.parse(record.schema_pages_detail)
+              : record.schema_pages_detail;
+            if (Array.isArray(schemaPagesDetailParsed) && schemaPagesDetailParsed.length > 0) {
+              schemaPagesDetailTruncated = schemaPagesDetailParsed.length > 200
+                ? schemaPagesDetailParsed.slice(0, 200)
+                : schemaPagesDetailParsed;
+              if (schemaPagesDetailParsed.length > 200) {
+                console.warn(`[get-latest-audit] Truncating schema_pages_detail from ${schemaPagesDetailParsed.length} to 200 immediately`);
+              }
+            }
+          } catch (e) {
+            console.warn('[get-latest-audit] Failed to parse schema_pages_detail JSON:', e.message);
+          }
+        }
+      }
+
+      const derivedSchemaTotalPages = record.schema_total_pages || (Array.isArray(schemaPagesDetailParsed) ? schemaPagesDetailParsed.length : 0);
+      const derivedSchemaPagesWithSchema = record.schema_pages_with_schema != null
+        ? record.schema_pages_with_schema
+        : (Array.isArray(schemaPagesDetailParsed) ? schemaPagesDetailParsed.filter(p => p && p.hasSchema === true).length : 0);
+      const derivedSchemaCoverage = record.schema_coverage != null
+        ? record.schema_coverage
+        : (derivedSchemaTotalPages > 0 ? (derivedSchemaPagesWithSchema / derivedSchemaTotalPages) * 100 : 0);
+
       auditData = {
       scores: {
         visibility: record.visibility_score || null,
@@ -755,78 +787,28 @@ export default async function handler(req, res) {
       schemaAudit: ((record.schema_total_pages != null && record.schema_total_pages > 0) || record.schema_coverage != null || record.content_schema_score != null || (record.schema_pages_detail != null && record.schema_pages_detail !== '[]' && record.schema_pages_detail !== '')) ? {
         status: 'ok',
         data: {
-          coverage: record.schema_coverage != null ? record.schema_coverage : (record.content_schema_score != null ? record.content_schema_score : 0),
-          totalPages: record.schema_total_pages || 0,
+          coverage: derivedSchemaCoverage,
+          totalPages: derivedSchemaTotalPages || 0,
           // CRITICAL: Include pages array for scorecard schema detection
           // schema_pages_detail is the detailed array with url, title, metaDescription, hasSchema, schemaTypes, error per page
           // Parse JSON if stored as string in Supabase
           // CRITICAL: Skip parsing if string is too large to prevent FUNCTION_INVOCATION_FAILED
           pages: (() => {
-            let pagesDetail = record.schema_pages_detail;
-            if (!pagesDetail) return null;
-            // Skip parsing if string is larger than 500KB to prevent timeouts
-            if (typeof pagesDetail === 'string' && pagesDetail.length > 500 * 1024) {
-              console.warn(`[get-latest-audit] Skipping schema_pages_detail parse (too large: ${Math.round(pagesDetail.length / 1024)}KB)`);
-              return null;
-            }
-            // Parse if stored as string
-            if (typeof pagesDetail === 'string') {
-              try {
-                pagesDetail = JSON.parse(pagesDetail);
-              } catch (e) {
-                console.warn('[get-latest-audit] Failed to parse schema_pages_detail JSON:', e.message);
-                return null;
-              }
-            }
-            // Return array if valid, otherwise null
-            // Ensure all fields are present (backward compatibility for old records)
-            if (Array.isArray(pagesDetail) && pagesDetail.length > 0) {
-              // Truncate to 200 items immediately to prevent large responses
-              const truncated = pagesDetail.length > 200 ? pagesDetail.slice(0, 200) : pagesDetail;
-              if (pagesDetail.length > 200) {
-                console.warn(`[get-latest-audit] Truncating schema_pages_detail from ${pagesDetail.length} to 200 immediately`);
-              }
-              return truncated.map(p => ({
-                url: p.url || '',
-                title: p.title || null,
-                metaDescription: p.metaDescription || null,
-                hasSchema: p.hasSchema === true,
-                hasInheritedSchema: p.hasInheritedSchema === true,
-                schemaTypes: Array.isArray(p.schemaTypes) ? p.schemaTypes : (p.schemaTypes ? [p.schemaTypes] : []),
-                error: p.error || null,
-                errorType: p.errorType || null
-              })).filter(p => p.url);
-            }
-            return null;
+            if (!Array.isArray(schemaPagesDetailTruncated) || schemaPagesDetailTruncated.length === 0) return null;
+            return schemaPagesDetailTruncated.map(p => ({
+              url: p.url || '',
+              title: p.title || null,
+              metaDescription: p.metaDescription || null,
+              hasSchema: p.hasSchema === true,
+              hasInheritedSchema: p.hasInheritedSchema === true,
+              schemaTypes: Array.isArray(p.schemaTypes) ? p.schemaTypes : (p.schemaTypes ? [p.schemaTypes] : []),
+              error: p.error || null,
+              errorType: p.errorType || null
+            })).filter(p => p.url);
           })(),
           pagesWithSchema: (() => {
-            let pagesDetail = record.schema_pages_detail;
-            if (!pagesDetail) {
-              // Fallback to count if detail not available
-              return record.schema_pages_with_schema != null ? record.schema_pages_with_schema : 0;
-            }
-            // Skip parsing if string is larger than 500KB to prevent timeouts
-            if (typeof pagesDetail === 'string' && pagesDetail.length > 500 * 1024) {
-              console.warn(`[get-latest-audit] Skipping pagesWithSchema parse (too large: ${Math.round(pagesDetail.length / 1024)}KB)`);
-              return record.schema_pages_with_schema != null ? record.schema_pages_with_schema : 0;
-            }
-            // Parse if stored as string
-            if (typeof pagesDetail === 'string') {
-              try {
-                pagesDetail = JSON.parse(pagesDetail);
-              } catch (e) {
-                console.warn('[get-latest-audit] Failed to parse schema_pages_detail JSON:', e.message);
-                return record.schema_pages_with_schema != null ? record.schema_pages_with_schema : 0;
-              }
-            }
-            // Return array if valid, otherwise fallback to count
-            // CRITICAL: Truncate array if too large to prevent FUNCTION_INVOCATION_FAILED
-            if (Array.isArray(pagesDetail) && pagesDetail.length > 0) {
-              if (pagesDetail.length > 200) {
-                console.warn(`[get-latest-audit] Truncating pagesWithSchema array from ${pagesDetail.length} to 200 immediately`);
-                return pagesDetail.slice(0, 200);
-              }
-              return pagesDetail;
+            if (Array.isArray(schemaPagesDetailTruncated) && schemaPagesDetailTruncated.length > 0) {
+              return schemaPagesDetailTruncated;
             }
             return record.schema_pages_with_schema != null ? record.schema_pages_with_schema : 0;
           })(),

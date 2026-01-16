@@ -225,6 +225,25 @@ export default async function handler(req, res) {
     // Extract schema audit data
     const schemaData = schemaAuditToUse?.data || {};
     const schemaTypes = schemaData.schemaTypes || [];
+    const getSchemaCounts = () => {
+      const pagesArray = Array.isArray(schemaData.pages) ? schemaData.pages : null;
+      const pagesWithSchemaArray = Array.isArray(schemaData.pagesWithSchema) ? schemaData.pagesWithSchema : null;
+
+      const pagesWithSchemaCount = typeof schemaData.pagesWithSchema === 'number'
+        ? schemaData.pagesWithSchema
+        : (pagesWithSchemaArray ? pagesWithSchemaArray.length : (pagesArray ? pagesArray.filter(p => p && p.hasSchema === true).length : 0));
+
+      const totalPagesCount = typeof schemaData.totalPages === 'number'
+        ? schemaData.totalPages
+        : (pagesArray ? pagesArray.length : (pagesWithSchemaArray ? pagesWithSchemaArray.length : pagesWithSchemaCount));
+
+      const coverage = (typeof schemaData.coverage === 'number' && !Number.isNaN(schemaData.coverage))
+        ? schemaData.coverage
+        : (totalPagesCount > 0 ? (pagesWithSchemaCount / totalPagesCount) * 100 : 0);
+
+      return { totalPagesCount, pagesWithSchemaCount, coverage };
+    };
+    const { totalPagesCount, pagesWithSchemaCount, coverage } = getSchemaCounts();
     
     // Debug: Log schema data structure to understand what's available
     console.log('[Save Audit] Schema data keys:', Object.keys(schemaData));
@@ -282,9 +301,9 @@ export default async function handler(req, res) {
       audit_date: String(auditDate).trim(), // Format: YYYY-MM-DD
       
       // Schema Audit Data
-      schema_total_pages: ensureNumber(schemaData.totalPages) ?? 0,
-      schema_pages_with_schema: ensureNumber(schemaData.pagesWithSchema) ?? 0,
-      schema_coverage: ensureNumber(schemaData.coverage) ?? 0,
+      schema_total_pages: ensureNumber(totalPagesCount) ?? 0,
+      schema_pages_with_schema: ensureNumber(pagesWithSchemaCount) ?? 0,
+      schema_coverage: ensureNumber(coverage) ?? 0,
       schema_types: Array.isArray(schemaTypes) 
         ? schemaTypes.map(st => typeof st === 'string' ? st : st.type).filter(Boolean)
         : [],
