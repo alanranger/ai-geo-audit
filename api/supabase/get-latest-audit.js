@@ -561,11 +561,16 @@ export default async function handler(req, res) {
         }
       }
 
-      const derivedSchemaTotalPages = record.schema_total_pages || (Array.isArray(schemaPagesDetailParsed) ? schemaPagesDetailParsed.length : 0);
-      const derivedSchemaPagesWithSchema = record.schema_pages_with_schema != null
+      const derivedSchemaTotalPages = (record.schema_total_pages != null && record.schema_total_pages > 0)
+        ? record.schema_total_pages
+        : (Array.isArray(schemaPagesDetailParsed) ? schemaPagesDetailParsed.length : 0);
+      const computedSchemaPagesWithSchema = Array.isArray(schemaPagesDetailParsed)
+        ? schemaPagesDetailParsed.filter(p => p && p.hasSchema === true).length
+        : 0;
+      const derivedSchemaPagesWithSchema = (record.schema_pages_with_schema != null && record.schema_pages_with_schema > 0)
         ? record.schema_pages_with_schema
-        : (Array.isArray(schemaPagesDetailParsed) ? schemaPagesDetailParsed.filter(p => p && p.hasSchema === true).length : 0);
-      const derivedSchemaCoverage = record.schema_coverage != null
+        : computedSchemaPagesWithSchema;
+      const derivedSchemaCoverage = (record.schema_coverage != null && record.schema_coverage > 0)
         ? record.schema_coverage
         : (derivedSchemaTotalPages > 0 ? (derivedSchemaPagesWithSchema / derivedSchemaTotalPages) * 100 : 0);
 

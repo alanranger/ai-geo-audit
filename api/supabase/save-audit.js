@@ -229,11 +229,11 @@ export default async function handler(req, res) {
       const pagesArray = Array.isArray(schemaData.pages) ? schemaData.pages : null;
       const pagesWithSchemaArray = Array.isArray(schemaData.pagesWithSchema) ? schemaData.pagesWithSchema : null;
 
-      const pagesWithSchemaCount = typeof schemaData.pagesWithSchema === 'number'
+      const pagesWithSchemaCount = (typeof schemaData.pagesWithSchema === 'number' && schemaData.pagesWithSchema > 0)
         ? schemaData.pagesWithSchema
         : (pagesWithSchemaArray ? pagesWithSchemaArray.length : (pagesArray ? pagesArray.filter(p => p && p.hasSchema === true).length : 0));
 
-      const totalPagesCount = typeof schemaData.totalPages === 'number'
+      const totalPagesCount = (typeof schemaData.totalPages === 'number' && schemaData.totalPages > 0)
         ? schemaData.totalPages
         : (pagesArray ? pagesArray.length : (pagesWithSchemaArray ? pagesWithSchemaArray.length : pagesWithSchemaCount));
 
