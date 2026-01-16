@@ -1,7 +1,7 @@
 # AI GEO Audit - Comprehensive Handover Document
 
-**Last Updated**: 2026-01-10  
-**Current Commit**: `51d50a4` (Computed fields storage verification complete)  
+**Last Updated**: 2026-01-16  
+**Current Commit**: `0ba829a` (Trend range, schema persistence, authority trend fixes)  
 **Purpose**: Single source of truth for all projects, phases, tasks, fixes, and key information for any new chat thread.
 
 ---
@@ -15,6 +15,16 @@ This document consolidates ALL critical information about the AI GEO Audit proje
 4. **All Update Buttons**: Complete reference of all data update/refresh processes
 5. **All Fixes**: Status of all fixes and known issues
 6. **Technical Architecture**: Data flow, key functions, dependencies
+
+---
+
+## Recent Fixes (2026-01-16)
+
+- ✅ Schema totals now derived from detailed pages on save/read (prevents zero coverage after refresh).
+- ✅ Partial saves no longer overwrite schema metadata (`schema_types`, `schema_rich_eligible`, totals).
+- ✅ Authority trend skips partial audits to avoid last-point dips.
+- ✅ Score Trends now respect selected date range (timeseries honors start/end).
+- ✅ Local signals and schema totals persist after global runs.
 
 ---
 
@@ -80,7 +90,9 @@ This document consolidates ALL critical information about the AI GEO Audit proje
 
 ## Current State (Post-Rollback)
 
-### Rollback Status
+### Rollback Status (Historical)
+
+Note: The rollback details below are historical context only. The current `main` branch includes multiple post‑rollback fixes (see "Recent Fixes (2026‑01‑16)").
 - **Baseline Commit**: `8951fcf` (2025-12-XX) - Stable baseline established
 - **Current Commit**: `577c64e` - Fixes applied for URL matching and flickering
 - **Rollback Reason**: Subsequent fixes introduced flickering counts and syntax errors

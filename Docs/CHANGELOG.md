@@ -2,6 +2,17 @@
 
 All notable changes to the AI GEO Audit Dashboard project will be documented in this file.
 
+## [2026-01-16] - v1.8.1 - Schema Persistence + Trend Range Fixes
+
+### Fixed
+- **Schema persistence**: Totals/coverage now derived from schema pages detail on save/read to prevent zero coverage on refresh.
+- **Partial save overwrites**: Partial saves no longer wipe schema metadata (`schema_types`, `schema_rich_eligible`, totals).
+- **Authority trend dips**: Authority trend now skips partial audits and uses last good value.
+- **Score Trends range**: Timeseries fetch now respects selected start/end dates when changing timescale.
+
+### Changed
+- **Trend chart sourcing**: GSC timeseries fetch now aligns with selected UI date range (not fixed 56-day window).
+
 ## [2026-01-10] - v1.8.0 - Computed Fields Storage & Complete Button Audit
 
 ### Added

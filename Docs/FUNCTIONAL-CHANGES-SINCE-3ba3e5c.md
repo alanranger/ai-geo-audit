@@ -9,6 +9,27 @@ This document lists all **functional** changes (excluding syntax fixes) that wer
 
 ---
 
+## 6. Schema Persistence + Trend Range Fixes (966f86d, 43f74e8, bd414b5, 8c7853f, 0ba829a)
+
+**Commits:**
+- `966f86d` - Fix schema totals from pages detail (save/read)
+- `43f74e8` - Prefer schema counts from pages detail when stored totals are zero
+- `bd414b5` - Preserve schema metadata on partial saves
+- `8c7853f` - Skip partial audits in Authority trend chart
+- `0ba829a` - Respect requested trend date range when fetching timeseries
+
+**What was done:**
+- Derived schema totals/coverage from `schema_pages_detail` to avoid zero coverage after refresh.
+- Prevented partial saves from overwriting schema metadata (`schema_types`, `schema_rich_eligible`, totals).
+- Authority trend now ignores partial audits (uses last good value).
+- Score Trends now uses the selected date range when fetching GSC timeseries.
+
+**Files changed:**
+- `api/supabase/save-audit.js`
+- `api/supabase/get-latest-audit.js`
+- `api/supabase/get-audit-history.js`
+- `audit-dashboard.html`
+
 ## 1. Extract Shared Helper Functions (517800e, 8c8b955, 8c1382a)
 
 **Commits:**

@@ -98,6 +98,18 @@ git push
 
 Vercel will automatically rebuild and deploy (usually takes 1-2 minutes).
 
+### Restore Points (Git Tags)
+
+For rollback points, create an annotated git tag and push it:
+```bash
+git tag -a "restore-YYYY-MM-DD" -m "Restore point"
+git push origin "restore-YYYY-MM-DD"
+```
+
+### Debug Logs
+
+Debug log files in `debug-logs/` are **kept local** and should not be committed.
+
 **Note**: After each deployment, ensure the version number in `audit-dashboard.html` is updated to reflect the latest commit hash. This helps track which version is currently deployed and prevents troubleshooting outdated versions.
 
 ## Troubleshooting
