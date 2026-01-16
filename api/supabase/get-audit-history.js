@@ -131,28 +131,40 @@ export default async function handler(req, res) {
     try {
       const LOOKBACK_DAYS = 56; // enough to compute rolling-28 across multiple points in a 28d view
 
-      // Prefer using the latest available GSC timeseries date from the database.
+      const normalizeDateInput = (value) => {
+        if (!value || typeof value !== 'string') return null;
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+        const candidate = new Date(`${trimmed}T00:00:00`);
+        return Number.isNaN(candidate.getTime()) ? null : candidate;
+      };
+
+      let endDateForTimeseries = normalizeDateInput(endDate);
+      let startDateForTimeseries = normalizeDateInput(startDate);
+
+      // Prefer using the latest available GSC timeseries date from the database when no endDate is provided.
       // GSC is often 1–2 days behind, so "yesterday" is not always correct.
-      let endDateForTimeseries = null;
-      try {
-        const latestDateQuery = `${supabaseUrl}/rest/v1/gsc_timeseries?property_url=eq.${encodeURIComponent(resolvedPropertyUrl)}&select=date&order=date.desc&limit=1`;
-        const latestResp = await fetch(latestDateQuery, {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            'apikey': supabaseKey,
-            'Authorization': `Bearer ${supabaseKey}`
+      if (!endDateForTimeseries) {
+        try {
+          const latestDateQuery = `${supabaseUrl}/rest/v1/gsc_timeseries?property_url=eq.${encodeURIComponent(resolvedPropertyUrl)}&select=date&order=date.desc&limit=1`;
+          const latestResp = await fetch(latestDateQuery, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': supabaseKey,
+              'Authorization': `Bearer ${supabaseKey}`
+            }
+          });
+          if (latestResp.ok) {
+            const latestRows = await latestResp.json();
+            const latestDateStr = latestRows && latestRows[0] && latestRows[0].date ? String(latestRows[0].date) : null;
+            if (latestDateStr) {
+              endDateForTimeseries = new Date(latestDateStr + 'T00:00:00');
+            }
           }
-        });
-        if (latestResp.ok) {
-          const latestRows = await latestResp.json();
-          const latestDateStr = latestRows && latestRows[0] && latestRows[0].date ? String(latestRows[0].date) : null;
-          if (latestDateStr) {
-            endDateForTimeseries = new Date(latestDateStr + 'T00:00:00');
-          }
+        } catch (e) {
+          // Ignore and fall back.
         }
-      } catch (e) {
-        // Ignore and fall back.
       }
 
       if (!endDateForTimeseries || Number.isNaN(endDateForTimeseries.getTime())) {
@@ -161,8 +173,10 @@ export default async function handler(req, res) {
         endDateForTimeseries.setDate(endDateForTimeseries.getDate() - 1); // fallback: yesterday
       }
 
-      const startDateForTimeseries = new Date(endDateForTimeseries);
-      startDateForTimeseries.setDate(startDateForTimeseries.getDate() - (LOOKBACK_DAYS - 1));
+      if (!startDateForTimeseries || Number.isNaN(startDateForTimeseries.getTime())) {
+        startDateForTimeseries = new Date(endDateForTimeseries);
+        startDateForTimeseries.setDate(startDateForTimeseries.getDate() - (LOOKBACK_DAYS - 1));
+      }
       
       const formatDate = (date) => {
         const year = date.getFullYear();
