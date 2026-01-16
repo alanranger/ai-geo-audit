@@ -44150,6 +44150,8 @@ Final Score: ${score}/100`;
                 let lastGoodLocalEntityDate = null;
                 let lastGoodServiceArea = null;
                 let lastGoodServiceAreaDate = null;
+                let lastGoodAuthority = null;
+                let lastGoodAuthorityDate = null;
                 
                 contentSchemaHistory.forEach(record => {
                   // Ensure date is in YYYY-MM-DD format (strip time if present)
@@ -44222,11 +44224,20 @@ Final Score: ${score}/100`;
                       const authorityScoreToUse = record._recalculatedAuthorityScore !== undefined 
                         ? record._recalculatedAuthorityScore 
                         : record.authorityScore;
-                      authorityMap.set(normalizedDate, authorityScoreToUse);
-                      if (record._recalculatedAuthorityScore !== undefined) {
-                        debugLog(`Mapped Authority (smoothed): ${normalizedDate} = ${authorityScoreToUse} (was ${record.authorityScore})`, 'info');
+                      if (record._isPartialAudit) {
+                        debugLog(`[Audit Validation] ⚠️ Skipping Authority for ${normalizedDate} (partial audit: ${record._partialReason}), using last good value (${lastGoodAuthority} from ${lastGoodAuthorityDate || 'none'})`, 'warn');
+                        if (lastGoodAuthority !== null && lastGoodAuthority !== undefined) {
+                          authorityMap.set(normalizedDate, lastGoodAuthority);
+                        }
                       } else {
-                        debugLog(`Mapped Authority: ${normalizedDate} = ${authorityScoreToUse}`, 'info');
+                        authorityMap.set(normalizedDate, authorityScoreToUse);
+                        lastGoodAuthority = authorityScoreToUse;
+                        lastGoodAuthorityDate = normalizedDate;
+                        if (record._recalculatedAuthorityScore !== undefined) {
+                          debugLog(`Mapped Authority (smoothed): ${normalizedDate} = ${authorityScoreToUse} (was ${record.authorityScore})`, 'info');
+                        } else {
+                          debugLog(`Mapped Authority: ${normalizedDate} = ${authorityScoreToUse}`, 'info');
+                        }
                       }
                     }
                     // Segmented Authority data (new: store segmented scores for historical tracking)
