@@ -244,6 +244,15 @@ export default async function handler(req, res) {
       return { totalPagesCount, pagesWithSchemaCount, coverage };
     };
     const { totalPagesCount, pagesWithSchemaCount, coverage } = getSchemaCounts();
+    const hasSchemaTypes = Array.isArray(schemaTypes) && schemaTypes.length > 0;
+    const hasRichEligible = schemaData.richEligible && typeof schemaData.richEligible === 'object' &&
+      Object.values(schemaData.richEligible).some(value => value === true);
+    const hasSchemaPages =
+      (Array.isArray(schemaData.pages) && schemaData.pages.length > 0) ||
+      (Array.isArray(schemaData.pagesWithSchema) && schemaData.pagesWithSchema.length > 0) ||
+      (typeof schemaData.totalPages === 'number' && schemaData.totalPages > 0) ||
+      (typeof schemaData.pagesWithSchema === 'number' && schemaData.pagesWithSchema > 0);
+    const hasSchemaPayload = !!schemaAuditToUse && (hasSchemaPages || hasSchemaTypes || hasRichEligible);
     
     // Debug: Log schema data structure to understand what's available
     console.log('[Save Audit] Schema data keys:', Object.keys(schemaData));
@@ -301,17 +310,17 @@ export default async function handler(req, res) {
       audit_date: String(auditDate).trim(), // Format: YYYY-MM-DD
       
       // Schema Audit Data
-      schema_total_pages: ensureNumber(totalPagesCount) ?? 0,
-      schema_pages_with_schema: ensureNumber(pagesWithSchemaCount) ?? 0,
-      schema_coverage: ensureNumber(coverage) ?? 0,
+      schema_total_pages: hasSchemaPayload ? (ensureNumber(totalPagesCount) ?? 0) : null,
+      schema_pages_with_schema: hasSchemaPayload ? (ensureNumber(pagesWithSchemaCount) ?? 0) : null,
+      schema_coverage: hasSchemaPayload ? (ensureNumber(coverage) ?? 0) : null,
       schema_types: Array.isArray(schemaTypes) 
         ? schemaTypes.map(st => typeof st === 'string' ? st : st.type).filter(Boolean)
-        : [],
-      schema_foundation: ensureJson(foundationSchemas) ?? {},
-      schema_rich_eligible: ensureJson(schemaData.richEligible) ?? {},
+        : (hasSchemaPayload ? [] : null),
+      schema_foundation: hasSchemaPayload ? (ensureJson(foundationSchemas) ?? {}) : null,
+      schema_rich_eligible: hasSchemaPayload ? (ensureJson(schemaData.richEligible) ?? {}) : null,
       schema_missing_pages: Array.isArray(schemaData.missingSchemaPages)
         ? schemaData.missingSchemaPages.map(p => (typeof p === 'string' ? p : p.url)).filter(Boolean)
-        : [],
+        : (hasSchemaPayload ? [] : null),
       // Detailed schema pages data (for scorecard) - SAVE ALL FIELDS from schema audit
       // Try schemaData.pages first (detailed array), then pagesWithSchema if it's an array
       schema_pages_detail: (() => {
