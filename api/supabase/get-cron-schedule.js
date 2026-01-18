@@ -31,7 +31,7 @@ export default async function handler(req, res) {
     const supabaseKey = need('SUPABASE_SERVICE_ROLE_KEY');
     const jobKey = req.query.jobKey ? String(req.query.jobKey) : null;
 
-    const selectFields = 'job_key,frequency,time_of_day,last_run_at,next_run_at,updated_at';
+    const selectFields = 'job_key,frequency,time_of_day,last_run_at,next_run_at,last_status,last_error,updated_at';
     const query = jobKey
       ? `${supabaseUrl}/rest/v1/audit_cron_schedule?job_key=eq.${encodeURIComponent(jobKey)}&select=${encodeURIComponent(selectFields)}`
       : `${supabaseUrl}/rest/v1/audit_cron_schedule?select=${encodeURIComponent(selectFields)}`;
@@ -64,7 +64,9 @@ export default async function handler(req, res) {
         frequency: row.frequency,
         timeOfDay: row.time_of_day,
         lastRunAt: row.last_run_at,
-        nextRunAt: row.next_run_at
+        nextRunAt: row.next_run_at,
+        lastStatus: row.last_status,
+        lastError: row.last_error
       };
     });
 

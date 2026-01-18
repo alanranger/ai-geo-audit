@@ -41,19 +41,46 @@ export default async function handler(req, res) {
     });
   }
 
-  try {
-    const propertyUrl = req.query.propertyUrl || process.env.CRON_PROPERTY_URL || 'https://www.alanranger.com';
-    const fallbackBaseUrl = req.headers.host
-      ? `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}`
-      : 'http://localhost:3000';
-    const baseUrl = process.env.CRON_BASE_URL || process.env.NEXT_PUBLIC_SITE_URL || fallbackBaseUrl;
-    const nowIso = new Date().toISOString();
+  const propertyUrl = req.query.propertyUrl || process.env.CRON_PROPERTY_URL || 'https://www.alanranger.com';
+  const fallbackBaseUrl = req.headers.host
+    ? `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}`
+    : 'http://localhost:3000';
+  const baseUrl = process.env.CRON_BASE_URL || process.env.NEXT_PUBLIC_SITE_URL || fallbackBaseUrl;
+  const nowIso = new Date().toISOString();
+  let schedule = { frequency: 'weekly', timeOfDay: '11:20' };
 
+  const updateScheduleStatus = async (status, errorMessage = null) => {
+    try {
+      const nextRunAt = computeNextRunAt({
+        frequency: schedule.frequency,
+        timeOfDay: schedule.timeOfDay,
+        lastRunAt: nowIso
+      });
+
+      await fetchJson(`${baseUrl}/api/supabase/save-cron-schedule`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jobs: {
+            global_run: {
+              frequency: schedule.frequency,
+              timeOfDay: schedule.timeOfDay,
+              lastRunAt: nowIso,
+              nextRunAt,
+              lastStatus: status,
+              lastError: errorMessage
+            }
+          }
+        })
+      });
+    } catch (err) {
+      console.warn('[Global Cron] Failed to update schedule status:', err.message);
+    }
+  };
+
+  try {
     const scheduleResp = await fetchJson(`${baseUrl}/api/supabase/get-cron-schedule?jobKey=global_run`);
-    const schedule = scheduleResp?.data?.jobs?.global_run || {
-      frequency: 'weekly',
-      timeOfDay: '11:20'
-    };
+    schedule = scheduleResp?.data?.jobs?.global_run || schedule;
 
     if (!shouldRunNow(schedule)) {
       return sendJson(res, 200, {
@@ -87,26 +114,7 @@ export default async function handler(req, res) {
       }
     );
 
-    const nextRunAt = computeNextRunAt({
-      frequency: schedule.frequency,
-      timeOfDay: schedule.timeOfDay,
-      lastRunAt: nowIso
-    });
-
-    await fetchJson(`${baseUrl}/api/supabase/save-cron-schedule`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jobs: {
-          global_run: {
-            frequency: schedule.frequency,
-            timeOfDay: schedule.timeOfDay,
-            lastRunAt: nowIso,
-            nextRunAt
-          }
-        }
-      })
-    });
+    await updateScheduleStatus('ok');
 
     return sendJson(res, 200, {
       status: 'ok',
@@ -119,6 +127,7 @@ export default async function handler(req, res) {
       meta: { generatedAt: nowIso }
     });
   } catch (err) {
+    await updateScheduleStatus('error', err.message);
     console.error('[Global Cron] Error:', err.message);
     return sendJson(res, 500, { status: 'error', message: err.message });
   }

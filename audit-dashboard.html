@@ -4271,6 +4271,7 @@
               <th style="text-align: left; padding: 0.75rem;">Frequency</th>
               <th style="text-align: left; padding: 0.75rem;">Time (GMT)</th>
               <th style="text-align: left; padding: 0.75rem;">Last Run</th>
+              <th style="text-align: left; padding: 0.75rem;">Status</th>
               <th style="text-align: left; padding: 0.75rem;">Next Scheduled</th>
             </tr>
           </thead>
@@ -4289,6 +4290,7 @@
                 <input id="scheduler-gsc-time" type="time" step="60" style="padding: 0.35rem 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px;">
               </td>
               <td style="padding: 0.75rem;" id="scheduler-gsc-last">—</td>
+              <td style="padding: 0.75rem;" id="scheduler-gsc-status">—</td>
               <td style="padding: 0.75rem;" id="scheduler-gsc-next">—</td>
             </tr>
             <tr style="border-bottom: 1px solid #e2e8f0;">
@@ -4305,6 +4307,7 @@
                 <input id="scheduler-ranking-time" type="time" step="60" style="padding: 0.35rem 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px;">
               </td>
               <td style="padding: 0.75rem;" id="scheduler-ranking-last">—</td>
+              <td style="padding: 0.75rem;" id="scheduler-ranking-status">—</td>
               <td style="padding: 0.75rem;" id="scheduler-ranking-next">—</td>
             </tr>
             <tr style="border-bottom: 1px solid #e2e8f0;">
@@ -4321,6 +4324,7 @@
                 <input id="scheduler-global-time" type="time" step="60" style="padding: 0.35rem 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px;">
               </td>
               <td style="padding: 0.75rem;" id="scheduler-global-last">—</td>
+              <td style="padding: 0.75rem;" id="scheduler-global-status">—</td>
               <td style="padding: 0.75rem;" id="scheduler-global-next">—</td>
             </tr>
           </tbody>
@@ -4467,10 +4471,25 @@
           const ranking = jobs[JOB_KEYS.ranking] || {};
           const global = jobs[JOB_KEYS.global] || {};
           document.getElementById('scheduler-gsc-last').textContent = formatUtc(gsc.lastRunAt);
+          const gscStatusEl = document.getElementById('scheduler-gsc-status');
+          if (gscStatusEl) {
+            gscStatusEl.textContent = gsc.lastStatus ? String(gsc.lastStatus) : '—';
+            gscStatusEl.title = gsc.lastError || '';
+          }
           document.getElementById('scheduler-gsc-next').textContent = formatUtc(gsc.nextRunAt || computeNextRun(gsc));
           document.getElementById('scheduler-ranking-last').textContent = formatUtc(ranking.lastRunAt);
+          const rankingStatusEl = document.getElementById('scheduler-ranking-status');
+          if (rankingStatusEl) {
+            rankingStatusEl.textContent = ranking.lastStatus ? String(ranking.lastStatus) : '—';
+            rankingStatusEl.title = ranking.lastError || '';
+          }
           document.getElementById('scheduler-ranking-next').textContent = formatUtc(ranking.nextRunAt || computeNextRun(ranking));
           document.getElementById('scheduler-global-last').textContent = formatUtc(global.lastRunAt);
+          const globalStatusEl = document.getElementById('scheduler-global-status');
+          if (globalStatusEl) {
+            globalStatusEl.textContent = global.lastStatus ? String(global.lastStatus) : '—';
+            globalStatusEl.title = global.lastError || '';
+          }
           document.getElementById('scheduler-global-next').textContent = formatUtc(global.nextRunAt || computeNextRun(global));
         };
 
@@ -4484,17 +4503,26 @@
               const cached = JSON.parse(localStorage.getItem('audit_scheduler_settings') || '{}');
               applyForm(cached.jobs || DEFAULTS);
               renderSchedule(cached.jobs || DEFAULTS);
+              if (typeof window.updateAuditTimestamp === 'function') {
+                window.updateAuditTimestamp();
+              }
               return;
             }
             const jobs = json.data?.jobs || {};
             applyForm(jobs);
             renderSchedule(jobs);
             statusEl.textContent = `Last updated: ${formatUtc(json.data?.updatedAt)}`;
+            if (typeof window.updateAuditTimestamp === 'function') {
+              window.updateAuditTimestamp();
+            }
           } catch (err) {
             statusEl.textContent = `Scheduler status unavailable (${err.message}).`;
             const cached = JSON.parse(localStorage.getItem('audit_scheduler_settings') || '{}');
             applyForm(cached.jobs || DEFAULTS);
             renderSchedule(cached.jobs || DEFAULTS);
+            if (typeof window.updateAuditTimestamp === 'function') {
+              window.updateAuditTimestamp();
+            }
           }
         };
 
@@ -4517,10 +4545,16 @@
             localStorage.setItem('audit_scheduler_settings', JSON.stringify({ jobs: savedJobs }));
             renderSchedule(savedJobs);
             statusEl.textContent = `Saved at ${formatUtc(json.data?.updatedAt || new Date().toISOString())}`;
+            if (typeof window.updateAuditTimestamp === 'function') {
+              window.updateAuditTimestamp();
+            }
           } catch (err) {
             localStorage.setItem('audit_scheduler_settings', JSON.stringify({ jobs }));
             renderSchedule(jobs);
             statusEl.textContent = `Saved locally (${err.message}).`;
+            if (typeof window.updateAuditTimestamp === 'function') {
+              window.updateAuditTimestamp();
+            }
           }
         };
 

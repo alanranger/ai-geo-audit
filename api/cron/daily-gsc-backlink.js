@@ -48,13 +48,39 @@ export default async function handler(req, res) {
     return json;
   };
 
+  const nowIso = new Date().toISOString();
+  let schedule = { frequency: 'daily', timeOfDay: '11:00' };
+  const updateScheduleStatus = async (status, errorMessage = null) => {
+    try {
+      const nextRunAt = computeNextRunAt({
+        frequency: schedule.frequency,
+        timeOfDay: schedule.timeOfDay,
+        lastRunAt: nowIso
+      });
+      await fetchJson(`${baseUrl}/api/supabase/save-cron-schedule`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jobs: {
+            gsc_backlinks: {
+              frequency: schedule.frequency,
+              timeOfDay: schedule.timeOfDay,
+              lastRunAt: nowIso,
+              nextRunAt,
+              lastStatus: status,
+              lastError: errorMessage
+            }
+          }
+        })
+      });
+    } catch (err) {
+      console.warn('[Daily Cron] Failed to update schedule status:', err.message);
+    }
+  };
+
   try {
-    const nowIso = new Date().toISOString();
     const scheduleResp = await fetchJson(`${baseUrl}/api/supabase/get-cron-schedule?jobKey=gsc_backlinks`);
-    const schedule = scheduleResp?.data?.jobs?.gsc_backlinks || {
-      frequency: 'daily',
-      timeOfDay: '11:00'
-    };
+    schedule = scheduleResp?.data?.jobs?.gsc_backlinks || schedule;
 
     if (!shouldRunNow(schedule)) {
       return res.status(200).json({
@@ -113,26 +139,7 @@ export default async function handler(req, res) {
       body: JSON.stringify(payload)
     });
 
-    const nextRunAt = computeNextRunAt({
-      frequency: schedule.frequency,
-      timeOfDay: schedule.timeOfDay,
-      lastRunAt: nowIso
-    });
-
-    await fetchJson(`${baseUrl}/api/supabase/save-cron-schedule`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jobs: {
-          gsc_backlinks: {
-            frequency: schedule.frequency,
-            timeOfDay: schedule.timeOfDay,
-            lastRunAt: nowIso,
-            nextRunAt
-          }
-        }
-      })
-    });
+    await updateScheduleStatus('ok');
 
     return res.status(200).json({
       status: 'ok',
@@ -148,6 +155,7 @@ export default async function handler(req, res) {
       meta: { generatedAt: new Date().toISOString() }
     });
   } catch (error) {
+    await updateScheduleStatus('error', error.message);
     return res.status(500).json({
       status: 'error',
       message: 'Daily audit failed',

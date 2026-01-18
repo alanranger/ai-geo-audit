@@ -105,6 +105,8 @@ CREATE TABLE IF NOT EXISTS audit_cron_schedule (
   time_of_day TEXT NOT NULL DEFAULT '11:00',
   last_run_at TIMESTAMP,
   next_run_at TIMESTAMP,
+  last_status TEXT,
+  last_error TEXT,
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW()
 );

@@ -157,7 +157,7 @@ const upsertAuditResults = async (payload) => {
   });
 };
 
-const updateSchedule = async (baseUrl, schedule, nowIso) => {
+const updateSchedule = async (baseUrl, schedule, nowIso, status, errorMessage = null) => {
   const nextRunAt = computeNextRunAt({
     frequency: schedule.frequency,
     timeOfDay: schedule.timeOfDay,
@@ -172,7 +172,9 @@ const updateSchedule = async (baseUrl, schedule, nowIso) => {
           frequency: schedule.frequency,
           timeOfDay: schedule.timeOfDay,
           lastRunAt: nowIso,
-          nextRunAt
+          nextRunAt,
+          lastStatus: status,
+          lastError: errorMessage
         }
       }
     })
@@ -246,7 +248,7 @@ export default async function handler(req, res) {
       updated_at: nowIso,
       timestamp: nowIso
     });
-    await updateSchedule(baseUrl, schedule, nowIso);
+    await updateSchedule(baseUrl, schedule, nowIso, 'ok');
 
     return sendJson(res, 200, {
       status: 'ok',
@@ -255,6 +257,17 @@ export default async function handler(req, res) {
       meta: { generatedAt: nowIso }
     });
   } catch (err) {
+    try {
+      const fallbackBaseUrl = req.headers.host
+        ? `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}`
+        : 'http://localhost:3000';
+      const baseUrl = process.env.CRON_BASE_URL || process.env.NEXT_PUBLIC_SITE_URL || fallbackBaseUrl;
+      const nowIso = new Date().toISOString();
+      const schedule = await getSchedule(baseUrl);
+      await updateSchedule(baseUrl, schedule, nowIso, 'error', err.message);
+    } catch (error_) {
+      console.warn('[Keyword Ranking Cron] Failed to update schedule status:', error_.message);
+    }
     console.error('[Keyword Ranking Cron] Error:', err.message);
     return sendJson(res, 500, { status: 'error', message: err.message });
   }

@@ -43,16 +43,27 @@ export default async function handler(req, res) {
     const rows = Object.entries(jobs).map(([jobKey, config]) => {
       const frequency = config?.frequency || 'off';
       const timeOfDay = config?.timeOfDay || '';
-      const lastRunAt = config?.lastRunAt || null;
+      const lastRunAt = config?.lastRunAt;
       const nextRunAt = computeNextRun({ frequency, timeOfDay, lastRunAt });
-      return {
+      const lastStatus = config?.lastStatus;
+      const lastError = config?.lastError;
+      const row = {
         job_key: jobKey,
         frequency,
         time_of_day: timeOfDay || '00:00',
-        last_run_at: lastRunAt,
         next_run_at: nextRunAt,
         updated_at: nowIso
       };
+      if (lastRunAt) {
+        row.last_run_at = lastRunAt;
+      }
+      if (lastStatus !== undefined) {
+        row.last_status = lastStatus;
+      }
+      if (lastError !== undefined) {
+        row.last_error = lastError;
+      }
+      return row;
     });
 
     const resp = await fetch(`${supabaseUrl}/rest/v1/audit_cron_schedule?on_conflict=job_key`, {
@@ -85,7 +96,9 @@ export default async function handler(req, res) {
         frequency: row.frequency,
         timeOfDay: row.time_of_day,
         lastRunAt: row.last_run_at,
-        nextRunAt: row.next_run_at
+        nextRunAt: row.next_run_at,
+        lastStatus: row.last_status,
+        lastError: row.last_error
       };
     });
 
