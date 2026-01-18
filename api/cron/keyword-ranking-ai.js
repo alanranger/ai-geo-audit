@@ -62,7 +62,7 @@ const runBatches = async (items, batchSize, handler, concurrency = 4) => {
   return results;
 };
 
-const fetchSerpRows = async (baseUrl, keywords) => runBatches(
+const fetchSerpRows = async (baseUrl, keywords, concurrency = 4) => runBatches(
   keywords,
   20,
   async (batch) => {
@@ -71,10 +71,10 @@ const fetchSerpRows = async (baseUrl, keywords) => runBatches(
     );
     return Array.isArray(serpResp?.per_keyword) ? serpResp.per_keyword : [];
   },
-  4
+  concurrency
 );
 
-const fetchAiRows = async (baseUrl, keywords) => runBatches(
+const fetchAiRows = async (baseUrl, keywords, concurrency = 4) => runBatches(
   keywords,
   10,
   async (batch) => {
@@ -85,7 +85,7 @@ const fetchAiRows = async (baseUrl, keywords) => runBatches(
     });
     return Array.isArray(aiResp?.per_query) ? aiResp.per_query : [];
   },
-  4
+  concurrency
 );
 
 const buildCombinedRows = (serpRows, aiRows) => {
@@ -261,8 +261,11 @@ export default async function handler(req, res) {
       });
     }
 
-    const serpRows = await fetchSerpRows(baseUrl, keywords);
-    const aiRows = await fetchAiRows(baseUrl, keywords);
+    let serpRows = await fetchSerpRows(baseUrl, keywords, 4);
+    if (!serpRows.length) {
+      serpRows = await fetchSerpRows(baseUrl, keywords, 1);
+    }
+    const aiRows = await fetchAiRows(baseUrl, keywords, 4);
     const combinedRows = buildCombinedRows(serpRows, aiRows);
 
     const auditDate = new Date().toISOString().slice(0, 10);
