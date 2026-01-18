@@ -537,6 +537,58 @@ export default async function handler(req, res) {
       console.log(`[get-latest-audit] Final rankingAiData: null or invalid`);
     }
 
+    // Prefer lastRunTimestamp from audit_results.ranking_ai_data for consistent UI timestamps
+    const parseRankingJson = (value) => {
+      if (!value) return null;
+      if (typeof value === 'object') return value;
+      try {
+        return JSON.parse(value);
+      } catch {
+        return null;
+      }
+    };
+    const normalizeRankingTimestamp = (value) => {
+      if (!value) return null;
+      if (value instanceof Date) return value.toISOString();
+      if (typeof value === 'number') {
+        const d = new Date(value);
+        return isNaN(d.getTime()) ? null : d.toISOString();
+      }
+      if (typeof value === 'string') {
+        let normalized = value.trim();
+        if (!normalized) return null;
+        if (normalized.includes(' ') && !normalized.includes('T')) {
+          normalized = normalized.replace(' ', 'T');
+        }
+        if (normalized.endsWith('+00')) {
+          normalized = `${normalized}:00`;
+        }
+        const d = new Date(normalized);
+        return isNaN(d.getTime()) ? null : d.toISOString();
+      }
+      return null;
+    };
+    const auditRankingData = parseRankingJson(record.ranking_ai_data);
+    const lastRunTimestamp = normalizeRankingTimestamp(auditRankingData?.lastRunTimestamp);
+    if (lastRunTimestamp) {
+      if (!rankingAiData || typeof rankingAiData !== 'object') {
+        rankingAiData = {
+          combinedRows: [],
+          summary: {
+            total_keywords: 0,
+            keywords_with_rank: 0,
+            keywords_with_ai_overview: 0,
+            keywords_where_alanranger_cited: 0,
+            keywords_top_3: 0,
+            keywords_top_10: 0
+          }
+        };
+      }
+      rankingAiData.timestamp = lastRunTimestamp;
+      rankingAiData.lastRunTimestamp = lastRunTimestamp;
+      rankingAiData.audit_date = auditRankingData?.audit_date || rankingAiData.audit_date || record.audit_date;
+    }
+
     // Reconstruct the full audit object from Supabase data
     // Wrap in try-catch to handle any parsing errors gracefully
     let auditData;
