@@ -25289,38 +25289,40 @@
             );
           }
 
-          // Ranking & AI: localStorage fast path
-          try {
-            const savedAudit = localStorage.getItem('last_audit_results');
-            const savedRankingData = localStorage.getItem('ranking_ai_data');
-            if (savedAudit) {
-              const parsed = JSON.parse(savedAudit);
-              if (parsed.ranking_ai_data && parsed.timestamp) {
-                const auditTs = new Date(parsed.timestamp);
-                if (!isNaN(auditTs.getTime())) {
-                  rankingAiTimestamp = auditTs.toISOString();
-                  rankingAiAuditDate = parsed.audit_date || parsed.ranking_ai_data.audit_date || rankingAiAuditDate;
-                  debugLog(`[updateAuditTimestamp] ✓ Found timestamp from localStorage (fast path): ${rankingAiTimestamp}`, 'success');
-                }
-              }
-            }
-            if (!rankingAiTimestamp && savedRankingData) {
-              try {
-                const parsedRanking = JSON.parse(savedRankingData);
-                if (parsedRanking.timestamp) {
-                  const ts = new Date(parsedRanking.timestamp);
-                  if (!isNaN(ts.getTime())) {
-                    rankingAiTimestamp = ts.toISOString();
-                    rankingAiAuditDate = parsedRanking.audit_date || rankingAiAuditDate;
-                    debugLog(`[updateAuditTimestamp] ✓ Found timestamp from ranking_ai_data localStorage: ${rankingAiTimestamp}`, 'success');
+          // Ranking & AI: localStorage fast path (only if audit_results did not supply a timestamp)
+          if (!rankingAiTimestamp) {
+            try {
+              const savedAudit = localStorage.getItem('last_audit_results');
+              const savedRankingData = localStorage.getItem('ranking_ai_data');
+              if (savedAudit) {
+                const parsed = JSON.parse(savedAudit);
+                if (parsed.ranking_ai_data && parsed.timestamp) {
+                  const auditTs = new Date(parsed.timestamp);
+                  if (!isNaN(auditTs.getTime())) {
+                    rankingAiTimestamp = auditTs.toISOString();
+                    rankingAiAuditDate = parsed.audit_date || parsed.ranking_ai_data.audit_date || rankingAiAuditDate;
+                    debugLog(`[updateAuditTimestamp] ✓ Found timestamp from localStorage (fast path): ${rankingAiTimestamp}`, 'success');
                   }
                 }
-              } catch (e) {
-                debugLog(`[updateAuditTimestamp] Error parsing ranking_ai_data from localStorage: ${e.message}`, 'warn');
               }
+              if (!rankingAiTimestamp && savedRankingData) {
+                try {
+                  const parsedRanking = JSON.parse(savedRankingData);
+                  if (parsedRanking.timestamp) {
+                    const ts = new Date(parsedRanking.timestamp);
+                    if (!isNaN(ts.getTime())) {
+                      rankingAiTimestamp = ts.toISOString();
+                      rankingAiAuditDate = parsedRanking.audit_date || rankingAiAuditDate;
+                      debugLog(`[updateAuditTimestamp] ✓ Found timestamp from ranking_ai_data localStorage: ${rankingAiTimestamp}`, 'success');
+                    }
+                  }
+                } catch (e) {
+                  debugLog(`[updateAuditTimestamp] Error parsing ranking_ai_data from localStorage: ${e.message}`, 'warn');
+                }
+              }
+            } catch (localErr) {
+              debugLog(`[updateAuditTimestamp] Error reading localStorage (fast path): ${localErr.message}`, 'warn');
             }
-          } catch (localErr) {
-            debugLog(`[updateAuditTimestamp] Error reading localStorage (fast path): ${localErr.message}`, 'warn');
           }
 
           // Ranking & AI: API path
@@ -25377,7 +25379,7 @@
             }
           }
 
-          // Final localStorage fallback
+          // Final localStorage fallback (only if audit_results did not supply a timestamp)
           if (!rankingAiTimestamp) {
             try {
               const savedAudit = localStorage.getItem('last_audit_results');
