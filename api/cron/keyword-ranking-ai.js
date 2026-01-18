@@ -162,8 +162,7 @@ const buildKeywordRows = (combinedRows, auditDate, propertyUrl) => combinedRows.
   local_pack_present_any: row.local_pack_present_any,
   paa_present_any: row.paa_present_any,
   featured_snippet_present_any: row.featured_snippet_present_any,
-  search_volume: row.search_volume,
-  search_volume_trend: row.search_volume_trend
+  search_volume: row.search_volume
 }));
 
 const saveKeywordBatch = async (baseUrl, payload) => {
