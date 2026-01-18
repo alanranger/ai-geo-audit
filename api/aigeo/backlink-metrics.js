@@ -16,6 +16,10 @@ import path from 'path';
 // Use custom CSV parser (same as schema-audit.js) to avoid dependency issues
 
 const METRICS_FILE = path.join(process.cwd(), 'data', 'backlink-metrics.json');
+const DEFAULT_BACKLINK_CSV_URLS = [
+  'https://raw.githubusercontent.com/alanranger/alan-shared-resources/main/csv/alanranger.com_-backlink-data%20(2).csv',
+  'https://raw.githubusercontent.com/alanranger/alan-shared-resources/master/csv/alanranger.com_-backlink-data%20(2).csv'
+];
 
 /**
  * Parse CSV line with proper quote handling (same as schema-audit.js)
@@ -48,6 +52,55 @@ function parseCsvLine(line) {
   }
   columns.push(current); // Add last column
   return columns;
+}
+
+function parseCsvToRows(csvContent) {
+  if (!csvContent) return [];
+  let text = csvContent;
+  if (text.charCodeAt(0) === 0xFEFF) {
+    text = text.slice(1);
+  }
+  const lines = text.split(/\r?\n/).filter(line => line.trim().length > 0);
+  if (lines.length < 2) return [];
+  const headers = parseCsvLine(lines[0]).map(h => h.trim().replace(/^"|"$/g, ''));
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cols = parseCsvLine(lines[i]);
+    const row = {};
+    headers.forEach((header, idx) => {
+      row[header] = cols[idx] ? cols[idx].trim().replace(/^"|"$/g, '') : '';
+    });
+    rows.push(row);
+  }
+  return rows;
+}
+
+async function fetchBacklinkCsvFromGithub() {
+  const envUrl = process.env.GITHUB_BACKLINK_CSV_URL;
+  const envUrlMaster = process.env.GITHUB_BACKLINK_CSV_URL_MASTER;
+  const urls = [
+    envUrl,
+    envUrlMaster,
+    ...DEFAULT_BACKLINK_CSV_URLS
+  ].filter(Boolean);
+
+  for (const url of urls) {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'Accept': 'text/csv',
+          'User-Agent': 'AI-GEO-Audit/1.0',
+          'Cache-Control': 'no-cache'
+        }
+      });
+      if (response.ok) {
+        return { csvText: await response.text(), source: url };
+      }
+    } catch (e) {
+      console.warn(`[Backlink Metrics] CSV fetch failed for ${url}: ${e.message}`);
+    }
+  }
+  return { csvText: null, source: null };
 }
 
 /**
@@ -322,12 +375,23 @@ export default async function handler(req, res) {
   // GET: Return stored metrics
   if (req.method === 'GET') {
     try {
-      const metrics = await readBacklinkMetrics();
+      let metrics = await readBacklinkMetrics();
+      let source = 'file';
+
+      if (!metrics || !metrics.totalBacklinks) {
+        const { csvText, source: csvSource } = await fetchBacklinkCsvFromGithub();
+        if (csvText) {
+          const rows = parseCsvToRows(csvText);
+          metrics = computeBacklinkMetrics(rows);
+          source = csvSource || 'github';
+        }
+      }
+
       return res.status(200).json({
         status: 'ok',
         source: 'backlink-metrics',
         data: metrics,
-        meta: { generatedAt: new Date().toISOString() }
+        meta: { generatedAt: new Date().toISOString(), source }
       });
     } catch (error) {
       console.error('Error reading backlink metrics:', error);
