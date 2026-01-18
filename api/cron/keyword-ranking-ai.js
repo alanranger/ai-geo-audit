@@ -120,14 +120,12 @@ const buildCombinedRows = (serpRows, aiRows) => {
       ai_total_citations: ai?.total_citations ?? 0,
       ai_alan_citations_count: ai?.alanranger_citations_count ?? 0,
       ai_alan_citations: ai?.alanranger_citations || [],
-      ai_sample_citations: ai?.sample_citations || [],
       serp_features: row?.serp_features || null,
       ai_overview_present_any: row?.ai_overview_present_any ?? row?.has_ai_overview ?? false,
       local_pack_present_any: row?.local_pack_present_any ?? false,
       paa_present_any: row?.paa_present_any ?? false,
       featured_snippet_present_any: row?.featured_snippet_present_any ?? false,
-      search_volume: row?.search_volume ?? null,
-      search_volume_trend: row?.search_volume_trend ?? null
+      search_volume: row?.search_volume ?? null
     };
   });
 };
