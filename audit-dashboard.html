@@ -27846,21 +27846,27 @@
       let localEntity;
       if (localSignals && localSignals.status === 'ok' && localSignals.data) {
         const localData = localSignals.data;
-        // Base score from NAP consistency (0-100)
-        let baseScore = localData.napConsistencyScore || 0;
-        
-        // Bonus for knowledge panel detection (+10 points)
-        if (localData.knowledgePanelDetected) {
-          baseScore = Math.min(100, baseScore + 10);
+        const explicitLocalEntity = localData.localEntityScore;
+        if (explicitLocalEntity !== null && explicitLocalEntity !== undefined) {
+          localEntity = clampScore(explicitLocalEntity);
+          debugLog(`Local Entity: Using explicit score from localSignals (${explicitLocalEntity})`, 'info');
+        } else {
+          // Base score from NAP consistency (0-100)
+          let baseScore = localData.napConsistencyScore || 0;
+          
+          // Bonus for knowledge panel detection (+10 points)
+          if (localData.knowledgePanelDetected) {
+            baseScore = Math.min(100, baseScore + 10);
+          }
+          
+          // Bonus for having at least one location (+5 points)
+          if (localData.locations && localData.locations.length > 0) {
+            baseScore = Math.min(100, baseScore + 5);
+          }
+          
+          localEntity = clampScore(baseScore);
+          debugLog(`Local Entity: NAP=${localData.napConsistencyScore || 0}, Knowledge Panel=${localData.knowledgePanelDetected}, Locations=${localData.locations?.length || 0}, Final=${localEntity}`, 'info');
         }
-        
-        // Bonus for having at least one location (+5 points)
-        if (localData.locations && localData.locations.length > 0) {
-          baseScore = Math.min(100, baseScore + 5);
-        }
-        
-        localEntity = clampScore(baseScore);
-        debugLog(`Local Entity: NAP=${localData.napConsistencyScore || 0}, Knowledge Panel=${localData.knowledgePanelDetected}, Locations=${localData.locations?.length || 0}, Final=${localEntity}`, 'info');
       } else {
         // Fallback: derived calculation (old method)
         // Calculate ctrScore from ctr (which is 0-100 percentage)
@@ -27874,28 +27880,34 @@
       let serviceArea;
       if (localSignals && localSignals.status === 'ok' && localSignals.data) {
         const localData = localSignals.data;
-        const serviceAreasCount = localData.serviceAreas?.length || 0;
-        
-        // Normalize service areas count to 0-100 score
-        // 0 areas = 0, 8+ areas = 100 (more reasonable threshold)
-        // Linear scale: 1 area = 12.5 points (8 areas = 100)
-        if (serviceAreasCount === 0) {
-          serviceArea = 0;
-        } else if (serviceAreasCount >= 8) {
-          serviceArea = 100;
+        const explicitServiceArea = localData.serviceAreaScore;
+        if (explicitServiceArea !== null && explicitServiceArea !== undefined) {
+          serviceArea = clampScore(explicitServiceArea);
+          debugLog(`Service Area: Using explicit score from localSignals (${explicitServiceArea})`, 'info');
         } else {
-          // Linear scale: 1 area = 12.5 points, 2 = 25, ..., 8 = 100
-          serviceArea = Math.min(100, serviceAreasCount * 12.5);
+          const serviceAreasCount = localData.serviceAreas?.length || 0;
+          
+          // Normalize service areas count to 0-100 score
+          // 0 areas = 0, 8+ areas = 100 (more reasonable threshold)
+          // Linear scale: 1 area = 12.5 points (8 areas = 100)
+          if (serviceAreasCount === 0) {
+            serviceArea = 0;
+          } else if (serviceAreasCount >= 8) {
+            serviceArea = 100;
+          } else {
+            // Linear scale: 1 area = 12.5 points, 2 = 25, ..., 8 = 100
+            serviceArea = Math.min(100, serviceAreasCount * 12.5);
+          }
+          
+          // Apply NAP consistency as a multiplier (if NAP is low, reduce service area score)
+          if (localData.napConsistencyScore !== null && localData.napConsistencyScore < 100) {
+            const napMultiplier = localData.napConsistencyScore / 100;
+            serviceArea = Math.round(serviceArea * napMultiplier);
+          }
+          
+          serviceArea = clampScore(serviceArea);
+          debugLog(`Service Area: Count=${serviceAreasCount}, NAP Multiplier=${localData.napConsistencyScore !== null ? (localData.napConsistencyScore / 100).toFixed(2) : 'N/A'}, Final=${serviceArea}`, 'info');
         }
-        
-        // Apply NAP consistency as a multiplier (if NAP is low, reduce service area score)
-        if (localData.napConsistencyScore !== null && localData.napConsistencyScore < 100) {
-          const napMultiplier = localData.napConsistencyScore / 100;
-          serviceArea = Math.round(serviceArea * napMultiplier);
-        }
-        
-        serviceArea = clampScore(serviceArea);
-        debugLog(`Service Area: Count=${serviceAreasCount}, NAP Multiplier=${localData.napConsistencyScore !== null ? (localData.napConsistencyScore / 100).toFixed(2) : 'N/A'}, Final=${serviceArea}`, 'info');
       } else {
         // Fallback: derived from Local Entity (old method)
         serviceArea = clampScore(localEntity - 5);
