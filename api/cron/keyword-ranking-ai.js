@@ -294,8 +294,7 @@ export default async function handler(req, res) {
       property_url: propertyUrl,
       audit_date: auditDate,
       ranking_ai_data: { summary, combinedRows, lastRunTimestamp: nowIso },
-      updated_at: nowIso,
-      timestamp: nowIso
+      updated_at: nowIso
     });
     await updateSchedule(baseUrl, schedule, nowIso, 'ok');
 
