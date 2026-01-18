@@ -43,7 +43,7 @@ export default async function handler(req, res) {
   }
 
   const propertyUrl = req.query.propertyUrl || process.env.CRON_PROPERTY_URL || 'https://www.alanranger.com';
-  const forceRun = req.query.force === '1' || req.query.force === 'true';
+    const forceRun = req.query.force === '1' || req.query.force === 'true';
   const fallbackBaseUrl = req.headers.host
     ? `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}`
     : 'http://localhost:3000';
@@ -99,8 +99,9 @@ export default async function handler(req, res) {
 
     const syncResult = await fetchJson(`${baseUrl}/api/sync-csv`, { method: 'GET', headers });
 
-    const gscForce = forceRun ? '&force=1' : '';
-    const rankingForce = forceRun ? '&force=1' : '';
+    const forceChildren = true;
+    const gscForce = forceChildren || forceRun ? '&force=1' : '';
+    const rankingForce = forceChildren || forceRun ? '&force=1' : '';
 
     const bulkHeaders = {
       'Content-Type': 'application/json',

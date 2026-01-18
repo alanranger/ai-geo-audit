@@ -617,6 +617,43 @@ export default async function handler(req, res) {
         }
       }
 
+      const deriveSchemaTypesFromPages = (pages = []) => {
+        const types = new Set();
+        (pages || []).forEach((page) => {
+          const schemaTypes = Array.isArray(page?.schemaTypes)
+            ? page.schemaTypes
+            : (page?.schemaTypes ? [page.schemaTypes] : []);
+          schemaTypes.forEach((type) => {
+            if (type) types.add(type);
+          });
+        });
+        return Array.from(types);
+      };
+
+      const parseSchemaTypes = (value) => {
+        if (!value) return [];
+        let types = value;
+        if (typeof types === 'string') {
+          try {
+            types = JSON.parse(types);
+          } catch (e) {
+            console.warn('[get-latest-audit] Failed to parse schema_types JSON:', e.message);
+            return [];
+          }
+        }
+        if (!Array.isArray(types)) return [];
+        return types.map((item) => (typeof item === 'string' ? item : item?.type)).filter(Boolean);
+      };
+
+      const buildSchemaFlags = (types, targetTypes) => {
+        const found = new Set((types || []).filter(Boolean));
+        const flags = {};
+        targetTypes.forEach((type) => {
+          flags[type] = found.has(type);
+        });
+        return flags;
+      };
+
       const derivedSchemaTotalPages = (record.schema_total_pages != null && record.schema_total_pages > 0)
         ? record.schema_total_pages
         : (Array.isArray(schemaPagesDetailParsed) ? schemaPagesDetailParsed.length : 0);
@@ -874,44 +911,57 @@ export default async function handler(req, res) {
             return record.schema_pages_with_schema != null ? record.schema_pages_with_schema : 0;
           })(),
           schemaTypes: (() => {
-            let types = record.schema_types;
-            if (!types) return [];
-            // Parse if stored as string
-            if (typeof types === 'string') {
-              try {
-                types = JSON.parse(types);
-              } catch (e) {
-                console.warn('[get-latest-audit] Failed to parse schema_types JSON:', e.message);
-                return [];
-              }
-            }
-            return Array.isArray(types) ? types : [];
+            const storedTypes = parseSchemaTypes(record.schema_types);
+            if (storedTypes.length > 0) return storedTypes;
+            return Array.isArray(schemaPagesDetailParsed)
+              ? deriveSchemaTypesFromPages(schemaPagesDetailParsed)
+              : [];
           })(),
           foundation: (() => {
             const foundation = record.schema_foundation;
-            if (!foundation) return {};
-            if (typeof foundation === 'string') {
-              try {
-                return JSON.parse(foundation);
-              } catch (e) {
-                console.warn('[get-latest-audit] Failed to parse schema_foundation JSON:', e.message);
-                return {};
+            let parsedFoundation = null;
+            if (foundation) {
+              if (typeof foundation === 'string') {
+                try {
+                  parsedFoundation = JSON.parse(foundation);
+                } catch (e) {
+                  console.warn('[get-latest-audit] Failed to parse schema_foundation JSON:', e.message);
+                }
+              } else if (typeof foundation === 'object') {
+                parsedFoundation = foundation;
               }
             }
-            return (typeof foundation === 'object' && foundation !== null) ? foundation : {};
+            if (parsedFoundation && Object.keys(parsedFoundation).length > 0) {
+              return parsedFoundation;
+            }
+            const derivedTypes = parseSchemaTypes(record.schema_types);
+            return buildSchemaFlags(
+              derivedTypes.length > 0 ? derivedTypes : deriveSchemaTypesFromPages(schemaPagesDetailParsed || []),
+              ['Organization', 'Person', 'WebSite', 'BreadcrumbList']
+            );
           })(),
           richEligible: (() => {
             const richEligible = record.schema_rich_eligible;
-            if (!richEligible) return {};
-            if (typeof richEligible === 'string') {
-              try {
-                return JSON.parse(richEligible);
-              } catch (e) {
-                console.warn('[get-latest-audit] Failed to parse schema_rich_eligible JSON:', e.message);
-                return {};
+            let parsedRich = null;
+            if (richEligible) {
+              if (typeof richEligible === 'string') {
+                try {
+                  parsedRich = JSON.parse(richEligible);
+                } catch (e) {
+                  console.warn('[get-latest-audit] Failed to parse schema_rich_eligible JSON:', e.message);
+                }
+              } else if (typeof richEligible === 'object') {
+                parsedRich = richEligible;
               }
             }
-            return (typeof richEligible === 'object' && richEligible !== null) ? richEligible : {};
+            if (parsedRich && Object.keys(parsedRich).length > 0) {
+              return parsedRich;
+            }
+            const derivedTypes = parseSchemaTypes(record.schema_types);
+            return buildSchemaFlags(
+              derivedTypes.length > 0 ? derivedTypes : deriveSchemaTypesFromPages(schemaPagesDetailParsed || []),
+              ['Article', 'Event', 'FAQPage', 'Product', 'LocalBusiness', 'Course', 'Review', 'HowTo', 'VideoObject', 'ImageObject', 'ItemList']
+            );
           })(),
           missingTypes: (() => {
             let types = record.schema_types;
