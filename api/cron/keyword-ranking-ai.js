@@ -157,7 +157,6 @@ const buildKeywordRows = (combinedRows, auditDate, propertyUrl) => combinedRows.
   ai_total_citations: row.ai_total_citations,
   ai_alan_citations_count: row.ai_alan_citations_count,
   ai_alan_citations: row.ai_alan_citations,
-  ai_sample_citations: row.ai_sample_citations,
   serp_features: row.serp_features,
   ai_overview_present_any: row.ai_overview_present_any,
   local_pack_present_any: row.local_pack_present_any,
