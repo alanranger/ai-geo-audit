@@ -4255,6 +4255,394 @@
         <div id="pdfStatus" style="font-size: 0.85rem; color: #666; margin-left: 0.5rem;"></div>
       </div>
     </div>
+
+    <div class="config-panel" id="audit-scheduler-panel" style="margin-top: 2rem;">
+      <h2>Audits Scheduler</h2>
+      <div class="info-box" style="background: #e0f2fe; border-left: 4px solid #0284c7; padding: 1rem; margin-bottom: 1rem; border-radius: 4px;">
+        <p style="margin: 0; font-size: 0.9rem; color: #0c4a6e;">
+          <strong>Automation:</strong> Set frequency and time (GMT) for each audit. Turning a job to <strong>Off</strong> pauses it.
+        </p>
+      </div>
+      <div style="overflow-x: auto;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+          <thead>
+            <tr style="background: #f8fafc; border-bottom: 1px solid #e2e8f0;">
+              <th style="text-align: left; padding: 0.75rem;">Job</th>
+              <th style="text-align: left; padding: 0.75rem;">Frequency</th>
+              <th style="text-align: left; padding: 0.75rem;">Time (GMT)</th>
+              <th style="text-align: left; padding: 0.75rem;">Last Run</th>
+              <th style="text-align: left; padding: 0.75rem;">Next Scheduled</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="border-bottom: 1px solid #e2e8f0;">
+              <td style="padding: 0.75rem; font-weight: 600;">GSC + Backlinks Audit</td>
+              <td style="padding: 0.75rem;">
+                <select id="scheduler-gsc-frequency" style="padding: 0.4rem 0.6rem; border: 1px solid #cbd5e1; border-radius: 4px;">
+                  <option value="off">Off</option>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                </select>
+              </td>
+              <td style="padding: 0.75rem;">
+                <input id="scheduler-gsc-time" type="time" step="60" style="padding: 0.35rem 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px;">
+              </td>
+              <td style="padding: 0.75rem;" id="scheduler-gsc-last">—</td>
+              <td style="padding: 0.75rem;" id="scheduler-gsc-next">—</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #e2e8f0;">
+              <td style="padding: 0.75rem; font-weight: 600;">Keyword Ranking &amp; AI Audit</td>
+              <td style="padding: 0.75rem;">
+                <select id="scheduler-ranking-frequency" style="padding: 0.4rem 0.6rem; border: 1px solid #cbd5e1; border-radius: 4px;">
+                  <option value="off">Off</option>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                </select>
+              </td>
+              <td style="padding: 0.75rem;">
+                <input id="scheduler-ranking-time" type="time" step="60" style="padding: 0.35rem 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px;">
+              </td>
+              <td style="padding: 0.75rem;" id="scheduler-ranking-last">—</td>
+              <td style="padding: 0.75rem;" id="scheduler-ranking-next">—</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #e2e8f0;">
+              <td style="padding: 0.75rem; font-weight: 600;">Global Dashboard Run</td>
+              <td style="padding: 0.75rem;">
+                <select id="scheduler-global-frequency" style="padding: 0.4rem 0.6rem; border: 1px solid #cbd5e1; border-radius: 4px;">
+                  <option value="off">Off</option>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                </select>
+              </td>
+              <td style="padding: 0.75rem;">
+                <input id="scheduler-global-time" type="time" step="60" style="padding: 0.35rem 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px;">
+              </td>
+              <td style="padding: 0.75rem;" id="scheduler-global-last">—</td>
+              <td style="padding: 0.75rem;" id="scheduler-global-next">—</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin-top: 1rem;">
+        <button class="btn" id="scheduler-save-btn" title="Save scheduler settings for all cron jobs.">Save Scheduler</button>
+        <button class="btn btn-secondary" id="scheduler-refresh-btn" title="Refresh last run / next scheduled times.">Refresh Status</button>
+        <div id="scheduler-status" style="font-size: 0.85rem; color: #666;"></div>
+      </div>
+    </div>
+    <script>
+      (function initAuditScheduler() {
+        const JOB_KEYS = {
+          gsc: 'gsc_backlinks',
+          ranking: 'ranking_ai',
+          global: 'global_run'
+        };
+
+        const DEFAULTS = {
+          [JOB_KEYS.gsc]: { frequency: 'daily', timeOfDay: '11:00' },
+          [JOB_KEYS.ranking]: { frequency: 'weekly', timeOfDay: '11:10' },
+          [JOB_KEYS.global]: { frequency: 'weekly', timeOfDay: '11:20' }
+        };
+
+        const formatUtc = (value) => {
+          if (!value) return '—';
+          const dt = new Date(value);
+          if (isNaN(dt.getTime())) return '—';
+          return dt.toLocaleString('en-GB', {
+            timeZone: 'UTC',
+            day: '2-digit',
+            month: 'short',
+            year: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+          }) + ' GMT';
+        };
+
+        const parseTime = (value) => {
+          if (!value || !/^\d{2}:\d{2}$/.test(value)) return null;
+          const [h, m] = value.split(':').map(v => parseInt(v, 10));
+          if (Number.isNaN(h) || Number.isNaN(m)) return null;
+          return { hours: h, minutes: m };
+        };
+
+        const computeNextRun = ({ frequency, timeOfDay, lastRunAt }, now = new Date()) => {
+          if (!frequency || frequency === 'off') return null;
+          const time = parseTime(timeOfDay);
+          if (!time) return null;
+          const candidate = new Date(Date.UTC(
+            now.getUTCFullYear(),
+            now.getUTCMonth(),
+            now.getUTCDate(),
+            time.hours,
+            time.minutes,
+            0,
+            0
+          ));
+
+          const addMonths = (date, months) => {
+            const d = new Date(date);
+            const day = d.getUTCDate();
+            d.setUTCMonth(d.getUTCMonth() + months);
+            const maxDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+            d.setUTCDate(Math.min(day, maxDay));
+            return d;
+          };
+
+          if (!lastRunAt) {
+            if (frequency === 'daily') {
+              if (candidate <= now) candidate.setUTCDate(candidate.getUTCDate() + 1);
+              return candidate.toISOString();
+            }
+            if (frequency === 'weekly') {
+              if (candidate <= now) candidate.setUTCDate(candidate.getUTCDate() + 7);
+              return candidate.toISOString();
+            }
+            if (frequency === 'monthly') {
+              return (candidate <= now ? addMonths(candidate, 1) : candidate).toISOString();
+            }
+            return null;
+          }
+
+          const last = new Date(lastRunAt);
+          if (frequency === 'daily') {
+            if (candidate <= now) candidate.setUTCDate(candidate.getUTCDate() + 1);
+            return candidate.toISOString();
+          }
+          if (frequency === 'weekly') {
+            const weekly = new Date(last);
+            weekly.setUTCHours(time.hours, time.minutes, 0, 0);
+            weekly.setUTCDate(weekly.getUTCDate() + 7);
+            return weekly.toISOString();
+          }
+          if (frequency === 'monthly') {
+            const monthly = new Date(last);
+            monthly.setUTCHours(time.hours, time.minutes, 0, 0);
+            return addMonths(monthly, 1).toISOString();
+          }
+          return null;
+        };
+
+        const statusEl = document.getElementById('scheduler-status');
+        const apiBase = typeof window.apiUrl === 'function' ? window.apiUrl('') : '';
+        const schedulerApiUrl = (path) => apiBase ? apiBase + path : path;
+
+        const readForm = () => ({
+          [JOB_KEYS.gsc]: {
+            frequency: document.getElementById('scheduler-gsc-frequency')?.value || 'off',
+            timeOfDay: document.getElementById('scheduler-gsc-time')?.value || ''
+          },
+          [JOB_KEYS.ranking]: {
+            frequency: document.getElementById('scheduler-ranking-frequency')?.value || 'off',
+            timeOfDay: document.getElementById('scheduler-ranking-time')?.value || ''
+          },
+          [JOB_KEYS.global]: {
+            frequency: document.getElementById('scheduler-global-frequency')?.value || 'off',
+            timeOfDay: document.getElementById('scheduler-global-time')?.value || ''
+          }
+        });
+
+        const applyForm = (jobs) => {
+          const gsc = jobs[JOB_KEYS.gsc] || DEFAULTS[JOB_KEYS.gsc];
+          const ranking = jobs[JOB_KEYS.ranking] || DEFAULTS[JOB_KEYS.ranking];
+          const global = jobs[JOB_KEYS.global] || DEFAULTS[JOB_KEYS.global];
+          const gscFreq = document.getElementById('scheduler-gsc-frequency');
+          const gscTime = document.getElementById('scheduler-gsc-time');
+          const rankingFreq = document.getElementById('scheduler-ranking-frequency');
+          const rankingTime = document.getElementById('scheduler-ranking-time');
+          const globalFreq = document.getElementById('scheduler-global-frequency');
+          const globalTime = document.getElementById('scheduler-global-time');
+          if (gscFreq) gscFreq.value = gsc.frequency || DEFAULTS[JOB_KEYS.gsc].frequency;
+          if (gscTime) gscTime.value = gsc.timeOfDay || DEFAULTS[JOB_KEYS.gsc].timeOfDay;
+          if (rankingFreq) rankingFreq.value = ranking.frequency || DEFAULTS[JOB_KEYS.ranking].frequency;
+          if (rankingTime) rankingTime.value = ranking.timeOfDay || DEFAULTS[JOB_KEYS.ranking].timeOfDay;
+          if (globalFreq) globalFreq.value = global.frequency || DEFAULTS[JOB_KEYS.global].frequency;
+          if (globalTime) globalTime.value = global.timeOfDay || DEFAULTS[JOB_KEYS.global].timeOfDay;
+        };
+
+        const renderSchedule = (jobs) => {
+          const gsc = jobs[JOB_KEYS.gsc] || {};
+          const ranking = jobs[JOB_KEYS.ranking] || {};
+          const global = jobs[JOB_KEYS.global] || {};
+          document.getElementById('scheduler-gsc-last').textContent = formatUtc(gsc.lastRunAt);
+          document.getElementById('scheduler-gsc-next').textContent = formatUtc(gsc.nextRunAt || computeNextRun(gsc));
+          document.getElementById('scheduler-ranking-last').textContent = formatUtc(ranking.lastRunAt);
+          document.getElementById('scheduler-ranking-next').textContent = formatUtc(ranking.nextRunAt || computeNextRun(ranking));
+          document.getElementById('scheduler-global-last').textContent = formatUtc(global.lastRunAt);
+          document.getElementById('scheduler-global-next').textContent = formatUtc(global.nextRunAt || computeNextRun(global));
+        };
+
+        const loadSchedule = async () => {
+          try {
+            const resp = await fetch(schedulerApiUrl('/api/supabase/get-cron-schedule'));
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const json = await resp.json();
+            if (json.status === 'missing_table') {
+              statusEl.textContent = 'Scheduler table not found. Run migration 20260118_add_audit_cron_schedule.sql.';
+              const cached = JSON.parse(localStorage.getItem('audit_scheduler_settings') || '{}');
+              applyForm(cached.jobs || DEFAULTS);
+              renderSchedule(cached.jobs || DEFAULTS);
+              return;
+            }
+            const jobs = json.data?.jobs || {};
+            applyForm(jobs);
+            renderSchedule(jobs);
+            statusEl.textContent = `Last updated: ${formatUtc(json.data?.updatedAt)}`;
+          } catch (err) {
+            statusEl.textContent = `Scheduler status unavailable (${err.message}).`;
+            const cached = JSON.parse(localStorage.getItem('audit_scheduler_settings') || '{}');
+            applyForm(cached.jobs || DEFAULTS);
+            renderSchedule(cached.jobs || DEFAULTS);
+          }
+        };
+
+        const saveSchedule = async () => {
+          const jobs = readForm();
+          Object.keys(jobs).forEach((key) => {
+            if (jobs[key].frequency !== 'off' && !parseTime(jobs[key].timeOfDay)) {
+              throw new Error('Time is required for active schedules.');
+            }
+          });
+          try {
+            const resp = await fetch(schedulerApiUrl('/api/supabase/save-cron-schedule'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ jobs })
+            });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const json = await resp.json();
+            const savedJobs = json.data?.jobs || jobs;
+            localStorage.setItem('audit_scheduler_settings', JSON.stringify({ jobs: savedJobs }));
+            renderSchedule(savedJobs);
+            statusEl.textContent = `Saved at ${formatUtc(json.data?.updatedAt || new Date().toISOString())}`;
+          } catch (err) {
+            localStorage.setItem('audit_scheduler_settings', JSON.stringify({ jobs }));
+            renderSchedule(jobs);
+            statusEl.textContent = `Saved locally (${err.message}).`;
+          }
+        };
+
+        const saveBtn = document.getElementById('scheduler-save-btn');
+        const refreshBtn = document.getElementById('scheduler-refresh-btn');
+        if (saveBtn) {
+          saveBtn.addEventListener('click', () => {
+            saveSchedule().catch((err) => {
+              statusEl.textContent = err.message;
+            });
+          });
+        }
+        if (refreshBtn) refreshBtn.addEventListener('click', loadSchedule);
+
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', loadSchedule);
+        } else {
+          loadSchedule();
+        }
+      })();
+    </script>
+    <script>
+      (function initAuditTimestampRefresh() {
+        const formatUtcShort = (value) => {
+          if (!value) return '—';
+          const dt = new Date(value);
+          if (isNaN(dt.getTime())) return '—';
+          return dt.toLocaleString('en-GB', {
+            timeZone: 'UTC',
+            day: '2-digit',
+            month: 'short',
+            year: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+          }) + ' GMT';
+        };
+
+        const formatDateRange = (start, end) => {
+          if (!start || !end) return '—';
+          const startDate = new Date(start);
+          const endDate = new Date(end);
+          if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) return '—';
+          const fmt = { timeZone: 'UTC', day: '2-digit', month: 'short', year: '2-digit' };
+          return `${startDate.toLocaleDateString('en-GB', fmt)} → ${endDate.toLocaleDateString('en-GB', fmt)}`;
+        };
+
+        const computeRangeFromTimeseries = (timeseries) => {
+          if (!Array.isArray(timeseries) || timeseries.length === 0) return null;
+          const dates = timeseries.map(p => p?.date).filter(Boolean).sort();
+          if (!dates.length) return null;
+          return { start: dates[0], end: dates[dates.length - 1] };
+        };
+
+        window.updateAuditTimestamp = async function updateAuditTimestamp() {
+          const gscAuditEl = document.getElementById('gscAuditDate');
+          const gscRangeEl = document.getElementById('gscDateRange');
+          const rankingEl = document.getElementById('rankingAiAuditDate');
+          const propertyUrl = document.getElementById('propertyUrl')?.value ||
+            localStorage.getItem('gsc_property_url') ||
+            localStorage.getItem('last_property_url') ||
+            'https://www.alanranger.com';
+
+          if (!gscAuditEl || !gscRangeEl || !rankingEl || !propertyUrl) return;
+
+          try {
+            let latestAudit = null;
+            if (typeof window.fetchLatestAuditFromSupabase === 'function') {
+              latestAudit = await window.fetchLatestAuditFromSupabase(propertyUrl, false);
+            }
+            if (!latestAudit) {
+              const resp = await fetch((window.apiUrl ? window.apiUrl('') : '') + `/api/supabase/get-latest-audit?propertyUrl=${encodeURIComponent(propertyUrl)}`);
+              if (resp.ok) latestAudit = await resp.json();
+            }
+            if (latestAudit) {
+              const auditPayload = latestAudit.data || latestAudit;
+              const auditDate = auditPayload.auditDate || auditPayload.audit_date || null;
+              const auditTimestamp = auditPayload.updated_at || auditPayload.timestamp || null;
+              if (auditDate || auditTimestamp) {
+                gscAuditEl.textContent = auditTimestamp ? formatUtcShort(auditTimestamp) : String(auditDate);
+              }
+              const rangeFromTs = computeRangeFromTimeseries(auditPayload.searchData?.timeseries);
+              if (rangeFromTs) {
+                gscRangeEl.textContent = formatDateRange(rangeFromTs.start, rangeFromTs.end);
+              } else {
+                const gscRange = parseInt(localStorage.getItem('gsc_date_range') || '28', 10);
+                const lastDate = window.lastGscTimeseriesDate ? new Date(window.lastGscTimeseriesDate) : null;
+                if (lastDate && !isNaN(lastDate.getTime())) {
+                  const startDate = new Date(lastDate);
+                  startDate.setUTCDate(startDate.getUTCDate() - Math.max(1, gscRange - 1));
+                  gscRangeEl.textContent = formatDateRange(startDate.toISOString(), lastDate.toISOString());
+                } else {
+                  gscRangeEl.textContent = gscRange ? `${gscRange} days` : '—';
+                }
+              }
+            }
+          } catch (err) {
+            gscAuditEl.textContent = '—';
+            gscRangeEl.textContent = '—';
+          }
+
+          try {
+            const resp = await fetch((window.apiUrl ? window.apiUrl('') : '') + `/api/supabase/get-keyword-rankings?propertyUrl=${encodeURIComponent(propertyUrl)}&latestOnly=true`);
+            if (resp.ok) {
+              const json = await resp.json();
+              const ts = json?.data?.latestTimestamp || json?.data?.latestAuditDate || null;
+              rankingEl.textContent = ts ? formatUtcShort(ts) : 'Not yet run';
+            }
+          } catch (err) {
+            rankingEl.textContent = '—';
+          }
+        };
+
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', () => {
+            window.updateAuditTimestamp();
+          });
+        } else {
+          window.updateAuditTimestamp();
+        }
+      })();
+    </script>
       </section>
 
       <!-- Dashboard Panel (placeholder – content to be defined) -->

@@ -1,3 +1,5 @@
+import { computeNextRunAt, shouldRunNow } from '../../lib/cron/schedule.js';
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -36,6 +38,7 @@ export default async function handler(req, res) {
     try {
       json = text ? JSON.parse(text) : null;
     } catch (err) {
+      console.warn('[Daily Cron] Failed to parse JSON response:', err.message);
       json = null;
     }
     if (!response.ok) {
@@ -46,6 +49,22 @@ export default async function handler(req, res) {
   };
 
   try {
+    const nowIso = new Date().toISOString();
+    const scheduleResp = await fetchJson(`${baseUrl}/api/supabase/get-cron-schedule?jobKey=gsc_backlinks`);
+    const schedule = scheduleResp?.data?.jobs?.gsc_backlinks || {
+      frequency: 'daily',
+      timeOfDay: '11:00'
+    };
+
+    if (!shouldRunNow(schedule)) {
+      return res.status(200).json({
+        status: 'skipped',
+        message: 'Schedule not due.',
+        schedule,
+        meta: { generatedAt: nowIso }
+      });
+    }
+
     const syncResult = await fetchJson(`${baseUrl}/api/sync-csv`);
     const gscResult = await fetchJson(
       `${baseUrl}/api/aigeo/gsc-entity-metrics?property=${encodeURIComponent(propertyUrl)}`
@@ -92,6 +111,27 @@ export default async function handler(req, res) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
+    });
+
+    const nextRunAt = computeNextRunAt({
+      frequency: schedule.frequency,
+      timeOfDay: schedule.timeOfDay,
+      lastRunAt: nowIso
+    });
+
+    await fetchJson(`${baseUrl}/api/supabase/save-cron-schedule`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jobs: {
+          gsc_backlinks: {
+            frequency: schedule.frequency,
+            timeOfDay: schedule.timeOfDay,
+            lastRunAt: nowIso,
+            nextRunAt
+          }
+        }
+      })
     });
 
     return res.status(200).json({
