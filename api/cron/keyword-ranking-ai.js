@@ -177,7 +177,7 @@ const upsertAuditResults = async (payload) => {
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !supabaseKey) return;
-  await fetchJson(`${supabaseUrl}/rest/v1/audit_results?on_conflict=property_url,audit_date`, {
+  const response = await fetch(`${supabaseUrl}/rest/v1/audit_results?on_conflict=property_url,audit_date`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -187,6 +187,10 @@ const upsertAuditResults = async (payload) => {
     },
     body: JSON.stringify(payload)
   });
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`HTTP ${response.status}: ${text}`);
+  }
 };
 
 const updateSchedule = async (baseUrl, schedule, nowIso, status, errorMessage = null) => {
