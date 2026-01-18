@@ -62,9 +62,13 @@ const runBatches = async (items, batchSize, handler, concurrency = 4) => {
   return results;
 };
 
-const fetchSerpRows = async (baseUrl, keywords, concurrency = 4) => runBatches(
+const fetchSerpRows = async (
+  baseUrl,
   keywords,
-  20,
+  { batchSize = 20, concurrency = 4 } = {}
+) => runBatches(
+  keywords,
+  batchSize,
   async (batch) => {
     const serpResp = await fetchJson(
       `${baseUrl}/api/aigeo/serp-rank-test?keywords=${encodeURIComponent(batch.join(','))}`
@@ -74,9 +78,13 @@ const fetchSerpRows = async (baseUrl, keywords, concurrency = 4) => runBatches(
   concurrency
 );
 
-const fetchAiRows = async (baseUrl, keywords, concurrency = 4) => runBatches(
+const fetchAiRows = async (
+  baseUrl,
   keywords,
-  10,
+  { batchSize = 10, concurrency = 4 } = {}
+) => runBatches(
+  keywords,
+  batchSize,
   async (batch) => {
     const aiResp = await fetchJson(`${baseUrl}/api/aigeo/ai-mode-serp-batch-test`, {
       method: 'POST',
@@ -261,12 +269,23 @@ export default async function handler(req, res) {
       });
     }
 
-    let serpRows = await fetchSerpRows(baseUrl, keywords, 4);
+    let serpRows = await fetchSerpRows(baseUrl, keywords, { batchSize: 20, concurrency: 4 });
     if (!serpRows.length) {
-      serpRows = await fetchSerpRows(baseUrl, keywords, 1);
+      serpRows = await fetchSerpRows(baseUrl, keywords, { batchSize: 10, concurrency: 2 });
     }
-    const aiRows = await fetchAiRows(baseUrl, keywords, 4);
+    if (!serpRows.length) {
+      serpRows = await fetchSerpRows(baseUrl, keywords, { batchSize: 5, concurrency: 1 });
+    }
+    const aiRows = await fetchAiRows(baseUrl, keywords, { batchSize: 10, concurrency: 4 });
     const combinedRows = buildCombinedRows(serpRows, aiRows);
+    if (!combinedRows.length) {
+      await updateSchedule(baseUrl, schedule, nowIso, 'error', 'No SERP rows returned for keywords');
+      return sendJson(res, 500, {
+        status: 'error',
+        message: 'No SERP rows returned for keywords',
+        meta: { generatedAt: nowIso }
+      });
+    }
 
     const auditDate = new Date().toISOString().slice(0, 10);
     const summary = buildSummary(combinedRows);
