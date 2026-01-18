@@ -1,4 +1,5 @@
 import { computeNextRunAt, shouldRunNow } from '../../lib/cron/schedule.js';
+import { runFullAudit } from '../../lib/audit/fullAudit.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -91,46 +92,24 @@ export default async function handler(req, res) {
       });
     }
 
-    const syncResult = await fetchJson(`${baseUrl}/api/sync-csv`);
-    const gscResult = await fetchJson(
-      `${baseUrl}/api/aigeo/gsc-entity-metrics?property=${encodeURIComponent(propertyUrl)}`
-    );
-    const backlinkResult = await fetchJson(`${baseUrl}/api/aigeo/backlink-metrics`);
-    const localSignalsResult = await fetchJson(
-      `${baseUrl}/api/aigeo/local-signals?property=${encodeURIComponent(propertyUrl)}`
-    );
-
-    const overview = gscResult?.data?.overview || {};
-    const searchData = {
-      totalClicks: overview.totalClicks || 0,
-      totalImpressions: overview.totalImpressions || 0,
-      averagePosition: overview.avgPosition || 0,
-      ctr: overview.ctr || 0,
-      overview: {
-        clicks: overview.totalClicks || 0,
-        impressions: overview.totalImpressions || 0,
-        position: overview.avgPosition || 0,
-        ctr: overview.ctr || 0,
-        totalClicks: overview.totalClicks || 0,
-        totalImpressions: overview.totalImpressions || 0,
-        siteTotalClicks: overview.totalClicks || 0,
-        siteTotalImpressions: overview.totalImpressions || 0
-      },
-      timeseries: gscResult?.data?.timeseries || [],
-      topQueries: gscResult?.data?.topQueries || [],
-      topPages: gscResult?.data?.topPages || [],
-      queryPages: gscResult?.data?.queryPages || [],
-      queryTotals: gscResult?.data?.queryTotals || [],
-      dateRange: 28,
-      propertyUrl
-    };
+    const audit = await runFullAudit({
+      baseUrl,
+      propertyUrl,
+      dateRangeDays: 28
+    });
 
     const payload = {
       propertyUrl,
       auditDate: new Date().toISOString().split('T')[0],
-      searchData,
-      backlinkMetrics: backlinkResult?.data || null,
-      localSignals: localSignalsResult || null
+      searchData: audit.searchData,
+      scores: audit.scores,
+      snippetReadiness: audit.snippetReadiness,
+      schemaAudit: audit.schemaAudit,
+      localSignals: audit.localSignals,
+      backlinkMetrics: audit.backlinkMetrics || null,
+      moneyPagesSummary: audit.moneyPagesSummary,
+      moneySegmentMetrics: audit.moneySegmentMetrics,
+      moneyPagePriorityData: audit.moneyPagePriorityData
     };
 
     const saveResult = await fetchJson(`${baseUrl}/api/supabase/save-audit`, {
@@ -146,10 +125,9 @@ export default async function handler(req, res) {
       message: 'Daily GSC + Backlink audit completed',
       data: {
         propertyUrl,
-        syncCsv: syncResult?.status || 'ok',
-        gsc: gscResult?.status || 'ok',
-        backlinks: backlinkResult?.status || 'ok',
-        localSignals: localSignalsResult?.status || 'ok',
+        gsc: 'ok',
+        backlinks: 'ok',
+        localSignals: 'ok',
         save: saveResult?.status || 'ok'
       },
       meta: { generatedAt: new Date().toISOString() }

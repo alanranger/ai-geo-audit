@@ -95,6 +95,8 @@ export default async function handler(req, res) {
       ? { 'x-cron-secret': cronSecret }
       : undefined;
 
+    const syncResult = await fetchJson(`${baseUrl}/api/sync-csv`, { method: 'GET', headers });
+
     const gscResult = await fetchJson(
       `${baseUrl}/api/cron/daily-gsc-backlink?propertyUrl=${encodeURIComponent(propertyUrl)}`,
       { method: 'GET', headers }
@@ -114,15 +116,26 @@ export default async function handler(req, res) {
       }
     );
 
+    const bulkHeaders = {
+      'Content-Type': 'application/json',
+      ...(cronSecret ? { 'x-cron-secret': cronSecret } : {})
+    };
+    const bulkUpdateResult = await fetchJson(
+      `${baseUrl}/api/optimisation/bulk-update?propertyUrl=${encodeURIComponent(propertyUrl)}`,
+      { method: 'POST', headers: bulkHeaders }
+    );
+
     await updateScheduleStatus('ok');
 
     return sendJson(res, 200, {
       status: 'ok',
       message: 'Global audit run complete.',
       results: {
+        sync_csv: syncResult?.status || 'ok',
         gsc_backlinks: gscResult?.status || 'ok',
         ranking_ai: rankingResult?.status || 'ok',
-        domain_strength: domainStrengthResult?.status || 'ok'
+        domain_strength: domainStrengthResult?.status || 'ok',
+        task_updates: bulkUpdateResult?.status || 'ok'
       },
       meta: { generatedAt: nowIso }
     });

@@ -4383,12 +4383,12 @@
                 <td style="text-align: center; padding: 0.6rem;"><span style="color: #16a34a; font-weight: 700;">✓</span></td>
                 <td style="text-align: center; padding: 0.6rem;"><span style="color: #16a34a; font-weight: 700;">✓</span></td>
                 <td style="text-align: center; padding: 0.6rem;"><span style="color: #16a34a; font-weight: 700;">✓</span></td>
+                <td style="text-align: center; padding: 0.6rem;"><span style="color: #16a34a; font-weight: 700;">✓</span></td>
+                <td style="text-align: center; padding: 0.6rem;"><span style="color: #16a34a; font-weight: 700;">✓</span></td>
                 <td style="text-align: center; padding: 0.6rem;"><span style="color: #dc2626; font-weight: 700;">✕</span></td>
+                <td style="text-align: center; padding: 0.6rem;"><span style="color: #16a34a; font-weight: 700;">✓</span></td>
                 <td style="text-align: center; padding: 0.6rem;"><span style="color: #dc2626; font-weight: 700;">✕</span></td>
-                <td style="text-align: center; padding: 0.6rem;"><span style="color: #dc2626; font-weight: 700;">✕</span></td>
-                <td style="text-align: center; padding: 0.6rem;"><span style="color: #dc2626; font-weight: 700;">✕</span></td>
-                <td style="text-align: center; padding: 0.6rem;"><span style="color: #dc2626; font-weight: 700;">✕</span></td>
-                <td style="text-align: center; padding: 0.6rem;"><span style="color: #dc2626; font-weight: 700;">✕</span></td>
+                <td style="text-align: center; padding: 0.6rem;"><span style="color: #16a34a; font-weight: 700;">✓</span></td>
                 <td style="text-align: center; padding: 0.6rem;"><span style="color: #dc2626; font-weight: 700;">✕</span></td>
                 <td style="text-align: center; padding: 0.6rem;"><span style="color: #64748b; font-weight: 700;">-</span></td>
               </tr>
@@ -4413,13 +4413,13 @@
                 <td style="text-align: center; padding: 0.6rem;"><span style="color: #16a34a; font-weight: 700;">✓</span></td>
                 <td style="text-align: center; padding: 0.6rem;"><span style="color: #16a34a; font-weight: 700;">✓</span></td>
                 <td style="text-align: center; padding: 0.6rem;"><span style="color: #16a34a; font-weight: 700;">✓</span></td>
-                <td style="text-align: center; padding: 0.6rem;"><span style="color: #dc2626; font-weight: 700;">✕</span></td>
-                <td style="text-align: center; padding: 0.6rem;"><span style="color: #dc2626; font-weight: 700;">✕</span></td>
                 <td style="text-align: center; padding: 0.6rem;"><span style="color: #16a34a; font-weight: 700;">✓</span></td>
-                <td style="text-align: center; padding: 0.6rem;"><span style="color: #dc2626; font-weight: 700;">✕</span></td>
                 <td style="text-align: center; padding: 0.6rem;"><span style="color: #16a34a; font-weight: 700;">✓</span></td>
-                <td style="text-align: center; padding: 0.6rem;"><span style="color: #dc2626; font-weight: 700;">✕</span></td>
-                <td style="text-align: center; padding: 0.6rem;"><span style="color: #dc2626; font-weight: 700;">✕</span></td>
+                <td style="text-align: center; padding: 0.6rem;"><span style="color: #16a34a; font-weight: 700;">✓</span></td>
+                <td style="text-align: center; padding: 0.6rem;"><span style="color: #16a34a; font-weight: 700;">✓</span></td>
+                <td style="text-align: center; padding: 0.6rem;"><span style="color: #16a34a; font-weight: 700;">✓</span></td>
+                <td style="text-align: center; padding: 0.6rem;"><span style="color: #16a34a; font-weight: 700;">✓</span></td>
+                <td style="text-align: center; padding: 0.6rem;"><span style="color: #16a34a; font-weight: 700;">✓</span></td>
                 <td style="text-align: center; padding: 0.6rem;"><span style="color: #64748b; font-weight: 700;">-</span></td>
               </tr>
             </tbody>
@@ -25151,6 +25151,22 @@
           const radarTimestampElement = document.getElementById('radarChartAuditTime');
           const radarTimestampContainer = document.getElementById('radarChartTimestamp');
 
+          const normalizeTimestamp = (value) => {
+            if (!value) return null;
+            if (typeof value === 'number') {
+              const d = new Date(value);
+              return isNaN(d.getTime()) ? null : d.toISOString();
+            }
+            if (typeof value === 'string') {
+              const normalized = value.includes(' ') && !value.includes('T')
+                ? value.replace(' ', 'T')
+                : value;
+              const d = new Date(normalized);
+              return isNaN(d.getTime()) ? null : d.toISOString();
+            }
+            return null;
+          };
+
           const formatDateShort = (dateStr) => {
             if (!dateStr) return 'Not yet run';
             try {
@@ -25203,6 +25219,7 @@
           let gscEndDate = null;
           let rankingAiAuditDate = null;
           let rankingAiTimestamp = null;
+          let latestFullAuditData = null;
 
           const safeFetch = async (url, label, controller) => {
             try {
@@ -25226,11 +25243,17 @@
               if (fullRes) {
                 const fullData = await fullRes.json();
                 if (fullData.status === 'ok' && fullData.data) {
-                  gscAuditDate = fullData.data.auditDate;
+                  latestFullAuditData = fullData.data;
+                  gscAuditDate = fullData.data.auditDate || fullData.data.audit_date || gscAuditDate;
                   window.lastGscAuditDate = gscAuditDate;
                   let auditDateForCalculation = null;
-                  if (fullData.data.timestamp) {
-                    const tsDate = new Date(fullData.data.timestamp);
+                  const gscTimestampCandidate = normalizeTimestamp(
+                    fullData.data.timestamp ||
+                    fullData.data.updated_at ||
+                    fullData.data.updatedAt
+                  );
+                  if (gscTimestampCandidate) {
+                    const tsDate = new Date(gscTimestampCandidate);
                     auditDateForCalculation = new Date(Date.UTC(tsDate.getUTCFullYear(), tsDate.getUTCMonth(), tsDate.getUTCDate()));
                   } else if (gscAuditDate) {
                     auditDateForCalculation = new Date(gscAuditDate + 'T00:00:00Z');
@@ -25241,8 +25264,8 @@
                     gscEndDate.setUTCDate(gscEndDate.getUTCDate() - 2);
                     gscStartDate = new Date(gscEndDate);
                     gscStartDate.setUTCDate(gscStartDate.getUTCDate() - (dateRange - 1));
-                    if (fullData.data.timestamp) {
-                      gscTimestamp = new Date(fullData.data.timestamp).toISOString();
+                    if (gscTimestampCandidate) {
+                      gscTimestamp = gscTimestampCandidate;
                     } else if (gscAuditDate) {
                       gscTimestamp = auditDateForCalculation.toISOString();
                     }
@@ -25250,6 +25273,20 @@
                 }
               }
             }
+          }
+
+          // Ranking & AI: latest audit data (cron + manual)
+          if (!rankingAiTimestamp && latestFullAuditData?.ranking_ai_data) {
+            const rankingFromAudit = latestFullAuditData.ranking_ai_data;
+            rankingAiAuditDate =
+              rankingFromAudit.audit_date ||
+              rankingFromAudit.auditDate ||
+              rankingAiAuditDate;
+            rankingAiTimestamp = normalizeTimestamp(
+              rankingFromAudit.lastRunTimestamp ||
+              rankingFromAudit.lastRunAt ||
+              rankingFromAudit.timestamp
+            );
           }
 
           // Ranking & AI: localStorage fast path
