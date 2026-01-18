@@ -110,6 +110,24 @@ git push origin "restore-YYYY-MM-DD"
 
 Debug log files in `debug-logs/` are **kept local** and should not be committed.
 
+### Daily Audit Cron
+
+The repo includes a Vercel cron job that runs at **07:00** daily:
+
+- Endpoint: `/api/cron/daily-gsc-backlink`
+- Schedule: `0 7 * * *`
+
+Set these environment variables in Vercel:
+- `CRON_PROPERTY_URL` (e.g., `https://www.alanranger.com`)
+- `CRON_SECRET` (optional). If set, send `X-Cron-Secret` header from the cron config.
+
+This job runs:
+1. `/api/sync-csv`
+2. `/api/aigeo/gsc-entity-metrics`
+3. `/api/aigeo/backlink-metrics`
+4. `/api/aigeo/local-signals`
+5. `/api/supabase/save-audit` (partial update)
+
 **Note**: After each deployment, ensure the version number in `audit-dashboard.html` is updated to reflect the latest commit hash. This helps track which version is currently deployed and prevents troubleshooting outdated versions.
 
 ## Troubleshooting
