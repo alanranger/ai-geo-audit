@@ -1,6 +1,7 @@
 # All Audit/Scan/Update/Refresh Processes
 
 **⚠️ NOTE**: For the most current status of fixes and ongoing issues (as of 2026-01-07), see **`HANDOVER.md`**.
+**Last Updated**: 2026-01-18
 
 ## Overview
 
@@ -10,17 +11,18 @@ This document lists ALL processes that can update/refresh/scan/audit data in the
 
 ## Main Audit/Scan Processes
 
-### 1. Run Audit Scan (`runAudit()`)
+### 1. GSC & Backlink Audit (`runAudit()`)
 **Location**: Line ~24438  
-**Trigger**: "Run Audit Scan" button  
+**Trigger**: "GSC & Backlink Audit" button  
 **What it does**:
-- Fetches GSC data via `fetchSearchConsoleData()`
+- Fetches GSC data via `fetchSearchConsoleData()` → `/api/aigeo/gsc-entity-metrics`
 - Fetches Local Signals (GBP) via `/api/aigeo/local-signals`
 - Fetches Trustpilot reviews via `/api/reviews/site-reviews`
 - Fetches Backlink metrics from localStorage or API
 - Fetches Schema audit via `/api/schema-audit`
 - Calculates pillar scores
 - Calculates snippet readiness
+- Builds Money Pages metrics from GSC + site URLs CSV
 - **Stores in**:
   - `localStorage.last_audit_results` (structure: `{scores, searchData, snippetReadiness, schemaAudit, localSignals, siteReviews, backlinkMetrics}`)
   - Supabase `audit_results` table:
@@ -36,6 +38,7 @@ This document lists ALL processes that can update/refresh/scan/audit data in the
 - Local Signals API
 - Trustpilot API
 - Backlink metrics (localStorage or API)
+- Site URLs CSV (GitHub/hosted) for Money Pages segmentation
 
 **Key Fields Created**:
 - `queryTotals`: Array of `{query, clicks, impressions, position, ctr}` (NO ranking/AI data)
@@ -46,7 +49,7 @@ This document lists ALL processes that can update/refresh/scan/audit data in the
 
 ### 2. Run Ranking & AI Scan (`loadRankingAiData()` / `renderRankingAiTab()`)
 **Location**: Multiple locations (Ranking & AI tab)  
-**Trigger**: "Run Ranking & AI Scan" button OR "Run Ranking & AI check" button  
+**Trigger**: "Run ranking & AI check" button  
 **What it does**:
 - Fetches SERP data from DataForSEO API for tracked keywords
 - Combines with GSC queryTotals data
@@ -90,26 +93,24 @@ This document lists ALL processes that can update/refresh/scan/audit data in the
 
 ### 4. Run Domain Strength Snapshot (`runDomainStrengthSnapshot()`)
 **Location**: Ranking & AI tab / Dashboard  
-**Trigger**: "Run snapshot" button in Domain Strength card  
+**Trigger**: "Run Domain Strength Snapshot (Google)" button  
 **What it does**:
-- Calculates domain strength score based on ranking positions
-- Compares against competitors
-- **Stores in**: Supabase and localStorage
+- Calls `/api/domain-strength/snapshot` (DataForSEO Labs)
+- Processes alanranger.com + pending queue, then saves snapshot rows
+- **Stores in**: Supabase `domain_strength_snapshots` table
 
 **Data Sources**:
-- Ranking & AI data (`combinedRows`)
-- Competitor data
+- DataForSEO Labs domain rank overview
+- Domain strength pending queue
 
 ---
 
 ### 5. Sync CSV (`syncCsv()`)
-**Location**: Main dashboard  
+**Location**: Configuration & Reporting  
 **Trigger**: "Sync CSV" button  
 **What it does**:
-- Syncs CSV data from configured source
-- Updates URL list for schema audit
-- Updates backlink data
-- **Stores in**: localStorage
+- Fetches CSV data and reports counts/health
+- Does not update localStorage or Supabase (response only)
 
 **Data Sources**:
 - Remote CSV files (GitHub/hosted)
@@ -170,20 +171,20 @@ This document lists ALL processes that can update/refresh/scan/audit data in the
 
 ## Global Run Process
 
-### 9. Run All Audits & Updates (`dashboardRunAll()`)
-**Location**: Line ~51610  
+### 9. Run All Audits & Updates (`runDashboardGlobalRun()`)
+**Location**: Dashboard tab  
 **Trigger**: "Run All Audits & Updates" button  
 **What it does**:
 - Runs multiple processes in sequence:
   1. Sync CSV
-  2. Run Audit Scan
+  2. GSC & Backlink Audit
   3. Run Ranking & AI Scan
   4. Run Money Pages Scan
   5. Run Domain Strength Snapshot
   6. Update All Tasks with Latest Data
 - **Stores in**: All of the above storage locations
 
-**Note**: This is the most comprehensive process, ensuring all data is fresh and consistent.
+**Note**: This is the most comprehensive UI process. The cron job `/api/cron/global-run` is narrower (GSC/Backlinks + Ranking & AI + Domain Strength only).
 
 ---
 
@@ -242,7 +243,7 @@ This document lists ALL processes that can update/refresh/scan/audit data in the
 - **Impact**: Different modules may show different data
 
 ### Issue 6: Timing Dependencies
-- "Bulk Update" runs after "Run Audit Scan" in global run
+- "Bulk Update" runs after "GSC & Backlink Audit" in global run
 - But "Add Measurement" can be run independently
 - **Impact**: "Add Measurement" may use stale audit data
 
@@ -264,7 +265,7 @@ This document lists ALL processes that can update/refresh/scan/audit data in the
 For consistent data:
 
 1. **Sync CSV** (if needed)
-2. **Run Audit Scan** (creates `queryTotals`, Money Pages data)
+2. **GSC & Backlink Audit** (creates `queryTotals`, Money Pages data)
 3. **Run Ranking & AI Scan** (creates `combinedRows`, `keyword_rankings`)
 4. **Run Money Pages Scan** (refreshes Money Pages from audit)
 5. **Run Domain Strength Snapshot** (uses Ranking & AI data)

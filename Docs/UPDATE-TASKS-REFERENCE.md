@@ -1,6 +1,6 @@
 # Update Tasks & Refresh Buttons Reference
 
-**Last Updated**: 2026-01-07  
+**Last Updated**: 2026-01-18  
 **Purpose**: Comprehensive reference of all buttons and functions that fetch, calculate, or update data across all modules in the AI GEO Audit dashboard.
 
 ---
@@ -24,8 +24,8 @@ This document catalogs all update/refresh/scan/audit buttons and their associate
 
 | Button/Label | Element ID | Function Called | What It Does | Data Fetched/Calculated |
 |--------------|------------|-----------------|--------------|------------------------|
-| **Run Audit Scan** | `runAudit` (button) | `window.runAudit()` | Runs full entity-level audit scan | GSC data, Local Signals (GBP), Trustpilot reviews, Backlink metrics, Schema audit, Pillar scores, Snippet readiness |
-| **Sync CSV** | `syncCsvBtn` | `window.syncCsv()` | Syncs CSV from alan-shared-resources | CSV data from GitHub/remote source |
+| **GSC & Backlink Audit** | N/A (onclick) | `window.runAudit()` | Runs full entity-level audit scan | GSC data, Local Signals (GBP), Trustpilot reviews, Backlink metrics, Schema audit, Money Pages metrics (CSV + GSC), Pillar scores, Snippet readiness |
+| **Sync CSV** | `syncCsvBtn` | `window.syncCsv()` | Fetches CSV and reports counts | Remote URL CSV and backlink CSV counts (no localStorage/Supabase writes) |
 | **Share Audit** | `shareAudit` (button) | `window.shareAudit()` | Creates shareable audit link | Generates share token, stores in Supabase |
 | **Save Configuration** | `saveConfig` (button) | `saveConfig()` | Saves GSC API key, property URL, date range | Saves to localStorage only |
 | **Save Admin Key** | `saveAdminKey` (button) | `setAdminKey()` | Stores admin key for optimisation tracking | Saves to sessionStorage and localStorage |
@@ -33,7 +33,7 @@ This document catalogs all update/refresh/scan/audit buttons and their associate
 | **Generate PDF Report** | `generatePdfReport` (button) | `generatePdfReport()` | Creates PDF report from audit data | Reads from localStorage/Supabase, generates PDF |
 
 ### Notes
-- **Run Audit Scan** is the primary data collection process
+- **GSC & Backlink Audit** is the primary data collection process
 - Does NOT fetch Ranking & AI data (separate process)
 - Creates `queryTotals` array (GSC data only, no ranking/AI)
 
@@ -48,7 +48,7 @@ This document catalogs all update/refresh/scan/audit buttons and their associate
 
 | Button/Label | Element ID | Function Called | What It Does | Data Fetched/Calculated |
 |--------------|------------|-----------------|--------------|------------------------|
-| **Run All Audits & Updates** | `dashboard-run-all-btn` | `window.runDashboardGlobalRun()` | Runs all scans/updates in sequence | Executes: Sync CSV → Audit Scan → Ranking & AI Scan → Money Pages Scan → Domain Strength Snapshot → Update All Tasks |
+| **▶ Run All Audits & Updates** | `dashboard-run-all-btn` | `window.runDashboardGlobalRun()` | Runs all scans/updates in sequence | Executes: Sync CSV → Audit Scan → Ranking & AI Scan → Money Pages Scan → Domain Strength Snapshot → Update All Tasks |
 | **Open** (Audit Scan card) | N/A | `setActivePanel('overview')` | Navigates to AI Health Scorecard | None (navigation only) |
 | **Run scan** (Ranking & AI card) | N/A | `window.dashboardRunRankingAiScan()` | Runs Ranking & AI scan | DataForSEO SERP data, creates `combinedRows` |
 | **Open** (Ranking & AI card) | N/A | `setActivePanel('ranking')` | Navigates to Keyword Ranking and AI tab | None (navigation only) |
@@ -59,7 +59,7 @@ This document catalogs all update/refresh/scan/audit buttons and their associate
 | **Open** (Domain Strength card) | N/A | `setActivePanel('ranking')` | Navigates to Keyword Ranking and AI tab | None (navigation only) |
 
 ### Notes
-- **Run All Audits & Updates** is the global execution function
+- **Run All Audits & Updates** is the global execution function in the UI (more complete than `/api/cron/global-run`)
 - Dashboard cards show summary metrics but don't fetch data themselves
 - "Run scan" buttons trigger module-specific scans
 - Dashboard automatically refreshes when data is updated elsewhere
@@ -75,7 +75,7 @@ This document catalogs all update/refresh/scan/audit buttons and their associate
 
 | Button/Label | Element ID | Function Called | What It Does | Data Fetched/Calculated |
 |--------------|------------|-----------------|--------------|------------------------|
-| **Run Audit Scan** | `runAudit` (button) | `window.runAudit()` | Runs full audit scan | Same as Configuration & Reporting → Run Audit Scan |
+| **GSC & Backlink Audit** | `runAudit` (button) | `window.runAudit()` | Runs full audit scan | Same as Configuration & Reporting → GSC & Backlink Audit |
 | **Share Audit** | `shareAudit` (button) | `window.shareAudit()` | Creates shareable link | Same as Configuration & Reporting → Share Audit |
 
 ### Notes
@@ -161,12 +161,12 @@ This document catalogs all update/refresh/scan/audit buttons and their associate
 | Button/Label | Element ID | Function Called | What It Does | Data Fetched/Calculated |
 |--------------|------------|-----------------|--------------|------------------------|
 | **Run ranking & AI check** | `ranking-ai-refresh` | `window.loadRankingAiData(true)` | Runs full Ranking & AI scan | DataForSEO SERP API, creates `combinedRows`, stores in Supabase `keyword_rankings` table |
-| **Refresh GSC Data** | `ranking-gsc-refresh` | `window.refreshRankingAiGscData()` | Refreshes CTR & Impressions from GSC | GSC API (query-level data), updates `combinedRows` with GSC metrics |
+| **Refresh GSC Data** | `ranking-gsc-refresh` | `window.refreshGSCDataOnly()` | Refreshes CTR & Impressions from GSC | GSC API (queryTotals), saves updated `searchData` to Supabase and localStorage |
 | **Edit Keywords** | `edit-keywords-btn` | Opens modal | Opens keyword editing modal | Loads keywords from API, saves via `/api/keywords/save` |
 | **Run Domain Strength Snapshot** | `domain-strength-run-btn` | `window.runDomainStrengthSnapshot()` | Runs Domain Strength snapshot | DataForSEO Labs API, calculates strength score |
 | **Track** (Keyword table rows) | `ranking-track-btn-{keyword}` | `window.openTrackKeywordModal()` | Creates optimisation task for keyword | Opens modal, creates task |
 | **Manage** (Keyword table rows) | `ranking-manage-btn-{keyword}` | `window.openOptimisationTaskDrawer()` | Opens task details for keyword | Loads task data from API |
-| **Backfill Domain Ranks** | `backfill-domain-ranks-btn` | `backfillMissingDomainRanks()` | Backfills missing domain ranks | Calls `/api/domain-strength/backfill` |
+| **Backfill Missing Ranks** | `backfill-domain-ranks-btn` | `backfillMissingDomainRanks()` | Backfills missing domain ranks | Calls `/api/domain-strength/backfill` |
 
 ### Notes
 - **Run ranking & AI check** is the primary data collection for keyword-level ranking and AI data
@@ -187,6 +187,7 @@ This document catalogs all update/refresh/scan/audit buttons and their associate
 | Button/Label | Element ID | Function Called | What It Does | Data Fetched/Calculated |
 |--------------|------------|-----------------|--------------|------------------------|
 | **Update All Tasks with Latest Data** | `optimisation-bulk-update-btn` | `window.bulkUpdateAllTasks()` | Updates all active tasks with latest metrics | Fetches latest audit from Supabase, uses `combinedRows` for keyword tasks, uses `computeAiMetricsForPageUrl()` for URL tasks |
+| **⚠ Rebaseline Incomplete Baselines** | `optimisation-bulk-rebaseline-btn` | `window.bulkRebaselineIncompleteBaselines()` | Rebaseline tasks missing baseline fields | Fetches latest audit + ranking data, rebuilds missing baseline + latest measurement |
 | **Needs Update** | `optimisation-filter-needs-update` | Filter function | Filters tasks needing measurement update | None (filter only) |
 | **Active Cycle Only** | `optimisation-filter-active-cycle` | Filter function | Filters to active cycles only | None (filter only) |
 | **Overdue Cycle** | `optimisation-filter-overdue-cycle` | Filter function | Filters to overdue cycles | None (filter only) |
@@ -294,7 +295,7 @@ This document catalogs all update/refresh/scan/audit buttons and their associate
 
 ### Primary Data Collection Processes
 
-1. **Run Audit Scan** → Creates `queryTotals` (GSC data), stores in Supabase `audit_results`
+1. **GSC & Backlink Audit** → Creates `queryTotals` (GSC data), stores in Supabase `audit_results`
 2. **Run Ranking & AI Scan** → Creates `combinedRows` (ranking + AI data), stores in Supabase `keyword_rankings` and `audit_results.ranking_ai_data`
 3. **Run Money Pages Scan** → Refreshes from latest audit, extracts Money Pages metrics
 
@@ -343,7 +344,7 @@ After deploying the URL Task AI Citations fix, test these buttons:
 
 ### Important (Should Test)
 - [ ] **Run Ranking & AI Scan** - Verify `combinedRows` includes `ai_alan_citations` arrays
-- [ ] **Run Audit Scan** - Verify doesn't break existing functionality
+- [ ] **GSC & Backlink Audit** - Verify doesn't break existing functionality
 - [ ] **Run All Audits & Updates** - Verify end-to-end flow works
 
 ### Nice to Have
@@ -359,7 +360,7 @@ After deploying the URL Task AI Citations fix, test these buttons:
 
 ---
 
-**Last Updated**: 2026-01-07  
+**Last Updated**: 2026-01-18  
 **Related Documents**: 
 - `FIX-PLAN-COMPREHENSIVE.md` - Overall fix plan
 - `URL-TASK-AI-CITATIONS-FIX-ANALYSIS.md` - Impact analysis for Fix 0
