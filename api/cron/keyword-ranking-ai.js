@@ -40,7 +40,7 @@ const splitIntoBatches = (keywords, size) => {
   return batches;
 };
 
-const runBatches = async (items, batchSize, handler, concurrency = 2) => {
+const runBatches = async (items, batchSize, handler, concurrency = 4) => {
   const batches = splitIntoBatches(items, batchSize);
   const results = [];
   let index = 0;
@@ -70,7 +70,8 @@ const fetchSerpRows = async (baseUrl, keywords) => runBatches(
       `${baseUrl}/api/aigeo/serp-rank-test?keywords=${encodeURIComponent(batch.join(','))}`
     );
     return Array.isArray(serpResp?.per_keyword) ? serpResp.per_keyword : [];
-  }
+  },
+  4
 );
 
 const fetchAiRows = async (baseUrl, keywords) => runBatches(
@@ -83,7 +84,8 @@ const fetchAiRows = async (baseUrl, keywords) => runBatches(
       body: JSON.stringify({ queries: batch })
     });
     return Array.isArray(aiResp?.per_query) ? aiResp.per_query : [];
-  }
+  },
+  4
 );
 
 const buildCombinedRows = (serpRows, aiRows) => {
