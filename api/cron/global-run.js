@@ -43,6 +43,7 @@ export default async function handler(req, res) {
   }
 
   const propertyUrl = req.query.propertyUrl || process.env.CRON_PROPERTY_URL || 'https://www.alanranger.com';
+  const forceRun = req.query.force === '1' || req.query.force === 'true';
   const fallbackBaseUrl = req.headers.host
     ? `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}`
     : 'http://localhost:3000';
@@ -83,7 +84,7 @@ export default async function handler(req, res) {
     const scheduleResp = await fetchJson(`${baseUrl}/api/supabase/get-cron-schedule?jobKey=global_run`);
     schedule = scheduleResp?.data?.jobs?.global_run || schedule;
 
-    if (!shouldRunNow(schedule)) {
+    if (!forceRun && !shouldRunNow(schedule)) {
       return sendJson(res, 200, {
         status: 'skipped',
         message: 'Schedule not due.',
@@ -98,13 +99,15 @@ export default async function handler(req, res) {
 
     const syncResult = await fetchJson(`${baseUrl}/api/sync-csv`, { method: 'GET', headers });
 
+    const gscForce = forceRun ? '&force=1' : '';
     const gscResult = await fetchJson(
-      `${baseUrl}/api/cron/daily-gsc-backlink?propertyUrl=${encodeURIComponent(propertyUrl)}`,
+      `${baseUrl}/api/cron/daily-gsc-backlink?propertyUrl=${encodeURIComponent(propertyUrl)}${gscForce}`,
       { method: 'GET', headers }
     );
 
+    const rankingForce = forceRun ? '&force=1' : '';
     const rankingResult = await fetchJson(
-      `${baseUrl}/api/cron/keyword-ranking-ai?propertyUrl=${encodeURIComponent(propertyUrl)}`,
+      `${baseUrl}/api/cron/keyword-ranking-ai?propertyUrl=${encodeURIComponent(propertyUrl)}${rankingForce}`,
       { method: 'GET', headers }
     );
 

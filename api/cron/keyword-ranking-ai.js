@@ -205,6 +205,8 @@ export default async function handler(req, res) {
     });
   }
 
+  const forceRun = req.query.force === '1' || req.query.force === 'true';
+
   try {
     const propertyUrl = req.query.propertyUrl || process.env.CRON_PROPERTY_URL || 'https://www.alanranger.com';
     const fallbackBaseUrl = req.headers.host
@@ -215,7 +217,7 @@ export default async function handler(req, res) {
 
     const schedule = await getSchedule(baseUrl);
 
-    if (!shouldRunNow(schedule)) {
+    if (!forceRun && !shouldRunNow(schedule)) {
       return sendJson(res, 200, {
         status: 'skipped',
         message: 'Schedule not due.',
