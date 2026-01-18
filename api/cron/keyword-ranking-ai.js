@@ -291,7 +291,7 @@ export default async function handler(req, res) {
     const summary = buildSummary(combinedRows);
     const keywordRows = buildKeywordRows(combinedRows, auditDate, propertyUrl);
 
-    await saveKeywordBatch(baseUrl, { propertyUrl, auditDate, keywords: keywordRows });
+    await saveKeywordBatch(baseUrl, { propertyUrl, auditDate, keywordRows });
     await upsertAuditResults({
       property_url: propertyUrl,
       audit_date: auditDate,
