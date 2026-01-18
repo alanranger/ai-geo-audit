@@ -196,7 +196,8 @@ export default async function handler(req, res) {
 
   const cronSecret = process.env.CRON_SECRET;
   const requestSecret = req.headers['x-cron-secret'] || req.query.secret;
-  if (cronSecret && requestSecret !== cronSecret) {
+  const isVercelCron = req.headers['x-vercel-cron'] === '1';
+  if (cronSecret && !isVercelCron && requestSecret !== cronSecret) {
     return sendJson(res, 401, {
       status: 'error',
       message: 'Unauthorized cron request',
