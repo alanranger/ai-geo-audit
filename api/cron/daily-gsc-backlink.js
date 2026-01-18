@@ -108,6 +108,7 @@ export default async function handler(req, res) {
       schemaAudit: audit.schemaAudit,
       localSignals: audit.localSignals,
       backlinkMetrics: audit.backlinkMetrics || null,
+      moneyPagesMetrics: audit.moneyPagesMetrics || null,
       moneyPagesSummary: audit.moneyPagesSummary,
       moneySegmentMetrics: audit.moneySegmentMetrics,
       moneyPagePriorityData: audit.moneyPagePriorityData
