@@ -28,6 +28,7 @@ export default async function handler(req, res) {
   }
 
   const propertyUrl = req.query.propertyUrl || process.env.CRON_PROPERTY_URL || 'https://www.alanranger.com';
+  const forceRun = req.query.force === '1' || req.query.force === 'true';
   const fallbackBaseUrl = req.headers.host
     ? `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}`
     : 'http://localhost:3000';
@@ -84,7 +85,7 @@ export default async function handler(req, res) {
     const scheduleResp = await fetchJson(`${baseUrl}/api/supabase/get-cron-schedule?jobKey=gsc_backlinks`);
     schedule = scheduleResp?.data?.jobs?.gsc_backlinks || schedule;
 
-    if (!shouldRunNow(schedule)) {
+    if (!forceRun && !shouldRunNow(schedule)) {
       return res.status(200).json({
         status: 'skipped',
         message: 'Schedule not due.',
