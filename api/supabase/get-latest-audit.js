@@ -31,9 +31,10 @@ export default async function handler(req, res) {
     console.log('[get-latest-audit] Method:', req.method);
     console.log('[get-latest-audit] Query:', JSON.stringify(req.query));
     
-    const { propertyUrl, minimal, includePartial } = req.query;
+    const { propertyUrl, minimal, includePartial, preferRecent } = req.query;
     const isMinimalRequest = minimal === 'true';
     const includePartialAudits = includePartial === 'true';
+    const preferRecentAudits = preferRecent === 'true';
 
     if (!propertyUrl) {
       console.log('[get-latest-audit] Missing propertyUrl parameter');
@@ -98,12 +99,15 @@ export default async function handler(req, res) {
     try {
       // Prefer latest *complete* audit (schema_pages_detail present) to avoid
       // treating "refresh/partial" rows as a full audit run.
+      // If preferRecent is true, skip schema detail filtering and return the most recent row.
       const buildQueryUrl = (candidateUrl, includeSchemaDetailFilter) => {
         const base = `${supabaseUrl}/rest/v1/audit_results?property_url=eq.${encodeURIComponent(candidateUrl)}&order=audit_date.desc&limit=1`;
         // If includePartial is true, don't filter by is_partial (include both partial and complete audits)
         // Otherwise, only return complete audits (is_partial=eq.false)
         const partialFilter = includePartialAudits ? '' : '&is_partial=eq.false';
-        const schemaFilter = includeSchemaDetailFilter ? `&schema_pages_detail=not.is.null${partialFilter}` : partialFilter;
+        const schemaFilter = (includeSchemaDetailFilter && !preferRecentAudits)
+          ? `&schema_pages_detail=not.is.null${partialFilter}`
+          : partialFilter;
         if (isMinimalRequest) {
           const selectFields = 'audit_date,updated_at,visibility_score,content_schema_score,authority_score,local_entity_score,service_area_score';
           return `${base}${schemaFilter}&select=${encodeURIComponent(selectFields)}`;
