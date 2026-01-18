@@ -24,9 +24,10 @@ export default async function handler(req, res) {
   }
 
   const propertyUrl = req.query.propertyUrl || process.env.CRON_PROPERTY_URL || 'https://www.alanranger.com';
-  const baseUrl = req.headers.host
+  const fallbackBaseUrl = req.headers.host
     ? `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}`
     : 'http://localhost:3000';
+  const baseUrl = process.env.CRON_BASE_URL || process.env.NEXT_PUBLIC_SITE_URL || fallbackBaseUrl;
 
   const fetchJson = async (url, options) => {
     const response = await fetch(url, options);
