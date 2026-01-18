@@ -1,7 +1,7 @@
 import { classifyKeywordSegment } from '../../lib/segment/classifyKeywordSegment.js';
 import { computeNextRunAt, shouldRunNow } from '../../lib/cron/schedule.js';
 
-export const config = { runtime: 'nodejs' };
+export const config = { runtime: 'nodejs', maxDuration: 300 };
 
 const sendJson = (res, status, body) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -40,27 +40,51 @@ const splitIntoBatches = (keywords, size) => {
   return batches;
 };
 
-const fetchSerpRows = async (baseUrl, keywords) => {
-  const serpRows = [];
-  for (const batch of splitIntoBatches(keywords, 20)) {
-    const serpResp = await fetchJson(`${baseUrl}/api/aigeo/serp-rank-test?keywords=${encodeURIComponent(batch.join(','))}`);
-    if (Array.isArray(serpResp?.per_keyword)) serpRows.push(...serpResp.per_keyword);
-  }
-  return serpRows;
+const runBatches = async (items, batchSize, handler, concurrency = 2) => {
+  const batches = splitIntoBatches(items, batchSize);
+  const results = [];
+  let index = 0;
+  const workerCount = Math.max(1, Math.min(concurrency, batches.length));
+
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (index < batches.length) {
+      const currentIndex = index;
+      index += 1;
+      const batch = batches[currentIndex];
+      const batchResult = await handler(batch);
+      if (Array.isArray(batchResult) && batchResult.length > 0) {
+        results.push(...batchResult);
+      }
+    }
+  });
+
+  await Promise.all(workers);
+  return results;
 };
 
-const fetchAiRows = async (baseUrl, keywords) => {
-  const aiRows = [];
-  for (const batch of splitIntoBatches(keywords, 10)) {
+const fetchSerpRows = async (baseUrl, keywords) => runBatches(
+  keywords,
+  20,
+  async (batch) => {
+    const serpResp = await fetchJson(
+      `${baseUrl}/api/aigeo/serp-rank-test?keywords=${encodeURIComponent(batch.join(','))}`
+    );
+    return Array.isArray(serpResp?.per_keyword) ? serpResp.per_keyword : [];
+  }
+);
+
+const fetchAiRows = async (baseUrl, keywords) => runBatches(
+  keywords,
+  10,
+  async (batch) => {
     const aiResp = await fetchJson(`${baseUrl}/api/aigeo/ai-mode-serp-batch-test`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ queries: batch })
     });
-    if (Array.isArray(aiResp?.per_query)) aiRows.push(...aiResp.per_query);
+    return Array.isArray(aiResp?.per_query) ? aiResp.per_query : [];
   }
-  return aiRows;
-};
+);
 
 const buildCombinedRows = (serpRows, aiRows) => {
   const aiMap = new Map(aiRows.map(row => [normalizeKeyword(row?.query), row]));

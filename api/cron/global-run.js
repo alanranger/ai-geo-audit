@@ -1,6 +1,6 @@
 import { computeNextRunAt, shouldRunNow } from '../../lib/cron/schedule.js';
 
-export const config = { runtime: 'nodejs' };
+export const config = { runtime: 'nodejs', maxDuration: 300 };
 
 const sendJson = (res, status, body) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -100,34 +100,40 @@ export default async function handler(req, res) {
     const syncResult = await fetchJson(`${baseUrl}/api/sync-csv`, { method: 'GET', headers });
 
     const gscForce = forceRun ? '&force=1' : '';
-    const gscResult = await fetchJson(
-      `${baseUrl}/api/cron/daily-gsc-backlink?propertyUrl=${encodeURIComponent(propertyUrl)}${gscForce}`,
-      { method: 'GET', headers }
-    );
-
     const rankingForce = forceRun ? '&force=1' : '';
-    const rankingResult = await fetchJson(
-      `${baseUrl}/api/cron/keyword-ranking-ai?propertyUrl=${encodeURIComponent(propertyUrl)}${rankingForce}`,
-      { method: 'GET', headers }
-    );
-
-    const domainStrengthResult = await fetchJson(
-      `${baseUrl}/api/domain-strength/snapshot`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'run', includePending: true })
-      }
-    );
 
     const bulkHeaders = {
       'Content-Type': 'application/json',
       ...(cronSecret ? { 'x-cron-secret': cronSecret } : {})
     };
-    const bulkUpdateResult = await fetchJson(
-      `${baseUrl}/api/optimisation/bulk-update?propertyUrl=${encodeURIComponent(propertyUrl)}`,
-      { method: 'POST', headers: bulkHeaders }
-    );
+
+    const [
+      gscResult,
+      rankingResult,
+      domainStrengthResult,
+      bulkUpdateResult
+    ] = await Promise.all([
+      fetchJson(
+        `${baseUrl}/api/cron/daily-gsc-backlink?propertyUrl=${encodeURIComponent(propertyUrl)}${gscForce}`,
+        { method: 'GET', headers }
+      ),
+      fetchJson(
+        `${baseUrl}/api/cron/keyword-ranking-ai?propertyUrl=${encodeURIComponent(propertyUrl)}${rankingForce}`,
+        { method: 'GET', headers }
+      ),
+      fetchJson(
+        `${baseUrl}/api/domain-strength/snapshot`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: 'run', includePending: true })
+        }
+      ),
+      fetchJson(
+        `${baseUrl}/api/optimisation/bulk-update?propertyUrl=${encodeURIComponent(propertyUrl)}`,
+        { method: 'POST', headers: bulkHeaders }
+      )
+    ]);
 
     await updateScheduleStatus('ok');
 
