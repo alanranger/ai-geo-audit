@@ -30915,8 +30915,9 @@
         }
       }
 
-      // Align authority/visibility to latest GSC series (or segment total) to prevent flips.
-      applyLatestPillarOverrides(scores);
+      // Align authority/visibility to latest GSC series (or segment total) and keep stable per audit.
+      const auditKey = saved?.auditDate || saved?.audit_date || saved?.timestamp || null;
+      applyStablePillarOverrides(scores, auditKey);
       
       // DEBUG: Log currentLocalSignals structure
       if (currentLocalSignals) {
@@ -57865,6 +57866,44 @@ Final Score: ${score}/100`;
         if (typeof visibilityOverride === 'number') {
           scoresObj.visibility = visibilityOverride;
         }
+      }
+
+      function applyStablePillarOverrides(scoresObj, auditKey) {
+        if (!scoresObj) return;
+        const lock = window.__pillarScoreLock;
+        if (lock && lock.key && lock.key === auditKey && lock.values) {
+          const auth = lock.values.authority;
+          const vis = lock.values.visibility;
+          if (typeof auth === 'number') {
+            if (typeof scoresObj.authority === 'object' && scoresObj.authority !== null) {
+              scoresObj.authority.score = auth;
+              if (scoresObj.authority.bySegment?.all) {
+                scoresObj.authority.bySegment.all.total = auth;
+                if (typeof scoresObj.authority.bySegment.all.score === 'number') {
+                  scoresObj.authority.bySegment.all.score = auth;
+                }
+              }
+            } else {
+              scoresObj.authority = auth;
+            }
+          }
+          if (typeof vis === 'number') {
+            scoresObj.visibility = vis;
+          }
+          return;
+        }
+
+        applyLatestPillarOverrides(scoresObj);
+        const authorityScore = (typeof scoresObj.authority === 'object' && scoresObj.authority !== null)
+          ? scoresObj.authority.score
+          : scoresObj.authority;
+        window.__pillarScoreLock = {
+          key: auditKey || null,
+          values: {
+            authority: toNum(authorityScore),
+            visibility: toNum(scoresObj.visibility)
+          }
+        };
       }
 
       const dashboardRadarLabelPlugin = {
