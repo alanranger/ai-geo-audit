@@ -57873,9 +57873,13 @@ Final Score: ${score}/100`;
             const angle = (typeof scale.getIndexAngle === 'function')
               ? scale.getIndexAngle(i)
               : ((Math.PI * 2) / count) * i - (Math.PI / 2);
-            const radius = (scale.drawingArea || 0) + padding;
-            const x = (scale.xCenter || 0) + Math.cos(angle) * radius;
-            const y = (scale.yCenter || 0) + Math.sin(angle) * radius;
+            const point = (typeof scale.getPointPositionForValue === 'function')
+              ? scale.getPointPositionForValue(i, scale.max || 100)
+              : null;
+            const baseX = point ? point.x : (scale.xCenter || 0) + Math.cos(angle) * (scale.drawingArea || 0);
+            const baseY = point ? point.y : (scale.yCenter || 0) + Math.sin(angle) * (scale.drawingArea || 0);
+            const x = baseX + Math.cos(angle) * padding;
+            const y = baseY + Math.sin(angle) * padding;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.font = '600 11px system-ui, -apple-system, Segoe UI, sans-serif';
