@@ -57864,22 +57864,46 @@ Final Score: ${score}/100`;
           const scale = chart?.scales?.r;
           if (!scale || labels.length === 0) return;
           const lineGap = typeof opts.lineGap === 'number' ? opts.lineGap : 12;
+          const deltaGap = typeof opts.deltaGap === 'number' ? opts.deltaGap : 10;
+          const labelPadding = typeof opts.labelPadding === 'number' ? opts.labelPadding : 8;
           const ctx = chart.ctx;
           ctx.save();
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
           for (let i = 0; i < labels.length; i += 1) {
+            const label = labels[i] || '';
             const deltaRaw = deltas[i];
             const deltaText = (deltaRaw == null || deltaRaw === '') ? '—' : String(deltaRaw);
             const pos = (typeof scale.getPointLabelPosition === 'function')
               ? scale.getPointLabelPosition(i)
               : null;
             if (!pos) continue;
+            const angle = Math.atan2(pos.y - (scale.yCenter || 0), pos.x - (scale.xCenter || 0));
+            const x = pos.x + Math.cos(angle) * labelPadding;
+            const y = pos.y + Math.sin(angle) * labelPadding;
+
+            const labelLines = (() => {
+              if (label.includes(' / ')) {
+                const parts = label.split(' / ').filter(Boolean);
+                if (parts.length >= 2) return [parts[0], parts.slice(1).join(' / ')];
+              }
+              const words = label.split(' ').filter(Boolean);
+              if (words.length === 2) return words;
+              return [label];
+            })();
+
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.font = '600 11px system-ui, -apple-system, Segoe UI, sans-serif';
+            ctx.fillStyle = 'rgba(226,232,240,0.9)';
+            const startY = y - ((labelLines.length - 1) * lineGap) / 2;
+            for (let j = 0; j < labelLines.length; j += 1) {
+              ctx.fillText(labelLines[j], x, startY + (j * lineGap));
+            }
+
             ctx.font = '700 10px system-ui, -apple-system, Segoe UI, sans-serif';
             ctx.fillStyle = (deltaRaw === '—' || deltaRaw == null || deltaRaw === '')
               ? 'rgba(226,232,240,0.6)'
               : (deltaColors[i] || 'rgba(226,232,240,0.9)');
-            ctx.fillText(deltaText, pos.x, pos.y + lineGap);
+            ctx.fillText(deltaText, x, startY + (labelLines.length * lineGap) + deltaGap);
           }
           ctx.restore();
         }
@@ -58790,7 +58814,9 @@ Final Score: ${score}/100`;
                   labels,
                   deltaTexts: labelDeltas,
                   deltaColors: labelColors,
-                  lineGap: 12
+                  lineGap: 12,
+                  deltaGap: 8,
+                  labelPadding: 10
                 }
               },
               scales: {
@@ -58800,12 +58826,7 @@ Final Score: ${score}/100`;
                   ticks: { display: false },
                   grid: { color: 'rgba(148, 163, 184, 0.20)' },
                   angleLines: { color: 'rgba(148, 163, 184, 0.20)' },
-                  pointLabels: {
-                    display: true,
-                    color: 'rgba(226,232,240,0.9)',
-                    font: { size: 11, weight: '700' },
-                    padding: 30
-                  }
+                  pointLabels: { display: false }
                 }
               }
             },
@@ -58950,7 +58971,9 @@ Final Score: ${score}/100`;
                   labels,
                   deltaTexts: labelDeltas,
                   deltaColors: labelColors,
-                  lineGap: 12
+                  lineGap: 12,
+                  deltaGap: 8,
+                  labelPadding: 10
                 }
               },
               scales: {
@@ -58961,12 +58984,7 @@ Final Score: ${score}/100`;
                   ticks: { display: false },
                   grid: { color: 'rgba(148,163,184,0.25)' },
                   angleLines: { color: 'rgba(148,163,184,0.25)' },
-                  pointLabels: {
-                    display: true,
-                    color: 'rgba(226,232,240,0.9)',
-                    font: { size: 11, weight: '600' },
-                    padding: 30
-                  }
+                  pointLabels: { display: false }
                 }
               }
             },
@@ -59067,7 +59085,9 @@ Final Score: ${score}/100`;
                   labels,
                   deltaTexts: labelDeltas,
                   deltaColors: labelColors,
-                  lineGap: 12
+                  lineGap: 12,
+                  deltaGap: 8,
+                  labelPadding: 10
                 }
               },
               scales: {
@@ -59078,12 +59098,7 @@ Final Score: ${score}/100`;
                   ticks: { display: false },
                   grid: { color: 'rgba(148,163,184,0.25)' },
                   angleLines: { color: 'rgba(148,163,184,0.25)' },
-                  pointLabels: {
-                    display: true,
-                    color: 'rgba(226,232,240,0.9)',
-                    font: { size: 11, weight: '600' },
-                    padding: 30
-                  }
+                  pointLabels: { display: false }
                 }
               }
             },
@@ -59396,7 +59411,9 @@ Final Score: ${score}/100`;
                   labels,
                   deltaTexts: labelDeltas,
                   deltaColors: labelColors,
-                  lineGap: 12
+                  lineGap: 12,
+                  deltaGap: 8,
+                  labelPadding: 10
                 }
               },
               scales: {
@@ -59407,12 +59424,7 @@ Final Score: ${score}/100`;
                   ticks: { display: false },
                   grid: { color: 'rgba(148,163,184,0.25)' },
                   angleLines: { color: 'rgba(148,163,184,0.25)' },
-                  pointLabels: {
-                    display: true,
-                    color: 'rgba(226,232,240,0.9)',
-                    font: { size: 11, weight: '600' },
-                    padding: 30
-                  }
+                  pointLabels: { display: false }
                 }
               }
             },
