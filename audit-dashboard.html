@@ -1723,6 +1723,9 @@
       font-weight: 700;
       color: var(--dark-text-muted);
     }
+    section[data-panel="dashboard"] .dashboard-dial-delta[data-dir="up"] { color: #10b981; }
+    section[data-panel="dashboard"] .dashboard-dial-delta[data-dir="down"] { color: #ef4444; }
+    section[data-panel="dashboard"] .dashboard-dial-delta[data-dir="flat"] { color: rgba(148, 163, 184, 0.95); }
 
     /* Dashboard: mini visuals under dials */
     section[data-panel="dashboard"] .dashboard-mini-gauge {
@@ -57823,6 +57826,25 @@ Final Score: ${score}/100`;
         return pp ? `${sign}${base}pp` : `${sign}${base}`;
       }
 
+      function formatDeltaLabel(label, curr, prev, { decimals = 0, pp = false, betterLower = false } = {}) {
+        const deltaText = formatDeltaNumber(curr, prev, { decimals, pp, betterLower });
+        if (deltaText === '—') return label;
+        return `${label} (${deltaText})`;
+      }
+
+      function setDialDeltaDir(dialEl, curr, prev, { betterLower = false } = {}) {
+        if (!dialEl) return;
+        const deltaEl = dialEl.querySelector('[data-field="delta"]');
+        if (!deltaEl) return;
+        const dir = deltaDir(curr, prev, { betterLower });
+        deltaEl.setAttribute('data-dir', dir);
+      }
+
+      function clearDeltaBreakdown(hostId) {
+        const host = document.getElementById(hostId);
+        if (host) host.innerHTML = '';
+      }
+
       function renderDeltaBreakdown(hostId, items, { title = 'Change drivers' } = {}) {
         const host = document.getElementById(hostId);
         if (!host) return;
@@ -58675,7 +58697,7 @@ Final Score: ${score}/100`;
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        const labels = items.map(i => i.label);
+        const labels = items.map(i => formatDeltaLabel(i.label, i.score, i.prevScore));
         const values = items.map(i => (toNum(i.score) ?? 0));
 
         try {
@@ -58800,14 +58822,20 @@ Final Score: ${score}/100`;
         }
       }
 
-      function renderDashboardEeatRadar(eeatSubscores) {
+      function renderDashboardEeatRadar(eeatSubscores, prevSubscores) {
         const canvas = document.getElementById('dashboard-eeat-radar');
         if (!canvas || typeof Chart === 'undefined') return;
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
         const s = eeatSubscores || {};
-        const labels = ['Experience', 'Expertise', 'Authoritativeness', 'Trustworthiness'];
+        const prev = prevSubscores || {};
+        const labels = [
+          formatDeltaLabel('Experience', s.experience, prev.experience),
+          formatDeltaLabel('Expertise', s.expertise, prev.expertise),
+          formatDeltaLabel('Authoritativeness', s.authoritativeness, prev.authoritativeness),
+          formatDeltaLabel('Trustworthiness', s.trustworthiness, prev.trustworthiness)
+        ];
         const values = [
           toNum(s.experience) ?? 0,
           toNum(s.expertise) ?? 0,
@@ -58864,7 +58892,7 @@ Final Score: ${score}/100`;
         }
       }
 
-      function renderDashboardAiSummaryRadar(aiSummaryComponents) {
+      function renderDashboardAiSummaryRadar(aiSummaryComponents, prevComponents) {
         const canvas = document.getElementById('dashboard-ai-summary-radar');
         if (!canvas) {
           console.warn('[Dashboard] AI Summary radar canvas not found');
@@ -58875,7 +58903,7 @@ Final Score: ${score}/100`;
           // Retry after a short delay if Chart.js loads
           setTimeout(() => {
             if (typeof Chart !== 'undefined') {
-              renderDashboardAiSummaryRadar(aiSummaryComponents);
+              renderDashboardAiSummaryRadar(aiSummaryComponents, prevComponents);
             }
           }, 500);
           return;
@@ -58895,7 +58923,12 @@ Final Score: ${score}/100`;
         window.__dashboardAiSummaryRadarLastRender = now;
 
         const c = aiSummaryComponents || {};
-        const labels = ['Snippet Readiness', 'Visibility', 'Brand'];
+        const prev = prevComponents || {};
+        const labels = [
+          formatDeltaLabel('Snippet Readiness', c.snippetReadiness, prev.snippetReadiness),
+          formatDeltaLabel('Visibility', c.visibility, prev.visibility),
+          formatDeltaLabel('Brand', c.brand, prev.brand)
+        ];
         const values = [
           toNum(c.snippetReadiness) ?? 0,
           toNum(c.visibility) ?? 0,
@@ -58957,7 +58990,7 @@ Final Score: ${score}/100`;
         }
       }
 
-      function renderDashboardUpliftChart(moneyPagesRows, targetCtr) {
+      function renderDashboardUpliftChart(moneyPagesRows, targetCtr, prevRows) {
         const canvas = document.getElementById('dashboard-uplift-chart');
         if (!canvas) {
           console.warn('[Dashboard] Uplift chart canvas not found');
@@ -58968,7 +59001,7 @@ Final Score: ${score}/100`;
           // Retry after a short delay if Chart.js loads
           setTimeout(() => {
             if (typeof Chart !== 'undefined') {
-              renderDashboardUpliftChart(moneyPagesRows, targetCtr);
+              renderDashboardUpliftChart(moneyPagesRows, targetCtr, prevRows);
             }
           }, 500);
           return;
@@ -58994,6 +59027,13 @@ Final Score: ${score}/100`;
 
         const targetCtrPct = targetCtr || 2.5;
         const targetCtrRatio = targetCtrPct / 100;
+        const prevByUrl = new Map();
+        if (Array.isArray(prevRows)) {
+          for (const row of prevRows) {
+            const key = String(row?.url || row?.page_url || '').toLowerCase();
+            if (key) prevByUrl.set(key, row);
+          }
+        }
 
         // Calculate potential extra clicks for each page
         const pagesWithUplift = moneyPagesRows
@@ -59002,11 +59042,22 @@ Final Score: ${score}/100`;
             const impressions = toNum(row.impressions || row.impressions_28d) || 0;
             const currentCtr = impressions > 0 ? clicks / impressions : 0;
             const potentialClicks = impressions > 0 ? Math.max(0, Math.round(impressions * targetCtrRatio - clicks)) : 0;
+            const urlKey = String(row.url || row.page_url || '').toLowerCase();
+            const prevRow = prevByUrl.get(urlKey) || null;
+            const prevClicks = prevRow ? (toNum(prevRow.clicks || prevRow.clicks_28d) || 0) : null;
+            const prevImpressions = prevRow ? (toNum(prevRow.impressions || prevRow.impressions_28d) || 0) : null;
+            const prevCtr = (prevImpressions && prevImpressions > 0) ? (prevClicks / prevImpressions) : null;
+            const currentCtrPct = currentCtr * 100;
+            const prevCtrPct = prevCtr == null ? null : (prevCtr * 100);
+            const deltaCtr = formatDeltaNumber(currentCtrPct, prevCtrPct, { decimals: 1, pp: true });
             return {
               url: row.url || row.page_url || 'Unknown',
               potentialClicks,
               currentClicks: clicks,
-              impressions
+              impressions,
+              currentCtrPct,
+              prevCtrPct,
+              deltaCtr
             };
           })
           .filter(p => p.potentialClicks > 0)
@@ -59048,7 +59099,10 @@ Final Score: ${score}/100`;
             url = '/';
           }
           // Truncate if too long
-          return url.length > 30 ? url.substring(0, 27) + '...' : url;
+          const base = url.length > 30 ? url.substring(0, 27) + '...' : url;
+          const ctrText = formatPct(p.currentCtrPct, 1);
+          const deltaText = (p.deltaCtr && p.deltaCtr !== '—') ? `Δ ${p.deltaCtr}` : 'Δ —';
+          return `${base} (${ctrText} | ${deltaText})`;
         });
         const data = pagesWithUplift.map(p => p.potentialClicks);
 
@@ -59086,12 +59140,14 @@ Final Score: ${score}/100`;
                 legend: { display: false },
                 tooltip: {
                   callbacks: {
-                    label: function(context) {
+                label: function(context) {
                       const idx = context.dataIndex;
                       const page = pagesWithUplift[idx];
                       return [
                         `Potential: +${page.potentialClicks} clicks`,
-                        `Current: ${page.currentClicks} clicks`,
+                    `Current CTR: ${formatPct(page.currentCtrPct, 1)}`,
+                    `CTR change: ${page.deltaCtr}`,
+                    `Current: ${page.currentClicks} clicks`,
                         `Impressions: ${formatInt(page.impressions)}`
                       ];
                     }
@@ -59122,7 +59178,7 @@ Final Score: ${score}/100`;
         }
       }
 
-      function renderDashboardMoneyShareRadar(moneyShareSplit) {
+      function renderDashboardMoneyShareRadar(moneyShareSplit, prevSplit) {
         const canvas = document.getElementById('dashboard-money-share-radar');
         if (!canvas) {
           console.warn('[Dashboard] Money Share radar canvas not found');
@@ -59133,7 +59189,7 @@ Final Score: ${score}/100`;
           // Retry after a short delay if Chart.js loads
           setTimeout(() => {
             if (typeof Chart !== 'undefined') {
-              renderDashboardMoneyShareRadar(moneyShareSplit);
+              renderDashboardMoneyShareRadar(moneyShareSplit, prevSplit);
             }
           }, 500);
           return;
@@ -59145,7 +59201,12 @@ Final Score: ${score}/100`;
         }
 
         const s = moneyShareSplit || null;
-        const labels = ['Landing', 'Event', 'Service'];
+        const prev = prevSplit || {};
+        const labels = [
+          formatDeltaLabel('Landing', s?.landingPct, prev.landingPct, { pp: true }),
+          formatDeltaLabel('Event', s?.eventPct, prev.eventPct, { pp: true }),
+          formatDeltaLabel('Service', s?.productPct, prev.productPct, { pp: true })
+        ];
         const values = [
           toNum(s?.landingPct) ?? 0,
           toNum(s?.eventPct) ?? 0,
@@ -59737,14 +59798,9 @@ Final Score: ${score}/100`;
             rag,
             deltaText: deltaText
           });
+          setDialDeltaDir(document.getElementById('dashboard-dial-gaio'), v, prevGaio, { betterLower: false });
           updateDeltaIndicator('dashboard-delta-gaio', v, prevGaio, { betterLower: false, decimals: 0 });
-          renderDeltaBreakdown('dashboard-gaio-breakdown', [
-            { label: 'Authority', curr: metrics?.pillars?.authority, prev: prevMetrics?.pillars?.authority },
-            { label: 'Content / Schema', curr: metrics?.pillars?.contentSchema, prev: prevMetrics?.pillars?.contentSchema },
-            { label: 'Visibility', curr: metrics?.pillars?.visibility, prev: prevMetrics?.pillars?.visibility },
-            { label: 'Local Entity', curr: metrics?.pillars?.localEntity, prev: prevMetrics?.pillars?.localEntity },
-            { label: 'Service Area', curr: metrics?.pillars?.serviceArea, prev: prevMetrics?.pillars?.serviceArea }
-          ], { title: 'Pillar delta' });
+          clearDeltaBreakdown('dashboard-gaio-breakdown');
           renderDashboardGaioPillarsAndRadar(metrics?.pillars || null, prevMetrics?.pillars || null);
         }
 
@@ -59759,12 +59815,9 @@ Final Score: ${score}/100`;
             rag,
             deltaText: formatDelta(metrics?.aiSummaryScore, prevMetrics?.aiSummaryScore)
           });
+          setDialDeltaDir(document.getElementById('dashboard-dial-ai-summary'), v, prevMetrics?.aiSummaryScore ?? null, { betterLower: false });
           updateDeltaIndicator('dashboard-delta-ai-summary', v, prevMetrics?.aiSummaryScore ?? null, { betterLower: false, decimals: 0 });
-          renderDeltaBreakdown('dashboard-ai-summary-breakdown', [
-            { label: 'Snippet readiness', curr: metrics?.aiSummaryComponents?.snippetReadiness, prev: prevMetrics?.aiSummaryComponents?.snippetReadiness },
-            { label: 'Visibility', curr: metrics?.aiSummaryComponents?.visibility, prev: prevMetrics?.aiSummaryComponents?.visibility },
-            { label: 'Brand', curr: metrics?.aiSummaryComponents?.brand, prev: prevMetrics?.aiSummaryComponents?.brand }
-          ], { title: 'Component delta' });
+          clearDeltaBreakdown('dashboard-ai-summary-breakdown');
           const host = document.getElementById('dashboard-ai-summary-mini');
           if (host) {
             const markerLeft = (typeof p === 'number') ? Math.max(0, Math.min(100, Math.round(p))) : null;
@@ -59777,7 +59830,7 @@ Final Score: ${score}/100`;
             `;
           }
           // Render chart - always call, function will handle Chart.js check
-          renderDashboardAiSummaryRadar(metrics?.aiSummaryComponents || null);
+          renderDashboardAiSummaryRadar(metrics?.aiSummaryComponents || null, prevMetrics?.aiSummaryComponents || null);
         }
 
         // Dial: Money share
@@ -59795,15 +59848,9 @@ Final Score: ${score}/100`;
             rag,
             deltaText: formatDelta(metrics?.moneySharePct, prevMetrics?.moneySharePct)
           });
+          setDialDeltaDir(document.getElementById('dashboard-dial-money-share'), pct, prevMetrics?.moneySharePct ?? null, { betterLower: false });
           updateDeltaIndicator('dashboard-delta-money-share', pct, prevMetrics?.moneySharePct ?? null, { betterLower: false, decimals: 0, pp: true });
-          const nonMoney = (typeof total === 'number' && typeof money === 'number') ? (total - money) : null;
-          const prevMoney = prevMetrics?.moneyCitations ?? null;
-          const prevTotal = prevMetrics?.totalCitations ?? null;
-          const prevNonMoney = (typeof prevTotal === 'number' && typeof prevMoney === 'number') ? (prevTotal - prevMoney) : null;
-          renderDeltaBreakdown('dashboard-money-share-breakdown', [
-            { label: 'Money citations', curr: money, prev: prevMoney },
-            { label: 'Non-money citations', curr: nonMoney, prev: prevNonMoney }
-          ], { title: 'Citation delta' });
+          clearDeltaBreakdown('dashboard-money-share-breakdown');
           const host = document.getElementById('dashboard-money-share-mini');
           if (host) {
             const m = (typeof money === 'number') ? money : null;
@@ -59819,7 +59866,7 @@ Final Score: ${score}/100`;
             `;
           }
           // Render chart - always call, function will handle Chart.js check
-          renderDashboardMoneyShareRadar(metrics?.moneyShareSplit || null);
+          renderDashboardMoneyShareRadar(metrics?.moneyShareSplit || null, prevMetrics?.moneyShareSplit || null);
         }
 
         // Dial: Uplift remaining (Money Pages CTR target)
@@ -59842,12 +59889,9 @@ Final Score: ${score}/100`;
             rag,
             deltaText: (typeof extra === 'number' && typeof prevExtra === 'number') ? deltaText : '—'
           });
+          setDialDeltaDir(document.getElementById('dashboard-dial-uplift'), extra, prevExtra ?? null, { betterLower: true });
           updateDeltaIndicator('dashboard-delta-uplift', extra, prevExtra ?? null, { betterLower: true, decimals: 0 });
-          renderDeltaBreakdown('dashboard-uplift-breakdown', [
-            { label: 'CTR', curr: metrics?.moneyAgg?.ctrPct, prev: prevMetrics?.moneyAgg?.ctrPct, decimals: 1, pp: true },
-            { label: 'Clicks', curr: metrics?.moneyAgg?.clicks, prev: prevMetrics?.moneyAgg?.clicks },
-            { label: 'Impressions', curr: metrics?.moneyAgg?.impressions, prev: prevMetrics?.moneyAgg?.impressions }
-          ], { title: 'Money pages delta' });
+          clearDeltaBreakdown('dashboard-uplift-breakdown');
           const host = document.getElementById('dashboard-uplift-mini');
           if (host) {
             const markerLeft = (typeof progressPct === 'number') ? Math.max(0, Math.min(100, Math.round(progressPct))) : null;
@@ -59860,7 +59904,7 @@ Final Score: ${score}/100`;
             `;
           }
           // Render chart - always call, function will handle Chart.js check
-          renderDashboardUpliftChart(metrics?.moneyPagesRows || null, targetCtr);
+          renderDashboardUpliftChart(metrics?.moneyPagesRows || null, targetCtr, prevMetrics?.moneyPagesRows || null);
         }
 
         // Dial: EEAT (placeholder)
@@ -59874,13 +59918,9 @@ Final Score: ${score}/100`;
             rag,
             deltaText: formatDelta(metrics?.eeatScore, prevMetrics?.eeatScore)
           });
+          setDialDeltaDir(document.getElementById('dashboard-dial-eeat'), v, prevMetrics?.eeatScore ?? null, { betterLower: false });
           updateDeltaIndicator('dashboard-delta-eeat', v, prevMetrics?.eeatScore ?? null, { betterLower: false, decimals: 0 });
-          renderDeltaBreakdown('dashboard-eeat-breakdown', [
-            { label: 'Experience', curr: metrics?.eeatSubscores?.experience, prev: prevMetrics?.eeatSubscores?.experience },
-            { label: 'Expertise', curr: metrics?.eeatSubscores?.expertise, prev: prevMetrics?.eeatSubscores?.expertise },
-            { label: 'Authoritativeness', curr: metrics?.eeatSubscores?.authoritativeness, prev: prevMetrics?.eeatSubscores?.authoritativeness },
-            { label: 'Trustworthiness', curr: metrics?.eeatSubscores?.trustworthiness, prev: prevMetrics?.eeatSubscores?.trustworthiness }
-          ], { title: 'Subscore delta' });
+          clearDeltaBreakdown('dashboard-eeat-breakdown');
           const host = document.getElementById('dashboard-eeat-mini');
           if (host) {
             const c = metrics?.eeatConfidence || '—';
@@ -59900,7 +59940,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
               <div class="dashboard-mini-note">Confidence: <strong>${c}</strong> · E ${toNum(s.experience) ?? '—'} · Ex ${toNum(s.expertise) ?? '—'} · A ${toNum(s.authoritativeness) ?? '—'} · T ${toNum(s.trustworthiness) ?? '—'}</div>
             `;
           }
-          renderDashboardEeatRadar(metrics?.eeatSubscores || null);
+          renderDashboardEeatRadar(metrics?.eeatSubscores || null, prevMetrics?.eeatSubscores || null);
         }
 
         // Summary cards (use latest available data from localStorage/window)
