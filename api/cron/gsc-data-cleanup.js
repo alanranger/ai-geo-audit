@@ -3,6 +3,7 @@ export const config = { runtime: 'nodejs', maxDuration: 300 };
 import { createClient } from '@supabase/supabase-js';
 import pg from 'pg';
 import { computeNextRunAt, shouldRunNow } from '../../lib/cron/schedule.js';
+import { logCronEvent } from '../../lib/cron/logCron.js';
 
 const JOB_KEY = 'gsc_cleanup';
 const DEFAULT_SCHEDULE = { frequency: 'monthly', timeOfDay: '02:30' };
@@ -167,6 +168,7 @@ export default async function handler(req, res) {
 
   const baseUrl = resolveBaseUrl(req);
   const nowIso = new Date().toISOString();
+  const startedAt = Date.now();
   const forceRun = req.query.force === '1' || req.query.force === 'true';
   const propertyUrl = req.query.propertyUrl || null;
   let schedule = { ...DEFAULT_SCHEDULE };
@@ -204,6 +206,12 @@ export default async function handler(req, res) {
     }
 
     await updateScheduleStatus(baseUrl, schedule, nowIso, 'success');
+    await logCronEvent({
+      jobKey: 'gsc_cleanup',
+      status: 'success',
+      propertyUrl,
+      durationMs: Date.now() - startedAt
+    });
 
     return sendJson(res, 200, {
       status: 'ok',
@@ -216,6 +224,13 @@ export default async function handler(req, res) {
     });
   } catch (err) {
     await updateScheduleStatus(baseUrl, schedule, nowIso, 'error', err.message);
+    await logCronEvent({
+      jobKey: 'gsc_cleanup',
+      status: 'error',
+      propertyUrl,
+      durationMs: Date.now() - startedAt,
+      details: err.message
+    });
     return sendJson(res, 500, { status: 'error', message: err.message, meta: { generatedAt: nowIso } });
   }
 }

@@ -1,5 +1,6 @@
 import { classifyKeywordSegment } from '../../lib/segment/classifyKeywordSegment.js';
 import { computeNextRunAt, shouldRunNow } from '../../lib/cron/schedule.js';
+import { logCronEvent } from '../../lib/cron/logCron.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
@@ -240,6 +241,7 @@ export default async function handler(req, res) {
   }
 
   const forceRun = req.query.force === '1' || req.query.force === 'true';
+  const startedAt = Date.now();
 
   try {
     const propertyUrl = req.query.propertyUrl || process.env.CRON_PROPERTY_URL || 'https://www.alanranger.com';
@@ -280,6 +282,13 @@ export default async function handler(req, res) {
     const combinedRows = buildCombinedRows(serpRows, aiRows);
     if (!combinedRows.length) {
       await updateSchedule(baseUrl, schedule, nowIso, 'error', 'No SERP rows returned for keywords');
+      await logCronEvent({
+        jobKey: 'ranking_ai',
+        status: 'error',
+        propertyUrl,
+        durationMs: Date.now() - startedAt,
+        details: 'No SERP rows returned for keywords'
+      });
       return sendJson(res, 500, {
         status: 'error',
         message: 'No SERP rows returned for keywords',
@@ -299,6 +308,12 @@ export default async function handler(req, res) {
       updated_at: nowIso
     });
     await updateSchedule(baseUrl, schedule, nowIso, 'ok');
+    await logCronEvent({
+      jobKey: 'ranking_ai',
+      status: 'success',
+      propertyUrl,
+      durationMs: Date.now() - startedAt
+    });
 
     return sendJson(res, 200, {
       status: 'ok',
@@ -318,6 +333,13 @@ export default async function handler(req, res) {
     } catch (error_) {
       console.warn('[Keyword Ranking Cron] Failed to update schedule status:', error_.message);
     }
+    await logCronEvent({
+      jobKey: 'ranking_ai',
+      status: 'error',
+      propertyUrl: req.query.propertyUrl || process.env.CRON_PROPERTY_URL || 'https://www.alanranger.com',
+      durationMs: Date.now() - startedAt,
+      details: err.message
+    });
     console.error('[Keyword Ranking Cron] Error:', err.message);
     return sendJson(res, 500, { status: 'error', message: err.message });
   }

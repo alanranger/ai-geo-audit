@@ -54,7 +54,7 @@ export default async function handler(req, res) {
         next_run_at: nextRunAt,
         updated_at: nowIso
       };
-      if (lastRunAt) {
+      if (lastRunAt !== undefined) {
         row.last_run_at = lastRunAt;
       }
       if (lastStatus !== undefined) {

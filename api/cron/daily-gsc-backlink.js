@@ -1,5 +1,6 @@
 import { computeNextRunAt, shouldRunNow } from '../../lib/cron/schedule.js';
 import { runFullAudit } from '../../lib/audit/fullAudit.js';
+import { logCronEvent } from '../../lib/cron/logCron.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -52,6 +53,7 @@ export default async function handler(req, res) {
   };
 
   const nowIso = new Date().toISOString();
+  const startedAt = Date.now();
   let schedule = { frequency: 'daily', timeOfDay: '11:00' };
   const updateScheduleStatus = async (status, errorMessage = null) => {
     try {
@@ -122,6 +124,12 @@ export default async function handler(req, res) {
     });
 
     await updateScheduleStatus('ok');
+    await logCronEvent({
+      jobKey: 'gsc_backlinks',
+      status: 'success',
+      propertyUrl,
+      durationMs: Date.now() - startedAt
+    });
 
     return res.status(200).json({
       status: 'ok',
@@ -137,6 +145,13 @@ export default async function handler(req, res) {
     });
   } catch (error) {
     await updateScheduleStatus('error', error.message);
+    await logCronEvent({
+      jobKey: 'gsc_backlinks',
+      status: 'error',
+      propertyUrl,
+      durationMs: Date.now() - startedAt,
+      details: error.message
+    });
     return res.status(500).json({
       status: 'error',
       message: 'Daily audit failed',

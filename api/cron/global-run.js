@@ -1,4 +1,5 @@
 import { computeNextRunAt, shouldRunNow } from '../../lib/cron/schedule.js';
+import { logCronEvent } from '../../lib/cron/logCron.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
@@ -48,7 +49,8 @@ export default async function handler(req, res) {
     ? `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}`
     : 'http://localhost:3000';
   const baseUrl = process.env.CRON_BASE_URL || process.env.NEXT_PUBLIC_SITE_URL || fallbackBaseUrl;
-  const nowIso = new Date().toISOString();
+    const nowIso = new Date().toISOString();
+    const startedAt = Date.now();
   let schedule = { frequency: 'weekly', timeOfDay: '11:20' };
 
   const updateScheduleStatus = async (status, errorMessage = null) => {
@@ -137,6 +139,12 @@ export default async function handler(req, res) {
     ]);
 
     await updateScheduleStatus('ok');
+    await logCronEvent({
+      jobKey: 'global_run',
+      status: 'success',
+      propertyUrl,
+      durationMs: Date.now() - startedAt
+    });
 
     return sendJson(res, 200, {
       status: 'ok',
@@ -152,6 +160,13 @@ export default async function handler(req, res) {
     });
   } catch (err) {
     await updateScheduleStatus('error', err.message);
+    await logCronEvent({
+      jobKey: 'global_run',
+      status: 'error',
+      propertyUrl,
+      durationMs: Date.now() - startedAt,
+      details: err.message
+    });
     console.error('[Global Cron] Error:', err.message);
     return sendJson(res, 500, { status: 'error', message: err.message });
   }
