@@ -1,7 +1,6 @@
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
 import { createClient } from '@supabase/supabase-js';
-import pg from 'pg';
 import { computeNextRunAt, shouldRunNow } from '../../lib/cron/schedule.js';
 import { logCronEvent } from '../../lib/cron/logCron.js';
 
@@ -49,58 +48,8 @@ const calculateCutoffDate = (now = new Date()) => {
   };
 };
 
-const buildDatabaseUrl = () => {
-  let dbUrl = process.env.SUPABASE_DB_URL;
-  if (dbUrl?.includes('[YOUR_PASSWORD]')) {
-    dbUrl = null;
-  }
-  if (dbUrl) return dbUrl;
-
-  const password = (process.env.SUPABASE_DB_PASSWORD || process.env.PGPASSWORD || '').trim();
-  const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-  if (!password || !supabaseUrl) {
-    throw new Error('missing_db_env:SUPABASE_DB_PASSWORD or SUPABASE_URL');
-  }
-  const match = /https?:\/\/([^.]+)\.supabase\.co/.exec(supabaseUrl);
-  if (!match) {
-    throw new Error('invalid_supabase_url');
-  }
-  const projectRef = match[1];
-  const encodedPassword = encodeURIComponent(password);
-  return `postgresql://postgres:${encodedPassword}@db.${projectRef}.supabase.co:5432/postgres`;
-};
-
-const runVacuum = async (tables) => {
-  const results = { success: [], errors: [], skipped: false, skipReason: null };
-  let connectionString;
-  try {
-    connectionString = buildDatabaseUrl();
-  } catch (err) {
-    results.skipped = true;
-    results.skipReason = err.message;
-    return results;
-  }
-
-  const { Client } = pg;
-  const client = new Client({ connectionString, ssl: { rejectUnauthorized: false } });
-
-  await client.connect();
-  try {
-    for (const table of tables) {
-      try {
-        const escaped = `"${String(table).replaceAll('"', '""')}"`;
-        await client.query(`VACUUM (ANALYZE) ${escaped}`);
-        results.success.push(table);
-      } catch (err) {
-        results.errors.push(`Failed to vacuum ${table}: ${err.message}`);
-      }
-    }
-  } finally {
-    await client.end();
-  }
-
-  return results;
-};
+// VACUUM is intentionally disabled (Supabase direct DB host is not IPv4 compatible)
+// Cleanup focuses on retention deletes only.
 
 const deleteOldRows = async (supabase, cutoffDate, propertyUrl) => {
   const tables = [
@@ -207,25 +156,12 @@ export default async function handler(req, res) {
       throw new Error(`delete_failed:${deleteErrors.map((item) => item.table).join(',')}`);
     }
 
-    const vacuumTargets = deleteResults.map((item) => item.table);
-    const vacuumResults = vacuumTargets.length
-      ? await runVacuum(vacuumTargets)
-      : { success: [], errors: [], skipped: false, skipReason: null };
-    if (vacuumResults.errors.length) {
-      throw new Error(`vacuum_failed:${vacuumResults.errors.join('; ')}`);
-    }
-
-    const status = vacuumResults.skipped ? 'warning' : 'success';
-    const warningMessage = vacuumResults.skipped
-      ? `vacuum_skipped:${vacuumResults.skipReason || 'missing_db_env'}`
-      : null;
-    await updateScheduleStatus(baseUrl, schedule, nowIso, status, warningMessage);
+    await updateScheduleStatus(baseUrl, schedule, nowIso, 'success');
     await logCronEvent({
       jobKey: 'gsc_cleanup',
-      status,
+      status: 'success',
       propertyUrl,
-      durationMs: Date.now() - startedAt,
-      details: warningMessage
+      durationMs: Date.now() - startedAt
     });
 
     return sendJson(res, 200, {
@@ -234,8 +170,7 @@ export default async function handler(req, res) {
       cutoffIso,
       propertyUrl,
       deleted: deleteResults,
-      vacuum: vacuumResults,
-      warning: vacuumResults.skipped ? warningMessage : null,
+      vacuum: { skipped: true, reason: 'disabled' },
       meta: { generatedAt: nowIso }
     });
   } catch (err) {
