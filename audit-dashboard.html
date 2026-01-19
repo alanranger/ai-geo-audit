@@ -44817,6 +44817,7 @@ Final Score: ${score}/100`;
           // Make maps global for access by displayDashboard
           window.visibilityMap = visibilityMap;
           window.authorityMap = authorityMap;
+          window.authorityBySegmentMap = authorityBySegmentMap;
           window.brandOverlayMap = brandOverlayMap;
           const currentContentSchema = scores.contentSchema || 0;
           const currentBrandOverlay = scores.brandOverlay?.score || null;
@@ -57845,8 +57846,18 @@ Final Score: ${score}/100`;
 
       function getLatestGscPillarOverrides() {
         const dateKey = window.lastGscTimeseriesDate || window.latestAuditDateStr || null;
+        let authority = null;
+        if (window.authorityBySegmentMap && typeof window.authorityBySegmentMap.get === 'function') {
+          const seg = window.authorityBySegmentMap.get(dateKey);
+          if (seg && seg.all) {
+            authority = toNum(seg.all.total || seg.all.score || seg.all);
+          }
+        }
+        if (typeof authority !== 'number') {
+          authority = getLatestMapValue(window.authorityMap, dateKey);
+        }
         return {
-          authority: getLatestMapValue(window.authorityMap, dateKey),
+          authority,
           visibility: getLatestMapValue(window.visibilityMap, dateKey)
         };
       }
