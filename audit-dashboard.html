@@ -57863,48 +57863,23 @@ Final Score: ${score}/100`;
           const deltaColors = opts.deltaColors || [];
           const scale = chart?.scales?.r;
           if (!scale || labels.length === 0) return;
-          const count = labels.length;
-          const padding = typeof opts.labelPadding === 'number' ? opts.labelPadding : 32;
           const lineGap = typeof opts.lineGap === 'number' ? opts.lineGap : 12;
           const ctx = chart.ctx;
           ctx.save();
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
           for (let i = 0; i < labels.length; i += 1) {
-            const base = labels[i] || '';
             const deltaRaw = deltas[i];
             const deltaText = (deltaRaw == null || deltaRaw === '') ? '—' : String(deltaRaw);
-            let pos = (typeof scale.getPointPositionForValue === 'function')
-              ? scale.getPointPositionForValue(i, scale.max || 100)
+            const pos = (typeof scale.getPointLabelPosition === 'function')
+              ? scale.getPointLabelPosition(i)
               : null;
-            if (!pos) {
-              const angleFallback = (typeof scale.getIndexAngle === 'function')
-                ? scale.getIndexAngle(i)
-                : ((Math.PI * 2) / count) * i - (Math.PI / 2);
-              const radiusFallback = (scale.drawingArea || 0) + padding;
-              pos = {
-                x: (scale.xCenter || 0) + Math.cos(angleFallback) * radiusFallback,
-                y: (scale.yCenter || 0) + Math.sin(angleFallback) * radiusFallback
-              };
-            }
-            const angle = Math.atan2(pos.y - (scale.yCenter || 0), pos.x - (scale.xCenter || 0));
-            const xBase = pos.x + Math.cos(angle) * padding;
-            const yBase = pos.y + Math.sin(angle) * padding;
-            const cos = Math.cos(angle);
-            const sin = Math.sin(angle);
-            const align = Math.abs(cos) < 0.25 ? 'center' : (cos > 0 ? 'left' : 'right');
-            const x = xBase + (align === 'left' ? 6 : (align === 'right' ? -6 : 0));
-            const y = yBase + (sin < -0.7 ? -2 : (sin > 0.7 ? 2 : 0));
-
-            ctx.textAlign = align;
-            ctx.textBaseline = 'middle';
-            ctx.font = '600 11px system-ui, -apple-system, Segoe UI, sans-serif';
-            ctx.fillStyle = 'rgba(226,232,240,0.9)';
-            ctx.fillText(base, x, y);
-
+            if (!pos) continue;
             ctx.font = '700 10px system-ui, -apple-system, Segoe UI, sans-serif';
             ctx.fillStyle = (deltaRaw === '—' || deltaRaw == null || deltaRaw === '')
               ? 'rgba(226,232,240,0.6)'
               : (deltaColors[i] || 'rgba(226,232,240,0.9)');
-            ctx.fillText(deltaText, x, y + lineGap);
+            ctx.fillText(deltaText, pos.x, pos.y + lineGap);
           }
           ctx.restore();
         }
@@ -58808,14 +58783,13 @@ Final Score: ${score}/100`;
             options: {
               responsive: true,
               maintainAspectRatio: false,
-              layout: { padding: 10 },
+              layout: { padding: 16 },
               plugins: {
                 legend: { display: false },
                 dashboardRadarLabels: {
                   labels,
                   deltaTexts: labelDeltas,
                   deltaColors: labelColors,
-                  labelPadding: 36,
                   lineGap: 12
                 }
               },
@@ -58826,7 +58800,12 @@ Final Score: ${score}/100`;
                   ticks: { display: false },
                   grid: { color: 'rgba(148, 163, 184, 0.20)' },
                   angleLines: { color: 'rgba(148, 163, 184, 0.20)' },
-                  pointLabels: { display: false }
+                  pointLabels: {
+                    display: true,
+                    color: 'rgba(226,232,240,0.9)',
+                    font: { size: 11, weight: '700' },
+                    padding: 30
+                  }
                 }
               }
             },
@@ -58964,14 +58943,13 @@ Final Score: ${score}/100`;
             options: {
               responsive: true,
               maintainAspectRatio: false,
-              layout: { padding: 10 },
+              layout: { padding: 16 },
               plugins: {
                 legend: { display: false },
                 dashboardRadarLabels: {
                   labels,
                   deltaTexts: labelDeltas,
                   deltaColors: labelColors,
-                  labelPadding: 36,
                   lineGap: 12
                 }
               },
@@ -58983,7 +58961,12 @@ Final Score: ${score}/100`;
                   ticks: { display: false },
                   grid: { color: 'rgba(148,163,184,0.25)' },
                   angleLines: { color: 'rgba(148,163,184,0.25)' },
-                  pointLabels: { display: false }
+                  pointLabels: {
+                    display: true,
+                    color: 'rgba(226,232,240,0.9)',
+                    font: { size: 11, weight: '600' },
+                    padding: 30
+                  }
                 }
               }
             },
@@ -59077,14 +59060,13 @@ Final Score: ${score}/100`;
             options: {
               responsive: true,
               maintainAspectRatio: false,
-              layout: { padding: 10 },
+              layout: { padding: 16 },
               plugins: {
                 legend: { display: false },
                 dashboardRadarLabels: {
                   labels,
                   deltaTexts: labelDeltas,
                   deltaColors: labelColors,
-                  labelPadding: 36,
                   lineGap: 12
                 }
               },
@@ -59096,7 +59078,12 @@ Final Score: ${score}/100`;
                   ticks: { display: false },
                   grid: { color: 'rgba(148,163,184,0.25)' },
                   angleLines: { color: 'rgba(148,163,184,0.25)' },
-                  pointLabels: { display: false }
+                  pointLabels: {
+                    display: true,
+                    color: 'rgba(226,232,240,0.9)',
+                    font: { size: 11, weight: '600' },
+                    padding: 30
+                  }
                 }
               }
             },
@@ -59402,14 +59389,13 @@ Final Score: ${score}/100`;
             options: {
               responsive: true,
               maintainAspectRatio: false,
-              layout: { padding: 10 },
+              layout: { padding: 16 },
               plugins: {
                 legend: { display: false },
                 dashboardRadarLabels: {
                   labels,
                   deltaTexts: labelDeltas,
                   deltaColors: labelColors,
-                  labelPadding: 36,
                   lineGap: 12
                 }
               },
@@ -59421,7 +59407,12 @@ Final Score: ${score}/100`;
                   ticks: { display: false },
                   grid: { color: 'rgba(148,163,184,0.25)' },
                   angleLines: { color: 'rgba(148,163,184,0.25)' },
-                  pointLabels: { display: false }
+                  pointLabels: {
+                    display: true,
+                    color: 'rgba(226,232,240,0.9)',
+                    font: { size: 11, weight: '600' },
+                    padding: 30
+                  }
                 }
               }
             },
