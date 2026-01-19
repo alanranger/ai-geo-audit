@@ -57832,6 +57832,15 @@ Final Score: ${score}/100`;
         return `${label} (${deltaText})`;
       }
 
+      function deltaLabelColor(curr, prev, { betterLower = false } = {}) {
+        const c = toNum(curr);
+        const p = toNum(prev);
+        if (c == null || p == null) return 'rgba(226,232,240,0.9)';
+        if (c === p) return 'rgba(226,232,240,0.9)';
+        if (betterLower) return (c < p) ? '#10b981' : '#ef4444';
+        return (c > p) ? '#10b981' : '#ef4444';
+      }
+
       function setDialDeltaDir(dialEl, curr, prev, { betterLower = false } = {}) {
         if (!dialEl) return;
         const deltaEl = dialEl.querySelector('[data-field="delta"]');
@@ -58164,9 +58173,9 @@ Final Score: ${score}/100`;
           }
           
           // Get visibility score directly from audit (pillars computed later)
-          const visibilityScore = audit.scores?.visibility || 0;
-          const brandScore = audit.scores?.brandOverlay?.score || 0;
-          if (snippetReadinessScore > 0 || visibilityScore > 0 || brandScore > 0) {
+          const visibilityScore = (typeof audit.scores?.visibility === 'number') ? audit.scores.visibility : null;
+          const brandScore = (typeof audit.scores?.brandOverlay?.score === 'number') ? audit.scores.brandOverlay.score : null;
+          if (snippetReadinessScore > 0 || visibilityScore != null || brandScore != null) {
             aiSummaryComponents = {
               snippetReadiness: snippetReadinessScore,
               visibility: visibilityScore,
@@ -58699,6 +58708,7 @@ Final Score: ${score}/100`;
 
         const labels = items.map(i => formatDeltaLabel(i.label, i.score, i.prevScore));
         const values = items.map(i => (toNum(i.score) ?? 0));
+        const labelColors = items.map(i => deltaLabelColor(i.score, i.prevScore));
 
         try {
           if (window.__dashboardGaioRadarChart) {
@@ -58739,7 +58749,7 @@ Final Score: ${score}/100`;
                   grid: { color: 'rgba(148, 163, 184, 0.20)' },
                   angleLines: { color: 'rgba(148, 163, 184, 0.20)' },
                   pointLabels: {
-                    color: 'rgba(226, 232, 240, 0.92)',
+                    color: (ctx) => labelColors[ctx.index] || 'rgba(226, 232, 240, 0.92)',
                     font: { size: 11, weight: '700' }
                   }
                 }
@@ -58842,6 +58852,12 @@ Final Score: ${score}/100`;
           toNum(s.authoritativeness) ?? 0,
           toNum(s.trustworthiness) ?? 0
         ];
+        const labelColors = [
+          deltaLabelColor(s.experience, prev.experience),
+          deltaLabelColor(s.expertise, prev.expertise),
+          deltaLabelColor(s.authoritativeness, prev.authoritativeness),
+          deltaLabelColor(s.trustworthiness, prev.trustworthiness)
+        ];
 
         try {
           if (window.__dashboardEeatRadarChart) {
@@ -58882,7 +58898,10 @@ Final Score: ${score}/100`;
                   ticks: { display: false },
                   grid: { color: 'rgba(148,163,184,0.25)' },
                   angleLines: { color: 'rgba(148,163,184,0.25)' },
-                  pointLabels: { color: 'rgba(226,232,240,0.9)', font: { size: 11, weight: '600' } }
+                  pointLabels: {
+                    color: (ctx) => labelColors[ctx.index] || 'rgba(226,232,240,0.9)',
+                    font: { size: 11, weight: '600' }
+                  }
                 }
               }
             }
@@ -58934,6 +58953,11 @@ Final Score: ${score}/100`;
           toNum(c.visibility) ?? 0,
           toNum(c.brand) ?? 0
         ];
+        const labelColors = [
+          deltaLabelColor(c.snippetReadiness, prev.snippetReadiness),
+          deltaLabelColor(c.visibility, prev.visibility),
+          deltaLabelColor(c.brand, prev.brand)
+        ];
 
         // Always destroy existing chart before creating new one
         try {
@@ -58980,7 +59004,10 @@ Final Score: ${score}/100`;
                   ticks: { display: false },
                   grid: { color: 'rgba(148,163,184,0.25)' },
                   angleLines: { color: 'rgba(148,163,184,0.25)' },
-                  pointLabels: { color: 'rgba(226,232,240,0.9)', font: { size: 11, weight: '600' } }
+                  pointLabels: {
+                    color: (ctx) => labelColors[ctx.index] || 'rgba(226,232,240,0.9)',
+                    font: { size: 11, weight: '600' }
+                  }
                 }
               }
             }
@@ -59212,6 +59239,11 @@ Final Score: ${score}/100`;
           toNum(s?.eventPct) ?? 0,
           toNum(s?.productPct) ?? 0
         ];
+        const labelColors = [
+          deltaLabelColor(s?.landingPct, prev.landingPct),
+          deltaLabelColor(s?.eventPct, prev.eventPct),
+          deltaLabelColor(s?.productPct, prev.productPct)
+        ];
 
         // Debounce: prevent re-rendering if chart was just rendered recently
         const now = Date.now();
@@ -59264,7 +59296,10 @@ Final Score: ${score}/100`;
                   ticks: { display: false },
                   grid: { color: 'rgba(148,163,184,0.25)' },
                   angleLines: { color: 'rgba(148,163,184,0.25)' },
-                  pointLabels: { color: 'rgba(226,232,240,0.9)', font: { size: 11, weight: '600' } }
+                  pointLabels: {
+                    color: (ctx) => labelColors[ctx.index] || 'rgba(226,232,240,0.9)',
+                    font: { size: 11, weight: '600' }
+                  }
                 }
               }
             }
@@ -59344,10 +59379,10 @@ Final Score: ${score}/100`;
             console.log('[Dashboard] computeDashboardSnapshotFromAuditData: Recalculated snippetReadiness from scores:', snippetReadinessScore);
           }
           
-          const visibilityScore = scores.visibility || 0;
-          const brandScore = scores.brandOverlay?.score || 0;
+          const visibilityScore = (typeof scores.visibility === 'number') ? scores.visibility : null;
+          const brandScore = (typeof scores.brandOverlay?.score === 'number') ? scores.brandOverlay.score : null;
           
-          if (snippetReadinessScore > 0 || visibilityScore > 0 || brandScore > 0) {
+          if (snippetReadinessScore > 0 || visibilityScore != null || brandScore != null) {
             aiSummaryComponents = {
               snippetReadiness: snippetReadinessScore,
               visibility: visibilityScore,
