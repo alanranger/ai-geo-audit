@@ -43172,8 +43172,16 @@ Final Score: ${score}/100`;
                   orderedPillars.splice(brandRowIndex + 1, 0, ['brandOverlay', brandOverlay.score || 0]);
                 }
                 
-                // Keep scorecard aligned to current audit scores (no historical override).
-                debugLog('[Scorecard] Using current audit scores for pillars', 'info');
+                // Prefer latest GSC pillar values when available (authority/visibility), else current audit scores.
+                const gscOverrides = getLatestGscPillarOverrides();
+                orderedPillars.forEach(([key, currentScore], idx) => {
+                  if (key === 'authority' && typeof gscOverrides.authority === 'number') {
+                    orderedPillars[idx][1] = gscOverrides.authority;
+                  } else if (key === 'visibility' && typeof gscOverrides.visibility === 'number') {
+                    orderedPillars[idx][1] = gscOverrides.visibility;
+                  }
+                });
+                debugLog('[Scorecard] Using latest GSC pillar overrides where available', 'info');
                 
                 return orderedPillars;
               })().map(([key, score], index) => {
@@ -57810,6 +57818,22 @@ Final Score: ${score}/100`;
         return `${text.slice(0, keep)}...${text.slice(-keep)}`;
       }
 
+      function getLatestMapValue(map, dateKey) {
+        if (!map || typeof map.get !== 'function') return null;
+        if (dateKey && map.has(dateKey)) return toNum(map.get(dateKey));
+        const keys = Array.from(map.keys()).sort();
+        if (!keys.length) return null;
+        return toNum(map.get(keys[keys.length - 1]));
+      }
+
+      function getLatestGscPillarOverrides() {
+        const dateKey = window.lastGscTimeseriesDate || window.latestAuditDateStr || null;
+        return {
+          authority: getLatestMapValue(window.authorityMap, dateKey),
+          visibility: getLatestMapValue(window.visibilityMap, dateKey)
+        };
+      }
+
       const dashboardRadarLabelPlugin = {
         id: 'dashboardRadarLabels',
         afterDraw(chart, args, pluginOptions) {
@@ -58234,10 +58258,12 @@ Final Score: ${score}/100`;
           // Get visibility score directly from audit (pillars computed later)
           const visibilityScore = (typeof audit.scores?.visibility === 'number') ? audit.scores.visibility : null;
           const brandScore = (typeof audit.scores?.brandOverlay?.score === 'number') ? audit.scores.brandOverlay.score : null;
+          const gscOverrides = getLatestGscPillarOverrides();
+          const visibilityOverride = (typeof gscOverrides.visibility === 'number') ? gscOverrides.visibility : visibilityScore;
           if (snippetReadinessScore > 0 || visibilityScore != null || brandScore != null) {
             aiSummaryComponents = {
               snippetReadiness: snippetReadinessScore,
-              visibility: visibilityScore,
+              visibility: visibilityOverride,
               brand: brandScore
             };
           }
@@ -58260,6 +58286,11 @@ Final Score: ${score}/100`;
           if (typeof audit.scores.contentSchema === 'number') pillars.contentSchema = audit.scores.contentSchema;
           if (typeof audit.scores.localEntity === 'number') pillars.localEntity = audit.scores.localEntity;
           if (typeof audit.scores.serviceArea === 'number') pillars.serviceArea = audit.scores.serviceArea;
+        }
+        if (pillars) {
+          const overrides = getLatestGscPillarOverrides();
+          if (typeof overrides.authority === 'number') pillars.authority = overrides.authority;
+          if (typeof overrides.visibility === 'number') pillars.visibility = overrides.visibility;
         }
         const auditKpis = computeAuditKpisFromAudit(audit);
 
