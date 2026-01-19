@@ -1757,6 +1757,35 @@
       line-height: 1.3;
     }
 
+    section[data-panel="dashboard"] .dashboard-delta-breakdown {
+      margin-top: 0.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+    section[data-panel="dashboard"] .dashboard-delta-breakdown-title {
+      font-size: 0.66rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--dark-text-muted);
+    }
+    section[data-panel="dashboard"] .dashboard-delta-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    section[data-panel="dashboard"] .dashboard-delta-label {
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: rgba(226, 232, 240, 0.88);
+    }
+    section[data-panel="dashboard"] .dashboard-delta-row .dashboard-kpi-delta {
+      font-size: 0.78rem;
+      font-weight: 700;
+    }
+
     /* Dashboard: traffic-light tile content (matches Optimisation module semantics) */
     section[data-panel="dashboard"] .dashboard-traffic-row {
       display: flex;
@@ -5082,6 +5111,7 @@
                 <div class="dashboard-dial-delta" data-field="delta">—</div>
               </div>
             </div>
+            <div id="dashboard-gaio-breakdown" style="margin-top: 0.5rem;"></div>
             <div id="dashboard-gaio-pillars" style="margin-top: 0.75rem;"></div>
             <div style="margin-top: 0.75rem;">
               <canvas id="dashboard-gaio-radar" width="340" height="200" style="width: 100%; height: 200px;"></canvas>
@@ -5101,6 +5131,7 @@
               </div>
             </div>
             <div id="dashboard-ai-summary-mini" style="margin-top: 0.75rem;"></div>
+            <div id="dashboard-ai-summary-breakdown" style="margin-top: 0.5rem;"></div>
             <div style="margin-top: 0.75rem;">
               <canvas id="dashboard-ai-summary-radar" width="340" height="200" style="width: 100%; height: 200px;"></canvas>
             </div>
@@ -5119,6 +5150,7 @@
               </div>
             </div>
             <div id="dashboard-money-share-mini" style="margin-top: 0.75rem;"></div>
+            <div id="dashboard-money-share-breakdown" style="margin-top: 0.5rem;"></div>
             <div style="margin-top: 0.75rem;">
               <canvas id="dashboard-money-share-radar" width="340" height="200" style="width: 100%; height: 200px;"></canvas>
             </div>
@@ -5137,6 +5169,7 @@
               </div>
             </div>
             <div id="dashboard-uplift-mini" style="margin-top: 0.75rem;"></div>
+            <div id="dashboard-uplift-breakdown" style="margin-top: 0.5rem;"></div>
             <div style="margin-top: 0.75rem;">
               <canvas id="dashboard-uplift-chart" width="340" height="200" style="width: 100%; height: 200px;"></canvas>
             </div>
@@ -5155,6 +5188,7 @@
               </div>
             </div>
             <div id="dashboard-eeat-mini" style="margin-top: 0.75rem;"></div>
+            <div id="dashboard-eeat-breakdown" style="margin-top: 0.5rem;"></div>
             <div style="margin-top: 0.75rem;">
               <canvas id="dashboard-eeat-radar" width="340" height="200" style="width: 100%; height: 200px;"></canvas>
             </div>
@@ -57789,6 +57823,40 @@ Final Score: ${score}/100`;
         return pp ? `${sign}${base}pp` : `${sign}${base}`;
       }
 
+      function renderDeltaBreakdown(hostId, items, { title = 'Change drivers' } = {}) {
+        const host = document.getElementById(hostId);
+        if (!host) return;
+        if (!Array.isArray(items) || items.length === 0) {
+          host.innerHTML = '';
+          return;
+        }
+        const hasDelta = items.some(it => toNum(it?.curr) != null && toNum(it?.prev) != null);
+        if (!hasDelta) {
+          host.innerHTML = `<div class="dashboard-mini-note">No prior snapshot yet.</div>`;
+          return;
+        }
+        const rows = items.map(it => {
+          const deltaText = formatDeltaNumber(it.curr, it.prev, {
+            decimals: it.decimals ?? 0,
+            betterLower: it.betterLower ?? false,
+            pp: it.pp ?? false
+          });
+          const dir = deltaDir(it.curr, it.prev, { betterLower: it.betterLower ?? false });
+          return `
+            <div class="dashboard-delta-row">
+              <span class="dashboard-delta-label">${it.label}</span>
+              <span class="dashboard-kpi-delta" data-dir="${dir}">${deltaText}</span>
+            </div>
+          `;
+        }).join('');
+        host.innerHTML = `
+          <div class="dashboard-delta-breakdown">
+            <div class="dashboard-delta-breakdown-title">${title}</div>
+            ${rows}
+          </div>
+        `;
+      }
+
       function computePillarScoresFromAudit(audit) {
         const scores = audit?.scores || null;
         if (!scores) return null;
@@ -59231,9 +59299,20 @@ Final Score: ${score}/100`;
         const domainStrength = auditData.domainStrength || null;
         
         // Extract EEAT data (needed for EEAT tile deltas)
-        const eeatScore = auditData.eeatScore ?? null;
-        const eeatConfidence = auditData.eeatConfidence ?? null;
-        const eeatSubscores = auditData.eeatSubscores || null;
+        let eeatScore = auditData.eeatScore ?? null;
+        let eeatConfidence = auditData.eeatConfidence ?? null;
+        let eeatSubscores = auditData.eeatSubscores || null;
+        if ((eeatScore == null || eeatConfidence == null || !eeatSubscores) && typeof computeEeatScore === 'function') {
+          const eeatComputed = computeEeatScore({
+            audit: auditData,
+            pillars,
+            rankingKpis,
+            domainStrength
+          });
+          if (eeatScore == null) eeatScore = eeatComputed?.score ?? null;
+          if (eeatConfidence == null) eeatConfidence = eeatComputed?.confidence ?? null;
+          if (!eeatSubscores) eeatSubscores = eeatComputed?.subscores ?? null;
+        }
         
         // Extract optimisation potential clicks (needed for Optimisation tile deltas)
         const optimisationPotentialClicks = auditData.optimisationPotentialClicks ?? null;
@@ -59251,6 +59330,8 @@ Final Score: ${score}/100`;
             avgPosition: searchData.overview.position || searchData.averagePosition || null,
             ctrPct: searchData.overview.ctr || searchData.ctr || 0
           } : null,
+          moneyCitations: moneyShare.money,
+          totalCitations: moneyShare.total,
           moneySharePct: moneySharePct, // Calculated from ranking data (money citations / total citations)
           moneyAgg: moneyAgg, // Add moneyAgg for Money Pages tile deltas
           rankingKpis, // Added for Ranking tile deltas
@@ -59657,6 +59738,13 @@ Final Score: ${score}/100`;
             deltaText: deltaText
           });
           updateDeltaIndicator('dashboard-delta-gaio', v, prevGaio, { betterLower: false, decimals: 0 });
+          renderDeltaBreakdown('dashboard-gaio-breakdown', [
+            { label: 'Authority', curr: metrics?.pillars?.authority, prev: prevMetrics?.pillars?.authority },
+            { label: 'Content / Schema', curr: metrics?.pillars?.contentSchema, prev: prevMetrics?.pillars?.contentSchema },
+            { label: 'Visibility', curr: metrics?.pillars?.visibility, prev: prevMetrics?.pillars?.visibility },
+            { label: 'Local Entity', curr: metrics?.pillars?.localEntity, prev: prevMetrics?.pillars?.localEntity },
+            { label: 'Service Area', curr: metrics?.pillars?.serviceArea, prev: prevMetrics?.pillars?.serviceArea }
+          ], { title: 'Pillar delta' });
           renderDashboardGaioPillarsAndRadar(metrics?.pillars || null, prevMetrics?.pillars || null);
         }
 
@@ -59672,6 +59760,11 @@ Final Score: ${score}/100`;
             deltaText: formatDelta(metrics?.aiSummaryScore, prevMetrics?.aiSummaryScore)
           });
           updateDeltaIndicator('dashboard-delta-ai-summary', v, prevMetrics?.aiSummaryScore ?? null, { betterLower: false, decimals: 0 });
+          renderDeltaBreakdown('dashboard-ai-summary-breakdown', [
+            { label: 'Snippet readiness', curr: metrics?.aiSummaryComponents?.snippetReadiness, prev: prevMetrics?.aiSummaryComponents?.snippetReadiness },
+            { label: 'Visibility', curr: metrics?.aiSummaryComponents?.visibility, prev: prevMetrics?.aiSummaryComponents?.visibility },
+            { label: 'Brand', curr: metrics?.aiSummaryComponents?.brand, prev: prevMetrics?.aiSummaryComponents?.brand }
+          ], { title: 'Component delta' });
           const host = document.getElementById('dashboard-ai-summary-mini');
           if (host) {
             const markerLeft = (typeof p === 'number') ? Math.max(0, Math.min(100, Math.round(p))) : null;
@@ -59703,6 +59796,14 @@ Final Score: ${score}/100`;
             deltaText: formatDelta(metrics?.moneySharePct, prevMetrics?.moneySharePct)
           });
           updateDeltaIndicator('dashboard-delta-money-share', pct, prevMetrics?.moneySharePct ?? null, { betterLower: false, decimals: 0, pp: true });
+          const nonMoney = (typeof total === 'number' && typeof money === 'number') ? (total - money) : null;
+          const prevMoney = prevMetrics?.moneyCitations ?? null;
+          const prevTotal = prevMetrics?.totalCitations ?? null;
+          const prevNonMoney = (typeof prevTotal === 'number' && typeof prevMoney === 'number') ? (prevTotal - prevMoney) : null;
+          renderDeltaBreakdown('dashboard-money-share-breakdown', [
+            { label: 'Money citations', curr: money, prev: prevMoney },
+            { label: 'Non-money citations', curr: nonMoney, prev: prevNonMoney }
+          ], { title: 'Citation delta' });
           const host = document.getElementById('dashboard-money-share-mini');
           if (host) {
             const m = (typeof money === 'number') ? money : null;
@@ -59742,6 +59843,11 @@ Final Score: ${score}/100`;
             deltaText: (typeof extra === 'number' && typeof prevExtra === 'number') ? deltaText : '—'
           });
           updateDeltaIndicator('dashboard-delta-uplift', extra, prevExtra ?? null, { betterLower: true, decimals: 0 });
+          renderDeltaBreakdown('dashboard-uplift-breakdown', [
+            { label: 'CTR', curr: metrics?.moneyAgg?.ctrPct, prev: prevMetrics?.moneyAgg?.ctrPct, decimals: 1, pp: true },
+            { label: 'Clicks', curr: metrics?.moneyAgg?.clicks, prev: prevMetrics?.moneyAgg?.clicks },
+            { label: 'Impressions', curr: metrics?.moneyAgg?.impressions, prev: prevMetrics?.moneyAgg?.impressions }
+          ], { title: 'Money pages delta' });
           const host = document.getElementById('dashboard-uplift-mini');
           if (host) {
             const markerLeft = (typeof progressPct === 'number') ? Math.max(0, Math.min(100, Math.round(progressPct))) : null;
@@ -59769,6 +59875,12 @@ Final Score: ${score}/100`;
             deltaText: formatDelta(metrics?.eeatScore, prevMetrics?.eeatScore)
           });
           updateDeltaIndicator('dashboard-delta-eeat', v, prevMetrics?.eeatScore ?? null, { betterLower: false, decimals: 0 });
+          renderDeltaBreakdown('dashboard-eeat-breakdown', [
+            { label: 'Experience', curr: metrics?.eeatSubscores?.experience, prev: prevMetrics?.eeatSubscores?.experience },
+            { label: 'Expertise', curr: metrics?.eeatSubscores?.expertise, prev: prevMetrics?.eeatSubscores?.expertise },
+            { label: 'Authoritativeness', curr: metrics?.eeatSubscores?.authoritativeness, prev: prevMetrics?.eeatSubscores?.authoritativeness },
+            { label: 'Trustworthiness', curr: metrics?.eeatSubscores?.trustworthiness, prev: prevMetrics?.eeatSubscores?.trustworthiness }
+          ], { title: 'Subscore delta' });
           const host = document.getElementById('dashboard-eeat-mini');
           if (host) {
             const c = metrics?.eeatConfidence || '—';
