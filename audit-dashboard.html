@@ -43172,52 +43172,8 @@ Final Score: ${score}/100`;
                   orderedPillars.splice(brandRowIndex + 1, 0, ['brandOverlay', brandOverlay.score || 0]);
                 }
                 
-                // Use historical scores for the last date in chart range (if available)
-                // This ensures scorecard matches what's shown in the trend chart
-                // Priority: 1) Fetched historical scores, 2) Window maps, 3) Current scores
-                const lastChartDate = window.latestAuditDateStr || window.lastGscTimeseriesDate || 
-                  (data && data.timeseries && data.timeseries.length > 0 ? data.timeseries[data.timeseries.length - 1].date : null);
-                
-                if (lastChartDate) {
-                  // Override scores with historical values if available
-                  orderedPillars.forEach(([key, currentScore], idx) => {
-                    let historicalScore = null;
-                    
-                    // First, try fetched historical scores
-                    if (key === 'authority' && historicalScoresForLastDate.authority !== null && historicalScoresForLastDate.authority !== undefined) {
-                      historicalScore = historicalScoresForLastDate.authority;
-                    } else if (key === 'contentSchema' && historicalScoresForLastDate.contentSchema !== null && historicalScoresForLastDate.contentSchema !== undefined) {
-                      historicalScore = historicalScoresForLastDate.contentSchema;
-                    } else if (key === 'localEntity' && historicalScoresForLastDate.localEntity !== null && historicalScoresForLastDate.localEntity !== undefined) {
-                      historicalScore = historicalScoresForLastDate.localEntity;
-                    } else if (key === 'serviceArea' && historicalScoresForLastDate.serviceArea !== null && historicalScoresForLastDate.serviceArea !== undefined) {
-                      historicalScore = historicalScoresForLastDate.serviceArea;
-                    } else if (key === 'visibility' && historicalScoresForLastDate.visibility !== null && historicalScoresForLastDate.visibility !== undefined) {
-                      historicalScore = historicalScoresForLastDate.visibility;
-                    }
-                    // Fallback to window maps if fetched scores not available
-                    else if (key === 'authority' && window.authorityMap && window.authorityMap.has(lastChartDate)) {
-                      historicalScore = window.authorityMap.get(lastChartDate);
-                    } else if (key === 'contentSchema' && window.contentSchemaMap && window.contentSchemaMap.has(lastChartDate)) {
-                      historicalScore = window.contentSchemaMap.get(lastChartDate);
-                    } else if (key === 'localEntity' && window.localEntityMap && window.localEntityMap.has(lastChartDate)) {
-                      historicalScore = window.localEntityMap.get(lastChartDate);
-                    } else if (key === 'serviceArea' && window.serviceAreaMap && window.serviceAreaMap.has(lastChartDate)) {
-                      historicalScore = window.serviceAreaMap.get(lastChartDate);
-                    } else if (key === 'visibility' && window.visibilityMap && window.visibilityMap.has(lastChartDate)) {
-                      historicalScore = window.visibilityMap.get(lastChartDate);
-                    }
-                    
-                    if (historicalScore !== null && historicalScore !== undefined) {
-                      orderedPillars[idx][1] = historicalScore;
-                      debugLog(`[Scorecard] Using historical ${key} score (${historicalScore}) for ${lastChartDate} instead of current (${currentScore})`, 'info');
-                    } else {
-                      debugLog(`[Scorecard] No historical ${key} score found for ${lastChartDate}, using current (${currentScore})`, 'info');
-                    }
-                  });
-                } else {
-                  debugLog(`[Scorecard] No last chart date available, using current audit scores`, 'info');
-                }
+                // Keep scorecard aligned to current audit scores (no historical override).
+                debugLog('[Scorecard] Using current audit scores for pillars', 'info');
                 
                 return orderedPillars;
               })().map(([key, score], index) => {
