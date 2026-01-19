@@ -44470,6 +44470,8 @@ Final Score: ${score}/100`;
           const orderedPillars = getOrderedPillars(scores);
           const orderedLabels = orderedPillars.map(([key]) => pillarNames[key]);
           const orderedData = orderedPillars.map(([, score]) => score);
+          window.__radarOrderedLabels = orderedLabels;
+          window.__radarOrderedData = orderedData;
           
           // Define pillar colors for radar chart (matching trend chart)
           const radarPillarColors = {
@@ -45744,6 +45746,12 @@ Final Score: ${score}/100`;
             if (lastTimeseriesDate) {
               debugLog(`Stored last GSC timeseries date globally: ${lastTimeseriesDate}`, 'info');
             }
+
+            // Sync overview pillar scores to latest GSC-series values once maps are ready.
+            const auditKey = saved?.auditDate || saved?.audit_date || saved?.timestamp || null;
+            applyStablePillarOverrides(scores, auditKey);
+            updateOverviewPillarUi(scores);
+            updateOverviewRadar(scores);
             
             // Determine actual last GSC data date
             // CRITICAL: Only use dates from maps that are <= lastTimeseriesDate (actual GSC data)
@@ -57904,6 +57912,59 @@ Final Score: ${score}/100`;
             visibility: toNum(scoresObj.visibility)
           }
         };
+      }
+
+      function updateOverviewPillarUi(scoresObj) {
+        if (!scoresObj) return;
+        const authorityScore = (typeof scoresObj.authority === 'object' && scoresObj.authority !== null)
+          ? scoresObj.authority.score
+          : scoresObj.authority;
+        const visibilityScore = scoresObj.visibility;
+
+        const updates = [
+          { label: 'Authority', score: authorityScore },
+          { label: 'Visibility', score: visibilityScore }
+        ];
+
+        updates.forEach(({ label, score }) => {
+          if (typeof score !== 'number') return;
+          const card = Array.from(document.querySelectorAll('.pillar-card')).find(c => {
+            const h3 = c.querySelector('h3');
+            return h3 && h3.textContent.trim() === label;
+          });
+          if (!card) return;
+
+          if (label === 'Authority' && typeof card._updateAuthorityDisplay === 'function') {
+            card._updateAuthorityDisplay();
+            return;
+          }
+
+          const scoreEl = card.querySelector('.pillar-score');
+          if (scoreEl) {
+            const rag = getRAGStatus(score);
+            scoreEl.textContent = Math.round(score);
+            scoreEl.className = `pillar-score rag-${rag.status}`;
+            const ragBadge = card.querySelector('.rag-badge');
+            if (ragBadge) {
+              ragBadge.className = `rag-badge ${rag.status}`;
+              ragBadge.textContent = rag.label;
+            }
+          }
+        });
+      }
+
+      function updateOverviewRadar(scoresObj) {
+        if (!scoresObj || !window.radarChart || !window.__radarOrderedData || !window.__radarOrderedLabels) return;
+        const orderedPillars = getOrderedPillars(scoresObj);
+        const newLabels = orderedPillars.map(([key]) => pillarNames[key]);
+        const newData = orderedPillars.map(([, score]) => score);
+        window.__radarOrderedLabels.length = 0;
+        window.__radarOrderedLabels.push(...newLabels);
+        window.__radarOrderedData.length = 0;
+        window.__radarOrderedData.push(...newData);
+        window.radarChart.data.labels = newLabels;
+        window.radarChart.data.datasets[0].data = newData;
+        window.radarChart.update();
       }
 
       const dashboardRadarLabelPlugin = {
