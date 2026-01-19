@@ -30914,6 +30914,9 @@
           debugLog(`[displayDashboard] ⚠ Failed to recompute authority from queryPages: ${e?.message || e}`, 'warn');
         }
       }
+
+      // Align authority/visibility to latest GSC series (or segment total) to prevent flips.
+      applyLatestPillarOverrides(scores);
       
       // DEBUG: Log currentLocalSignals structure
       if (currentLocalSignals) {
@@ -32001,14 +32004,6 @@ Final Score: ${score}/100`;
       
       // Clear pillar cards for fresh render
       pillarCards.innerHTML = '';
-
-      // Normalize Authority score to match by-segment "all" total if available.
-      if (scores?.authority && typeof scores.authority === 'object' && scores.authority.bySegment?.all) {
-        const allTotal = scores.authority.bySegment.all.total;
-        if (typeof allTotal === 'number') {
-          scores.authority.score = allTotal;
-        }
-      }
 
       const orderedPillars = getOrderedPillars(scores);
       debugLog(`Creating ${orderedPillars.length} pillar cards from scores: ${JSON.stringify(scores)}`, 'info');
@@ -57840,6 +57835,36 @@ Final Score: ${score}/100`;
           authority: getLatestMapValue(window.authorityMap, dateKey),
           visibility: getLatestMapValue(window.visibilityMap, dateKey)
         };
+      }
+
+      function applyLatestPillarOverrides(scoresObj) {
+        if (!scoresObj) return;
+        const overrides = getLatestGscPillarOverrides();
+        const authorityOverride = overrides.authority;
+        const visibilityOverride = overrides.visibility;
+
+        if (typeof authorityOverride === 'number') {
+          if (typeof scoresObj.authority === 'object' && scoresObj.authority !== null) {
+            scoresObj.authority.score = authorityOverride;
+            if (scoresObj.authority.bySegment?.all) {
+              scoresObj.authority.bySegment.all.total = authorityOverride;
+              if (typeof scoresObj.authority.bySegment.all.score === 'number') {
+                scoresObj.authority.bySegment.all.score = authorityOverride;
+              }
+            }
+          } else {
+            scoresObj.authority = authorityOverride;
+          }
+        } else if (scoresObj.authority && typeof scoresObj.authority === 'object') {
+          const segmentTotal = scoresObj.authority.bySegment?.all?.total;
+          if (typeof segmentTotal === 'number') {
+            scoresObj.authority.score = segmentTotal;
+          }
+        }
+
+        if (typeof visibilityOverride === 'number') {
+          scoresObj.visibility = visibilityOverride;
+        }
       }
 
       const dashboardRadarLabelPlugin = {
