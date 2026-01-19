@@ -71,10 +71,18 @@ const buildDatabaseUrl = () => {
 };
 
 const runVacuum = async (tables) => {
+  const results = { success: [], errors: [], skipped: false, skipReason: null };
+  let connectionString;
+  try {
+    connectionString = buildDatabaseUrl();
+  } catch (err) {
+    results.skipped = true;
+    results.skipReason = err.message;
+    return results;
+  }
+
   const { Client } = pg;
-  const connectionString = buildDatabaseUrl();
   const client = new Client({ connectionString, ssl: { rejectUnauthorized: false } });
-  const results = { success: [], errors: [] };
 
   await client.connect();
   try {
@@ -200,17 +208,24 @@ export default async function handler(req, res) {
     }
 
     const vacuumTargets = deleteResults.map((item) => item.table);
-    const vacuumResults = vacuumTargets.length ? await runVacuum(vacuumTargets) : { success: [], errors: [] };
+    const vacuumResults = vacuumTargets.length
+      ? await runVacuum(vacuumTargets)
+      : { success: [], errors: [], skipped: false, skipReason: null };
     if (vacuumResults.errors.length) {
       throw new Error(`vacuum_failed:${vacuumResults.errors.join('; ')}`);
     }
 
-    await updateScheduleStatus(baseUrl, schedule, nowIso, 'success');
+    const status = vacuumResults.skipped ? 'warning' : 'success';
+    const warningMessage = vacuumResults.skipped
+      ? `vacuum_skipped:${vacuumResults.skipReason || 'missing_db_env'}`
+      : null;
+    await updateScheduleStatus(baseUrl, schedule, nowIso, status, warningMessage);
     await logCronEvent({
       jobKey: 'gsc_cleanup',
-      status: 'success',
+      status,
       propertyUrl,
-      durationMs: Date.now() - startedAt
+      durationMs: Date.now() - startedAt,
+      details: warningMessage
     });
 
     return sendJson(res, 200, {
@@ -220,6 +235,7 @@ export default async function handler(req, res) {
       propertyUrl,
       deleted: deleteResults,
       vacuum: vacuumResults,
+      warning: vacuumResults.skipped ? warningMessage : null,
       meta: { generatedAt: nowIso }
     });
   } catch (err) {
