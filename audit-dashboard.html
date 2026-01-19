@@ -57841,6 +57841,49 @@ Final Score: ${score}/100`;
         return (c > p) ? '#10b981' : '#ef4444';
       }
 
+      function formatSignedPp(value, decimals = 1) {
+        const n = toNum(value);
+        if (n == null) return '—';
+        const sign = n > 0 ? '+' : '';
+        return `${sign}${n.toFixed(decimals)}pp`;
+      }
+
+      function shortenMiddle(text, maxLen = 42) {
+        if (!text || text.length <= maxLen) return text;
+        const keep = Math.max(8, Math.floor((maxLen - 3) / 2));
+        return `${text.slice(0, keep)}...${text.slice(-keep)}`;
+      }
+
+      const dashboardRadarLabelPlugin = {
+        id: 'dashboardRadarLabels',
+        afterDraw(chart, args, pluginOptions) {
+          const opts = pluginOptions || {};
+          const labels = opts.labels || [];
+          const deltas = opts.deltaTexts || [];
+          const deltaColors = opts.deltaColors || [];
+          const scale = chart?.scales?.r;
+          if (!scale || labels.length === 0) return;
+          const ctx = chart.ctx;
+          ctx.save();
+          for (let i = 0; i < labels.length; i += 1) {
+            const base = labels[i] || '';
+            const delta = deltas[i] || '';
+            const pos = scale.getPointLabelPosition(i);
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.font = '600 11px system-ui, -apple-system, Segoe UI, sans-serif';
+            ctx.fillStyle = 'rgba(226,232,240,0.9)';
+            ctx.fillText(base, pos.x, pos.y);
+            if (delta) {
+              ctx.font = '700 10px system-ui, -apple-system, Segoe UI, sans-serif';
+              ctx.fillStyle = deltaColors[i] || 'rgba(226,232,240,0.9)';
+              ctx.fillText(delta, pos.x, pos.y + 12);
+            }
+          }
+          ctx.restore();
+        }
+      };
+
       function setDialDeltaDir(dialEl, curr, prev, { betterLower = false } = {}) {
         if (!dialEl) return;
         const deltaEl = dialEl.querySelector('[data-field="delta"]');
@@ -58706,8 +58749,9 @@ Final Score: ${score}/100`;
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        const labels = items.map(i => formatDeltaLabel(i.label, i.score, i.prevScore));
+        const labels = items.map(i => i.label);
         const values = items.map(i => (toNum(i.score) ?? 0));
+        const labelDeltas = items.map(i => formatDeltaNumber(i.score, i.prevScore, { decimals: 0 }));
         const labelColors = items.map(i => deltaLabelColor(i.score, i.prevScore));
 
         try {
@@ -58739,7 +58783,12 @@ Final Score: ${score}/100`;
               responsive: true,
               maintainAspectRatio: false,
               plugins: {
-                legend: { display: false }
+                legend: { display: false },
+                dashboardRadarLabels: {
+                  labels,
+                  deltaTexts: labelDeltas.map(d => (d === '—' ? '' : d)),
+                  deltaColors: labelColors
+                }
               },
               scales: {
                 r: {
@@ -58748,13 +58797,11 @@ Final Score: ${score}/100`;
                   ticks: { display: false },
                   grid: { color: 'rgba(148, 163, 184, 0.20)' },
                   angleLines: { color: 'rgba(148, 163, 184, 0.20)' },
-                  pointLabels: {
-                    color: (ctx) => labelColors[ctx.index] || 'rgba(226, 232, 240, 0.92)',
-                    font: { size: 11, weight: '700' }
-                  }
+                  pointLabels: { display: false }
                 }
               }
-            }
+            },
+            plugins: [dashboardRadarLabelPlugin]
           });
         } catch (e) {
           // ignore
@@ -58840,17 +58887,18 @@ Final Score: ${score}/100`;
 
         const s = eeatSubscores || {};
         const prev = prevSubscores || {};
-        const labels = [
-          formatDeltaLabel('Experience', s.experience, prev.experience),
-          formatDeltaLabel('Expertise', s.expertise, prev.expertise),
-          formatDeltaLabel('Authoritativeness', s.authoritativeness, prev.authoritativeness),
-          formatDeltaLabel('Trustworthiness', s.trustworthiness, prev.trustworthiness)
-        ];
+        const labels = ['Experience', 'Expertise', 'Authoritativeness', 'Trustworthiness'];
         const values = [
           toNum(s.experience) ?? 0,
           toNum(s.expertise) ?? 0,
           toNum(s.authoritativeness) ?? 0,
           toNum(s.trustworthiness) ?? 0
+        ];
+        const labelDeltas = [
+          formatDeltaNumber(s.experience, prev.experience, { decimals: 0 }),
+          formatDeltaNumber(s.expertise, prev.expertise, { decimals: 0 }),
+          formatDeltaNumber(s.authoritativeness, prev.authoritativeness, { decimals: 0 }),
+          formatDeltaNumber(s.trustworthiness, prev.trustworthiness, { decimals: 0 })
         ];
         const labelColors = [
           deltaLabelColor(s.experience, prev.experience),
@@ -58888,7 +58936,12 @@ Final Score: ${score}/100`;
               responsive: true,
               maintainAspectRatio: false,
               plugins: {
-                legend: { display: false }
+                legend: { display: false },
+                dashboardRadarLabels: {
+                  labels,
+                  deltaTexts: labelDeltas.map(d => (d === '—' ? '' : d)),
+                  deltaColors: labelColors
+                }
               },
               scales: {
                 r: {
@@ -58898,13 +58951,11 @@ Final Score: ${score}/100`;
                   ticks: { display: false },
                   grid: { color: 'rgba(148,163,184,0.25)' },
                   angleLines: { color: 'rgba(148,163,184,0.25)' },
-                  pointLabels: {
-                    color: (ctx) => labelColors[ctx.index] || 'rgba(226,232,240,0.9)',
-                    font: { size: 11, weight: '600' }
-                  }
+                  pointLabels: { display: false }
                 }
               }
-            }
+            },
+            plugins: [dashboardRadarLabelPlugin]
           });
         } catch (e) {
           // ignore
@@ -58943,15 +58994,16 @@ Final Score: ${score}/100`;
 
         const c = aiSummaryComponents || {};
         const prev = prevComponents || {};
-        const labels = [
-          formatDeltaLabel('Snippet Readiness', c.snippetReadiness, prev.snippetReadiness),
-          formatDeltaLabel('Visibility', c.visibility, prev.visibility),
-          formatDeltaLabel('Brand', c.brand, prev.brand)
-        ];
+        const labels = ['Snippet Readiness', 'Visibility', 'Brand'];
         const values = [
           toNum(c.snippetReadiness) ?? 0,
           toNum(c.visibility) ?? 0,
           toNum(c.brand) ?? 0
+        ];
+        const labelDeltas = [
+          formatDeltaNumber(c.snippetReadiness, prev.snippetReadiness, { decimals: 0 }),
+          formatDeltaNumber(c.visibility, prev.visibility, { decimals: 0 }),
+          formatDeltaNumber(c.brand, prev.brand, { decimals: 0 })
         ];
         const labelColors = [
           deltaLabelColor(c.snippetReadiness, prev.snippetReadiness),
@@ -58994,7 +59046,12 @@ Final Score: ${score}/100`;
               responsive: true,
               maintainAspectRatio: false,
               plugins: {
-                legend: { display: false }
+                legend: { display: false },
+                dashboardRadarLabels: {
+                  labels,
+                  deltaTexts: labelDeltas.map(d => (d === '—' ? '' : d)),
+                  deltaColors: labelColors
+                }
               },
               scales: {
                 r: {
@@ -59004,13 +59061,11 @@ Final Score: ${score}/100`;
                   ticks: { display: false },
                   grid: { color: 'rgba(148,163,184,0.25)' },
                   angleLines: { color: 'rgba(148,163,184,0.25)' },
-                  pointLabels: {
-                    color: (ctx) => labelColors[ctx.index] || 'rgba(226,232,240,0.9)',
-                    font: { size: 11, weight: '600' }
-                  }
+                  pointLabels: { display: false }
                 }
               }
-            }
+            },
+            plugins: [dashboardRadarLabelPlugin]
           });
         } catch (err) {
           console.error('[Dashboard] Error rendering AI Summary radar:', err);
@@ -59075,16 +59130,15 @@ Final Score: ${score}/100`;
             const prevImpressions = prevRow ? (toNum(prevRow.impressions || prevRow.impressions_28d) || 0) : null;
             const prevCtr = (prevImpressions && prevImpressions > 0) ? (prevClicks / prevImpressions) : null;
             const currentCtrPct = currentCtr * 100;
-            const prevCtrPct = prevCtr == null ? null : (prevCtr * 100);
-            const deltaCtr = formatDeltaNumber(currentCtrPct, prevCtrPct, { decimals: 1, pp: true });
+            const gapToTargetPp = targetCtrPct - currentCtrPct;
+            const gapText = formatSignedPp(gapToTargetPp, 1);
             return {
               url: row.url || row.page_url || 'Unknown',
               potentialClicks,
               currentClicks: clicks,
               impressions,
               currentCtrPct,
-              prevCtrPct,
-              deltaCtr
+              gapText
             };
           })
           .filter(p => p.potentialClicks > 0)
@@ -59126,10 +59180,8 @@ Final Score: ${score}/100`;
             url = '/';
           }
           // Truncate if too long
-          const base = url.length > 30 ? url.substring(0, 27) + '...' : url;
-          const ctrText = formatPct(p.currentCtrPct, 1);
-          const deltaText = (p.deltaCtr && p.deltaCtr !== '—') ? `Δ ${p.deltaCtr}` : 'Δ —';
-          return `${base} (${ctrText} | ${deltaText})`;
+          const base = shortenMiddle(url, 48);
+          return base;
         });
         const data = pagesWithUplift.map(p => p.potentialClicks);
 
@@ -59143,8 +59195,7 @@ Final Score: ${score}/100`;
           // ignore
         }
 
-        const totalUplift = pagesWithUplift.reduce((sum, p) => sum + p.potentialClicks, 0);
-        canvas.title = `Top pages by potential uplift (target CTR: ${targetCtrPct}%). Total potential: +${totalUplift} clicks.`;
+        canvas.title = '';
 
         try {
           window.__dashboardUpliftChart = new Chart(ctx, {
@@ -59167,14 +59218,14 @@ Final Score: ${score}/100`;
                 legend: { display: false },
                 tooltip: {
                   callbacks: {
-                label: function(context) {
+                    label: function(context) {
                       const idx = context.dataIndex;
                       const page = pagesWithUplift[idx];
                       return [
                         `Potential: +${page.potentialClicks} clicks`,
-                    `Current CTR: ${formatPct(page.currentCtrPct, 1)}`,
-                    `CTR change: ${page.deltaCtr}`,
-                    `Current: ${page.currentClicks} clicks`,
+                        `Current CTR: ${formatPct(page.currentCtrPct, 1)}`,
+                        `Gap to target: ${page.gapText}`,
+                        `Current: ${page.currentClicks} clicks`,
                         `Impressions: ${formatInt(page.impressions)}`
                       ];
                     }
@@ -59188,6 +59239,12 @@ Final Score: ${score}/100`;
                     color: 'rgba(226,232,240,0.7)',
                     font: { size: 10 }
                   },
+                  title: {
+                    display: true,
+                    text: 'Potential extra clicks (28d)',
+                    color: 'rgba(226,232,240,0.65)',
+                    font: { size: 10, weight: '600' }
+                  },
                   grid: { color: 'rgba(148,163,184,0.15)' }
                 },
                 y: {
@@ -59198,7 +59255,29 @@ Final Score: ${score}/100`;
                   grid: { display: false }
                 }
               }
-            }
+            },
+            plugins: [{
+              id: 'dashboardUpliftBarLabels',
+              afterDatasetsDraw(chart) {
+                const ctx = chart.ctx;
+                const meta = chart.getDatasetMeta(0);
+                if (!meta) return;
+                ctx.save();
+                ctx.font = '700 10px system-ui, -apple-system, Segoe UI, sans-serif';
+                ctx.fillStyle = '#f8fafc';
+                ctx.textBaseline = 'middle';
+                for (let i = 0; i < meta.data.length; i += 1) {
+                  const bar = meta.data[i];
+                  const page = pagesWithUplift[i];
+                  if (!bar || !page) continue;
+                  const text = `+${page.potentialClicks} | CTR ${formatPct(page.currentCtrPct, 1)} | gap ${page.gapText}`;
+                  const x = Math.max(bar.x - 6, chart.chartArea.left + 6);
+                  ctx.textAlign = 'right';
+                  ctx.fillText(text, x, bar.y);
+                }
+                ctx.restore();
+              }
+            }]
           });
         } catch (err) {
           console.error('[Dashboard] Error rendering Uplift chart:', err);
@@ -59229,15 +59308,16 @@ Final Score: ${score}/100`;
 
         const s = moneyShareSplit || null;
         const prev = prevSplit || {};
-        const labels = [
-          formatDeltaLabel('Landing', s?.landingPct, prev.landingPct, { pp: true }),
-          formatDeltaLabel('Event', s?.eventPct, prev.eventPct, { pp: true }),
-          formatDeltaLabel('Service', s?.productPct, prev.productPct, { pp: true })
-        ];
+        const labels = ['Landing', 'Event', 'Service'];
         const values = [
           toNum(s?.landingPct) ?? 0,
           toNum(s?.eventPct) ?? 0,
           toNum(s?.productPct) ?? 0
+        ];
+        const labelDeltas = [
+          formatDeltaNumber(s?.landingPct, prev.landingPct, { decimals: 0, pp: true }),
+          formatDeltaNumber(s?.eventPct, prev.eventPct, { decimals: 0, pp: true }),
+          formatDeltaNumber(s?.productPct, prev.productPct, { decimals: 0, pp: true })
         ];
         const labelColors = [
           deltaLabelColor(s?.landingPct, prev.landingPct),
@@ -59287,7 +59367,14 @@ Final Score: ${score}/100`;
             options: {
               responsive: true,
               maintainAspectRatio: false,
-              plugins: { legend: { display: false } },
+              plugins: {
+                legend: { display: false },
+                dashboardRadarLabels: {
+                  labels,
+                  deltaTexts: labelDeltas.map(d => (d === '—' ? '' : d)),
+                  deltaColors: labelColors
+                }
+              },
               scales: {
                 r: {
                   beginAtZero: true,
@@ -59296,13 +59383,11 @@ Final Score: ${score}/100`;
                   ticks: { display: false },
                   grid: { color: 'rgba(148,163,184,0.25)' },
                   angleLines: { color: 'rgba(148,163,184,0.25)' },
-                  pointLabels: {
-                    color: (ctx) => labelColors[ctx.index] || 'rgba(226,232,240,0.9)',
-                    font: { size: 11, weight: '600' }
-                  }
+                  pointLabels: { display: false }
                 }
               }
-            }
+            },
+            plugins: [dashboardRadarLabelPlugin]
           });
         } catch (err) {
           console.error('[Dashboard] Error rendering Money Share radar:', err);
