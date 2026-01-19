@@ -57867,6 +57867,7 @@ Final Score: ${score}/100`;
           const lineGap = typeof opts.lineGap === 'number' ? opts.lineGap : 12;
           const deltaGap = typeof opts.deltaGap === 'number' ? opts.deltaGap : 10;
           const labelPadding = typeof opts.labelPadding === 'number' ? opts.labelPadding : 8;
+          const edgePadding = typeof opts.edgePadding === 'number' ? opts.edgePadding : 8;
           const ctx = chart.ctx;
           ctx.save();
           for (let i = 0; i < labels.length; i += 1) {
@@ -57877,8 +57878,8 @@ Final Score: ${score}/100`;
               ? scale.getIndexAngle(i)
               : ((Math.PI * 2) / count) * i - (Math.PI / 2);
             const radius = (scale.drawingArea || 0) + labelPadding;
-            const x = (scale.xCenter || 0) + Math.cos(angle) * radius;
-            const y = (scale.yCenter || 0) + Math.sin(angle) * radius;
+            let x = (scale.xCenter || 0) + Math.cos(angle) * radius;
+            let y = (scale.yCenter || 0) + Math.sin(angle) * radius;
 
             const labelLines = (() => {
               if (label.includes(' / ')) {
@@ -57889,6 +57890,23 @@ Final Score: ${score}/100`;
               if (words.length === 2) return words;
               return [label];
             })();
+
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.font = '600 11px system-ui, -apple-system, Segoe UI, sans-serif';
+            const labelWidths = labelLines.map(line => ctx.measureText(line).width);
+            let maxWidth = labelWidths.length ? Math.max(...labelWidths) : 0;
+            ctx.font = '700 10px system-ui, -apple-system, Segoe UI, sans-serif';
+            const deltaWidth = ctx.measureText(deltaText).width;
+            if (deltaWidth > maxWidth) maxWidth = deltaWidth;
+            const totalHeight = (labelLines.length * lineGap) + deltaGap + lineGap;
+            const halfW = maxWidth / 2;
+            const minX = (chart.chartArea?.left ?? 0) + edgePadding + halfW;
+            const maxX = (chart.chartArea?.right ?? chart.width ?? 0) - edgePadding - halfW;
+            const minY = (chart.chartArea?.top ?? 0) + edgePadding + (totalHeight / 2);
+            const maxY = (chart.chartArea?.bottom ?? chart.height ?? 0) - edgePadding - (totalHeight / 2);
+            x = Math.max(minX, Math.min(maxX, x));
+            y = Math.max(minY, Math.min(maxY, y));
 
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
@@ -58807,7 +58825,7 @@ Final Score: ${score}/100`;
             options: {
               responsive: true,
               maintainAspectRatio: false,
-              layout: { padding: 16 },
+              layout: { padding: 18 },
               plugins: {
                 legend: { display: false },
                 dashboardRadarLabels: {
@@ -58816,7 +58834,8 @@ Final Score: ${score}/100`;
                   deltaColors: labelColors,
                   lineGap: 12,
                   deltaGap: 8,
-                  labelPadding: 10
+                  labelPadding: 12,
+                  edgePadding: 10
                 }
               },
               scales: {
@@ -58964,7 +58983,7 @@ Final Score: ${score}/100`;
             options: {
               responsive: true,
               maintainAspectRatio: false,
-              layout: { padding: 16 },
+              layout: { padding: 18 },
               plugins: {
                 legend: { display: false },
                 dashboardRadarLabels: {
@@ -58973,7 +58992,8 @@ Final Score: ${score}/100`;
                   deltaColors: labelColors,
                   lineGap: 12,
                   deltaGap: 8,
-                  labelPadding: 10
+                  labelPadding: 12,
+                  edgePadding: 10
                 }
               },
               scales: {
@@ -59078,7 +59098,7 @@ Final Score: ${score}/100`;
             options: {
               responsive: true,
               maintainAspectRatio: false,
-              layout: { padding: 16 },
+              layout: { padding: 18 },
               plugins: {
                 legend: { display: false },
                 dashboardRadarLabels: {
@@ -59087,7 +59107,8 @@ Final Score: ${score}/100`;
                   deltaColors: labelColors,
                   lineGap: 12,
                   deltaGap: 8,
-                  labelPadding: 10
+                  labelPadding: 12,
+                  edgePadding: 10
                 }
               },
               scales: {
@@ -59404,7 +59425,7 @@ Final Score: ${score}/100`;
             options: {
               responsive: true,
               maintainAspectRatio: false,
-              layout: { padding: 16 },
+              layout: { padding: 18 },
               plugins: {
                 legend: { display: false },
                 dashboardRadarLabels: {
@@ -59413,7 +59434,8 @@ Final Score: ${score}/100`;
                   deltaColors: labelColors,
                   lineGap: 12,
                   deltaGap: 8,
-                  labelPadding: 10
+                  labelPadding: 12,
+                  edgePadding: 10
                 }
               },
               scales: {
