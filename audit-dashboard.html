@@ -58963,25 +58963,18 @@ Final Score: ${score}/100`;
 
         const s = eeatSubscores || {};
         const prev = prevSubscores || {};
-        const labels = ['Experience', 'Expertise', 'Authoritativeness', 'Trustworthiness'];
-        const values = [
-          toNum(s.experience) ?? 0,
-          toNum(s.expertise) ?? 0,
-          toNum(s.authoritativeness) ?? 0,
-          toNum(s.trustworthiness) ?? 0
+        const items = [
+          { key: 'experience', label: 'Experience', score: s.experience, prevScore: prev.experience },
+          { key: 'expertise', label: 'Expertise', score: s.expertise, prevScore: prev.expertise },
+          { key: 'authoritativeness', label: 'Authoritativeness', score: s.authoritativeness, prevScore: prev.authoritativeness },
+          { key: 'trustworthiness', label: 'Trustworthiness', score: s.trustworthiness, prevScore: prev.trustworthiness }
         ];
-        const labelDeltas = [
-          formatDeltaNumber(s.experience, prev.experience, { decimals: 0 }),
-          formatDeltaNumber(s.expertise, prev.expertise, { decimals: 0 }),
-          formatDeltaNumber(s.authoritativeness, prev.authoritativeness, { decimals: 0 }),
-          formatDeltaNumber(s.trustworthiness, prev.trustworthiness, { decimals: 0 })
-        ];
-        const labelColors = [
-          deltaLabelColor(s.experience, prev.experience),
-          deltaLabelColor(s.expertise, prev.expertise),
-          deltaLabelColor(s.authoritativeness, prev.authoritativeness),
-          deltaLabelColor(s.trustworthiness, prev.trustworthiness)
-        ];
+        const order = ['trustworthiness', 'experience', 'expertise', 'authoritativeness'];
+        const ordered = order.map(key => items.find(i => i.key === key)).filter(Boolean);
+        const labels = ordered.map(i => i.label);
+        const values = ordered.map(i => toNum(i.score) ?? 0);
+        const labelDeltas = ordered.map(i => formatDeltaNumber(i.score, i.prevScore, { decimals: 0 }));
+        const labelColors = ordered.map(i => deltaLabelColor(i.score, i.prevScore));
 
         try {
           if (window.__dashboardEeatRadarChart) {
@@ -59014,6 +59007,18 @@ Final Score: ${score}/100`;
               layout: { padding: 18 },
               plugins: {
                 legend: { display: false },
+                tooltip: {
+                  callbacks: {
+                    label: function(context) {
+                      const idx = context.dataIndex;
+                      const item = ordered[idx];
+                      if (!item) return '';
+                      const score = toNum(item.score);
+                      const display = score == null ? '—' : Math.round(score);
+                      return `${item.label}: ${display}`;
+                    }
+                  }
+                },
                 dashboardRadarLabels: {
                   labels,
                   deltaTexts: labelDeltas,
@@ -59075,22 +59080,17 @@ Final Score: ${score}/100`;
 
         const c = aiSummaryComponents || {};
         const prev = prevComponents || {};
-        const labels = ['Snippet Readiness', 'Visibility', 'Brand'];
-        const values = [
-          toNum(c.snippetReadiness) ?? 0,
-          toNum(c.visibility) ?? 0,
-          toNum(c.brand) ?? 0
+        const items = [
+          { key: 'snippetReadiness', label: 'Snippet Readiness', score: c.snippetReadiness, prevScore: prev.snippetReadiness },
+          { key: 'visibility', label: 'Visibility', score: c.visibility, prevScore: prev.visibility },
+          { key: 'brand', label: 'Brand', score: c.brand, prevScore: prev.brand }
         ];
-        const labelDeltas = [
-          formatDeltaNumber(c.snippetReadiness, prev.snippetReadiness, { decimals: 0 }),
-          formatDeltaNumber(c.visibility, prev.visibility, { decimals: 0 }),
-          formatDeltaNumber(c.brand, prev.brand, { decimals: 0 })
-        ];
-        const labelColors = [
-          deltaLabelColor(c.snippetReadiness, prev.snippetReadiness),
-          deltaLabelColor(c.visibility, prev.visibility),
-          deltaLabelColor(c.brand, prev.brand)
-        ];
+        const order = ['snippetReadiness', 'visibility', 'brand'];
+        const ordered = order.map(key => items.find(i => i.key === key)).filter(Boolean);
+        const labels = ordered.map(i => i.label);
+        const values = ordered.map(i => toNum(i.score) ?? 0);
+        const labelDeltas = ordered.map(i => formatDeltaNumber(i.score, i.prevScore, { decimals: 0 }));
+        const labelColors = ordered.map(i => deltaLabelColor(i.score, i.prevScore));
 
         // Always destroy existing chart before creating new one
         try {
@@ -59129,6 +59129,18 @@ Final Score: ${score}/100`;
               layout: { padding: 18 },
               plugins: {
                 legend: { display: false },
+                tooltip: {
+                  callbacks: {
+                    label: function(context) {
+                      const idx = context.dataIndex;
+                      const item = ordered[idx];
+                      if (!item) return '';
+                      const score = toNum(item.score);
+                      const display = score == null ? '—' : Math.round(score);
+                      return `${item.label}: ${display}`;
+                    }
+                  }
+                },
                 dashboardRadarLabels: {
                   labels,
                   deltaTexts: labelDeltas,
@@ -59394,22 +59406,17 @@ Final Score: ${score}/100`;
 
         const s = moneyShareSplit || null;
         const prev = prevSplit || {};
-        const labels = ['Landing', 'Event', 'Service'];
-        const values = [
-          toNum(s?.landingPct) ?? 0,
-          toNum(s?.eventPct) ?? 0,
-          toNum(s?.productPct) ?? 0
+        const items = [
+          { key: 'landing', label: 'Landing', score: s?.landingPct, prevScore: prev.landingPct },
+          { key: 'event', label: 'Event', score: s?.eventPct, prevScore: prev.eventPct },
+          { key: 'service', label: 'Service', score: s?.productPct, prevScore: prev.productPct }
         ];
-        const labelDeltas = [
-          formatDeltaNumber(s?.landingPct, prev.landingPct, { decimals: 0, pp: true }),
-          formatDeltaNumber(s?.eventPct, prev.eventPct, { decimals: 0, pp: true }),
-          formatDeltaNumber(s?.productPct, prev.productPct, { decimals: 0, pp: true })
-        ];
-        const labelColors = [
-          deltaLabelColor(s?.landingPct, prev.landingPct),
-          deltaLabelColor(s?.eventPct, prev.eventPct),
-          deltaLabelColor(s?.productPct, prev.productPct)
-        ];
+        const order = ['service', 'landing', 'event'];
+        const ordered = order.map(key => items.find(i => i.key === key)).filter(Boolean);
+        const labels = ordered.map(i => i.label);
+        const values = ordered.map(i => toNum(i.score) ?? 0);
+        const labelDeltas = ordered.map(i => formatDeltaNumber(i.score, i.prevScore, { decimals: 0, pp: true }));
+        const labelColors = ordered.map(i => deltaLabelColor(i.score, i.prevScore));
 
         // Debounce: prevent re-rendering if chart was just rendered recently
         const now = Date.now();
@@ -59456,6 +59463,18 @@ Final Score: ${score}/100`;
               layout: { padding: 18 },
               plugins: {
                 legend: { display: false },
+                tooltip: {
+                  callbacks: {
+                    label: function(context) {
+                      const idx = context.dataIndex;
+                      const item = ordered[idx];
+                      if (!item) return '';
+                      const score = toNum(item.score);
+                      const display = score == null ? '—' : Math.round(score);
+                      return `${item.label}: ${display}%`;
+                    }
+                  }
+                },
                 dashboardRadarLabels: {
                   labels,
                   deltaTexts: labelDeltas,
