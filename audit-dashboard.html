@@ -30917,7 +30917,8 @@
 
       // Align authority/visibility to latest GSC series (or segment total) and keep stable per audit.
       const auditKey = saved?.auditDate || saved?.audit_date || saved?.timestamp || null;
-      applyStablePillarOverrides(scores, auditKey);
+      const gscKey = window.lastGscTimeseriesDate || window.latestAuditDateStr || null;
+      applyStablePillarOverrides(scores, auditKey, gscKey);
       
       // DEBUG: Log currentLocalSignals structure
       if (currentLocalSignals) {
@@ -45755,7 +45756,8 @@ Final Score: ${score}/100`;
 
             // Sync overview pillar scores to latest GSC-series values once maps are ready.
             const auditKey = saved?.auditDate || saved?.audit_date || saved?.timestamp || null;
-            applyStablePillarOverrides(scores, auditKey);
+            const gscKey = window.lastGscTimeseriesDate || null;
+            applyStablePillarOverrides(scores, auditKey, gscKey);
             updateOverviewPillarUi(scores);
             updateOverviewRadar(scores);
             
@@ -57844,8 +57846,8 @@ Final Score: ${score}/100`;
         return toNum(map.get(keys[keys.length - 1]));
       }
 
-      function getLatestGscPillarOverrides() {
-        const dateKey = window.lastGscTimeseriesDate || window.latestAuditDateStr || null;
+      function getLatestGscPillarOverrides(dateKeyOverride = null) {
+        const dateKey = dateKeyOverride || window.lastGscTimeseriesDate || window.latestAuditDateStr || null;
         let authority = null;
         if (window.authorityBySegmentMap && typeof window.authorityBySegmentMap.get === 'function') {
           const seg = window.authorityBySegmentMap.get(dateKey);
@@ -57862,9 +57864,9 @@ Final Score: ${score}/100`;
         };
       }
 
-      function applyLatestPillarOverrides(scoresObj) {
+      function applyLatestPillarOverrides(scoresObj, dateKeyOverride = null) {
         if (!scoresObj) return;
-        const overrides = getLatestGscPillarOverrides();
+        const overrides = getLatestGscPillarOverrides(dateKeyOverride);
         const authorityOverride = overrides.authority;
         const visibilityOverride = overrides.visibility;
 
@@ -57892,10 +57894,12 @@ Final Score: ${score}/100`;
         }
       }
 
-      function applyStablePillarOverrides(scoresObj, auditKey) {
+      function applyStablePillarOverrides(scoresObj, auditKey, dateKeyOverride = null) {
         if (!scoresObj) return;
+        const dateKey = dateKeyOverride || window.lastGscTimeseriesDate || window.latestAuditDateStr || null;
+        const lockKey = `${auditKey || ''}|${dateKey || ''}`;
         const lock = window.__pillarScoreLock;
-        if (lock && lock.key && lock.key === auditKey && lock.values) {
+        if (lock && lock.key && lock.key === lockKey && lock.values) {
           const auth = lock.values.authority;
           const vis = lock.values.visibility;
           if (typeof auth === 'number') {
@@ -57917,12 +57921,12 @@ Final Score: ${score}/100`;
           return;
         }
 
-        applyLatestPillarOverrides(scoresObj);
+        applyLatestPillarOverrides(scoresObj, dateKey);
         const authorityScore = (typeof scoresObj.authority === 'object' && scoresObj.authority !== null)
           ? scoresObj.authority.score
           : scoresObj.authority;
         window.__pillarScoreLock = {
-          key: auditKey || null,
+          key: lockKey,
           values: {
             authority: toNum(authorityScore),
             visibility: toNum(scoresObj.visibility)
