@@ -5117,7 +5117,7 @@
             <div id="dashboard-gaio-breakdown" style="margin-top: 0.5rem;"></div>
             <div id="dashboard-gaio-pillars" style="margin-top: 0.75rem;"></div>
             <div style="margin-top: 0.75rem;">
-              <canvas id="dashboard-gaio-radar" width="420" height="300" style="width: 100%; height: 300px;"></canvas>
+              <canvas id="dashboard-gaio-radar" width="460" height="340" style="width: 100%; height: 340px;"></canvas>
             </div>
           </div>
 
@@ -5136,7 +5136,7 @@
             <div id="dashboard-ai-summary-mini" style="margin-top: 0.75rem;"></div>
             <div id="dashboard-ai-summary-breakdown" style="margin-top: 0.5rem;"></div>
             <div style="margin-top: 0.75rem;">
-              <canvas id="dashboard-ai-summary-radar" width="420" height="300" style="width: 100%; height: 300px;"></canvas>
+              <canvas id="dashboard-ai-summary-radar" width="460" height="340" style="width: 100%; height: 340px;"></canvas>
             </div>
           </div>
 
@@ -5155,7 +5155,7 @@
             <div id="dashboard-money-share-mini" style="margin-top: 0.75rem;"></div>
             <div id="dashboard-money-share-breakdown" style="margin-top: 0.5rem;"></div>
             <div style="margin-top: 0.75rem;">
-              <canvas id="dashboard-money-share-radar" width="420" height="300" style="width: 100%; height: 300px;"></canvas>
+              <canvas id="dashboard-money-share-radar" width="460" height="340" style="width: 100%; height: 340px;"></canvas>
             </div>
           </div>
 
@@ -5174,7 +5174,7 @@
             <div id="dashboard-uplift-mini" style="margin-top: 0.75rem;"></div>
             <div id="dashboard-uplift-breakdown" style="margin-top: 0.5rem;"></div>
             <div style="margin-top: 0.75rem;">
-              <canvas id="dashboard-uplift-chart" width="400" height="280" style="width: 100%; height: 280px;"></canvas>
+              <canvas id="dashboard-uplift-chart" width="440" height="320" style="width: 100%; height: 320px;"></canvas>
             </div>
           </div>
 
@@ -5193,7 +5193,7 @@
             <div id="dashboard-eeat-mini" style="margin-top: 0.75rem;"></div>
             <div id="dashboard-eeat-breakdown" style="margin-top: 0.5rem;"></div>
             <div style="margin-top: 0.75rem;">
-              <canvas id="dashboard-eeat-radar" width="420" height="300" style="width: 100%; height: 300px;"></canvas>
+              <canvas id="dashboard-eeat-radar" width="460" height="340" style="width: 100%; height: 340px;"></canvas>
             </div>
           </div>
         </div>
@@ -57864,14 +57864,14 @@ Final Score: ${score}/100`;
           const scale = chart?.scales?.r;
           if (!scale || labels.length === 0) return;
           const count = labels.length;
-          const padding = typeof opts.labelPadding === 'number' ? opts.labelPadding : 24;
+          const padding = typeof opts.labelPadding === 'number' ? opts.labelPadding : 32;
           const lineGap = typeof opts.lineGap === 'number' ? opts.lineGap : 12;
           const ctx = chart.ctx;
           ctx.save();
           for (let i = 0; i < labels.length; i += 1) {
             const base = labels[i] || '';
-            const deltaRaw = deltas[i] || '';
-            const deltaText = (deltaRaw && deltaRaw !== '—') ? deltaRaw : '';
+            const deltaRaw = deltas[i];
+            const deltaText = (deltaRaw == null || deltaRaw === '') ? '—' : String(deltaRaw);
             let pos = (typeof scale.getPointPositionForValue === 'function')
               ? scale.getPointPositionForValue(i, scale.max || 100)
               : null;
@@ -57886,20 +57886,25 @@ Final Score: ${score}/100`;
               };
             }
             const angle = Math.atan2(pos.y - (scale.yCenter || 0), pos.x - (scale.xCenter || 0));
-            const x = pos.x + Math.cos(angle) * padding;
-            const y = pos.y + Math.sin(angle) * padding;
+            const xBase = pos.x + Math.cos(angle) * padding;
+            const yBase = pos.y + Math.sin(angle) * padding;
+            const cos = Math.cos(angle);
+            const sin = Math.sin(angle);
+            const align = Math.abs(cos) < 0.25 ? 'center' : (cos > 0 ? 'left' : 'right');
+            const x = xBase + (align === 'left' ? 6 : (align === 'right' ? -6 : 0));
+            const y = yBase + (sin < -0.7 ? -2 : (sin > 0.7 ? 2 : 0));
 
-            ctx.textAlign = 'center';
+            ctx.textAlign = align;
             ctx.textBaseline = 'middle';
             ctx.font = '600 11px system-ui, -apple-system, Segoe UI, sans-serif';
             ctx.fillStyle = 'rgba(226,232,240,0.9)';
             ctx.fillText(base, x, y);
 
-            if (deltaText) {
-              ctx.font = '700 10px system-ui, -apple-system, Segoe UI, sans-serif';
-              ctx.fillStyle = deltaColors[i] || 'rgba(226,232,240,0.9)';
-              ctx.fillText(deltaText, x, y + lineGap);
-            }
+            ctx.font = '700 10px system-ui, -apple-system, Segoe UI, sans-serif';
+            ctx.fillStyle = (deltaRaw === '—' || deltaRaw == null || deltaRaw === '')
+              ? 'rgba(226,232,240,0.6)'
+              : (deltaColors[i] || 'rgba(226,232,240,0.9)');
+            ctx.fillText(deltaText, x, y + lineGap);
           }
           ctx.restore();
         }
@@ -58803,14 +58808,14 @@ Final Score: ${score}/100`;
             options: {
               responsive: true,
               maintainAspectRatio: false,
-              layout: { padding: 8 },
+              layout: { padding: 10 },
               plugins: {
                 legend: { display: false },
                 dashboardRadarLabels: {
                   labels,
                   deltaTexts: labelDeltas,
                   deltaColors: labelColors,
-                  labelPadding: 28,
+                  labelPadding: 36,
                   lineGap: 12
                 }
               },
@@ -58959,14 +58964,14 @@ Final Score: ${score}/100`;
             options: {
               responsive: true,
               maintainAspectRatio: false,
-              layout: { padding: 8 },
+              layout: { padding: 10 },
               plugins: {
                 legend: { display: false },
                 dashboardRadarLabels: {
                   labels,
                   deltaTexts: labelDeltas,
                   deltaColors: labelColors,
-                  labelPadding: 28,
+                  labelPadding: 36,
                   lineGap: 12
                 }
               },
@@ -59072,14 +59077,14 @@ Final Score: ${score}/100`;
             options: {
               responsive: true,
               maintainAspectRatio: false,
-              layout: { padding: 8 },
+              layout: { padding: 10 },
               plugins: {
                 legend: { display: false },
                 dashboardRadarLabels: {
                   labels,
                   deltaTexts: labelDeltas,
                   deltaColors: labelColors,
-                  labelPadding: 28,
+                  labelPadding: 36,
                   lineGap: 12
                 }
               },
@@ -59397,14 +59402,14 @@ Final Score: ${score}/100`;
             options: {
               responsive: true,
               maintainAspectRatio: false,
-              layout: { padding: 8 },
+              layout: { padding: 10 },
               plugins: {
                 legend: { display: false },
                 dashboardRadarLabels: {
                   labels,
                   deltaTexts: labelDeltas,
                   deltaColors: labelColors,
-                  labelPadding: 28,
+                  labelPadding: 36,
                   lineGap: 12
                 }
               },
