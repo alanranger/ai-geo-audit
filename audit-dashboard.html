@@ -58293,9 +58293,17 @@ Final Score: ${score}/100`;
         const rankingKpis = computeRankingKpisFromRows(rankingRows);
 
         const pillars = computePillarScoresFromAudit(audit);
-        const authorityOverride = audit?.scores?.authority;
-        if (pillars && typeof authorityOverride === 'object' && authorityOverride !== null && typeof authorityOverride.score === 'number') {
-          pillars.authority = authorityOverride.score;
+        if (pillars && audit?.scores) {
+          const authorityOverride = audit.scores.authority;
+          if (typeof authorityOverride === 'object' && authorityOverride !== null && typeof authorityOverride.score === 'number') {
+            pillars.authority = authorityOverride.score;
+          } else if (typeof authorityOverride === 'number') {
+            pillars.authority = authorityOverride;
+          }
+          if (typeof audit.scores.visibility === 'number') pillars.visibility = audit.scores.visibility;
+          if (typeof audit.scores.contentSchema === 'number') pillars.contentSchema = audit.scores.contentSchema;
+          if (typeof audit.scores.localEntity === 'number') pillars.localEntity = audit.scores.localEntity;
+          if (typeof audit.scores.serviceArea === 'number') pillars.serviceArea = audit.scores.serviceArea;
         }
         const auditKpis = computeAuditKpisFromAudit(audit);
 
@@ -58781,11 +58789,11 @@ Final Score: ${score}/100`;
         const p = pillars || {};
         const prev = prevPillars || {};
         const items = [
-          { key: 'authority', label: 'Authority', score: p.authority, prevScore: prev.authority },
-          { key: 'contentSchema', label: 'Content / Schema', score: p.contentSchema, prevScore: prev.contentSchema },
-          { key: 'visibility', label: 'Visibility', score: p.visibility, prevScore: prev.visibility },
-          { key: 'localEntity', label: 'Local Entity', score: p.localEntity, prevScore: prev.localEntity },
-          { key: 'serviceArea', label: 'Service Area', score: p.serviceArea, prevScore: prev.serviceArea },
+          { key: 'authority', label: 'Authority', score: (typeof p.authority === 'number') ? Math.round(p.authority) : p.authority, prevScore: prev.authority },
+          { key: 'contentSchema', label: 'Content / Schema', score: (typeof p.contentSchema === 'number') ? Math.round(p.contentSchema) : p.contentSchema, prevScore: prev.contentSchema },
+          { key: 'visibility', label: 'Visibility', score: (typeof p.visibility === 'number') ? Math.round(p.visibility) : p.visibility, prevScore: prev.visibility },
+          { key: 'localEntity', label: 'Local Entity', score: (typeof p.localEntity === 'number') ? Math.round(p.localEntity) : p.localEntity, prevScore: prev.localEntity },
+          { key: 'serviceArea', label: 'Service Area', score: (typeof p.serviceArea === 'number') ? Math.round(p.serviceArea) : p.serviceArea, prevScore: prev.serviceArea },
         ];
 
         const rowsHtml = items.map(it => {
