@@ -57865,41 +57865,40 @@ Final Score: ${score}/100`;
           if (!scale || labels.length === 0) return;
           const count = labels.length;
           const padding = typeof opts.labelPadding === 'number' ? opts.labelPadding : 24;
-          const gap = typeof opts.deltaGap === 'number' ? opts.deltaGap : 4;
+          const lineGap = typeof opts.lineGap === 'number' ? opts.lineGap : 12;
           const ctx = chart.ctx;
           ctx.save();
-          ctx.textBaseline = 'middle';
-          ctx.textAlign = 'left';
           for (let i = 0; i < labels.length; i += 1) {
             const base = labels[i] || '';
             const deltaRaw = deltas[i] || '';
-            const deltaText = deltaRaw ? `(${deltaRaw})` : '';
-            const angle = (typeof scale.getIndexAngle === 'function')
-              ? scale.getIndexAngle(i)
-              : ((Math.PI * 2) / count) * i - (Math.PI / 2);
-            const radius = (scale.drawingArea || 0) + padding;
-            const x = (scale.xCenter || 0) + Math.cos(angle) * radius;
-            const y = (scale.yCenter || 0) + Math.sin(angle) * radius;
-
-            ctx.font = '600 11px system-ui, -apple-system, Segoe UI, sans-serif';
-            const baseWidth = ctx.measureText(base).width;
-            let deltaWidth = 0;
-            if (deltaText) {
-              ctx.font = '700 10px system-ui, -apple-system, Segoe UI, sans-serif';
-              deltaWidth = ctx.measureText(deltaText).width;
+            const deltaText = (deltaRaw && deltaRaw !== '—') ? deltaRaw : '';
+            let pos = (typeof scale.getPointPositionForValue === 'function')
+              ? scale.getPointPositionForValue(i, scale.max || 100)
+              : null;
+            if (!pos) {
+              const angleFallback = (typeof scale.getIndexAngle === 'function')
+                ? scale.getIndexAngle(i)
+                : ((Math.PI * 2) / count) * i - (Math.PI / 2);
+              const radiusFallback = (scale.drawingArea || 0) + padding;
+              pos = {
+                x: (scale.xCenter || 0) + Math.cos(angleFallback) * radiusFallback,
+                y: (scale.yCenter || 0) + Math.sin(angleFallback) * radiusFallback
+              };
             }
-            const totalWidth = baseWidth + (deltaText ? (gap + deltaWidth) : 0);
-            const startX = x - (totalWidth / 2);
+            const angle = Math.atan2(pos.y - (scale.yCenter || 0), pos.x - (scale.xCenter || 0));
+            const x = pos.x + Math.cos(angle) * padding;
+            const y = pos.y + Math.sin(angle) * padding;
 
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
             ctx.font = '600 11px system-ui, -apple-system, Segoe UI, sans-serif';
             ctx.fillStyle = 'rgba(226,232,240,0.9)';
-            ctx.fillText(base, startX, y);
+            ctx.fillText(base, x, y);
 
             if (deltaText) {
               ctx.font = '700 10px system-ui, -apple-system, Segoe UI, sans-serif';
-              const color = (deltaRaw === '—') ? 'rgba(226,232,240,0.6)' : (deltaColors[i] || 'rgba(226,232,240,0.9)');
-              ctx.fillStyle = color;
-              ctx.fillText(deltaText, startX + baseWidth + gap, y);
+              ctx.fillStyle = deltaColors[i] || 'rgba(226,232,240,0.9)';
+              ctx.fillText(deltaText, x, y + lineGap);
             }
           }
           ctx.restore();
@@ -58812,7 +58811,7 @@ Final Score: ${score}/100`;
                   deltaTexts: labelDeltas,
                   deltaColors: labelColors,
                   labelPadding: 28,
-                  deltaGap: 4
+                  lineGap: 12
                 }
               },
               scales: {
@@ -58968,7 +58967,7 @@ Final Score: ${score}/100`;
                   deltaTexts: labelDeltas,
                   deltaColors: labelColors,
                   labelPadding: 28,
-                  deltaGap: 4
+                  lineGap: 12
                 }
               },
               scales: {
@@ -59081,7 +59080,7 @@ Final Score: ${score}/100`;
                   deltaTexts: labelDeltas,
                   deltaColors: labelColors,
                   labelPadding: 28,
-                  deltaGap: 4
+                  lineGap: 12
                 }
               },
               scales: {
@@ -59406,7 +59405,7 @@ Final Score: ${score}/100`;
                   deltaTexts: labelDeltas,
                   deltaColors: labelColors,
                   labelPadding: 28,
-                  deltaGap: 4
+                  lineGap: 12
                 }
               },
               scales: {
