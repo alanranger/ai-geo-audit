@@ -57863,6 +57863,7 @@ Final Score: ${score}/100`;
           const deltaColors = opts.deltaColors || [];
           const scale = chart?.scales?.r;
           if (!scale || labels.length === 0) return;
+          const count = labels.length;
           const lineGap = typeof opts.lineGap === 'number' ? opts.lineGap : 12;
           const deltaGap = typeof opts.deltaGap === 'number' ? opts.deltaGap : 10;
           const labelPadding = typeof opts.labelPadding === 'number' ? opts.labelPadding : 8;
@@ -57872,13 +57873,12 @@ Final Score: ${score}/100`;
             const label = labels[i] || '';
             const deltaRaw = deltas[i];
             const deltaText = (deltaRaw == null || deltaRaw === '') ? '—' : String(deltaRaw);
-            const pos = (typeof scale.getPointLabelPosition === 'function')
-              ? scale.getPointLabelPosition(i)
-              : null;
-            if (!pos) continue;
-            const angle = Math.atan2(pos.y - (scale.yCenter || 0), pos.x - (scale.xCenter || 0));
-            const x = pos.x + Math.cos(angle) * labelPadding;
-            const y = pos.y + Math.sin(angle) * labelPadding;
+            const angle = (typeof scale.getIndexAngle === 'function')
+              ? scale.getIndexAngle(i)
+              : ((Math.PI * 2) / count) * i - (Math.PI / 2);
+            const radius = (scale.drawingArea || 0) + labelPadding;
+            const x = (scale.xCenter || 0) + Math.cos(angle) * radius;
+            const y = (scale.yCenter || 0) + Math.sin(angle) * radius;
 
             const labelLines = (() => {
               if (label.includes(' / ')) {
