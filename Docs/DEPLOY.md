@@ -63,6 +63,9 @@ After deployment, configure OAuth2 credentials:
    - `GOOGLE_REFRESH_TOKEN` - Your OAuth2 Refresh Token
    - `SUPABASE_URL` (optional) - Your Supabase project URL (for historical Content/Schema tracking)
    - `SUPABASE_SERVICE_ROLE_KEY` (optional) - Your Supabase service role key (for historical Content/Schema tracking)
+   - `ARP_ADMIN_KEY` (required) - Admin key for AI GEO cron controls (dashboard run/schedule/logs)
+   - `CRON_SECRET` (optional) - Shared secret for cron endpoints
+   - `SUPABASE_DB_PASSWORD` (required for cleanup VACUUM) - Used by `/api/cron/gsc-data-cleanup`
 4. Select **Production**, **Preview**, and **Development** environments
 5. Click **Save**
 
@@ -109,6 +112,19 @@ git push origin "restore-YYYY-MM-DD"
 ### Debug Logs
 
 Debug log files in `debug-logs/` are **kept local** and should not be committed.
+
+The AI GEO cron dashboard uses the `debug_logs` table for run history and logs.
+If missing, apply migration `migrations/20250117_create_debug_logs_table.sql` in Supabase.
+
+### AI GEO Cron Controls
+
+Admin-gated endpoints for the cron dashboard:
+
+- `/api/cron/run-job` - Run a cron job now
+- `/api/cron/update-schedule` - Update frequency/time or reset stats
+- `/api/cron/job-history` - Read recent run history/logs
+
+These require the `x-arp-admin-key` header (value from `ARP_ADMIN_KEY`).
 
 ### Daily Audit Cron
 
