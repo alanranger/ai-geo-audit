@@ -44472,6 +44472,7 @@ Final Score: ${score}/100`;
           const orderedData = orderedPillars.map(([, score]) => score);
           window.__radarOrderedLabels = orderedLabels;
           window.__radarOrderedData = orderedData;
+          window.__radarOrderedKeys = orderedPillars.map(([key]) => key);
           
           // Define pillar colors for radar chart (matching trend chart)
           const radarPillarColors = {
@@ -57955,9 +57956,16 @@ Final Score: ${score}/100`;
 
       function updateOverviewRadar(scoresObj) {
         if (!scoresObj || !window.radarChart || !window.__radarOrderedData || !window.__radarOrderedLabels) return;
-        const orderedPillars = getOrderedPillars(scoresObj);
-        const newLabels = orderedPillars.map(([key]) => pillarNames[key]);
-        const newData = orderedPillars.map(([, score]) => score);
+        const keys = Array.isArray(window.__radarOrderedKeys) ? window.__radarOrderedKeys : null;
+        if (!keys || !keys.length) return;
+        const newLabels = keys.map(key => pillarNames[key]);
+        const newData = keys.map(key => {
+          const value = scoresObj[key];
+          if (key === 'authority' && typeof value === 'object' && value !== null) {
+            return value.score || 0;
+          }
+          return value;
+        });
         window.__radarOrderedLabels.length = 0;
         window.__radarOrderedLabels.push(...newLabels);
         window.__radarOrderedData.length = 0;
