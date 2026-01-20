@@ -46577,6 +46577,27 @@ Final Score: ${score}/100`;
           // Debug: Log the actual data arrays being passed to the chart
           const brandOverlayValid = brandOverlayData.filter(v => v !== null && v !== undefined && !isNaN(v));
           debugLog(`Chart creation: Local Entity data length=${localEntityData.length}, last 3 values=${localEntityData.slice(-3).join(', ')}, Service Area data length=${serviceAreaData.length}, last 3 values=${serviceAreaData.slice(-3).join(', ')}, Brand & Entity data length=${brandOverlayData.length}, valid values=${brandOverlayValid.length}, last 3 values=${brandOverlayData.slice(-3).join(', ')}, all values=${brandOverlayData.join(', ')}`, 'info');
+
+          const findLastValid = (arr) => {
+            for (let i = arr.length - 1; i >= 0; i -= 1) {
+              const v = arr[i];
+              if (typeof v === 'number' && !isNaN(v)) return { value: v, index: i };
+            }
+            return null;
+          };
+          const lastAuthority = findLastValid(authorityData);
+          const lastVisibility = findLastValid(visibilityData);
+          if (lastAuthority || lastVisibility) {
+            window.latestTrendPillarValues = {
+              authority: lastAuthority ? lastAuthority.value : null,
+              visibility: lastVisibility ? lastVisibility.value : null,
+              date: window.lastGscTimeseriesDate || null
+            };
+            const auditKey = saved?.auditDate || saved?.audit_date || saved?.timestamp || null;
+            applyStablePillarOverrides(scores, auditKey, window.latestTrendPillarValues.date);
+            updateOverviewPillarUi(scores);
+            updateOverviewRadar(scores);
+          }
           
           // DEBUG: Log exact labels being passed to Chart.js
           debugLog(`[Trend Chart] Creating chart with ${chartDates.length} labels`, 'info');
@@ -57847,6 +57868,12 @@ Final Score: ${score}/100`;
       }
 
       function getLatestGscPillarOverrides(dateKeyOverride = null) {
+        if (window.latestTrendPillarValues) {
+          return {
+            authority: toNum(window.latestTrendPillarValues.authority),
+            visibility: toNum(window.latestTrendPillarValues.visibility)
+          };
+        }
         const dateKey = dateKeyOverride || window.lastGscTimeseriesDate || window.latestAuditDateStr || null;
         let authority = null;
         if (window.authorityBySegmentMap && typeof window.authorityBySegmentMap.get === 'function') {
