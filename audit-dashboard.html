@@ -59423,7 +59423,7 @@ Final Score: ${score}/100`;
         }
 
         // Calculate potential extra clicks for each page
-        const pagesWithUplift = moneyPagesRows
+        const allPages = moneyPagesRows
           .map(row => {
             const clicks = toNum(row.clicks || row.clicks_28d) || 0;
             const impressions = toNum(row.impressions || row.impressions_28d) || 0;
@@ -59446,11 +59446,18 @@ Final Score: ${score}/100`;
               gapText
             };
           })
-          .filter(p => p.potentialClicks > 0)
+          .filter(p => p.potentialClicks > 0);
+
+        const pagesWithUplift = allPages
           .sort((a, b) => b.potentialClicks - a.potentialClicks)
           .slice(0, 8); // Top 8 pages
 
+        const totalPagesWithUplift = allPages.length;
+        const totalShownUplift = pagesWithUplift.reduce((sum, item) => sum + (item.potentialClicks || 0), 0);
+
         if (pagesWithUplift.length === 0) {
+          const host = document.getElementById('dashboard-uplift-breakdown');
+          if (host) host.innerHTML = '';
           try {
             if (window.__dashboardUpliftChart) {
               window.__dashboardUpliftChart.destroy();
@@ -59460,6 +59467,15 @@ Final Score: ${score}/100`;
             // ignore
           }
           return;
+        }
+
+        const breakdownHost = document.getElementById('dashboard-uplift-breakdown');
+        if (breakdownHost) {
+          breakdownHost.innerHTML = `
+            <div class="dashboard-mini-note">
+              Top ${pagesWithUplift.length} of ${totalPagesWithUplift} Money Pages by uplift · shown total +${formatInt(totalShownUplift)} clicks (28d).
+            </div>
+          `;
         }
 
         // Debounce: prevent re-rendering if chart was just rendered recently
