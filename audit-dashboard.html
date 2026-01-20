@@ -30915,11 +30915,6 @@
         }
       }
 
-      // Align authority/visibility to latest GSC series (or segment total) and keep stable per audit.
-      const auditKey = saved?.auditDate || saved?.audit_date || saved?.timestamp || null;
-      const gscKey = window.lastGscTimeseriesDate || window.latestAuditDateStr || null;
-      applyStablePillarOverrides(scores, auditKey, gscKey);
-      
       // DEBUG: Log currentLocalSignals structure
       if (currentLocalSignals) {
         debugLog(`[displayDashboard] currentLocalSignals structure: status=${currentLocalSignals.status}, hasData=${!!currentLocalSignals.data}, hasLocations=${!!currentLocalSignals.data?.locations}, locationsCount=${currentLocalSignals.data?.locations?.length || 0}`, 'info');
@@ -45754,13 +45749,6 @@ Final Score: ${score}/100`;
               debugLog(`Stored last GSC timeseries date globally: ${lastTimeseriesDate}`, 'info');
             }
 
-            // Sync overview pillar scores to latest GSC-series values once maps are ready.
-            const auditKey = saved?.auditDate || saved?.audit_date || saved?.timestamp || null;
-            const gscKey = window.lastGscTimeseriesDate || null;
-            applyStablePillarOverrides(scores, auditKey, gscKey);
-            updateOverviewPillarUi(scores);
-            updateOverviewRadar(scores);
-            
             // Determine actual last GSC data date
             // CRITICAL: Only use dates from maps that are <= lastTimeseriesDate (actual GSC data)
             // Never forward-fill GSC data beyond the last actual GSC timeseries date
@@ -46593,10 +46581,6 @@ Final Score: ${score}/100`;
               visibility: lastVisibility ? lastVisibility.value : null,
               date: window.lastGscTimeseriesDate || null
             };
-            const auditKey = saved?.auditDate || saved?.audit_date || saved?.timestamp || null;
-            applyStablePillarOverrides(scores, auditKey, window.latestTrendPillarValues.date);
-            updateOverviewPillarUi(scores);
-            updateOverviewRadar(scores);
           }
           
           // DEBUG: Log exact labels being passed to Chart.js
@@ -58452,12 +58436,10 @@ Final Score: ${score}/100`;
           // Get visibility score directly from audit (pillars computed later)
           const visibilityScore = (typeof audit.scores?.visibility === 'number') ? audit.scores.visibility : null;
           const brandScore = (typeof audit.scores?.brandOverlay?.score === 'number') ? audit.scores.brandOverlay.score : null;
-          const gscOverrides = getLatestGscPillarOverrides();
-          const visibilityOverride = (typeof gscOverrides.visibility === 'number') ? gscOverrides.visibility : visibilityScore;
           if (snippetReadinessScore > 0 || visibilityScore != null || brandScore != null) {
             aiSummaryComponents = {
               snippetReadiness: snippetReadinessScore,
-              visibility: visibilityOverride,
+              visibility: visibilityScore,
               brand: brandScore
             };
           }
@@ -58480,11 +58462,6 @@ Final Score: ${score}/100`;
           if (typeof audit.scores.contentSchema === 'number') pillars.contentSchema = audit.scores.contentSchema;
           if (typeof audit.scores.localEntity === 'number') pillars.localEntity = audit.scores.localEntity;
           if (typeof audit.scores.serviceArea === 'number') pillars.serviceArea = audit.scores.serviceArea;
-        }
-        if (pillars) {
-          const overrides = getLatestGscPillarOverrides();
-          if (typeof overrides.authority === 'number') pillars.authority = overrides.authority;
-          if (typeof overrides.visibility === 'number') pillars.visibility = overrides.visibility;
         }
         const auditKpis = computeAuditKpisFromAudit(audit);
 
