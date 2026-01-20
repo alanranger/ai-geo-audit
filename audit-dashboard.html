@@ -30910,6 +30910,10 @@
             scores.authorityComponents = recomputed.authorityComponents;
           }
           debugLog(`[displayDashboard] ✓ Recomputed authority with segmented scores: behaviour=${recomputed.authorityComponents?.behaviour}, ranking=${recomputed.authorityComponents?.ranking}`, 'success');
+          if (saved && saved.scores) {
+            saved.scores = { ...saved.scores, ...scores };
+            safeSetLocalStorage('last_audit_results', saved);
+          }
         } catch (e) {
           debugLog(`[displayDashboard] ⚠ Failed to recompute authority from queryPages: ${e?.message || e}`, 'warn');
         }
@@ -43176,17 +43180,6 @@ Final Score: ${score}/100`;
                   orderedPillars.splice(brandRowIndex + 1, 0, ['brandOverlay', brandOverlay.score || 0]);
                 }
                 
-                // Prefer latest GSC pillar values when available (authority/visibility), else current audit scores.
-                const gscOverrides = getLatestGscPillarOverrides();
-                orderedPillars.forEach(([key, currentScore], idx) => {
-                  if (key === 'authority' && typeof gscOverrides.authority === 'number') {
-                    orderedPillars[idx][1] = gscOverrides.authority;
-                  } else if (key === 'visibility' && typeof gscOverrides.visibility === 'number') {
-                    orderedPillars[idx][1] = gscOverrides.visibility;
-                  }
-                });
-                debugLog('[Scorecard] Using latest GSC pillar overrides where available', 'info');
-                
                 return orderedPillars;
               })().map(([key, score], index) => {
                 const rag = getRAGStatus(score);
@@ -43814,7 +43807,7 @@ Final Score: ${score}/100`;
             <strong>Weighting:</strong> Pillars are weighted by their importance for AI search systems. Authority (30%) and Content/Schema (25%) are most critical, as AI relies heavily on E-A-T signals and structured data. Visibility (20%) reflects how AI learns from existing performance, while Local Entity (15%) and Service Area (10%) are less critical for AI-powered results. Brand & Entity is treated as an overlay metric – it does not change the GAIO score but influences how AI systems attribute your content and build summaries.
           </p>
           <p style="margin: 0; font-size: 0.85rem; color: #666; line-height: 1.6; font-style: italic;">
-            <strong>Note:</strong> Scores shown are for the last date in the trend chart range. If different audits were run on different days with different page counts or data scopes, scores may vary even if the underlying content didn't change. The "Data Date" column shows when the data was collected for each pillar.
+            <strong>Note:</strong> Scores shown are from the latest audit snapshot. If different audits were run on different days with different page counts or data scopes, scores may vary even if the underlying content didn't change. The "Data Date" column shows when the data was collected for each pillar.
           </p>
         </div>
       `;
@@ -46277,6 +46270,23 @@ Final Score: ${score}/100`;
             }
             chartDates = fallbackDates;
             chartDateObjects = fallbackDateObjects;
+          }
+
+          // Align Authority/Visibility to latest audit snapshot for the final audit date.
+          if (latestAuditDateStr && Array.isArray(chartDateObjects) && chartDateObjects.length > 0) {
+            const auditScores = savedAuditForTrend?.scores || null;
+            const auditAuthority = (typeof auditScores?.authority === 'object' && auditScores.authority !== null)
+              ? auditScores.authority.score
+              : auditScores?.authority;
+            const auditVisibility = auditScores?.visibility;
+            if (typeof auditAuthority === 'number' || typeof auditVisibility === 'number') {
+              const auditIdx = chartDateObjects.findIndex(d => d.toISOString().slice(0, 10) === latestAuditDateStr);
+              if (auditIdx >= 0) {
+                if (typeof auditAuthority === 'number') authorityData[auditIdx] = auditAuthority;
+                if (typeof auditVisibility === 'number') visibilityData[auditIdx] = auditVisibility;
+                debugLog(`[Trend Chart] Using audit snapshot for ${latestAuditDateStr}: Authority=${auditAuthority ?? 'n/a'}, Visibility=${auditVisibility ?? 'n/a'}`, 'info');
+              }
+            }
           }
           
           // Calculate min and max across all datasets (filter out null values)
