@@ -30910,13 +30910,16 @@
             scores.authorityComponents = recomputed.authorityComponents;
           }
           debugLog(`[displayDashboard] ✓ Recomputed authority with segmented scores: behaviour=${recomputed.authorityComponents?.behaviour}, ranking=${recomputed.authorityComponents?.ranking}`, 'success');
-          if (saved && saved.scores) {
-            saved.scores = { ...saved.scores, ...scores };
-            safeSetLocalStorage('last_audit_results', saved);
-          }
         } catch (e) {
           debugLog(`[displayDashboard] ⚠ Failed to recompute authority from queryPages: ${e?.message || e}`, 'warn');
         }
+      }
+
+      // Keep a live snapshot for other modules (Dashboard) to avoid stale localStorage values.
+      window.latestAuditScores = scores;
+      if (saved && saved.scores) {
+        saved.scores = { ...saved.scores, ...scores };
+        safeSetLocalStorage('last_audit_results', saved);
       }
 
       // DEBUG: Log currentLocalSignals structure
@@ -58420,6 +58423,9 @@ Final Score: ${score}/100`;
 
       function computeDashboardSnapshot() {
         const audit = dashboardSafeJsonParse(localStorage.getItem('last_audit_results'), null);
+        if (audit && window.latestAuditScores) {
+          audit.scores = { ...audit.scores, ...window.latestAuditScores };
+        }
         const hasAudit = audit && audit.scores;
 
         let gaioScore = null;
