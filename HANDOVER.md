@@ -1,7 +1,7 @@
 # AI GEO Audit - Comprehensive Handover Document
 
-**Last Updated**: 2026-01-16  
-**Current Commit**: `0ba829a` (Trend range, schema persistence, authority trend fixes)  
+**Last Updated**: 2026-01-19  
+**Current Commit**: `ee09922` (Trend series overrides for Authority/Visibility)  
 **Purpose**: Single source of truth for all projects, phases, tasks, fixes, and key information for any new chat thread.
 
 ---
@@ -830,6 +830,7 @@ mcp_supabase_execute_sql({ ... })
 8. `Docs/ARCHITECTURE.md` - System architecture and roadmap (consolidated above)
 9. `README.md` - Project overview and features (stays in root)
 10. `Docs/CHANGELOG.md` - Version history
+11. `Docs/AI_HEALTH_SCORE_INCONSISTENCY.md` - Authority/Visibility mismatch diagnosis
 
 **Note**: This HANDOVER.md is now the single source of truth. Other MD files are for reference only.
 
@@ -849,6 +850,13 @@ mcp_supabase_execute_sql({ ... })
 ### What's Not Working ❌
 - AI Citations column sorting (still present, needs removal)
 - URL Task AI Citations Logic (Fix 0 - wrong logic, needs reversal)
+- **Authority/Visibility inconsistency**: Overview cards/radar/snippet show 52/74 while trend chart + scorecard show 50/75 (mixed data sources)
+
+### Open TODOs (Current)
+1. **Choose single source of truth for Authority/Visibility** (audit snapshot vs trend series).
+2. **Remove the other path entirely** (no partial overrides).
+3. **Align Overview + Dashboard** to same source and update labels accordingly.
+4. **Document final decision** in `Docs/AI_HEALTH_SCORE_INCONSISTENCY.md`.
 
 ### What Needs Implementation ⏸️
 - Phase 5: URL Task AI Citations Logic Fix (Fix 0) - **AWAITING APPROVAL**
