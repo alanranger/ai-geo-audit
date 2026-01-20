@@ -59488,7 +59488,11 @@ Final Score: ${score}/100`;
           const base = shortenMiddle(url, 48);
           return base;
         });
-        const data = pagesWithUplift.map(p => p.potentialClicks);
+        const currentCtrSeries = pagesWithUplift.map(p => Math.max(0, p.currentCtrPct || 0));
+        const gapSeries = pagesWithUplift.map(p => Math.max(0, targetCtrPct - (p.currentCtrPct || 0)));
+        const totals = currentCtrSeries.map((val, idx) => val + (gapSeries[idx] || 0));
+        const maxTotal = totals.length ? Math.max(...totals) : targetCtrPct;
+        const xMax = Math.max(targetCtrPct, maxTotal) + 0.3;
 
         // Always destroy existing chart before creating new one
         try {
@@ -59507,13 +59511,24 @@ Final Score: ${score}/100`;
             type: 'bar',
             data: {
               labels,
-              datasets: [{
-                label: 'Potential Extra Clicks',
-                data,
-                backgroundColor: 'rgba(239, 68, 68, 0.7)',
-                borderColor: 'rgba(239, 68, 68, 0.9)',
-                borderWidth: 1
-              }]
+              datasets: [
+                {
+                  label: 'Current CTR',
+                  data: currentCtrSeries,
+                  backgroundColor: 'rgba(148, 163, 184, 0.75)',
+                  borderColor: 'rgba(148, 163, 184, 0.95)',
+                  borderWidth: 1,
+                  borderRadius: 4
+                },
+                {
+                  label: 'Gap to target',
+                  data: gapSeries,
+                  backgroundColor: 'rgba(239, 68, 68, 0.75)',
+                  borderColor: 'rgba(239, 68, 68, 0.95)',
+                  borderWidth: 1,
+                  borderRadius: 4
+                }
+              ]
             },
             options: {
               indexAxis: 'y',
@@ -59527,10 +59542,10 @@ Final Score: ${score}/100`;
                       const idx = context.dataIndex;
                       const page = pagesWithUplift[idx];
                       return [
-                        `Potential: +${page.potentialClicks} clicks`,
                         `Current CTR: ${formatPct(page.currentCtrPct, 1)}`,
                         `Gap to target: ${page.gapText}`,
-                        `Current: ${page.currentClicks} clicks`,
+                        `Target: ${formatPct(targetCtrPct, 1)}`,
+                        `Potential: +${page.potentialClicks} clicks`,
                         `Impressions: ${formatInt(page.impressions)}`
                       ];
                     }
@@ -59539,20 +59554,26 @@ Final Score: ${score}/100`;
               },
               scales: {
                 x: {
+                  stacked: true,
                   beginAtZero: true,
+                  max: xMax,
                   ticks: {
                     color: 'rgba(226,232,240,0.7)',
-                    font: { size: 10 }
+                    font: { size: 10 },
+                    callback: function(value) {
+                      return `${value}%`;
+                    }
                   },
                   title: {
                     display: true,
-                    text: 'Potential extra clicks (28d)',
+                    text: `CTR (%) toward ${formatPct(targetCtrPct, 1)} target`,
                     color: 'rgba(226,232,240,0.65)',
                     font: { size: 10, weight: '600' }
                   },
                   grid: { color: 'rgba(148,163,184,0.15)' }
                 },
                 y: {
+                  stacked: true,
                   ticks: {
                     color: 'rgba(226,232,240,0.7)',
                     font: { size: 10 }
@@ -59561,28 +59582,56 @@ Final Score: ${score}/100`;
                 }
               }
             },
-            plugins: [{
-              id: 'dashboardUpliftBarLabels',
-              afterDatasetsDraw(chart) {
-                const ctx = chart.ctx;
-                const meta = chart.getDatasetMeta(0);
-                if (!meta) return;
-                ctx.save();
-                ctx.font = '700 10px system-ui, -apple-system, Segoe UI, sans-serif';
-                ctx.fillStyle = '#f8fafc';
-                ctx.textBaseline = 'middle';
-                for (let i = 0; i < meta.data.length; i += 1) {
-                  const bar = meta.data[i];
-                  const page = pagesWithUplift[i];
-                  if (!bar || !page) continue;
-                  const text = `+${page.potentialClicks} | CTR ${formatPct(page.currentCtrPct, 1)} | gap ${page.gapText}`;
-                  const x = Math.max(bar.x - 6, chart.chartArea.left + 6);
-                  ctx.textAlign = 'right';
-                  ctx.fillText(text, x, bar.y);
+            plugins: [
+              {
+                id: 'dashboardUpliftTargetLine',
+                afterDraw(chart) {
+                  const xScale = chart.scales?.x;
+                  if (!xScale) return;
+                  const x = xScale.getPixelForValue(targetCtrPct);
+                  const top = chart.chartArea.top;
+                  const bottom = chart.chartArea.bottom;
+                  const ctx = chart.ctx;
+                  ctx.save();
+                  ctx.strokeStyle = 'rgba(16, 185, 129, 0.85)';
+                  ctx.lineWidth = 1;
+                  ctx.setLineDash([4, 4]);
+                  ctx.beginPath();
+                  ctx.moveTo(x, top);
+                  ctx.lineTo(x, bottom);
+                  ctx.stroke();
+                  ctx.setLineDash([]);
+                  ctx.fillStyle = 'rgba(16, 185, 129, 0.9)';
+                  ctx.font = '600 10px system-ui, -apple-system, Segoe UI, sans-serif';
+                  ctx.textAlign = 'left';
+                  ctx.textBaseline = 'top';
+                  ctx.fillText(`Target ${formatPct(targetCtrPct, 1)}`, x + 6, top + 2);
+                  ctx.restore();
                 }
-                ctx.restore();
+              },
+              {
+                id: 'dashboardUpliftBarLabels',
+                afterDatasetsDraw(chart) {
+                  const ctx = chart.ctx;
+                  const meta = chart.getDatasetMeta(1);
+                  if (!meta) return;
+                  ctx.save();
+                  ctx.font = '700 10px system-ui, -apple-system, Segoe UI, sans-serif';
+                  ctx.fillStyle = '#f8fafc';
+                  ctx.textBaseline = 'middle';
+                  for (let i = 0; i < meta.data.length; i += 1) {
+                    const bar = meta.data[i];
+                    const page = pagesWithUplift[i];
+                    if (!bar || !page) continue;
+                    const text = `CTR ${formatPct(page.currentCtrPct, 1)} | gap ${page.gapText} | +${page.potentialClicks}`;
+                    const x = chart.chartArea.right - 6;
+                    ctx.textAlign = 'right';
+                    ctx.fillText(text, x, bar.y);
+                  }
+                  ctx.restore();
+                }
               }
-            }]
+            ]
           });
         } catch (err) {
           console.error('[Dashboard] Error rendering Uplift chart:', err);
