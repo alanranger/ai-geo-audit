@@ -59162,10 +59162,12 @@ Final Score: ${score}/100`;
           const stronger = toNum(cache?.strongerCount);
           const competitorsCount = toNum(cache?.competitorsCount);
           const snapshotDate = cache?.snapshotDate || null;
+          const hasDrivers = !!(cache?.drivers && cache.drivers.etv && cache.drivers.etv.value !== undefined);
           // Treat null-valued caches as stale (common when older code wrote "fresh" cache with nulls).
           return (typeof selfScore === 'number' || typeof topScore === 'number' || typeof stronger === 'number')
             && !!snapshotDate
-            && (typeof competitorsCount === 'number'); // needed for rank tile
+            && (typeof competitorsCount === 'number')
+            && hasDrivers; // needed for driver micro panel
         })();
         const stale = needsUpgradeToV4 || !lastMs || (now - lastMs) > (6 * 60 * 60 * 1000) || !hasUsefulValues; // 6 hours
         if (!stale) return { cache, updated: false };
@@ -59184,6 +59186,10 @@ Final Score: ${score}/100`;
               score: toNum(it?.latest?.score ?? it.score),
               band: (it?.latest?.band ?? it.band ?? it.label) || null,
               snapshotDate: it?.latest?.snapshotDate || it.snapshotDate || it.snapshot_date || null,
+              organicEtv: toNum(it?.latest?.organicEtv ?? it.organicEtv ?? it.organic_etv_raw),
+              organicKeywordsTotal: toNum(it?.latest?.organicKeywordsTotal ?? it.organicKeywordsTotal ?? it.organic_keywords_total_raw),
+              top3Keywords: toNum(it?.latest?.top3Keywords ?? it.top3Keywords ?? it.top3_keywords_raw),
+              top10Keywords: toNum(it?.latest?.top10Keywords ?? it.top10Keywords ?? it.top10_keywords_raw),
               isCompetitor: (it?.isCompetitor === true) || (it?.is_competitor === true) || (it?.domain_type === 'competitor')
             }))
             .filter(it => it.domain);
@@ -59191,6 +59197,14 @@ Final Score: ${score}/100`;
           // Only compare against explicitly marked competitors
           const competitors = normItems.filter(it => it.isCompetitor === true && it.domain !== normalizedSelf && typeof it.score === 'number');
           const selfScore = selfItem?.score ?? null;
+          const maxEtv = Math.max(0, ...normItems.map(it => it.organicEtv || 0));
+          const maxKeywords = Math.max(0, ...normItems.map(it => it.organicKeywordsTotal || 0));
+          const maxTop3 = Math.max(0, ...normItems.map(it => it.top3Keywords || 0));
+          const maxTop10 = Math.max(0, ...normItems.map(it => it.top10Keywords || 0));
+          const driverPct = (value, max) => {
+            if (typeof value !== 'number' || !isFinite(value) || max <= 0) return null;
+            return Math.max(0, Math.min(100, Math.round((value / max) * 100)));
+          };
           const topCompetitor = competitors.slice().sort((a, b) => (b.score ?? -1) - (a.score ?? -1))[0] || null;
           const topCompetitorScore = topCompetitor?.score ?? null;
           const strongerCount = (typeof selfScore === 'number')
@@ -59205,7 +59219,13 @@ Final Score: ${score}/100`;
             selfScore,
             topCompetitorScore,
             strongerCount,
-            competitorsCount
+            competitorsCount,
+            drivers: {
+              etv: { value: selfItem?.organicEtv ?? null, pct: driverPct(selfItem?.organicEtv, maxEtv) },
+              keywords: { value: selfItem?.organicKeywordsTotal ?? null, pct: driverPct(selfItem?.organicKeywordsTotal, maxKeywords) },
+              top3: { value: selfItem?.top3Keywords ?? null, pct: driverPct(selfItem?.top3Keywords, maxTop3) },
+              top10: { value: selfItem?.top10Keywords ?? null, pct: driverPct(selfItem?.top10Keywords, maxTop10) }
+            }
           };
           localStorage.setItem('dashboard_domain_strength_cache_v4', JSON.stringify(next));
           return { cache: next, updated: true };
