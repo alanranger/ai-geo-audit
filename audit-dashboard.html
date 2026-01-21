@@ -58513,7 +58513,8 @@ Final Score: ${score}/100`;
         // Use a flag to prevent infinite loops
         // Also check if delta is null/undefined (not just missing) - if it's "0" that's valid
         const hasValidDelta = domainCache && domainCache.deltas && domainCache.deltas.selfScore !== undefined && domainCache.deltas.selfScore !== null;
-        if (!hasValidDelta) {
+        const hasValidDrivers = domainCache && domainCache.drivers && domainCache.drivers.etv && domainCache.drivers.etv.value !== undefined;
+        if (!hasValidDelta || !hasValidDrivers) {
           // Check if we're already fetching to prevent multiple simultaneous calls
           // Also check if we've already fetched recently (within last 10 seconds) to prevent loops
           const lastFetchTime = window.__domainStrengthLastFetchTime || 0;
@@ -58618,6 +58619,15 @@ Final Score: ${score}/100`;
                         .map(item => typeof item.latest?.score === 'number' ? item.latest.score : null)
                         .filter(score => score !== null)
                         .sort((a, b) => b - a);
+
+                      const maxEtv = Math.max(0, ...overviewJson.items.map(item => toNum(item?.latest?.organicEtv) || 0));
+                      const maxKeywords = Math.max(0, ...overviewJson.items.map(item => toNum(item?.latest?.organicKeywordsTotal) || 0));
+                      const maxTop3 = Math.max(0, ...overviewJson.items.map(item => toNum(item?.latest?.top3Keywords) || 0));
+                      const maxTop10 = Math.max(0, ...overviewJson.items.map(item => toNum(item?.latest?.top10Keywords) || 0));
+                      const driverPct = (value, max) => {
+                        if (typeof value !== 'number' || !isFinite(value) || max <= 0) return null;
+                        return Math.max(0, Math.min(100, Math.round((value / max) * 100)));
+                      };
                       
                       const topScore = allScores.length > 0 ? allScores[0] : null;
                       const gapTop = (topScore !== null && ourScore !== null) ? (topScore - ourScore) : null;
@@ -58642,6 +58652,12 @@ Final Score: ${score}/100`;
                         stronger: strongerCount,
                         rankVs: rankVs,
                         snapshotDate: latestSnapshotDate,
+                        drivers: {
+                          etv: { value: toNum(latest.organicEtv), pct: driverPct(toNum(latest.organicEtv), maxEtv) },
+                          keywords: { value: toNum(latest.organicKeywordsTotal), pct: driverPct(toNum(latest.organicKeywordsTotal), maxKeywords) },
+                          top3: { value: toNum(latest.top3Keywords), pct: driverPct(toNum(latest.top3Keywords), maxTop3) },
+                          top10: { value: toNum(latest.top10Keywords), pct: driverPct(toNum(latest.top10Keywords), maxTop10) }
+                        },
                         kpis: {
                           selfScore: ourScore !== null ? ourScore.toFixed(1) : null,
                           gapTop: gapTop !== null ? `+${gapTop.toFixed(1)}` : null,
@@ -58813,6 +58829,53 @@ Final Score: ${score}/100`;
           </span>
         `;
 
+        const renderDomainStrengthDrivers = (ds) => {
+          const drivers = ds?.drivers;
+          if (!drivers) {
+            return '<div class="dashboard-mini-note">Drivers available after snapshot refresh.</div>';
+          }
+          const rows = [
+            {
+              label: 'ETV (visibility)',
+              pct: drivers.etv?.pct,
+              display: formatEtvDollars(drivers.etv?.value)
+            },
+            {
+              label: 'Total keywords',
+              pct: drivers.keywords?.pct,
+              display: formatIntegerOrDash(drivers.keywords?.value)
+            },
+            {
+              label: 'Top 3 keywords',
+              pct: drivers.top3?.pct,
+              display: formatIntegerOrDash(drivers.top3?.value)
+            },
+            {
+              label: 'Top 10 keywords',
+              pct: drivers.top10?.pct,
+              display: formatIntegerOrDash(drivers.top10?.value)
+            }
+          ];
+          const rowsHtml = rows.map(row => {
+            const safePct = (typeof row.pct === 'number') ? row.pct : 0;
+            return `
+              <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.35rem;">
+                <div style="min-width:120px; font-size:0.78rem; color: var(--dark-text-muted);">${row.label}</div>
+                <div style="flex:1; height:8px; background: rgba(148,163,184,0.18); border-radius:999px; overflow:hidden;">
+                  <div style="height:100%; width:${safePct}%; background: rgba(96,165,250,0.85);"></div>
+                </div>
+                <div style="min-width:72px; text-align:right; font-size:0.78rem; color: var(--dark-text);">${row.display}</div>
+              </div>
+            `;
+          }).join('');
+          return `
+            <div style="margin-top:0.65rem; padding-top:0.5rem; border-top: 1px solid var(--dark-border);">
+              <div style="font-size:0.8rem; font-weight:600; color: var(--dark-text-muted); margin-bottom:0.35rem;">Score drivers (trackable)</div>
+              ${rowsHtml}
+            </div>
+          `;
+        };
+
         const tile = (label, value, deltaText, dir = 'flat', title = '') => {
           // Only show top-right corner indicator if delta is NOT shown in tile content (i.e., when deltaText is empty/N/A)
           // This prevents duplicate delta displays
@@ -58953,6 +59016,7 @@ Final Score: ${score}/100`;
               ${tile('# stronger domains', domainStrength?.kpis?.stronger ?? '—', domainStrength?.deltas?.stronger ?? '', domainStrength?.dirs?.stronger ?? 'flat', 'How many competitors in the snapshot set have a higher score than you.')}
               ${tile('Rank vs set', domainStrength?.kpis?.rankVs ?? '—', '', 'flat', 'Your rank among the comparison set (you + competitors). Example: 1/16 means strongest in the set.')}
             </div>
+            ${renderDomainStrengthDrivers(domainStrength)}
           </div>
         `;
       }
@@ -60619,6 +60683,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           timestamp: lastGlobal?.timestamp || null,
           rag: (typeof selfScore === 'number') ? domainRag : 'neutral',
           ragLabel: (typeof selfScore === 'number') ? `Score: ${formatFixed(selfScore, 1)}` : 'Not run',
+          drivers: ds?.drivers || null,
           run: {
             label: 'Run snapshot',
             title: 'Runs a Domain Strength snapshot now.',
