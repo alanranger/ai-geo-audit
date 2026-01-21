@@ -59239,6 +59239,9 @@ Final Score: ${score}/100`;
             : null;
           const competitorsCount = competitors.length; // competitor-only denominator
 
+          const prevSelfScore = toNum(cache?.selfScore);
+          const prevGapTop = toNum(cache?.gapTop);
+          const prevStronger = toNum(cache?.strongerCount);
           const next = {
             fetchedAtMs: now,
             snapshotDate: selfItem?.snapshotDate || topCompetitor?.snapshotDate || null,
@@ -59255,7 +59258,12 @@ Final Score: ${score}/100`;
             },
             driverReference: strongestDriver
               ? { label: strongestDriver.label || strongestDriver.domain, domain: strongestDriver.domain }
-              : null
+              : null,
+            deltas: {
+              selfScore: (typeof selfScore === 'number' && typeof prevSelfScore === 'number') ? (selfScore - prevSelfScore) : null,
+              gapTop: (typeof gapTop === 'number' && typeof prevGapTop === 'number') ? (gapTop - prevGapTop) : null,
+              stronger: (typeof strongerCount === 'number' && typeof prevStronger === 'number') ? (strongerCount - prevStronger) : null
+            }
           };
           localStorage.setItem('dashboard_domain_strength_cache_v4', JSON.stringify(next));
           return { cache: next, updated: true };
@@ -60728,7 +60736,16 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const rank = (typeof strongerCount === 'number') ? (strongerCount + 1) : null;
         const rankDenom = (typeof competitorsCount === 'number') ? competitorsCount : null; // competitor-only set
         const domainRag = scoreToRag(selfScore, { greenAt: 70, amberAt: 50 });
-          const domainCard = {
+        const deltaSelfFallback = (typeof prevDs?.selfScore === 'number')
+          ? (selfScore - prevDs.selfScore)
+          : toNum(ds?.deltas?.selfScore);
+        const deltaGapFallback = (typeof prevDs?.topCompetitorScore === 'number' && typeof prevDs?.selfScore === 'number')
+          ? (gapTop - (toNum(prevDs.topCompetitorScore) - toNum(prevDs.selfScore)))
+          : toNum(ds?.deltas?.gapTop);
+        const deltaStrongerFallback = (typeof prevDs?.strongerCount === 'number')
+          ? (strongerCount - toNum(prevDs.strongerCount))
+          : toNum(ds?.deltas?.stronger);
+        const domainCard = {
           note: ds?.snapshotDate ? `Snapshot date: ${ds.snapshotDate}` : 'Run snapshot to populate (Ranking & AI tab)',
           timestamp: lastGlobal?.timestamp || null,
           rag: (typeof selfScore === 'number') ? domainRag : 'neutral',
@@ -60747,14 +60764,14 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
             rankVs: (typeof rank === 'number' && typeof rankDenom === 'number') ? `${formatInt(rank)}/${formatInt(rankDenom)}` : '—'
           },
           deltas: {
-            selfScore: (prevDs ? formatDeltaNumber(selfScore, prevDs.selfScore, { decimals: 1 }) : ''),
-            gapTop: (prevDs ? formatDeltaNumber(gapTop, (toNum(prevDs?.topCompetitorScore) != null && toNum(prevDs?.selfScore) != null) ? (toNum(prevDs.topCompetitorScore) - toNum(prevDs.selfScore)) : null, { decimals: 1, betterLower: true }) : ''),
-            stronger: (prevDs ? formatDeltaNumber(strongerCount, prevDs.strongerCount, { decimals: 0, betterLower: true }) : '')
+            selfScore: (typeof deltaSelfFallback === 'number') ? formatDeltaNumber(selfScore, selfScore - deltaSelfFallback, { decimals: 1 }) : '',
+            gapTop: (typeof deltaGapFallback === 'number') ? formatDeltaNumber(gapTop, gapTop - deltaGapFallback, { decimals: 1, betterLower: true }) : '',
+            stronger: (typeof deltaStrongerFallback === 'number') ? formatDeltaNumber(strongerCount, strongerCount - deltaStrongerFallback, { decimals: 0, betterLower: true }) : ''
           },
           dirs: {
-            selfScore: deltaDir(selfScore, prevDs?.selfScore, { betterLower: false }),
-            gapTop: deltaDir(gapTop, (toNum(prevDs?.topCompetitorScore) != null && toNum(prevDs?.selfScore) != null) ? (toNum(prevDs.topCompetitorScore) - toNum(prevDs.selfScore)) : null, { betterLower: true }),
-            stronger: deltaDir(strongerCount, prevDs?.strongerCount, { betterLower: true })
+            selfScore: (typeof deltaSelfFallback === 'number') ? (deltaSelfFallback > 0 ? 'up' : deltaSelfFallback < 0 ? 'down' : 'flat') : deltaDir(selfScore, prevDs?.selfScore, { betterLower: false }),
+            gapTop: (typeof deltaGapFallback === 'number') ? (deltaGapFallback < 0 ? 'up' : deltaGapFallback > 0 ? 'down' : 'flat') : deltaDir(gapTop, (toNum(prevDs?.topCompetitorScore) != null && toNum(prevDs?.selfScore) != null) ? (toNum(prevDs.topCompetitorScore) - toNum(prevDs.selfScore)) : null, { betterLower: true }),
+            stronger: (typeof deltaStrongerFallback === 'number') ? (deltaStrongerFallback < 0 ? 'up' : deltaStrongerFallback > 0 ? 'down' : 'flat') : deltaDir(strongerCount, prevDs?.strongerCount, { betterLower: true })
           }
         };
 
