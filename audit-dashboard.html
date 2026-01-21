@@ -55610,6 +55610,36 @@ Final Score: ${score}/100`;
       // Expose for dashboard tile buttons.
       window.runDomainStrengthSnapshot = runDomainStrengthSnapshot;
 
+      async function runDomainStrengthSnapshotFromDashboard() {
+        if (typeof window.runDomainStrengthSnapshot === 'function') {
+          return window.runDomainStrengthSnapshot();
+        }
+        try {
+          const endpoint = (typeof apiUrl === 'function') ? apiUrl('/api/domain-strength/snapshot') : '/api/domain-strength/snapshot';
+          debugLog(`[DomainStrength] Dashboard run fallback -> ${endpoint}`, 'warn');
+          const resp = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: 'run', domains: [], includePending: true })
+          });
+          const json = await resp.json();
+          if (json?.status !== 'ok') {
+            throw new Error(json?.message || 'Snapshot failed');
+          }
+          try {
+            ['dashboard_domain_strength_cache_v4', 'dashboard_domain_strength_cache_v3', 'dashboard_domain_strength_cache_v2', 'dashboard_domain_strength_cache_v1']
+              .forEach((key) => localStorage.removeItem(key));
+          } catch (e) {}
+          if (typeof window.renderDashboardTab === 'function') {
+            window.renderDashboardTab();
+          }
+        } catch (e) {
+          debugLog(`[DomainStrength] Dashboard run failed: ${e.message || e}`, 'warn');
+        }
+      }
+
+      window.runDomainStrengthSnapshotFromDashboard = runDomainStrengthSnapshotFromDashboard;
+
       function wireDomainStrengthButton() {
         const btn = document.getElementById('domain-strength-run-btn');
         if (!btn) return;
@@ -60758,7 +60788,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           run: {
             label: 'Run snapshot',
             title: 'Runs a Domain Strength snapshot now.',
-            onClick: "if (typeof window.runDomainStrengthSnapshot === 'function') window.runDomainStrengthSnapshot();"
+            onClick: "if (typeof window.runDomainStrengthSnapshotFromDashboard === 'function') window.runDomainStrengthSnapshotFromDashboard(); else if (typeof window.runDomainStrengthSnapshot === 'function') window.runDomainStrengthSnapshot();"
           },
           kpis: {
             selfScore: (typeof selfScore === 'number') ? formatFixed(selfScore, 1) : '—',
