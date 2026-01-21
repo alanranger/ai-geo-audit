@@ -58851,6 +58851,45 @@ Final Score: ${score}/100`;
         return { rag: 'green', label: 'Fresh', daysOld };
       }
 
+      // Ensure dashboard run button works even if the ranking tab hasn't been opened yet.
+      if (typeof window.runDomainStrengthSnapshotFromDashboard !== 'function') {
+        window.runDomainStrengthSnapshotFromDashboard = async function() {
+          try {
+            if (typeof window.runDomainStrengthSnapshot === 'function') {
+              return window.runDomainStrengthSnapshot();
+            }
+            const endpoint = (typeof apiUrl === 'function')
+              ? apiUrl('/api/domain-strength/snapshot')
+              : '/api/domain-strength/snapshot';
+            debugLog(`[DomainStrength] Dashboard run fallback -> ${endpoint}`, 'warn');
+            const resp = await fetch(endpoint, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ mode: 'run', domains: [], includePending: true })
+            });
+            let json = null;
+            try {
+              json = await resp.json();
+            } catch (parseErr) {
+              const text = await resp.text().catch(() => '');
+              throw new Error(text || `Snapshot failed (status ${resp.status})`);
+            }
+            if (json?.status !== 'ok') {
+              throw new Error(json?.message || 'Snapshot failed');
+            }
+            try {
+              ['dashboard_domain_strength_cache_v4', 'dashboard_domain_strength_cache_v3', 'dashboard_domain_strength_cache_v2', 'dashboard_domain_strength_cache_v1']
+                .forEach((key) => localStorage.removeItem(key));
+            } catch (e) {}
+            if (typeof window.renderDashboardTab === 'function') {
+              window.renderDashboardTab();
+            }
+          } catch (e) {
+            debugLog(`[DomainStrength] Dashboard run failed: ${e.message || e}`, 'warn');
+          }
+        };
+      }
+
       function renderDashboardSummaryCards({ audit, ranking, moneyPages, optimisation, domainStrength }) {
         const grid = document.getElementById('dashboard-summary-grid');
         if (!grid) return;
