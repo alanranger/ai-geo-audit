@@ -58623,6 +58623,14 @@ Final Score: ${score}/100`;
 
                       const competitorItems = overviewJson.items.filter(item => item?.isCompetitor === true || item?.is_competitor === true || item?.domain_type === 'competitor');
                       const driverSet = competitorItems.length ? competitorItems : overviewJson.items;
+                      const strongestDriver = driverSet
+                        .map(item => ({
+                          domain: String(item?.domain || '').replace(/^www\./, ''),
+                          label: item?.label || item?.name || item?.domain,
+                          score: toNum(item?.latest?.score ?? item?.score)
+                        }))
+                        .filter(item => item.domain && typeof item.score === 'number')
+                        .sort((a, b) => b.score - a.score)[0] || null;
                       const maxEtv = Math.max(0, ...driverSet.map(item => toNum(item?.latest?.organicEtv) || 0));
                       const maxKeywords = Math.max(0, ...driverSet.map(item => toNum(item?.latest?.organicKeywordsTotal) || 0));
                       const maxTop3 = Math.max(0, ...driverSet.map(item => toNum(item?.latest?.top3Keywords) || 0));
@@ -58661,6 +58669,9 @@ Final Score: ${score}/100`;
                           top3: { value: toNum(latest.top3Keywords), pct: driverPct(toNum(latest.top3Keywords), maxTop3) },
                           top10: { value: toNum(latest.top10Keywords), pct: driverPct(toNum(latest.top10Keywords), maxTop10) }
                         },
+                        driverReference: strongestDriver
+                          ? { label: strongestDriver.label || strongestDriver.domain, domain: strongestDriver.domain }
+                          : null,
                         kpis: {
                           selfScore: ourScore !== null ? ourScore.toFixed(1) : null,
                           gapTop: gapTop !== null ? `+${gapTop.toFixed(1)}` : null,
@@ -58871,7 +58882,10 @@ Final Score: ${score}/100`;
               </div>
             `;
           }).join('');
-          const capsNote = 'Scaled to strongest competitor in snapshot set.';
+          const driverLabel = ds?.driverReference?.label || ds?.driverReference?.domain;
+          const capsNote = driverLabel
+            ? `Scaled to strongest competitor: ${driverLabel}.`
+            : 'Scaled to strongest competitor in snapshot set.';
           return `
             <div style="margin-top:0.65rem; padding-top:0.5rem; border-top: 1px solid var(--dark-border);">
               <div style="font-size:0.8rem; font-weight:600; color: var(--dark-text-muted); margin-bottom:0.2rem;">Score drivers (trackable)</div>
@@ -59196,6 +59210,7 @@ Final Score: ${score}/100`;
               organicKeywordsTotal: toNum(it?.latest?.organicKeywordsTotal ?? it.organicKeywordsTotal ?? it.organic_keywords_total_raw),
               top3Keywords: toNum(it?.latest?.top3Keywords ?? it.top3Keywords ?? it.top3_keywords_raw),
               top10Keywords: toNum(it?.latest?.top10Keywords ?? it.top10Keywords ?? it.top10_keywords_raw),
+              label: it?.label || it?.name || it?.domain || null,
               isCompetitor: (it?.isCompetitor === true) || (it?.is_competitor === true) || (it?.domain_type === 'competitor')
             }))
             .filter(it => it.domain);
@@ -59206,6 +59221,9 @@ Final Score: ${score}/100`;
           const competitorDrivers = competitors.length
             ? competitors
             : normItems;
+          const strongestDriver = competitorDrivers
+            .filter(it => typeof it.score === 'number')
+            .sort((a, b) => (b.score ?? -1) - (a.score ?? -1))[0] || null;
           const maxEtv = Math.max(0, ...competitorDrivers.map(it => it.organicEtv || 0));
           const maxKeywords = Math.max(0, ...competitorDrivers.map(it => it.organicKeywordsTotal || 0));
           const maxTop3 = Math.max(0, ...competitorDrivers.map(it => it.top3Keywords || 0));
@@ -59234,7 +59252,10 @@ Final Score: ${score}/100`;
               keywords: { value: selfItem?.organicKeywordsTotal ?? null, pct: driverPct(selfItem?.organicKeywordsTotal, maxKeywords) },
               top3: { value: selfItem?.top3Keywords ?? null, pct: driverPct(selfItem?.top3Keywords, maxTop3) },
               top10: { value: selfItem?.top10Keywords ?? null, pct: driverPct(selfItem?.top10Keywords, maxTop10) }
-            }
+            },
+            driverReference: strongestDriver
+              ? { label: strongestDriver.label || strongestDriver.domain, domain: strongestDriver.domain }
+              : null
           };
           localStorage.setItem('dashboard_domain_strength_cache_v4', JSON.stringify(next));
           return { cache: next, updated: true };
@@ -60707,12 +60728,13 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         const rank = (typeof strongerCount === 'number') ? (strongerCount + 1) : null;
         const rankDenom = (typeof competitorsCount === 'number') ? competitorsCount : null; // competitor-only set
         const domainRag = scoreToRag(selfScore, { greenAt: 70, amberAt: 50 });
-        const domainCard = {
+          const domainCard = {
           note: ds?.snapshotDate ? `Snapshot date: ${ds.snapshotDate}` : 'Run snapshot to populate (Ranking & AI tab)',
           timestamp: lastGlobal?.timestamp || null,
           rag: (typeof selfScore === 'number') ? domainRag : 'neutral',
           ragLabel: (typeof selfScore === 'number') ? `Score: ${formatFixed(selfScore, 1)}` : 'Not run',
           drivers: ds?.drivers || null,
+          driverReference: ds?.driverReference || null,
           run: {
             label: 'Run snapshot',
             title: 'Runs a Domain Strength snapshot now.',
