@@ -58514,8 +58514,7 @@ Final Score: ${score}/100`;
         // Also check if delta is null/undefined (not just missing) - if it's "0" that's valid
         const hasValidDelta = domainCache && domainCache.deltas && domainCache.deltas.selfScore !== undefined && domainCache.deltas.selfScore !== null;
         const hasValidDrivers = domainCache && domainCache.drivers && domainCache.drivers.etv
-          && domainCache.drivers.etv.value !== undefined
-          && domainCache.drivers.etv.cap !== undefined;
+          && domainCache.drivers.etv.value !== undefined;
         if (!hasValidDelta || !hasValidDrivers) {
           // Check if we're already fetching to prevent multiple simultaneous calls
           // Also check if we've already fetched recently (within last 10 seconds) to prevent loops
@@ -58622,10 +58621,15 @@ Final Score: ${score}/100`;
                         .filter(score => score !== null)
                         .sort((a, b) => b - a);
 
-                      const driverCaps = { etv: 50000, keywords: 5000, top3: 500, top10: 2000 };
-                      const driverPct = (value, cap) => {
-                        if (typeof value !== 'number' || !isFinite(value) || cap <= 0) return null;
-                        return Math.max(0, Math.min(100, Math.round((value / cap) * 100)));
+                      const competitorItems = overviewJson.items.filter(item => item?.isCompetitor === true || item?.is_competitor === true || item?.domain_type === 'competitor');
+                      const driverSet = competitorItems.length ? competitorItems : overviewJson.items;
+                      const maxEtv = Math.max(0, ...driverSet.map(item => toNum(item?.latest?.organicEtv) || 0));
+                      const maxKeywords = Math.max(0, ...driverSet.map(item => toNum(item?.latest?.organicKeywordsTotal) || 0));
+                      const maxTop3 = Math.max(0, ...driverSet.map(item => toNum(item?.latest?.top3Keywords) || 0));
+                      const maxTop10 = Math.max(0, ...driverSet.map(item => toNum(item?.latest?.top10Keywords) || 0));
+                      const driverPct = (value, max) => {
+                        if (typeof value !== 'number' || !isFinite(value) || max <= 0) return null;
+                        return Math.max(0, Math.min(100, Math.round((value / max) * 100)));
                       };
                       
                       const topScore = allScores.length > 0 ? allScores[0] : null;
@@ -58652,10 +58656,10 @@ Final Score: ${score}/100`;
                         rankVs: rankVs,
                         snapshotDate: latestSnapshotDate,
                         drivers: {
-                          etv: { value: toNum(latest.organicEtv), pct: driverPct(toNum(latest.organicEtv), driverCaps.etv), cap: driverCaps.etv },
-                          keywords: { value: toNum(latest.organicKeywordsTotal), pct: driverPct(toNum(latest.organicKeywordsTotal), driverCaps.keywords), cap: driverCaps.keywords },
-                          top3: { value: toNum(latest.top3Keywords), pct: driverPct(toNum(latest.top3Keywords), driverCaps.top3), cap: driverCaps.top3 },
-                          top10: { value: toNum(latest.top10Keywords), pct: driverPct(toNum(latest.top10Keywords), driverCaps.top10), cap: driverCaps.top10 }
+                          etv: { value: toNum(latest.organicEtv), pct: driverPct(toNum(latest.organicEtv), maxEtv) },
+                          keywords: { value: toNum(latest.organicKeywordsTotal), pct: driverPct(toNum(latest.organicKeywordsTotal), maxKeywords) },
+                          top3: { value: toNum(latest.top3Keywords), pct: driverPct(toNum(latest.top3Keywords), maxTop3) },
+                          top10: { value: toNum(latest.top10Keywords), pct: driverPct(toNum(latest.top10Keywords), maxTop10) }
                         },
                         kpis: {
                           selfScore: ourScore !== null ? ourScore.toFixed(1) : null,
@@ -58867,7 +58871,7 @@ Final Score: ${score}/100`;
               </div>
             `;
           }).join('');
-          const capsNote = `Scaled to caps: ${formatEtvDollars(drivers.etv?.cap || 100000)} ETV, ${formatIntegerOrDash(drivers.keywords?.cap || 10000)} total, ${formatIntegerOrDash(drivers.top3?.cap || 1000)} top-3, ${formatIntegerOrDash(drivers.top10?.cap || 5000)} top-10.`;
+          const capsNote = 'Scaled to strongest competitor in snapshot set.';
           return `
             <div style="margin-top:0.65rem; padding-top:0.5rem; border-top: 1px solid var(--dark-border);">
               <div style="font-size:0.8rem; font-weight:600; color: var(--dark-text-muted); margin-bottom:0.2rem;">Score drivers (trackable)</div>
@@ -59164,8 +59168,7 @@ Final Score: ${score}/100`;
           const competitorsCount = toNum(cache?.competitorsCount);
           const snapshotDate = cache?.snapshotDate || null;
           const hasDrivers = !!(cache?.drivers && cache.drivers.etv
-            && cache.drivers.etv.value !== undefined
-            && cache.drivers.etv.cap !== undefined);
+            && cache.drivers.etv.value !== undefined);
           // Treat null-valued caches as stale (common when older code wrote "fresh" cache with nulls).
           return (typeof selfScore === 'number' || typeof topScore === 'number' || typeof stronger === 'number')
             && !!snapshotDate
@@ -59200,10 +59203,16 @@ Final Score: ${score}/100`;
           // Only compare against explicitly marked competitors
           const competitors = normItems.filter(it => it.isCompetitor === true && it.domain !== normalizedSelf && typeof it.score === 'number');
           const selfScore = selfItem?.score ?? null;
-          const driverCaps = { etv: 50000, keywords: 5000, top3: 500, top10: 2000 };
-          const driverPct = (value, cap) => {
-            if (typeof value !== 'number' || !isFinite(value) || cap <= 0) return null;
-            return Math.max(0, Math.min(100, Math.round((value / cap) * 100)));
+          const competitorDrivers = competitors.length
+            ? competitors
+            : normItems;
+          const maxEtv = Math.max(0, ...competitorDrivers.map(it => it.organicEtv || 0));
+          const maxKeywords = Math.max(0, ...competitorDrivers.map(it => it.organicKeywordsTotal || 0));
+          const maxTop3 = Math.max(0, ...competitorDrivers.map(it => it.top3Keywords || 0));
+          const maxTop10 = Math.max(0, ...competitorDrivers.map(it => it.top10Keywords || 0));
+          const driverPct = (value, max) => {
+            if (typeof value !== 'number' || !isFinite(value) || max <= 0) return null;
+            return Math.max(0, Math.min(100, Math.round((value / max) * 100)));
           };
           const topCompetitor = competitors.slice().sort((a, b) => (b.score ?? -1) - (a.score ?? -1))[0] || null;
           const topCompetitorScore = topCompetitor?.score ?? null;
@@ -59221,10 +59230,10 @@ Final Score: ${score}/100`;
             strongerCount,
             competitorsCount,
             drivers: {
-              etv: { value: selfItem?.organicEtv ?? null, pct: driverPct(selfItem?.organicEtv, driverCaps.etv), cap: driverCaps.etv },
-              keywords: { value: selfItem?.organicKeywordsTotal ?? null, pct: driverPct(selfItem?.organicKeywordsTotal, driverCaps.keywords), cap: driverCaps.keywords },
-              top3: { value: selfItem?.top3Keywords ?? null, pct: driverPct(selfItem?.top3Keywords, driverCaps.top3), cap: driverCaps.top3 },
-              top10: { value: selfItem?.top10Keywords ?? null, pct: driverPct(selfItem?.top10Keywords, driverCaps.top10), cap: driverCaps.top10 }
+              etv: { value: selfItem?.organicEtv ?? null, pct: driverPct(selfItem?.organicEtv, maxEtv) },
+              keywords: { value: selfItem?.organicKeywordsTotal ?? null, pct: driverPct(selfItem?.organicKeywordsTotal, maxKeywords) },
+              top3: { value: selfItem?.top3Keywords ?? null, pct: driverPct(selfItem?.top3Keywords, maxTop3) },
+              top10: { value: selfItem?.top10Keywords ?? null, pct: driverPct(selfItem?.top10Keywords, maxTop10) }
             }
           };
           localStorage.setItem('dashboard_domain_strength_cache_v4', JSON.stringify(next));
