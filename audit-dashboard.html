@@ -54963,6 +54963,7 @@ Final Score: ${score}/100`;
           debugLog('[DomainStrength] Missing card or tbody element', 'warn');
           return;
         }
+        const showDebug = /[?&]dsdebug=1/.test(window.location.search || '');
 
         card.innerHTML = `<div style="color:#64748b; font-size:0.95rem;">Loading domain strength…</div>`;
         tbody.innerHTML = '<tr><td colspan="8" class="ranking-table-empty">Loading…</td></tr>';
@@ -55039,6 +55040,7 @@ Final Score: ${score}/100`;
           debugLog(`[DomainStrength] Latest data: score=${latest.score}, snapshotDate=${latest.snapshotDate}, createdAt=${latest.createdAt}`, 'info');
           const selfPoints = Array.isArray(selfItem?.trend?.points) ? selfItem.trend.points : [];
           const delta = coerceDomainStrengthDelta(selfItem?.trend?.deltaLatest, selfPoints);
+          const rawDelta = selfItem?.trend?.deltaLatest;
           if (selfPoints.length) {
             const lastPoint = selfPoints[selfPoints.length - 1];
             const prevPoint = selfPoints.length > 1 ? selfPoints[selfPoints.length - 2] : null;
@@ -55077,6 +55079,9 @@ Final Score: ${score}/100`;
             }
           }
 
+          const debugLine = showDebug
+            ? `<div style="margin-top:0.35rem; font-size:0.78rem; color:#64748b;">Debug: raw=${rawDelta}, points=${selfPoints.length}, last=${selfPoints[selfPoints.length - 1]?.score ?? '—'}, prev=${selfPoints.length > 1 ? selfPoints[selfPoints.length - 2]?.score : '—'}</div>`
+            : '';
           card.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.35rem;">
               <div style="font-weight:700; color:#0f172a;">${label}</div>
@@ -55096,6 +55101,7 @@ Final Score: ${score}/100`;
               Domain strength ${formatDomainStrengthScore(latest.score)} on Google – ${delta === null ? 'no previous snapshot yet' : `${changeText} vs last snapshot`};
               ${formatIntegerOrDash(latest.top10Keywords)} top‑10 keywords and estimated traffic ${formatEtvDollars(latest.organicEtv)}/month.
             </div>
+            ${debugLine}
           `;
         } else {
           card.innerHTML = `
@@ -55157,6 +55163,7 @@ Final Score: ${score}/100`;
           const latest = it?.latest || null;
           const points = Array.isArray(it?.trend?.points) ? it.trend.points : [];
           const delta = coerceDomainStrengthDelta(it?.trend?.deltaLatest, points);
+          const rawDelta = it?.trend?.deltaLatest;
           if (visibleIndex < 3) {
             const lastPoint = points.length ? points[points.length - 1] : null;
             const prevPoint = points.length > 1 ? points[points.length - 2] : null;
@@ -55179,6 +55186,9 @@ Final Score: ${score}/100`;
           const arrow = delta > 0.5 ? '↑' : (delta < -0.5 ? '↓' : '•');
           const cls = delta > 0.5 ? 'kpi-trend-up' : (delta < -0.5 ? 'kpi-trend-down' : 'kpi-trend-flat');
           const changeTitle = delta === null ? 'No previous snapshot yet' : `Change vs last snapshot: ${formatDelta(delta)}`;
+          const debugTitle = showDebug
+            ? `raw=${rawDelta}; points=${points.length}; last=${points[points.length - 1]?.score ?? '—'}; prev=${points.length > 1 ? points[points.length - 2]?.score : '—'}`
+            : '';
 
           // Check if this is the self domain row
           const isSelfDomain = String(it?.domain || '') === selfDomain;
@@ -55207,7 +55217,7 @@ Final Score: ${score}/100`;
             <td style="${isSelfDomain ? 'font-weight: 700;' : ''}">${latest ? renderDomainStrengthBandPill(latest.band) : '—'}</td>
             <td style="text-align:right; white-space: nowrap; ${isSelfDomain ? 'font-weight: 700;' : ''}">${latest ? formatEtvDollars(latest.organicEtv) : '—'}</td>
             <td style="text-align:right; white-space: nowrap; ${isSelfDomain ? 'font-weight: 700;' : ''}">${latest ? formatIntegerOrDash(latest.top10Keywords) : '—'}</td>
-            <td style="text-align:center; ${isSelfDomain ? 'font-weight: 700;' : ''}"><span class="${cls}" title="${changeTitle}">${delta === null ? '—' : `${arrow} ${formatDelta(delta)}`}</span></td>
+            <td style="text-align:center; ${isSelfDomain ? 'font-weight: 700;' : ''}"><span class="${cls}" title="${debugTitle || changeTitle}">${delta === null ? '—' : `${arrow} ${formatDelta(delta)}`}</span></td>
             <td style="text-align:center;">
               <canvas class="domain-strength-sparkline" id="${canvasId}" width="140" height="28" aria-label="12 month score trend"></canvas>
             </td>
