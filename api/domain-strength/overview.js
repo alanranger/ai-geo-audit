@@ -189,44 +189,45 @@ export default async function handler(req, res) {
         return String(b.created_at || '').localeCompare(String(a.created_at || ''));
       });
 
-    const points = sorted
-      .map((r) => {
-        const s = num(r?.score);
-        const d = String(r?.snapshot_date || "");
-        if (!d || s === null) return null;
-        return { date: d, score: s };
+    // Keep only the latest entry per snapshot date (newest created_at wins).
+    const byDate = new Map();
+    for (const r of sorted) {
+      const d = String(r?.snapshot_date || "");
+      if (!d) continue;
+      if (!byDate.has(d)) {
+        byDate.set(d, r);
+      }
+    }
+    const points = Array.from(byDate.entries())
+      .map(([date, row]) => {
+        const s = num(row?.score);
+        if (!date || s === null) return null;
+        return { date, score: s };
       })
       .filter(Boolean);
 
-    const last = sorted[sorted.length - 1] || null;
-    const lastScore = num(last?.score);
-    
-    // Find the most recent previous snapshot score (even if unchanged)
-    // This ensures delta shows 0.0 when the score is flat between runs
-    let prevScore = null;
-    for (let i = sorted.length - 2; i >= 0; i--) {
-      const prev = sorted[i];
-      const score = num(prev?.score);
-      if (score !== null) {
-        prevScore = score;
-        break;
-      }
-    }
-    
+    const dates = Array.from(byDate.keys());
+    const lastDate = dates[dates.length - 1] || null;
+    const prevDate = dates.length > 1 ? dates[dates.length - 2] : null;
+    const lastRow = lastDate ? byDate.get(lastDate) : null;
+    const prevRow = prevDate ? byDate.get(prevDate) : null;
+    const lastScore = num(lastRow?.score);
+    const prevScore = num(prevRow?.score);
+
     const deltaLatest =
       lastScore !== null && prevScore !== null ? lastScore - prevScore : null;
 
     const latest =
-      last && lastScore !== null
+      lastRow && lastScore !== null
         ? {
-            snapshotDate: String(last.snapshot_date || ""),
-            createdAt: String(last.created_at || ""),
+            snapshotDate: String(lastRow.snapshot_date || ""),
+            createdAt: String(lastRow.created_at || ""),
             score: lastScore,
-            band: String(last.band || ""),
-            organicEtv: Number(last.organic_etv_raw || 0),
-            organicKeywordsTotal: Number(last.organic_keywords_total_raw || 0),
-            top3Keywords: last.top3_keywords_raw == null ? 0 : Number(last.top3_keywords_raw || 0),
-            top10Keywords: last.top10_keywords_raw == null ? 0 : Number(last.top10_keywords_raw || 0),
+            band: String(lastRow.band || ""),
+            organicEtv: Number(lastRow.organic_etv_raw || 0),
+            organicKeywordsTotal: Number(lastRow.organic_keywords_total_raw || 0),
+            top3Keywords: lastRow.top3_keywords_raw == null ? 0 : Number(lastRow.top3_keywords_raw || 0),
+            top10Keywords: lastRow.top10_keywords_raw == null ? 0 : Number(lastRow.top10_keywords_raw || 0),
           }
         : null;
 
