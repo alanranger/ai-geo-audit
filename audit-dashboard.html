@@ -58575,6 +58575,7 @@ Final Score: ${score}/100`;
             // Start async fetch but don't block - dashboard will render with cached data
             (async () => {
               try {
+                debugLog(`[DomainStrength] Refresh cache: hasValidDelta=${hasValidDelta}, hasValidDrivers=${hasValidDrivers}`, 'info');
                 const selfDomain = (typeof window.getSelfDomainForDomainStrength === 'function' 
                   ? window.getSelfDomainForDomainStrength() 
                   : null) || localStorage.getItem('gsc_property_url') || 'https://www.alanranger.com';
@@ -58596,6 +58597,7 @@ Final Score: ${score}/100`;
                 if (overviewResp.ok && historyResp.ok) {
                   const overviewJson = await overviewResp.json();
                   const historyJson = await historyResp.json();
+                  debugLog(`[DomainStrength] Overview items=${overviewJson?.items?.length || 0}, history rows=${historyJson?.data?.length || 0}`, 'info');
                   
                   if (overviewJson?.status === 'ok' && Array.isArray(overviewJson.items)) {
                     // Find our domain in the overview response
@@ -58609,8 +58611,26 @@ Final Score: ${score}/100`;
                       const ourScore = typeof latest.score === 'number' ? latest.score : null;
                       const latestSnapshotDate = latest.snapshotDate || null;
                       
+                      if (!latestSnapshotDate) {
+                        debugLog('[DomainStrength] Missing latest snapshot date in overview response', 'warn');
+                      }
+                      if (ourScore === null) {
+                        debugLog('[DomainStrength] Missing latest score in overview response', 'warn');
+                      }
+                      
                       // Calculate rolling 28-day delta from history
                       let rolling28DayDelta = null;
+                      const deltaMeta = {
+                        source: 'none',
+                        reason: 'not computed',
+                        latestSnapshotDate: latestSnapshotDate,
+                        latestScore: ourScore,
+                        prevSnapshotDate: null,
+                        prevScore: null,
+                        points: null,
+                        historyStatus: historyJson?.status ?? null,
+                        historyRows: Array.isArray(historyJson?.data) ? historyJson.data.length : null
+                      };
                       if (historyJson?.status === 'ok' && Array.isArray(historyJson.data) && latestSnapshotDate && ourScore !== null) {
                         // Calculate target date: 27 days before latest snapshot date
                         const latestDate = new Date(latestSnapshotDate);
@@ -58632,6 +58652,17 @@ Final Score: ${score}/100`;
                             return dateB - dateA; // Descending (newest first)
                           });
                         
+                        deltaMeta.points = snapshots.length;
+                        if (snapshots.length === 0) {
+                          debugLog(`[DomainStrength] No history snapshots found for ${normalizedDomain}`, 'warn');
+                          deltaMeta.reason = 'no history snapshots';
+                        } else if (snapshots.length === 1) {
+                          debugLog(`[DomainStrength] Only one history snapshot found for ${normalizedDomain} (${snapshots[0].snapshot_date})`, 'warn');
+                          deltaMeta.reason = 'only one history snapshot';
+                        } else {
+                          debugLog(`[DomainStrength] History snapshots=${snapshots.length}, latest=${snapshots[0].snapshot_date}, target=${targetDateStr}`, 'info');
+                        }
+                        
                         // Find snapshot closest to target date (prefer on or before target)
                         let bestMatch = null;
                         let bestDiff = Infinity;
@@ -58650,10 +58681,23 @@ Final Score: ${score}/100`;
                         }
                         
                         if (bestMatch && bestMatch.score !== null) {
+                          deltaMeta.prevSnapshotDate = bestMatch.snapshot_date || null;
+                          deltaMeta.prevScore = bestMatch.score;
                           rolling28DayDelta = ourScore - bestMatch.score;
                           const daysDiff = Math.round((latestDate - new Date(bestMatch.snapshot_date)) / (1000 * 60 * 60 * 24));
                           debugLog(`[Dashboard] Domain strength rolling 28-day delta: ${rolling28DayDelta.toFixed(1)} (from ${bestMatch.snapshot_date}, ${daysDiff} days ago)`, 'info');
+                          deltaMeta.source = 'history';
+                          deltaMeta.reason = `closest snapshot to target (${targetDateStr})`;
+                        } else {
+                          debugLog(`[DomainStrength] No suitable previous snapshot found for target=${targetDateStr}`, 'warn');
+                          deltaMeta.reason = 'no suitable previous snapshot';
                         }
+                      } else if (!(historyJson?.status === 'ok')) {
+                        debugLog(`[DomainStrength] History API status not ok: ${historyJson?.status}`, 'warn');
+                        deltaMeta.reason = `history status not ok: ${historyJson?.status ?? 'unknown'}`;
+                      } else if (!Array.isArray(historyJson?.data) || historyJson.data.length === 0) {
+                        debugLog('[DomainStrength] History API returned no rows', 'warn');
+                        deltaMeta.reason = 'history returned no rows';
                       }
                       
                       // Fallback to API's deltaLatest if rolling 28-day calculation failed
@@ -58661,7 +58705,17 @@ Final Score: ${score}/100`;
                         rolling28DayDelta = typeof ourItem.trend.deltaLatest === 'number' ? ourItem.trend.deltaLatest : null;
                         if (rolling28DayDelta !== null) {
                           debugLog('[Dashboard] Domain strength using API deltaLatest as fallback', 'info');
+                          deltaMeta.source = 'overview.deltaLatest';
+                          deltaMeta.reason = deltaMeta.reason === 'not computed' ? 'history delta missing' : `${deltaMeta.reason} -> fallback to deltaLatest`;
+                        } else {
+                          debugLog('[DomainStrength] deltaLatest is null/undefined in overview response', 'warn');
+                          deltaMeta.reason = 'deltaLatest missing in overview';
                         }
+                      }
+                      if (rolling28DayDelta === null) {
+                        debugLog('[DomainStrength] Delta not computed: missing history or prev snapshot', 'warn');
+                        deltaMeta.source = 'none';
+                        if (deltaMeta.reason === 'not computed') deltaMeta.reason = 'missing history or prev snapshot';
                       }
                       
                       // Calculate gap to top and stronger domains count
@@ -58705,6 +58759,9 @@ Final Score: ${score}/100`;
                         deltaText = `${sign}${rolling28DayDelta.toFixed(1)}`;
                       }
                       
+                      const safeFixed = (value, digits) => (typeof value === 'number' && isFinite(value)) ? value.toFixed(digits) : '—';
+                      const dsDebugLine = `Debug: source=${deltaMeta.source}; reason=${deltaMeta.reason}; latest=${deltaMeta.latestSnapshotDate ?? '—'} (${safeFixed(deltaMeta.latestScore, 1)}); prev=${deltaMeta.prevSnapshotDate ?? '—'} (${safeFixed(deltaMeta.prevScore, 1)}); delta=${rolling28DayDelta !== null && isFinite(rolling28DayDelta) ? rolling28DayDelta.toFixed(1) : '—'}; points=${deltaMeta.points ?? '—'}`;
+
                       // Build cache object with rolling 28-day deltas
                       const newCache = {
                         selfScore: ourScore,
@@ -58712,6 +58769,8 @@ Final Score: ${score}/100`;
                         stronger: strongerCount,
                         rankVs: rankVs,
                         snapshotDate: latestSnapshotDate,
+                        deltaMeta: deltaMeta,
+                        debugLine: dsDebugLine,
                         drivers: {
                           etv: { value: toNum(latest.organicEtv), pct: driverPct(toNum(latest.organicEtv), maxEtv) },
                           keywords: { value: toNum(latest.organicKeywordsTotal), pct: driverPct(toNum(latest.organicKeywordsTotal), maxKeywords) },
@@ -58746,8 +58805,12 @@ Final Score: ${score}/100`;
                       // This prevents infinite loops while still showing updated delta
                       // The tile will update on next manual refresh or when dashboard is re-rendered for other reasons
                       debugLog('[Dashboard] Domain strength cache updated with rolling 28-day deltas', 'success');
+                    } else {
+                      debugLog(`[DomainStrength] Overview response missing our domain: ${normalizedDomain}`, 'warn');
                     }
                   }
+                } else {
+                  debugLog(`[DomainStrength] Overview/history fetch failed: overviewOk=${overviewResp.ok}, historyOk=${historyResp.ok}`, 'warn');
                 }
               } catch (err) {
                 debugLog(`[Dashboard] Failed to fetch domain strength for rolling 28-day delta: ${err.message}`, 'warn');
@@ -58987,16 +59050,12 @@ Final Score: ${score}/100`;
           // Only show top-right corner indicator if delta is NOT shown in tile content (i.e., when deltaText is empty/N/A)
           // This prevents duplicate delta displays
           let indicatorHtml = '';
-          const hasDeltaInTile = deltaText && deltaText !== '—' && deltaText !== '' && deltaText !== '0';
+          const hasDeltaInTile = deltaText && deltaText !== '—' && deltaText !== '';
           
           // Only show corner indicator when there's no delta in the tile content
           if (!hasDeltaInTile) {
-            if (deltaText === '0') {
-              indicatorHtml = `<div class="dashboard-kpi-tile-indicator" data-dir="flat"><span class="delta-arrow">—</span> 0</div>`;
-            } else {
-              // Show N/A when no delta data available
-              indicatorHtml = `<div class="dashboard-kpi-tile-indicator" data-dir="flat"><span class="delta-arrow">—</span> N/A</div>`;
-            }
+            // Show N/A when no delta data available
+            indicatorHtml = `<div class="dashboard-kpi-tile-indicator" data-dir="flat"><span class="delta-arrow">—</span> N/A</div>`;
           }
           
           return `
@@ -59124,6 +59183,7 @@ Final Score: ${score}/100`;
               ${tile('Rank vs set', domainStrength?.kpis?.rankVs ?? '—', '', 'flat', 'Your rank among the comparison set (you + competitors). Example: 1/16 means strongest in the set.')}
             </div>
             ${renderDomainStrengthDrivers(domainStrength)}
+          ${domainStrength?.debugLine ? `<div style="margin-top:0.5rem; font-size:0.75rem; color: var(--dark-text-muted);">${domainStrength.debugLine}</div>` : ''}
           </div>
         `;
       }
