@@ -54890,9 +54890,10 @@ Final Score: ${score}/100`;
       }
 
       function formatDelta(delta) {
-        if (delta === null || !isFinite(delta)) return '—';
-        const sign = delta > 0 ? '+' : '';
-        return `${sign}${delta.toFixed(1)}`;
+        const num = typeof delta === 'number' ? delta : Number(delta);
+        if (num === null || !Number.isFinite(num)) return '—';
+        const sign = num > 0 ? '+' : '';
+        return `${sign}${num.toFixed(1)}`;
       }
 
       // Domain Strength sorting and pagination state
@@ -55039,7 +55040,8 @@ Final Score: ${score}/100`;
           const latest = selfItem.latest;
           debugLog(`[DomainStrength] Latest data: score=${latest.score}, snapshotDate=${latest.snapshotDate}, createdAt=${latest.createdAt}`, 'info');
           const selfPoints = Array.isArray(selfItem?.trend?.points) ? selfItem.trend.points : [];
-          const delta = coerceDomainStrengthDelta(selfItem?.trend?.deltaLatest, selfPoints);
+          const deltaRaw = coerceDomainStrengthDelta(selfItem?.trend?.deltaLatest, selfPoints);
+          const delta = Number.isFinite(Number(deltaRaw)) ? Number(deltaRaw) : null;
           const rawDelta = selfItem?.trend?.deltaLatest;
           if (selfPoints.length) {
             const lastPoint = selfPoints[selfPoints.length - 1];
@@ -55163,7 +55165,8 @@ Final Score: ${score}/100`;
         for (const it of visibleRows) {
           const latest = it?.latest || null;
           const points = Array.isArray(it?.trend?.points) ? it.trend.points : [];
-          const delta = coerceDomainStrengthDelta(it?.trend?.deltaLatest, points);
+          const deltaRaw = coerceDomainStrengthDelta(it?.trend?.deltaLatest, points);
+          const delta = Number.isFinite(Number(deltaRaw)) ? Number(deltaRaw) : null;
           const rawDelta = it?.trend?.deltaLatest;
           if (visibleIndex < 3) {
             const lastPoint = points.length ? points[points.length - 1] : null;
