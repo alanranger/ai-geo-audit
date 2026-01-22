@@ -248,6 +248,29 @@ async function fetchExistingSnapshotRowsForMonth(monthStart, monthEnd, engine, d
   return out;
 }
 
+async function fetchCompetitorDomains() {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !supabaseKey) return [];
+
+  const url =
+    `${supabaseUrl}/rest/v1/domain_strength_domains` +
+    `?is_competitor=eq.true&select=domain&limit=5000`;
+
+  const resp = await fetch(url, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: supabaseKey,
+      Authorization: `Bearer ${supabaseKey}`,
+    },
+  });
+  if (!resp.ok) return [];
+  const rows = await resp.json();
+  if (!Array.isArray(rows)) return [];
+  return rows.map((r) => normalizeDomain(r?.domain)).filter(Boolean);
+}
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -270,6 +293,7 @@ export default async function handler(req, res) {
   const body = req.body && typeof req.body === "string" ? JSON.parse(req.body) : (req.body || {});
   const mode = (body.mode || "run") === "test" ? "test" : "run";
   const force = body.force === true;
+  const forceCompetitors = body.forceCompetitors === true || body.force_competitors === true;
   const includePending = body.includePending !== false; // default true
   const pendingLimit = Math.max(1, Math.min(1000, Number(body.pendingLimit) || 100));
   const domains = normalizeDomainArray(body.domains || []);
@@ -328,6 +352,13 @@ export default async function handler(req, res) {
     } else if (domains.length > 0) {
       // If includePending is false but domains are provided, use those
       runDomains = [...runDomains, ...normalizeDomainArray(domains)];
+    }
+
+    if (forceCompetitors) {
+      const competitorDomains = await fetchCompetitorDomains();
+      if (competitorDomains.length > 0) {
+        runDomains = [...runDomains, ...competitorDomains];
+      }
     }
   }
   
@@ -682,6 +713,7 @@ export default async function handler(req, res) {
       engine,
       mode,
       force,
+    forceCompetitors,
       includePending,
       caps,
       domains_processed: runDomains.length,
@@ -693,6 +725,8 @@ export default async function handler(req, res) {
         primaryDomain,
         includePending,
         pendingLimit,
+      forceCompetitors,
+      competitorDomainsFetched: forceCompetitors ? (await fetchCompetitorDomains()).length : 0,
         pendingDomainsFetched: includePending ? (await dequeuePending({ engine, limit: 1 })).length : 0, // Quick count check
         runDomainsCount: runDomains.length,
         runDomainsSample: runDomains.slice(0, 10), // First 10 for debugging
