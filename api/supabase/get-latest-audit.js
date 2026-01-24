@@ -604,11 +604,9 @@ export default async function handler(req, res) {
               ? JSON.parse(record.schema_pages_detail)
               : record.schema_pages_detail;
             if (Array.isArray(schemaPagesDetailParsed) && schemaPagesDetailParsed.length > 0) {
-              schemaPagesDetailTruncated = schemaPagesDetailParsed.length > 200
-                ? schemaPagesDetailParsed.slice(0, 200)
-                : schemaPagesDetailParsed;
+              schemaPagesDetailTruncated = schemaPagesDetailParsed;
               if (schemaPagesDetailParsed.length > 200) {
-                console.warn(`[get-latest-audit] Truncating schema_pages_detail from ${schemaPagesDetailParsed.length} to 200 immediately`);
+                console.warn(`[get-latest-audit] Returning full schema_pages_detail (${schemaPagesDetailParsed.length} pages)`);
               }
             }
           } catch (e) {
