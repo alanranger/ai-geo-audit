@@ -32,6 +32,21 @@ const normalizeUrl = (url) => {
   return normalized.replace(/^\/+/, '').replace(/\/+$/, '');
 };
 
+const buildPropertyCandidates = (propertyUrl) => {
+  const trimmed = String(propertyUrl || '').trim().replace(/\/$/, '');
+  if (!trimmed) return [];
+  const candidates = new Set([trimmed]);
+  const hasProtocol = /^(https?:\/\/)/.exec(trimmed);
+  const withProtocol = hasProtocol ? trimmed : `https://${trimmed}`;
+  candidates.add(withProtocol);
+  if (withProtocol.includes('://www.')) {
+    candidates.add(withProtocol.replace('://www.', '://'));
+  } else {
+    candidates.add(withProtocol.replace('://', '://www.'));
+  }
+  return Array.from(candidates);
+};
+
 const buildMeta = (property_url, target_url, count) => ({
   property_url,
   target_url,
@@ -118,10 +133,11 @@ export default async function handler(req, res) {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - daysNum);
 
+    const propertyCandidates = buildPropertyCandidates(property_url);
     const { data: storedRows, error: storedError } = await supabase
       .from('gsc_page_timeseries')
       .select('date,clicks,impressions,ctr,position')
-      .eq('property_url', property_url)
+      .in('property_url', propertyCandidates)
       .eq('page_url', targetUrlNormalized)
       .gte('date', cutoffDate.toISOString().split('T')[0])
       .order('date', { ascending: true });
@@ -138,7 +154,7 @@ export default async function handler(req, res) {
     const { data: audits, error: auditError } = await supabase
       .from('audit_results')
       .select('audit_date, gsc_timeseries')
-      .eq('property_url', property_url)
+      .in('property_url', propertyCandidates)
       .order('audit_date', { ascending: false });
 
     if (auditError || !audits || audits.length === 0) {
