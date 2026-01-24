@@ -9802,10 +9802,10 @@
             for (const mk of metricKeysForDebug) {
               const baselineExtracted = getMetricValue(baselineLatest.baseline, mk);
               const latestExtracted = getMetricValue(baselineLatest.latest, mk);
-              debugLog(`[Traffic Lights] Task "${task.title || task.id}" EXTRACTED ${mk}: baselineValue=${baselineExtracted}, latestValue=${latestExtracted}`, baselineExtracted === latestExtracted ? 'warn' : 'info');
+              debugLog(`[Traffic Lights] Task "${task.title || task.id}" EXTRACTED ${mk}: baselineValue=${baselineExtracted}, latestValue=${latestExtracted}`, 'info');
             }
           } else {
-            debugLog(`[Traffic Lights] Task "${task.title || task.id}": No measurements and baseline_metrics/latest_metrics have same date (${baselineDate}) - cannot compute delta`, 'warn');
+            debugLog(`[Traffic Lights] Task "${task.title || task.id}": No measurements and baseline_metrics/latest_metrics have same date (${baselineDate}) - cannot compute delta`, 'info');
           }
         } else if (baselineLatest && baselineLatest.baseline === baselineLatest.latest) {
           // Only 1 measurement - baseline and latest are the same object
@@ -9835,17 +9835,17 @@
               for (const mk of metricKeysForDebug) {
                 const baselineExtracted = getMetricValue(baselineLatest.baseline, mk);
                 const latestExtracted = getMetricValue(baselineLatest.latest, mk);
-                debugLog(`[Traffic Lights] Task "${task.title || task.id}" EXTRACTED ${mk}: baselineValue=${baselineExtracted}, latestValue=${latestExtracted}`, baselineExtracted === latestExtracted ? 'warn' : 'info');
+                debugLog(`[Traffic Lights] Task "${task.title || task.id}" EXTRACTED ${mk}: baselineValue=${baselineExtracted}, latestValue=${latestExtracted}`, 'info');
               }
             } else {
-              debugLog(`[Traffic Lights] Task "${task.title || task.id}": Only 1 measurement but baseline_metrics/latest_metrics have same date (${baselineDate}) - cannot compute delta`, 'warn');
+              debugLog(`[Traffic Lights] Task "${task.title || task.id}": Only 1 measurement but baseline_metrics/latest_metrics have same date (${baselineDate}) - cannot compute delta`, 'info');
             }
           } else {
-            debugLog(`[Traffic Lights] Task "${task.title || task.id}": Only 1 measurement and no baseline_metrics/latest_metrics available - metrics will show as 'same'`, 'warn');
+            debugLog(`[Traffic Lights] Task "${task.title || task.id}": Only 1 measurement and no baseline_metrics/latest_metrics available - metrics will show as 'same'`, 'info');
           }
         } else if (!baselineLatest) {
           // No baselineLatest could be computed - log why
-          debugLog(`[Traffic Lights] Task "${task.title || task.id}": Cannot compute baselineLatest - measurements.length=${measurements.length}, hasBaselineMetrics=${!!task.baseline_metrics}, hasLatestMetrics=${!!task.latest_metrics}`, 'warn');
+          debugLog(`[Traffic Lights] Task "${task.title || task.id}": Cannot compute baselineLatest - measurements.length=${measurements.length}, hasBaselineMetrics=${!!task.baseline_metrics}, hasLatestMetrics=${!!task.latest_metrics}`, 'info');
         }
 
         // DEBUG: Log task details for troubleshooting
@@ -9885,7 +9885,7 @@
               debugLog(`[Traffic Lights] Task "${task.title || task.id}": baseline.captured_at=${baselineLatest.baseline?.captured_at || baselineLatest.baseline?.created_at || 'N/A'}, latest.captured_at=${baselineLatest.latest?.captured_at || baselineLatest.latest?.created_at || 'N/A'}`, 'info');
               // Check if baseline and latest are the same object
               const isSameObject = baselineLatest.baseline === baselineLatest.latest;
-              debugLog(`[Traffic Lights] Task "${task.title || task.id}": baseline === latest (same object)? ${isSameObject}`, isSameObject ? 'warn' : 'info');
+              debugLog(`[Traffic Lights] Task "${task.title || task.id}": baseline === latest (same object)? ${isSameObject}`, 'info');
             }
           }
           
@@ -9906,7 +9906,7 @@
               const latestDate = baselineLatest.latest?.captured_at || baselineLatest.latest?.created_at || 'no-date';
               const isSameObject = baselineLatest.baseline === baselineLatest.latest;
               const delta = (baselineValue != null && latestValue != null) ? (latestValue - baselineValue) : null;
-              debugLog(`[Traffic Lights] Task "${task.title || task.id}" ${metricKey}: baselineValue=${baselineValue}, latestValue=${latestValue}, delta=${delta}, classification=${classification || 'null'}, baselineDate=${baselineDate}, latestDate=${latestDate}, isSameObject=${isSameObject}`, classification === 'same' && delta !== 0 ? 'warn' : 'info');
+              debugLog(`[Traffic Lights] Task "${task.title || task.id}" ${metricKey}: baselineValue=${baselineValue}, latestValue=${latestValue}, delta=${delta}, classification=${classification || 'null'}, baselineDate=${baselineDate}, latestDate=${latestDate}, isSameObject=${isSameObject}`, 'info');
             }
 
             if (classification) {
@@ -9915,10 +9915,10 @@
             }
           }
         } else if (typeof debugLog === 'function' && task.objectiveKpiKey) {
-          debugLog(`[Traffic Lights] Task "${task.title || task.id}": No baselineLatest (measurementsCount=${measurements.length}, scope=${scope})`, 'warn');
+          debugLog(`[Traffic Lights] Task "${task.title || task.id}": No baselineLatest (measurementsCount=${measurements.length}, scope=${scope})`, 'info');
         } else if (task.title && (task.title.includes('Landscape') || task.title.includes('photography-courses'))) {
           if (typeof debugLog === 'function') {
-            debugLog(`[Traffic Lights] No baselineLatest for task: id=${task.id}, title="${task.title}", measurementsCount=${measurements.length}, scope=${scope}, hasActiveCycle=${!!activeCycle}`, 'warn');
+            debugLog(`[Traffic Lights] No baselineLatest for task: id=${task.id}, title="${task.title}", measurementsCount=${measurements.length}, scope=${scope}, hasActiveCycle=${!!activeCycle}`, 'info');
           }
         }
 
@@ -20099,14 +20099,14 @@
         const valueString = typeof value === 'string' ? value : JSON.stringify(value);
         // Check size before saving (localStorage limit is typically 5-10MB)
         if (valueString.length > 4 * 1024 * 1024) {
-          debugLog(`⚠ Data too large for localStorage (${Math.round(valueString.length / 1024)}KB), skipping save. Supabase is source of truth.`, 'warn');
+          debugLog(`⚠ Data too large for localStorage (${Math.round(valueString.length / 1024)}KB), skipping save. Supabase is source of truth.`, 'info');
           return false;
         }
         localStorage.setItem(key, valueString);
         return true;
       } catch (error) {
         if (error.name === 'QuotaExceededError' || error.message.includes('quota')) {
-          debugLog(`⚠ localStorage quota exceeded for ${key}, skipping save. Supabase is source of truth.`, 'warn');
+          debugLog(`⚠ localStorage quota exceeded for ${key}, skipping save. Supabase is source of truth.`, 'info');
           return false;
         } else {
           debugLog(`✗ Error saving to localStorage (${key}): ${error.message}`, 'error');
@@ -58082,7 +58082,7 @@ Final Score: ${score}/100`;
             localStorage.setItem(DASHBOARD_RUNS_KEY, JSON.stringify(next));
           } catch (quotaError) {
             // If quota exceeded, try saving with fewer runs
-            console.warn('[Dashboard] localStorage quota exceeded, reducing run history...');
+            debugLog('[Dashboard] localStorage quota exceeded, reducing run history...', 'info');
             const reduced = next.slice(-10); // Keep only last 10 runs
             try {
               localStorage.setItem(DASHBOARD_RUNS_KEY, JSON.stringify(reduced));
@@ -60797,7 +60797,7 @@ Final Score: ${score}/100`;
             
             if (latestAuditFromSupabase) {
               // Update localStorage with latest audit data to ensure snapshot uses fresh data
-              localStorage.setItem('last_audit_results', JSON.stringify(latestAuditFromSupabase));
+              safeSetLocalStorage('last_audit_results', latestAuditFromSupabase);
               debugLog(`[Dashboard] Updated localStorage with latest audit from Supabase (audit_date: ${latestAuditFromSupabase.auditDate || latestAuditFromSupabase.audit_date || 'unknown'})`, 'info');
               // Also update window.moneyPagesMetrics if available
               if (latestAuditFromSupabase.scores?.moneyPagesMetrics || latestAuditFromSupabase.moneyPagesMetrics) {
