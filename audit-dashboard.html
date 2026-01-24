@@ -33931,6 +33931,191 @@ Final Score: ${score}/100`;
         }
       };
 
+      if (typeof window.closeMoneyPageInlineCards !== 'function') {
+        window.closeMoneyPageInlineCards = function(button) {
+          const chartId = button?.getAttribute('data-chart-id');
+          if (chartId && window.moneyPageInlineCharts?.get(chartId)) {
+            try {
+              window.moneyPageInlineCharts.get(chartId).destroy();
+            } catch (e) {
+              // Ignore chart cleanup errors
+            }
+            window.moneyPageInlineCharts.delete(chartId);
+          }
+          const row = button?.closest('tr');
+          if (row) row.remove();
+        };
+      }
+
+      if (typeof window.renderMoneyPageInlineTrendChart !== 'function') {
+        window.renderMoneyPageInlineTrendChart = function(chartId, targetUrlNormalized) {
+          const canvas = document.getElementById(chartId);
+          const emptyEl = document.getElementById(`${chartId}-empty`);
+          if (!canvas || typeof Chart === 'undefined') return;
+
+          const lastAuditResults = localStorage.getItem('last_audit_results');
+          if (!lastAuditResults) {
+            if (emptyEl) emptyEl.style.display = 'block';
+            return;
+          }
+
+          let auditData = null;
+          try {
+            auditData = JSON.parse(lastAuditResults);
+          } catch (e) {
+            if (emptyEl) emptyEl.style.display = 'block';
+            return;
+          }
+
+          const timeseries =
+            auditData?.gscData?.timeseries ||
+            auditData?.searchData?.gscData?.timeseries ||
+            auditData?.searchData?.timeseries;
+          const pages = timeseries?.pages;
+          if (!Array.isArray(pages)) {
+            if (emptyEl) emptyEl.style.display = 'block';
+            return;
+          }
+
+          const normalizeUrl = (url) => {
+            if (!url) return '';
+            let normalized = String(url).toLowerCase().trim();
+            normalized = normalized.replace(/^https?:\/\//, '');
+            normalized = normalized.replace(/^www\./, '');
+            normalized = normalized.split('?')[0].split('#')[0];
+            const parts = normalized.split('/');
+            if (parts.length > 1) {
+              normalized = parts.slice(1).join('/');
+            }
+            return normalized.replace(/^\/+/, '').replace(/\/+$/, '');
+          };
+
+          const pageData = pages.find(p => normalizeUrl(p.page || p.url || '') === targetUrlNormalized);
+          const rawPoints = Array.isArray(pageData?.data) ? pageData.data : [];
+          const points = rawPoints.map(point => {
+            const dateValue = point.date || point.day;
+            const date = dateValue ? new Date(dateValue) : null;
+            if (!date || isNaN(date.getTime())) return null;
+            return {
+              date,
+              clicks: point.clicks || 0,
+              impressions: point.impressions || 0,
+              position: point.position ?? null
+            };
+          }).filter(Boolean).sort((a, b) => a.date - b.date);
+
+          if (points.length === 0) {
+            if (emptyEl) emptyEl.style.display = 'block';
+            return;
+          }
+
+          const endDate = points[points.length - 1].date;
+          const startDate = new Date(endDate);
+          startDate.setDate(endDate.getDate() - 27);
+          const lastPoints = points.filter(p => p.date >= startDate);
+
+          if (lastPoints.length === 0) {
+            if (emptyEl) emptyEl.style.display = 'block';
+            return;
+          }
+
+          if (emptyEl) emptyEl.style.display = 'none';
+
+          const labels = lastPoints.map(p => p.date.toISOString().slice(5, 10));
+          const clicks = lastPoints.map(p => p.clicks);
+          const impressions = lastPoints.map(p => p.impressions);
+          const ctr = lastPoints.map(p => p.impressions > 0 ? (p.clicks / p.impressions) * 100 : 0);
+          const positions = lastPoints.map(p => p.position);
+
+          if (!window.moneyPageInlineCharts) {
+            window.moneyPageInlineCharts = new Map();
+          }
+
+          const existingChart = window.moneyPageInlineCharts.get(chartId) || (Chart.getChart ? Chart.getChart(canvas) : null);
+          if (existingChart) {
+            try {
+              existingChart.destroy();
+            } catch (e) {
+              // Ignore destroy errors
+            }
+          }
+
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return;
+
+          const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+              labels,
+              datasets: [
+                {
+                  label: 'Clicks',
+                  data: clicks,
+                  borderColor: '#2563eb',
+                  backgroundColor: 'rgba(37, 99, 235, 0.12)',
+                  tension: 0.3,
+                  borderWidth: 2,
+                  pointRadius: 0,
+                  yAxisID: 'y'
+                },
+                {
+                  label: 'Impressions',
+                  data: impressions,
+                  borderColor: '#10b981',
+                  backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                  tension: 0.3,
+                  borderWidth: 2,
+                  pointRadius: 0,
+                  yAxisID: 'y'
+                },
+                {
+                  label: 'CTR (%)',
+                  data: ctr,
+                  borderColor: '#f59e0b',
+                  backgroundColor: 'rgba(245, 158, 11, 0.12)',
+                  tension: 0.3,
+                  borderWidth: 2,
+                  pointRadius: 0,
+                  yAxisID: 'y1'
+                },
+                {
+                  label: 'Avg Position',
+                  data: positions,
+                  borderColor: '#ef4444',
+                  backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                  tension: 0.3,
+                  borderWidth: 2,
+                  pointRadius: 0,
+                  spanGaps: true,
+                  yAxisID: 'y1'
+                }
+              ]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              interaction: { mode: 'index', intersect: false },
+              plugins: {
+                legend: { position: 'bottom', labels: { boxWidth: 10, boxHeight: 10 } }
+              },
+              scales: {
+                y: {
+                  beginAtZero: true,
+                  grid: { color: 'rgba(148, 163, 184, 0.25)' }
+                },
+                y1: {
+                  position: 'right',
+                  beginAtZero: true,
+                  grid: { drawOnChartArea: false }
+                }
+              }
+            }
+          });
+
+          window.moneyPageInlineCharts.set(chartId, chart);
+        };
+      }
+
       // Show inline performance cards for Money Pages rows (replaces modal)
       if (typeof window.showMoneyPagePerformanceInline !== 'function') {
         window.showMoneyPagePerformanceInline = async function(pageUrl, pageTitle, rowElement) {
@@ -33988,6 +34173,16 @@ Final Score: ${score}/100`;
             };
 
             const targetUrlNormalized = normalizeUrl(pageUrl);
+            const hashString = (value) => {
+              let hash = 0;
+              for (let i = 0; i < value.length; i++) {
+                hash = ((hash << 5) - hash) + value.charCodeAt(i);
+                hash |= 0;
+              }
+              return Math.abs(hash).toString(36);
+            };
+            const trendChartId = `money-page-trend-${hashString(targetUrlNormalized)}`;
+            const trendChartEmptyId = `${trendChartId}-empty`;
 
             // ============================================
             // CARD 1: Performance Trends (28d + 90d average from Supabase)
@@ -34244,6 +34439,15 @@ Final Score: ${score}/100`;
                 </div>
               `;
             }
+            card1Html += `
+              <div style="border-top: 1px dashed #e2e8f0; padding-top: 0.75rem; margin-top: 0.75rem;">
+                <div style="font-size: 0.7rem; color: #94a3b8; margin-bottom: 0.5rem;">Last 28 days (rolling)</div>
+                <div style="position: relative; height: 160px;">
+                  <canvas id="${trendChartId}" style="width: 100%; height: 160px;"></canvas>
+                </div>
+                <div id="${trendChartEmptyId}" style="display: none; font-size: 0.75rem; color: #94a3b8; text-align: center; margin-top: 0.5rem;">No timeseries available for this URL.</div>
+              </div>
+            `;
             card1Html += `</div>`;
 
             // Card 2: AI Citations with Keywords
@@ -34475,7 +34679,7 @@ Final Score: ${score}/100`;
                 ${card3Html}
               </div>
               <div style="display: flex; justify-content: flex-end; margin-top: 1rem;">
-                <button type="button" onclick="this.closest('tr').remove()" style="padding: 0.5rem 1rem; border-radius: 6px; border: 1px solid #cbd5e1; background: white; color: #475569; font-weight: 600; font-size: 0.8rem; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.background='#f1f5f9';" onmouseout="this.style.background='white';">
+                <button type="button" onclick="window.closeMoneyPageInlineCards(this)" data-chart-id="${trendChartId}" style="padding: 0.5rem 1rem; border-radius: 6px; border: 1px solid #cbd5e1; background: white; color: #475569; font-weight: 600; font-size: 0.8rem; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.background='#f1f5f9';" onmouseout="this.style.background='white';">
                   Close
                 </button>
               </div>
@@ -34486,6 +34690,9 @@ Final Score: ${score}/100`;
               const newRow = document.createElement('tr');
               newRow.appendChild(cardsContainer);
               currentRow.parentNode.insertBefore(newRow, currentRow.nextSibling);
+              if (typeof window.renderMoneyPageInlineTrendChart === 'function') {
+                requestAnimationFrame(() => window.renderMoneyPageInlineTrendChart(trendChartId, targetUrlNormalized));
+              }
             }
           } catch (err) {
             console.error('[Money Pages] Error showing inline performance cards:', err);
