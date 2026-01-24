@@ -34052,6 +34052,17 @@ Final Score: ${score}/100`;
           const maxImpressions = Math.max(1, ...impressions);
           const maxCtr = Math.max(1, ...ctr);
           const maxPosition = Math.max(1, ...positions.filter(p => p !== null));
+          const scalePad = 1.5;
+          const movingAverage = (values, windowSize) => values.map((_, idx) => {
+            if (idx + 1 < windowSize) return null;
+            const slice = values.slice(idx + 1 - windowSize, idx + 1);
+            const valid = slice.filter(val => val !== null && !Number.isNaN(val));
+            if (valid.length === 0) return null;
+            return valid.reduce((sum, val) => sum + val, 0) / valid.length;
+          });
+          const impressionsTrend = movingAverage(impressions, 7);
+          const clicksTrend = movingAverage(clicks, 7);
+          const ctrTarget = labels.map(() => 2.5);
           const pointRadius = lastPoints.length <= 1 ? 2 : 0;
           const pointHoverRadius = lastPoints.length <= 1 ? 3 : 2;
 
@@ -34088,6 +34099,16 @@ Final Score: ${score}/100`;
                   yAxisID: 'y2'
                 },
                 {
+                  label: 'Clicks trend (7d)',
+                  data: clicksTrend,
+                  borderColor: 'rgba(37, 99, 235, 0.6)',
+                  borderDash: [4, 4],
+                  borderWidth: 2,
+                  pointRadius: 0,
+                  spanGaps: true,
+                  yAxisID: 'y2'
+                },
+                {
                   label: 'Impressions',
                   data: impressions,
                   borderColor: '#10b981',
@@ -34099,6 +34120,16 @@ Final Score: ${score}/100`;
                   yAxisID: 'y'
                 },
                 {
+                  label: 'Impressions trend (7d)',
+                  data: impressionsTrend,
+                  borderColor: 'rgba(16, 185, 129, 0.6)',
+                  borderDash: [4, 4],
+                  borderWidth: 2,
+                  pointRadius: 0,
+                  spanGaps: true,
+                  yAxisID: 'y'
+                },
+                {
                   label: 'CTR (%)',
                   data: ctr,
                   borderColor: '#f59e0b',
@@ -34107,6 +34138,15 @@ Final Score: ${score}/100`;
                   borderWidth: 2,
                   pointRadius,
                   pointHoverRadius,
+                  yAxisID: 'y3'
+                },
+                {
+                  label: 'CTR target 2.5%',
+                  data: ctrTarget,
+                  borderColor: 'rgba(245, 158, 11, 0.8)',
+                  borderDash: [4, 4],
+                  borderWidth: 1.5,
+                  pointRadius: 0,
                   yAxisID: 'y3'
                 },
                 {
@@ -34133,7 +34173,7 @@ Final Score: ${score}/100`;
               scales: {
                 y: {
                   beginAtZero: true,
-                  suggestedMax: Math.ceil(maxImpressions * 1.15),
+                  suggestedMax: Math.ceil(maxImpressions * scalePad),
                   title: { display: true, text: 'Impressions', color: '#64748b', font: { size: 10 } },
                   ticks: { color: '#94a3b8' },
                   grid: { color: 'rgba(148, 163, 184, 0.25)' }
@@ -34141,7 +34181,7 @@ Final Score: ${score}/100`;
                 y1: {
                   position: 'right',
                   beginAtZero: true,
-                  suggestedMax: Math.ceil(maxPosition * 1.15),
+                  suggestedMax: Math.ceil(maxPosition * scalePad),
                   title: { display: true, text: 'Avg Position', color: '#ef4444', font: { size: 10 } },
                   ticks: { color: '#ef4444' },
                   grid: { drawOnChartArea: false }
@@ -34149,7 +34189,7 @@ Final Score: ${score}/100`;
                 y2: {
                   position: 'left',
                   beginAtZero: true,
-                  suggestedMax: Math.ceil(maxClicks * 1.15),
+                  suggestedMax: Math.ceil(maxClicks * scalePad),
                   title: { display: true, text: 'Clicks', color: '#2563eb', font: { size: 10 } },
                   ticks: { color: '#2563eb' },
                   grid: { drawOnChartArea: false }
@@ -34157,7 +34197,7 @@ Final Score: ${score}/100`;
                 y3: {
                   position: 'right',
                   beginAtZero: true,
-                  suggestedMax: Math.ceil(maxCtr * 1.15),
+                  suggestedMax: Math.max(3, Math.ceil(maxCtr * scalePad)),
                   title: { display: true, text: 'CTR (%)', color: '#f59e0b', font: { size: 10 } },
                   ticks: {
                     color: '#f59e0b',
