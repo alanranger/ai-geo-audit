@@ -2,6 +2,74 @@ import { computeNextRunAt, shouldRunNow } from '../../lib/cron/schedule.js';
 import { runFullAudit } from '../../lib/audit/fullAudit.js';
 import { logCronEvent } from '../../lib/cron/logCron.js';
 
+const normalizeUrl = (url) => {
+  if (!url) return '';
+  let normalized = String(url).toLowerCase().trim();
+  normalized = normalized.replace(/^https?:\/\//, '');
+  normalized = normalized.replace(/^www\./, '');
+  normalized = normalized.split('?')[0].split('#')[0];
+  const parts = normalized.split('/');
+  if (parts.length > 1) {
+    normalized = parts.slice(1).join('/');
+  }
+  return normalized.replace(/^\/+/, '').replace(/\/+$/, '');
+};
+
+const buildRollingDateRange = (daysBack = 28) => {
+  const end = new Date();
+  end.setDate(end.getDate() - 1);
+  end.setHours(0, 0, 0, 0);
+  const start = new Date(end);
+  start.setDate(start.getDate() - Math.max(daysBack - 1, 0));
+  start.setHours(0, 0, 0, 0);
+  return {
+    startDate: start.toISOString().split('T')[0],
+    endDate: end.toISOString().split('T')[0]
+  };
+};
+
+const buildDateSeries = (endDate, days) => {
+  const list = [];
+  const end = new Date(`${endDate}T00:00:00Z`);
+  for (let i = days - 1; i >= 0; i -= 1) {
+    const d = new Date(end);
+    d.setUTCDate(end.getUTCDate() - i);
+    list.push(d.toISOString().split('T')[0]);
+  }
+  return list;
+};
+
+const buildMoneyPageGridRows = ({ propertyUrl, moneyPages, timeseries, days }) => {
+  const pageSet = new Set(moneyPages.map((row) => normalizeUrl(row?.url || row)).filter(Boolean));
+  if (pageSet.size === 0) return [];
+  const { endDate } = buildRollingDateRange(days);
+  const dateSeries = buildDateSeries(endDate, days);
+  const pageMap = new Map();
+  (timeseries || []).forEach((row) => {
+    const pageKey = normalizeUrl(row.page || row.url || '');
+    if (!pageKey) return;
+    if (!pageMap.has(pageKey)) pageMap.set(pageKey, new Map());
+    pageMap.get(pageKey).set(row.date, row);
+  });
+  const records = [];
+  pageSet.forEach((pageKey) => {
+    const perDate = pageMap.get(pageKey) || new Map();
+    dateSeries.forEach((date) => {
+      const existing = perDate.get(date);
+      records.push({
+        propertyUrl,
+        page: pageKey,
+        date,
+        clicks: Number(existing?.clicks || 0),
+        impressions: Number(existing?.impressions || 0),
+        ctr: Number(existing?.ctr || 0),
+        position: existing?.position ?? null
+      });
+    });
+  });
+  return records;
+};
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -125,13 +193,22 @@ export default async function handler(req, res) {
 
     let pageTimeseriesSave = null;
     try {
-      if (Array.isArray(audit.moneyPagesTimeseries) && audit.moneyPagesTimeseries.length > 0) {
+      const moneyPages = Array.isArray(audit.moneyPagesMetrics?.rows)
+        ? audit.moneyPagesMetrics.rows
+        : [];
+      const gridRows = buildMoneyPageGridRows({
+        propertyUrl,
+        moneyPages,
+        timeseries: audit.moneyPagesTimeseries,
+        days: 28
+      });
+      if (gridRows.length > 0) {
         pageTimeseriesSave = await fetchJson(`${baseUrl}/api/supabase/save-gsc-page-timeseries`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             propertyUrl,
-            rows: audit.moneyPagesTimeseries
+            rows: gridRows
           })
         });
       }
