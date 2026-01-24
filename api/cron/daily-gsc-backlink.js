@@ -123,6 +123,22 @@ export default async function handler(req, res) {
       body: JSON.stringify(payload)
     });
 
+    let pageTimeseriesSave = null;
+    try {
+      if (Array.isArray(audit.moneyPagesTimeseries) && audit.moneyPagesTimeseries.length > 0) {
+        pageTimeseriesSave = await fetchJson(`${baseUrl}/api/supabase/save-gsc-page-timeseries`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            propertyUrl,
+            rows: audit.moneyPagesTimeseries
+          })
+        });
+      }
+    } catch (err) {
+      pageTimeseriesSave = { status: 'error', message: err.message };
+    }
+
     await updateScheduleStatus('ok');
     await logCronEvent({
       jobKey: 'gsc_backlinks',
@@ -139,7 +155,8 @@ export default async function handler(req, res) {
         gsc: 'ok',
         backlinks: 'ok',
         localSignals: 'ok',
-        save: saveResult?.status || 'ok'
+        save: saveResult?.status || 'ok',
+        pageTimeseries: pageTimeseriesSave?.status || (pageTimeseriesSave ? 'ok' : 'skipped')
       },
       meta: { generatedAt: new Date().toISOString() }
     });

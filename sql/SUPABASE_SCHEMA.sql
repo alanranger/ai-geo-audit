@@ -95,6 +95,28 @@ CREATE INDEX IF NOT EXISTS idx_gsc_timeseries_property
   ON gsc_timeseries(property_url);
 
 -- ============================================================================
+-- Table: gsc_page_timeseries
+-- Purpose: Cache page-level GSC timeseries for money pages
+-- Status: NEW - Required for per-URL trend charts
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS gsc_page_timeseries (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  property_url TEXT NOT NULL,
+  page_url TEXT NOT NULL,
+  date DATE NOT NULL,
+  clicks INTEGER NOT NULL DEFAULT 0,
+  impressions INTEGER NOT NULL DEFAULT 0,
+  ctr DECIMAL(5,2) NOT NULL DEFAULT 0,
+  position DECIMAL(5,2),
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW(),
+  UNIQUE(property_url, page_url, date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_gsc_page_timeseries_lookup
+  ON gsc_page_timeseries(property_url, page_url, date DESC);
+
+-- ============================================================================
 -- Table: audit_cron_schedule
 -- Purpose: Store per-job cron schedule + last/next run
 -- Status: NEW - Required for scheduler UI + cron gating
