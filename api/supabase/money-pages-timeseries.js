@@ -66,6 +66,43 @@ const mapStoredRows = (rows) => rows.map((row) => ({
   position: toNumberOrNull(row.position)
 }));
 
+const toUtcDate = (dateStr) => {
+  if (!dateStr) return null;
+  const date = new Date(`${dateStr}T00:00:00Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const fillMissingDates = (points, days) => {
+  if (!Array.isArray(points) || points.length === 0) return [];
+  const validDays = Number.parseInt(days, 10) || 28;
+  const keyed = new Map(points.map((p) => [p.date, p]));
+  const dates = points
+    .map((p) => toUtcDate(p.date))
+    .filter(Boolean);
+  if (dates.length === 0) return points;
+  const endDate = new Date(Math.max(...dates.map((d) => d.getTime())));
+  const startDate = new Date(endDate);
+  startDate.setUTCDate(endDate.getUTCDate() - (validDays - 1));
+  const filled = [];
+  for (let i = 0; i < validDays; i += 1) {
+    const day = new Date(startDate);
+    day.setUTCDate(startDate.getUTCDate() + i);
+    const key = day.toISOString().split('T')[0];
+    if (keyed.has(key)) {
+      filled.push(keyed.get(key));
+    } else {
+      filled.push({
+        date: key,
+        clicks: 0,
+        impressions: 0,
+        ctr: 0,
+        position: null
+      });
+    }
+  }
+  return filled;
+};
+
 const readFromAuditResults = (audits, cutoffDate, targetUrlNormalized) => {
   const dailyMap = new Map();
   audits.forEach((audit) => {
@@ -143,7 +180,7 @@ export default async function handler(req, res) {
       .order('date', { ascending: true });
 
     if (!storedError && Array.isArray(storedRows) && storedRows.length > 0) {
-      const data = mapStoredRows(storedRows);
+      const data = fillMissingDates(mapStoredRows(storedRows), daysNum);
       return sendJSON(res, 200, {
         status: 'ok',
         data,
@@ -161,7 +198,7 @@ export default async function handler(req, res) {
       return sendJSON(res, 200, { status: 'ok', data: [], message: 'No audit data found' });
     }
 
-    const data = readFromAuditResults(audits, cutoffDate, targetUrlNormalized);
+    const data = fillMissingDates(readFromAuditResults(audits, cutoffDate, targetUrlNormalized), daysNum);
 
     return sendJSON(res, 200, {
       status: 'ok',
