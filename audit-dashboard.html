@@ -33948,34 +33948,10 @@ Final Score: ${score}/100`;
       }
 
       if (typeof window.renderMoneyPageInlineTrendChart !== 'function') {
-        window.renderMoneyPageInlineTrendChart = function(chartId, targetUrlNormalized) {
+        window.renderMoneyPageInlineTrendChart = async function(chartId, targetUrlNormalized) {
           const canvas = document.getElementById(chartId);
           const emptyEl = document.getElementById(`${chartId}-empty`);
           if (!canvas || typeof Chart === 'undefined') return;
-
-          const lastAuditResults = localStorage.getItem('last_audit_results');
-          if (!lastAuditResults) {
-            if (emptyEl) emptyEl.style.display = 'block';
-            return;
-          }
-
-          let auditData = null;
-          try {
-            auditData = JSON.parse(lastAuditResults);
-          } catch (e) {
-            if (emptyEl) emptyEl.style.display = 'block';
-            return;
-          }
-
-          const timeseries =
-            auditData?.gscData?.timeseries ||
-            auditData?.searchData?.gscData?.timeseries ||
-            auditData?.searchData?.timeseries;
-          const pages = timeseries?.pages;
-          if (!Array.isArray(pages)) {
-            if (emptyEl) emptyEl.style.display = 'block';
-            return;
-          }
 
           const normalizeUrl = (url) => {
             if (!url) return '';
@@ -33990,9 +33966,7 @@ Final Score: ${score}/100`;
             return normalized.replace(/^\/+/, '').replace(/\/+$/, '');
           };
 
-          const pageData = pages.find(p => normalizeUrl(p.page || p.url || '') === targetUrlNormalized);
-          const rawPoints = Array.isArray(pageData?.data) ? pageData.data : [];
-          const points = rawPoints.map(point => {
+          const buildPoints = (rawPoints) => rawPoints.map(point => {
             const dateValue = point.date || point.day;
             const date = dateValue ? new Date(dateValue) : null;
             if (!date || isNaN(date.getTime())) return null;
@@ -34003,6 +33977,54 @@ Final Score: ${score}/100`;
               position: point.position ?? null
             };
           }).filter(Boolean).sort((a, b) => a.date - b.date);
+
+          const getLocalPoints = () => {
+            const lastAuditResults = localStorage.getItem('last_audit_results');
+            if (!lastAuditResults) return [];
+            try {
+              const auditData = JSON.parse(lastAuditResults);
+              const timeseries =
+                auditData?.gscData?.timeseries ||
+                auditData?.searchData?.gscData?.timeseries ||
+                auditData?.searchData?.timeseries;
+              const pages = timeseries?.pages;
+              if (!Array.isArray(pages)) return [];
+              const pageData = pages.find(p => normalizeUrl(p.page || p.url || '') === targetUrlNormalized);
+              const rawPoints = Array.isArray(pageData?.data) ? pageData.data : [];
+              return buildPoints(rawPoints);
+            } catch (e) {
+              return [];
+            }
+          };
+
+          const fetchRemotePoints = async () => {
+            const propertyUrl = document.getElementById('propertyUrl')?.value ||
+              localStorage.getItem('property_url') ||
+              localStorage.getItem('gsc_property_url') ||
+              localStorage.getItem('last_property_url') ||
+              '';
+            if (!propertyUrl) return [];
+            try {
+              const endpoint = apiUrl(`/api/supabase/money-pages-timeseries?property_url=${encodeURIComponent(propertyUrl)}&target_url=${encodeURIComponent(targetUrlNormalized)}&days=28`);
+              const response = await fetch(endpoint);
+              if (!response.ok) return [];
+              const payload = await response.json();
+              if (!payload || payload.status !== 'ok' || !Array.isArray(payload.data)) return [];
+              return payload.data.map(point => ({
+                date: point.date ? new Date(point.date) : null,
+                clicks: point.clicks || 0,
+                impressions: point.impressions || 0,
+                position: point.position ?? null
+              })).filter(p => p.date && !isNaN(p.date.getTime())).sort((a, b) => a.date - b.date);
+            } catch (e) {
+              return [];
+            }
+          };
+
+          let points = getLocalPoints();
+          if (points.length === 0) {
+            points = await fetchRemotePoints();
+          }
 
           if (points.length === 0) {
             if (emptyEl) emptyEl.style.display = 'block';
