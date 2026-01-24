@@ -52,6 +52,78 @@ function normalizeUrl(url) {
   return path;
 }
 
+const buildPropertyCandidates = (propertyUrl) => {
+  const trimmed = String(propertyUrl || '').trim().replace(/\/$/, '');
+  if (!trimmed) return [];
+  const candidates = new Set([trimmed]);
+  const hasProtocol = /^(https?:\/\/)/.exec(trimmed);
+  const withProtocol = hasProtocol ? trimmed : `https://${trimmed}`;
+  candidates.add(withProtocol);
+  if (withProtocol.includes('://www.')) {
+    candidates.add(withProtocol.replace('://www.', '://'));
+  } else {
+    candidates.add(withProtocol.replace('://', '://www.'));
+  }
+  return Array.from(candidates);
+};
+
+const parseRankingAiData = (value) => {
+  if (!value) return null;
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value);
+    } catch (e) {
+      return null;
+    }
+  }
+  return value;
+};
+
+const combinedRowsCount = (value) => {
+  const parsed = parseRankingAiData(value);
+  const rows = parsed?.combinedRows;
+  return Array.isArray(rows) ? rows.length : 0;
+};
+
+const findLatestRankingAudit = async (supabase, propertyFilter) => {
+  const { data, error } = await supabase
+    .from('audit_results')
+    .select('audit_date, ranking_ai_data')
+    .in('property_url', propertyFilter)
+    .not('ranking_ai_data', 'is', null)
+    .order('audit_date', { ascending: false })
+    .limit(5);
+  if (error || !Array.isArray(data) || data.length === 0) return null;
+  const best = data.find(row => combinedRowsCount(row.ranking_ai_data) > 0);
+  if (!best) return null;
+  return { auditDate: best.audit_date, ranking_ai_data: best.ranking_ai_data };
+};
+
+const findLatestAuditDate = async (supabase, propertyFilter) => {
+  const { data, error } = await supabase
+    .from('audit_results')
+    .select('audit_date')
+    .in('property_url', propertyFilter)
+    .order('audit_date', { ascending: false })
+    .limit(1)
+    .single();
+  if (error || !data) return null;
+  return data.audit_date;
+};
+
+const fetchAuditRecord = async (supabase, propertyFilter, auditDateToUse) => {
+  const { data, error } = await supabase
+    .from('audit_results')
+    .select('ranking_ai_data')
+    .in('property_url', propertyFilter)
+    .eq('audit_date', auditDateToUse)
+    .order('audit_date', { ascending: false })
+    .limit(1)
+    .single();
+  if (error || !data) return null;
+  return data;
+};
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -79,42 +151,38 @@ export default async function handler(req, res) {
     // Normalize target URL
     const targetUrlNormalized = normalizeUrl(target_url);
     
-    // Get latest audit date if not provided
+    const propertyCandidates = buildPropertyCandidates(property_url);
+    const propertyFilter = propertyCandidates.length ? propertyCandidates : [property_url];
+
+    // Get latest audit date if not provided (prefer audits with ranking_ai_data)
     let auditDateToUse = audit_date;
+    let auditRecord = null;
     if (!auditDateToUse) {
-      const { data: latestAudit, error: auditError } = await supabase
-        .from('audit_results')
-        .select('audit_date')
-        .eq('property_url', property_url)
-        .order('audit_date', { ascending: false })
-        .limit(1)
-        .single();
-      
-      if (auditError || !latestAudit) {
+      const latestRanking = await findLatestRankingAudit(supabase, propertyFilter);
+      if (latestRanking) {
+        auditDateToUse = latestRanking.auditDate;
+        auditRecord = { ranking_ai_data: latestRanking.ranking_ai_data };
+      }
+    }
+
+    if (!auditDateToUse) {
+      auditDateToUse = await findLatestAuditDate(supabase, propertyFilter);
+      if (!auditDateToUse) {
         return sendJSON(res, 404, { 
           status: 'error',
           error: 'No audit found for property URL' 
         });
       }
-      
-      auditDateToUse = latestAudit.audit_date;
     }
 
-    // Get ranking_ai_data from audit_results table (where the data is actually stored)
-    const { data: auditRecord, error: auditError } = await supabase
-      .from('audit_results')
-      .select('ranking_ai_data')
-      .eq('property_url', property_url)
-      .eq('audit_date', auditDateToUse)
-      .order('audit_date', { ascending: false })
-      .limit(1)
-      .single();
-
-    if (auditError || !auditRecord) {
-      return sendJSON(res, 404, { 
-        status: 'error',
-        error: 'No audit found for property URL and audit date' 
-      });
+    if (!auditRecord) {
+      auditRecord = await fetchAuditRecord(supabase, propertyFilter, auditDateToUse);
+      if (!auditRecord) {
+        return sendJSON(res, 404, { 
+          status: 'error',
+          error: 'No audit found for property URL and audit date' 
+        });
+      }
     }
 
     // Parse ranking_ai_data (stored as JSONB)

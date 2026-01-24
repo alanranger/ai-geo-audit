@@ -34061,7 +34061,7 @@ Final Score: ${score}/100`;
           const maxImpressions = Math.max(1, ...impressions);
           const maxCtr = Math.max(1, ...ctr);
           const maxPosition = Math.max(1, ...positions.filter(p => p !== null));
-          const scalePad = 1.5;
+          const scalePad = 1.2;
           const movingAverage = (values, windowSize) => values.map((_, idx) => {
             if (idx + 1 < windowSize) return null;
             const slice = values.slice(idx + 1 - windowSize, idx + 1);
@@ -34069,8 +34069,14 @@ Final Score: ${score}/100`;
             if (valid.length === 0) return null;
             return valid.reduce((sum, val) => sum + val, 0) / valid.length;
           });
-          const impressionsTrend = movingAverage(impressions, 7);
-          const clicksTrend = movingAverage(clicks, 7);
+          const smoothSeries = (values) => {
+            const smoothed = movingAverage(values, 7);
+            return smoothed.some(value => value !== null) ? smoothed : values;
+          };
+          const clicksTrend = smoothSeries(clicks);
+          const impressionsTrend = smoothSeries(impressions);
+          const ctrTrend = smoothSeries(ctr);
+          const positionTrend = smoothSeries(positions);
           const ctrTarget = labels.map(() => 2.5);
           const pointRadius = lastPoints.length <= 1 ? 2 : 0;
           const pointHoverRadius = lastPoints.length <= 1 ? 3 : 2;
@@ -34098,7 +34104,7 @@ Final Score: ${score}/100`;
               datasets: [
                 {
                   label: 'Clicks',
-                  data: clicks,
+                  data: clicksTrend,
                   borderColor: '#2563eb',
                   backgroundColor: 'rgba(37, 99, 235, 0.12)',
                   tension: 0.3,
@@ -34108,18 +34114,8 @@ Final Score: ${score}/100`;
                   yAxisID: 'y2'
                 },
                 {
-                  label: 'Clicks trend (7d)',
-                  data: clicksTrend,
-                  borderColor: 'rgba(37, 99, 235, 0.6)',
-                  borderDash: [4, 4],
-                  borderWidth: 2,
-                  pointRadius: 0,
-                  spanGaps: true,
-                  yAxisID: 'y2'
-                },
-                {
                   label: 'Impressions',
-                  data: impressions,
+                  data: impressionsTrend,
                   borderColor: '#10b981',
                   backgroundColor: 'rgba(16, 185, 129, 0.12)',
                   tension: 0.3,
@@ -34129,18 +34125,8 @@ Final Score: ${score}/100`;
                   yAxisID: 'y'
                 },
                 {
-                  label: 'Impressions trend (7d)',
-                  data: impressionsTrend,
-                  borderColor: 'rgba(16, 185, 129, 0.6)',
-                  borderDash: [4, 4],
-                  borderWidth: 2,
-                  pointRadius: 0,
-                  spanGaps: true,
-                  yAxisID: 'y'
-                },
-                {
                   label: 'CTR (%)',
-                  data: ctr,
+                  data: ctrTrend,
                   borderColor: '#f59e0b',
                   backgroundColor: 'rgba(245, 158, 11, 0.12)',
                   tension: 0.3,
@@ -34152,7 +34138,7 @@ Final Score: ${score}/100`;
                 {
                   label: 'CTR target 2.5%',
                   data: ctrTarget,
-                  borderColor: 'rgba(245, 158, 11, 0.8)',
+                  borderColor: '#f59e0b',
                   borderDash: [4, 4],
                   borderWidth: 1.5,
                   pointRadius: 0,
@@ -34160,7 +34146,7 @@ Final Score: ${score}/100`;
                 },
                 {
                   label: 'Avg Position',
-                  data: positions,
+                  data: positionTrend,
                   borderColor: '#ef4444',
                   backgroundColor: 'rgba(239, 68, 68, 0.12)',
                   tension: 0.3,
@@ -34184,24 +34170,27 @@ Final Score: ${score}/100`;
                   beginAtZero: true,
                   suggestedMax: Math.ceil(maxImpressions * scalePad),
                   title: { display: true, text: 'Impressions', color: '#64748b', font: { size: 10 } },
-                  ticks: { color: '#94a3b8' },
-                  grid: { color: 'rgba(148, 163, 184, 0.25)' }
+                  ticks: { color: '#94a3b8', maxTicksLimit: 7, autoSkip: true },
+                  grid: { color: 'rgba(148, 163, 184, 0.25)' },
+                  grace: '5%'
                 },
                 y1: {
                   position: 'right',
                   beginAtZero: true,
                   suggestedMax: Math.ceil(maxPosition * scalePad),
                   title: { display: true, text: 'Avg Position', color: '#ef4444', font: { size: 10 } },
-                  ticks: { color: '#ef4444' },
-                  grid: { drawOnChartArea: false }
+                  ticks: { color: '#ef4444', maxTicksLimit: 7, autoSkip: true },
+                  grid: { drawOnChartArea: false },
+                  grace: '5%'
                 },
                 y2: {
                   position: 'left',
                   beginAtZero: true,
                   suggestedMax: Math.ceil(maxClicks * scalePad),
                   title: { display: true, text: 'Clicks', color: '#2563eb', font: { size: 10 } },
-                  ticks: { color: '#2563eb' },
-                  grid: { drawOnChartArea: false }
+                  ticks: { color: '#2563eb', maxTicksLimit: 7, autoSkip: true },
+                  grid: { drawOnChartArea: false },
+                  grace: '5%'
                 },
                 y3: {
                   position: 'right',
@@ -34210,10 +34199,13 @@ Final Score: ${score}/100`;
                   title: { display: true, text: 'CTR (%)', color: '#f59e0b', font: { size: 10 } },
                   ticks: {
                     color: '#f59e0b',
-                    callback: (value) => `${value}%`
+                    callback: (value) => `${value}%`,
+                    maxTicksLimit: 7,
+                    autoSkip: true
                   },
                   grid: { drawOnChartArea: false },
-                  offset: true
+                  offset: true,
+                  grace: '5%'
                 }
               }
             }
@@ -34549,8 +34541,8 @@ Final Score: ${score}/100`;
             card1Html += `
               <div style="border-top: 1px dashed #e2e8f0; padding-top: 0.75rem; margin-top: 0.75rem;">
                 <div style="font-size: 0.7rem; color: #94a3b8; margin-bottom: 0.5rem;">Last 28 days (rolling)</div>
-                <div style="position: relative; height: 160px;">
-                  <canvas id="${trendChartId}" style="width: 100%; height: 160px;"></canvas>
+                <div style="position: relative; height: 220px;">
+                  <canvas id="${trendChartId}" style="width: 100%; height: 220px;"></canvas>
                 </div>
                 <div id="${trendChartEmptyId}" style="display: none; font-size: 0.75rem; color: #94a3b8; text-align: center; margin-top: 0.5rem;">No timeseries available for this URL.</div>
               </div>
@@ -36573,17 +36565,19 @@ Final Score: ${score}/100`;
                 </div>
 
                 <div class="priority-table-wrapper" style="overflow-x: auto;">
-                  <table id="money-pages-priority-table" style="width: 100%; border-collapse: collapse;">
+                  <table id="money-pages-priority-table" style="width: 100%; border-collapse: collapse; table-layout: fixed;">
                     <thead>
                       <tr style="background: #f1f5f9;">
-                        <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;" title="The URL or page title of the money page. Click to open in a new tab.">Keyword or Page</th>
+                        <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0; width: 240px; max-width: 240px;" title="The URL or page title of the money page. Click to open in a new tab.">Keyword or Page</th>
                         <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;" title="Segment type: Landing (collection/category pages), Event (workshop/event listings), or Product (service/product offerings).">Type</th>
                         <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;" title="Priority level (HIGH/MEDIUM/LOW) based on impact and difficulty. HIGH priority = high impact + low/medium difficulty. Click column header to sort.">Priority</th>
                         <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;" title="Impact level based on lost clicks (expected CTR minus actual CTR). HIGH = significant opportunity to improve clicks. Click column header to sort.">Impact</th>
                         <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;" title="Difficulty level based on current ranking position and schema effort required. LOW = easy to improve, HIGH = requires more work. Click column header to sort.">Difficulty</th>
                         <th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0;" title="Click-through rate: percentage of impressions that resulted in clicks. Higher is better. Click column header to sort.">CTR</th>
                         <th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0;" title="Total impressions: number of times this page appeared in search results. Click column header to sort.">Impr.</th>
-                        <th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0;" title="Average position: average ranking position in search results (1 = best, lower numbers are better). Click column header to sort.">Avg pos.</th>
+                        <th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0; line-height: 1.1;" title="Average position: average ranking position in search results (1 = best, lower numbers are better). Click column header to sort.">
+                          <div>Avg</div><div>Pos.</div>
+                        </th>
                         <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;" title="Recommended action based on priority level. HIGH = Fix CTR & strengthen content, MEDIUM = Improve SERP snippet & schema, LOW = Monitor & maintain.">Action</th>
                       </tr>
                     </thead>
@@ -39220,7 +39214,7 @@ Final Score: ${score}/100`;
               <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Total impressions: number of times this page appeared in search results. Click column header to sort.">ℹ</div>
             </th>
             <th data-sort="avgPosition" class="sortable ${sortClass('avgPosition')}" style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0;" title="Average position: average ranking position in search results (1 = best, lower numbers are better). Click column header to sort.">
-              <div style="text-align: right;">Avg pos. <span class="sort-indicator"></span></div>
+              <div style="text-align: right; line-height: 1.1;"><div>Avg</div><div>Pos. <span class="sort-indicator"></span></div></div>
               <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Average position: average ranking position in search results (1 = best, lower numbers are better). Click column header to sort.">ℹ</div>
             </th>
             <th style="padding: 0.75rem; text-align: right; border-bottom: 2px solid #e2e8f0;" title="AI citations (unique keywords that cite this URL in AI Overview). Latest audit only.">
@@ -39232,7 +39226,7 @@ Final Score: ${score}/100`;
               <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Recommended action based on priority level. HIGH = Fix CTR & strengthen content, MEDIUM = Improve SERP snippet & schema, LOW = Monitor & maintain.">ℹ</div>
             </th>
             <th style="padding: 0.75rem; text-align: left; border-bottom: 2px solid #e2e8f0;" title="Optimisation tracking status for this page. Shows whether optimisation work is planned, in progress, being monitored, or completed.">
-              <div>Optimisation</div>
+              <div>Optimise</div>
               <div style="font-size: 0.75rem; color: #2563eb; cursor: help; margin-top: 0.25rem; text-align: center;" title="Optimisation tracking status for this page. Shows whether optimisation work is planned, in progress, being monitored, or completed.">ℹ</div>
             </th>
           </tr>
@@ -39416,8 +39410,8 @@ Final Score: ${score}/100`;
 
             return `
               <tr style="border-bottom: 1px solid #e2e8f0;">
-                <td style="padding: 0.75rem;">
-                  <a href="${p.url || '#'}" target="_blank" rel="noopener" style="color: #2563eb; text-decoration: none;">${p.title || p.url || 'Untitled'}</a>
+                <td style="padding: 0.75rem; width: 240px; max-width: 240px; word-break: break-word; white-space: normal;">
+                  <a href="${p.url || '#'}" target="_blank" rel="noopener" style="color: #2563eb; text-decoration: none; display: inline-block; max-width: 100%; font-size: 0.82rem;">${p.title || p.url || 'Untitled'}</a>
                   ${domainStrengthLine ? `<div style="margin-top: 0.25rem; font-size: 0.8rem; color: #64748b;">${domainStrengthLine}</div>` : ''}
                 </td>
                 <td style="padding: 0.75rem;">${typeLabel}${isAuthorityAction && authSegment ? ` · <span style="color:#64748b;">${authSegment}</span>` : ''}</td>
@@ -39446,6 +39440,17 @@ Final Score: ${score}/100`;
         (async () => {
           if (!window.moneyPagesAiCitationCache) {
             window.moneyPagesAiCitationCache = new Map();
+          }
+          const cacheVersion = 'v2';
+          try {
+            const storedVersion = localStorage.getItem('moneyPagesAiCitationCacheVersion');
+            if (storedVersion !== cacheVersion) {
+              localStorage.removeItem('moneyPagesAiCitationCache');
+              localStorage.setItem('moneyPagesAiCitationCacheVersion', cacheVersion);
+              window.moneyPagesAiCitationCache = new Map();
+            }
+          } catch (e) {
+            debugLog(`[Money Pages] Failed to init citations cache version: ${e.message}`, 'warn');
           }
           // Load from localStorage if available to prime cache
           try {
