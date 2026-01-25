@@ -30882,15 +30882,19 @@
       const currentLocalSignals = localSignals || (saved && (saved.localSignals || saved.localSignalsSnapshot)) || null;
       // If Authority components/segmented scores are missing but we have queryPages, recompute from searchData
       const searchDataForRecalc = data?.searchData || data || saved?.searchData || null;
+      const hasAuthorityScore = Number.isFinite(scores?.authority?.score);
+      const hasSegmentedAuthority =
+        !!scores?.authority?.behaviourScoresSegmented &&
+        !!scores?.authority?.rankingScoresSegmented;
+      const hasAuthorityComponents =
+        !!scores?.authorityComponents &&
+        scores.authorityComponents.behaviour != null &&
+        scores.authorityComponents.ranking != null &&
+        scores.authorityComponents.backlinks != null &&
+        scores.authorityComponents.reviews != null;
       const missingAuthority =
         !scores?.authority ||
-        !scores?.authority?.behaviourScoresSegmented ||
-        !scores?.authority?.rankingScoresSegmented ||
-        !scores?.authorityComponents ||
-        scores?.authorityComponents?.behaviour == null ||
-        scores?.authorityComponents?.ranking == null ||
-        scores?.authorityComponents?.backlinks == null ||
-        scores?.authorityComponents?.reviews == null;
+        (!hasAuthorityScore && (!hasSegmentedAuthority || !hasAuthorityComponents));
       if (missingAuthority && searchDataForRecalc && Array.isArray(searchDataForRecalc.queryPages) && searchDataForRecalc.queryPages.length > 0) {
         try {
           debugLog(`[displayDashboard] Recomputing authority from queryPages (${searchDataForRecalc.queryPages.length} rows) due to missing segmented scores/components`, 'info');

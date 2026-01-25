@@ -1,89 +1,81 @@
 # AI Health Scorecard: Authority/Visibility Inconsistency
 
-**Date**: 2026-01-19  
-**Status**: OPEN  
+**Date**: 2026-01-24  
+**Status**: INVESTIGATED  
 **Owner**: Alan / Next chat
 
 ---
 
 ## Summary
-Authority and Visibility values are inconsistent within the **AI Health (Overview)** module and between the **Overview** and **Dashboard** modules. Some components show **52/74** while others show **50/75** for the same date range.
+Authority values are inconsistent within the **AI Health (Overview)** module and between the **Overview** and **Dashboard** modules. Some components show **50** while the Score Trends line shows **53** for the same date (2026-01-23).
 
-This is not a display-only bug. The UI currently mixes two different data sources for the same fields.
+This is not a display-only bug. The UI is recomputing Authority on the client using incomplete inputs even when the API provides the correct Authority score and components.
 
 ---
 
 ## Observed Mismatch
 **Same module (Overview / AI Health Scorecard):**
-- Pillar cards, radar, snippet readiness show: **Authority 52 / Visibility 74**
-- Score Trends tooltip and Pillar Scorecard table show: **Authority 50 / Visibility 75**
+- Pillar cards, radar, GAIO breakdown, spider web show: **Authority 50**
+- Score Trends line chart shows: **Authority 53**
 
-**Dashboard module (AI Health / AI Summary tiles):**
-- Values can differ from Overview depending on which override path was used.
-
----
-
-## Root Cause (Data Source Split)
-Two distinct sources are used for Authority/Visibility:
-
-1) **Audit snapshot scores** (`savedAudit.scores`)
-- Calculated during the audit run.
-- Used by Pillar cards, Radar, Snippet Readiness.
-- Produces **52 / 74**.
-
-2) **Trend / GSC timeseries values** (`authorityMap`, `authorityBySegmentMap`, `visibilityMap`)
-- Derived from GSC timeseries and last GSC date.
-- Used by Score Trends tooltip and Pillar Scorecard.
-- Produces **50 / 75**.
-
-These two are not guaranteed to match because:
-- Authority is computed from segmented GSC query data vs. audit snapshot aggregation.
-- Visibility uses a different date or rounding when sourced from timeseries.
-- Timeseries last date can lag the audit snapshot by 1–2 days.
+**Same date**: 2026-01-23 (GSC delayed date)
 
 ---
 
-## Where Each Source Is Used
-**Audit snapshot (52 / 74):**
-- Pillar cards (`displayDashboard` -> `getOrderedPillars(scores)`)
-- Radar chart (Overview)
-- Snippet Readiness gauge
+## Root Cause (Client Recompute With Missing Inputs)
+The API returns valid Authority data, but the frontend recomputes it anyway and overwrites it with a lower value.
 
-**Trend series (50 / 75):**
-- Score Trends chart tooltip (timeseries arrays)
-- Pillar Scorecard table (overrides via `getLatestGscPillarOverrides()`)
+**What we verified**
+- `get-audit-history` for 2026-01-23 returns **authorityScore: 53**.
+- `get-latest-audit` returns `scores.authority.score: 53` and `authorityComponents: {behaviour, ranking, backlinks, reviews}`.
+
+**Why the recompute happens**
+- `get-latest-audit` reconstructs `scores.authority` without the exact nested fields the UI expects (`behaviourScoresSegmented`, `rankingScoresSegmented`).
+- The `missingAuthority` check in `audit-dashboard.html` still evaluates true when `searchData.queryPages` exists.
+- This triggers `calculatePillarScores` on the client with `backlinkMetrics` and `siteReviews` missing, which forces:
+  - `computeBacklinkScore` -> `0`
+  - `computeReviewScore` -> `50`
+- The recomputed Authority becomes **50**, which overwrites the correct **53** for the pillar card, radar, GAIO breakdown, and spider web.
+
+---
+
+## Where the Mismatch Is Introduced
+- Pillar cards / radar / GAIO breakdown: use the **recomputed** Authority (50).
+- Score Trends chart: uses **history timeseries Authority** (53).
 
 ---
 
 ## Impact
-- Users see two conflicting values for the same pillars.
-- Dashboards cannot be trusted for comparisons.
-- Makes deltas and narrative insights misleading.
+- Users see conflicting Authority values for the same date.
+- Scorecard narrative and trend analysis are unreliable.
 
 ---
 
-## Decision Required (Single Source of Truth)
-Pick **one** and use it everywhere:
+## Solid, Reliable Fix (Recommended)
+**Stop the client-side recompute when a valid Authority score is already supplied.**
 
-**Option A — Audit Snapshot (recommended by user):**
-- Use `savedAudit.scores` as the definitive Authority/Visibility for Overview + Dashboard.
-- Trend chart should use these values for the last point (or explicitly label as timeseries).
+Do one of the following (either is sufficient, Option A is the simplest):
 
-**Option B — Trend / GSC Timeseries:**
-- Use `authorityBySegmentMap` and `visibilityMap` values everywhere.
-- Ignore audit snapshot for these two pillars.
+**Option A — Frontend guard (recommended)**
+- In `audit-dashboard.html`, treat `scores.authority.score` or `authorityComponents` as authoritative.
+- Update the `missingAuthority` check to **not** recompute if:
+  - `scores.authority.score` is a finite number, or
+  - `authorityComponents` exists with valid `backlinks` and `reviews`.
+
+**Option B — Backend shape fix**
+- In `get-latest-audit.js`, add `scores.authority.behaviourScoresSegmented` and `scores.authority.rankingScoresSegmented` from stored values (if available).
+- This prevents `missingAuthority` from firing, keeping the stored score intact.
 
 ---
 
 ## Required Fix (high level)
-1) Decide the single source of truth.
-2) Remove the other override path.
-3) Make all Overview + Dashboard components read from the same source.
-4) Update any labels to reflect the chosen source (audit vs timeseries).
+1) **Preserve** `scores.authority.score` from the API if present.
+2) **Avoid recompute** unless all required inputs exist.
+3) Ensure all components use the same Authority value for the same date.
 
 ---
 
 ## Handover Notes
-- Several attempted patches tried to sync values post-load; these did not resolve the core mismatch.
-- The issue will persist until one source is chosen and enforced across all render paths.
-- Do not add more partial overrides; remove one path completely.
+- This issue is not caused by missing database storage; the API returns correct Authority data.
+- The mismatch is caused by frontend recompute using incomplete inputs.
+- Fixing the recompute guard removes the inconsistency without changing stored data.
