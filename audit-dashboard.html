@@ -37092,6 +37092,18 @@ Final Score: ${score}/100`;
         // Keep latest dataset + callback; use delegation so filters survive table re-renders.
         window.__moneyPagesOpportunityAllRows = allRows || window.__moneyPagesOpportunityAllRows || [];
         window.__moneyPagesOpportunityOnFilterChange = onFilterChange || window.__moneyPagesOpportunityOnFilterChange || null;
+        const restoreUrlFilterFocus = (value, selStart, selEnd) => {
+          const el = document.getElementById('money-pages-url-filter');
+          if (!el) return;
+          el.value = value;
+          el.focus();
+          if (typeof el.setSelectionRange === 'function' && selStart != null && selEnd != null) {
+            const len = el.value.length;
+            const start = Math.min(selStart, len);
+            const end = Math.min(selEnd, len);
+            el.setSelectionRange(start, end);
+          }
+        };
 
         if (!window.__moneyPagesOpportunityFiltersDelegationAttached) {
           window.__moneyPagesOpportunityFiltersDelegationAttached = true;
@@ -37149,7 +37161,10 @@ Final Score: ${score}/100`;
             const t = e && e.target ? e.target : null;
             if (!t || t.id !== 'money-pages-url-filter') return;
 
-            window.moneyPagesUrlFilter = String(t.value || '').trim();
+            const currentValue = String(t.value || '');
+            const selStart = t.selectionStart;
+            const selEnd = t.selectionEnd;
+            window.moneyPagesUrlFilter = currentValue.trim();
             window.moneyPagesCurrentPage = 1;
 
             if (typeof window.__moneyPagesOpportunityOnFilterChange === 'function') {
@@ -37159,6 +37174,7 @@ Final Score: ${score}/100`;
             if (typeof window.renderMoneyPagesSuggestedTop10 === 'function') {
               window.renderMoneyPagesSuggestedTop10();
             }
+            setTimeout(() => restoreUrlFilterFocus(currentValue, selStart, selEnd), 0);
           });
 
           document.addEventListener('click', async (e) => {
