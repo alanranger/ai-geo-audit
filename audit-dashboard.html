@@ -35015,19 +35015,34 @@ Final Score: ${score}/100`;
         const currentCategoryFilter = String(window.moneyPagesCategoryFilter || 'ALL').toUpperCase();
         const currentSubSegmentFilter = String(window.moneyPagesSubSegmentFilter || 'ALL').toUpperCase();
         const currentMinImpressions = Number(window.moneyPagesMinImpressions || 0) || 0;
+        const currentUrlFilterRaw = String(window.moneyPagesUrlFilter || '').trim();
         
         // Get zero impressions filter (default to true - include zero impressions)
         const includeZero = window.moneyPagesIncludeZero !== false;
+        const normalizeUrlForFilter = (value) => {
+          let val = String(value || '').toLowerCase();
+          val = val.replace(/^https?:\/\//, '');
+          val = val.replace(/^www\./, '');
+          val = val.split('#')[0];
+          val = val.split('?')[0];
+          if (val.length > 1 && val.endsWith('/')) val = val.slice(0, -1);
+          return val;
+        };
+        const currentUrlFilter = normalizeUrlForFilter(currentUrlFilterRaw);
+        const urlSuggestions = Array.from(new Set(sortedRows.map(row => row.url).filter(Boolean))).slice(0, 200);
+        const urlSuggestionOptions = urlSuggestions.map((url) => `<option value="${escapeHtml(url)}"></option>`).join('');
         
         // Apply filters before sorting/pagination
         let filteredRows = sortedRows.filter(row => {
           const rowCat = String(row.category || '').toUpperCase();
           const rowSub = String(row.subSegment || row.segmentType || '').toUpperCase();
+          const rowUrl = normalizeUrlForFilter(row.url || row.page || '');
           const matchCat = currentCategoryFilter === 'ALL' || rowCat === currentCategoryFilter;
           const matchSubSeg = currentSubSegmentFilter === 'ALL' || rowSub === currentSubSegmentFilter;
           const matchImp = (row.impressions || 0) >= currentMinImpressions;
           const matchZero = includeZero || (row.impressions || 0) > 0; // Include zero impressions if checkbox is checked
-          return matchCat && matchSubSeg && matchImp && matchZero;
+          const matchUrl = !currentUrlFilter || rowUrl.includes(currentUrlFilter);
+          return matchCat && matchSubSeg && matchImp && matchZero && matchUrl;
         });
 
         // Expose current filtered Opportunity rows so Suggested Top 10 can align with the table.
@@ -35067,6 +35082,13 @@ Final Score: ${score}/100`;
                     <option value="EVENT" ${currentSubSegmentFilter === 'EVENT' ? 'selected' : ''} id="money-subsegment-event">Event Pages</option>
                     <option value="LANDING" ${currentSubSegmentFilter === 'LANDING' ? 'selected' : ''} id="money-subsegment-landing">Landing Pages</option>
                   </select>
+                </label>
+                <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #475569;">
+                  URL search:
+                  <input type="text" id="money-pages-url-filter" list="money-pages-url-datalist" value="${escapeHtml(currentUrlFilterRaw)}" placeholder="Type part of URL" style="padding: 0.4rem 0.6rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.85rem; width: 220px;" />
+                  <datalist id="money-pages-url-datalist">
+                    ${urlSuggestionOptions}
+                  </datalist>
                 </label>
                 <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #475569;">
                   Min impressions:
@@ -37082,24 +37104,28 @@ Final Score: ${score}/100`;
               t.id === 'money-pages-filter-category' ||
               t.id === 'money-pages-filter-subsegment' ||
               t.id === 'money-pages-min-impressions' ||
-              t.id === 'money-pages-include-zero';
+              t.id === 'money-pages-include-zero' ||
+              t.id === 'money-pages-url-filter';
             if (!isFilter) return;
 
             const categoryEl = document.getElementById('money-pages-filter-category');
             const subSegEl = document.getElementById('money-pages-filter-subsegment');
             const minImpEl = document.getElementById('money-pages-min-impressions');
             const includeZeroEl = document.getElementById('money-pages-include-zero');
+            const urlFilterEl = document.getElementById('money-pages-url-filter');
             if (!categoryEl || !subSegEl || !minImpEl) return;
 
             const filterCat = categoryEl.value || 'ALL';
             const filterSubSeg = subSegEl.value || 'ALL';
             const minImp = parseInt(minImpEl.value, 10) || 0;
             const includeZero = includeZeroEl ? !!includeZeroEl.checked : true;
+            const urlFilter = urlFilterEl ? String(urlFilterEl.value || '').trim() : '';
 
             window.moneyPagesCategoryFilter = filterCat;
             window.moneyPagesSubSegmentFilter = filterSubSeg;
             window.moneyPagesMinImpressions = minImp;
             window.moneyPagesIncludeZero = includeZero;
+            window.moneyPagesUrlFilter = urlFilter;
             window.moneyPagesCurrentPage = 1;
 
             // Sync top-level filter when table filter changes.
@@ -37119,6 +37145,22 @@ Final Score: ${score}/100`;
             }
           });
 
+          document.addEventListener('input', async (e) => {
+            const t = e && e.target ? e.target : null;
+            if (!t || t.id !== 'money-pages-url-filter') return;
+
+            window.moneyPagesUrlFilter = String(t.value || '').trim();
+            window.moneyPagesCurrentPage = 1;
+
+            if (typeof window.__moneyPagesOpportunityOnFilterChange === 'function') {
+              await window.__moneyPagesOpportunityOnFilterChange();
+            }
+
+            if (typeof window.renderMoneyPagesSuggestedTop10 === 'function') {
+              window.renderMoneyPagesSuggestedTop10();
+            }
+          });
+
           document.addEventListener('click', async (e) => {
             const t = e && e.target ? e.target : null;
             if (!t || t.id !== 'money-pages-copy-urls') return;
@@ -37127,11 +37169,23 @@ Final Score: ${score}/100`;
             const subSegEl = document.getElementById('money-pages-filter-subsegment');
             const minImpEl = document.getElementById('money-pages-min-impressions');
             const includeZeroEl = document.getElementById('money-pages-include-zero');
+            const urlFilterEl = document.getElementById('money-pages-url-filter');
 
             const filterCat = categoryEl ? (categoryEl.value || 'ALL') : (window.moneyPagesCategoryFilter || 'ALL');
             const filterSubSeg = subSegEl ? (subSegEl.value || 'ALL') : (window.moneyPagesSubSegmentFilter || 'ALL');
             const minImp = minImpEl ? (parseInt(minImpEl.value, 10) || 0) : (window.moneyPagesMinImpressions || 0);
             const includeZero = includeZeroEl ? !!includeZeroEl.checked : (window.moneyPagesIncludeZero !== false);
+            const urlFilterRaw = urlFilterEl ? String(urlFilterEl.value || '').trim() : (window.moneyPagesUrlFilter || '');
+            const normalizeUrlForFilter = (value) => {
+              let val = String(value || '').toLowerCase();
+              val = val.replace(/^https?:\/\//, '');
+              val = val.replace(/^www\./, '');
+              val = val.split('#')[0];
+              val = val.split('?')[0];
+              if (val.length > 1 && val.endsWith('/')) val = val.slice(0, -1);
+              return val;
+            };
+            const urlFilter = normalizeUrlForFilter(urlFilterRaw);
 
             const all = Array.isArray(window.__moneyPagesOpportunityAllRows) ? window.__moneyPagesOpportunityAllRows : [];
             const filtered = all.filter(row => {
@@ -37139,7 +37193,9 @@ Final Score: ${score}/100`;
               const matchSubSeg = filterSubSeg === 'ALL' || row.subSegment === filterSubSeg;
               const matchImp = (row.impressions || 0) >= minImp;
               const matchZero = includeZero || (row.impressions || 0) > 0;
-              return matchCat && matchSubSeg && matchImp && matchZero;
+              const rowUrl = normalizeUrlForFilter(row.url || row.page || '');
+              const matchUrl = !urlFilter || rowUrl.includes(urlFilter);
+              return matchCat && matchSubSeg && matchImp && matchZero && matchUrl;
             });
 
             const urls = filtered.map(r => r.url).join('\n');
