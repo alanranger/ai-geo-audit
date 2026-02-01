@@ -35029,7 +35029,27 @@ Final Score: ${score}/100`;
           return val;
         };
         const currentUrlFilter = normalizeUrlForFilter(currentUrlFilterRaw);
-        const urlSuggestions = Array.from(new Set(sortedRows.map(row => row.url).filter(Boolean))).slice(0, 200);
+        const buildParentUrl = (value) => {
+          try {
+            const parsed = new URL(value);
+            const parts = parsed.pathname.split('/').filter(Boolean);
+            if (parts.length <= 1) return null;
+            const parentPath = '/' + parts.slice(0, -1).join('/') + '/';
+            return parsed.origin + parentPath;
+          } catch (e) {
+            return null;
+          }
+        };
+        const suggestionSet = new Set();
+        sortedRows.forEach((row) => {
+          if (!row || !row.url) return;
+          suggestionSet.add(row.url);
+          const parentUrl = buildParentUrl(row.url);
+          if (parentUrl) suggestionSet.add(parentUrl);
+        });
+        const urlSuggestions = Array.from(suggestionSet).slice(0, 300);
+        const normalizedUrlSet = new Set(urlSuggestions.map((url) => normalizeUrlForFilter(url)));
+        const useExactUrlMatch = currentUrlFilter && normalizedUrlSet.has(currentUrlFilter);
         const urlSuggestionOptions = urlSuggestions.map((url) => `<option value="${escapeHtml(url)}"></option>`).join('');
         
         // Apply filters before sorting/pagination
@@ -35041,7 +35061,7 @@ Final Score: ${score}/100`;
           const matchSubSeg = currentSubSegmentFilter === 'ALL' || rowSub === currentSubSegmentFilter;
           const matchImp = (row.impressions || 0) >= currentMinImpressions;
           const matchZero = includeZero || (row.impressions || 0) > 0; // Include zero impressions if checkbox is checked
-          const matchUrl = !currentUrlFilter || rowUrl.includes(currentUrlFilter);
+          const matchUrl = !currentUrlFilter || (useExactUrlMatch ? rowUrl === currentUrlFilter : rowUrl.includes(currentUrlFilter));
           return matchCat && matchSubSeg && matchImp && matchZero && matchUrl;
         });
 
@@ -35064,7 +35084,8 @@ Final Score: ${score}/100`;
                 </p>
                 <span style="font-size: 0.75rem; color: #334155; font-weight: 500;">Data period: Last 28 days • Showing ${filteredStartIdx + 1}-${Math.min(filteredEndIdx, filteredRows.length)} of ${filteredRows.length}</span>
               </div>
-              <div class="table-controls" style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+              <div class="table-controls" style="display: flex; flex-direction: column; gap: 0.6rem; align-items: flex-end;">
+                <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; justify-content: flex-end;">
                 <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #475569;">
                   Category:
                   <select id="money-pages-filter-category" style="padding: 0.4rem 0.6rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.85rem; background: white; cursor: pointer;">
@@ -35084,13 +35105,6 @@ Final Score: ${score}/100`;
                   </select>
                 </label>
                 <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #475569;">
-                  URL search:
-                  <input type="text" id="money-pages-url-filter" list="money-pages-url-datalist" value="${escapeHtml(currentUrlFilterRaw)}" placeholder="Type part of URL" style="padding: 0.4rem 0.6rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.85rem; width: 220px;" />
-                  <datalist id="money-pages-url-datalist">
-                    ${urlSuggestionOptions}
-                  </datalist>
-                </label>
-                <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #475569;">
                   Min impressions:
                   <input type="number" id="money-pages-min-impressions" min="0" step="50" value="${currentMinImpressions}" style="padding: 0.4rem 0.6rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.85rem; width: 100px;" />
                 </label>
@@ -35098,9 +35112,19 @@ Final Score: ${score}/100`;
                   <input type="checkbox" id="money-pages-include-zero" ${window.moneyPagesIncludeZero !== false ? 'checked' : ''} style="cursor: pointer;" />
                   Include zero impressions
                 </label>
-                <button id="money-pages-copy-urls" type="button" style="font-size: 0.8rem; padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #2563eb; background: #2563eb; cursor: pointer; color: white; font-weight: 600; transition: all 0.2s; box-shadow: 0 1px 2px rgba(0,0,0,0.1);" onmouseover="this.style.background='#1d4ed8'; this.style.borderColor='#1d4ed8';" onmouseout="this.style.background='#2563eb'; this.style.borderColor='#2563eb';">
-                  Copy current URLs
-                </button>
+                </div>
+                <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; justify-content: flex-end; width: 100%;">
+                  <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #475569;">
+                    URL search:
+                  <input type="text" id="money-pages-url-filter" list="money-pages-url-datalist" value="${escapeHtml(currentUrlFilterRaw)}" placeholder="Type part of URL" style="padding: 0.4rem 0.6rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.85rem; width: 520px; max-width: 100%;" />
+                    <datalist id="money-pages-url-datalist">
+                      ${urlSuggestionOptions}
+                    </datalist>
+                  </label>
+                  <button id="money-pages-copy-urls" type="button" style="font-size: 0.8rem; padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #2563eb; background: #2563eb; cursor: pointer; color: white; font-weight: 600; transition: all 0.2s; box-shadow: 0 1px 2px rgba(0,0,0,0.1);" onmouseover="this.style.background='#1d4ed8'; this.style.borderColor='#1d4ed8';" onmouseout="this.style.background='#2563eb'; this.style.borderColor='#2563eb';">
+                    Copy current URLs
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -37201,7 +37225,27 @@ Final Score: ${score}/100`;
               if (val.length > 1 && val.endsWith('/')) val = val.slice(0, -1);
               return val;
             };
+            const buildParentUrl = (value) => {
+              try {
+                const parsed = new URL(value);
+                const parts = parsed.pathname.split('/').filter(Boolean);
+                if (parts.length <= 1) return null;
+                const parentPath = '/' + parts.slice(0, -1).join('/') + '/';
+                return parsed.origin + parentPath;
+              } catch (e) {
+                return null;
+              }
+            };
             const urlFilter = normalizeUrlForFilter(urlFilterRaw);
+            const suggestionSet = new Set();
+            all.forEach((row) => {
+              if (!row || !row.url) return;
+              suggestionSet.add(row.url);
+              const parentUrl = buildParentUrl(row.url);
+              if (parentUrl) suggestionSet.add(parentUrl);
+            });
+            const normalizedUrlSet = new Set(Array.from(suggestionSet).map((url) => normalizeUrlForFilter(url)));
+            const useExactUrlMatch = urlFilter && normalizedUrlSet.has(urlFilter);
 
             const all = Array.isArray(window.__moneyPagesOpportunityAllRows) ? window.__moneyPagesOpportunityAllRows : [];
             const filtered = all.filter(row => {
@@ -37210,7 +37254,7 @@ Final Score: ${score}/100`;
               const matchImp = (row.impressions || 0) >= minImp;
               const matchZero = includeZero || (row.impressions || 0) > 0;
               const rowUrl = normalizeUrlForFilter(row.url || row.page || '');
-              const matchUrl = !urlFilter || rowUrl.includes(urlFilter);
+              const matchUrl = !urlFilter || (useExactUrlMatch ? rowUrl === urlFilter : rowUrl.includes(urlFilter));
               return matchCat && matchSubSeg && matchImp && matchZero && matchUrl;
             });
 
