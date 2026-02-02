@@ -138,6 +138,18 @@ export default async function handler(req, res) {
       )
     ]);
 
+    // Run month-end portfolio snapshot backfill (after daily GSC has run).
+    let portfolioMonthEndResult = { status: 'skipped' };
+    try {
+      portfolioMonthEndResult = await fetchJson(
+        `${baseUrl}/api/cron/monthly-portfolio-snapshot?propertyUrl=${encodeURIComponent(propertyUrl)}`,
+        { method: 'GET', headers }
+      );
+    } catch (error_) {
+      console.warn('[Global Cron] Month-end portfolio snapshot failed (non-critical):', error_.message);
+      portfolioMonthEndResult = { status: 'error', message: error_.message };
+    }
+
     await updateScheduleStatus('ok');
     await logCronEvent({
       jobKey: 'global_run',
@@ -154,7 +166,8 @@ export default async function handler(req, res) {
         gsc_backlinks: gscResult?.status || 'ok',
         ranking_ai: rankingResult?.status || 'ok',
         domain_strength: domainStrengthResult?.status || 'ok',
-        task_updates: bulkUpdateResult?.status || 'ok'
+        task_updates: bulkUpdateResult?.status || 'ok',
+        portfolio_month_end: portfolioMonthEndResult?.status || 'ok'
       },
       meta: { generatedAt: nowIso }
     });
