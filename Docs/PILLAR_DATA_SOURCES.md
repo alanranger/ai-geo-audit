@@ -2,6 +2,13 @@
 
 ## Summary
 
+## 2026-02-01 Clarification (Plain English)
+
+- **URL metrics** = page‑level totals (all queries for the page).
+- **Keyword metrics** = query‑level totals (one keyword only).
+- Authority/Behaviour are **intentionally query‑based** because users search by keywords, not by page URL.
+- Money Pages tables are **page‑level** by design.
+
 **Pillars that USE GSC data (calculated at load time):**
 1. **Visibility** - Uses GSC position data
 2. **Authority** - Uses GSC position, CTR, clicks, impressions data
@@ -37,6 +44,7 @@
   - **Ranking (20%):** Calculated from GSC position data
   - **Backlinks (20%):** From backlink CSV upload (not GSC)
   - **Reviews (20%):** From Business Profile API + Trustpilot (not GSC)
+    - GBP review count is pulled from the Business Profile **reviews endpoint** (v4), which is the most reliable source when location detail fields are missing.
 
 **When calculated:** At audit time (when you click "Run Audit")
 **Stored in DB:** Yes, saved to `audit_results.authority_score` column

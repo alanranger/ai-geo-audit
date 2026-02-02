@@ -6,6 +6,33 @@
 
 This document compares the logic used for keyword-based tasks vs URL-only tasks across all optimization task operations.
 
+## 2026-02-01 Clarification (Plain English)
+
+### Why metrics can look "conflicting"
+- **URL tasks** use **page-level totals** (all queries for the page).
+- **Keyword tasks** use **query-level totals** (one keyword only).
+- When you compare a URL metric to a keyword metric, they can look contradictory because they are **different slices of GSC**.
+
+### Source of truth by task type
+- **URL task** (no keyword): page totals are the correct source of truth.
+- **Keyword task** (has keyword): query totals are the correct source of truth.
+
+### Optimisation task measurements (baseline/latest)
+- Baseline and latest values are **snapshots captured at the time of “Add Measurement” or “Rebaseline.”**
+- They are **not recalculated later** from the database.
+- A URL task baseline and latest will both use **page totals**, so they are **internally consistent** even if they differ from keyword metrics.
+
+### Authority/Behaviour scores
+- These should remain **query-based** because users search by keywords, not by page URL.
+- Switching Authority/Behaviour to page totals would change the meaning of those scores.
+
+### Decision note
+- If the goal is to avoid conflicting metrics across the UI, **leave the current split in place**:
+  - URL tasks → page totals
+  - Keyword tasks → query totals
+  - Authority/Behaviour → query-based
+  - Money Pages table → page totals
+
 ---
 
 ## Operations Analyzed

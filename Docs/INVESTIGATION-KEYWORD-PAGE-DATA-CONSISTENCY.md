@@ -20,6 +20,11 @@
 - Page tasks should show **page-level** metrics (aggregated across all queries for that page)
 - Both should use the **same source of truth** from Supabase
 
+### 2026-02-01 Clarification (Plain English)
+- **URL tasks** use **page‑level totals** (all queries for the page).
+- **Keyword tasks** use **query‑level totals** (one keyword only).
+- These are **not expected to match**, because they answer different questions.
+
 ---
 
 ## Investigation Scope

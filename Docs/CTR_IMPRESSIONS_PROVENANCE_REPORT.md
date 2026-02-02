@@ -6,6 +6,23 @@
 
 ---
 
+## 2026-02-01 Clarification (Plain English)
+
+### Why metrics can look conflicting
+- **URL metrics** = page‑level totals (all queries for the page).
+- **Keyword metrics** = query‑level totals (one keyword only).
+- Comparing the two will **look inconsistent** because they are different slices of GSC.
+
+### Source of truth
+- **URL task / Money Pages**: page‑level totals are correct.
+- **Keyword task / Ranking table**: query‑level totals are correct.
+
+### Important note about optimisation baselines
+- Baseline/latest in the optimisation drawer are **snapshots captured at the time** of Add Measurement/Rebaseline.
+- They are **not recalculated later**, so they stay consistent with the task type at capture time.
+
+---
+
 ## 1. UI Component + Field Names
 
 ### Location

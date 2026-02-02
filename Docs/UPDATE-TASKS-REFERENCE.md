@@ -13,6 +13,13 @@ This document catalogs all update/refresh/scan/audit buttons and their associate
 - Tracking which functions fetch vs. calculate vs. display data
 - Planning comprehensive testing after the URL Task AI Citations fix
 
+## 2026-02-01 Clarification (Plain English)
+
+- **URL task metrics** use **page‑level totals** (all queries for that page).
+- **Keyword task metrics** use **query‑level totals** (that keyword only).
+- These are **not supposed to match**, because they answer different questions.
+- Optimisation **baseline/latest** are **snapshots captured at the time** of Add Measurement/Rebaseline and are **not recalculated later**.
+
 ---
 
 ## Module: Configuration & Reporting

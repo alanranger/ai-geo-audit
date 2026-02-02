@@ -27,6 +27,14 @@
   - "Create Task" / "Manage Task" buttons matching Priority & Actions table behavior
   - Enhanced optimization status detection (checks multiple task types)
 
+---
+
+## 2026-02-01 Clarification (Plain English)
+
+- Money Pages tables and charts use **page‑level totals** (all queries for the page).
+- Keyword tables use **query‑level totals** (one keyword only).
+- These are **different slices of GSC**, so they will not match 1:1.
+
 ## Overview
 
 A dedicated section that tracks how money pages perform vs the rest of the site, highlights which specific URLs need attention, and suggests concrete actions based on real GSC + schema data.

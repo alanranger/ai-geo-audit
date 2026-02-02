@@ -4,6 +4,13 @@
 
 Add an Optimisation Tracking capability that turns high-value keywords (from Ranking & AI) into trackable optimisation work items, with repeatable "change cycles" and clear monitoring status over time. This must integrate cleanly with existing keyword/ranking data, and reuse your established UI patterns (table styling, presets, filters, pills/badges, spacing).
 
+## 2026-02-01 Clarification (Plain English)
+
+- **URL task metrics** should use **page‑level totals** (all queries for the page).
+- **Keyword task metrics** should use **query‑level totals** (one keyword only).
+- These are different slices of GSC and are **not expected to match**.
+- Baseline/latest are **snapshots captured at the time** of Add Measurement/Rebaseline and are **not recalculated** later.
+
 ## Primary Outcomes
 
 ### From the Ranking & AI keyword table:

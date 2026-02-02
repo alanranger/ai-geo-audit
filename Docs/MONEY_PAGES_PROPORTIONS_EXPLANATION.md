@@ -1,5 +1,11 @@
 # Money Page Proportions - How They Work
 
+## 2026-02-01 Clarification (Plain English)
+
+- Money Pages metrics are **page‑level totals** (all queries for the page).
+- Keyword metrics are **query‑level totals** (one keyword only).
+- These are different slices of GSC, so they will not match 1:1.
+
 ## What Are Money Page Proportions?
 
 Money page proportions tell us **what percentage of total site traffic comes from money pages** and how that traffic is distributed across different money page types.

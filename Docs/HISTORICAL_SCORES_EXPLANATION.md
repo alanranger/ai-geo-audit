@@ -1,5 +1,11 @@
 # Why Authority and Visibility Scores Were Missing Historically
 
+## 2026-02-01 Clarification (Plain English)
+
+- **Authority/Behaviour** are intentionally **query‑based** (keywords), because users search by keywords, not by page URL.
+- **Money Pages tables** are **page‑level** and will not match keyword metrics.
+- This is expected and not a data bug.
+
 ## The Problem
 
 **Key Finding:**
