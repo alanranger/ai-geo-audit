@@ -170,9 +170,10 @@ export default async function handler(req, res) {
       dateRangeDays: 28
     });
 
+    const auditDate = new Date().toISOString().split('T')[0];
     const payload = {
       propertyUrl,
-      auditDate: new Date().toISOString().split('T')[0],
+      auditDate,
       searchData: audit.searchData,
       scores: audit.scores,
       snippetReadiness: audit.snippetReadiness,
@@ -190,6 +191,27 @@ export default async function handler(req, res) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
+
+    let pageMetricsSave = null;
+    try {
+      const pages = Array.isArray(audit?.gscPageRows) ? audit.gscPageRows : [];
+      const gscRange = audit?.gscRange || null;
+      if (pages.length > 0 && gscRange?.startDate && gscRange?.endDate) {
+        pageMetricsSave = await fetchJson(`${baseUrl}/api/supabase/save-gsc-page-metrics`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            runId: auditDate,
+            siteUrl: propertyUrl,
+            dateStart: gscRange.startDate,
+            dateEnd: gscRange.endDate,
+            pages
+          })
+        });
+      }
+    } catch (err) {
+      pageMetricsSave = { status: 'error', message: err.message };
+    }
 
     let pageTimeseriesSave = null;
     try {
@@ -233,6 +255,7 @@ export default async function handler(req, res) {
         backlinks: 'ok',
         localSignals: 'ok',
         save: saveResult?.status || 'ok',
+        pageMetrics: pageMetricsSave?.status || (pageMetricsSave ? 'ok' : 'skipped'),
         pageTimeseries: pageTimeseriesSave?.status || (pageTimeseriesSave ? 'ok' : 'skipped')
       },
       meta: { generatedAt: new Date().toISOString() }
