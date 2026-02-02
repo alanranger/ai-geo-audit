@@ -255,7 +255,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { property } = req.query;
+    const { property, debug } = req.query;
     
     if (!property) {
       return res.status(400).json({
@@ -688,6 +688,17 @@ export default async function handler(req, res) {
       console.log('[Local Signals] First location name:', finalLocations[0].name || finalLocations[0].title || 'unnamed');
     }
     
+    const debugMode = String(debug || '').toLowerCase() === '1' || String(debug || '').toLowerCase() === 'true';
+
+    const locationSummaries = debugMode
+      ? finalLocations.map((loc) => ({
+          name: loc.name || loc.title || null,
+          websiteUri: loc.websiteUri || null,
+          rating: loc.rating ?? loc.averageRating ?? loc.primaryRating ?? null,
+          reviewCount: loc.reviewCount ?? loc.totalReviewCount ?? loc.numberOfReviews ?? null
+        }))
+      : null;
+
     // Build response object with error handling to prevent crashes
     try {
       const responseData = {
@@ -756,7 +767,8 @@ export default async function handler(req, res) {
         locationsToProcessCount: locationsToProcess.length,
         locationsResponseStatus: locationsResponseStatus,
         hasNextPageToken: !!nextPageToken,
-        locationNames: locationsToProcess.map(loc => loc.name || loc.title || 'unnamed')
+        locationNames: locationsToProcess.map(loc => loc.name || loc.title || 'unnamed'),
+        locationSummaries
       }
     };
       
