@@ -92,6 +92,28 @@ async function readGbpFallback() {
   }
 }
 
+function selectLocationForProperty(locations = [], propertyUrl) {
+  if (!Array.isArray(locations) || locations.length === 0) return null;
+  const normalizedProperty = normalizePropertyUrl(propertyUrl);
+  if (!normalizedProperty) return locations[0];
+  let propertyHost = null;
+  try {
+    propertyHost = new URL(normalizedProperty).hostname.replace(/^www\./, '').toLowerCase();
+  } catch {
+    propertyHost = normalizedProperty.replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
+  }
+  const match = locations.find((loc) => {
+    if (!loc?.websiteUri) return false;
+    try {
+      const host = new URL(loc.websiteUri).hostname.replace(/^www\./, '').toLowerCase();
+      return host === propertyHost;
+    } catch {
+      return String(loc.websiteUri || '').toLowerCase().includes(propertyHost);
+    }
+  });
+  return match || locations[0];
+}
+
 export default async function handler(req, res) {
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -330,7 +352,11 @@ export default async function handler(req, res) {
       // Try to fetch GBP rating/review count from API (wrapped in try/catch so failures don't crash endpoint)
       try {
         if (locationsToProcess && locationsToProcess.length > 0) {
-          const firstLocation = locationsToProcess[0];
+          const selectedLocation = selectLocationForProperty(locationsToProcess, property);
+          const firstLocation = selectedLocation || locationsToProcess[0];
+          if (selectedLocation?.websiteUri) {
+            console.log('[Local Signals] Selected GBP location:', selectedLocation.name || selectedLocation.title || 'unnamed', 'website=', selectedLocation.websiteUri);
+          }
           
           // Check various possible field names for rating and review count in the location detail
           // The Business Information API might have these fields nested or named differently
