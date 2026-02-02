@@ -659,8 +659,8 @@ export default async function handler(req, res) {
     
     // Fallback to static JSON file if API didn't return rating/review count
     // This runs AFTER locations processing to avoid interfering with it
+    const fallback = await readGbpFallback();
     if (gbpRating == null || gbpReviewCount == null) {
-      const fallback = await readGbpFallback();
       if (fallback.gbpRating != null && fallback.gbpReviewCount != null) {
         gbpRating = fallback.gbpRating;
         gbpReviewCount = fallback.gbpReviewCount;
@@ -668,6 +668,16 @@ export default async function handler(req, res) {
           rating: gbpRating,
           count: gbpReviewCount
         });
+      }
+    } else if (fallback.gbpReviewCount != null && fallback.gbpReviewCount > gbpReviewCount) {
+      // Allow manual override when fallback is more recent than API data.
+      console.info('[Local Signals] Overriding GBP review count with fallback value:', {
+        apiCount: gbpReviewCount,
+        fallbackCount: fallback.gbpReviewCount
+      });
+      gbpReviewCount = fallback.gbpReviewCount;
+      if (fallback.gbpRating != null) {
+        gbpRating = fallback.gbpRating;
       }
     }
     
