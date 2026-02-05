@@ -60134,6 +60134,34 @@ Final Score: ${score}/100`;
           }
         }
 
+        const normalizeUrlKey = (value) => String(value || '')
+          .toLowerCase()
+          .replace(/^https?:\/\//, '')
+          .replace(/^www\./, '')
+          .replace(/\/$/, '');
+
+        const baselineByUrl = new Map();
+        const tasks = window.optimisationModuleState?.allTasks || [];
+        if (Array.isArray(tasks) && tasks.length > 0) {
+          tasks.forEach((task) => {
+            const url = task?.target_url || task?.targetUrl || task?.targetUrlClean || task?.classic_ranking_url || '';
+            if (!url) return;
+            const key = normalizeUrlKey(url);
+            if (!key) return;
+            const metrics = task?.baseline_metrics || {};
+            let baselineCtr = metrics.gsc_ctr_28d ?? metrics.ctr_28d ?? metrics.gsc_ctr ?? metrics.ctr ?? null;
+            if (baselineCtr == null) return;
+            const n = Number(baselineCtr);
+            if (!isFinite(n)) return;
+            baselineCtr = (n > 1 && n <= 100) ? n / 100 : n;
+            const capturedAt = metrics.captured_at || metrics.created_at || task?.created_at || null;
+            const prev = baselineByUrl.get(key);
+            if (!prev || (capturedAt && (!prev.capturedAt || new Date(capturedAt) > new Date(prev.capturedAt)))) {
+              baselineByUrl.set(key, { ratio: baselineCtr, capturedAt });
+            }
+          });
+        }
+
         // Calculate potential extra clicks for each page
         const allPages = moneyPagesRows
           .map(row => {
@@ -60149,12 +60177,15 @@ Final Score: ${score}/100`;
             const currentCtrPct = currentCtr * 100;
             const gapToTargetPp = targetCtrPct - currentCtrPct;
             const gapText = formatSignedPp(gapToTargetPp, 1);
+            const baselineEntry = baselineByUrl.get(normalizeUrlKey(row.url || row.page_url || '')) || null;
+            const baselineCtrPct = baselineEntry?.ratio != null ? (baselineEntry.ratio * 100) : null;
             return {
               url: row.url || row.page_url || 'Unknown',
               potentialClicks,
               currentClicks: clicks,
               impressions,
               currentCtrPct,
+              baselineCtrPct,
               gapText
             };
           })
@@ -60216,9 +60247,10 @@ Final Score: ${score}/100`;
           const base = shortenMiddle(url, 48);
           return base;
         });
-        const currentCtrSeries = pagesWithUplift.map(p => Math.max(0, p.currentCtrPct || 0));
+        const baselineSeries = pagesWithUplift.map(p => Math.max(0, p.baselineCtrPct || 0));
+        const progressSeries = pagesWithUplift.map(p => Math.max(0, (p.currentCtrPct || 0) - (p.baselineCtrPct || 0)));
         const gapSeries = pagesWithUplift.map(p => Math.max(0, targetCtrPct - (p.currentCtrPct || 0)));
-        const totals = currentCtrSeries.map((val, idx) => val + (gapSeries[idx] || 0));
+        const totals = baselineSeries.map((val, idx) => val + (progressSeries[idx] || 0) + (gapSeries[idx] || 0));
         const maxTotal = totals.length ? Math.max(...totals) : targetCtrPct;
         const xMax = Math.max(targetCtrPct, maxTotal) + 0.3;
 
@@ -60241,10 +60273,18 @@ Final Score: ${score}/100`;
               labels,
               datasets: [
                 {
-                  label: 'Current CTR',
-                  data: currentCtrSeries,
-                  backgroundColor: 'rgba(148, 163, 184, 0.75)',
-                  borderColor: 'rgba(148, 163, 184, 0.95)',
+                  label: 'Baseline CTR',
+                  data: baselineSeries,
+                  backgroundColor: 'rgba(100, 116, 139, 0.75)',
+                  borderColor: 'rgba(100, 116, 139, 0.95)',
+                  borderWidth: 1,
+                  borderRadius: 4
+                },
+                {
+                  label: 'Progress since baseline',
+                  data: progressSeries,
+                  backgroundColor: 'rgba(16, 185, 129, 0.75)',
+                  borderColor: 'rgba(16, 185, 129, 0.95)',
                   borderWidth: 1,
                   borderRadius: 4
                 },
@@ -60270,6 +60310,7 @@ Final Score: ${score}/100`;
                       const idx = context.dataIndex;
                       const page = pagesWithUplift[idx];
                       return [
+                        `Baseline CTR: ${page.baselineCtrPct != null ? formatPct(page.baselineCtrPct, 1) : '—'}`,
                         `Current CTR: ${formatPct(page.currentCtrPct, 1)}`,
                         `Gap to target: ${page.gapText}`,
                         `Target: ${formatPct(targetCtrPct, 1)}`,
@@ -60341,7 +60382,7 @@ Final Score: ${score}/100`;
                 id: 'dashboardUpliftBarLabels',
                 afterDatasetsDraw(chart) {
                   const ctx = chart.ctx;
-                  const meta = chart.getDatasetMeta(1);
+                  const meta = chart.getDatasetMeta(2);
                   if (!meta) return;
                   ctx.save();
                   ctx.font = '700 10px system-ui, -apple-system, Segoe UI, sans-serif';
@@ -60351,7 +60392,8 @@ Final Score: ${score}/100`;
                     const bar = meta.data[i];
                     const page = pagesWithUplift[i];
                     if (!bar || !page) continue;
-                    const text = `CTR ${formatPct(page.currentCtrPct, 1)} | gap ${page.gapText} | +${page.potentialClicks}`;
+                    const baselineLabel = page.baselineCtrPct != null ? formatPct(page.baselineCtrPct, 1) : '—';
+                    const text = `Base ${baselineLabel} | CTR ${formatPct(page.currentCtrPct, 1)} | gap ${page.gapText} | +${page.potentialClicks}`;
                     const x = chart.chartArea.right - 6;
                     ctx.textAlign = 'right';
                     ctx.fillText(text, x, bar.y);
