@@ -60244,13 +60244,14 @@ Final Score: ${score}/100`;
             url = '/';
           }
           // Truncate if too long
-          const base = shortenMiddle(url, 48);
+          const base = shortenMiddle(url, 36);
           return base;
         });
         const baselineSeries = pagesWithUplift.map(p => Math.max(0, p.baselineCtrPct || 0));
         const progressSeries = pagesWithUplift.map(p => Math.max(0, (p.currentCtrPct || 0) - (p.baselineCtrPct || 0)));
+        const regressSeries = pagesWithUplift.map(p => Math.max(0, (p.baselineCtrPct || 0) - (p.currentCtrPct || 0)));
         const gapSeries = pagesWithUplift.map(p => Math.max(0, targetCtrPct - (p.currentCtrPct || 0)));
-        const totals = baselineSeries.map((val, idx) => val + (progressSeries[idx] || 0) + (gapSeries[idx] || 0));
+        const totals = baselineSeries.map((val, idx) => val + (progressSeries[idx] || 0) + (regressSeries[idx] || 0) + (gapSeries[idx] || 0));
         const maxTotal = totals.length ? Math.max(...totals) : targetCtrPct;
         const xMax = Math.max(targetCtrPct, maxTotal) + 0.3;
 
@@ -60278,7 +60279,10 @@ Final Score: ${score}/100`;
                   backgroundColor: 'rgba(100, 116, 139, 0.75)',
                   borderColor: 'rgba(100, 116, 139, 0.95)',
                   borderWidth: 1,
-                  borderRadius: 4
+                  borderRadius: 4,
+                  barThickness: 20,
+                  maxBarThickness: 22,
+                  borderSkipped: false
                 },
                 {
                   label: 'Progress since baseline',
@@ -60286,7 +60290,21 @@ Final Score: ${score}/100`;
                   backgroundColor: 'rgba(16, 185, 129, 0.75)',
                   borderColor: 'rgba(16, 185, 129, 0.95)',
                   borderWidth: 1,
-                  borderRadius: 4
+                  borderRadius: 4,
+                  barThickness: 20,
+                  maxBarThickness: 22,
+                  borderSkipped: false
+                },
+                {
+                  label: 'Drop vs baseline',
+                  data: regressSeries,
+                  backgroundColor: 'rgba(245, 158, 11, 0.75)',
+                  borderColor: 'rgba(245, 158, 11, 0.95)',
+                  borderWidth: 1,
+                  borderRadius: 4,
+                  barThickness: 20,
+                  maxBarThickness: 22,
+                  borderSkipped: false
                 },
                 {
                   label: 'Gap to target',
@@ -60294,7 +60312,10 @@ Final Score: ${score}/100`;
                   backgroundColor: 'rgba(239, 68, 68, 0.75)',
                   borderColor: 'rgba(239, 68, 68, 0.95)',
                   borderWidth: 1,
-                  borderRadius: 4
+                  borderRadius: 4,
+                  barThickness: 20,
+                  maxBarThickness: 22,
+                  borderSkipped: false
                 }
               ]
             },
@@ -60330,7 +60351,9 @@ Final Score: ${score}/100`;
                     color: 'rgba(226,232,240,0.7)',
                     font: { size: 10 },
                     callback: function(value) {
-                      return `${value}%`;
+                      const n = Number(value);
+                      if (!isFinite(n)) return '';
+                      return `${n.toFixed(n < 1 ? 1 : 0)}%`;
                     }
                   },
                   title: {
@@ -60382,7 +60405,7 @@ Final Score: ${score}/100`;
                 id: 'dashboardUpliftBarLabels',
                 afterDatasetsDraw(chart) {
                   const ctx = chart.ctx;
-                  const meta = chart.getDatasetMeta(2);
+                  const meta = chart.getDatasetMeta(3);
                   if (!meta) return;
                   ctx.save();
                   ctx.font = '700 10px system-ui, -apple-system, Segoe UI, sans-serif';
@@ -60393,10 +60416,15 @@ Final Score: ${score}/100`;
                     const page = pagesWithUplift[i];
                     if (!bar || !page) continue;
                     const baselineLabel = page.baselineCtrPct != null ? formatPct(page.baselineCtrPct, 1) : '—';
-                    const text = `Base ${baselineLabel} | CTR ${formatPct(page.currentCtrPct, 1)} | gap ${page.gapText} | +${page.potentialClicks}`;
+                    const text = `Base ${baselineLabel}\nCTR ${formatPct(page.currentCtrPct, 1)}\nGap ${page.gapText} | +${page.potentialClicks}`;
                     const x = chart.chartArea.right - 6;
                     ctx.textAlign = 'right';
-                    ctx.fillText(text, x, bar.y);
+                    const lines = String(text).split('\n');
+                    const lineHeight = 11;
+                    const startY = bar.y - ((lines.length - 1) * lineHeight) / 2;
+                    lines.forEach((line, lineIdx) => {
+                      ctx.fillText(line, x, startY + lineIdx * lineHeight);
+                    });
                   }
                   ctx.restore();
                 }
