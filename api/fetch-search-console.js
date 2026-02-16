@@ -1,5 +1,17 @@
 // Vercel Serverless Function to fetch real Google Search Console data
 // This function handles OAuth2 authentication and fetches performance data
+//
+// Usage examples:
+//
+// 1. Get aggregate totals + top queries (default behavior):
+//    curl -X POST https://ai-geo-audit.vercel.app/api/fetch-search-console \
+//      -H "Content-Type: application/json" \
+//      -d '{"propertyUrl":"https://www.alanranger.com","startDate":"2026-01-18","endDate":"2026-02-14"}'
+//
+// 2. Get page-level data:
+//    curl -X POST https://ai-geo-audit.vercel.app/api/fetch-search-console \
+//      -H "Content-Type: application/json" \
+//      -d '{"propertyUrl":"https://www.alanranger.com","startDate":"2026-01-18","endDate":"2026-02-14","dimensions":["page"],"rowLimit":25000}'
 
 export default async function handler(req, res) {
   // Set CORS headers
@@ -18,11 +30,15 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { propertyUrl, startDate, endDate } = req.body;
+    const { propertyUrl, startDate, endDate, dimensions, rowLimit } = req.body;
     
     if (!propertyUrl || !startDate || !endDate) {
       return res.status(400).json({ error: 'Missing required parameters: propertyUrl, startDate, endDate' });
     }
+
+    // Check if page-level data is requested
+    const isPageDimension = Array.isArray(dimensions) && dimensions.includes('page');
+    const requestedRowLimit = rowLimit || (isPageDimension ? 25000 : 10);
 
     // Get OAuth2 credentials from environment variables
     const clientId = process.env.GOOGLE_CLIENT_ID;
@@ -74,7 +90,82 @@ export default async function handler(req, res) {
     
     const searchConsoleUrl = `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`;
     
-    // First, get overall aggregate data (no dimensions = site-wide totals)
+    // If page dimension is requested, fetch page-level data
+    if (isPageDimension) {
+      const pageResponse = await fetch(searchConsoleUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          startDate: startDate,
+          endDate: endDate,
+          dimensions: ['page'],
+          rowLimit: requestedRowLimit,
+        }),
+      });
+
+      if (!pageResponse.ok) {
+        const errorText = await pageResponse.text();
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch (e) {
+          errorData = { error: { message: errorText } };
+        }
+        
+        // If permission error, provide helpful message
+        if (pageResponse.status === 403) {
+          return res.status(403).json({ 
+            error: 'Permission denied',
+            message: errorData.error?.message || 'User does not have access to this Search Console property',
+            suggestion: 'Make sure: 1) The property URL matches exactly how it appears in Search Console (check if it uses https:// or http://), 2) The Google account used for the refresh token has access to this property, 3) The property is verified in Search Console',
+            attemptedUrl: siteUrl
+          });
+        }
+        
+        return res.status(pageResponse.status).json({ 
+          error: 'Failed to fetch Search Console data',
+          details: errorData,
+          status: pageResponse.status,
+          attemptedUrl: siteUrl
+        });
+      }
+
+      const pageData = await pageResponse.json();
+      
+      // Map GSC rows to our format
+      const rows = (pageData.rows || []).map(row => ({
+        page: row.keys[0] || '',
+        clicks: row.clicks || 0,
+        impressions: row.impressions || 0,
+        position: row.position || 0,
+        ctr: row.ctr || 0
+      }));
+
+      // Calculate totals from page rows
+      const totalClicks = rows.reduce((sum, r) => sum + (r.clicks || 0), 0);
+      const totalImpressions = rows.reduce((sum, r) => sum + (r.impressions || 0), 0);
+      const weightedPosition = rows.reduce((sum, r) => sum + ((r.position || 0) * (r.impressions || 0)), 0);
+      const averagePosition = totalImpressions > 0 ? weightedPosition / totalImpressions : 0;
+      const ctr = totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0;
+
+      return res.status(200).json({
+        ok: true,
+        dateRange: {
+          startDate,
+          endDate
+        },
+        totalClicks,
+        totalImpressions,
+        averagePosition,
+        ctr,
+        rows
+      });
+    }
+    
+    // Original behavior: get overall aggregate data (no dimensions = site-wide totals)
     const aggregateResponse = await fetch(searchConsoleUrl, {
       method: 'POST',
       headers: {
