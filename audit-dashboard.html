@@ -37083,31 +37083,43 @@ Final Score: ${score}/100`;
       function attachMoneyPagesCopyHandler(allRows) {
         setTimeout(() => {
           const copyBtn = document.getElementById('money-pages-copy-urls');
-          if (copyBtn) {
-            const newCopyBtn = copyBtn.cloneNode(true);
-            copyBtn.parentNode.replaceChild(newCopyBtn, copyBtn);
-            newCopyBtn.addEventListener('click', async () => {
-              const urls = (allRows || []).slice(0, 10).map((r) => r.url).join('\n');
-              if (urls) {
-                try {
-                  await navigator.clipboard.writeText(urls);
-                  newCopyBtn.textContent = 'Copied!';
-                  newCopyBtn.style.color = '#10b981';
-                  setTimeout(() => {
-                    newCopyBtn.textContent = 'Copy URLs';
-                    newCopyBtn.style.color = 'white';
-                  }, 2000);
-                } catch (err) {
-                  newCopyBtn.textContent = 'Copy failed';
-                  newCopyBtn.style.color = '#ef4444';
-                  setTimeout(() => {
-                    newCopyBtn.textContent = 'Copy URLs';
-                    newCopyBtn.style.color = 'white';
-                  }, 2000);
-                }
-              }
-            });
-          }
+          if (!copyBtn) return;
+
+          const newCopyBtn = copyBtn.cloneNode(true);
+          copyBtn.parentNode.replaceChild(newCopyBtn, copyBtn);
+
+          newCopyBtn.addEventListener('click', async () => {
+            const filteredRows = Array.isArray(window.moneyPagesOpportunityFilteredRows)
+              ? window.moneyPagesOpportunityFilteredRows
+              : null;
+            const sourceRows = (filteredRows && filteredRows.length ? filteredRows : (allRows || [])) || [];
+
+            const urls = sourceRows
+              .map((r) => (r && r.url ? String(r.url).trim() : ''))
+              .filter(Boolean)
+              .join('\n');
+
+            if (!urls) {
+              return;
+            }
+
+            try {
+              await navigator.clipboard.writeText(urls);
+              newCopyBtn.textContent = 'Copied!';
+              newCopyBtn.style.color = '#10b981';
+              setTimeout(() => {
+                newCopyBtn.textContent = 'Copy URLs';
+                newCopyBtn.style.color = 'white';
+              }, 2000);
+            } catch (err) {
+              newCopyBtn.textContent = 'Copy failed';
+              newCopyBtn.style.color = '#ef4444';
+              setTimeout(() => {
+                newCopyBtn.textContent = 'Copy URLs';
+                newCopyBtn.style.color = 'white';
+              }, 2000);
+            }
+          });
         }, 50);
       }
       
