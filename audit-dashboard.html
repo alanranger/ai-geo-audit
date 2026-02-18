@@ -60169,57 +60169,118 @@ Final Score: ${score}/100`;
           return;
         }
 
-        const projectPeriodForSegment = (segKey, periodMetrics, { useActual28 = false } = {}) => {
+        const allocateTotalsWithOtherResidual = (totalRaw, landingShare, eventShare, productShare) => {
+          const total = Math.max(0, Math.round(toNum(totalRaw) || 0));
+          let landing = Math.round(total * (toNum(landingShare) || 0));
+          let event = Math.round(total * (toNum(eventShare) || 0));
+          let product = Math.round(total * (toNum(productShare) || 0));
+          let other = total - landing - event - product;
+          if (other < 0) {
+            let overflow = Math.abs(other);
+            const keys = ['landing', 'event', 'product']
+              .sort((a, b) => ({ landing, event, product }[b] || 0) - ({ landing, event, product }[a] || 0));
+            keys.forEach((k) => {
+              if (overflow <= 0) return;
+              if (k === 'landing') {
+                const take = Math.min(overflow, landing);
+                landing -= take;
+                overflow -= take;
+              } else if (k === 'event') {
+                const take = Math.min(overflow, event);
+                event -= take;
+                overflow -= take;
+              } else {
+                const take = Math.min(overflow, product);
+                product -= take;
+                overflow -= take;
+              }
+            });
+            other = 0;
+          }
+          return { landing, event, product, other };
+        };
+
+        const buildReconciledPeriodBySegment = (periodMetrics, { useActual28 = false } = {}) => {
           if (!periodMetrics) return null;
-          const segBase = canonical28BySegment?.[segKey] || current?.[segKey] || {};
           if (useActual28) {
             return {
-              clicks: toNum(segBase?.clicks) || 0,
-              impressions: toNum(segBase?.impressions) || 0,
-              ctrPct: toNum(segBase?.ctrPct),
-              avgPosition: toNum(segBase?.avgPosition)
+              landing: canonical28BySegment?.landing || current?.landing || null,
+              event: canonical28BySegment?.event || current?.event || null,
+              product: canonical28BySegment?.product || current?.product || null,
+              other: canonical28BySegment?.other || current?.other || null
             };
           }
-          const segClicks28 = toNum(segBase?.clicks) || 0;
-          const segImpr28 = toNum(segBase?.impressions) || 0;
+
           const siteClicks28 = toNum(siteBaseline28?.clicks) || 0;
           const siteImpr28 = toNum(siteBaseline28?.impressions) || 0;
-          const clicksShare = siteClicks28 > 0 ? (segClicks28 / siteClicks28) : 0;
-          const imprShare = siteImpr28 > 0 ? (segImpr28 / siteImpr28) : 0;
-
-          const projectedClicks = Math.max(0, (toNum(periodMetrics?.clicks) || 0) * clicksShare);
-          const projectedImpressions = Math.max(0, (toNum(periodMetrics?.impressions) || 0) * imprShare);
-          const projectedCtr = projectedImpressions > 0 ? ((projectedClicks / projectedImpressions) * 100) : null;
-
-          let projectedPos = toNum(segBase?.avgPosition);
           const sitePos28 = toNum(siteBaseline28?.avgPosition);
           const sitePosPeriod = toNum(periodMetrics?.avgPosition);
-          if (projectedPos != null && sitePos28 != null && sitePos28 > 0 && sitePosPeriod != null) {
-            projectedPos = projectedPos * (sitePosPeriod / sitePos28);
+          const scalePos = (sitePos28 != null && sitePos28 > 0 && sitePosPeriod != null) ? (sitePosPeriod / sitePos28) : null;
+
+          const clickShares = {
+            landing: siteClicks28 > 0 ? ((toNum(canonical28BySegment?.landing?.clicks) || 0) / siteClicks28) : 0,
+            event: siteClicks28 > 0 ? ((toNum(canonical28BySegment?.event?.clicks) || 0) / siteClicks28) : 0,
+            product: siteClicks28 > 0 ? ((toNum(canonical28BySegment?.product?.clicks) || 0) / siteClicks28) : 0
+          };
+          const imprShares = {
+            landing: siteImpr28 > 0 ? ((toNum(canonical28BySegment?.landing?.impressions) || 0) / siteImpr28) : 0,
+            event: siteImpr28 > 0 ? ((toNum(canonical28BySegment?.event?.impressions) || 0) / siteImpr28) : 0,
+            product: siteImpr28 > 0 ? ((toNum(canonical28BySegment?.product?.impressions) || 0) / siteImpr28) : 0
+          };
+
+          const clickAlloc = allocateTotalsWithOtherResidual(periodMetrics?.clicks, clickShares.landing, clickShares.event, clickShares.product);
+          const imprAlloc = allocateTotalsWithOtherResidual(periodMetrics?.impressions, imprShares.landing, imprShares.event, imprShares.product);
+
+          const out = {};
+          defs.forEach(({ key }) => {
+            const clicks = clickAlloc[key] || 0;
+            const impressions = imprAlloc[key] || 0;
+            const basePos = toNum(canonical28BySegment?.[key]?.avgPosition);
+            const avgPosition = (basePos != null && scalePos != null) ? (basePos * scalePos) : basePos;
+            out[key] = {
+              clicks,
+              impressions,
+              ctrPct: impressions > 0 ? ((clicks / impressions) * 100) : null,
+              avgPosition
+            };
+          });
+
+          const siteWeighted = (toNum(periodMetrics?.avgPosition) != null) ? ((toNum(periodMetrics?.avgPosition) || 0) * (toNum(periodMetrics?.impressions) || 0)) : null;
+          const moneyWeighted = ['landing', 'event', 'product'].reduce((sum, key) => {
+            const p = toNum(out?.[key]?.avgPosition);
+            const i = toNum(out?.[key]?.impressions) || 0;
+            if (p == null || i <= 0) return sum;
+            return sum + (p * i);
+          }, 0);
+          if (siteWeighted != null && (toNum(out?.other?.impressions) || 0) > 0) {
+            const otherImpr = toNum(out.other.impressions) || 0;
+            out.other.avgPosition = Math.max(0, (siteWeighted - moneyWeighted)) / otherImpr;
           }
 
-          return {
-            clicks: projectedClicks,
-            impressions: projectedImpressions,
-            ctrPct: projectedCtr,
-            avgPosition: projectedPos
-          };
+          return out;
         };
+
+        const latestBySegment = buildReconciledPeriodBySegment(latestWindow?.current);
+        const latestPrevBySegment = buildReconciledPeriodBySegment(latestWindow?.prev);
+        const sevenBySegment = buildReconciledPeriodBySegment(sevenDayWindow?.current);
+        const sevenPrevBySegment = buildReconciledPeriodBySegment(sevenDayWindow?.prev);
+        const twentyeightBySegment = buildReconciledPeriodBySegment(twentyEightDayWindow?.current, { useActual28: true });
+        const twentyeightPrevBySegment = buildReconciledPeriodBySegment(twentyEightDayWindow?.prev);
 
         const cardsHtml = defs.map(({ key, label }) => {
           const c = (canonical28BySegment?.[key] || current[key] || {});
           const pageCount = toNum(authoritativeCounts?.[key]);
-          const latestNow = projectPeriodForSegment(key, latestWindow?.current);
-          const latestPrev = projectPeriodForSegment(key, latestWindow?.prev);
-          const sevenNow = projectPeriodForSegment(key, sevenDayWindow?.current);
-          const sevenPrev = projectPeriodForSegment(key, sevenDayWindow?.prev);
-          const twentyeightNow = projectPeriodForSegment(key, twentyEightDayWindow?.current, { useActual28: true }) || {
+          const latestNow = latestBySegment?.[key] || null;
+          const latestPrev = latestPrevBySegment?.[key] || null;
+          const sevenNow = sevenBySegment?.[key] || null;
+          const sevenPrev = sevenPrevBySegment?.[key] || null;
+          const twentyeightNow = twentyeightBySegment?.[key] || {
             clicks: c.clicks,
             impressions: c.impressions,
             ctrPct: c.ctrPct,
             avgPosition: c.avgPosition
           };
-          const twentyeightPrev = projectPeriodForSegment(key, twentyEightDayWindow?.prev);
+          const twentyeightPrev = twentyeightPrevBySegment?.[key] || null;
 
           const latestDate = latestWindow?.endDate || '—';
           const sevenRange = `${sevenDayWindow?.startDate || '—'} -> ${sevenDayWindow?.endDate || '—'}`;
