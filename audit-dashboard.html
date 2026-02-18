@@ -59938,6 +59938,24 @@ Final Score: ${score}/100`;
         }
       }
 
+      async function fetchDashboardSubsegmentPageActivityCounts(propertyUrl, startDate, endDate) {
+        try {
+          if (!propertyUrl || !startDate || !endDate) return null;
+          const params = new URLSearchParams({
+            property: propertyUrl,
+            startDate,
+            endDate
+          });
+          const response = await fetch(apiUrl(`/api/aigeo/gsc-subsegment-page-activity-counts?${params.toString()}`));
+          if (!response.ok) return null;
+          const payload = await response.json();
+          if (payload?.status !== 'ok') return null;
+          return payload?.data || null;
+        } catch (err) {
+          return null;
+        }
+      }
+
       async function renderDashboardGscPeriodTiles(currentAudit) {
         const host = document.getElementById('dashboard-gsc-kpi-periods');
         if (!host) return;
@@ -60395,6 +60413,11 @@ Final Score: ${score}/100`;
         const sevenPrevBySegment = buildReconciledPeriodBySegment(sevenDayWindow?.prev);
         const twentyeightBySegment = buildReconciledPeriodBySegment(twentyEightDayWindow?.current, { useActual28: true });
         const twentyeightPrevBySegment = buildReconciledPeriodBySegment(twentyEightDayWindow?.prev);
+        const [latestSubsegmentActivity, sevenSubsegmentActivity, twentyeightSubsegmentActivity] = await Promise.all([
+          fetchDashboardSubsegmentPageActivityCounts(propertyUrl, latestWindow?.endDate, latestWindow?.endDate),
+          fetchDashboardSubsegmentPageActivityCounts(propertyUrl, sevenDayWindow?.startDate, sevenDayWindow?.endDate),
+          fetchDashboardSubsegmentPageActivityCounts(propertyUrl, twentyEightDayWindow?.startDate, twentyEightDayWindow?.endDate)
+        ]);
 
         const cardsHtml = defs.map(({ key, label }) => {
           const c = (canonical28BySegment?.[key] || current[key] || {});
@@ -60414,6 +60437,15 @@ Final Score: ${score}/100`;
             avgPosition: c.avgPosition
           });
           const twentyeightPrev = twentyeightPrevBySegment?.[key] || null;
+          const latestRowActivity = latestSubsegmentActivity?.[key]
+            ? { ...latestSubsegmentActivity[key], totalPages: pageCount }
+            : null;
+          const sevenRowActivity = sevenSubsegmentActivity?.[key]
+            ? { ...sevenSubsegmentActivity[key], totalPages: pageCount }
+            : null;
+          const twentyeightRowActivity = twentyeightSubsegmentActivity?.[key]
+            ? { ...twentyeightSubsegmentActivity[key], totalPages: pageCount }
+            : null;
 
           const latestDate = hasDbWindows ? (dbWindowsByDays?.[1]?.[key]?.dateEnd || latestWindow?.endDate || '—') : (latestWindow?.endDate || '—');
           const sevenRange = hasDbWindows
@@ -60431,9 +60463,9 @@ Final Score: ${score}/100`;
               </div>
               <div class="dashboard-segment-subtitle">Sub-segment trend tiles aligned to Latest / 7d / 28d windows.</div>
               <div class="dashboard-period-rows">
-                ${renderDashboardPeriodRow('Latest', latestDate, latestNow, latestPrev)}
-                ${renderDashboardPeriodRow('7 days', sevenRange, sevenNow, sevenPrev)}
-                ${renderDashboardPeriodRow('28 days', twentyeightRange, twentyeightNow, twentyeightPrev)}
+                ${renderDashboardPeriodRow('Latest', latestDate, latestNow, latestPrev, latestRowActivity)}
+                ${renderDashboardPeriodRow('7 days', sevenRange, sevenNow, sevenPrev, sevenRowActivity)}
+                ${renderDashboardPeriodRow('28 days', twentyeightRange, twentyeightNow, twentyeightPrev, twentyeightRowActivity)}
               </div>
             </div>
           `;
