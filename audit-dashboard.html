@@ -2091,6 +2091,12 @@
       font-weight: 900;
       letter-spacing: -0.02em;
     }
+    section[data-panel="dashboard"] .dashboard-kpi-meta {
+      font-size: 0.75rem;
+      color: var(--dark-text-muted);
+      font-weight: 700;
+      line-height: 1.1;
+    }
 
     section[data-panel="dashboard"] .dashboard-kpi-delta {
       margin-top: 0.1rem;
@@ -59873,28 +59879,29 @@ Final Score: ${score}/100`;
         return `<div class="dashboard-kpi-delta" data-dir="${dir}">△ ${absText}</div>`;
       }
 
-      function renderDashboardPeriodTile(label, value, deltaHtml = '') {
+      function renderDashboardPeriodTile(label, value, deltaHtml = '', metaHtml = '') {
         return `
           <div class="dashboard-kpi-tile">
             <div class="dashboard-kpi-label">${label}</div>
             <div class="dashboard-kpi-value">${value}</div>
+            ${metaHtml}
             ${deltaHtml}
           </div>
         `;
       }
 
-      function renderDashboardPeriodRow(periodLabel, dateLabel, metrics, prevMetrics) {
-        const includePageCount = arguments.length > 4 ? !!arguments[4] : false;
-        const pageCountValue = arguments.length > 5 ? arguments[5] : null;
+      function renderDashboardPeriodRow(periodLabel, dateLabel, metrics, prevMetrics, pageCountValue = null) {
+        const pagesMeta = (pageCountValue != null)
+          ? `<div class="dashboard-kpi-meta">${formatInt(pageCountValue)} pages</div>`
+          : '';
         return `
           <div class="dashboard-period-row">
             <div class="dashboard-period-label">
               <strong>${periodLabel}</strong>
               <div class="dashboard-period-date">${dateLabel || '—'}</div>
             </div>
-            ${renderDashboardPeriodTile('Clicks', formatInt(metrics?.clicks), formatDashboardPctDelta(metrics?.clicks, prevMetrics?.clicks))}
-            ${renderDashboardPeriodTile('Impressions', formatInt(metrics?.impressions), formatDashboardPctDelta(metrics?.impressions, prevMetrics?.impressions))}
-            ${includePageCount ? renderDashboardPeriodTile('Total pages', formatInt(pageCountValue)) : ''}
+            ${renderDashboardPeriodTile('Clicks', formatInt(metrics?.clicks), formatDashboardPctDelta(metrics?.clicks, prevMetrics?.clicks), pagesMeta)}
+            ${renderDashboardPeriodTile('Impressions', formatInt(metrics?.impressions), formatDashboardPctDelta(metrics?.impressions, prevMetrics?.impressions), pagesMeta)}
             ${renderDashboardPeriodTile('Avg position', metrics?.avgPosition != null ? formatFixed(metrics.avgPosition, 1) : '—', formatDashboardPctDelta(metrics?.avgPosition, prevMetrics?.avgPosition, { betterLower: true }))}
             ${renderDashboardPeriodTile('CTR', metrics?.ctrPct != null ? formatPct(metrics.ctrPct, 2) : '—', formatDashboardPctDelta(metrics?.ctrPct, prevMetrics?.ctrPct))}
           </div>
@@ -59929,9 +59936,9 @@ Final Score: ${score}/100`;
             <span>Latest available date: ${latestDate || '—'} (normally 2-day GSC lag)</span>
           </div>
           <div class="dashboard-period-rows">
-            ${renderDashboardPeriodRow('Latest (GSC latest day)', latestWindow.endDate || '—', latestWindow.current, latestWindow.prev, true, totalSitePages)}
-            ${renderDashboardPeriodRow('7 days', `${sevenDayWindow.startDate || '—'} -> ${sevenDayWindow.endDate || '—'}`, sevenDayWindow.current, sevenDayWindow.prev, true, totalSitePages)}
-            ${renderDashboardPeriodRow('28 days', `${twentyEightDayWindow.startDate || '—'} -> ${twentyEightDayWindow.endDate || '—'}`, twentyEightDayWindow.current, twentyEightDayWindow.prev, true, totalSitePages)}
+            ${renderDashboardPeriodRow('Latest (GSC latest day)', latestWindow.endDate || '—', latestWindow.current, latestWindow.prev, totalSitePages)}
+            ${renderDashboardPeriodRow('7 days', `${sevenDayWindow.startDate || '—'} -> ${sevenDayWindow.endDate || '—'}`, sevenDayWindow.current, sevenDayWindow.prev, totalSitePages)}
+            ${renderDashboardPeriodRow('28 days', `${twentyEightDayWindow.startDate || '—'} -> ${twentyEightDayWindow.endDate || '—'}`, twentyEightDayWindow.current, twentyEightDayWindow.prev, totalSitePages)}
           </div>
         `;
       }
