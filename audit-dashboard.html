@@ -59892,9 +59892,18 @@ Final Score: ${score}/100`;
 
       function renderDashboardPeriodRow(periodLabel, dateLabel, metrics, prevMetrics, pageActivity = null) {
         const formatPagesMeta = (uniquePages, kind) => {
-          if (uniquePages == null) return '';
-          if (kind === 'clicks') return `<div class="dashboard-kpi-meta">${formatInt(uniquePages)} unique pages clicked</div>`;
-          return `<div class="dashboard-kpi-meta">${formatInt(uniquePages)} unique pages with impressions</div>`;
+          const totalMetric = kind === 'clicks' ? toNum(metrics?.clicks) : toNum(metrics?.impressions);
+          if (totalMetric == null || totalMetric <= 0) {
+            return `<div class="dashboard-kpi-meta">0 unique pages ${kind === 'clicks' ? 'clicked' : 'with impressions'}</div>`;
+          }
+          const rawUnique = toNum(uniquePages);
+          if (rawUnique == null || rawUnique <= 0) {
+            return `<div class="dashboard-kpi-meta">0 unique pages ${kind === 'clicks' ? 'clicked' : 'with impressions'}</div>`;
+          }
+          // Keep this count logically consistent with the metric in the same tile.
+          const safeUnique = Math.max(0, Math.min(Math.round(rawUnique), Math.round(totalMetric)));
+          if (kind === 'clicks') return `<div class="dashboard-kpi-meta">${formatInt(safeUnique)} unique pages clicked</div>`;
+          return `<div class="dashboard-kpi-meta">${formatInt(safeUnique)} unique pages with impressions</div>`;
         };
         const clicksMeta = formatPagesMeta(pageActivity?.clickPages, 'clicks');
         const impressionsMeta = formatPagesMeta(pageActivity?.impressionPages, 'impressions');
@@ -60413,6 +60422,70 @@ Final Score: ${score}/100`;
           fetchDashboardSubsegmentPageActivityCounts(propertyUrl, twentyEightDayWindow?.startDate, twentyEightDayWindow?.endDate)
         ]);
 
+        const getPeriodBySegmentFromDb = (days) => {
+          if (!hasDbWindows) return null;
+          const out = {};
+          defs.forEach(({ key }) => {
+            out[key] = dbWindowsByDays?.[days]?.[key] || null;
+          });
+          return out;
+        };
+
+        const reconcilePeriodSegmentsToSite = (periodBySegment, sitePeriod) => {
+          if (!periodBySegment || !sitePeriod) return periodBySegment;
+          const clone = {};
+          defs.forEach(({ key }) => {
+            const src = periodBySegment?.[key] || {};
+            clone[key] = {
+              clicks: toNum(src.clicks) || 0,
+              impressions: toNum(src.impressions) || 0,
+              ctrPct: toNum(src.ctrPct),
+              avgPosition: toNum(src.avgPosition)
+            };
+          });
+
+          const siteClicks = Math.max(0, Math.round(toNum(sitePeriod?.clicks) || 0));
+          const siteImpr = Math.max(0, Math.round(toNum(sitePeriod?.impressions) || 0));
+          const moneyClicks = (toNum(clone?.landing?.clicks) || 0) + (toNum(clone?.event?.clicks) || 0) + (toNum(clone?.product?.clicks) || 0);
+          const moneyImpr = (toNum(clone?.landing?.impressions) || 0) + (toNum(clone?.event?.impressions) || 0) + (toNum(clone?.product?.impressions) || 0);
+          clone.other.clicks = Math.max(0, siteClicks - moneyClicks);
+          clone.other.impressions = Math.max(0, siteImpr - moneyImpr);
+
+          // Keep weighted-position consistency by assigning residual to Other.
+          const siteAvgPos = toNum(sitePeriod?.avgPosition);
+          if (siteAvgPos != null && siteImpr > 0 && clone.other.impressions > 0) {
+            const siteWeighted = siteAvgPos * siteImpr;
+            const moneyWeighted = ['landing', 'event', 'product'].reduce((sum, key) => {
+              const p = toNum(clone?.[key]?.avgPosition);
+              const i = toNum(clone?.[key]?.impressions) || 0;
+              if (p == null || i <= 0) return sum;
+              return sum + (p * i);
+            }, 0);
+            clone.other.avgPosition = Math.max(0, (siteWeighted - moneyWeighted) / clone.other.impressions);
+          }
+
+          defs.forEach(({ key }) => {
+            const i = toNum(clone?.[key]?.impressions) || 0;
+            const c = toNum(clone?.[key]?.clicks) || 0;
+            clone[key].ctrPct = i > 0 ? ((c / i) * 100) : null;
+          });
+
+          return clone;
+        };
+
+        const latestDisplayBySegment = reconcilePeriodSegmentsToSite(
+          hasDbWindows ? getPeriodBySegmentFromDb(1) : latestBySegment,
+          latestWindow?.current || null
+        ) || latestBySegment;
+        const sevenDisplayBySegment = reconcilePeriodSegmentsToSite(
+          hasDbWindows ? getPeriodBySegmentFromDb(7) : sevenBySegment,
+          sevenDayWindow?.current || null
+        ) || sevenBySegment;
+        const twentyeightDisplayBySegment = reconcilePeriodSegmentsToSite(
+          hasDbWindows ? getPeriodBySegmentFromDb(28) : twentyeightBySegment,
+          twentyEightDayWindow?.current || null
+        ) || twentyeightBySegment;
+
         const cardsHtml = defs.map(({ key, label }) => {
           const c = (canonical28BySegment?.[key] || current[key] || {});
           const pageCount = (key === 'landing' || key === 'event' || key === 'product')
@@ -60420,16 +60493,16 @@ Final Score: ${score}/100`;
             : (hasDbWindows
               ? (toNum(dbWindowsByDays?.[28]?.[key]?.pageCount) ?? toNum(authoritativeCounts?.[key]))
               : toNum(authoritativeCounts?.[key]));
-          const latestNow = hasDbWindows ? (dbWindowsByDays?.[1]?.[key] || null) : (latestBySegment?.[key] || null);
+          const latestNow = latestDisplayBySegment?.[key] || null;
           const latestPrev = latestPrevBySegment?.[key] || null;
-          const sevenNow = hasDbWindows ? (dbWindowsByDays?.[7]?.[key] || null) : (sevenBySegment?.[key] || null);
+          const sevenNow = sevenDisplayBySegment?.[key] || null;
           const sevenPrev = sevenPrevBySegment?.[key] || null;
-          const twentyeightNow = hasDbWindows ? (dbWindowsByDays?.[28]?.[key] || null) : (twentyeightBySegment?.[key] || {
+          const twentyeightNow = twentyeightDisplayBySegment?.[key] || {
             clicks: c.clicks,
             impressions: c.impressions,
             ctrPct: c.ctrPct,
             avgPosition: c.avgPosition
-          });
+          };
           const twentyeightPrev = twentyeightPrevBySegment?.[key] || null;
           const latestRowActivity = latestSubsegmentActivity?.[key] || null;
           const sevenRowActivity = sevenSubsegmentActivity?.[key] || null;
