@@ -238,6 +238,25 @@ export default async function handler(req, res) {
       pageTimeseriesSave = { status: 'error', message: err.message };
     }
 
+    let dashboardWindowSave = null;
+    try {
+      const gscRange = audit?.gscRange || null;
+      if (gscRange?.endDate) {
+        dashboardWindowSave = await fetchJson(`${baseUrl}/api/supabase/save-dashboard-subsegment-windows`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            siteUrl: propertyUrl,
+            runId: auditDate,
+            dateEnd: gscRange.endDate,
+            scope: 'all_pages'
+          })
+        });
+      }
+    } catch (err) {
+      dashboardWindowSave = { status: 'error', message: err.message };
+    }
+
     await updateScheduleStatus('ok');
     await logCronEvent({
       jobKey: 'gsc_backlinks',
@@ -256,7 +275,8 @@ export default async function handler(req, res) {
         localSignals: 'ok',
         save: saveResult?.status || 'ok',
         pageMetrics: pageMetricsSave?.status || (pageMetricsSave ? 'ok' : 'skipped'),
-        pageTimeseries: pageTimeseriesSave?.status || (pageTimeseriesSave ? 'ok' : 'skipped')
+        pageTimeseries: pageTimeseriesSave?.status || (pageTimeseriesSave ? 'ok' : 'skipped'),
+        dashboardWindows: dashboardWindowSave?.status || (dashboardWindowSave ? 'ok' : 'skipped')
       },
       meta: { generatedAt: new Date().toISOString() }
     });

@@ -23366,6 +23366,29 @@
         const saveResult = await saveResponse.json();
           debugLog(`✓ Saved ${saveResult.inserted} portfolio segment snapshots to Supabase (scope=${s.scopeName})`, 'success');
         }
+
+        // Build exact dashboard windows (Latest/7d/28d) from DB truth.
+        try {
+          const winResp = await fetch(apiUrl('/api/supabase/save-dashboard-subsegment-windows'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              siteUrl,
+              runId,
+              dateEnd,
+              scope: 'all_pages'
+            })
+          });
+          if (winResp.ok) {
+            const winData = await winResp.json();
+            debugLog(`✓ Saved dashboard sub-segment windows (${winData.inserted || 0} rows)`, 'success');
+          } else {
+            const msg = await winResp.text();
+            debugLog(`⚠ Failed to save dashboard sub-segment windows: ${msg}`, 'warn');
+          }
+        } catch (winErr) {
+          debugLog(`⚠ Error saving dashboard sub-segment windows: ${winErr.message}`, 'warn');
+        }
         
       } catch (err) {
         debugLog(`Error calculating portfolio segment snapshots: ${err.message}`, 'error');
@@ -60135,7 +60158,41 @@ Final Score: ${score}/100`;
         };
       }
 
-      function renderDashboardSubsegmentSections(currentAudit) {
+      async function fetchDashboardSubsegmentWindowsFromDb(siteUrl, runId = null, scope = 'all_pages') {
+        try {
+          if (!siteUrl) return null;
+          const params = new URLSearchParams({ siteUrl, scope });
+          if (runId) params.set('runId', runId);
+          const response = await fetch(apiUrl(`/api/supabase/get-dashboard-subsegment-windows?${params.toString()}`));
+          if (!response.ok) return null;
+          const payload = await response.json();
+          return payload || null;
+        } catch (err) {
+          return null;
+        }
+      }
+
+      function buildWindowSegmentLookup(rows) {
+        const lookup = {};
+        (Array.isArray(rows) ? rows : []).forEach((r) => {
+          const days = parseInt(r?.window_days || 0, 10);
+          const seg = normalizeDashboardSubsegment(r?.segment);
+          if (!days || !seg) return;
+          if (!lookup[days]) lookup[days] = {};
+          lookup[days][seg] = {
+            clicks: toNum(r?.clicks) || 0,
+            impressions: toNum(r?.impressions) || 0,
+            ctrPct: (toNum(r?.ctr) || 0) * 100,
+            avgPosition: toNum(r?.avg_position),
+            pageCount: toNum(r?.pages_count) || 0,
+            dateStart: r?.date_start || null,
+            dateEnd: r?.date_end || null
+          };
+        });
+        return lookup;
+      }
+
+      async function renderDashboardSubsegmentSections(currentAudit) {
         const host = document.getElementById('dashboard-subsegments-grid');
         if (!host) return;
 
@@ -60147,6 +60204,11 @@ Final Score: ${score}/100`;
         const twentyEightDayWindow = computeDashboardPeriodWindow(rows, 28);
         const siteBaseline28 = twentyEightDayWindow?.current || null;
         const canonical28BySegment = getCanonicalSubsegmentMetrics28(currentAudit || null, siteBaseline28, current);
+        const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+        const currentRunId = currentAudit?.auditDate || currentAudit?.audit_date || null;
+        const dbWindowPayload = await fetchDashboardSubsegmentWindowsFromDb(propertyUrl, currentRunId, 'all_pages');
+        const dbWindowsByDays = buildWindowSegmentLookup(dbWindowPayload?.rows || []);
+        const hasDbWindows = !!(dbWindowsByDays?.[1] && dbWindowsByDays?.[7] && dbWindowsByDays?.[28]);
 
         const defs = [
           { key: 'landing', label: 'Landing Pages' },
@@ -60269,22 +60331,28 @@ Final Score: ${score}/100`;
 
         const cardsHtml = defs.map(({ key, label }) => {
           const c = (canonical28BySegment?.[key] || current[key] || {});
-          const pageCount = toNum(authoritativeCounts?.[key]);
-          const latestNow = latestBySegment?.[key] || null;
+          const pageCount = hasDbWindows
+            ? (toNum(dbWindowsByDays?.[28]?.[key]?.pageCount) ?? toNum(authoritativeCounts?.[key]))
+            : toNum(authoritativeCounts?.[key]);
+          const latestNow = hasDbWindows ? (dbWindowsByDays?.[1]?.[key] || null) : (latestBySegment?.[key] || null);
           const latestPrev = latestPrevBySegment?.[key] || null;
-          const sevenNow = sevenBySegment?.[key] || null;
+          const sevenNow = hasDbWindows ? (dbWindowsByDays?.[7]?.[key] || null) : (sevenBySegment?.[key] || null);
           const sevenPrev = sevenPrevBySegment?.[key] || null;
-          const twentyeightNow = twentyeightBySegment?.[key] || {
+          const twentyeightNow = hasDbWindows ? (dbWindowsByDays?.[28]?.[key] || null) : (twentyeightBySegment?.[key] || {
             clicks: c.clicks,
             impressions: c.impressions,
             ctrPct: c.ctrPct,
             avgPosition: c.avgPosition
-          };
+          });
           const twentyeightPrev = twentyeightPrevBySegment?.[key] || null;
 
-          const latestDate = latestWindow?.endDate || '—';
-          const sevenRange = `${sevenDayWindow?.startDate || '—'} -> ${sevenDayWindow?.endDate || '—'}`;
-          const twentyeightRange = `${twentyEightDayWindow?.startDate || '—'} -> ${twentyEightDayWindow?.endDate || '—'}`;
+          const latestDate = hasDbWindows ? (dbWindowsByDays?.[1]?.[key]?.dateEnd || latestWindow?.endDate || '—') : (latestWindow?.endDate || '—');
+          const sevenRange = hasDbWindows
+            ? `${dbWindowsByDays?.[7]?.[key]?.dateStart || sevenDayWindow?.startDate || '—'} -> ${dbWindowsByDays?.[7]?.[key]?.dateEnd || sevenDayWindow?.endDate || '—'}`
+            : `${sevenDayWindow?.startDate || '—'} -> ${sevenDayWindow?.endDate || '—'}`;
+          const twentyeightRange = hasDbWindows
+            ? `${dbWindowsByDays?.[28]?.[key]?.dateStart || twentyEightDayWindow?.startDate || '—'} -> ${dbWindowsByDays?.[28]?.[key]?.dateEnd || twentyEightDayWindow?.endDate || '—'}`
+            : `${twentyEightDayWindow?.startDate || '—'} -> ${twentyEightDayWindow?.endDate || '—'}`;
 
           return `
             <div class="dashboard-subsegment-card">
@@ -62129,7 +62197,7 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
         });
 
         renderDashboardGscPeriodTiles(audit);
-        renderDashboardSubsegmentSections(audit);
+        await renderDashboardSubsegmentSections(audit);
 
         // Async: refresh Domain Strength cache occasionally so the tile isn't stale.
         // Keep it non-blocking and avoid loops.
