@@ -59884,6 +59884,8 @@ Final Score: ${score}/100`;
       }
 
       function renderDashboardPeriodRow(periodLabel, dateLabel, metrics, prevMetrics) {
+        const includePageCount = arguments.length > 4 ? !!arguments[4] : false;
+        const pageCountValue = arguments.length > 5 ? arguments[5] : null;
         return `
           <div class="dashboard-period-row">
             <div class="dashboard-period-label">
@@ -59892,6 +59894,7 @@ Final Score: ${score}/100`;
             </div>
             ${renderDashboardPeriodTile('Clicks', formatInt(metrics?.clicks), formatDashboardPctDelta(metrics?.clicks, prevMetrics?.clicks))}
             ${renderDashboardPeriodTile('Impressions', formatInt(metrics?.impressions), formatDashboardPctDelta(metrics?.impressions, prevMetrics?.impressions))}
+            ${includePageCount ? renderDashboardPeriodTile('Total pages', formatInt(pageCountValue)) : ''}
             ${renderDashboardPeriodTile('Avg position', metrics?.avgPosition != null ? formatFixed(metrics.avgPosition, 1) : '—', formatDashboardPctDelta(metrics?.avgPosition, prevMetrics?.avgPosition, { betterLower: true }))}
             ${renderDashboardPeriodTile('CTR', metrics?.ctrPct != null ? formatPct(metrics.ctrPct, 2) : '—', formatDashboardPctDelta(metrics?.ctrPct, prevMetrics?.ctrPct))}
           </div>
@@ -59907,6 +59910,9 @@ Final Score: ${score}/100`;
         const sevenDayWindow = computeDashboardPeriodWindow(rows, 7);
         const twentyEightDayWindow = computeDashboardPeriodWindow(rows, 28);
         const latestDate = rows.length ? rows[rows.length - 1].date : null;
+        const topCounts = getAuthoritativeDashboardSubsegmentCounts(currentAudit || null, null);
+        const totalSitePages = ['landing', 'event', 'product', 'other']
+          .reduce((sum, key) => sum + (toNum(topCounts?.[key]) || 0), 0);
 
         if (!latestWindow || !sevenDayWindow || !twentyEightDayWindow) {
           host.innerHTML = `
@@ -59923,9 +59929,9 @@ Final Score: ${score}/100`;
             <span>Latest available date: ${latestDate || '—'} (normally 2-day GSC lag)</span>
           </div>
           <div class="dashboard-period-rows">
-            ${renderDashboardPeriodRow('Latest (GSC latest day)', latestWindow.endDate || '—', latestWindow.current, latestWindow.prev)}
-            ${renderDashboardPeriodRow('7 days', `${sevenDayWindow.startDate || '—'} -> ${sevenDayWindow.endDate || '—'}`, sevenDayWindow.current, sevenDayWindow.prev)}
-            ${renderDashboardPeriodRow('28 days', `${twentyEightDayWindow.startDate || '—'} -> ${twentyEightDayWindow.endDate || '—'}`, twentyEightDayWindow.current, twentyEightDayWindow.prev)}
+            ${renderDashboardPeriodRow('Latest (GSC latest day)', latestWindow.endDate || '—', latestWindow.current, latestWindow.prev, true, totalSitePages)}
+            ${renderDashboardPeriodRow('7 days', `${sevenDayWindow.startDate || '—'} -> ${sevenDayWindow.endDate || '—'}`, sevenDayWindow.current, sevenDayWindow.prev, true, totalSitePages)}
+            ${renderDashboardPeriodRow('28 days', `${twentyEightDayWindow.startDate || '—'} -> ${twentyEightDayWindow.endDate || '—'}`, twentyEightDayWindow.current, twentyEightDayWindow.prev, true, totalSitePages)}
           </div>
         `;
       }
@@ -60198,6 +60204,20 @@ Final Score: ${score}/100`;
 
         const current = aggregateDashboardSubsegmentMetrics(currentAudit || null);
         const authoritativeCounts = getAuthoritativeDashboardSubsegmentCounts(currentAudit || null, current);
+        const moneyRowsForCounts = Array.isArray(currentAudit?.scores?.moneyPagesMetrics?.rows)
+          ? currentAudit.scores.moneyPagesMetrics.rows
+          : (Array.isArray(currentAudit?.moneyPagesMetrics?.rows) ? currentAudit.moneyPagesMetrics.rows : []);
+        const moneyTabCounts = {
+          landing: 0,
+          event: 0,
+          product: 0
+        };
+        moneyRowsForCounts.forEach((row) => {
+          const seg = String(row?.subSegment || row?.segmentType || 'LANDING').toLowerCase();
+          if (seg === 'landing') moneyTabCounts.landing += 1;
+          else if (seg === 'event') moneyTabCounts.event += 1;
+          else if (seg === 'product') moneyTabCounts.product += 1;
+        });
         const rows = getDashboardTimeseriesRowsFromAudit(currentAudit);
         const latestWindow = computeDashboardPeriodWindow(rows, 1);
         const sevenDayWindow = computeDashboardPeriodWindow(rows, 7);
@@ -60331,9 +60351,11 @@ Final Score: ${score}/100`;
 
         const cardsHtml = defs.map(({ key, label }) => {
           const c = (canonical28BySegment?.[key] || current[key] || {});
-          const pageCount = hasDbWindows
-            ? (toNum(dbWindowsByDays?.[28]?.[key]?.pageCount) ?? toNum(authoritativeCounts?.[key]))
-            : toNum(authoritativeCounts?.[key]);
+          const pageCount = (key === 'landing' || key === 'event' || key === 'product')
+            ? (toNum(moneyTabCounts?.[key]) || 0)
+            : (hasDbWindows
+              ? (toNum(dbWindowsByDays?.[28]?.[key]?.pageCount) ?? toNum(authoritativeCounts?.[key]))
+              : toNum(authoritativeCounts?.[key]));
           const latestNow = hasDbWindows ? (dbWindowsByDays?.[1]?.[key] || null) : (latestBySegment?.[key] || null);
           const latestPrev = latestPrevBySegment?.[key] || null;
           const sevenNow = hasDbWindows ? (dbWindowsByDays?.[7]?.[key] || null) : (sevenBySegment?.[key] || null);
