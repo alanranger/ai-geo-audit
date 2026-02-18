@@ -59890,18 +59890,18 @@ Final Score: ${score}/100`;
         `;
       }
 
+      function getSafeUniquePages(totalMetric, rawUnique) {
+        const total = toNum(totalMetric);
+        if (total == null || total <= 0) return 0;
+        const unique = toNum(rawUnique);
+        if (unique == null || unique <= 0) return 0;
+        return Math.max(0, Math.min(Math.round(unique), Math.round(total)));
+      }
+
       function renderDashboardPeriodRow(periodLabel, dateLabel, metrics, prevMetrics, pageActivity = null) {
         const formatPagesMeta = (uniquePages, kind) => {
-          const totalMetric = kind === 'clicks' ? toNum(metrics?.clicks) : toNum(metrics?.impressions);
-          if (totalMetric == null || totalMetric <= 0) {
-            return `<div class="dashboard-kpi-meta">0 unique pages ${kind === 'clicks' ? 'clicked' : 'with impressions'}</div>`;
-          }
-          const rawUnique = toNum(uniquePages);
-          if (rawUnique == null || rawUnique <= 0) {
-            return `<div class="dashboard-kpi-meta">0 unique pages ${kind === 'clicks' ? 'clicked' : 'with impressions'}</div>`;
-          }
-          // Keep this count logically consistent with the metric in the same tile.
-          const safeUnique = Math.max(0, Math.min(Math.round(rawUnique), Math.round(totalMetric)));
+          const totalMetric = kind === 'clicks' ? metrics?.clicks : metrics?.impressions;
+          const safeUnique = getSafeUniquePages(totalMetric, uniquePages);
           if (kind === 'clicks') return `<div class="dashboard-kpi-meta">${formatInt(safeUnique)} unique pages clicked</div>`;
           return `<div class="dashboard-kpi-meta">${formatInt(safeUnique)} unique pages with impressions</div>`;
         };
@@ -60005,9 +60005,10 @@ Final Score: ${score}/100`;
           fetchDashboardGscPageActivityCounts(propertyUrl, sevenDayWindow.startDate, sevenDayWindow.endDate),
           fetchDashboardGscPageActivityCounts(propertyUrl, twentyEightDayWindow.startDate, twentyEightDayWindow.endDate)
         ]);
-        const latestActivity = sumPageActivityFromSubsegments(latestSubsegmentActivity) || latestRawActivity || null;
-        const sevenActivity = sumPageActivityFromSubsegments(sevenSubsegmentActivity) || sevenRawActivity || null;
-        const twentyEightActivity = sumPageActivityFromSubsegments(twentyEightSubsegmentActivity) || twentyEightRawActivity || null;
+        const fromDisplayedSubsegments = window.__dashboardSubsegmentUniqueTotals || null;
+        const latestActivity = fromDisplayedSubsegments?.latest || sumPageActivityFromSubsegments(latestSubsegmentActivity) || latestRawActivity || null;
+        const sevenActivity = fromDisplayedSubsegments?.seven || sumPageActivityFromSubsegments(sevenSubsegmentActivity) || sevenRawActivity || null;
+        const twentyEightActivity = fromDisplayedSubsegments?.twentyeight || sumPageActivityFromSubsegments(twentyEightSubsegmentActivity) || twentyEightRawActivity || null;
 
         host.innerHTML = `
           <div class="dashboard-periods-headline">
@@ -60287,6 +60288,7 @@ Final Score: ${score}/100`;
       async function renderDashboardSubsegmentSections(currentAudit) {
         const host = document.getElementById('dashboard-subsegments-grid');
         if (!host) return;
+        window.__dashboardSubsegmentUniqueTotals = null;
 
         const current = aggregateDashboardSubsegmentMetrics(currentAudit || null);
         const authoritativeCounts = getAuthoritativeDashboardSubsegmentCounts(currentAudit || null, current);
@@ -60504,6 +60506,12 @@ Final Score: ${score}/100`;
           twentyEightDayWindow?.current || null
         ) || twentyeightBySegment;
 
+        const uniqueTotalsForTop = {
+          latest: { clickPages: 0, impressionPages: 0 },
+          seven: { clickPages: 0, impressionPages: 0 },
+          twentyeight: { clickPages: 0, impressionPages: 0 }
+        };
+
         const cardsHtml = defs.map(({ key, label }) => {
           const c = (canonical28BySegment?.[key] || current[key] || {});
           const pageCount = (key === 'landing' || key === 'event' || key === 'product')
@@ -60525,6 +60533,13 @@ Final Score: ${score}/100`;
           const latestRowActivity = latestSubsegmentActivity?.[key] || null;
           const sevenRowActivity = sevenSubsegmentActivity?.[key] || null;
           const twentyeightRowActivity = twentyeightSubsegmentActivity?.[key] || null;
+
+          uniqueTotalsForTop.latest.clickPages += getSafeUniquePages(latestNow?.clicks, latestRowActivity?.clickPages);
+          uniqueTotalsForTop.latest.impressionPages += getSafeUniquePages(latestNow?.impressions, latestRowActivity?.impressionPages);
+          uniqueTotalsForTop.seven.clickPages += getSafeUniquePages(sevenNow?.clicks, sevenRowActivity?.clickPages);
+          uniqueTotalsForTop.seven.impressionPages += getSafeUniquePages(sevenNow?.impressions, sevenRowActivity?.impressionPages);
+          uniqueTotalsForTop.twentyeight.clickPages += getSafeUniquePages(twentyeightNow?.clicks, twentyeightRowActivity?.clickPages);
+          uniqueTotalsForTop.twentyeight.impressionPages += getSafeUniquePages(twentyeightNow?.impressions, twentyeightRowActivity?.impressionPages);
 
           const latestDate = hasDbWindows ? (dbWindowsByDays?.[1]?.[key]?.dateEnd || latestWindow?.endDate || '—') : (latestWindow?.endDate || '—');
           const sevenRange = hasDbWindows
@@ -60550,6 +60565,7 @@ Final Score: ${score}/100`;
           `;
         }).join('');
 
+        window.__dashboardSubsegmentUniqueTotals = uniqueTotalsForTop;
         host.innerHTML = cardsHtml;
       }
 
@@ -62376,8 +62392,8 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           domainStrength: domainCard
         });
 
-        await renderDashboardGscPeriodTiles(audit);
         await renderDashboardSubsegmentSections(audit);
+        await renderDashboardGscPeriodTiles(audit);
 
         // Async: refresh Domain Strength cache occasionally so the tile isn't stale.
         // Keep it non-blocking and avoid loops.
