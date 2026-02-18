@@ -60503,6 +60503,41 @@ Final Score: ${score}/100`;
           return clone;
         };
 
+        // Final display-level guard: after rounding, force Other as residual
+        // so rendered Landing+Event+Product+Other always matches top totals.
+        const rebalanceDisplayedResidualToOther = (periodBySegment, sitePeriod) => {
+          if (!periodBySegment || !sitePeriod) return periodBySegment;
+          const out = {};
+          defs.forEach(({ key }) => {
+            const src = periodBySegment?.[key] || {};
+            out[key] = {
+              clicks: toNum(src.clicks) || 0,
+              impressions: toNum(src.impressions) || 0,
+              ctrPct: toNum(src.ctrPct),
+              avgPosition: toNum(src.avgPosition)
+            };
+          });
+
+          const siteClicksRounded = Math.max(0, Math.round(toNum(sitePeriod?.clicks) || 0));
+          const siteImprRounded = Math.max(0, Math.round(toNum(sitePeriod?.impressions) || 0));
+          const lepClicksRounded = Math.max(0, Math.round(toNum(out?.landing?.clicks) || 0))
+            + Math.max(0, Math.round(toNum(out?.event?.clicks) || 0))
+            + Math.max(0, Math.round(toNum(out?.product?.clicks) || 0));
+          const lepImprRounded = Math.max(0, Math.round(toNum(out?.landing?.impressions) || 0))
+            + Math.max(0, Math.round(toNum(out?.event?.impressions) || 0))
+            + Math.max(0, Math.round(toNum(out?.product?.impressions) || 0));
+
+          out.other.clicks = Math.max(0, siteClicksRounded - lepClicksRounded);
+          out.other.impressions = Math.max(0, siteImprRounded - lepImprRounded);
+
+          defs.forEach(({ key }) => {
+            const c = toNum(out?.[key]?.clicks) || 0;
+            const i = toNum(out?.[key]?.impressions) || 0;
+            out[key].ctrPct = i > 0 ? ((c / i) * 100) : null;
+          });
+          return out;
+        };
+
         const latestDisplayBySegment = reconcilePeriodSegmentsToSite(
           hasDbWindows ? getPeriodBySegmentFromDb(1) : latestBySegment,
           latestWindow?.current || null
@@ -60515,6 +60550,10 @@ Final Score: ${score}/100`;
           hasDbWindows ? getPeriodBySegmentFromDb(28) : twentyeightBySegment,
           twentyEightDayWindow?.current || null
         ) || twentyeightBySegment;
+
+        const latestDisplayBalanced = rebalanceDisplayedResidualToOther(latestDisplayBySegment, latestWindow?.current || null) || latestDisplayBySegment;
+        const sevenDisplayBalanced = rebalanceDisplayedResidualToOther(sevenDisplayBySegment, sevenDayWindow?.current || null) || sevenDisplayBySegment;
+        const twentyeightDisplayBalanced = rebalanceDisplayedResidualToOther(twentyeightDisplayBySegment, twentyEightDayWindow?.current || null) || twentyeightDisplayBySegment;
 
         const uniqueTotalsForTop = {
           latest: { clickPages: 0, impressionPages: 0 },
@@ -60529,11 +60568,11 @@ Final Score: ${score}/100`;
             : (hasDbWindows
               ? (toNum(dbWindowsByDays?.[28]?.[key]?.pageCount) ?? toNum(authoritativeCounts?.[key]))
               : toNum(authoritativeCounts?.[key]));
-          const latestNow = latestDisplayBySegment?.[key] || null;
+          const latestNow = latestDisplayBalanced?.[key] || null;
           const latestPrev = latestPrevBySegment?.[key] || null;
-          const sevenNow = sevenDisplayBySegment?.[key] || null;
+          const sevenNow = sevenDisplayBalanced?.[key] || null;
           const sevenPrev = sevenPrevBySegment?.[key] || null;
-          const twentyeightNow = twentyeightDisplayBySegment?.[key] || {
+          const twentyeightNow = twentyeightDisplayBalanced?.[key] || {
             clicks: c.clicks,
             impressions: c.impressions,
             ctrPct: c.ctrPct,
