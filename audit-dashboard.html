@@ -59891,12 +59891,16 @@ Final Score: ${score}/100`;
       }
 
       function renderDashboardPeriodRow(periodLabel, dateLabel, metrics, prevMetrics, pageActivity = null) {
-        const clicksMeta = (pageActivity && pageActivity.clickPages != null)
-          ? `<div class="dashboard-kpi-meta">${formatInt(pageActivity.clickPages)} pages</div>`
-          : '';
-        const impressionsMeta = (pageActivity && pageActivity.impressionPages != null)
-          ? `<div class="dashboard-kpi-meta">${formatInt(pageActivity.impressionPages)} pages</div>`
-          : '';
+        const formatPagesMeta = (uniquePages) => {
+          if (uniquePages == null) return '';
+          const totalPages = toNum(pageActivity?.totalPages);
+          if (totalPages != null && totalPages > 0) {
+            return `<div class="dashboard-kpi-meta">${formatInt(totalPages)} pages (Unique pages ${formatInt(uniquePages)})</div>`;
+          }
+          return `<div class="dashboard-kpi-meta">Unique pages ${formatInt(uniquePages)}</div>`;
+        };
+        const clicksMeta = formatPagesMeta(pageActivity?.clickPages);
+        const impressionsMeta = formatPagesMeta(pageActivity?.impressionPages);
         return `
           <div class="dashboard-period-row">
             <div class="dashboard-period-label">
@@ -59944,6 +59948,9 @@ Final Score: ${score}/100`;
         const twentyEightDayWindow = computeDashboardPeriodWindow(rows, 28);
         const latestDate = rows.length ? rows[rows.length - 1].date : null;
         const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+        const topCounts = getAuthoritativeDashboardSubsegmentCounts(currentAudit || null, null);
+        const totalSitePages = ['landing', 'event', 'product', 'other']
+          .reduce((sum, key) => sum + (toNum(topCounts?.[key]) || 0), 0);
 
         if (!latestWindow || !sevenDayWindow || !twentyEightDayWindow) {
           host.innerHTML = `
@@ -59954,11 +59961,14 @@ Final Score: ${score}/100`;
           return;
         }
 
-        const [latestActivity, sevenActivity, twentyEightActivity] = await Promise.all([
+        const [latestRawActivity, sevenRawActivity, twentyEightRawActivity] = await Promise.all([
           fetchDashboardGscPageActivityCounts(propertyUrl, latestWindow.endDate, latestWindow.endDate),
           fetchDashboardGscPageActivityCounts(propertyUrl, sevenDayWindow.startDate, sevenDayWindow.endDate),
           fetchDashboardGscPageActivityCounts(propertyUrl, twentyEightDayWindow.startDate, twentyEightDayWindow.endDate)
         ]);
+        const latestActivity = latestRawActivity ? { ...latestRawActivity, totalPages: totalSitePages } : null;
+        const sevenActivity = sevenRawActivity ? { ...sevenRawActivity, totalPages: totalSitePages } : null;
+        const twentyEightActivity = twentyEightRawActivity ? { ...twentyEightRawActivity, totalPages: totalSitePages } : null;
 
         host.innerHTML = `
           <div class="dashboard-periods-headline">
