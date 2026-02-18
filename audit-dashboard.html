@@ -59976,6 +59976,8 @@ Final Score: ${score}/100`;
       async function renderDashboardGscPeriodTiles(currentAudit, options = {}) {
         const host = document.getElementById('dashboard-gsc-kpi-periods');
         if (!host) return;
+        const renderToken = options?.renderToken || null;
+        if (renderToken && window.__dashboardRenderToken && renderToken !== window.__dashboardRenderToken) return;
 
         const rows = getDashboardTimeseriesRowsFromAudit(currentAudit);
         const latestWindow = computeDashboardPeriodWindow(rows, 1);
@@ -59985,6 +59987,7 @@ Final Score: ${score}/100`;
         const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
 
         if (!latestWindow || !sevenDayWindow || !twentyEightDayWindow) {
+          if (renderToken && window.__dashboardRenderToken && renderToken !== window.__dashboardRenderToken) return;
           host.innerHTML = `
             <div class="dashboard-subsegment-empty" style="margin: 0;">
               KPI period tiles need GSC timeseries data. Run <strong>GSC & Backlink Audit</strong> in Configuration & Reporting.
@@ -60014,6 +60017,7 @@ Final Score: ${score}/100`;
           twentyEightActivity = twentyEightActivity || sumPageActivityFromSubsegments(twentyEightSubsegmentActivity) || twentyEightRawActivity || null;
         }
 
+        if (renderToken && window.__dashboardRenderToken && renderToken !== window.__dashboardRenderToken) return;
         host.innerHTML = `
           <div class="dashboard-periods-headline">
             <span>Search Console KPIs</span>
@@ -60289,9 +60293,11 @@ Final Score: ${score}/100`;
         return lookup;
       }
 
-      async function renderDashboardSubsegmentSections(currentAudit) {
+      async function renderDashboardSubsegmentSections(currentAudit, options = {}) {
         const host = document.getElementById('dashboard-subsegments-grid');
         if (!host) return;
+        const renderToken = options?.renderToken || null;
+        if (renderToken && window.__dashboardRenderToken && renderToken !== window.__dashboardRenderToken) return null;
 
         const current = aggregateDashboardSubsegmentMetrics(currentAudit || null);
         const authoritativeCounts = getAuthoritativeDashboardSubsegmentCounts(currentAudit || null, current);
@@ -60334,6 +60340,7 @@ Final Score: ${score}/100`;
         });
 
         if (!hasAnyData) {
+          if (renderToken && window.__dashboardRenderToken && renderToken !== window.__dashboardRenderToken) return null;
           host.innerHTML = `
             <div class="dashboard-subsegment-empty">
               Sub-segment sections appear after a fresh audit with page-level data. Run an audit to populate Landing, Event, Product, and Other sections.
@@ -60568,6 +60575,7 @@ Final Score: ${score}/100`;
           `;
         }).join('');
 
+        if (renderToken && window.__dashboardRenderToken && renderToken !== window.__dashboardRenderToken) return null;
         host.innerHTML = cardsHtml;
         return uniqueTotalsForTop;
       }
@@ -61916,6 +61924,8 @@ Final Score: ${score}/100`;
       }
 
       window.renderDashboardTab = async function renderDashboardTab() {
+        const renderToken = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        window.__dashboardRenderToken = renderToken;
         // CRITICAL: Fetch latest audit from Supabase to ensure we have fresh data
         // This ensures Audit Scan and Money Pages tiles show the latest data after global audit
         try {
@@ -62395,8 +62405,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           domainStrength: domainCard
         });
 
-        const topUniqueFromSegments = await renderDashboardSubsegmentSections(audit);
-        await renderDashboardGscPeriodTiles(audit, { topUniqueFromSegments });
+        const topUniqueFromSegments = await renderDashboardSubsegmentSections(audit, { renderToken });
+        if (window.__dashboardRenderToken !== renderToken) return;
+        await renderDashboardGscPeriodTiles(audit, { topUniqueFromSegments, renderToken });
 
         // Async: refresh Domain Strength cache occasionally so the tile isn't stale.
         // Keep it non-blocking and avoid loops.
