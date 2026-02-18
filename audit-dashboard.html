@@ -1954,6 +1954,121 @@
       margin-top: 0.75rem;
       padding-left: 0.25rem;
     }
+    section[data-panel="dashboard"] .dashboard-subsegments-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+    section[data-panel="dashboard"] .dashboard-periods-section {
+      margin-top: 1rem;
+      background: rgba(15, 20, 25, 0.25);
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      border-radius: 12px;
+      padding: 0.85rem;
+    }
+    section[data-panel="dashboard"] .dashboard-periods-headline {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.65rem;
+      font-size: 0.85rem;
+      color: var(--dark-text-muted);
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+    section[data-panel="dashboard"] .dashboard-period-rows {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 0.75rem;
+    }
+    section[data-panel="dashboard"] .dashboard-period-row {
+      display: grid;
+      grid-template-columns: 190px repeat(4, minmax(0, 1fr));
+      gap: 0.6rem;
+      align-items: stretch;
+    }
+    section[data-panel="dashboard"] .dashboard-period-label {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 0.15rem;
+      background: rgba(15, 20, 25, 0.38);
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      border-radius: 10px;
+      padding: 0.55rem 0.7rem;
+      color: var(--dark-text);
+      min-height: 74px;
+    }
+    section[data-panel="dashboard"] .dashboard-period-label strong {
+      font-size: 0.92rem;
+      letter-spacing: -0.01em;
+    }
+    section[data-panel="dashboard"] .dashboard-period-date {
+      font-size: 0.72rem;
+      color: var(--dark-text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    section[data-panel="dashboard"] .dashboard-segment-subtitle {
+      font-size: 0.72rem;
+      color: var(--dark-text-muted);
+      margin-bottom: 0.45rem;
+    }
+    section[data-panel="dashboard"] .dashboard-subsegment-card {
+      background: linear-gradient(145deg, rgba(15, 23, 42, 0.95), rgba(17, 24, 39, 0.92));
+      border: 1px solid rgba(148, 163, 184, 0.24);
+      border-radius: 12px;
+      padding: 1rem;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+    }
+    section[data-panel="dashboard"] .dashboard-subsegment-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.5rem;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+      padding-bottom: 0.55rem;
+    }
+    section[data-panel="dashboard"] .dashboard-subsegment-title {
+      font-size: 1rem;
+      font-weight: 800;
+      letter-spacing: -0.01em;
+      color: var(--dark-text);
+    }
+    section[data-panel="dashboard"] .dashboard-subsegment-count {
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--dark-text-muted);
+      background: rgba(15, 20, 25, 0.45);
+      border: 1px solid rgba(148, 163, 184, 0.28);
+      border-radius: 999px;
+      padding: 0.2rem 0.55rem;
+      white-space: nowrap;
+    }
+    section[data-panel="dashboard"] .dashboard-subsegment-empty {
+      grid-column: 1 / -1;
+      background: rgba(15, 20, 25, 0.35);
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      border-radius: 12px;
+      padding: 1rem;
+      color: var(--dark-text-muted);
+      font-size: 0.9rem;
+    }
+    @media (max-width: 1100px) {
+      section[data-panel="dashboard"] .dashboard-subsegments-grid {
+        grid-template-columns: 1fr;
+      }
+      section[data-panel="dashboard"] .dashboard-period-row {
+        grid-template-columns: 1fr 1fr;
+      }
+      section[data-panel="dashboard"] .dashboard-period-label {
+        grid-column: 1 / -1;
+      }
+    }
     section[data-panel="dashboard"] .dashboard-kpi-tile {
       background: rgba(15, 20, 25, 0.35);
       border: 1px solid rgba(148, 163, 184, 0.18);
@@ -5206,6 +5321,9 @@
             </div>
           </div>
         </div>
+
+        <div class="dashboard-periods-section" id="dashboard-gsc-kpi-periods"></div>
+        <div class="dashboard-subsegments-grid" id="dashboard-subsegments-grid"></div>
       </section>
 
       <!-- Authority Panel -->
@@ -30428,6 +30546,13 @@
         
         // Save audit results to localStorage AFTER Supabase save (for performance/caching)
         saveAuditResults(scores, searchData, snippetReadiness, schemaAudit, localSignals, siteReviews, backlinkMetrics);
+
+        // Ensure dashboard period tiles refresh immediately after Config tab audit run.
+        if (typeof window.renderDashboardTab === 'function') {
+          setTimeout(() => {
+            try { window.renderDashboardTab(); } catch (e) {}
+          }, 250);
+        }
         
         // Update audit timestamp display after saving - with retry mechanism for Supabase commit delay
         if (typeof updateAuditTimestamp === 'function') {
@@ -59642,6 +59767,327 @@ Final Score: ${score}/100`;
         `;
       }
 
+      function getDashboardQueryPagesFromAudit(auditLike) {
+        if (!auditLike || typeof auditLike !== 'object') return [];
+        if (Array.isArray(auditLike?.searchData?.queryPages)) return auditLike.searchData.queryPages;
+        if (Array.isArray(auditLike?.queryPages)) return auditLike.queryPages;
+        return [];
+      }
+
+      function getDashboardTimeseriesRowsFromAudit(auditLike) {
+        if (!auditLike || typeof auditLike !== 'object') return [];
+        const fromSearchData = auditLike?.searchData?.timeseries;
+        const fromRaw = auditLike?.searchData?._gscResponse?.data?.timeseries;
+        const rows = Array.isArray(fromSearchData) && fromSearchData.length > 0
+          ? fromSearchData
+          : (Array.isArray(fromRaw) ? fromRaw : []);
+        if (!Array.isArray(rows) || rows.length === 0) return [];
+
+        const normalized = rows
+          .map((r) => {
+            const date = r?.date || r?.day || r?.date_end || null;
+            const clicks = toNum(r?.clicks ?? r?.totalClicks ?? r?.gsc_clicks ?? null);
+            const impressions = toNum(r?.impressions ?? r?.totalImpressions ?? r?.gsc_impressions ?? null);
+            const rawCtr = toNum(r?.ctr ?? r?.gsc_ctr ?? null);
+            const ctrPct = rawCtr == null ? null : (rawCtr <= 1 ? rawCtr * 100 : rawCtr);
+            const avgPosition = toNum(r?.avgPosition ?? r?.position ?? r?.avg_position ?? null);
+            if (!date) return null;
+            return { date: String(date), clicks, impressions, ctrPct, avgPosition };
+          })
+          .filter(Boolean)
+          .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+
+        return normalized;
+      }
+
+      function computeDashboardPeriodWindow(rows, days = 28) {
+        if (!Array.isArray(rows) || rows.length === 0) return null;
+        const n = Math.max(1, Math.min(days, rows.length));
+        const currentSlice = rows.slice(rows.length - n);
+        const prevSlice = rows.slice(Math.max(0, rows.length - (2 * n)), Math.max(0, rows.length - n));
+
+        const agg = (slice) => {
+          if (!Array.isArray(slice) || slice.length === 0) {
+            return { clicks: null, impressions: null, ctrPct: null, avgPosition: null };
+          }
+          let clicks = 0;
+          let impressions = 0;
+          let weightedPos = 0;
+          let posImpr = 0;
+          slice.forEach((r) => {
+            const c = toNum(r?.clicks) || 0;
+            const i = toNum(r?.impressions) || 0;
+            const p = toNum(r?.avgPosition);
+            clicks += c;
+            impressions += i;
+            if (p != null && i > 0) {
+              weightedPos += (p * i);
+              posImpr += i;
+            }
+          });
+          return {
+            clicks,
+            impressions,
+            ctrPct: impressions > 0 ? ((clicks / impressions) * 100) : null,
+            avgPosition: posImpr > 0 ? (weightedPos / posImpr) : null
+          };
+        };
+
+        const current = agg(currentSlice);
+        const prev = agg(prevSlice);
+        const startDate = currentSlice[0]?.date || null;
+        const endDate = currentSlice[currentSlice.length - 1]?.date || null;
+        return { current, prev, startDate, endDate, days: n };
+      }
+
+      function formatDashboardPctDelta(curr, prev, { betterLower = false } = {}) {
+        const c = toNum(curr);
+        const p = toNum(prev);
+        if (c == null || p == null || p === 0) return '';
+        const raw = ((c - p) / Math.abs(p)) * 100;
+        const dir = betterLower ? (raw < 0 ? 'up' : raw > 0 ? 'down' : 'flat') : (raw > 0 ? 'up' : raw < 0 ? 'down' : 'flat');
+        const absText = `${raw >= 0 ? '+' : ''}${raw.toFixed(1)}%`;
+        return `<div class="dashboard-kpi-delta" data-dir="${dir}">△ ${absText}</div>`;
+      }
+
+      function renderDashboardPeriodTile(label, value, deltaHtml = '') {
+        return `
+          <div class="dashboard-kpi-tile">
+            <div class="dashboard-kpi-label">${label}</div>
+            <div class="dashboard-kpi-value">${value}</div>
+            ${deltaHtml}
+          </div>
+        `;
+      }
+
+      function renderDashboardPeriodRow(periodLabel, dateLabel, metrics, prevMetrics) {
+        return `
+          <div class="dashboard-period-row">
+            <div class="dashboard-period-label">
+              <strong>${periodLabel}</strong>
+              <div class="dashboard-period-date">${dateLabel || '—'}</div>
+            </div>
+            ${renderDashboardPeriodTile('Clicks', formatInt(metrics?.clicks), formatDashboardPctDelta(metrics?.clicks, prevMetrics?.clicks))}
+            ${renderDashboardPeriodTile('Impressions', formatInt(metrics?.impressions), formatDashboardPctDelta(metrics?.impressions, prevMetrics?.impressions))}
+            ${renderDashboardPeriodTile('Avg position', metrics?.avgPosition != null ? formatFixed(metrics.avgPosition, 1) : '—', formatDashboardPctDelta(metrics?.avgPosition, prevMetrics?.avgPosition, { betterLower: true }))}
+            ${renderDashboardPeriodTile('CTR', metrics?.ctrPct != null ? formatPct(metrics.ctrPct, 2) : '—', formatDashboardPctDelta(metrics?.ctrPct, prevMetrics?.ctrPct))}
+          </div>
+        `;
+      }
+
+      function renderDashboardGscPeriodTiles(currentAudit) {
+        const host = document.getElementById('dashboard-gsc-kpi-periods');
+        if (!host) return;
+
+        const rows = getDashboardTimeseriesRowsFromAudit(currentAudit);
+        const latestWindow = computeDashboardPeriodWindow(rows, 1);
+        const sevenDayWindow = computeDashboardPeriodWindow(rows, 7);
+        const twentyEightDayWindow = computeDashboardPeriodWindow(rows, 28);
+        const latestDate = rows.length ? rows[rows.length - 1].date : null;
+
+        if (!latestWindow || !sevenDayWindow || !twentyEightDayWindow) {
+          host.innerHTML = `
+            <div class="dashboard-subsegment-empty" style="margin: 0;">
+              KPI period tiles need GSC timeseries data. Run <strong>GSC & Backlink Audit</strong> in Configuration & Reporting.
+            </div>
+          `;
+          return;
+        }
+
+        host.innerHTML = `
+          <div class="dashboard-periods-headline">
+            <span>Search Console KPIs</span>
+            <span>Latest available date: ${latestDate || '—'} (normally 2-day GSC lag)</span>
+          </div>
+          <div class="dashboard-period-rows">
+            ${renderDashboardPeriodRow('Latest (GSC latest day)', latestWindow.endDate || '—', latestWindow.current, latestWindow.prev)}
+            ${renderDashboardPeriodRow('7 days', `${sevenDayWindow.startDate || '—'} -> ${sevenDayWindow.endDate || '—'}`, sevenDayWindow.current, sevenDayWindow.prev)}
+            ${renderDashboardPeriodRow('28 days', `${twentyEightDayWindow.startDate || '—'} -> ${twentyEightDayWindow.endDate || '—'}`, twentyEightDayWindow.current, twentyEightDayWindow.prev)}
+          </div>
+        `;
+      }
+
+      function normalizeDashboardSubsegment(rawSegment) {
+        const seg = String(rawSegment || '').toLowerCase();
+        if (seg === 'landing') return 'landing';
+        if (seg === 'event') return 'event';
+        if (seg === 'product') return 'product';
+        return 'other';
+      }
+
+      function classifyDashboardSubsegment(url) {
+        try {
+          if (typeof classifyPortfolioSegmentFromUrl === 'function') {
+            return normalizeDashboardSubsegment(classifyPortfolioSegmentFromUrl(url || ''));
+          }
+          if (typeof classifyMoneyPageSubSegment === 'function') {
+            return normalizeDashboardSubsegment(classifyMoneyPageSubSegment(url || ''));
+          }
+        } catch (err) {
+          // ignore and use default
+        }
+        return 'other';
+      }
+
+      function aggregateDashboardSubsegmentMetrics(auditLike) {
+        const buckets = {
+          landing: { pages: new Set(), clicks: 0, impressions: 0, weightedPos: 0 },
+          event: { pages: new Set(), clicks: 0, impressions: 0, weightedPos: 0 },
+          product: { pages: new Set(), clicks: 0, impressions: 0, weightedPos: 0 },
+          other: { pages: new Set(), clicks: 0, impressions: 0, weightedPos: 0 }
+        };
+
+        const addRow = (url, clicks, impressions, position, forcedBucket = null) => {
+          const bucketKey = forcedBucket || classifyDashboardSubsegment(url);
+          const bucket = buckets[bucketKey] || buckets.other;
+          if (url) bucket.pages.add(String(url));
+
+          const c = toNum(clicks) || 0;
+          const i = toNum(impressions) || 0;
+          const p = toNum(position);
+
+          bucket.clicks += c;
+          bucket.impressions += i;
+          if (p != null && i > 0) {
+            bucket.weightedPos += (p * i);
+          }
+        };
+
+        const queryPages = getDashboardQueryPagesFromAudit(auditLike);
+        if (Array.isArray(queryPages) && queryPages.length > 0) {
+          queryPages.forEach((row) => {
+            const url = row?.page || row?.url || row?.best_url || row?.bestUrl || '';
+            addRow(url, row?.clicks, row?.impressions, row?.position ?? row?.avgPosition ?? null);
+          });
+        } else {
+          const moneyMetrics = auditLike?.scores?.moneyPagesMetrics || auditLike?.moneyPagesMetrics || null;
+          const moneyRows = Array.isArray(moneyMetrics?.rows) ? moneyMetrics.rows : [];
+          moneyRows.forEach((row) => {
+            const url = row?.url || '';
+            const forcedBucket = normalizeDashboardSubsegment(row?.subSegment);
+            addRow(url, row?.clicks, row?.impressions, row?.avgPosition ?? null, forcedBucket);
+          });
+        }
+
+        const formatBucket = (bucket) => {
+          const impressions = bucket.impressions || 0;
+          const clicks = bucket.clicks || 0;
+          const ctrPct = impressions > 0 ? ((clicks / impressions) * 100) : null;
+          const avgPosition = impressions > 0 ? (bucket.weightedPos / impressions) : null;
+          return {
+            pageCount: bucket.pages.size,
+            clicks,
+            impressions,
+            ctrPct,
+            avgPosition
+          };
+        };
+
+        return {
+          landing: formatBucket(buckets.landing),
+          event: formatBucket(buckets.event),
+          product: formatBucket(buckets.product),
+          other: formatBucket(buckets.other)
+        };
+      }
+
+      function renderDashboardSubsegmentSections(currentAudit) {
+        const host = document.getElementById('dashboard-subsegments-grid');
+        if (!host) return;
+
+        const current = aggregateDashboardSubsegmentMetrics(currentAudit || null);
+        const rows = getDashboardTimeseriesRowsFromAudit(currentAudit);
+        const latestWindow = computeDashboardPeriodWindow(rows, 1);
+        const sevenDayWindow = computeDashboardPeriodWindow(rows, 7);
+        const twentyEightDayWindow = computeDashboardPeriodWindow(rows, 28);
+        const siteBaseline28 = twentyEightDayWindow?.current || null;
+
+        const defs = [
+          { key: 'landing', label: 'Landing Pages' },
+          { key: 'event', label: 'Event Pages' },
+          { key: 'product', label: 'Product Pages' },
+          { key: 'other', label: 'Other' }
+        ];
+
+        const hasAnyData = defs.some(({ key }) => {
+          const seg = current[key];
+          return (seg?.pageCount || 0) > 0 || (seg?.impressions || 0) > 0 || (seg?.clicks || 0) > 0;
+        });
+
+        if (!hasAnyData) {
+          host.innerHTML = `
+            <div class="dashboard-subsegment-empty">
+              Sub-segment sections appear after a fresh audit with page-level data. Run an audit to populate Landing, Event, Product, and Other sections.
+            </div>
+          `;
+          return;
+        }
+
+        const projectPeriodForSegment = (seg, periodMetrics) => {
+          if (!periodMetrics) return null;
+          const segClicks28 = toNum(seg?.clicks) || 0;
+          const segImpr28 = toNum(seg?.impressions) || 0;
+          const siteClicks28 = toNum(siteBaseline28?.clicks) || 0;
+          const siteImpr28 = toNum(siteBaseline28?.impressions) || 0;
+          const clicksShare = siteClicks28 > 0 ? (segClicks28 / siteClicks28) : 0;
+          const imprShare = siteImpr28 > 0 ? (segImpr28 / siteImpr28) : 0;
+
+          const projectedClicks = Math.max(0, (toNum(periodMetrics?.clicks) || 0) * clicksShare);
+          const projectedImpressions = Math.max(0, (toNum(periodMetrics?.impressions) || 0) * imprShare);
+          const projectedCtr = projectedImpressions > 0 ? ((projectedClicks / projectedImpressions) * 100) : null;
+
+          let projectedPos = toNum(seg?.avgPosition);
+          const sitePos28 = toNum(siteBaseline28?.avgPosition);
+          const sitePosPeriod = toNum(periodMetrics?.avgPosition);
+          if (projectedPos != null && sitePos28 != null && sitePos28 > 0 && sitePosPeriod != null) {
+            projectedPos = projectedPos * (sitePosPeriod / sitePos28);
+          }
+
+          return {
+            clicks: projectedClicks,
+            impressions: projectedImpressions,
+            ctrPct: projectedCtr,
+            avgPosition: projectedPos
+          };
+        };
+
+        const cardsHtml = defs.map(({ key, label }) => {
+          const c = current[key] || {};
+          const latestNow = projectPeriodForSegment(c, latestWindow?.current);
+          const latestPrev = projectPeriodForSegment(c, latestWindow?.prev);
+          const sevenNow = projectPeriodForSegment(c, sevenDayWindow?.current);
+          const sevenPrev = projectPeriodForSegment(c, sevenDayWindow?.prev);
+          const twentyeightNow = projectPeriodForSegment(c, twentyEightDayWindow?.current) || {
+            clicks: c.clicks,
+            impressions: c.impressions,
+            ctrPct: c.ctrPct,
+            avgPosition: c.avgPosition
+          };
+          const twentyeightPrev = projectPeriodForSegment(c, twentyEightDayWindow?.prev);
+
+          const latestDate = latestWindow?.endDate || '—';
+          const sevenRange = `${sevenDayWindow?.startDate || '—'} -> ${sevenDayWindow?.endDate || '—'}`;
+          const twentyeightRange = `${twentyEightDayWindow?.startDate || '—'} -> ${twentyEightDayWindow?.endDate || '—'}`;
+
+          return `
+            <div class="dashboard-subsegment-card">
+              <div class="dashboard-subsegment-header">
+                <div class="dashboard-subsegment-title">${label}</div>
+                <div class="dashboard-subsegment-count">${formatInt(c.pageCount || 0)} pages</div>
+              </div>
+              <div class="dashboard-segment-subtitle">Sub-segment trend tiles aligned to Latest / 7d / 28d windows.</div>
+              <div class="dashboard-period-rows">
+                ${renderDashboardPeriodRow('Latest', latestDate, latestNow, latestPrev)}
+                ${renderDashboardPeriodRow('7 days', sevenRange, sevenNow, sevenPrev)}
+                ${renderDashboardPeriodRow('28 days', twentyeightRange, twentyeightNow, twentyeightPrev)}
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        host.innerHTML = cardsHtml;
+      }
+
       function renderDashboardGaioPillarsAndRadar(pillars, prevPillars) {
         const host = document.getElementById('dashboard-gaio-pillars');
         if (!host) return;
@@ -61464,6 +61910,9 @@ Signals used (where available): reviews+behaviour+local signals, content/schema+
           optimisation: optCard,
           domainStrength: domainCard
         });
+
+        renderDashboardGscPeriodTiles(audit);
+        renderDashboardSubsegmentSections(audit);
 
         // Async: refresh Domain Strength cache occasionally so the tile isn't stale.
         // Keep it non-blocking and avoid loops.
