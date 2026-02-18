@@ -60091,10 +60091,11 @@ Final Score: ${score}/100`;
         return 'generic';
       }
 
-      function renderDashboardPeriodTile(label, value, deltaHtml = '', metaHtml = '') {
+      function renderDashboardPeriodTile(label, value, deltaHtml = '', metaHtml = '', options = {}) {
         const metricKey = getDashboardKpiMetricKey(label);
+        const drillMetric = String(options?.drillMetric || metricKey || 'generic').toLowerCase();
         return `
-          <div class="dashboard-kpi-tile" data-metric="${metricKey}">
+          <div class="dashboard-kpi-tile" data-metric="${metricKey}" data-drilldown-metric="${drillMetric}">
             <div class="dashboard-kpi-label">${label}</div>
             <div class="dashboard-kpi-value">${value}</div>
             ${metaHtml}
@@ -60111,7 +60112,8 @@ Final Score: ${score}/100`;
         return Math.max(0, Math.min(Math.round(unique), Math.round(total)));
       }
 
-      function renderDashboardPeriodRow(periodLabel, dateLabel, metrics, prevMetrics, pageActivity = null) {
+      function renderDashboardPeriodRow(periodLabel, dateLabel, metrics, prevMetrics, pageActivity = null, options = {}) {
+        const periodKey = String(options?.periodKey || '').trim().toLowerCase();
         const formatPagesMeta = (uniquePages, kind) => {
           const totalMetric = kind === 'clicks' ? metrics?.clicks : metrics?.impressions;
           const safeUnique = getSafeUniquePages(totalMetric, uniquePages);
@@ -60121,15 +60123,15 @@ Final Score: ${score}/100`;
         const clicksMeta = formatPagesMeta(pageActivity?.clickPages, 'clicks');
         const impressionsMeta = formatPagesMeta(pageActivity?.impressionPages, 'impressions');
         return `
-          <div class="dashboard-period-row">
+          <div class="dashboard-period-row" data-period-key="${escapeHtml(periodKey || '')}">
             <div class="dashboard-period-label">
               <strong>${periodLabel}</strong>
               <div class="dashboard-period-date">${dateLabel || '—'}</div>
             </div>
-            ${renderDashboardPeriodTile('Clicks', formatInt(metrics?.clicks), formatDashboardPctDelta(metrics?.clicks, prevMetrics?.clicks), clicksMeta)}
-            ${renderDashboardPeriodTile('Impressions', formatInt(metrics?.impressions), formatDashboardPctDelta(metrics?.impressions, prevMetrics?.impressions), impressionsMeta)}
-            ${renderDashboardPeriodTile('Avg position', metrics?.avgPosition != null ? formatFixed(metrics.avgPosition, 1) : '—', formatDashboardPctDelta(metrics?.avgPosition, prevMetrics?.avgPosition, { betterLower: true }))}
-            ${renderDashboardPeriodTile('CTR', metrics?.ctrPct != null ? formatPct(metrics.ctrPct, 2) : '—', formatDashboardPctDelta(metrics?.ctrPct, prevMetrics?.ctrPct))}
+            ${renderDashboardPeriodTile('Clicks', formatInt(metrics?.clicks), formatDashboardPctDelta(metrics?.clicks, prevMetrics?.clicks), clicksMeta, { drillMetric: 'clicks' })}
+            ${renderDashboardPeriodTile('Impressions', formatInt(metrics?.impressions), formatDashboardPctDelta(metrics?.impressions, prevMetrics?.impressions), impressionsMeta, { drillMetric: 'impressions' })}
+            ${renderDashboardPeriodTile('Avg position', metrics?.avgPosition != null ? formatFixed(metrics.avgPosition, 1) : '—', formatDashboardPctDelta(metrics?.avgPosition, prevMetrics?.avgPosition, { betterLower: true }), '', { drillMetric: 'avg-position' })}
+            ${renderDashboardPeriodTile('CTR', metrics?.ctrPct != null ? formatPct(metrics.ctrPct, 2) : '—', formatDashboardPctDelta(metrics?.ctrPct, prevMetrics?.ctrPct), '', { drillMetric: 'ctr' })}
           </div>
         `;
       }
@@ -60643,6 +60645,8 @@ Final Score: ${score}/100`;
         const subsegmentView = validSubsegmentViews.has(storedSubsegmentView) ? storedSubsegmentView : 'tier';
         const subsegmentUiState = window.__dashboardSubsegmentUiState || {
           selectedSegment: null,
+          metricFilter: 'all',
+          selectedPeriodKey: null,
           sortKey: 'clicks',
           sortDir: 'desc',
           page: 1,
@@ -60975,10 +60979,10 @@ Final Score: ${score}/100`;
             : `${ninetyDayWindow?.startDate || '—'} -> ${ninetyDayWindow?.endDate || '—'}`;
 
           const periodRows = {
-            today: renderDashboardPeriodRow('Today', latestDate, latestNow, latestPrev, latestRowActivity),
-            '7d': renderDashboardPeriodRow('7 days', sevenRange, sevenNow, sevenPrev, sevenRowActivity),
-            '28d': renderDashboardPeriodRow('28 days', twentyeightRange, twentyeightNow, twentyeightPrev, twentyeightRowActivity),
-            '90d': renderDashboardPeriodRow('90 days', ninetyRange, ninetyNow, ninetyPrev, ninetyRowActivity)
+            today: renderDashboardPeriodRow('Today', latestDate, latestNow, latestPrev, latestRowActivity, { periodKey: 'today' }),
+            '7d': renderDashboardPeriodRow('7 days', sevenRange, sevenNow, sevenPrev, sevenRowActivity, { periodKey: '7d' }),
+            '28d': renderDashboardPeriodRow('28 days', twentyeightRange, twentyeightNow, twentyeightPrev, twentyeightRowActivity, { periodKey: '28d' }),
+            '90d': renderDashboardPeriodRow('90 days', ninetyRange, ninetyNow, ninetyPrev, ninetyRowActivity, { periodKey: '90d' })
           };
           const visibleRowsHtml = subsegmentView === 'tier'
             ? `${periodRows.today}${periodRows['7d']}${periodRows['28d']}${periodRows['90d']}`
@@ -61086,7 +61090,9 @@ Final Score: ${score}/100`;
             hostEl.innerHTML = `<div style="color: var(--dark-text-muted); font-size: 0.8rem;">Click a sub-segment tile to open the filtered URL table.</div>`;
             return;
           }
-          const period = activePeriod || periodByView['28d'];
+          const selectedPeriodKey = String(subsegmentUiState.selectedPeriodKey || '').toLowerCase();
+          const periodKey = periodByView?.[selectedPeriodKey] ? selectedPeriodKey : activePeriodKey;
+          const period = periodByView?.[periodKey] || activePeriod || periodByView['28d'];
           if (!period?.startDate || !period?.endDate) {
             hostEl.innerHTML = `<div style="color: var(--dark-text-muted); font-size: 0.8rem;">No period date range available for drilldown.</div>`;
             return;
@@ -61097,8 +61103,25 @@ Final Score: ${score}/100`;
             hostEl.innerHTML = `<div style="color: var(--dark-text-muted); font-size: 0.8rem;">No page rows returned for this period.</div>`;
             return;
           }
+          const metricFilter = String(subsegmentUiState.metricFilter || 'all').toLowerCase();
+          const metricFilterLabel = metricFilter === 'clicks'
+            ? 'Clicks > 0'
+            : metricFilter === 'impressions'
+              ? 'Impressions > 0'
+              : metricFilter === 'ctr'
+                ? 'CTR > 0'
+                : metricFilter === 'avg-position'
+                  ? 'Has avg position'
+                  : 'All rows';
+          const metricPredicate = (row) => {
+            if (metricFilter === 'clicks') return (toNum(row?.clicks) || 0) > 0;
+            if (metricFilter === 'impressions') return (toNum(row?.impressions) || 0) > 0;
+            if (metricFilter === 'ctr') return (toNum(row?.ctrPct) || 0) > 0;
+            if (metricFilter === 'avg-position') return (toNum(row?.impressions) || 0) > 0 && toNum(row?.avgPosition) != null;
+            return true;
+          };
           const q = String(subsegmentUiState.query || '').trim().toLowerCase();
-          const filtered = pageRows.filter((row) => row.segment === selected && (!q || String(row.url || '').toLowerCase().includes(q)));
+          const filtered = pageRows.filter((row) => row.segment === selected && metricPredicate(row) && (!q || String(row.url || '').toLowerCase().includes(q)));
           const sortKey = subsegmentUiState.sortKey || 'clicks';
           const sortDir = subsegmentUiState.sortDir === 'asc' ? 'asc' : 'desc';
           filtered.sort((a, b) => {
@@ -61116,7 +61139,7 @@ Final Score: ${score}/100`;
           const pageRowsSlice = filtered.slice(startIdx, startIdx + rowsPerPage);
           hostEl.innerHTML = `
             <div class="dashboard-segment-drilldown-controls">
-              <div style="font-weight:800; color: var(--dark-text);">${defs.find((d) => d.key === selected)?.label || selected} • Top URLs (${period.label})</div>
+              <div style="font-weight:800; color: var(--dark-text);">${defs.find((d) => d.key === selected)?.label || selected} • Top URLs (${period.label}) • ${metricFilterLabel}</div>
               <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
                 <input id="dashboard-segment-search" type="text" placeholder="Filter URL..." value="${escapeHtml(subsegmentUiState.query || '')}">
                 <label style="font-size:0.74rem; color:var(--dark-text-muted);">Rows
@@ -61227,6 +61250,25 @@ Final Score: ${score}/100`;
             const seg = String(card.getAttribute('data-dashboard-segment') || '');
             if (!seg) return;
             subsegmentUiState.selectedSegment = seg;
+            subsegmentUiState.metricFilter = 'all';
+            subsegmentUiState.selectedPeriodKey = null;
+            subsegmentUiState.page = 1;
+            renderSegmentDrilldown();
+          });
+        });
+        host.querySelectorAll('[data-dashboard-segment] .dashboard-kpi-tile[data-drilldown-metric]').forEach((tile) => {
+          tile.addEventListener('click', (evt) => {
+            evt.preventDefault();
+            evt.stopPropagation();
+            const card = tile.closest('[data-dashboard-segment]');
+            const seg = String(card?.getAttribute('data-dashboard-segment') || '');
+            if (!seg) return;
+            const rowEl = tile.closest('.dashboard-period-row');
+            const periodKey = String(rowEl?.getAttribute('data-period-key') || '').toLowerCase();
+            const metric = String(tile.getAttribute('data-drilldown-metric') || 'all').toLowerCase();
+            subsegmentUiState.selectedSegment = seg;
+            subsegmentUiState.metricFilter = metric;
+            subsegmentUiState.selectedPeriodKey = periodKey || null;
             subsegmentUiState.page = 1;
             renderSegmentDrilldown();
           });
