@@ -11,6 +11,19 @@
 import { getGSCAccessToken, normalizePropertyUrl, parseDateRange } from './utils.js';
 import { classifyPageSegment, PageSegment } from './pageSegment.js';
 
+const normalisePageUrl = (rawUrl, fallbackSiteUrl) => {
+  try {
+    const base = normalizePropertyUrl(fallbackSiteUrl || '');
+    const u = new URL(String(rawUrl || ''), base);
+    const host = u.hostname.replace(/^www\./i, '').toLowerCase();
+    let path = (u.pathname || '/').toLowerCase();
+    path = path.replace(/\/+$/, '') || '/';
+    return `https://${host}${path}`;
+  } catch {
+    return String(rawUrl || '').trim().toLowerCase();
+  }
+};
+
 const classifyMoneySubsegment = (url) => {
   const u = String(url || '').toLowerCase();
   if (u.includes('/beginners-photography-lessons') || u.includes('/photographic-workshops-near-me')) return 'event';
@@ -108,7 +121,8 @@ export default async function handler(req, res) {
       if (rows.length === 0) break;
 
       rows.forEach((row) => {
-        const pageUrl = row?.keys?.[0] || '';
+        const rawPage = row?.keys?.[0] || '';
+        const pageUrl = normalisePageUrl(rawPage, siteUrl);
         const segment = getDashboardSubsegment(pageUrl);
         const clicks = Number(row?.clicks || 0);
         const impressions = Number(row?.impressions || 0);

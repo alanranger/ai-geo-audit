@@ -8,6 +8,19 @@
 
 import { getGSCAccessToken, normalizePropertyUrl, parseDateRange } from './utils.js';
 
+const normalisePageUrl = (rawUrl, fallbackSiteUrl) => {
+  try {
+    const base = normalizePropertyUrl(fallbackSiteUrl || '');
+    const u = new URL(String(rawUrl || ''), base);
+    const host = u.hostname.replace(/^www\./i, '').toLowerCase();
+    let path = (u.pathname || '/').toLowerCase();
+    path = path.replace(/\/+$/, '') || '/';
+    return `https://${host}${path}`;
+  } catch {
+    return String(rawUrl || '').trim().toLowerCase();
+  }
+};
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -41,8 +54,8 @@ export default async function handler(req, res) {
 
     const rowLimit = 25000;
     let startRow = 0;
-    let clickPages = 0;
-    let impressionPages = 0;
+    const clickPageSet = new Set();
+    const impressionPageSet = new Set();
     let fetchedRows = 0;
 
     while (true) {
@@ -77,10 +90,13 @@ export default async function handler(req, res) {
       if (rows.length === 0) break;
 
       rows.forEach((row) => {
+        const rawPage = row?.keys?.[0] || '';
+        const pageKey = normalisePageUrl(rawPage, siteUrl);
+        if (!pageKey) return;
         const clicks = Number(row?.clicks || 0);
         const impressions = Number(row?.impressions || 0);
-        if (clicks > 0) clickPages += 1;
-        if (impressions > 0) impressionPages += 1;
+        if (clicks > 0) clickPageSet.add(pageKey);
+        if (impressions > 0) impressionPageSet.add(pageKey);
       });
 
       fetchedRows += rows.length;
@@ -93,8 +109,8 @@ export default async function handler(req, res) {
       source: 'gsc-page-activity-counts',
       params: { property: siteUrl, startDate, endDate },
       data: {
-        clickPages,
-        impressionPages
+        clickPages: clickPageSet.size,
+        impressionPages: impressionPageSet.size
       },
       meta: {
         fetchedRows,

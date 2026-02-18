@@ -59891,16 +59891,13 @@ Final Score: ${score}/100`;
       }
 
       function renderDashboardPeriodRow(periodLabel, dateLabel, metrics, prevMetrics, pageActivity = null) {
-        const formatPagesMeta = (uniquePages) => {
+        const formatPagesMeta = (uniquePages, kind) => {
           if (uniquePages == null) return '';
-          const totalPages = toNum(pageActivity?.totalPages);
-          if (totalPages != null && totalPages > 0) {
-            return `<div class="dashboard-kpi-meta">${formatInt(uniquePages)} pages (Total pages ${formatInt(totalPages)})</div>`;
-          }
-          return `<div class="dashboard-kpi-meta">${formatInt(uniquePages)} pages</div>`;
+          if (kind === 'clicks') return `<div class="dashboard-kpi-meta">${formatInt(uniquePages)} unique pages clicked</div>`;
+          return `<div class="dashboard-kpi-meta">${formatInt(uniquePages)} unique pages with impressions</div>`;
         };
-        const clicksMeta = formatPagesMeta(pageActivity?.clickPages);
-        const impressionsMeta = formatPagesMeta(pageActivity?.impressionPages);
+        const clicksMeta = formatPagesMeta(pageActivity?.clickPages, 'clicks');
+        const impressionsMeta = formatPagesMeta(pageActivity?.impressionPages, 'impressions');
         return `
           <div class="dashboard-period-row">
             <div class="dashboard-period-label">
@@ -59966,9 +59963,6 @@ Final Score: ${score}/100`;
         const twentyEightDayWindow = computeDashboardPeriodWindow(rows, 28);
         const latestDate = rows.length ? rows[rows.length - 1].date : null;
         const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
-        const topCounts = getAuthoritativeDashboardSubsegmentCounts(currentAudit || null, null);
-        const totalSitePages = ['landing', 'event', 'product', 'other']
-          .reduce((sum, key) => sum + (toNum(topCounts?.[key]) || 0), 0);
 
         if (!latestWindow || !sevenDayWindow || !twentyEightDayWindow) {
           host.innerHTML = `
@@ -59984,9 +59978,9 @@ Final Score: ${score}/100`;
           fetchDashboardGscPageActivityCounts(propertyUrl, sevenDayWindow.startDate, sevenDayWindow.endDate),
           fetchDashboardGscPageActivityCounts(propertyUrl, twentyEightDayWindow.startDate, twentyEightDayWindow.endDate)
         ]);
-        const latestActivity = latestRawActivity ? { ...latestRawActivity, totalPages: totalSitePages } : null;
-        const sevenActivity = sevenRawActivity ? { ...sevenRawActivity, totalPages: totalSitePages } : null;
-        const twentyEightActivity = twentyEightRawActivity ? { ...twentyEightRawActivity, totalPages: totalSitePages } : null;
+        const latestActivity = latestRawActivity || null;
+        const sevenActivity = sevenRawActivity || null;
+        const twentyEightActivity = twentyEightRawActivity || null;
 
         host.innerHTML = `
           <div class="dashboard-periods-headline">
@@ -60437,15 +60431,9 @@ Final Score: ${score}/100`;
             avgPosition: c.avgPosition
           });
           const twentyeightPrev = twentyeightPrevBySegment?.[key] || null;
-          const latestRowActivity = latestSubsegmentActivity?.[key]
-            ? { ...latestSubsegmentActivity[key], totalPages: pageCount }
-            : null;
-          const sevenRowActivity = sevenSubsegmentActivity?.[key]
-            ? { ...sevenSubsegmentActivity[key], totalPages: pageCount }
-            : null;
-          const twentyeightRowActivity = twentyeightSubsegmentActivity?.[key]
-            ? { ...twentyeightSubsegmentActivity[key], totalPages: pageCount }
-            : null;
+          const latestRowActivity = latestSubsegmentActivity?.[key] || null;
+          const sevenRowActivity = sevenSubsegmentActivity?.[key] || null;
+          const twentyeightRowActivity = twentyeightSubsegmentActivity?.[key] || null;
 
           const latestDate = hasDbWindows ? (dbWindowsByDays?.[1]?.[key]?.dateEnd || latestWindow?.endDate || '—') : (latestWindow?.endDate || '—');
           const sevenRange = hasDbWindows
