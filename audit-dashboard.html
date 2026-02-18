@@ -59962,6 +59962,17 @@ Final Score: ${score}/100`;
         }
       }
 
+      function sumPageActivityFromSubsegments(subsegmentActivity) {
+        if (!subsegmentActivity || typeof subsegmentActivity !== 'object') return null;
+        const keys = ['landing', 'event', 'product', 'other'];
+        return keys.reduce((acc, key) => {
+          const row = subsegmentActivity?.[key] || {};
+          acc.clickPages += Math.max(0, Math.round(toNum(row?.clickPages) || 0));
+          acc.impressionPages += Math.max(0, Math.round(toNum(row?.impressionPages) || 0));
+          return acc;
+        }, { clickPages: 0, impressionPages: 0 });
+      }
+
       async function renderDashboardGscPeriodTiles(currentAudit) {
         const host = document.getElementById('dashboard-gsc-kpi-periods');
         if (!host) return;
@@ -59982,14 +59993,21 @@ Final Score: ${score}/100`;
           return;
         }
 
+        // Derive top-row unique page activity from the same sub-segment source
+        // used by the four cards so totals always reconcile.
+        const [latestSubsegmentActivity, sevenSubsegmentActivity, twentyEightSubsegmentActivity] = await Promise.all([
+          fetchDashboardSubsegmentPageActivityCounts(propertyUrl, latestWindow.endDate, latestWindow.endDate),
+          fetchDashboardSubsegmentPageActivityCounts(propertyUrl, sevenDayWindow.startDate, sevenDayWindow.endDate),
+          fetchDashboardSubsegmentPageActivityCounts(propertyUrl, twentyEightDayWindow.startDate, twentyEightDayWindow.endDate)
+        ]);
         const [latestRawActivity, sevenRawActivity, twentyEightRawActivity] = await Promise.all([
           fetchDashboardGscPageActivityCounts(propertyUrl, latestWindow.endDate, latestWindow.endDate),
           fetchDashboardGscPageActivityCounts(propertyUrl, sevenDayWindow.startDate, sevenDayWindow.endDate),
           fetchDashboardGscPageActivityCounts(propertyUrl, twentyEightDayWindow.startDate, twentyEightDayWindow.endDate)
         ]);
-        const latestActivity = latestRawActivity || null;
-        const sevenActivity = sevenRawActivity || null;
-        const twentyEightActivity = twentyEightRawActivity || null;
+        const latestActivity = sumPageActivityFromSubsegments(latestSubsegmentActivity) || latestRawActivity || null;
+        const sevenActivity = sumPageActivityFromSubsegments(sevenSubsegmentActivity) || sevenRawActivity || null;
+        const twentyEightActivity = sumPageActivityFromSubsegments(twentyEightSubsegmentActivity) || twentyEightRawActivity || null;
 
         host.innerHTML = `
           <div class="dashboard-periods-headline">
