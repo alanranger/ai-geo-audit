@@ -60563,6 +60563,46 @@ Final Score: ${score}/100`;
         }
       }
 
+      function summarizeDashboardWindowRowsBySegment(pageRows) {
+        const base = {
+          landing: { clicks: 0, impressions: 0, posWeighted: 0, clickPages: new Set(), impressionPages: new Set() },
+          event: { clicks: 0, impressions: 0, posWeighted: 0, clickPages: new Set(), impressionPages: new Set() },
+          product: { clicks: 0, impressions: 0, posWeighted: 0, clickPages: new Set(), impressionPages: new Set() },
+          other: { clicks: 0, impressions: 0, posWeighted: 0, clickPages: new Set(), impressionPages: new Set() }
+        };
+        const rows = Array.isArray(pageRows) ? pageRows : [];
+        rows.forEach((row) => {
+          const seg = normalizeDashboardSubsegment(row?.segment || classifyDashboardSubsegment(row?.url || ''));
+          const bucket = base[seg] || base.other;
+          const clicks = toNum(row?.clicks) || 0;
+          const impressions = toNum(row?.impressions) || 0;
+          const avgPosition = toNum(row?.avgPosition);
+          const rawUrl = String(row?.url || '').trim();
+          const canonicalUrl = (typeof normalizeGscPageKey === 'function')
+            ? normalizeGscPageKey(rawUrl)
+            : rawUrl.toLowerCase();
+          bucket.clicks += clicks;
+          bucket.impressions += impressions;
+          if (avgPosition != null && impressions > 0) bucket.posWeighted += (avgPosition * impressions);
+          if (clicks > 0 && canonicalUrl) bucket.clickPages.add(canonicalUrl);
+          if (impressions > 0 && canonicalUrl) bucket.impressionPages.add(canonicalUrl);
+        });
+
+        const out = {};
+        ['landing', 'event', 'product', 'other'].forEach((key) => {
+          const seg = base[key];
+          out[key] = {
+            clicks: seg.clicks,
+            impressions: seg.impressions,
+            ctrPct: seg.impressions > 0 ? ((seg.clicks / seg.impressions) * 100) : null,
+            avgPosition: seg.impressions > 0 ? (seg.posWeighted / seg.impressions) : null,
+            clickPages: seg.clickPages.size,
+            impressionPages: seg.impressionPages.size
+          };
+        });
+        return out;
+      }
+
       async function renderDashboardSubsegmentSections(currentAudit, options = {}) {
         const host = document.getElementById('dashboard-subsegments-grid');
         if (!host) return;
@@ -60732,12 +60772,24 @@ Final Score: ${score}/100`;
         const twentyeightPrevBySegment = buildReconciledPeriodBySegment(twentyEightDayWindow?.prev);
         const ninetyBySegment = buildReconciledPeriodBySegment(ninetyDayWindow?.current);
         const ninetyPrevBySegment = buildReconciledPeriodBySegment(ninetyDayWindow?.prev);
-        const [latestSubsegmentActivity, sevenSubsegmentActivity, twentyeightSubsegmentActivity, ninetySubsegmentActivity] = await Promise.all([
-          fetchDashboardSubsegmentPageActivityCounts(propertyUrl, latestWindow?.endDate, latestWindow?.endDate),
-          fetchDashboardSubsegmentPageActivityCounts(propertyUrl, sevenDayWindow?.startDate, sevenDayWindow?.endDate),
-          fetchDashboardSubsegmentPageActivityCounts(propertyUrl, twentyEightDayWindow?.startDate, twentyEightDayWindow?.endDate),
-          fetchDashboardSubsegmentPageActivityCounts(propertyUrl, ninetyDayWindow?.startDate, ninetyDayWindow?.endDate)
+        const safeFetchWindowRows = async (startDate, endDate) => {
+          if (!propertyUrl || !startDate || !endDate) return [];
+          return fetchDashboardPageRowsForWindow(propertyUrl, startDate, endDate);
+        };
+        const [latestWindowRows, sevenWindowRows, twentyeightWindowRows, ninetyWindowRows] = await Promise.all([
+          safeFetchWindowRows(latestWindow?.endDate, latestWindow?.endDate),
+          safeFetchWindowRows(sevenDayWindow?.startDate, sevenDayWindow?.endDate),
+          safeFetchWindowRows(twentyEightDayWindow?.startDate, twentyEightDayWindow?.endDate),
+          safeFetchWindowRows(ninetyDayWindow?.startDate, ninetyDayWindow?.endDate)
         ]);
+        const latestWindowSummary = summarizeDashboardWindowRowsBySegment(latestWindowRows);
+        const sevenWindowSummary = summarizeDashboardWindowRowsBySegment(sevenWindowRows);
+        const twentyeightWindowSummary = summarizeDashboardWindowRowsBySegment(twentyeightWindowRows);
+        const ninetyWindowSummary = summarizeDashboardWindowRowsBySegment(ninetyWindowRows);
+        const latestSubsegmentActivity = latestWindowSummary;
+        const sevenSubsegmentActivity = sevenWindowSummary;
+        const twentyeightSubsegmentActivity = twentyeightWindowSummary;
+        const ninetySubsegmentActivity = ninetyWindowSummary;
 
         const getPeriodBySegmentFromDb = (days) => {
           if (!hasDbWindows) return null;
@@ -60842,10 +60894,36 @@ Final Score: ${score}/100`;
           ninetyDayWindow?.current || null
         ) || ninetyBySegment;
 
-        const latestDisplayBalanced = rebalanceDisplayedResidualToOther(latestDisplayBySegment, latestWindow?.current || null) || latestDisplayBySegment;
-        const sevenDisplayBalanced = rebalanceDisplayedResidualToOther(sevenDisplayBySegment, sevenDayWindow?.current || null) || sevenDisplayBySegment;
-        const twentyeightDisplayBalanced = rebalanceDisplayedResidualToOther(twentyeightDisplayBySegment, twentyEightDayWindow?.current || null) || twentyeightDisplayBySegment;
-        const ninetyDisplayBalanced = rebalanceDisplayedResidualToOther(ninetyDisplayBySegment, ninetyDayWindow?.current || null) || ninetyDisplayBySegment;
+        const applyWindowSummaryMetrics = (periodBySegment, summaryBySegment) => {
+          if (!periodBySegment) return periodBySegment;
+          const out = {};
+          defs.forEach(({ key }) => {
+            const base = periodBySegment?.[key] || {};
+            const summary = summaryBySegment?.[key] || null;
+            if (!summary) {
+              out[key] = { ...base };
+              return;
+            }
+            out[key] = {
+              ...base,
+              clicks: toNum(summary?.clicks) || 0,
+              impressions: toNum(summary?.impressions) || 0,
+              ctrPct: summary?.ctrPct == null ? null : toNum(summary.ctrPct),
+              avgPosition: summary?.avgPosition == null ? null : toNum(summary.avgPosition)
+            };
+          });
+          return out;
+        };
+
+        const latestDisplayFromRows = applyWindowSummaryMetrics(latestDisplayBySegment, latestWindowSummary) || latestDisplayBySegment;
+        const sevenDisplayFromRows = applyWindowSummaryMetrics(sevenDisplayBySegment, sevenWindowSummary) || sevenDisplayBySegment;
+        const twentyeightDisplayFromRows = applyWindowSummaryMetrics(twentyeightDisplayBySegment, twentyeightWindowSummary) || twentyeightDisplayBySegment;
+        const ninetyDisplayFromRows = applyWindowSummaryMetrics(ninetyDisplayBySegment, ninetyWindowSummary) || ninetyDisplayBySegment;
+
+        const latestDisplayBalanced = rebalanceDisplayedResidualToOther(latestDisplayFromRows, latestWindow?.current || null) || latestDisplayFromRows;
+        const sevenDisplayBalanced = rebalanceDisplayedResidualToOther(sevenDisplayFromRows, sevenDayWindow?.current || null) || sevenDisplayFromRows;
+        const twentyeightDisplayBalanced = rebalanceDisplayedResidualToOther(twentyeightDisplayFromRows, twentyEightDayWindow?.current || null) || twentyeightDisplayFromRows;
+        const ninetyDisplayBalanced = rebalanceDisplayedResidualToOther(ninetyDisplayFromRows, ninetyDayWindow?.current || null) || ninetyDisplayFromRows;
 
         const uniqueTotalsForTop = {
           latest: { clickPages: 0, impressionPages: 0 },
