@@ -1960,6 +1960,44 @@
       gap: 1rem;
       margin-top: 1rem;
     }
+    section[data-panel="dashboard"] .dashboard-subsegments-toggle {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+      flex-wrap: wrap;
+      background: rgba(15, 20, 25, 0.32);
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      border-radius: 10px;
+      padding: 0.55rem 0.65rem;
+    }
+    section[data-panel="dashboard"] .dashboard-subsegments-toggle-label {
+      font-size: 0.75rem;
+      color: var(--dark-text-muted);
+      font-weight: 800;
+      margin-right: 0.15rem;
+    }
+    section[data-panel="dashboard"] .dashboard-subsegments-toggle-btn {
+      border: 1px solid rgba(148, 163, 184, 0.28);
+      background: rgba(15, 20, 25, 0.5);
+      color: var(--dark-text);
+      border-radius: 999px;
+      padding: 0.28rem 0.62rem;
+      font-size: 0.74rem;
+      font-weight: 800;
+      cursor: pointer;
+      transition: all 0.18s ease;
+    }
+    section[data-panel="dashboard"] .dashboard-subsegments-toggle-btn:hover {
+      border-color: rgba(245, 158, 11, 0.45);
+      transform: translateY(-1px);
+    }
+    section[data-panel="dashboard"] .dashboard-subsegments-toggle-btn.is-active {
+      border-color: rgba(245, 158, 11, 0.65);
+      background: rgba(245, 158, 11, 0.18);
+      color: #fbbf24;
+      box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.25);
+    }
     section[data-panel="dashboard"] .dashboard-periods-section {
       margin-top: 1rem;
       background: rgba(15, 20, 25, 0.25);
@@ -2080,6 +2118,22 @@
       justify-content: center;
       gap: 0.25rem;
       position: relative;
+    }
+    section[data-panel="dashboard"] .dashboard-kpi-tile[data-metric="clicks"] {
+      border-color: rgba(59, 130, 246, 0.35);
+      background: linear-gradient(145deg, rgba(30, 58, 138, 0.22), rgba(15, 20, 25, 0.4));
+    }
+    section[data-panel="dashboard"] .dashboard-kpi-tile[data-metric="impressions"] {
+      border-color: rgba(14, 165, 233, 0.35);
+      background: linear-gradient(145deg, rgba(6, 78, 99, 0.24), rgba(15, 20, 25, 0.4));
+    }
+    section[data-panel="dashboard"] .dashboard-kpi-tile[data-metric="avg-position"] {
+      border-color: rgba(16, 185, 129, 0.33);
+      background: linear-gradient(145deg, rgba(6, 78, 59, 0.2), rgba(15, 20, 25, 0.4));
+    }
+    section[data-panel="dashboard"] .dashboard-kpi-tile[data-metric="ctr"] {
+      border-color: rgba(245, 158, 11, 0.36);
+      background: linear-gradient(145deg, rgba(120, 53, 15, 0.2), rgba(15, 20, 25, 0.4));
     }
     section[data-panel="dashboard"] .dashboard-kpi-label {
       font-size: 0.8rem;
@@ -59879,9 +59933,19 @@ Final Score: ${score}/100`;
         return `<div class="dashboard-kpi-delta" data-dir="${dir}">△ ${absText}</div>`;
       }
 
+      function getDashboardKpiMetricKey(label) {
+        const raw = String(label || '').toLowerCase();
+        if (raw.includes('click')) return 'clicks';
+        if (raw.includes('impression')) return 'impressions';
+        if (raw.includes('position')) return 'avg-position';
+        if (raw === 'ctr' || raw.includes('ctr')) return 'ctr';
+        return 'generic';
+      }
+
       function renderDashboardPeriodTile(label, value, deltaHtml = '', metaHtml = '') {
+        const metricKey = getDashboardKpiMetricKey(label);
         return `
-          <div class="dashboard-kpi-tile">
+          <div class="dashboard-kpi-tile" data-metric="${metricKey}">
             <div class="dashboard-kpi-label">${label}</div>
             <div class="dashboard-kpi-value">${value}</div>
             ${metaHtml}
@@ -60319,6 +60383,7 @@ Final Score: ${score}/100`;
         const latestWindow = computeDashboardPeriodWindow(rows, 1);
         const sevenDayWindow = computeDashboardPeriodWindow(rows, 7);
         const twentyEightDayWindow = computeDashboardPeriodWindow(rows, 28);
+        const ninetyDayWindow = computeDashboardPeriodWindow(rows, 90);
         const siteBaseline28 = twentyEightDayWindow?.current || null;
         const canonical28BySegment = getCanonicalSubsegmentMetrics28(currentAudit || null, siteBaseline28, current);
         const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
@@ -60326,6 +60391,10 @@ Final Score: ${score}/100`;
         const dbWindowPayload = await fetchDashboardSubsegmentWindowsFromDb(propertyUrl, currentRunId, 'all_pages');
         const dbWindowsByDays = buildWindowSegmentLookup(dbWindowPayload?.rows || []);
         const hasDbWindows = !!(dbWindowsByDays?.[1] && dbWindowsByDays?.[7] && dbWindowsByDays?.[28]);
+        const subsegmentViewStorageKey = 'dashboard_subsegment_view_mode';
+        const validSubsegmentViews = new Set(['today', '7d', '28d', '90d', 'tier']);
+        const storedSubsegmentView = String(localStorage.getItem(subsegmentViewStorageKey) || 'tier').toLowerCase();
+        const subsegmentView = validSubsegmentViews.has(storedSubsegmentView) ? storedSubsegmentView : 'tier';
 
         const defs = [
           { key: 'landing', label: 'Landing Pages' },
@@ -60446,10 +60515,13 @@ Final Score: ${score}/100`;
         const sevenPrevBySegment = buildReconciledPeriodBySegment(sevenDayWindow?.prev);
         const twentyeightBySegment = buildReconciledPeriodBySegment(twentyEightDayWindow?.current, { useActual28: true });
         const twentyeightPrevBySegment = buildReconciledPeriodBySegment(twentyEightDayWindow?.prev);
-        const [latestSubsegmentActivity, sevenSubsegmentActivity, twentyeightSubsegmentActivity] = await Promise.all([
+        const ninetyBySegment = buildReconciledPeriodBySegment(ninetyDayWindow?.current);
+        const ninetyPrevBySegment = buildReconciledPeriodBySegment(ninetyDayWindow?.prev);
+        const [latestSubsegmentActivity, sevenSubsegmentActivity, twentyeightSubsegmentActivity, ninetySubsegmentActivity] = await Promise.all([
           fetchDashboardSubsegmentPageActivityCounts(propertyUrl, latestWindow?.endDate, latestWindow?.endDate),
           fetchDashboardSubsegmentPageActivityCounts(propertyUrl, sevenDayWindow?.startDate, sevenDayWindow?.endDate),
-          fetchDashboardSubsegmentPageActivityCounts(propertyUrl, twentyEightDayWindow?.startDate, twentyEightDayWindow?.endDate)
+          fetchDashboardSubsegmentPageActivityCounts(propertyUrl, twentyEightDayWindow?.startDate, twentyEightDayWindow?.endDate),
+          fetchDashboardSubsegmentPageActivityCounts(propertyUrl, ninetyDayWindow?.startDate, ninetyDayWindow?.endDate)
         ]);
 
         const getPeriodBySegmentFromDb = (days) => {
@@ -60550,10 +60622,15 @@ Final Score: ${score}/100`;
           hasDbWindows ? getPeriodBySegmentFromDb(28) : twentyeightBySegment,
           twentyEightDayWindow?.current || null
         ) || twentyeightBySegment;
+        const ninetyDisplayBySegment = reconcilePeriodSegmentsToSite(
+          hasDbWindows ? getPeriodBySegmentFromDb(90) : ninetyBySegment,
+          ninetyDayWindow?.current || null
+        ) || ninetyBySegment;
 
         const latestDisplayBalanced = rebalanceDisplayedResidualToOther(latestDisplayBySegment, latestWindow?.current || null) || latestDisplayBySegment;
         const sevenDisplayBalanced = rebalanceDisplayedResidualToOther(sevenDisplayBySegment, sevenDayWindow?.current || null) || sevenDisplayBySegment;
         const twentyeightDisplayBalanced = rebalanceDisplayedResidualToOther(twentyeightDisplayBySegment, twentyEightDayWindow?.current || null) || twentyeightDisplayBySegment;
+        const ninetyDisplayBalanced = rebalanceDisplayedResidualToOther(ninetyDisplayBySegment, ninetyDayWindow?.current || null) || ninetyDisplayBySegment;
 
         const uniqueTotalsForTop = {
           latest: { clickPages: 0, impressionPages: 0 },
@@ -60582,6 +60659,9 @@ Final Score: ${score}/100`;
           const latestRowActivity = latestSubsegmentActivity?.[key] || null;
           const sevenRowActivity = sevenSubsegmentActivity?.[key] || null;
           const twentyeightRowActivity = twentyeightSubsegmentActivity?.[key] || null;
+          const ninetyNow = ninetyDisplayBalanced?.[key] || null;
+          const ninetyPrev = ninetyPrevBySegment?.[key] || null;
+          const ninetyRowActivity = ninetySubsegmentActivity?.[key] || null;
 
           uniqueTotalsForTop.latest.clickPages += getSafeUniquePages(latestNow?.clicks, latestRowActivity?.clickPages);
           uniqueTotalsForTop.latest.impressionPages += getSafeUniquePages(latestNow?.impressions, latestRowActivity?.impressionPages);
@@ -60597,6 +60677,19 @@ Final Score: ${score}/100`;
           const twentyeightRange = hasDbWindows
             ? `${dbWindowsByDays?.[28]?.[key]?.dateStart || twentyEightDayWindow?.startDate || '—'} -> ${dbWindowsByDays?.[28]?.[key]?.dateEnd || twentyEightDayWindow?.endDate || '—'}`
             : `${twentyEightDayWindow?.startDate || '—'} -> ${twentyEightDayWindow?.endDate || '—'}`;
+          const ninetyRange = hasDbWindows
+            ? `${dbWindowsByDays?.[90]?.[key]?.dateStart || ninetyDayWindow?.startDate || '—'} -> ${dbWindowsByDays?.[90]?.[key]?.dateEnd || ninetyDayWindow?.endDate || '—'}`
+            : `${ninetyDayWindow?.startDate || '—'} -> ${ninetyDayWindow?.endDate || '—'}`;
+
+          const periodRows = {
+            today: renderDashboardPeriodRow('Today', latestDate, latestNow, latestPrev, latestRowActivity),
+            '7d': renderDashboardPeriodRow('7 days', sevenRange, sevenNow, sevenPrev, sevenRowActivity),
+            '28d': renderDashboardPeriodRow('28 days', twentyeightRange, twentyeightNow, twentyeightPrev, twentyeightRowActivity),
+            '90d': renderDashboardPeriodRow('90 days', ninetyRange, ninetyNow, ninetyPrev, ninetyRowActivity)
+          };
+          const visibleRowsHtml = subsegmentView === 'tier'
+            ? `${periodRows.today}${periodRows['7d']}${periodRows['28d']}${periodRows['90d']}`
+            : (periodRows[subsegmentView] || periodRows.today);
 
           return `
             <div class="dashboard-subsegment-card">
@@ -60604,18 +60697,46 @@ Final Score: ${score}/100`;
                 <div class="dashboard-subsegment-title">${label}</div>
                 <div class="dashboard-subsegment-count">${formatInt(pageCount != null ? pageCount : (c.pageCount || 0))} pages</div>
               </div>
-              <div class="dashboard-segment-subtitle">Sub-segment trend tiles aligned to Latest / 7d / 28d windows.</div>
+              <div class="dashboard-segment-subtitle">Sub-segment trend tiles aligned to Today / 7d / 28d / 90d windows.</div>
               <div class="dashboard-period-rows">
-                ${renderDashboardPeriodRow('Latest', latestDate, latestNow, latestPrev, latestRowActivity)}
-                ${renderDashboardPeriodRow('7 days', sevenRange, sevenNow, sevenPrev, sevenRowActivity)}
-                ${renderDashboardPeriodRow('28 days', twentyeightRange, twentyeightNow, twentyeightPrev, twentyeightRowActivity)}
+                ${visibleRowsHtml}
               </div>
             </div>
           `;
         }).join('');
 
+        const toggleButtons = [
+          { value: 'today', label: 'Today' },
+          { value: '7d', label: '7 day' },
+          { value: '28d', label: '28 day' },
+          { value: '90d', label: '90 day' },
+          { value: 'tier', label: 'Tier (sub-segments)' }
+        ];
+        const toggleHtml = `
+          <div class="dashboard-subsegments-toggle">
+            <span class="dashboard-subsegments-toggle-label">Sub-segment view</span>
+            ${toggleButtons.map((btn) => `
+              <button
+                type="button"
+                class="dashboard-subsegments-toggle-btn ${subsegmentView === btn.value ? 'is-active' : ''}"
+                data-subsegment-view="${btn.value}"
+              >${btn.label}</button>
+            `).join('')}
+          </div>
+        `;
+
         if (renderToken && window.__dashboardRenderToken && renderToken !== window.__dashboardRenderToken) return null;
-        host.innerHTML = cardsHtml;
+        host.innerHTML = `${toggleHtml}${cardsHtml}`;
+        host.querySelectorAll('[data-subsegment-view]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const nextView = String(btn.getAttribute('data-subsegment-view') || '').toLowerCase();
+            if (!validSubsegmentViews.has(nextView)) return;
+            localStorage.setItem(subsegmentViewStorageKey, nextView);
+            if (typeof window.renderDashboardTab === 'function') {
+              window.renderDashboardTab();
+            }
+          });
+        });
         return uniqueTotalsForTop;
       }
 
