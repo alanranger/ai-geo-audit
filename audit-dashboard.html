@@ -60910,6 +60910,7 @@ Final Score: ${score}/100`;
           selectedSegment: null,
           tableSegmentFilter: 'all',
           zeroClicksOnly: false,
+          clicksOnly: false,
           metricFilter: 'all',
           selectedPeriodKey: null,
           sortKey: 'clicks',
@@ -61369,13 +61370,6 @@ Final Score: ${score}/100`;
         const renderSegmentDrilldown = async () => {
           const hostEl = document.getElementById('dashboard-segment-drilldown');
           if (!hostEl) return;
-          const selected = (subsegmentUiState.selectedSegment && defs.find((d) => d.key === subsegmentUiState.selectedSegment))
-            ? subsegmentUiState.selectedSegment
-            : null;
-          host.querySelectorAll('[data-dashboard-segment]').forEach((card) => {
-            const seg = String(card.getAttribute('data-dashboard-segment') || '');
-            card.classList.toggle('is-active', !!selected && seg === selected);
-          });
 
           const selectedPeriodKey = String(subsegmentUiState.selectedPeriodKey || '').toLowerCase();
           const periodKey = periodByView?.[selectedPeriodKey] ? selectedPeriodKey : activePeriodKey;
@@ -61399,11 +61393,17 @@ Final Score: ${score}/100`;
           }
 
           if (!subsegmentUiState.tableSegmentFilter) subsegmentUiState.tableSegmentFilter = 'all';
-          if (selected) subsegmentUiState.tableSegmentFilter = selected;
           const segmentFilter = defs.find((d) => d.key === subsegmentUiState.tableSegmentFilter)
             ? subsegmentUiState.tableSegmentFilter
             : 'all';
+          const activeSegment = segmentFilter === 'all' ? null : segmentFilter;
+          subsegmentUiState.selectedSegment = activeSegment;
+          host.querySelectorAll('[data-dashboard-segment]').forEach((card) => {
+            const seg = String(card.getAttribute('data-dashboard-segment') || '');
+            card.classList.toggle('is-active', !!activeSegment && seg === activeSegment);
+          });
           const zeroClicksOnly = !!subsegmentUiState.zeroClicksOnly;
+          const clicksOnlyFilter = !!subsegmentUiState.clicksOnly;
           const metricFilter = String(subsegmentUiState.metricFilter || 'all').toLowerCase();
           const metricFilterLabel = metricFilter === 'clicks'
             ? 'Clicks > 0'
@@ -61424,9 +61424,11 @@ Final Score: ${score}/100`;
           const q = String(subsegmentUiState.query || '').trim().toLowerCase();
           const filtered = pageRows.filter((row) => {
             const segmentOk = segmentFilter === 'all' ? true : row.segment === segmentFilter;
-            const zeroOk = zeroClicksOnly ? (toNum(row?.clicks) || 0) === 0 : true;
+            const clicks = toNum(row?.clicks) || 0;
+            const zeroOk = zeroClicksOnly ? clicks === 0 : true;
+            const clicksOk = clicksOnlyFilter ? clicks > 0 : true;
             const queryOk = !q || String(row.url || '').toLowerCase().includes(q);
-            return segmentOk && zeroOk && metricPredicate(row) && queryOk;
+            return segmentOk && zeroOk && clicksOk && metricPredicate(row) && queryOk;
           });
 
           const sortKey = subsegmentUiState.sortKey || 'clicks';
@@ -61448,10 +61450,15 @@ Final Score: ${score}/100`;
           const pageRowsSlice = allRows ? filtered : filtered.slice(startIdx, startIdx + rowsPerPage);
 
           const segmentCount = (key) => pageRows.filter((r) => r.segment === key).length;
-          const activeTileLabel = selected ? (defs.find((d) => d.key === selected)?.label || selected) : null;
+          const activeTileLabel = activeSegment ? (defs.find((d) => d.key === activeSegment)?.label || activeSegment) : null;
           const selectedFilterLabel = segmentFilter === 'all'
             ? 'All tiers'
             : (defs.find((d) => d.key === segmentFilter)?.label || segmentFilter);
+          const clickFilterLabel = zeroClicksOnly
+            ? '0-clicks only'
+            : clicksOnlyFilter
+              ? 'Clicks > 0 only'
+              : 'All clicks';
 
           hostEl.innerHTML = `
             <div class="dashboard-segment-drilldown-controls">
@@ -61482,6 +61489,10 @@ Final Score: ${score}/100`;
                   <input id="dashboard-segment-zero-clicks" type="checkbox" ${zeroClicksOnly ? 'checked' : ''} style="width:auto; padding:0; accent-color:#38bdf8;">
                   0-clicks
                 </label>
+                <label style="display:flex; align-items:center; gap:0.3rem; font-size:0.74rem; color:var(--dark-text-muted);">
+                  <input id="dashboard-segment-clicks-only" type="checkbox" ${clicksOnlyFilter ? 'checked' : ''} style="width:auto; padding:0; accent-color:#38bdf8;">
+                  Clicks only
+                </label>
                 <label style="font-size:0.74rem; color:var(--dark-text-muted);">Rows
                   <select id="dashboard-segment-rows">
                     ${['all', 10, 20, 50, 100].map((n) => `<option value="${n}" ${String(subsegmentUiState.rowsPerPage || 20) === String(n) ? 'selected' : ''}>${n}</option>`).join('')}
@@ -61493,7 +61504,7 @@ Final Score: ${score}/100`;
               </div>
             </div>
             <div style="font-size:0.74rem; color:var(--dark-text-muted); margin-bottom:0.5rem;">
-              ${escapeHtml(selectedFilterLabel)} • ${escapeHtml(period.label)} • ${escapeHtml(metricFilterLabel)} • ${formatInt(totalRows)} URLs
+              ${escapeHtml(selectedFilterLabel)} • ${escapeHtml(period.label)} • ${escapeHtml(clickFilterLabel)} • ${escapeHtml(metricFilterLabel)} • ${formatInt(totalRows)} URLs
             </div>
             <div class="dashboard-segment-table-wrap">
               <table class="dashboard-segment-table">
@@ -61577,6 +61588,19 @@ Final Score: ${score}/100`;
           if (zeroClicks) {
             zeroClicks.addEventListener('change', () => {
               subsegmentUiState.zeroClicksOnly = !!zeroClicks.checked;
+              if (subsegmentUiState.zeroClicksOnly) subsegmentUiState.clicksOnly = false;
+              subsegmentUiState.selectedSegment = subsegmentUiState.tableSegmentFilter === 'all' ? null : subsegmentUiState.tableSegmentFilter;
+              subsegmentUiState.page = 1;
+              renderSegmentDrilldown();
+            });
+          }
+
+          const clicksOnlyToggle = hostEl.querySelector('#dashboard-segment-clicks-only');
+          if (clicksOnlyToggle) {
+            clicksOnlyToggle.addEventListener('change', () => {
+              subsegmentUiState.clicksOnly = !!clicksOnlyToggle.checked;
+              if (subsegmentUiState.clicksOnly) subsegmentUiState.zeroClicksOnly = false;
+              subsegmentUiState.selectedSegment = subsegmentUiState.tableSegmentFilter === 'all' ? null : subsegmentUiState.tableSegmentFilter;
               subsegmentUiState.page = 1;
               renderSegmentDrilldown();
             });
@@ -61597,6 +61621,7 @@ Final Score: ${score}/100`;
               subsegmentUiState.selectedSegment = null;
               subsegmentUiState.tableSegmentFilter = 'all';
               subsegmentUiState.zeroClicksOnly = false;
+              subsegmentUiState.clicksOnly = false;
               subsegmentUiState.metricFilter = 'all';
               subsegmentUiState.selectedPeriodKey = null;
               subsegmentUiState.query = '';
