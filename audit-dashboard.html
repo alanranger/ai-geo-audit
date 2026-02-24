@@ -60099,9 +60099,34 @@ Final Score: ${score}/100`;
 
       function computeDashboardPeriodWindow(rows, days = 28) {
         if (!Array.isArray(rows) || rows.length === 0) return null;
-        const n = Math.max(1, Math.min(days, rows.length));
-        const currentSlice = rows.slice(rows.length - n);
-        const prevSlice = rows.slice(Math.max(0, rows.length - (2 * n)), Math.max(0, rows.length - n));
+        const n = Math.max(1, Math.round(toNum(days) || 1));
+        const parseIsoDate = (iso) => {
+          if (!iso) return null;
+          const d = new Date(`${String(iso)}T00:00:00Z`);
+          return Number.isFinite(d.getTime()) ? d : null;
+        };
+        const toIsoDate = (d) => {
+          if (!(d instanceof Date) || !Number.isFinite(d.getTime())) return null;
+          return d.toISOString().slice(0, 10);
+        };
+        const shiftIsoDate = (iso, deltaDays) => {
+          const base = parseIsoDate(iso);
+          if (!base) return null;
+          const next = new Date(base);
+          next.setUTCDate(next.getUTCDate() + deltaDays);
+          return toIsoDate(next);
+        };
+        const inRange = (dateIso, startIso, endIso) => {
+          if (!dateIso || !startIso || !endIso) return false;
+          return String(dateIso) >= String(startIso) && String(dateIso) <= String(endIso);
+        };
+        const latestDate = String(rows[rows.length - 1]?.date || '');
+        if (!latestDate) return null;
+        const startDate = shiftIsoDate(latestDate, -(n - 1));
+        const prevEndDate = shiftIsoDate(startDate, -1);
+        const prevStartDate = shiftIsoDate(prevEndDate, -(n - 1));
+        const currentSlice = rows.filter((r) => inRange(r?.date, startDate, latestDate));
+        const prevSlice = rows.filter((r) => inRange(r?.date, prevStartDate, prevEndDate));
 
         const agg = (slice) => {
           if (!Array.isArray(slice) || slice.length === 0) {
@@ -60132,9 +60157,7 @@ Final Score: ${score}/100`;
 
         const current = agg(currentSlice);
         const prev = agg(prevSlice);
-        const startDate = currentSlice[0]?.date || null;
-        const endDate = currentSlice[currentSlice.length - 1]?.date || null;
-        return { current, prev, startDate, endDate, days: n };
+        return { current, prev, startDate: startDate || null, endDate: latestDate || null, days: n };
       }
 
       function formatDashboardPctDelta(curr, prev, { betterLower = false } = {}) {
@@ -61227,10 +61250,12 @@ Final Score: ${score}/100`;
         const twentyeightDisplayFromRows = applyWindowSummaryMetrics(twentyeightDisplayBySegment, twentyeightWindowSummary) || twentyeightDisplayBySegment;
         const ninetyDisplayFromRows = applyWindowSummaryMetrics(ninetyDisplayBySegment, ninetyWindowSummary) || ninetyDisplayBySegment;
 
-        const latestDisplayBalanced = rebalanceDisplayedResidualToOther(latestDisplayFromRows, latestWindow?.current || null) || latestDisplayFromRows;
-        const sevenDisplayBalanced = rebalanceDisplayedResidualToOther(sevenDisplayFromRows, sevenDayWindow?.current || null) || sevenDisplayFromRows;
-        const twentyeightDisplayBalanced = rebalanceDisplayedResidualToOther(twentyeightDisplayFromRows, twentyEightDayWindow?.current || null) || twentyeightDisplayFromRows;
-        const ninetyDisplayBalanced = rebalanceDisplayedResidualToOther(ninetyDisplayFromRows, ninetyDayWindow?.current || null) || ninetyDisplayFromRows;
+        // Keep segment totals directly tied to page-level summaries for each period.
+        // This avoids residual balancing drifting tile counts away from row-level data.
+        const latestDisplayBalanced = latestDisplayFromRows;
+        const sevenDisplayBalanced = sevenDisplayFromRows;
+        const twentyeightDisplayBalanced = twentyeightDisplayFromRows;
+        const ninetyDisplayBalanced = ninetyDisplayFromRows;
 
         const uniqueTotalsForTop = {
           latest: { clickPages: 0, impressionPages: 0 },
