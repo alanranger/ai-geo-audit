@@ -60283,6 +60283,36 @@ Final Score: ${score}/100`;
         return 'other';
       }
 
+      function toDashboardSegmentUrlKey(rawUrl) {
+        const raw = String(rawUrl || '').trim();
+        if (!raw) return '';
+        if (typeof normalizeGscPageKey === 'function') {
+          return String(normalizeGscPageKey(raw) || '').toLowerCase();
+        }
+        return raw.toLowerCase().replace(/\/+$/, '');
+      }
+
+      function buildDashboardMoneySubsegmentLookup(auditLike) {
+        const lookup = new Map();
+        const moneyMetrics = auditLike?.scores?.moneyPagesMetrics || auditLike?.moneyPagesMetrics || null;
+        const rows = Array.isArray(moneyMetrics?.rows) ? moneyMetrics.rows : [];
+        rows.forEach((row) => {
+          const key = toDashboardSegmentUrlKey(row?.url || row?.page || '');
+          if (!key) return;
+          const seg = normalizeDashboardSubsegment(row?.subSegment || row?.segmentType || classifyDashboardSubsegment(row?.url || row?.page || ''));
+          lookup.set(key, seg);
+        });
+        return lookup;
+      }
+
+      function resolveDashboardSubsegmentFromLookup(url, segmentLookup) {
+        const key = toDashboardSegmentUrlKey(url);
+        if (key && segmentLookup instanceof Map && segmentLookup.has(key)) {
+          return normalizeDashboardSubsegment(segmentLookup.get(key));
+        }
+        return classifyDashboardSubsegment(url);
+      }
+
       function aggregateDashboardSubsegmentMetrics(auditLike) {
         const buckets = {
           landing: { pages: new Set(), clicks: 0, impressions: 0, weightedPos: 0 },
@@ -60580,7 +60610,7 @@ Final Score: ${score}/100`;
         }
       }
 
-      function summarizeDashboardWindowRowsBySegment(pageRows) {
+      function summarizeDashboardWindowRowsBySegment(pageRows, segmentLookup = null) {
         const base = {
           landing: { clicks: 0, impressions: 0, posWeighted: 0, clickPages: new Set(), impressionPages: new Set() },
           event: { clicks: 0, impressions: 0, posWeighted: 0, clickPages: new Set(), impressionPages: new Set() },
@@ -60589,7 +60619,9 @@ Final Score: ${score}/100`;
         };
         const rows = Array.isArray(pageRows) ? pageRows : [];
         rows.forEach((row) => {
-          const seg = normalizeDashboardSubsegment(row?.segment || classifyDashboardSubsegment(row?.url || ''));
+          const seg = normalizeDashboardSubsegment(
+            row?.segment || resolveDashboardSubsegmentFromLookup(row?.url || '', segmentLookup)
+          );
           const bucket = base[seg] || base.other;
           const clicks = toNum(row?.clicks) || 0;
           const impressions = toNum(row?.impressions) || 0;
@@ -60654,6 +60686,7 @@ Final Score: ${score}/100`;
         const dbWindowPayload = await fetchDashboardSubsegmentWindowsFromDb(propertyUrl, currentRunId, 'all_pages');
         const dbWindowsByDays = buildWindowSegmentLookup(dbWindowPayload?.rows || []);
         const hasDbWindows = !!(dbWindowsByDays?.[1] && dbWindowsByDays?.[7] && dbWindowsByDays?.[28]);
+        const moneySegmentLookup = buildDashboardMoneySubsegmentLookup(currentAudit || null);
         const subsegmentViewStorageKey = 'dashboard_subsegment_view_mode';
         const validSubsegmentViews = new Set(['today', '7d', '28d', '90d', 'tier']);
         const storedSubsegmentView = String(localStorage.getItem(subsegmentViewStorageKey) || 'tier').toLowerCase();
@@ -60801,10 +60834,18 @@ Final Score: ${score}/100`;
           safeFetchWindowRows(twentyEightDayWindow?.startDate, twentyEightDayWindow?.endDate),
           safeFetchWindowRows(ninetyDayWindow?.startDate, ninetyDayWindow?.endDate)
         ]);
-        const latestWindowSummary = summarizeDashboardWindowRowsBySegment(latestWindowRows);
-        const sevenWindowSummary = summarizeDashboardWindowRowsBySegment(sevenWindowRows);
-        const twentyeightWindowSummary = summarizeDashboardWindowRowsBySegment(twentyeightWindowRows);
-        const ninetyWindowSummary = summarizeDashboardWindowRowsBySegment(ninetyWindowRows);
+        const applyLookupSegment = (row) => ({
+          ...row,
+          segment: resolveDashboardSubsegmentFromLookup(row?.url || '', moneySegmentLookup)
+        });
+        const latestWindowRowsResolved = latestWindowRows.map(applyLookupSegment);
+        const sevenWindowRowsResolved = sevenWindowRows.map(applyLookupSegment);
+        const twentyeightWindowRowsResolved = twentyeightWindowRows.map(applyLookupSegment);
+        const ninetyWindowRowsResolved = ninetyWindowRows.map(applyLookupSegment);
+        const latestWindowSummary = summarizeDashboardWindowRowsBySegment(latestWindowRowsResolved, moneySegmentLookup);
+        const sevenWindowSummary = summarizeDashboardWindowRowsBySegment(sevenWindowRowsResolved, moneySegmentLookup);
+        const twentyeightWindowSummary = summarizeDashboardWindowRowsBySegment(twentyeightWindowRowsResolved, moneySegmentLookup);
+        const ninetyWindowSummary = summarizeDashboardWindowRowsBySegment(ninetyWindowRowsResolved, moneySegmentLookup);
         const latestSubsegmentActivity = latestWindowSummary;
         const sevenSubsegmentActivity = sevenWindowSummary;
         const twentyeightSubsegmentActivity = twentyeightWindowSummary;
@@ -61113,8 +61154,14 @@ Final Score: ${score}/100`;
             return;
           }
           hostEl.innerHTML = `<div style="color: var(--dark-text-muted); font-size: 0.8rem;">Loading URL table for ${selected}…</div>`;
-          const pageRows = await fetchDashboardPageRowsForWindow(propertyUrl, period.startDate, period.endDate);
-          if (!Array.isArray(pageRows) || pageRows.length === 0) {
+          const pageRowsRaw = await fetchDashboardPageRowsForWindow(propertyUrl, period.startDate, period.endDate);
+          const pageRows = Array.isArray(pageRowsRaw)
+            ? pageRowsRaw.map((row) => ({
+              ...row,
+              segment: resolveDashboardSubsegmentFromLookup(row?.url || '', moneySegmentLookup)
+            }))
+            : [];
+          if (pageRows.length === 0) {
             hostEl.innerHTML = `<div style="color: var(--dark-text-muted); font-size: 0.8rem;">No page rows returned for this period.</div>`;
             return;
           }
