@@ -2087,7 +2087,7 @@
       display: flex;
       gap: 0.5rem;
       align-items: center;
-      justify-content: space-between;
+      justify-content: flex-start;
       flex-wrap: wrap;
       margin-bottom: 0.6rem;
     }
@@ -60313,10 +60313,12 @@ Final Score: ${score}/100`;
       function classifyDashboardSubsegment(url) {
         try {
           if (typeof classifyPortfolioSegmentFromUrl === 'function') {
-            return normalizeDashboardSubsegment(classifyPortfolioSegmentFromUrl(url || ''));
+            const seg = normalizeDashboardSubsegment(classifyPortfolioSegmentFromUrl(url || ''));
+            if (seg && seg !== 'unmapped') return seg;
           }
           if (typeof classifyMoneyPageSubSegment === 'function') {
-            return normalizeDashboardSubsegment(classifyMoneyPageSubSegment(url || ''));
+            const seg = normalizeDashboardSubsegment(classifyMoneyPageSubSegment(url || ''));
+            if (seg && seg !== 'unmapped') return seg;
           }
         } catch (err) {
           // ignore and use default
@@ -60744,20 +60746,37 @@ Final Score: ${score}/100`;
           }
           const payload = await response.json();
           const rows = Array.isArray(payload?.data?.rows) ? payload.data.rows : [];
-          const mapped = rows.map((r) => {
-            const url = String(r?.keys?.[0] || '').trim();
+          const agg = new Map();
+          rows.forEach((r) => {
+            const rawUrl = String(r?.keys?.[0] || '').trim();
+            if (!rawUrl) return;
+            const key = toDashboardSegmentUrlKey(rawUrl) || rawUrl.toLowerCase();
             const clicks = toNum(r?.clicks) || 0;
             const impressions = toNum(r?.impressions) || 0;
-            const rawCtr = toNum(r?.ctr);
-            const ctrPct = rawCtr == null ? (impressions > 0 ? (clicks / impressions) * 100 : null) : (rawCtr <= 1 ? rawCtr * 100 : rawCtr);
             const avgPosition = toNum(r?.position);
+            const curr = agg.get(key) || {
+              url: rawUrl,
+              clicks: 0,
+              impressions: 0,
+              posWeighted: 0
+            };
+            // Keep the shorter readable URL when variants collapse.
+            if (String(rawUrl).length < String(curr.url || '').length) curr.url = rawUrl;
+            curr.clicks += clicks;
+            curr.impressions += impressions;
+            if (avgPosition != null && impressions > 0) curr.posWeighted += (avgPosition * impressions);
+            agg.set(key, curr);
+          });
+          const mapped = Array.from(agg.values()).map((row) => {
+            const ctrPct = row.impressions > 0 ? ((row.clicks / row.impressions) * 100) : null;
+            const avgPosition = row.impressions > 0 ? (row.posWeighted / row.impressions) : null;
             return {
-              url,
-              clicks,
-              impressions,
+              url: row.url,
+              clicks: row.clicks,
+              impressions: row.impressions,
               ctrPct,
               avgPosition,
-              segment: resolveDashboardSubsegmentFromLookup(url, segmentLookup)
+              segment: resolveDashboardSubsegmentFromLookup(row.url, segmentLookup)
             };
           });
           cache[key] = mapped;
@@ -61410,7 +61429,7 @@ Final Score: ${score}/100`;
               </div>
             </div>
             <div style="font-size:0.74rem; color:var(--dark-text-muted); margin-bottom:0.5rem;">
-              ${escapeHtml(selectedFilterLabel)} • ${escapeHtml(period.label)} • ${escapeHtml(metricFilterLabel)}
+              ${escapeHtml(selectedFilterLabel)} • ${escapeHtml(period.label)} • ${escapeHtml(metricFilterLabel)} • ${formatInt(totalRows)} URLs
             </div>
             <div class="dashboard-segment-table-wrap">
               <table class="dashboard-segment-table">
