@@ -60365,6 +60365,30 @@ Final Score: ${score}/100`;
         }
       }
 
+      function getDashboardPathname(rawUrl) {
+        const normalized = normalizeDashboardRawUrl(rawUrl);
+        if (!normalized) return '';
+        try {
+          const path = String(new URL(normalized).pathname || '/').replace(/\/{2,}/g, '/');
+          if (!path) return '/';
+          return path.length > 1 ? path.replace(/\/+$/, '').toLowerCase() : '/';
+        } catch (err) {
+          const plain = String(normalized || '').toLowerCase();
+          if (!plain) return '';
+          return plain;
+        }
+      }
+
+      function setDashboardSegmentLookupWithAliases(lookup, key, segment) {
+        if (!(lookup instanceof Map) || !key || !segment) return;
+        lookup.set(key, segment);
+        if (/\/home$/i.test(key)) {
+          lookup.set(key.replace(/\/home$/i, '/'), segment);
+        } else if (/\/$/i.test(key)) {
+          lookup.set(key.replace(/\/$/i, '/home'), segment);
+        }
+      }
+
       function parseDashboardCsvLine(line) {
         const columns = [];
         let current = '';
@@ -60439,7 +60463,7 @@ Final Score: ${score}/100`;
               if (!raw) return;
               const k = toDashboardSegmentUrlKey(raw);
               if (!k) return;
-              lookup.set(k, key);
+              setDashboardSegmentLookupWithAliases(lookup, k, key);
             });
           }
           window.__dashboardTierSegmentationLookup = lookup;
@@ -60457,12 +60481,15 @@ Final Score: ${score}/100`;
           const key = toDashboardSegmentUrlKey(row?.url || row?.page || '');
           if (!key) return;
           const seg = normalizeDashboardSubsegment(row?.subSegment || row?.segmentType || classifyDashboardSubsegment(row?.url || row?.page || ''));
-          if (!lookup.has(key)) lookup.set(key, seg);
+          if (!lookup.has(key)) setDashboardSegmentLookupWithAliases(lookup, key, seg);
         });
         return lookup;
       }
 
       function resolveDashboardSubsegmentFromLookup(url, segmentLookup) {
+        const path = getDashboardPathname(url);
+        if (path === '/' || path === '/home') return 'landing';
+        if (path.includes('/s/')) return 'academy';
         const key = toDashboardSegmentUrlKey(url);
         if (key && segmentLookup instanceof Map && segmentLookup.has(key)) {
           return normalizeDashboardSubsegment(segmentLookup.get(key));
