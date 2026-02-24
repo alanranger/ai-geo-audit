@@ -60334,12 +60334,24 @@ Final Score: ${score}/100`;
       }
 
       function toDashboardSegmentUrlKey(rawUrl) {
-        const raw = String(rawUrl || '').trim();
+        const raw = normalizeDashboardRawUrl(rawUrl);
         if (!raw) return '';
         if (typeof normalizeGscPageKey === 'function') {
           return String(normalizeGscPageKey(raw) || '').toLowerCase();
         }
         return raw.toLowerCase().replace(/\/+$/, '');
+      }
+
+      function normalizeDashboardRawUrl(rawUrl) {
+        const raw = String(rawUrl || '').trim();
+        if (!raw) return '';
+        try {
+          const u = new URL(raw);
+          u.pathname = String(u.pathname || '/').replace(/\/{2,}/g, '/');
+          return u.toString();
+        } catch (err) {
+          return raw.replace(/(^|[^:])\/{2,}/g, '$1/');
+        }
       }
 
       function parseDashboardCsvLine(line) {
@@ -60748,7 +60760,7 @@ Final Score: ${score}/100`;
           const rows = Array.isArray(payload?.data?.rows) ? payload.data.rows : [];
           const agg = new Map();
           rows.forEach((r) => {
-            const rawUrl = String(r?.keys?.[0] || '').trim();
+            const rawUrl = normalizeDashboardRawUrl(String(r?.keys?.[0] || '').trim());
             if (!rawUrl) return;
             const key = toDashboardSegmentUrlKey(rawUrl) || rawUrl.toLowerCase();
             const clicks = toNum(r?.clicks) || 0;
@@ -61407,6 +61419,20 @@ Final Score: ${score}/100`;
             <div class="dashboard-segment-drilldown-controls">
               <div style="font-weight:800; color: var(--dark-text);">Top URLs (this window)</div>
               <div class="dashboard-table-toolbar">
+                <div style="display:flex; gap:0.35rem; align-items:center;">
+                  ${[
+                    { key: 'today', label: 'Today' },
+                    { key: '7d', label: '7 day' },
+                    { key: '28d', label: '28 day' },
+                    { key: '90d', label: '90 day' }
+                  ].map((opt) => `
+                    <button
+                      type="button"
+                      class="dashboard-subsegments-toggle-btn ${periodKey === opt.key ? 'is-active' : ''}"
+                      data-table-period-key="${opt.key}"
+                    >${opt.label}</button>
+                  `).join('')}
+                </div>
                 ${activeTileLabel ? `<span class="dashboard-table-badge">Active tile: ${escapeHtml(activeTileLabel)}</span>` : ''}
                 <label style="font-size:0.74rem; color:var(--dark-text-muted);">Filter
                   <select id="dashboard-segment-filter">
@@ -61475,6 +61501,16 @@ Final Score: ${score}/100`;
                 subsegmentUiState.sortKey = nextKey;
                 subsegmentUiState.sortDir = nextKey === 'url' ? 'asc' : 'desc';
               }
+              subsegmentUiState.page = 1;
+              renderSegmentDrilldown();
+            });
+          });
+
+          hostEl.querySelectorAll('[data-table-period-key]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+              const nextPeriod = String(btn.getAttribute('data-table-period-key') || '').toLowerCase();
+              if (!periodByView?.[nextPeriod]) return;
+              subsegmentUiState.selectedPeriodKey = nextPeriod;
               subsegmentUiState.page = 1;
               renderSegmentDrilldown();
             });
