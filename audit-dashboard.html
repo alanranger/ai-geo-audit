@@ -61290,6 +61290,53 @@ Final Score: ${score}/100`;
           `;
         }).join('');
 
+        const sumActivityByDefs = (activityBySegment) => defs.reduce((acc, d) => {
+          const item = activityBySegment?.[d.key] || null;
+          acc.clickPages += toNum(item?.clickPages) || 0;
+          acc.impressionPages += toNum(item?.impressionPages) || 0;
+          return acc;
+        }, { clickPages: 0, impressionPages: 0 });
+        const totalPageCount = defs.reduce((sum, d) => sum + (toNum(authoritativeCounts?.[d.key]) || 0), 0);
+        const buildTotalPeriodMetrics = (periodBySegment) => {
+          const totals = defs.reduce((acc, d) => {
+            const item = periodBySegment?.[d.key] || null;
+            const clicks = toNum(item?.clicks) || 0;
+            const impressions = toNum(item?.impressions) || 0;
+            const avgPosition = toNum(item?.avgPosition);
+            acc.clicks += clicks;
+            acc.impressions += impressions;
+            acc.weightedPos += (avgPosition || 0) * impressions;
+            return acc;
+          }, { clicks: 0, impressions: 0, weightedPos: 0 });
+          return {
+            clicks: totals.clicks,
+            impressions: totals.impressions,
+            ctrPct: totals.impressions > 0 ? (totals.clicks / totals.impressions) * 100 : null,
+            avgPosition: totals.impressions > 0 ? (totals.weightedPos / totals.impressions) : null
+          };
+        };
+        const totalCardPeriodRows = {
+          today: renderDashboardPeriodRow('Today', latestWindow?.endDate || '—', buildTotalPeriodMetrics(latestDisplayBalanced), null, sumActivityByDefs(latestSubsegmentActivity), { periodKey: 'today' }),
+          '7d': renderDashboardPeriodRow('7 days', `${sevenDayWindow?.startDate || '—'} -> ${sevenDayWindow?.endDate || '—'}`, buildTotalPeriodMetrics(sevenDisplayBalanced), null, sumActivityByDefs(sevenSubsegmentActivity), { periodKey: '7d' }),
+          '28d': renderDashboardPeriodRow('28 days', `${twentyEightDayWindow?.startDate || '—'} -> ${twentyEightDayWindow?.endDate || '—'}`, buildTotalPeriodMetrics(twentyeightDisplayBalanced), null, sumActivityByDefs(twentyeightSubsegmentActivity), { periodKey: '28d' }),
+          '90d': renderDashboardPeriodRow('90 days', `${ninetyDayWindow?.startDate || '—'} -> ${ninetyDayWindow?.endDate || '—'}`, buildTotalPeriodMetrics(ninetyDisplayBalanced), null, sumActivityByDefs(ninetySubsegmentActivity), { periodKey: '90d' })
+        };
+        const totalCardRowsHtml = subsegmentView === 'tier'
+          ? `${totalCardPeriodRows.today}${totalCardPeriodRows['7d']}${totalCardPeriodRows['28d']}${totalCardPeriodRows['90d']}`
+          : (totalCardPeriodRows[subsegmentView] || totalCardPeriodRows.today);
+        const allTiersCardHtml = `
+          <div class="dashboard-subsegment-card" data-dashboard-segment="all" style="cursor: pointer;">
+            <div class="dashboard-subsegment-header">
+              <div class="dashboard-subsegment-title">All tiers total</div>
+              <div class="dashboard-subsegment-count">${formatInt(totalPageCount)} pages</div>
+            </div>
+            <div class="dashboard-segment-subtitle">Aggregate totals across Tier A-F for quick reconciliation.</div>
+            <div class="dashboard-period-rows">
+              ${totalCardRowsHtml}
+            </div>
+          </div>
+        `;
+
         const toggleButtons = [
           { value: 'today', label: 'Today' },
           { value: '7d', label: '7 day' },
@@ -61371,8 +61418,7 @@ Final Score: ${score}/100`;
           const hostEl = document.getElementById('dashboard-segment-drilldown');
           if (!hostEl) return;
 
-          const selectedPeriodKey = String(subsegmentUiState.selectedPeriodKey || '').toLowerCase();
-          const periodKey = periodByView?.[selectedPeriodKey] ? selectedPeriodKey : activePeriodKey;
+          const periodKey = activePeriodKey;
           const period = periodByView?.[periodKey] || activePeriod || periodByView['28d'];
           if (!period?.startDate || !period?.endDate) {
             hostEl.innerHTML = `<div style="color: var(--dark-text-muted); font-size: 0.8rem;">No period date range available for table.</div>`;
@@ -61396,11 +61442,11 @@ Final Score: ${score}/100`;
           const segmentFilter = defs.find((d) => d.key === subsegmentUiState.tableSegmentFilter)
             ? subsegmentUiState.tableSegmentFilter
             : 'all';
-          const activeSegment = segmentFilter === 'all' ? null : segmentFilter;
+          const activeSegment = segmentFilter;
           subsegmentUiState.selectedSegment = activeSegment;
           host.querySelectorAll('[data-dashboard-segment]').forEach((card) => {
             const seg = String(card.getAttribute('data-dashboard-segment') || '');
-            card.classList.toggle('is-active', !!activeSegment && seg === activeSegment);
+            card.classList.toggle('is-active', seg === activeSegment);
           });
           const zeroClicksOnly = !!subsegmentUiState.zeroClicksOnly;
           const clicksOnlyFilter = !!subsegmentUiState.clicksOnly;
@@ -61450,7 +61496,9 @@ Final Score: ${score}/100`;
           const pageRowsSlice = allRows ? filtered : filtered.slice(startIdx, startIdx + rowsPerPage);
 
           const segmentCount = (key) => pageRows.filter((r) => r.segment === key).length;
-          const activeTileLabel = activeSegment ? (defs.find((d) => d.key === activeSegment)?.label || activeSegment) : null;
+          const activeTileLabel = activeSegment === 'all'
+            ? 'All tiers total'
+            : (defs.find((d) => d.key === activeSegment)?.label || activeSegment);
           const selectedFilterLabel = segmentFilter === 'all'
             ? 'All tiers'
             : (defs.find((d) => d.key === segmentFilter)?.label || segmentFilter);
@@ -61459,6 +61507,11 @@ Final Score: ${score}/100`;
             : clicksOnlyFilter
               ? 'Clicks > 0 only'
               : 'All clicks';
+          const totalsClicks = filtered.reduce((sum, row) => sum + (toNum(row?.clicks) || 0), 0);
+          const totalsImpressions = filtered.reduce((sum, row) => sum + (toNum(row?.impressions) || 0), 0);
+          const totalsCtrPct = totalsImpressions > 0 ? (totalsClicks / totalsImpressions) * 100 : null;
+          const totalsWeightedPos = filtered.reduce((sum, row) => sum + ((toNum(row?.avgPosition) || 0) * (toNum(row?.impressions) || 0)), 0);
+          const totalsAvgPos = totalsImpressions > 0 ? (totalsWeightedPos / totalsImpressions) : null;
 
           hostEl.innerHTML = `
             <div class="dashboard-segment-drilldown-controls">
@@ -61518,6 +61571,13 @@ Final Score: ${score}/100`;
                   </tr>
                 </thead>
                 <tbody>
+                  <tr>
+                    <td style="font-weight:700;">TOTAL (${formatInt(totalRows)} URLs)</td>
+                    <td style="font-weight:700;">${formatInt(totalsClicks)}</td>
+                    <td style="font-weight:700;">${formatInt(totalsImpressions)}</td>
+                    <td style="font-weight:700;">${totalsCtrPct != null ? formatPct(totalsCtrPct, 2) : '—'}</td>
+                    <td style="font-weight:700;">${totalsAvgPos != null ? formatFixed(totalsAvgPos, 1) : '—'}</td>
+                  </tr>
                   ${pageRowsSlice.length > 0 ? pageRowsSlice.map((row) => `
                     <tr>
                       <td><a href="${escapeHtml(row.url || '#')}" target="_blank" rel="noopener noreferrer" style="color:#93c5fd; text-decoration:none;">${escapeHtml(row.url || '—')}</a></td>
@@ -61559,8 +61619,12 @@ Final Score: ${score}/100`;
             btn.addEventListener('click', () => {
               const nextPeriod = String(btn.getAttribute('data-table-period-key') || '').toLowerCase();
               if (!periodByView?.[nextPeriod]) return;
-              subsegmentUiState.selectedPeriodKey = nextPeriod;
+              localStorage.setItem(subsegmentViewStorageKey, nextPeriod);
               subsegmentUiState.page = 1;
+              if (typeof window.renderDashboardTab === 'function') {
+                window.renderDashboardTab();
+                return;
+              }
               renderSegmentDrilldown();
             });
           });
@@ -61678,6 +61742,7 @@ Final Score: ${score}/100`;
         if (renderToken && window.__dashboardRenderToken && renderToken !== window.__dashboardRenderToken) return null;
         host.innerHTML = `
           ${overviewHtml}
+          ${allTiersCardHtml}
           ${cardsHtml}
           <div id="dashboard-segment-drilldown" class="dashboard-segment-drilldown">
             <div style="color: var(--dark-text-muted); font-size: 0.8rem;">Loading URL table...</div>
