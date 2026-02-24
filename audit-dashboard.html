@@ -60323,13 +60323,24 @@ Final Score: ${score}/100`;
         } catch (err) {
           // ignore and use default
         }
-        const raw = String(url || '').toLowerCase();
-        if (!raw) return 'unmapped';
-        if (raw.includes('/workshops') || raw.includes('/event') || raw.includes('/webinar')) return 'event';
-        if (raw.includes('/academy') || raw.includes('/free-online-photography-course')) return 'academy';
-        if (raw.includes('/blog') || raw.includes('/article') || raw.includes('/guides')) return 'blog';
-        if (raw.includes('/product') || raw.includes('/courses') || raw.includes('/mentoring') || raw.includes('/subscription')) return 'product';
-        if (raw.endsWith('/') || raw.split('/').filter(Boolean).length <= 2) return 'landing';
+        const normalizedUrl = normalizeDashboardRawUrl(url);
+        if (!normalizedUrl) return 'unmapped';
+        let path = '';
+        try {
+          path = String(new URL(normalizedUrl).pathname || '/').toLowerCase();
+        } catch (err) {
+          path = String(normalizedUrl || '').toLowerCase();
+        }
+        if (!path) return 'unmapped';
+        if (path.includes('/workshops') || path.includes('/event') || path.includes('/webinar')) return 'event';
+        if (path.includes('/academy') || path.includes('/free-online-photography-course')) return 'academy';
+        if (path.includes('/blog') || path.includes('/article') || path.includes('/guides')) return 'blog';
+        if (path.includes('/photography-services-near-me/')
+          || path.includes('/product')
+          || path.includes('/courses')
+          || path.includes('/mentoring')
+          || path.includes('/subscription')) return 'product';
+        if (path.split('/').filter(Boolean).length <= 1) return 'landing';
         return 'unmapped';
       }
 
