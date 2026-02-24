@@ -26770,6 +26770,21 @@
       return normalizePropertyHost(raw);
     }
 
+    function getAuditPropertyUrl(auditData) {
+      const fromAudit = (
+        auditData?.propertyUrl ||
+        auditData?.property_url ||
+        auditData?.searchData?.propertyUrl ||
+        auditData?.searchData?.property_url ||
+        ''
+      ).trim();
+      if (fromAudit) return fromAudit;
+      if (typeof window.getPropertyUrl === 'function') {
+        return (window.getPropertyUrl() || '').trim();
+      }
+      return (localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '').trim();
+    }
+
     /**
      * Unified Data Fetching Utility (Phase 4)
      * Standardized function for fetching audit data with Supabase-first pattern and localStorage fallback
@@ -60199,7 +60214,7 @@ Final Score: ${score}/100`;
         const sevenDayWindow = computeDashboardPeriodWindow(rows, 7);
         const twentyEightDayWindow = computeDashboardPeriodWindow(rows, 28);
         const latestDate = rows.length ? rows[rows.length - 1].date : null;
-        const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+        const propertyUrl = getAuditPropertyUrl(currentAudit);
 
         if (!latestWindow || !sevenDayWindow || !twentyEightDayWindow) {
           if (renderToken && window.__dashboardRenderToken && renderToken !== window.__dashboardRenderToken) return;
@@ -60634,7 +60649,7 @@ Final Score: ${score}/100`;
         const ninetyDayWindow = computeDashboardPeriodWindow(rows, 90);
         const siteBaseline28 = twentyEightDayWindow?.current || null;
         const canonical28BySegment = getCanonicalSubsegmentMetrics28(currentAudit || null, siteBaseline28, current);
-        const propertyUrl = localStorage.getItem('gsc_property_url') || localStorage.getItem('last_property_url') || '';
+        const propertyUrl = getAuditPropertyUrl(currentAudit);
         const currentRunId = currentAudit?.auditDate || currentAudit?.audit_date || null;
         const dbWindowPayload = await fetchDashboardSubsegmentWindowsFromDb(propertyUrl, currentRunId, 'all_pages');
         const dbWindowsByDays = buildWindowSegmentLookup(dbWindowPayload?.rows || []);
