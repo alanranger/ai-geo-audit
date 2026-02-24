@@ -2120,6 +2120,43 @@
     }
     section[data-panel="dashboard"] .dashboard-segment-table-wrap {
       overflow-x: auto;
+      max-width: 52%;
+      min-width: 640px;
+    }
+    section[data-panel="dashboard"] .dashboard-subsegment-card.is-active {
+      border-color: rgba(56, 189, 248, 0.8);
+      box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.45), 0 10px 24px rgba(2, 6, 23, 0.45);
+    }
+    section[data-panel="dashboard"] .dashboard-table-toolbar {
+      display: flex;
+      gap: 0.45rem;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    section[data-panel="dashboard"] .dashboard-table-toolbar button,
+    section[data-panel="dashboard"] .dashboard-table-toolbar select,
+    section[data-panel="dashboard"] .dashboard-table-toolbar input {
+      background: rgba(15, 20, 25, 0.5);
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      color: var(--dark-text);
+      border-radius: 6px;
+      padding: 0.35rem 0.5rem;
+      font-size: 0.76rem;
+    }
+    section[data-panel="dashboard"] .dashboard-table-toolbar .dashboard-table-badge {
+      border: 1px solid rgba(56, 189, 248, 0.45);
+      color: #bae6fd;
+      background: rgba(2, 132, 199, 0.18);
+      border-radius: 999px;
+      padding: 0.2rem 0.55rem;
+      font-size: 0.72rem;
+      font-weight: 700;
+    }
+    @media (max-width: 1400px) {
+      section[data-panel="dashboard"] .dashboard-segment-table-wrap {
+        max-width: 100%;
+        min-width: 0;
+      }
     }
     section[data-panel="dashboard"] .dashboard-segment-pagination {
       margin-top: 0.5rem;
@@ -60802,6 +60839,8 @@ Final Score: ${score}/100`;
         const subsegmentView = validSubsegmentViews.has(storedSubsegmentView) ? storedSubsegmentView : 'tier';
         const subsegmentUiState = window.__dashboardSubsegmentUiState || {
           selectedSegment: null,
+          tableSegmentFilter: 'all',
+          zeroClicksOnly: false,
           metricFilter: 'all',
           selectedPeriodKey: null,
           sortKey: 'clicks',
@@ -61255,28 +61294,29 @@ Final Score: ${score}/100`;
                 </div>
               </div>
             </div>
-            <div id="dashboard-segment-drilldown" class="dashboard-segment-drilldown">
-              <div style="color: var(--dark-text-muted); font-size: 0.8rem;">Click a sub-segment tile to open the filtered URL table.</div>
-            </div>
           </div>
         `;
 
         const renderSegmentDrilldown = async () => {
           const hostEl = document.getElementById('dashboard-segment-drilldown');
           if (!hostEl) return;
-          const selected = subsegmentUiState.selectedSegment || null;
-          if (!selected || !defs.find((d) => d.key === selected)) {
-            hostEl.innerHTML = `<div style="color: var(--dark-text-muted); font-size: 0.8rem;">Click a sub-segment tile to open the filtered URL table.</div>`;
-            return;
-          }
+          const selected = (subsegmentUiState.selectedSegment && defs.find((d) => d.key === subsegmentUiState.selectedSegment))
+            ? subsegmentUiState.selectedSegment
+            : null;
+          host.querySelectorAll('[data-dashboard-segment]').forEach((card) => {
+            const seg = String(card.getAttribute('data-dashboard-segment') || '');
+            card.classList.toggle('is-active', !!selected && seg === selected);
+          });
+
           const selectedPeriodKey = String(subsegmentUiState.selectedPeriodKey || '').toLowerCase();
           const periodKey = periodByView?.[selectedPeriodKey] ? selectedPeriodKey : activePeriodKey;
           const period = periodByView?.[periodKey] || activePeriod || periodByView['28d'];
           if (!period?.startDate || !period?.endDate) {
-            hostEl.innerHTML = `<div style="color: var(--dark-text-muted); font-size: 0.8rem;">No period date range available for drilldown.</div>`;
+            hostEl.innerHTML = `<div style="color: var(--dark-text-muted); font-size: 0.8rem;">No period date range available for table.</div>`;
             return;
           }
-          hostEl.innerHTML = `<div style="color: var(--dark-text-muted); font-size: 0.8rem;">Loading URL table for ${selected}…</div>`;
+
+          hostEl.innerHTML = `<div style="color: var(--dark-text-muted); font-size: 0.8rem;">Loading URL table...</div>`;
           const pageRowsRaw = await fetchDashboardPageRowsForWindow(propertyUrl, period.startDate, period.endDate, moneySegmentLookup);
           const pageRows = Array.isArray(pageRowsRaw)
             ? pageRowsRaw.map((row) => ({
@@ -61288,6 +61328,13 @@ Final Score: ${score}/100`;
             hostEl.innerHTML = `<div style="color: var(--dark-text-muted); font-size: 0.8rem;">No page rows returned for this period.</div>`;
             return;
           }
+
+          if (!subsegmentUiState.tableSegmentFilter) subsegmentUiState.tableSegmentFilter = 'all';
+          if (selected) subsegmentUiState.tableSegmentFilter = selected;
+          const segmentFilter = defs.find((d) => d.key === subsegmentUiState.tableSegmentFilter)
+            ? subsegmentUiState.tableSegmentFilter
+            : 'all';
+          const zeroClicksOnly = !!subsegmentUiState.zeroClicksOnly;
           const metricFilter = String(subsegmentUiState.metricFilter || 'all').toLowerCase();
           const metricFilterLabel = metricFilter === 'clicks'
             ? 'Clicks > 0'
@@ -61306,7 +61353,13 @@ Final Score: ${score}/100`;
             return true;
           };
           const q = String(subsegmentUiState.query || '').trim().toLowerCase();
-          const filtered = pageRows.filter((row) => row.segment === selected && metricPredicate(row) && (!q || String(row.url || '').toLowerCase().includes(q)));
+          const filtered = pageRows.filter((row) => {
+            const segmentOk = segmentFilter === 'all' ? true : row.segment === segmentFilter;
+            const zeroOk = zeroClicksOnly ? (toNum(row?.clicks) || 0) === 0 : true;
+            const queryOk = !q || String(row.url || '').toLowerCase().includes(q);
+            return segmentOk && zeroOk && metricPredicate(row) && queryOk;
+          });
+
           const sortKey = subsegmentUiState.sortKey || 'clicks';
           const sortDir = subsegmentUiState.sortDir === 'asc' ? 'asc' : 'desc';
           filtered.sort((a, b) => {
@@ -61315,25 +61368,49 @@ Final Score: ${score}/100`;
             if (sortKey === 'url') return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
             return sortDir === 'asc' ? av - bv : bv - av;
           });
-          const rowsPerPage = Math.max(5, Math.min(100, Number.parseInt(subsegmentUiState.rowsPerPage, 10) || 20));
+
+          const allRows = String(subsegmentUiState.rowsPerPage || '').toLowerCase() === 'all';
+          const rowsPerPage = allRows ? filtered.length : Math.max(5, Math.min(100, Number.parseInt(subsegmentUiState.rowsPerPage, 10) || 20));
           const totalRows = filtered.length;
-          const totalPages = Math.max(1, Math.ceil(totalRows / rowsPerPage));
-          const page = Math.max(1, Math.min(totalPages, Number.parseInt(subsegmentUiState.page, 10) || 1));
+          const totalPages = allRows ? 1 : Math.max(1, Math.ceil(totalRows / Math.max(1, rowsPerPage)));
+          const page = allRows ? 1 : Math.max(1, Math.min(totalPages, Number.parseInt(subsegmentUiState.page, 10) || 1));
           subsegmentUiState.page = page;
-          const startIdx = (page - 1) * rowsPerPage;
-          const pageRowsSlice = filtered.slice(startIdx, startIdx + rowsPerPage);
+          const startIdx = allRows ? 0 : ((page - 1) * rowsPerPage);
+          const pageRowsSlice = allRows ? filtered : filtered.slice(startIdx, startIdx + rowsPerPage);
+
+          const segmentCount = (key) => pageRows.filter((r) => r.segment === key).length;
+          const activeTileLabel = selected ? (defs.find((d) => d.key === selected)?.label || selected) : null;
+          const selectedFilterLabel = segmentFilter === 'all'
+            ? 'All tiers'
+            : (defs.find((d) => d.key === segmentFilter)?.label || segmentFilter);
+
           hostEl.innerHTML = `
             <div class="dashboard-segment-drilldown-controls">
-              <div style="font-weight:800; color: var(--dark-text);">${defs.find((d) => d.key === selected)?.label || selected} • Top URLs (${period.label}) • ${metricFilterLabel}</div>
-              <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
-                <input id="dashboard-segment-search" type="text" placeholder="Filter URL..." value="${escapeHtml(subsegmentUiState.query || '')}">
-                <label style="font-size:0.74rem; color:var(--dark-text-muted);">Rows
-                  <select id="dashboard-segment-rows">
-                    ${[10, 20, 50, 100].map((n) => `<option value="${n}" ${rowsPerPage === n ? 'selected' : ''}>${n}</option>`).join('')}
+              <div style="font-weight:800; color: var(--dark-text);">Top URLs (this window)</div>
+              <div class="dashboard-table-toolbar">
+                ${activeTileLabel ? `<span class="dashboard-table-badge">Active tile: ${escapeHtml(activeTileLabel)}</span>` : ''}
+                <label style="font-size:0.74rem; color:var(--dark-text-muted);">Filter
+                  <select id="dashboard-segment-filter">
+                    <option value="all" ${segmentFilter === 'all' ? 'selected' : ''}>All tiers (${formatInt(pageRows.length)})</option>
+                    ${defs.map((d) => `<option value="${d.key}" ${segmentFilter === d.key ? 'selected' : ''}>${escapeHtml(d.label)} (${formatInt(segmentCount(d.key))})</option>`).join('')}
                   </select>
                 </label>
+                <label style="display:flex; align-items:center; gap:0.3rem; font-size:0.74rem; color:var(--dark-text-muted);">
+                  <input id="dashboard-segment-zero-clicks" type="checkbox" ${zeroClicksOnly ? 'checked' : ''} style="width:auto; padding:0; accent-color:#38bdf8;">
+                  0-clicks
+                </label>
+                <label style="font-size:0.74rem; color:var(--dark-text-muted);">Rows
+                  <select id="dashboard-segment-rows">
+                    ${['all', 10, 20, 50, 100].map((n) => `<option value="${n}" ${String(subsegmentUiState.rowsPerPage || 20) === String(n) ? 'selected' : ''}>${n}</option>`).join('')}
+                  </select>
+                </label>
+                <input id="dashboard-segment-search" type="text" placeholder="Filter URL..." value="${escapeHtml(subsegmentUiState.query || '')}">
+                <button id="dashboard-segment-export" type="button">Export CSV</button>
                 <button id="dashboard-segment-clear" type="button">Clear</button>
               </div>
+            </div>
+            <div style="font-size:0.74rem; color:var(--dark-text-muted); margin-bottom:0.5rem;">
+              ${escapeHtml(selectedFilterLabel)} • ${escapeHtml(period.label)} • ${escapeHtml(metricFilterLabel)}
             </div>
             <div class="dashboard-segment-table-wrap">
               <table class="dashboard-segment-table">
@@ -61359,14 +61436,17 @@ Final Score: ${score}/100`;
                 </tbody>
               </table>
             </div>
-            <div class="dashboard-segment-pagination">
-              <span>Page ${page} / ${totalPages} • ${formatInt(totalRows)} rows</span>
-              <div style="display:flex; gap:0.35rem; align-items:center;">
-                <button id="dashboard-segment-prev" type="button" ${page <= 1 ? 'disabled' : ''}>Prev</button>
-                <button id="dashboard-segment-next" type="button" ${page >= totalPages ? 'disabled' : ''}>Next</button>
+            ${allRows ? '' : `
+              <div class="dashboard-segment-pagination">
+                <span>Page ${page} / ${totalPages} • ${formatInt(totalRows)} rows</span>
+                <div style="display:flex; gap:0.35rem; align-items:center;">
+                  <button id="dashboard-segment-prev" type="button" ${page <= 1 ? 'disabled' : ''}>Prev</button>
+                  <button id="dashboard-segment-next" type="button" ${page >= totalPages ? 'disabled' : ''}>Next</button>
+                </div>
               </div>
-            </div>
+            `}
           `;
+
           hostEl.querySelectorAll('th[data-sort-key]').forEach((th) => {
             th.addEventListener('click', () => {
               const nextKey = String(th.getAttribute('data-sort-key') || 'clicks');
@@ -61380,6 +61460,7 @@ Final Score: ${score}/100`;
               renderSegmentDrilldown();
             });
           });
+
           const searchInput = hostEl.querySelector('#dashboard-segment-search');
           if (searchInput) {
             searchInput.addEventListener('input', () => {
@@ -61388,22 +61469,78 @@ Final Score: ${score}/100`;
               renderSegmentDrilldown();
             });
           }
-          const rowsSelect = hostEl.querySelector('#dashboard-segment-rows');
-          if (rowsSelect) {
-            rowsSelect.addEventListener('change', () => {
-              subsegmentUiState.rowsPerPage = Number.parseInt(rowsSelect.value, 10) || 20;
+
+          const segmentSelect = hostEl.querySelector('#dashboard-segment-filter');
+          if (segmentSelect) {
+            segmentSelect.addEventListener('change', () => {
+              subsegmentUiState.tableSegmentFilter = segmentSelect.value || 'all';
+              subsegmentUiState.selectedSegment = subsegmentUiState.tableSegmentFilter === 'all' ? null : subsegmentUiState.tableSegmentFilter;
               subsegmentUiState.page = 1;
               renderSegmentDrilldown();
             });
           }
+
+          const zeroClicks = hostEl.querySelector('#dashboard-segment-zero-clicks');
+          if (zeroClicks) {
+            zeroClicks.addEventListener('change', () => {
+              subsegmentUiState.zeroClicksOnly = !!zeroClicks.checked;
+              subsegmentUiState.page = 1;
+              renderSegmentDrilldown();
+            });
+          }
+
+          const rowsSelect = hostEl.querySelector('#dashboard-segment-rows');
+          if (rowsSelect) {
+            rowsSelect.addEventListener('change', () => {
+              subsegmentUiState.rowsPerPage = rowsSelect.value || '20';
+              subsegmentUiState.page = 1;
+              renderSegmentDrilldown();
+            });
+          }
+
           const clearBtn = hostEl.querySelector('#dashboard-segment-clear');
           if (clearBtn) {
             clearBtn.addEventListener('click', () => {
+              subsegmentUiState.selectedSegment = null;
+              subsegmentUiState.tableSegmentFilter = 'all';
+              subsegmentUiState.zeroClicksOnly = false;
+              subsegmentUiState.metricFilter = 'all';
+              subsegmentUiState.selectedPeriodKey = null;
               subsegmentUiState.query = '';
               subsegmentUiState.page = 1;
               renderSegmentDrilldown();
             });
           }
+
+          const exportBtn = hostEl.querySelector('#dashboard-segment-export');
+          if (exportBtn) {
+            exportBtn.addEventListener('click', () => {
+              const header = ['url', 'segment', 'clicks', 'impressions', 'ctr_pct', 'avg_position'];
+              const csvRows = filtered.map((row) => ([
+                row.url || '',
+                row.segment || '',
+                toNum(row.clicks) || 0,
+                toNum(row.impressions) || 0,
+                row.ctrPct == null ? '' : Number(row.ctrPct).toFixed(4),
+                row.avgPosition == null ? '' : Number(row.avgPosition).toFixed(4)
+              ]));
+              const esc = (v) => {
+                const s = String(v ?? '');
+                if (s.includes('"') || s.includes(',') || s.includes('\n')) return `"${s.replace(/"/g, '""')}"`;
+                return s;
+              };
+              const csv = [header, ...csvRows].map((r) => r.map(esc).join(',')).join('\n');
+              const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+              const a = document.createElement('a');
+              a.href = URL.createObjectURL(blob);
+              a.download = `dashboard-top-urls-${period.label.replace(/\s+/g, '-').toLowerCase()}.csv`;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(a.href);
+            });
+          }
+
           const prevBtn = hostEl.querySelector('#dashboard-segment-prev');
           if (prevBtn) {
             prevBtn.addEventListener('click', () => {
@@ -61421,7 +61558,13 @@ Final Score: ${score}/100`;
         };
 
         if (renderToken && window.__dashboardRenderToken && renderToken !== window.__dashboardRenderToken) return null;
-        host.innerHTML = `${overviewHtml}${cardsHtml}`;
+        host.innerHTML = `
+          ${overviewHtml}
+          ${cardsHtml}
+          <div id="dashboard-segment-drilldown" class="dashboard-segment-drilldown">
+            <div style="color: var(--dark-text-muted); font-size: 0.8rem;">Loading URL table...</div>
+          </div>
+        `;
         host.querySelectorAll('[data-subsegment-view]').forEach((btn) => {
           btn.addEventListener('click', () => {
             const nextView = String(btn.getAttribute('data-subsegment-view') || '').toLowerCase();
@@ -61434,7 +61577,9 @@ Final Score: ${score}/100`;
           card.addEventListener('click', () => {
             const seg = String(card.getAttribute('data-dashboard-segment') || '');
             if (!seg) return;
-            subsegmentUiState.selectedSegment = seg;
+            const isSame = subsegmentUiState.selectedSegment === seg && String(subsegmentUiState.metricFilter || 'all') === 'all';
+            subsegmentUiState.selectedSegment = isSame ? null : seg;
+            subsegmentUiState.tableSegmentFilter = isSame ? 'all' : seg;
             subsegmentUiState.metricFilter = 'all';
             subsegmentUiState.selectedPeriodKey = null;
             subsegmentUiState.page = 1;
@@ -61451,14 +61596,18 @@ Final Score: ${score}/100`;
             const rowEl = tile.closest('.dashboard-period-row');
             const periodKey = String(rowEl?.getAttribute('data-period-key') || '').toLowerCase();
             const metric = String(tile.getAttribute('data-drilldown-metric') || 'all').toLowerCase();
-            subsegmentUiState.selectedSegment = seg;
-            subsegmentUiState.metricFilter = metric;
-            subsegmentUiState.selectedPeriodKey = periodKey || null;
+            const isSameMetric = subsegmentUiState.selectedSegment === seg
+              && String(subsegmentUiState.metricFilter || 'all') === metric
+              && String(subsegmentUiState.selectedPeriodKey || '').toLowerCase() === periodKey;
+            subsegmentUiState.selectedSegment = isSameMetric ? null : seg;
+            subsegmentUiState.tableSegmentFilter = isSameMetric ? 'all' : seg;
+            subsegmentUiState.metricFilter = isSameMetric ? 'all' : metric;
+            subsegmentUiState.selectedPeriodKey = isSameMetric ? null : (periodKey || null);
             subsegmentUiState.page = 1;
             renderSegmentDrilldown();
           });
         });
-        if (!subsegmentUiState.rowsPerPage) subsegmentUiState.rowsPerPage = 20;
+        if (!subsegmentUiState.rowsPerPage) subsegmentUiState.rowsPerPage = '20';
         await renderSegmentDrilldown();
         return uniqueTotalsForTop;
       }
