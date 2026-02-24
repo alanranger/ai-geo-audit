@@ -60194,7 +60194,7 @@ Final Score: ${score}/100`;
 
       function sumPageActivityFromSubsegments(subsegmentActivity) {
         if (!subsegmentActivity || typeof subsegmentActivity !== 'object') return null;
-        const keys = ['landing', 'event', 'product', 'other'];
+        const keys = ['landing', 'product', 'event', 'blog', 'academy', 'unmapped'];
         return keys.reduce((acc, key) => {
           const row = subsegmentActivity?.[key] || {};
           acc.clickPages += Math.max(0, Math.round(toNum(row?.clickPages) || 0));
@@ -60266,7 +60266,11 @@ Final Score: ${score}/100`;
         if (seg === 'landing') return 'landing';
         if (seg === 'event') return 'event';
         if (seg === 'product') return 'product';
-        return 'other';
+        if (seg === 'blog') return 'blog';
+        if (seg === 'academy') return 'academy';
+        if (seg === 'other') return 'unmapped';
+        if (seg === 'unmapped') return 'unmapped';
+        return 'unmapped';
       }
 
       function classifyDashboardSubsegment(url) {
@@ -60280,7 +60284,14 @@ Final Score: ${score}/100`;
         } catch (err) {
           // ignore and use default
         }
-        return 'other';
+        const raw = String(url || '').toLowerCase();
+        if (!raw) return 'unmapped';
+        if (raw.includes('/workshops') || raw.includes('/event') || raw.includes('/webinar')) return 'event';
+        if (raw.includes('/academy') || raw.includes('/free-online-photography-course')) return 'academy';
+        if (raw.includes('/blog') || raw.includes('/article') || raw.includes('/guides')) return 'blog';
+        if (raw.includes('/product') || raw.includes('/courses') || raw.includes('/mentoring') || raw.includes('/subscription')) return 'product';
+        if (raw.endsWith('/') || raw.split('/').filter(Boolean).length <= 2) return 'landing';
+        return 'unmapped';
       }
 
       function toDashboardSegmentUrlKey(rawUrl) {
@@ -60292,15 +60303,99 @@ Final Score: ${score}/100`;
         return raw.toLowerCase().replace(/\/+$/, '');
       }
 
-      function buildDashboardMoneySubsegmentLookup(auditLike) {
-        const lookup = new Map();
+      function parseDashboardCsvLine(line) {
+        const columns = [];
+        let current = '';
+        let inQuotes = false;
+        for (let i = 0; i < String(line || '').length; i += 1) {
+          const ch = line[i];
+          const next = line[i + 1];
+          if (ch === '"') {
+            if (inQuotes && next === '"') {
+              current += '"';
+              i += 1;
+            } else {
+              inQuotes = !inQuotes;
+            }
+          } else if (ch === ',' && !inQuotes) {
+            columns.push(current.trim());
+            current = '';
+          } else {
+            current += ch;
+          }
+        }
+        columns.push(current.trim());
+        return columns;
+      }
+
+      function tierKeyFromHeader(header) {
+        const h = String(header || '').toLowerCase();
+        if (h.includes('tier a') || h.includes('landing')) return 'landing';
+        if (h.includes('tier b') || h.includes('product')) return 'product';
+        if (h.includes('tier c') || h.includes('event')) return 'event';
+        if (h.includes('tier d') || h.includes('blog')) return 'blog';
+        if (h.includes('tier e') || h.includes('academy')) return 'academy';
+        return null;
+      }
+
+      async function fetchDashboardTierSegmentationLookup() {
+        try {
+          if (window.__dashboardTierSegmentationLookup instanceof Map) {
+            return window.__dashboardTierSegmentationLookup;
+          }
+          const urls = [
+            'https://raw.githubusercontent.com/alanranger/alan-shared-resources/main/csv/page%20segmentation%20by%20tier.csv',
+            'https://raw.githubusercontent.com/alanranger/alan-shared-resources/master/csv/page%20segmentation%20by%20tier.csv'
+          ];
+          let csvText = '';
+          for (const sourceUrl of urls) {
+            try {
+              const res = await fetch(`${sourceUrl}?cb=${Date.now()}`, { cache: 'no-store' });
+              if (!res.ok) continue;
+              csvText = await res.text();
+              if (csvText && csvText.trim()) break;
+            } catch (err) {
+              // try next source
+            }
+          }
+          const lookup = new Map();
+          if (!csvText || !csvText.trim()) {
+            window.__dashboardTierSegmentationLookup = lookup;
+            return lookup;
+          }
+          const lines = csvText.split(/\r?\n/).filter((line) => line.trim().length > 0);
+          if (lines.length < 2) {
+            window.__dashboardTierSegmentationLookup = lookup;
+            return lookup;
+          }
+          const headers = parseDashboardCsvLine(lines[0]);
+          const columnDefs = headers.map((h, idx) => ({ idx, key: tierKeyFromHeader(h) })).filter((c) => c.key);
+          for (let i = 1; i < lines.length; i += 1) {
+            const cols = parseDashboardCsvLine(lines[i]);
+            columnDefs.forEach(({ idx, key }) => {
+              const raw = String(cols[idx] || '').trim();
+              if (!raw) return;
+              const k = toDashboardSegmentUrlKey(raw);
+              if (!k) return;
+              lookup.set(k, key);
+            });
+          }
+          window.__dashboardTierSegmentationLookup = lookup;
+          return lookup;
+        } catch (err) {
+          return new Map();
+        }
+      }
+
+      function buildDashboardMoneySubsegmentLookup(auditLike, seedLookup = null) {
+        const lookup = (seedLookup instanceof Map) ? new Map(seedLookup) : new Map();
         const moneyMetrics = auditLike?.scores?.moneyPagesMetrics || auditLike?.moneyPagesMetrics || null;
         const rows = Array.isArray(moneyMetrics?.rows) ? moneyMetrics.rows : [];
         rows.forEach((row) => {
           const key = toDashboardSegmentUrlKey(row?.url || row?.page || '');
           if (!key) return;
           const seg = normalizeDashboardSubsegment(row?.subSegment || row?.segmentType || classifyDashboardSubsegment(row?.url || row?.page || ''));
-          lookup.set(key, seg);
+          if (!lookup.has(key)) lookup.set(key, seg);
         });
         return lookup;
       }
@@ -60318,12 +60413,14 @@ Final Score: ${score}/100`;
           landing: { pages: new Set(), clicks: 0, impressions: 0, weightedPos: 0 },
           event: { pages: new Set(), clicks: 0, impressions: 0, weightedPos: 0 },
           product: { pages: new Set(), clicks: 0, impressions: 0, weightedPos: 0 },
-          other: { pages: new Set(), clicks: 0, impressions: 0, weightedPos: 0 }
+          blog: { pages: new Set(), clicks: 0, impressions: 0, weightedPos: 0 },
+          academy: { pages: new Set(), clicks: 0, impressions: 0, weightedPos: 0 },
+          unmapped: { pages: new Set(), clicks: 0, impressions: 0, weightedPos: 0 }
         };
 
         const addRow = (url, clicks, impressions, position, forcedBucket = null) => {
           const bucketKey = forcedBucket || classifyDashboardSubsegment(url);
-          const bucket = buckets[bucketKey] || buckets.other;
+          const bucket = buckets[bucketKey] || buckets.unmapped;
           if (url) bucket.pages.add(String(url));
 
           const c = toNum(clicks) || 0;
@@ -60371,7 +60468,9 @@ Final Score: ${score}/100`;
           landing: formatBucket(buckets.landing),
           event: formatBucket(buckets.event),
           product: formatBucket(buckets.product),
-          other: formatBucket(buckets.other)
+          blog: formatBucket(buckets.blog),
+          academy: formatBucket(buckets.academy),
+          unmapped: formatBucket(buckets.unmapped)
         };
       }
 
@@ -60380,7 +60479,9 @@ Final Score: ${score}/100`;
           landing: { pageCount: 0 },
           event: { pageCount: 0 },
           product: { pageCount: 0 },
-          other: { pageCount: 0 }
+          blog: { pageCount: 0 },
+          academy: { pageCount: 0 },
+          unmapped: { pageCount: 0 }
         };
 
         const moneyMetrics = auditLike?.scores?.moneyPagesMetrics || auditLike?.moneyPagesMetrics || null;
@@ -60388,7 +60489,9 @@ Final Score: ${score}/100`;
         let landing = 0;
         let event = 0;
         let product = 0;
-        let otherFromUrlList = null;
+        let blog = 0;
+        let academy = 0;
+        let unmappedFromUrlList = null;
 
         // Preferred source for page counts: full site URL list (manual/synced CSV).
         // This guarantees "Other" means every non-money page, not just pages present in query-level GSC rows.
@@ -60396,7 +60499,7 @@ Final Score: ${score}/100`;
           const rawList = localStorage.getItem('manual_url_list');
           const urlList = rawList ? JSON.parse(rawList) : [];
           if (Array.isArray(urlList) && urlList.length > 0 && typeof classifyPageSegment === 'function' && typeof PageSegment !== 'undefined') {
-            let otherCount = 0;
+            let unmappedCount = 0;
             urlList.forEach((url) => {
               const seg = classifyPageSegment(url);
               if (seg === PageSegment.MONEY) {
@@ -60404,28 +60507,36 @@ Final Score: ${score}/100`;
                 if (subSeg === 'landing') landing += 1;
                 else if (subSeg === 'event') event += 1;
                 else if (subSeg === 'product') product += 1;
-                else otherCount += 1;
+                else if (subSeg === 'blog') blog += 1;
+                else if (subSeg === 'academy') academy += 1;
+                else unmappedCount += 1;
               } else {
-                otherCount += 1;
+                if (normalizeDashboardSubsegment(classifyDashboardSubsegment(url)) === 'academy') academy += 1;
+                else if (normalizeDashboardSubsegment(classifyDashboardSubsegment(url)) === 'blog') blog += 1;
+                else unmappedCount += 1;
               }
             });
-            otherFromUrlList = otherCount;
+            unmappedFromUrlList = unmappedCount;
           }
         } catch (err) {
           // Ignore parse/classification issues and continue with fallback logic.
         }
 
-        if (moneyRows.length > 0 && otherFromUrlList == null) {
+        if (moneyRows.length > 0 && unmappedFromUrlList == null) {
           moneyRows.forEach((row) => {
             const seg = normalizeDashboardSubsegment(row?.subSegment || classifyDashboardSubsegment(row?.url || row?.page || ''));
             if (seg === 'landing') landing += 1;
             else if (seg === 'event') event += 1;
             else if (seg === 'product') product += 1;
+            else if (seg === 'blog') blog += 1;
+            else if (seg === 'academy') academy += 1;
           });
         } else {
           landing = toNum(base?.landing?.pageCount) || 0;
           event = toNum(base?.event?.pageCount) || 0;
           product = toNum(base?.product?.pageCount) || 0;
+          blog = toNum(base?.blog?.pageCount) || 0;
+          academy = toNum(base?.academy?.pageCount) || 0;
         }
 
         const queryPages = getDashboardQueryPagesFromAudit(auditLike);
@@ -60437,18 +60548,19 @@ Final Score: ${score}/100`;
         );
         const totalKnown = siteUnique.size > 0 ? siteUnique.size : null;
 
-        // Other = everything outside Landing/Event/Product.
-        const derivedOther = (otherFromUrlList != null)
-          ? otherFromUrlList
+        const derivedUnmapped = (unmappedFromUrlList != null)
+          ? unmappedFromUrlList
           : (typeof totalKnown === 'number')
-          ? Math.max(0, totalKnown - landing - event - product)
-          : (toNum(base?.other?.pageCount) || 0);
+          ? Math.max(0, totalKnown - landing - event - product - blog - academy)
+          : (toNum(base?.unmapped?.pageCount) || 0);
 
         return {
           landing,
           event,
           product,
-          other: derivedOther
+          blog,
+          academy,
+          unmapped: derivedUnmapped
         };
       }
 
@@ -60466,7 +60578,9 @@ Final Score: ${score}/100`;
         const buckets = {
           landing: { clicks: 0, impressions: 0, weightedPos: 0 },
           event: { clicks: 0, impressions: 0, weightedPos: 0 },
-          product: { clicks: 0, impressions: 0, weightedPos: 0 }
+          product: { clicks: 0, impressions: 0, weightedPos: 0 },
+          blog: { clicks: 0, impressions: 0, weightedPos: 0 },
+          academy: { clicks: 0, impressions: 0, weightedPos: 0 }
         };
 
         moneyRows.forEach((row) => {
@@ -60491,30 +60605,34 @@ Final Score: ${score}/100`;
         const landing = toMetrics(buckets.landing);
         const event = toMetrics(buckets.event);
         const product = toMetrics(buckets.product);
+        const blog = toMetrics(buckets.blog);
+        const academy = toMetrics(buckets.academy);
 
-        const moneyClicks = landing.clicks + event.clicks + product.clicks;
-        const moneyImpr = landing.impressions + event.impressions + product.impressions;
-        const moneyWeightedPos = buckets.landing.weightedPos + buckets.event.weightedPos + buckets.product.weightedPos;
+        const mappedClicks = landing.clicks + event.clicks + product.clicks + blog.clicks + academy.clicks;
+        const mappedImpr = landing.impressions + event.impressions + product.impressions + blog.impressions + academy.impressions;
+        const mappedWeightedPos = buckets.landing.weightedPos + buckets.event.weightedPos + buckets.product.weightedPos + buckets.blog.weightedPos + buckets.academy.weightedPos;
 
-        const otherClicks = Math.max(0, siteClicks - moneyClicks);
-        const otherImpr = Math.max(0, siteImpr - moneyImpr);
-        let otherAvgPos = null;
-        if (otherImpr > 0 && siteAvgPos != null) {
+        const unmappedClicks = Math.max(0, siteClicks - mappedClicks);
+        const unmappedImpr = Math.max(0, siteImpr - mappedImpr);
+        let unmappedAvgPos = null;
+        if (unmappedImpr > 0 && siteAvgPos != null) {
           const siteWeighted = siteAvgPos * siteImpr;
-          const otherWeighted = Math.max(0, siteWeighted - moneyWeightedPos);
-          otherAvgPos = otherWeighted / otherImpr;
+          const unmappedWeighted = Math.max(0, siteWeighted - mappedWeightedPos);
+          unmappedAvgPos = unmappedWeighted / unmappedImpr;
         }
-        const otherCtrPct = otherImpr > 0 ? ((otherClicks / otherImpr) * 100) : null;
+        const unmappedCtrPct = unmappedImpr > 0 ? ((unmappedClicks / unmappedImpr) * 100) : null;
 
         return {
           landing,
           event,
           product,
-          other: {
-            clicks: otherClicks,
-            impressions: otherImpr,
-            ctrPct: otherCtrPct,
-            avgPosition: otherAvgPos
+          blog,
+          academy,
+          unmapped: {
+            clicks: unmappedClicks,
+            impressions: unmappedImpr,
+            ctrPct: unmappedCtrPct,
+            avgPosition: unmappedAvgPos
           }
         };
       }
@@ -60558,11 +60676,13 @@ Final Score: ${score}/100`;
           landing: '#60a5fa',
           event: '#22d3ee',
           product: '#34d399',
-          other: '#a78bfa'
+          blog: '#f59e0b',
+          academy: '#ec4899',
+          unmapped: '#a78bfa'
         };
       }
 
-      async function fetchDashboardPageRowsForWindow(propertyUrl, startDate, endDate) {
+      async function fetchDashboardPageRowsForWindow(propertyUrl, startDate, endDate, segmentLookup = null) {
         try {
           if (!propertyUrl || !startDate || !endDate) return [];
           const cache = window.__dashboardPageRowsByWindow || {};
@@ -60600,7 +60720,7 @@ Final Score: ${score}/100`;
               impressions,
               ctrPct,
               avgPosition,
-              segment: classifyDashboardSubsegment(url)
+              segment: resolveDashboardSubsegmentFromLookup(url, segmentLookup)
             };
           });
           cache[key] = mapped;
@@ -60615,14 +60735,16 @@ Final Score: ${score}/100`;
           landing: { clicks: 0, impressions: 0, posWeighted: 0, clickPages: new Set(), impressionPages: new Set() },
           event: { clicks: 0, impressions: 0, posWeighted: 0, clickPages: new Set(), impressionPages: new Set() },
           product: { clicks: 0, impressions: 0, posWeighted: 0, clickPages: new Set(), impressionPages: new Set() },
-          other: { clicks: 0, impressions: 0, posWeighted: 0, clickPages: new Set(), impressionPages: new Set() }
+          blog: { clicks: 0, impressions: 0, posWeighted: 0, clickPages: new Set(), impressionPages: new Set() },
+          academy: { clicks: 0, impressions: 0, posWeighted: 0, clickPages: new Set(), impressionPages: new Set() },
+          unmapped: { clicks: 0, impressions: 0, posWeighted: 0, clickPages: new Set(), impressionPages: new Set() }
         };
         const rows = Array.isArray(pageRows) ? pageRows : [];
         rows.forEach((row) => {
           const seg = normalizeDashboardSubsegment(
             row?.segment || resolveDashboardSubsegmentFromLookup(row?.url || '', segmentLookup)
           );
-          const bucket = base[seg] || base.other;
+          const bucket = base[seg] || base.unmapped;
           const clicks = toNum(row?.clicks) || 0;
           const impressions = toNum(row?.impressions) || 0;
           const avgPosition = toNum(row?.avgPosition);
@@ -60638,7 +60760,7 @@ Final Score: ${score}/100`;
         });
 
         const out = {};
-        ['landing', 'event', 'product', 'other'].forEach((key) => {
+        ['landing', 'event', 'product', 'blog', 'academy', 'unmapped'].forEach((key) => {
           const seg = base[key];
           out[key] = {
             clicks: seg.clicks,
@@ -60660,20 +60782,6 @@ Final Score: ${score}/100`;
 
         const current = aggregateDashboardSubsegmentMetrics(currentAudit || null);
         const authoritativeCounts = getAuthoritativeDashboardSubsegmentCounts(currentAudit || null, current);
-        const moneyRowsForCounts = Array.isArray(currentAudit?.scores?.moneyPagesMetrics?.rows)
-          ? currentAudit.scores.moneyPagesMetrics.rows
-          : (Array.isArray(currentAudit?.moneyPagesMetrics?.rows) ? currentAudit.moneyPagesMetrics.rows : []);
-        const moneyTabCounts = {
-          landing: 0,
-          event: 0,
-          product: 0
-        };
-        moneyRowsForCounts.forEach((row) => {
-          const seg = String(row?.subSegment || row?.segmentType || 'LANDING').toLowerCase();
-          if (seg === 'landing') moneyTabCounts.landing += 1;
-          else if (seg === 'event') moneyTabCounts.event += 1;
-          else if (seg === 'product') moneyTabCounts.product += 1;
-        });
         const rows = getDashboardTimeseriesRowsFromAudit(currentAudit);
         const latestWindow = computeDashboardPeriodWindow(rows, 1);
         const sevenDayWindow = computeDashboardPeriodWindow(rows, 7);
@@ -60685,8 +60793,9 @@ Final Score: ${score}/100`;
         const currentRunId = currentAudit?.auditDate || currentAudit?.audit_date || null;
         const dbWindowPayload = await fetchDashboardSubsegmentWindowsFromDb(propertyUrl, currentRunId, 'all_pages');
         const dbWindowsByDays = buildWindowSegmentLookup(dbWindowPayload?.rows || []);
-        const hasDbWindows = !!(dbWindowsByDays?.[1] && dbWindowsByDays?.[7] && dbWindowsByDays?.[28]);
-        const moneySegmentLookup = buildDashboardMoneySubsegmentLookup(currentAudit || null);
+        const tierCsvLookup = await fetchDashboardTierSegmentationLookup();
+        const hasDbWindows = false;
+        const moneySegmentLookup = buildDashboardMoneySubsegmentLookup(currentAudit || null, tierCsvLookup);
         const subsegmentViewStorageKey = 'dashboard_subsegment_view_mode';
         const validSubsegmentViews = new Set(['today', '7d', '28d', '90d', 'tier']);
         const storedSubsegmentView = String(localStorage.getItem(subsegmentViewStorageKey) || 'tier').toLowerCase();
@@ -60704,10 +60813,12 @@ Final Score: ${score}/100`;
         window.__dashboardSubsegmentUiState = subsegmentUiState;
 
         const defs = [
-          { key: 'landing', label: 'Landing Pages' },
-          { key: 'event', label: 'Event Pages' },
-          { key: 'product', label: 'Product Pages' },
-          { key: 'other', label: 'Other' }
+          { key: 'landing', label: 'Tier A Landing' },
+          { key: 'product', label: 'Tier B Product' },
+          { key: 'event', label: 'Tier C Event' },
+          { key: 'blog', label: 'Tier D Blog' },
+          { key: 'academy', label: 'Tier E Academy' },
+          { key: 'unmapped', label: 'Tier F Unmapped' }
         ];
 
         const hasAnyData = defs.some(({ key }) => {
@@ -60719,7 +60830,7 @@ Final Score: ${score}/100`;
           if (renderToken && window.__dashboardRenderToken && renderToken !== window.__dashboardRenderToken) return null;
           host.innerHTML = `
             <div class="dashboard-subsegment-empty">
-              Sub-segment sections appear after a fresh audit with page-level data. Run an audit to populate Landing, Event, Product, and Other sections.
+              Tier sections appear after a fresh audit with page-level data.
             </div>
           `;
           return null;
@@ -60730,9 +60841,9 @@ Final Score: ${score}/100`;
           let landing = Math.round(total * (toNum(landingShare) || 0));
           let event = Math.round(total * (toNum(eventShare) || 0));
           let product = Math.round(total * (toNum(productShare) || 0));
-          let other = total - landing - event - product;
-          if (other < 0) {
-            let overflow = Math.abs(other);
+          let unmapped = total - landing - event - product;
+          if (unmapped < 0) {
+            let overflow = Math.abs(unmapped);
             const keys = ['landing', 'event', 'product']
               .sort((a, b) => ({ landing, event, product }[b] || 0) - ({ landing, event, product }[a] || 0));
             keys.forEach((k) => {
@@ -60751,9 +60862,9 @@ Final Score: ${score}/100`;
                 overflow -= take;
               }
             });
-            other = 0;
+            unmapped = 0;
           }
-          return { landing, event, product, other };
+          return { landing, event, product, unmapped };
         };
 
         const buildReconciledPeriodBySegment = (periodMetrics, { useActual28 = false } = {}) => {
@@ -60763,7 +60874,9 @@ Final Score: ${score}/100`;
               landing: canonical28BySegment?.landing || current?.landing || null,
               event: canonical28BySegment?.event || current?.event || null,
               product: canonical28BySegment?.product || current?.product || null,
-              other: canonical28BySegment?.other || current?.other || null
+              blog: canonical28BySegment?.blog || current?.blog || null,
+              academy: canonical28BySegment?.academy || current?.academy || null,
+              unmapped: canonical28BySegment?.unmapped || current?.unmapped || null
             };
           }
 
@@ -60802,15 +60915,15 @@ Final Score: ${score}/100`;
           });
 
           const siteWeighted = (toNum(periodMetrics?.avgPosition) != null) ? ((toNum(periodMetrics?.avgPosition) || 0) * (toNum(periodMetrics?.impressions) || 0)) : null;
-          const moneyWeighted = ['landing', 'event', 'product'].reduce((sum, key) => {
+          const moneyWeighted = ['landing', 'event', 'product', 'blog', 'academy'].reduce((sum, key) => {
             const p = toNum(out?.[key]?.avgPosition);
             const i = toNum(out?.[key]?.impressions) || 0;
             if (p == null || i <= 0) return sum;
             return sum + (p * i);
           }, 0);
-          if (siteWeighted != null && (toNum(out?.other?.impressions) || 0) > 0) {
-            const otherImpr = toNum(out.other.impressions) || 0;
-            out.other.avgPosition = Math.max(0, (siteWeighted - moneyWeighted)) / otherImpr;
+          if (siteWeighted != null && (toNum(out?.unmapped?.impressions) || 0) > 0) {
+            const unmappedImpr = toNum(out.unmapped.impressions) || 0;
+            out.unmapped.avgPosition = Math.max(0, (siteWeighted - moneyWeighted)) / unmappedImpr;
           }
 
           return out;
@@ -60826,7 +60939,7 @@ Final Score: ${score}/100`;
         const ninetyPrevBySegment = buildReconciledPeriodBySegment(ninetyDayWindow?.prev);
         const safeFetchWindowRows = async (startDate, endDate) => {
           if (!propertyUrl || !startDate || !endDate) return [];
-          return fetchDashboardPageRowsForWindow(propertyUrl, startDate, endDate);
+          return fetchDashboardPageRowsForWindow(propertyUrl, startDate, endDate, moneySegmentLookup);
         };
         const [latestWindowRows, sevenWindowRows, twentyeightWindowRows, ninetyWindowRows] = await Promise.all([
           safeFetchWindowRows(latestWindow?.endDate, latestWindow?.endDate),
@@ -60875,22 +60988,30 @@ Final Score: ${score}/100`;
 
           const siteClicks = Math.max(0, Math.round(toNum(sitePeriod?.clicks) || 0));
           const siteImpr = Math.max(0, Math.round(toNum(sitePeriod?.impressions) || 0));
-          const moneyClicks = (toNum(clone?.landing?.clicks) || 0) + (toNum(clone?.event?.clicks) || 0) + (toNum(clone?.product?.clicks) || 0);
-          const moneyImpr = (toNum(clone?.landing?.impressions) || 0) + (toNum(clone?.event?.impressions) || 0) + (toNum(clone?.product?.impressions) || 0);
-          clone.other.clicks = Math.max(0, siteClicks - moneyClicks);
-          clone.other.impressions = Math.max(0, siteImpr - moneyImpr);
+          const mappedClicks = (toNum(clone?.landing?.clicks) || 0)
+            + (toNum(clone?.event?.clicks) || 0)
+            + (toNum(clone?.product?.clicks) || 0)
+            + (toNum(clone?.blog?.clicks) || 0)
+            + (toNum(clone?.academy?.clicks) || 0);
+          const mappedImpr = (toNum(clone?.landing?.impressions) || 0)
+            + (toNum(clone?.event?.impressions) || 0)
+            + (toNum(clone?.product?.impressions) || 0)
+            + (toNum(clone?.blog?.impressions) || 0)
+            + (toNum(clone?.academy?.impressions) || 0);
+          clone.unmapped.clicks = Math.max(0, siteClicks - mappedClicks);
+          clone.unmapped.impressions = Math.max(0, siteImpr - mappedImpr);
 
-          // Keep weighted-position consistency by assigning residual to Other.
+          // Keep weighted-position consistency by assigning residual to Unmapped.
           const siteAvgPos = toNum(sitePeriod?.avgPosition);
-          if (siteAvgPos != null && siteImpr > 0 && clone.other.impressions > 0) {
+          if (siteAvgPos != null && siteImpr > 0 && clone.unmapped.impressions > 0) {
             const siteWeighted = siteAvgPos * siteImpr;
-            const moneyWeighted = ['landing', 'event', 'product'].reduce((sum, key) => {
+            const moneyWeighted = ['landing', 'event', 'product', 'blog', 'academy'].reduce((sum, key) => {
               const p = toNum(clone?.[key]?.avgPosition);
               const i = toNum(clone?.[key]?.impressions) || 0;
               if (p == null || i <= 0) return sum;
               return sum + (p * i);
             }, 0);
-            clone.other.avgPosition = Math.max(0, (siteWeighted - moneyWeighted) / clone.other.impressions);
+            clone.unmapped.avgPosition = Math.max(0, (siteWeighted - moneyWeighted) / clone.unmapped.impressions);
           }
 
           defs.forEach(({ key }) => {
@@ -60902,8 +61023,8 @@ Final Score: ${score}/100`;
           return clone;
         };
 
-        // Final display-level guard: after rounding, force Other as residual
-        // so rendered Landing+Event+Product+Other always matches top totals.
+        // Final display-level guard: after rounding, force Unmapped as residual
+        // so rendered tier totals always match top totals.
         const rebalanceDisplayedResidualToOther = (periodBySegment, sitePeriod) => {
           if (!periodBySegment || !sitePeriod) return periodBySegment;
           const out = {};
@@ -60921,13 +61042,17 @@ Final Score: ${score}/100`;
           const siteImprRounded = Math.max(0, Math.round(toNum(sitePeriod?.impressions) || 0));
           const lepClicksRounded = Math.max(0, Math.round(toNum(out?.landing?.clicks) || 0))
             + Math.max(0, Math.round(toNum(out?.event?.clicks) || 0))
-            + Math.max(0, Math.round(toNum(out?.product?.clicks) || 0));
+            + Math.max(0, Math.round(toNum(out?.product?.clicks) || 0))
+            + Math.max(0, Math.round(toNum(out?.blog?.clicks) || 0))
+            + Math.max(0, Math.round(toNum(out?.academy?.clicks) || 0));
           const lepImprRounded = Math.max(0, Math.round(toNum(out?.landing?.impressions) || 0))
             + Math.max(0, Math.round(toNum(out?.event?.impressions) || 0))
-            + Math.max(0, Math.round(toNum(out?.product?.impressions) || 0));
+            + Math.max(0, Math.round(toNum(out?.product?.impressions) || 0))
+            + Math.max(0, Math.round(toNum(out?.blog?.impressions) || 0))
+            + Math.max(0, Math.round(toNum(out?.academy?.impressions) || 0));
 
-          out.other.clicks = Math.max(0, siteClicksRounded - lepClicksRounded);
-          out.other.impressions = Math.max(0, siteImprRounded - lepImprRounded);
+          out.unmapped.clicks = Math.max(0, siteClicksRounded - lepClicksRounded);
+          out.unmapped.impressions = Math.max(0, siteImprRounded - lepImprRounded);
 
           defs.forEach(({ key }) => {
             const c = toNum(out?.[key]?.clicks) || 0;
@@ -60993,11 +61118,9 @@ Final Score: ${score}/100`;
 
         const cardsHtml = defs.map(({ key, label }) => {
           const c = (canonical28BySegment?.[key] || current[key] || {});
-          const pageCount = (key === 'landing' || key === 'event' || key === 'product')
-            ? (toNum(moneyTabCounts?.[key]) || 0)
-            : (hasDbWindows
-              ? (toNum(dbWindowsByDays?.[28]?.[key]?.pageCount) ?? toNum(authoritativeCounts?.[key]))
-              : toNum(authoritativeCounts?.[key]));
+          const pageCount = hasDbWindows
+            ? (toNum(dbWindowsByDays?.[28]?.[key]?.pageCount) ?? toNum(authoritativeCounts?.[key]))
+            : toNum(authoritativeCounts?.[key]);
           const latestNow = latestDisplayBalanced?.[key] || null;
           const latestPrev = latestPrevBySegment?.[key] || null;
           const sevenNow = sevenDisplayBalanced?.[key] || null;
@@ -61154,7 +61277,7 @@ Final Score: ${score}/100`;
             return;
           }
           hostEl.innerHTML = `<div style="color: var(--dark-text-muted); font-size: 0.8rem;">Loading URL table for ${selected}…</div>`;
-          const pageRowsRaw = await fetchDashboardPageRowsForWindow(propertyUrl, period.startDate, period.endDate);
+          const pageRowsRaw = await fetchDashboardPageRowsForWindow(propertyUrl, period.startDate, period.endDate, moneySegmentLookup);
           const pageRows = Array.isArray(pageRowsRaw)
             ? pageRowsRaw.map((row) => ({
               ...row,
