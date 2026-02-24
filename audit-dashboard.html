@@ -2245,6 +2245,19 @@
       padding: 1rem;
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
     }
+    section[data-panel="dashboard"] .dashboard-subsegment-card.dashboard-subsegment-card--all {
+      background: linear-gradient(145deg, rgba(30, 58, 138, 0.32), rgba(30, 64, 175, 0.22));
+      border: 1px solid rgba(59, 130, 246, 0.55);
+      box-shadow: inset 0 1px 0 rgba(147, 197, 253, 0.18), 0 0 0 1px rgba(59, 130, 246, 0.14);
+    }
+    section[data-panel="dashboard"] .dashboard-subsegment-card.dashboard-subsegment-card--all .dashboard-subsegment-title {
+      color: #dbeafe;
+    }
+    section[data-panel="dashboard"] .dashboard-subsegment-card.dashboard-subsegment-card--all .dashboard-subsegment-count {
+      background: rgba(30, 58, 138, 0.35);
+      border-color: rgba(96, 165, 250, 0.65);
+      color: #dbeafe;
+    }
     section[data-panel="dashboard"] .dashboard-subsegment-header {
       display: flex;
       justify-content: space-between;
@@ -61272,6 +61285,16 @@ Final Score: ${score}/100`;
             '28d': renderDashboardPeriodRow('28 days', twentyeightRange, twentyeightNow, twentyeightPrev, twentyeightRowActivity, { periodKey: '28d' }),
             '90d': renderDashboardPeriodRow('90 days', ninetyRange, ninetyNow, ninetyPrev, ninetyRowActivity, { periodKey: '90d' })
           };
+          const periodPageCounts = {
+            today: getSafeUniquePages(latestNow?.impressions, latestRowActivity?.impressionPages),
+            '7d': getSafeUniquePages(sevenNow?.impressions, sevenRowActivity?.impressionPages),
+            '28d': getSafeUniquePages(twentyeightNow?.impressions, twentyeightRowActivity?.impressionPages),
+            '90d': getSafeUniquePages(ninetyNow?.impressions, ninetyRowActivity?.impressionPages)
+          };
+          const staticPages = toNum(pageCount != null ? pageCount : (c.pageCount || 0)) || 0;
+          const visibleKey = subsegmentView === 'tier' ? '28d' : subsegmentView;
+          const periodPages = toNum(periodPageCounts?.[visibleKey]);
+          const pagesForBadge = periodPages != null ? periodPages : staticPages;
           const visibleRowsHtml = subsegmentView === 'tier'
             ? `${periodRows.today}${periodRows['7d']}${periodRows['28d']}${periodRows['90d']}`
             : (periodRows[subsegmentView] || periodRows.today);
@@ -61280,7 +61303,7 @@ Final Score: ${score}/100`;
             <div class="dashboard-subsegment-card" data-dashboard-segment="${key}" style="cursor: pointer;">
               <div class="dashboard-subsegment-header">
                 <div class="dashboard-subsegment-title">${label}</div>
-                <div class="dashboard-subsegment-count">${formatInt(pageCount != null ? pageCount : (c.pageCount || 0))} pages</div>
+                <div class="dashboard-subsegment-count">${formatInt(pagesForBadge)} pages</div>
               </div>
               <div class="dashboard-segment-subtitle">Sub-segment trend tiles aligned to Today / 7d / 28d / 90d windows.</div>
               <div class="dashboard-period-rows">
@@ -61321,14 +61344,22 @@ Final Score: ${score}/100`;
           '28d': renderDashboardPeriodRow('28 days', `${twentyEightDayWindow?.startDate || '—'} -> ${twentyEightDayWindow?.endDate || '—'}`, buildTotalPeriodMetrics(twentyeightDisplayBalanced), null, sumActivityByDefs(twentyeightSubsegmentActivity), { periodKey: '28d' }),
           '90d': renderDashboardPeriodRow('90 days', `${ninetyDayWindow?.startDate || '—'} -> ${ninetyDayWindow?.endDate || '—'}`, buildTotalPeriodMetrics(ninetyDisplayBalanced), null, sumActivityByDefs(ninetySubsegmentActivity), { periodKey: '90d' })
         };
+        const totalActivityPages = {
+          today: toNum(sumActivityByDefs(latestSubsegmentActivity)?.impressionPages) || 0,
+          '7d': toNum(sumActivityByDefs(sevenSubsegmentActivity)?.impressionPages) || 0,
+          '28d': toNum(sumActivityByDefs(twentyeightSubsegmentActivity)?.impressionPages) || 0,
+          '90d': toNum(sumActivityByDefs(ninetySubsegmentActivity)?.impressionPages) || 0
+        };
+        const allVisibleKey = subsegmentView === 'tier' ? '28d' : subsegmentView;
+        const allPagesForBadge = toNum(totalActivityPages?.[allVisibleKey]) || totalPageCount;
         const totalCardRowsHtml = subsegmentView === 'tier'
           ? `${totalCardPeriodRows.today}${totalCardPeriodRows['7d']}${totalCardPeriodRows['28d']}${totalCardPeriodRows['90d']}`
           : (totalCardPeriodRows[subsegmentView] || totalCardPeriodRows.today);
         const allTiersCardHtml = `
-          <div class="dashboard-subsegment-card" data-dashboard-segment="all" style="cursor: pointer;">
+          <div class="dashboard-subsegment-card dashboard-subsegment-card--all" data-dashboard-segment="all" style="cursor: pointer;">
             <div class="dashboard-subsegment-header">
               <div class="dashboard-subsegment-title">All tiers total</div>
-              <div class="dashboard-subsegment-count">${formatInt(totalPageCount)} pages</div>
+              <div class="dashboard-subsegment-count">${formatInt(allPagesForBadge)} pages</div>
             </div>
             <div class="dashboard-segment-subtitle">Aggregate totals across Tier A-F for quick reconciliation.</div>
             <div class="dashboard-period-rows">
